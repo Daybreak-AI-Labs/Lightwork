@@ -60,14 +60,15 @@
 
 {% call hero('Autonomous Shoring', "Hand a Team's Work to Lightwork",
              lede='Choose a business area, set the service levels you expect, and track what it costs and saves compared with doing it by hand. See the full breakdown on <a href="/savings">Savings</a>.') %}
-  {{ state('Money saved',
+  {% if report.available %}{{ state('Estimated cost difference',
            '$' ~ '{:,.2f}'.format(saved) ~ ' saved',
            badge='Saving money' if saved >= 0 else 'Costing more',
            badge_class='ok' if saved >= 0 else 'warn',
-           copy='Compared with doing the same work by hand, counted from finished work over the last ' ~ report.window_days ~ ' days. Never a forecast.') }}
+           copy='Assumption-based comparison in USD over finished attempts in the last ' ~ report.window_days ~ ' days. These figures do not establish realized savings or accepted outcomes.') }}
+  {% else %}<p role="alert">{{ report.unavailable_reason }} <a href="/savings">Review savings assumptions and history</a>.</p>{% endif %}
 {% endcall %}
 
-<div class="section-head"><h2>Savings Summary</h2></div>
+{% if report.available %}<div class="section-head"><h2>Savings estimate</h2></div>
 <div class="grid" aria-label="Savings summary">
   <div class="stat">
     <div class="num {{ 'sh-pos' if saved >= 0 else 'sh-neg' }}">${{ '{:,.2f}'.format(saved) }}</div>
@@ -87,6 +88,7 @@
   </div>
 </div>
 
+{% endif %}
 <div class="section-head"><h2>Book of Work</h2>
   {% if can_manage %}<button type="button" class="btn btn--primary" data-sh-new>Add a business area</button>{% endif %}
 </div>

@@ -40,14 +40,16 @@ def _days(days: int) -> int:
     return days
 
 
-def _value_report(days: int) -> dict[str, Any]:
+def _value_report(days: int, owner=None) -> dict[str, Any]:
     from maverick import workforce_value
 
     from ._shared import _world
-    report = workforce_value.compute(_world(), window_days=days)
+    report = workforce_value.compute(_world(), window_days=days, owner=owner)
     improvement = report.improvement
     checkpoints = len(report.coverage_trend)
-    if improvement is None:
+    if not report.available:
+        learning = report.unavailable_reason
+    elif improvement is None:
         learning = ("Not enough learning checkpoints yet to show a trend. They are recorded each time Lightwork "
                     "reviews its past work.")
     elif improvement >= 0:
@@ -72,7 +74,8 @@ def _value_report(days: int) -> dict[str, Any]:
 @router.get("/value-report")
 async def value_report(request: Request, days: int = 90) -> dict:
     require_permission(request, "view")
-    return await run_in_threadpool(_value_report, _days(days))
+    from .auth import goal_owner_filter
+    return await run_in_threadpool(_value_report, _days(days), goal_owner_filter(request))
 
 
 def _charts(days: int) -> dict[str, Any]:

@@ -5576,7 +5576,7 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     days = max(1, min(days, 730))
     resolution = _value_assumptions_resolution()
     cfg = resolution["effective_assumptions"]
-    report = savings_mod.compute(_world(), window_days=days, cfg=cfg)
+    report = savings_mod.compute(_world(), window_days=days, cfg=cfg, owner=goal_owner_filter(request))
     return templates.TemplateResponse(
         request,
         "savings.html",
@@ -5605,16 +5605,22 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     # Keep both the statement and its itemized export within the same
     # principal boundary as the spend APIs. Tenant scoping alone is not enough:
     # a tenant can contain many mutually untrusted dashboard users.
-    episodes = w.list_episodes(limit=10_000, owner=goal_owner_filter(request))
+    from maverick.episode_reporting import iter_episodes
+
+    owner = goal_owner_filter(request)
+    episodes = iter_episodes(w, owner=owner, finished_only=True)
     months: dict[str, dict] = {}
     for e in episodes:
         if not e.ended_at:
             continue
         m = datetime.fromtimestamp(e.started_at, timezone.utc).strftime("%Y-%m")
         b = months.setdefault(
-            m, {"period": m, "cost": 0.0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
+            m, {"period": m, "cost": 0.0, "unknown_cost_runs": 0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
         )
-        b["cost"] += e.cost_dollars
+        if e.cost_dollars is None:
+            b["unknown_cost_runs"] += 1
+        else:
+            b["cost"] += e.cost_dollars
         b["input_tokens"] += e.input_tokens
         b["output_tokens"] += e.output_tokens
         b["runs"] += 1
@@ -5642,36 +5648,47 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
 
     if format == "csv":
         sel = period or datetime.now(timezone.utc).strftime("%Y-%m")
-        rows = [
-            "Run,Task,Started,Finished,Result,"
-            "Cost (USD),Input tokens,Output tokens,Tool uses"
-        ]
-        for e in episodes:
-            if not e.ended_at:
-                continue
-            started = datetime.fromtimestamp(e.started_at, timezone.utc)
-            if started.strftime("%Y-%m") != sel:
-                continue
-            ended = datetime.fromtimestamp(e.ended_at, timezone.utc).isoformat()
-            rows.append(
-                f"{e.id},{e.goal_id},{started.isoformat()},{ended},"
-                f"{e.outcome or ''},{e.cost_dollars:.6f},"
-                f"{e.input_tokens},{e.output_tokens},{e.tool_calls}"
-            )
-        return PlainTextResponse(
-            "\n".join(rows) + "\n",
-            media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="invoice-{tenant}-{sel}.csv"'},
-        )
+        try:
+            start = datetime.strptime(sel, "%Y-%m").replace(tzinfo=timezone.utc)
+            if start.strftime("%Y-%m") != sel:
+                raise ValueError("invalid month")
+            end = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
+        except ValueError:
+            raise HTTPException(422, "Choose a billing month in year-month order.") from None
+
+        def rows():
+            import csv
+            import io
+            from .audit_actions_api import csv_safe
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(["Run", "Task", "Started", "Finished", "Result", "Cost (USD)",
+                             "Input tokens", "Output tokens", "Tool uses", "Cost basis"])
+            yield buf.getvalue()
+            for episode in iter_episodes(w, owner=owner, since=start.timestamp(), until=end.timestamp(), finished_only=True):
+                buf.seek(0)
+                buf.truncate(0)
+                writer.writerow([episode.id, episode.goal_id,
+                                 datetime.fromtimestamp(episode.started_at, timezone.utc).isoformat(),
+                                 datetime.fromtimestamp(episode.ended_at, timezone.utc).isoformat(),
+                                 csv_safe(episode.outcome or ""),
+                                 "unknown" if episode.cost_dollars is None else f"{episode.cost_dollars:.6f}",
+                                 episode.input_tokens, episode.output_tokens, episode.tool_calls,
+                                 "Recorded runtime price; not provider-invoice reconciled"])
+                yield buf.getvalue()
+        safe_tenant = "".join(c for c in tenant if c.isalnum() or c in "-_")[:64] or "workspace"
+        return StreamingResponse(rows(), media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="statement-{safe_tenant}-{sel}.csv"',
+                     "Cache-Control": "private, no-store"})
 
     cur = datetime.now(timezone.utc).strftime("%Y-%m")
     current = months.get(
-        cur, {"period": cur, "cost": 0.0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
+        cur, {"period": cur, "cost": 0.0, "unknown_cost_runs": 0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
     )
     prev_keys = sorted([m for m in months if m < cur], reverse=True)
     previous = months.get(prev_keys[0]) if prev_keys else None
     delta_pct = None
-    if previous and previous["cost"] > 0:
+    if previous and previous["cost"] > 0 and not previous["unknown_cost_runs"] and not current["unknown_cost_runs"]:
         delta_pct = round((current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
     series = [months[k] for k in sorted(months, reverse=True)][:12]
     from maverick.quotas import UsageLedger, UsageLedgerError
@@ -5788,8 +5805,6 @@ async def audit_page(request: Request) -> HTMLResponse:
     # view-only caller reads the full audit log via the HTML page despite the
     # API denying them.
     require_permission(request, "audit")
-    from collections import deque
-
     from maverick.audit import default_audit_log
 
     from . import audit_actions_api as _audit_plain
@@ -5805,8 +5820,16 @@ async def audit_page(request: Request) -> HTMLResponse:
             status_code=400,
             detail="Invalid audit day. Enter a real date in YYYY-MM-DD format.",
         )
-    since = safe_audit_day(request.query_params.get("since"))
-    until = safe_audit_day(request.query_params.get("until"))
+    raw_since, raw_until = request.query_params.get("since"), request.query_params.get("until")
+    since, until = safe_audit_day(raw_since), safe_audit_day(raw_until)
+    filter_error = ""
+    if (raw_since and since is None) or (raw_until and until is None):
+        filter_error = "Enter a real From and To date in year-month-day order. No search was performed."
+    elif since and until and since > until:
+        filter_error = "From must be on or before To. No search was performed."
+    before_event = request.query_params.get("before_event", "")
+    if before_event and (len(before_event) != 64 or any(c not in "0123456789abcdef" for c in before_event)):
+        filter_error = "This continuation is invalid. Start a new activity search."
     audit_log = default_audit_log()
     from maverick.audit.segments import ReadReport
 
@@ -5824,42 +5847,36 @@ async def audit_page(request: Request) -> HTMLResponse:
         return not needle or (needle in json.dumps(e, default=str).lower()
                               or needle in _audit_plain.kind_label(e.get("kind")).lower())
 
-    window_note = ""
-    if since or until:
-        from maverick.audit.export import iter_audit_events
+    from datetime import datetime, timezone
+    from urllib.parse import urlencode
+    from maverick.audit.export import iter_audit_events
+    from .audit_search import search_events
 
-        def _window() -> tuple[list[dict], set[str], set[str], int, bool]:
-            # Filters apply while scanning, and the newest matches are kept,
-            # so a busy range never hides recent events behind old ones.
-            kept: deque = deque(maxlen=n)
-            seen_kinds: set[str] = set()
-            seen_people: set[str] = set()
-            matched = 0
-            for scanned, e in enumerate(iter_audit_events(since=since, until=until,
-                                                          report=read_report)):
-                if scanned >= _AUDIT_RANGE_SCAN_LIMIT:
-                    return list(kept), seen_kinds, seen_people, matched, True
-                if e.get("kind"):
-                    seen_kinds.add(str(e.get("kind")))
-                if len(seen_people) < 1000:
-                    seen_people.add(_audit_plain.event_person(e))
-                if _matches(e):
-                    matched += 1
-                    kept.append(e)
-            return list(kept), seen_kinds, seen_people, matched, False
-
-        events, kind_set, people_set, matched, cut = await run_in_threadpool(_window)
-        if cut:
-            window_note = ("These dates hold more activity than the page can search at once, "
-                           "so later events may be missing. Choose fewer days to see everything.")
-        elif matched > n:
-            window_note = (f"Showing the latest {n} of {matched} matching events. "
-                           "Choose fewer days or add a filter to see earlier ones.")
-    else:
-        events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
-        kind_set = {str(e.get("kind")) for e in events if e.get("kind")}
-        people_set = {_audit_plain.event_person(e) for e in events}
-        events = [e for e in events if _matches(e)]
+    window_note, next_href = "", None
+    events, kind_set, people_set = [], set(), set()
+    if not filter_error:
+        scan_since, scan_until = since, until
+        if not (since or until):
+            scan_since = scan_until = day or datetime.now(timezone.utc).date().isoformat()
+        result = await run_in_threadpool(
+            search_events, iter_audit_events(since=scan_since, until=scan_until, report=read_report),
+            matches=_matches, person_for=_audit_plain.event_person, limit=n,
+            before=before_event, scan_limit=_AUDIT_RANGE_SCAN_LIMIT,
+        )
+        events, kind_set, people_set = result["events"], result["kinds"], result["people"]
+        if not result["cursor_found"]:
+            filter_error = "The saved activity position is no longer available. Start a new search."
+            events = []
+        elif result["cut"]:
+            window_note = "The activity scan reached its limit. This is a partial view; narrow the dates before relying on its totals."
+        else:
+            window_note = f"Showing {len(events)} of {result['matched']} matching events before this page boundary."
+        if result["next_cursor"] and not filter_error:
+            params = dict(request.query_params)
+            if not (since or until):
+                params["day"] = scan_since
+            params["before_event"] = result["next_cursor"]
+            next_href = "/audit?" + urlencode(params)
     # Distinct kinds and people in the window (for the filter dropdowns),
     # gathered before filtering so every choice stays selectable.
     kinds = sorted(kind_set, key=_audit_plain.kind_label)
@@ -5883,6 +5900,8 @@ async def audit_page(request: Request) -> HTMLResponse:
             "audit_signing_enabled": bool(audit_log.signing_enabled),
             "audit_read_report": read_report.as_dict(),
             "audit_window_note": window_note,
+            "audit_filter_error": filter_error,
+            "audit_next_href": next_href,
             **_audit_plain.page_helpers(),
         },
     )
@@ -6479,8 +6498,6 @@ def oversight_page(request: Request) -> HTMLResponse:
 
     from collections import Counter, deque
 
-    from maverick.audit import default_audit_log
-
     try:
         n = max(1, min(int(request.query_params.get("n") or 1000), 5000))
     except (TypeError, ValueError):
@@ -6499,46 +6516,34 @@ def oversight_page(request: Request) -> HTMLResponse:
     by_kind: Counter = Counter()
     recent: deque = deque(maxlen=150)
     total = 0
-    if ranged:
-        # Incident review: an inclusive [since, until] window across day-files,
-        # reusing the export reader's lexical date filter (open-ended if one
-        # bound is unset). Bound the file scan on a very wide window.
-        from maverick.audit.export import iter_audit_events
+    source_errors = []
+    from datetime import datetime, timezone
+    from maverick.audit.export import iter_audit_events
+    from maverick.audit.segments import ReadReport
+    from .content_access import audit_metadata
 
-        scanned = 0
-        try:
-            for e in iter_audit_events(since=since, until=until):
-                scanned += 1
-                if scanned > 200_000:
-                    break
-                if _is_intervention(e) and _audit_event_visible_to_caller(
-                    e,
-                    principal=principal,
-                    owner_filter=owner_filter,
-                    world=w,
-                    goal_owner_cache=goal_owner_cache,
-                ):
-                    by_kind[str(e.get("kind"))] += 1
-                    total += 1
-                    recent.append(e)
-        except Exception:  # pragma: no cover - never 500 the console on a log error
-            pass
-    else:
-        try:
-            raw = default_audit_log().tail(n, day=day)
-        except Exception:  # pragma: no cover - never 500 the console on a log error
-            raw = []
-        for e in raw:
-            if _is_intervention(e) and _audit_event_visible_to_caller(
-                e,
-                principal=principal,
-                owner_filter=owner_filter,
-                world=w,
+    report = ReadReport()
+    scan_since, scan_until = since, until
+    if not ranged:
+        scan_since = scan_until = day or datetime.now(timezone.utc).date().isoformat()
+    try:
+        for scanned, event in enumerate(iter_audit_events(since=scan_since, until=scan_until, report=report)):
+            if scanned >= 200_000:
+                source_errors.append("Activity is partial: narrow the date range to inspect the rest.")
+                break
+            if _is_intervention(event) and _audit_event_visible_to_caller(
+                event, principal=principal, owner_filter=owner_filter, world=w,
                 goal_owner_cache=goal_owner_cache,
             ):
-                by_kind[str(e.get("kind"))] += 1
+                safe = audit_metadata(event)
+                by_kind[str(safe.get("kind"))] += 1
                 total += 1
-                recent.append(e)
+                recent.append(safe)
+        if report.as_dict().get("failures"):
+            source_errors.append("Some activity segments could not be read. Counts are partial; review the activity log.")
+    except Exception:
+        total = None
+        source_errors.append("Activity is unavailable. An empty list does not mean that no intervention occurred.")
 
     titles: dict[int, str] = {}
 
@@ -6547,8 +6552,9 @@ def oversight_page(request: Request) -> HTMLResponse:
             return ""
         if goal_id not in titles:
             try:
+                assert_goal_access(request, goal_id)
                 goal = w.get_goal(goal_id)
-            except Exception:  # pragma: no cover - a missing title shows a number
+            except Exception:  # pragma: no cover - a missing or private title shows a number
                 goal = None
             titles[goal_id] = (goal.title if goal is not None else "") or ""
         return titles[goal_id]
@@ -6567,20 +6573,24 @@ def oversight_page(request: Request) -> HTMLResponse:
 
     try:
         from maverick.killswitch import is_active
-
         halted = bool(is_active())
     except Exception:
-        halted = False
+        halted = None
+        source_errors.append("Emergency-stop state is unavailable. Check its controls before relying on this view.")
 
     try:
-        approvals = list(w.pending_approvals())
+        approvals = [a for a in w.pending_approvals()
+                     if owner_filter is None or (a.requested_by or "") == owner_filter]
+        pending = len(approvals)
     except Exception:
-        approvals = []
+        approvals, pending = [], None
+        source_errors.append("Your approval queue is unavailable. Its current size is unknown.")
     approval_context = _approval_queue_context(approvals)
     try:
         active = len(w.list_goals(status="active", owner=owner_filter))
     except Exception:
-        active = 0
+        active = None
+        source_errors.append("Active task state is unavailable.")
 
     return templates.TemplateResponse(
         request,
@@ -6596,7 +6606,8 @@ def oversight_page(request: Request) -> HTMLResponse:
             "can_halt": has_global_permission(request, "operate"),
             "approvals": approvals,
             **approval_context,
-            "pending": len(approvals),
+            "pending": pending,
+            "source_errors": source_errors,
             "active": active,
             "n": n,
             "day": day,
@@ -10640,44 +10651,14 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
         buf.seek(0)
         buf.truncate(0)
 
-        sql = (
-            "SELECT id, goal_id, started_at, ended_at, outcome, "
-            "cost_dollars, input_tokens, output_tokens, tool_calls "
-            "FROM episodes"
-        )
-        conds: list[str] = []
-        plist: list = []
-        if start_ts is not None:
-            conds.append("started_at >= ? AND started_at < ?")
-            plist += [start_ts, end_ts]
-        if owner is not None:
-            # Subquery (not a 10k-element IN list) avoids SQLite's bound-variable
-            # limit and scopes the stream to the caller's goals.
-            conds.append("goal_id IN (SELECT id FROM goals WHERE owner = ?)")
-            plist.append(owner)
-        if conds:
-            sql += " WHERE " + " AND ".join(conds)
-        sql += " ORDER BY id"
-        params = tuple(plist)
+        from maverick.episode_reporting import iter_episodes
+        from .audit_actions_api import csv_safe
 
-        # outcome is a sealed column when at-rest encryption is on; this CSV reads
-        # it via raw SQL, so decrypt it like the WorldModel accessors do.
-        from maverick.world_model import _dec_field
-
-        for row in w.query(sql, params):
-            writer.writerow(
-                [
-                    row["id"],
-                    row["goal_id"],
-                    row["started_at"],
-                    row["ended_at"] or "",
-                    _dec_field(row["outcome"]) or "",
-                    f"{(row['cost_dollars'] or 0):.6f}",
-                    row["input_tokens"],
-                    row["output_tokens"],
-                    row["tool_calls"],
-                ]
-            )
+        for episode in iter_episodes(w, owner=owner, since=start_ts, until=end_ts, finished_only=True):
+            writer.writerow([episode.id, episode.goal_id, episode.started_at, episode.ended_at,
+                             csv_safe(episode.outcome or ""),
+                             "unknown" if episode.cost_dollars is None else f"{episode.cost_dollars:.6f}",
+                             episode.input_tokens, episode.output_tokens, episode.tool_calls])
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)

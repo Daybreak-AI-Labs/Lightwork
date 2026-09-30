@@ -14,15 +14,17 @@
   {% call hero('Value & spend', 'Spend',
                subtitle='What your AI work has cost',
                lede='Costs for every finished task, taken from Lightwork\'s own
-                     records, never estimated. Need the monthly statement?
+                     runtime pricing records. These can be measured, estimated or bounded prices;
+                     they are not verified provider invoices. Need the monthly statement?
                      Open <a href="/billing">Billing</a>.') %}
     {{ state('Current state',
-             '$' ~ '{:,.2f}'.format(total.dollars) ~ ' total spent',
+             '$' ~ '{:,.2f}'.format(total.dollars) ~ ' recorded across all time',
              badge=total.runs ~ ' finished task' ~ ('' if total.runs == 1 else 's'),
              badge_class='ok' if total.runs else 'idle',
              copy='The same records power <a href="/savings">Savings</a> and
                    the monthly statement.') }}
   {% endcall %}
+  <p class="muted">Report scopes: the heading is all time; the charts use the selected period; the task table shows the latest 50 attempts. The download uses its own month selector. Recorded runtime prices exclude subscription fees, taxes, external tools and unreconciled provider adjustments. A missing price is unknown, not free.</p>
 
   <div class="bd-toolbar">
     <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
@@ -45,7 +47,7 @@
     </div>
     <div class="panel viz-card">
       <h2>How tasks ended</h2>
-      <p class="viz-sub">Results of tasks in this period.</p>
+      <p class="viz-sub">All authorized episode attempts started in this period. Running attempts are separate from the finished-attempt cost totals; retries can create several attempts for one task.</p>
       <div id="bd-outcomes"></div>
     </div>
     <div class="panel viz-card viz-card--wide">
@@ -68,7 +70,7 @@
   {% include "_spend_insights.html" %}
 
   <div class="toolbar">
-    <h2>Recent tasks</h2>
+    <h2>Latest 50 episode attempts — independent of chart range</h2>
     <form class="spend-download" id="spend-download">
       <label for="spend-month">Download</label>
       <select class="select" id="spend-month">

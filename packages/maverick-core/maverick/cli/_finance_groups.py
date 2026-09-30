@@ -718,7 +718,10 @@ def savings_cmd(ctx, days: int, as_json: bool) -> None:
         import json as _json
         click.echo(_json.dumps(savings_mod.to_dict(r), indent=2))
         return
-    click.echo(f"Savings — last {r.window_days} days ({r.currency})")
+    click.echo(f"Savings - last {r.window_days} days ({r.currency})")
+    if not r.available:
+        click.echo(r.unavailable_reason)
+        return
     click.echo("=" * 44)
     click.echo(f"Deliverables completed : {r.deliverables}")
     click.echo(f"Human hours given back : {r.human_hours:,.1f}h")

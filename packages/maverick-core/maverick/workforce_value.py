@@ -61,6 +61,9 @@ class DepartmentValue:
 
 @dataclass
 class WorkforceValue:
+    available: bool = True
+    incomplete: bool = False
+    unavailable_reason: str = ""
     window_days: int = 0
     deliverables: int = 0
     agent_cost: float = 0.0
@@ -106,7 +109,7 @@ def _department_of(world: Any, goal_id: int, cache: dict[int, str]) -> str:
 def compute(
     world: Any, *, window_days: int = 90, human_cost: float | None = None,
     human_cost_for: Any = None, episode_limit: int = 5000,
-    now: float | None = None,
+    now: float | None = None, owner: str | None = None,
 ) -> WorkforceValue:
     """Assemble the workforce value report from existing signals (read-only).
 
@@ -114,8 +117,8 @@ def compute(
     human deliverable (defaults conservative). ``human_cost_for`` is an optional
     callable ``(department) -> float`` that overrides ``human_cost`` per
     department -- how the savings dashboard prices legal work differently from
-    support (rate x hours per department). Never raises -- each signal degrades
-    independently to empty, and a callable that raises falls back to the flat
+    support (rate x hours per department). An unreadable cost population is
+    explicitly unavailable, and a callable that raises falls back to the flat
     ``human_cost``.
     """
     ts_now = now if now is not None else time.time()
@@ -135,16 +138,28 @@ def compute(
     depts: dict[str, DepartmentValue] = {}
     cache: dict[int, str] = {}
     try:
-        episodes = world.list_episodes(limit=episode_limit)
+        if callable(getattr(world, "query", None)):
+            from .episode_reporting import iter_episodes
+            episodes = iter_episodes(world, owner=owner, since=cutoff, until=ts_now, finished_only=True)
+        else:
+            if owner is not None:
+                raise ValueError("This history adapter cannot enforce an owner scope.")
+            episodes = world.list_episodes(limit=episode_limit)
+            out.incomplete = len(episodes) >= episode_limit
     except Exception as e:  # pragma: no cover -- report never blocks
         log.debug("workforce_value: episode read failed: %s", e)
-        episodes = []
-    for ep in episodes:
+        out.available = False
+        out.unavailable_reason = "Task history could not be read. Savings are unavailable; no zero-activity claim was made."
+        return out
+    def record(ep):
         if float(getattr(ep, "started_at", 0) or 0) < cutoff:
-            continue
-        cost = float(getattr(ep, "cost_dollars", 0) or 0)
+            return
+        raw_cost = getattr(ep, "cost_dollars", None)
+        if raw_cost is None:
+            raise ValueError("A finished episode has no recorded cost.")
+        cost = float(raw_cost)
         done = _is_done(getattr(ep, "outcome", None))
-        dept = _department_of(world, getattr(ep, "goal_id", 0), cache)
+        dept = getattr(ep, "domain", None) or _department_of(world, getattr(ep, "goal_id", 0), cache)
         dv = depts.setdefault(dept, DepartmentValue(department=dept))
         dv.agent_cost += cost
         out.agent_cost += cost
@@ -154,6 +169,13 @@ def compute(
             dv.human_baseline += per
             out.deliverables += 1
             out.human_baseline += per
+    try:
+        for ep in episodes:
+            record(ep)
+    except Exception as exc:
+        log.debug("workforce_value: complete history read failed: %s", type(exc).__name__)
+        return WorkforceValue(window_days=window_days, available=False,
+                              unavailable_reason="Task history could not be read completely. Savings are unavailable.")
     out.by_department = sorted(
         depts.values(), key=lambda d: d.cost_avoided, reverse=True,
     )
@@ -228,6 +250,8 @@ def _governance_summary() -> dict:
 
 def format_report(v: WorkforceValue) -> str:
     """Render the value report as an executive-readable block."""
+    if not v.available:
+        return "Workforce value unavailable: " + v.unavailable_reason
     lines = [
         f"AI Workforce — last {v.window_days} days",
         "=" * 44,
@@ -262,7 +286,13 @@ def format_report(v: WorkforceValue) -> str:
 
 
 def to_dict(v: WorkforceValue) -> dict:
+    if not v.available:
+        return {"available": False, "incomplete": True, "unavailable_reason": v.unavailable_reason,
+                "window_days": v.window_days, "by_department": [], "governance": v.governance,
+                "coverage_trend": [], "improvement": None,
+                **{key: None for key in ("deliverables", "agent_cost", "human_baseline", "cost_avoided", "roi_multiple")}}
     return {
+        "available": True, "incomplete": v.incomplete, "unavailable_reason": "",
         "window_days": v.window_days,
         "deliverables": v.deliverables,
         "agent_cost": round(v.agent_cost, 2),

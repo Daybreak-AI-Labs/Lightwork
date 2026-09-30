@@ -411,6 +411,7 @@ window.LWBoard = (function () {
   // the default board API for pages whose payload already exists elsewhere.
   function attach(cfg) {
     var days = 90;
+    var generation = 0, active = null, retired = false, updated = '';
     var stampEl = document.getElementById('bd-stamp');
     function stamp(msg) {
       if (stampEl) stampEl.textContent = msg;
@@ -420,20 +421,29 @@ window.LWBoard = (function () {
       return '/api/v1/dashboards/' + cfg.board + '?days=' + days;
     }
     function load() {
-      fetch(url())
+      if (retired) return;
+      var request = ++generation, selectedDays = days;
+      if (active) active.abort();
+      active = new AbortController();
+      var controller = active;
+      var timeout = setTimeout(function () { controller.abort(); }, 20000);
+      stamp('Loading ' + selectedDays + ' days' + (updated ? ' · previous view: ' + updated : '') + '.');
+      fetch(url(), {signal: controller.signal, credentials: 'same-origin', cache: 'no-store'})
         .then(function (r) {
           if (!r.ok) throw r;
           return r.json();
         })
         .then(function (D) {
+          if (retired || request !== generation || selectedDays !== days) return;
           cfg.render(D);
-          stamp('Updated ' + new Date().toLocaleTimeString() +
-                ' · updates every minute');
+          updated = selectedDays + ' days, ' + new Date().toLocaleTimeString();
+          stamp('Showing ' + updated + ' · updates every minute');
         })
         .catch(function (e) {
+          if (retired || request !== generation) return;
           var why = window.mvErrorText ? window.mvErrorText(e, 'load the board') : 'Could not load the board.';
-          stamp(why + ' Trying again in a minute.');
-        });
+          stamp(why + (updated ? ' Previous view retained: ' + updated + '.' : '') + ' Trying again in a minute.');
+        }).finally(function () { clearTimeout(timeout); if (request === generation) active = null; });
     }
     document.querySelectorAll('.bd-slicer button').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -447,7 +457,14 @@ window.LWBoard = (function () {
         load();
       });
     });
-    setInterval(function () { if (!document.hidden) load(); }, 60000);
+    var poll = setInterval(function () { if (!document.hidden && !active) load(); }, 60000);
+    window.addEventListener('pagehide', function () { retired = true; ++generation; clearInterval(poll); if (active) active.abort(); });
+    window.addEventListener('pageshow', function (event) {
+      if (!event.persisted || !retired) return;
+      retired = false;
+      poll = setInterval(function () { if (!document.hidden && !active) load(); }, 60000);
+      load();
+    });
     load();
   }
 

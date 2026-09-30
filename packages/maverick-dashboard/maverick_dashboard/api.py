@@ -669,12 +669,12 @@ def _board_spend(w, owner, days: int) -> dict:
     totals, prev = _tot(since), _tot(prev_since)
     episodes = w.list_episodes(limit=200, owner=owner)
     outcomes = {"success": 0, "failed": 0, "running": 0}
-    for e in episodes:
-        if e.started_at < since:
-            continue
-        if not e.outcome:
+    from maverick.episode_reporting import iter_episodes
+    from maverick.workforce_value import _is_done
+    for e in iter_episodes(w, owner=owner, since=since, until=since + days * 86400 + 1):
+        if e.ended_at is None:
             outcomes["running"] += 1
-        elif e.outcome == "success":
+        elif _is_done(e.outcome):
             outcomes["success"] += 1
         else:
             outcomes["failed"] += 1
@@ -706,6 +706,7 @@ def _board_spend(w, owner, days: int) -> dict:
         "prev": prev,
         "daily": list(daily.values()),
         "outcomes": outcomes,
+        "outcomes_population": "All authorized episode attempts started in the selected period; running attempts are separate from the finished-attempt cost totals.",
         "per_run": per_run,
         "top_goals": top_goals,
         "by_platform": _external_platform_spend(w, owner, since),
@@ -928,29 +929,38 @@ def _board_savings(w, owner, days: int) -> dict:
     ):
         if day in daily:
             daily[day]["n"] = int(n)
-    report = savings_mod.to_dict(savings_mod.compute(w, window_days=days, cfg=get_value()))
+    report = savings_mod.to_dict(savings_mod.compute(w, window_days=days, cfg=get_value(), owner=owner))
     return {"report": report, "daily_done": list(daily.values())}
 
 
 def _board_oversight(w, owner, days: int) -> dict:
-    """Mission-control rollup: guardrail interventions from the audit log
-    (fail-soft: unreadable log yields an empty board, never a 500), the
-    pending human queue, and the halt state."""
+    """Scoped guardrail metadata with explicit availability for each source."""
     from datetime import datetime, timedelta, timezone
+    from .app import _audit_event_visible_to_caller, _is_intervention
 
     day_list, since, _prev = _board_day_list(days)
     daily = {d.isoformat(): {"d": d.isoformat(), "n": 0} for d in day_list}
     by_kind: dict[str, int] = {}
     total = 0
+    owner_cache = {}
+    sources = {name: {"state": "available", "checked_at": time.time(), "repair_href": href}
+               for name, href in (("audit", "/audit"), ("approvals", "/action-center"), ("halt", "/oversight"))}
     try:
         from maverick.audit.export import iter_audit_events
+        from maverick.audit.segments import ReadReport
 
         since_day = (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
+        report = ReadReport()
         scanned = 0
-        for e in iter_audit_events(since=since_day):
+        for e in iter_audit_events(since=since_day, report=report):
             scanned += 1
             if scanned > 100_000:
+                sources["audit"]["state"] = "partial"
                 break
+            if not _is_intervention(e) or not _audit_event_visible_to_caller(
+                e, principal=owner, owner_filter=owner, world=w, goal_owner_cache=owner_cache,
+            ):
+                continue
             total += 1
             kind = str(e.get("kind") or "event")
             by_kind[kind] = by_kind.get(kind, 0) + 1
@@ -959,18 +969,26 @@ def _board_oversight(w, owner, days: int) -> dict:
                 day = datetime.fromtimestamp(float(ts), tz=timezone.utc).date().isoformat()
                 if day in daily:
                     daily[day]["n"] += 1
+        if report.as_dict().get("failures"):
+            sources["audit"]["state"] = "partial"
     except Exception:  # pragma: no cover -- fail-soft like the page
-        pass
+        total = None
+        sources["audit"]["state"] = "unavailable"
     try:
-        pending = sum(
-            1 for a in w.list_approvals(limit=500) if getattr(a, "status", "") == "pending"
-        )
+        clauses = "a.status = 'pending'"
+        values = ()
+        if owner is not None:
+            clauses += " AND COALESCE(a.requested_by, '') = ?"
+            values = (owner,)
+        pending = int(w.query("SELECT COUNT(*) FROM approvals a WHERE " + clauses, values)[0][0])
     except Exception:  # pragma: no cover
-        pending = 0
+        pending = None
+        sources["approvals"]["state"] = "unavailable"
     try:
         halted = bool(w.active_halt())
     except Exception:  # pragma: no cover
-        halted = False
+        halted = None
+        sources["halt"]["state"] = "unavailable"
     kinds = sorted(
         ({"kind": k.replace("_", " "), "n": n} for k, n in by_kind.items()),
         key=lambda r: r["n"],
@@ -982,6 +1000,8 @@ def _board_oversight(w, owner, days: int) -> dict:
         "daily": list(daily.values()),
         "pending_approvals": pending,
         "halted": halted,
+        "sources": sources,
+        "degraded": any(source["state"] != "available" for source in sources.values()),
     }
 
 
@@ -8362,7 +8382,7 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     days = max(1, min(int(days), 730))
     resolution = _value_assumptions_resolution()
     cfg = resolution["effective_assumptions"]
-    report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg)
+    report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg, owner=goal_owner_filter(request))
     return {
         "enabled": cfg["enable"],
         "report": savings_mod.to_dict(report),
@@ -8429,6 +8449,8 @@ def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) -> dict:
     stay one source of truth. Global-operate-gated: a tenant-local role cannot
     alter the assumptions used by other tenants."""
     require_global_permission(request, "operate")
+    if body.currency is not None and body.currency.upper() != "USD":
+        raise HTTPException(422, "Savings compares USD runtime costs. Review and enter human cost assumptions in USD; currency conversion is not configured.")
     from maverick.config import reset_config_cache
 
     from . import settings_store

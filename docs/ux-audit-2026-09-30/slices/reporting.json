@@ -1,0 +1,129 @@
+[
+  {
+    "id": "LW-160",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "maverick.episode_reporting.iter_episodes: authorized keyset traversal with insertion ceiling; no 10,000-row cap",
+      "app.billing_page and cost_csv: finished-attempt population and bounded streaming month export",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-161",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "maverick.workforce_value.compute / savings.compute: complete paginated history, unavailable costs/read errors, owner scope across dashboard consumers",
+      "savings and shoring templates: explicit unavailable state",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-162",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Savings compares USD only; non-USD existing assumptions require review without automatic conversion",
+      "api.put_savings_assumptions and savings page show the same USD basis",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-166",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "billing_invoice_api._display_amounts: same deterministic currency allocation as collection",
+      "Invoice preview and CSV display identical allocated line amounts and total, including minimum lines",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-167",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "audit_search.search_events: project private content, filter complete selected reader stream before result paging",
+      "app.audit_page and audit template: anchored older-page continuation plus completeness report",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-168",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "app.audit_page validates both supplied dates and ordering; invalid scope returns visible error and no normal result set",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-169",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "board.js: owned request generation, AbortController, bounded fetch, selected-period last-good stamp and page lifecycle cancellation",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-170",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "api._board_spend reads all authorized attempts within selected interval for outcomes; running and finished denominators explained",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-171",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "spend page labels all-time totals, selected-period charts, latest-50 table and independently chosen month export",
+      "_spend_insights states independent retrospective controls; billing periods unchanged",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-172",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "lightwork-analytics.js displays latest-100 scope, generation-bound manual refresh and last-updated status",
+      "embed_demo removes shared credential recommendation and uses each viewer session",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-173",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "api._board_oversight reports per-source availability/partial counts and scoped complete approval count",
+      "oversight_page and template render source errors/unknown stop and retain last-known chart state with timestamps",
+      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+    ],
+    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
+    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues."
+  },
+  {
+    "id": "LW-163",
+    "status": "planned",
+    "implementation_evidence": [
+      "Removed never-estimated claim, clarified runtime-pricing basis and missing cost categories, added statement export basis"
+    ],
+    "validation": "Static source review only.",
+    "remaining": "Per-entry recorded/estimated/ceiling/reconciled provenance across spend view and all exports remains to implement."
+  }
+]

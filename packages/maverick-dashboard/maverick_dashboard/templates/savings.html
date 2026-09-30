@@ -15,8 +15,8 @@
 </style>
 
   {% set saved = report.saved %}
-  {% set cur = cfg.currency or 'USD' %}
-  {% macro amount(v) %}{{ '$' if cur == 'USD' else (cur ~ ' ') }}{{ '{:,.2f}'.format(v) }}{% endmacro %}
+  {% set cur = 'USD' %}
+  {% macro amount(v) %}{% if v is none %}Unavailable{% else %}${{ '{:,.2f}'.format(v) }}{% endif %}{% endmacro %}
   {% set field_words = {'hourly_rate': 'hourly rate', 'hours_per_task': 'hours per task', 'currency': 'currency', 'departments': 'department numbers'} %}
   {% from "_hero.html" import hero, state %}
   {% call hero('Value & spend', 'Savings',
@@ -27,11 +27,14 @@
                      Lightwork\'s costs are its own records, not verified provider invoices.') %}
     {{ state('Current state',
              amount(saved) ~ ' estimated difference',
-             badge='Saving money' if saved >= 0 else 'Costing more',
-             badge_class='ok' if saved >= 0 else 'warn',
+             badge='Unavailable' if not report.available else ('Saving money' if saved >= 0 else 'Costing more'),
+             badge_class='warn' if not report.available else ('ok' if saved >= 0 else 'warn'),
              copy='This estimate changes with your numbers below. For measured
                    results, run a workflow pilot.') }}
   {% endcall %}
+  {% if not report.available %}<p role="alert">{{ report.unavailable_reason }}</p>{% endif %}
+  {% if report.incomplete %}<p role="status">History coverage is incomplete. Do not treat these figures as a complete period total.</p>{% endif %}
+  <p class="muted">Comparison basis: USD only, finished episode attempts in the selected period. Provider invoices, subscriptions, taxes and human rework are not included. Existing non-USD assumptions require your review; Lightwork does not relabel or convert them.</p>
   <p class="sv-range"><a class="btn" href="/outcome-pilots">Measure a workflow pilot</a>
     <span class="muted">Needs outcome measurement turned on.</span>
     <a class="btn btn--ghost" href="/settings#feature-outcome_measurement">Turn it on in Settings</a></p>
@@ -102,8 +105,8 @@
           <label for="sv-currency">Currency</label>
           <select class="select" id="sv-currency" name="currency"{% if not can_manage_assumptions %} disabled{% endif %}>
             {% set currencies = [('USD','US dollar'),('EUR','Euro'),('GBP','British pound'),('CAD','Canadian dollar'),('AUD','Australian dollar'),('NZD','New Zealand dollar'),('JPY','Japanese yen'),('CHF','Swiss franc'),('SEK','Swedish krona'),('NOK','Norwegian krone'),('DKK','Danish krone'),('INR','Indian rupee'),('SGD','Singapore dollar'),('HKD','Hong Kong dollar'),('BRL','Brazilian real'),('MXN','Mexican peso'),('ZAR','South African rand')] %}
-            {% for code, name in currencies %}<option value="{{ code }}"{% if cfg.currency | upper == code %} selected{% endif %}>{{ name }} ({{ code }})</option>{% endfor %}
-            {% if cfg.currency and (cfg.currency | upper) not in currencies | map(attribute=0) | list %}<option value="{{ cfg.currency }}" selected>{{ cfg.currency }}</option>{% endif %}
+            <option value="USD"{% if cfg.currency | upper == 'USD' %} selected{% endif %}>US dollar (USD)</option>
+            {% if cfg.currency and cfg.currency | upper != 'USD' %}<option value="{{ cfg.currency }}" selected disabled>{{ cfg.currency }} — review and convert your assumptions to USD</option>{% endif %}
           </select>
         </div>
         <div class="field">
@@ -249,6 +252,7 @@
 
   function render(D) {
     var rep = D.report;
+    if (!rep.available) throw new Error(rep.unavailable_reason || 'Savings history is unavailable.');
     var k = document.getElementById('bd-kpis');
     k.textContent = '';
     k.appendChild(B.kpi({ label: 'Estimated savings', value: rep.saved,
