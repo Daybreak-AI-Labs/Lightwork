@@ -7,7 +7,7 @@
                lede='Everything your workforce is doing right now — goals in
                      flight, work delivered, and anything waiting on you.
                      Start new work from <a href="/chat">chat</a>, or manage
-                     the teams on <a href="/workforce">Workforce</a>.') %}
+                     the teams on <a href="/workforce">Workforce</a>.' | safe) %}
     {{ state('Current state',
              counts.total ~ ' goal' ~ ('' if counts.total == 1 else 's') ~ ' on record',
              badge=(counts.active ~ ' active') if counts.active else 'idle',

@@ -17,7 +17,7 @@
                lede='Workflows, templates, and specialist instructions you\'ve built
                      — schedule them, trigger them from events, or run them on
                      demand. Browse the full catalog on
-                     <a href="/templates">Templates</a>.') %}
+                     <a href="/templates">Templates</a>.' | safe) %}
     {{ state('Current state',
              ((flows | length ~ ' flows · ') if flows_enabled else '')
                ~ templates | length ~ ' templates · '

@@ -18,12 +18,14 @@
       {% endfor %}
     </div>
   {% endmacro %}
-  {% call hero('Administration', 'Users &amp; roles',
+  {% set users_lede %}
+    Who can use this workspace and what each person is
+    allowed to do. A new person who signs in starts as
+    <strong>{{ default_role | role_label }}</strong> until you change it here.
+  {% endset %}
+  {% call hero('Administration', 'Users & roles',
                subtitle='Who can use Lightwork',
-               lede='Who can use this workspace and what each person is
-                     allowed to do. A new person who signs in starts as
-                     <strong>' ~ (default_role | role_label) ~ '</strong> until you change it
-                     here.') %}
+               lede=users_lede) %}
     {{ state('Current state',
              users | length ~ ' ' ~ ('person has' if users | length == 1 else 'people have') ~ ' a role',
              badge='Company sign-in on' if auth_on else 'Sign-in off',

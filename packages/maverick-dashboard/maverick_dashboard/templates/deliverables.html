@@ -7,7 +7,7 @@
                lede='The work your AI teams produce, organized by deliverable
                      and by who it\'s for — your forecasts, reports, and items
                      awaiting your sign-off (the full
-                     <a href="/goals">run history</a> is separate).') %}
+                     <a href="/goals">run history</a> is separate).' | safe) %}
     {{ state('Current state',
              items | length ~ ' deliverable' ~ ('' if items | length == 1 else 's') ~ ' in view',
              badge=(awaiting | length ~ ' awaiting sign-off') if awaiting else 'clear',

@@ -37,7 +37,7 @@
              lede='Every way your workflows run without you — on a recurring
                    schedule, when another service sends an update, or when something new
                    appears in a connected source. Create them in the
-                   <a href="/workflow-builder">Workflow Builder</a>.') %}
+                   <a href="/workflow-builder">Workflow Builder</a>.' | safe) %}
   {{ state('Current state',
            automation_total ~ ' automation' ~ ('' if automation_total == 1 else 's') ~ ' configured',
            badge=(channels_on ~ ' of 3 ways to start are on') if channels_on else 'All turned off',

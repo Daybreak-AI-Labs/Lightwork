@@ -14,7 +14,7 @@
              learned | length ~ ' learned skill' ~ ('' if learned | length == 1 else 's') ~ ' and tool' ~ ('' if learned | length == 1 else 's') ~ ' on record',
              badge='Self-coaching on' if harness_enabled else 'Self-coaching off',
              badge_class='ok' if harness_enabled else 'idle',
-             copy='Self-learning is switched on or off on the <a href="/learning">Learning</a> page.') }}
+             copy='Self-learning is switched on or off on the <a href="/learning">Learning</a> page.' | safe) }}
   {% endcall %}
   <p class="muted">This page shows your own learning records and lessons explicitly available to the workspace. Older records without verified ownership are preserved privately and are not reused automatically. Administrator access does not include other employees' content.</p>
   <p id="gt-msg" role="status" aria-live="polite" class="muted"></p>

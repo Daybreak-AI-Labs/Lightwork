@@ -21,7 +21,7 @@
                      assessment Lightwork has run (financial reporting controls
                      under SOX, fraud risk, IT controls, credit risk and close
                      readiness) with risk ratings, age and open follow-ups.
-                     <a href="/finance/board">Open the finance overview</a>') %}
+                     <a href="/finance/board">Open the finance overview</a>' | safe) %}
     {{ state('Current state',
              stats.total ~ ' assessment' ~ ('' if stats.total == 1 else 's') ~ ' on record',
              badge=(stats.pending ~ ' to review') if stats.pending else 'clear',

@@ -59,7 +59,7 @@
 {% set lc_cls = {'scoping': 'idle', 'demonstrating': 'info', 'running': 'ok', 'proving': 'info'} %}
 
 {% call hero('Autonomous Shoring', "Hand a Team's Work to Lightwork",
-             lede='Choose a business area, set the service levels you expect, and track what it costs and saves compared with doing it by hand. See the full breakdown on <a href="/savings">Savings</a>.') %}
+             lede='Choose a business area, set the service levels you expect, and track what it costs and saves compared with doing it by hand. See the full breakdown on <a href="/savings">Savings</a>.' | safe) %}
   {% if report.available %}{{ state('Estimated cost difference',
            '$' ~ '{:,.2f}'.format(saved) ~ ' saved',
            badge='Saving money' if saved >= 0 else 'Costing more',

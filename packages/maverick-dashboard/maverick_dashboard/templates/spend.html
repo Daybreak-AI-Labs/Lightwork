@@ -17,13 +17,13 @@
                lede='Costs for every finished task, taken from Lightwork\'s own
                      runtime pricing records. These can be measured, estimated or bounded prices;
                      they are not verified provider invoices. Need the monthly statement?
-                     Open <a href="/billing">Billing</a>.') %}
+                     Open <a href="/billing">Billing</a>.' | safe) %}
     {{ state('Current state',
              '$' ~ '{:,.2f}'.format(total.dollars) ~ ' recorded across all time',
              badge=total.runs ~ ' finished task' ~ ('' if total.runs == 1 else 's'),
              badge_class='ok' if total.runs else 'idle',
              copy='The same records power <a href="/savings">Savings</a> and
-                   the monthly statement.') }}
+                   the monthly statement.' | safe) }}
   {% endcall %}
   <p class="muted">Report scopes: the heading is all time; the charts use the selected period; the task table shows the latest 50 attempts. The download uses its own month selector. Recorded runtime prices exclude subscription fees, taxes, external tools and unreconciled provider adjustments. A missing price is unknown, not free.</p>
 

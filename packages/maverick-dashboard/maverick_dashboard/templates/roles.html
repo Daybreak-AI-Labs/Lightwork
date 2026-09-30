@@ -8,7 +8,7 @@
                      For each one you can choose the <strong>model</strong> it
                      uses, how hard it <strong>thinks</strong>, and add
                      <strong>extra instructions</strong> that suit your
-                     organization.') %}
+                     organization.' | safe) %}
     {{ state('Current state',
              roles | length ~ ' role' ~ ('' if roles | length == 1 else 's'),
              badge='Editable' if editable else 'View only',

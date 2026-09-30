@@ -24,7 +24,7 @@
                lede='An estimate of the cost you avoided: finished tasks times
                      <strong>your</strong> numbers for what the same work costs
                      people, minus what Lightwork spent (from <a href="/spend">Spend</a>).
-                     Lightwork\'s costs are its own records, not verified provider invoices.') %}
+                     Lightwork\'s costs are its own records, not verified provider invoices.' | safe) %}
     {{ state('Current state',
              amount(saved) ~ ' estimated difference',
              badge='Unavailable' if not report.available else ('Saving money' if saved >= 0 else 'Costing more'),
