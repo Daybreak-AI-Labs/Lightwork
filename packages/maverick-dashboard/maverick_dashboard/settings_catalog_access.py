@@ -262,7 +262,7 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "Enable administrator-only version checks in a restricted local container, and pin used plugin bytes for ongoing tasks. No service credentials or network are available during checks.",
           "toggle", grp, False, "maverick.plugin_workbench", subgroup=access),
         S("plugins", "workbench_image", "Reviewed local plugin-check image",
-          "Immutable sha256 image ID of an already installed Linux image containing the exact approved plugin and jsonschema. The workbench never downloads an image or falls back to host execution.",
+          "Fixed image reference for an already installed Linux check environment containing the exact approved plugin and its validation tools. Lightwork never downloads an image or runs these checks directly on the host.",
           "text", grp, "", "maverick.plugin_workbench", subgroup=access, max_length=71,
           pattern=r"^(sha256:[a-f0-9]{64})?$"),
         S("workflows", "versioning", "Workflow draft and publication history",

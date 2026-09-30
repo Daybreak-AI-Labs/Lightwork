@@ -20,7 +20,7 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_structured as structured
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -61,7 +61,7 @@ def audit_rows(monkeypatch):
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _saved(changes):
@@ -303,7 +303,7 @@ def test_outside_work_area_options_reach_the_program(audit_rows, monkeypatch, tm
 
 # -------------------------------------------------------------------- plugins
 def _program(tmp_path, name="node"):
-    path = tmp_path / "bin" / name
+    path = tmp_path / "bin" / (name + ".exe" if os.name == "nt" else name)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\n", encoding="utf-8")
     path.chmod(0o755)

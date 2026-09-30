@@ -19,7 +19,7 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_privacy as privacy
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -221,7 +221,7 @@ def _lookup(tree, setting):
 def _save(changes: dict, confirm=False, reset=()):
     body = [{"id": k, "value": v} for k, v in changes.items()]
     body += [{"id": k, "reset": True} for k in reset]
-    return client.post(API, json={"changes": body, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": body, "confirm": confirm})
 
 
 def _rows(state: dict) -> dict:
@@ -314,7 +314,7 @@ def test_row_saves_reads_back_and_reaches_load_config(setting, audit_rows):
     assert len(mine) == 1 and mine[0]["kind"] == "setting_changed" and mine[0]["_global"]
     # Reset gives the default back and is recorded too.
     needs = [] if setting.id.startswith(_NOTICE) else list(NEEDS.get(setting.id, {}))
-    r = client.post(API, json={"changes": [{"id": setting.id, "reset": True}]
+    r = save_catalog(client, API, json={"changes": [{"id": setting.id, "reset": True}]
                                + [{"id": k, "reset": True} for k in needs],
                                "confirm": True})
     if setting.id == f"{_NOTICE}.active_tenants":

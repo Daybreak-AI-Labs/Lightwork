@@ -16,7 +16,7 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_governance as governance
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -68,7 +68,7 @@ def _loaded() -> dict:
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _rows_by_id() -> dict:

@@ -16,6 +16,8 @@ from maverick_dashboard import settings_catalog_governance as governance
 from maverick_dashboard import settings_catalog_learning as learning
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import save_catalog
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 _EA = "ai_evidence_analysis"
@@ -100,7 +102,7 @@ def test_sending_benchmark_results_needs_the_service_address():
 def test_the_page_refuses_a_broken_combination_and_saves_nothing():
     from maverick import config
 
-    r = client.post(API, json={"changes": [{"id": f"{_EA}.parser_sandbox.enable", "value": True}],
+    r = save_catalog(client, API, json={"changes": [{"id": f"{_EA}.parser_sandbox.enable", "value": True}],
                                "confirm": True})
     assert r.status_code == 400
     assert "Open files in an isolated area" in r.json()["message"]
@@ -115,13 +117,13 @@ def test_the_page_saves_a_complete_combination_in_one_go():
         {"id": f"{_ENTRA}.retry_max_seconds", "value": 1200},
         {"id": f"{_ENTRA}.retry_base_seconds", "value": 900},
     ]
-    r = client.post(API, json={"changes": changes, "confirm": True})
+    r = save_catalog(client, API, json={"changes": changes, "confirm": True})
     assert r.status_code == 200, r.text
     config.reset_config_cache()
     table = config.load_config()["ai_identity_governance_connectors"]["scheduler"]
     assert table["providers"]["entra"]["retry_base_seconds"] == 900
     # Raising the first wait above the saved ceiling alone is refused.
-    r = client.post(API, json={"changes": [{"id": f"{_ENTRA}.retry_base_seconds",
+    r = save_catalog(client, API, json={"changes": [{"id": f"{_ENTRA}.retry_base_seconds",
                                             "value": 1500}], "confirm": True})
     assert r.status_code == 400
     assert "can't be more than" in r.json()["message"]

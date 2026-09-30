@@ -899,7 +899,7 @@ SETTINGS: tuple[Setting, ...] = (
       "Let signed-in people choose subscriptions, quiet hours, daily digests and task mutes for their in-product inbox. Requires personal preferences. External personal delivery is not connected.",
       "toggle", "Integrations", False, "maverick_dashboard.personal_notifications_api"),
     S("notifications", "personal_critical_bypass", "Allow personal approval and deadline exceptions",
-      "Let people explicitly allow approval and deadline alerts to bypass their personal quiet hours and digest timing. Organization operational alerts are unchanged.",
+      "Let people explicitly allow approval and deadline alerts to bypass their personal quiet hours and summary timing. Organization operational alerts are unchanged.",
       "toggle", "Integrations", False, "maverick_dashboard.personal_notifications_api"),
     S("notifications", "personal_background", "Refresh personal alerts while pages are closed",
       "Run a bounded dashboard observer for explicitly enrolled named accounts. It rechecks current identity and owned work, observes changes about every 30 seconds, and releases eligible digests while the dashboard is running.",

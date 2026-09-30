@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -51,7 +51,7 @@ def audit_rows(monkeypatch):
 def _save(changes, confirm=False):
     from maverick import config
 
-    response = client.post(API, json={"changes": changes, "confirm": confirm})
+    response = save_catalog(client, API, json={"changes": changes, "confirm": confirm})
     config.reset_config_cache()
     return response
 

@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from maverick_dashboard import settings_all_page as page
 from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_runtime as runtime
 from maverick_dashboard.app import app
+
+from test_support.settings_pages import save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -60,7 +63,7 @@ def _loaded():
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -270,7 +273,12 @@ def test_row_saves_reads_back_and_resets(setting, audit_rows):
         assert audit_rows[0]["new"] == "set" and stored not in repr(audit_rows)
     r = _save([{"id": setting.id, "reset": True}], confirm=True)
     assert r.status_code == 200, r.text
-    assert _row(setting.id)["source"] == "default"
+    row = _row(setting.id)
+    if row["source"] == "here":
+        from maverick.config_resets import is_reset
+        assert is_reset(page._sources()["here"], setting), "Only the explicit product-default mask may remain after reset"
+    else:
+        assert row["source"] == "default"
 
 
 @pytest.mark.parametrize("setting", ROWS, ids=lambda s: s.id)

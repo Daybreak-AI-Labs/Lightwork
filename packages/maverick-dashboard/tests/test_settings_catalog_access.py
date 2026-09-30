@@ -22,7 +22,7 @@ from maverick_dashboard import settings_catalog_access as access
 from maverick_dashboard import settings_tests
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -87,7 +87,7 @@ def _loaded():
 
 
 def _save(changes, confirm=False, http=client):
-    return http.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(http, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -107,6 +107,8 @@ def _file(tmp_path, name="server.pem", mode=0o600):
 
 
 _TEXT = {
+    "plugins.workbench_image": "sha256:" + "a" * 64,
+    "connections.self_connect_profiles": "google-drive,google-cloud-storage",
     "auth.oidc.issuer": "https://login.example.com/realm",
     "auth.oidc.client_id": "lightwork-dashboard",
     "auth.oidc.audience": "lightwork-dashboard",
@@ -258,7 +260,12 @@ def test_every_access_row_saves_reads_back_and_resets(setting, tmp_path, monkeyp
         assert audit_rows[-1]["key"] == setting.key
     r = _save([{"id": setting.id, "reset": True}], confirm=True)
     assert r.status_code == 200, r.text
-    assert _row(setting.id)["source"] in {"default", "installer"}
+    row = _row(setting.id)
+    if row["source"] == "here":
+        from maverick.config_resets import is_reset
+        assert is_reset(page._sources()["here"], setting), "Only an explicit product-default mask may remain local after reset"
+    else:
+        assert row["source"] in {"default", "installer"}
 
 
 def _invalid(setting, tmp_path):  # noqa: C901 - one branch per control
@@ -296,34 +303,49 @@ def test_every_access_row_refuses_invalid_values(setting, tmp_path, as_token, wo
 
 
 # ----------------------------------------------------------------- paths
-def test_paths_must_be_full_existing_readable_and_inside_allowed_places(tmp_path, as_token,
+def test_paths_must_be_full_existing_readable_and_inside_allowed_places(tmp_path, monkeypatch, as_token,
                                                                         audit_rows):
     key = "auth.saml.sp_key_file"
+    outside = tmp_path.parent / (tmp_path.name + "-outside.pem")
+    outside.write_text("test certificate", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", str(tmp_path))
     cases = {
         "relative/key.pem": "full location",
         str(tmp_path / "nope.pem"): "nothing was found",
         str(tmp_path): "is a folder",
-        "/proc/self/status": "only uses locations",
+        str(outside): "only uses locations",
     }
     for value, words in cases.items():
         r = _save([{"id": key, "value": value}], confirm=True)
         assert r.status_code == 400, value
         assert words in r.json()["message"], (value, r.json()["message"])
-    world_readable = _file(tmp_path, "open.key", mode=0o644)
-    r = _save([{"id": key, "value": str(world_readable)}], confirm=True)
-    assert r.status_code == 400 and "anyone on the server can read" in r.json()["message"]
-    folder = _save([{"id": "workspace.snapshot_dir", "value": str(world_readable)}], confirm=True)
+    ordinary_file = _file(tmp_path, "ordinary.pem")
+    folder = _save([{"id": "workspace.snapshot_dir", "value": str(ordinary_file)}], confirm=True)
     assert folder.status_code == 400 and "Choose a folder" in folder.json()["message"]
     private = _file(tmp_path, "ok.key", mode=0o600)
     assert _save([{"id": key, "value": str(private)}], confirm=True).status_code == 200
     assert _loaded()["auth"]["saml"]["sp_key_file"] == str(private)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits; Windows native ACL qualification is separate")
+def test_private_key_path_rejects_world_readable_posix_mode(tmp_path, as_token, audit_rows):
+    world_readable = _file(tmp_path, "open.key", mode=0o644)
+    response = _save([{"id": "auth.saml.sp_key_file", "value": str(world_readable)}], confirm=True)
+    assert response.status_code == 400 and "anyone on the server can read" in response.json()["message"]
+
+
 def test_a_link_cannot_lead_outside_the_allowed_places(tmp_path, monkeypatch, as_token,
                                                        audit_rows):
     link = tmp_path / "certs" / "sneaky.pem"
     link.parent.mkdir(parents=True, exist_ok=True)
-    link.symlink_to("/etc/hostname" if os.path.exists("/etc/hostname") else "/etc/passwd")
+    target = tmp_path.parent / (tmp_path.name + "-outside.pem")
+    target.write_text("test certificate", encoding="utf-8")
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("This Windows executor cannot create symlinks; the filesystem privilege is unavailable")
+        raise
     monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", str(tmp_path))
     r = _save([{"id": "license.license_file", "value": str(link)}], confirm=True)
     assert r.status_code == 400 and "only uses locations" in r.json()["message"]
@@ -877,10 +899,10 @@ def test_the_server_access_token_can_be_set_here_and_is_checked(monkeypatch, aud
     assert client.get(API, headers=bearer).status_code == 200
     assert _row_with(bearer, "dashboard.token")["is_set"] is True
     # Removing it with only the token to get back in would lock you out.
-    r = client.post(API, json={"changes": [{"id": "dashboard.token", "reset": True}],
+    r = save_catalog(client, API, json={"changes": [{"id": "dashboard.token", "reset": True}],
                                "confirm": True}, headers=bearer)
     assert r.status_code == 409 and "no other working way back in" in r.json()["message"]
-    r = client.post(API, json={"changes": [{"id": "dashboard.token", "value": "short"}],
+    r = save_catalog(client, API, json={"changes": [{"id": "dashboard.token", "value": "short"}],
                                "confirm": True}, headers=bearer)
     assert r.status_code == 400 and r.json()["message"].startswith("Server access token")
     # The environment still wins.

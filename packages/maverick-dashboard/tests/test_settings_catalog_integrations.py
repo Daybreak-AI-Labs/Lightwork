@@ -13,7 +13,7 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_integrations as integrations
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -240,6 +240,16 @@ def _isolated(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
+def _link_for_qualification(path, target, *, required=False):
+    try:
+        path.symlink_to(target)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) != 1314:
+            raise
+        if required:
+            pytest.skip("Windows symlink qualification requires an executor privilege unavailable here")
+
+
 def _voice_engine_files(tmp_path):
     """Lightwork's programs and speech model folders, with one approved entry
     each, entries that must never be offered (not executable, a link out, an
@@ -255,14 +265,19 @@ def _voice_engine_files(tmp_path):
     programs.mkdir(parents=True)
     (programs / "whisper-cli").write_text("#!/bin/sh\necho ok\n")
     os.chmod(programs / "whisper-cli", 0o755)
-    (programs / "whisper-cpp").write_text("not executable")
-    (programs / "whisper.cpp").symlink_to(outside / "tool")
+    if os.name == "nt":
+        # Windows does not expose POSIX executable bits: this invalid entry is
+        # a directory. POSIX jobs retain the non-executable-file qualification.
+        (programs / "whisper-cpp").mkdir()
+    else:
+        (programs / "whisper-cpp").write_text("not executable")
+    _link_for_qualification(programs / "whisper.cpp", outside / "tool")
     (programs / "ffmpeg").write_text("#!/bin/sh\n")
     os.chmod(programs / "ffmpeg", 0o755)
     models = tmp_path / "home" / "models" / "whisper"
     models.mkdir(parents=True)
     (models / "ggml-custom.bin").write_bytes(b"model")
-    (models / "ggml-escape.bin").symlink_to(outside / "ggml-escape.bin")
+    _link_for_qualification(models / "ggml-escape.bin", outside / "ggml-escape.bin")
     return programs, models, outside
 
 
@@ -288,7 +303,7 @@ def _loaded() -> dict:
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -583,7 +598,8 @@ def test_saved_gist_key_shares_task_histories_and_the_environment_wins(monkeypat
         def json(self):
             return {"html_url": "https://gist.github.com/example/1"}
 
-    def post(url, *, json, headers, timeout):
+    def post(url, *, content, headers, timeout):
+        assert __import__("json").loads(content) == {"files": {}}
         sent.append(headers["Authorization"])
         return Reply()
 
@@ -679,7 +695,7 @@ def test_a_chosen_program_runs_and_is_checked_again_before_it_runs(tmp_path, mon
     assert audit_rows[-1]["key"] == "whisper_cpp_bin" and audit_rows[-1]["new"] == "whisper-cli"
     # The file is swapped for a link out of the folder after it was chosen.
     program.unlink()
-    program.symlink_to(tmp_path / "outside" / "tool")
+    _link_for_qualification(program, tmp_path / "outside" / "tool", required=True)
     assert voice_models.checked_program("whisper-cli") is None
     assert voice._find_whisper_cpp() is None
     monkeypatch.setenv("MAVERICK_WHISPER_CPP", str(tmp_path / "outside" / "tool"))
@@ -695,7 +711,7 @@ def test_a_chosen_model_file_loads_and_a_link_out_is_refused(tmp_path, audit_row
     assert voice_models.locate_model() == chosen
     assert all(p.name != "ggml-escape.bin" for p in voice_models.installed_models())
     chosen.unlink()
-    chosen.symlink_to(tmp_path / "outside" / "ggml-escape.bin")
+    _link_for_qualification(chosen, tmp_path / "outside" / "ggml-escape.bin", required=True)
     assert voice_models.checked_model_file("ggml-custom.bin") is None
     assert voice_models.locate_model() is None
 
@@ -708,6 +724,9 @@ def test_saved_pushover_keys_send_alerts_and_the_environment_wins(monkeypatch, a
 
     class Reply:
         status_code = 200
+
+        def json(self):
+            return {"status": 1}
 
     def post(url, data=None, **kwargs):
         sent.append(dict(data or {}))
