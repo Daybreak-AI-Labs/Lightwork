@@ -1,0 +1,105 @@
+{# Shared full-page/live result projection. All values remain autoescaped. #}
+<section id="answer-panel" data-goal="{{ goal.id }}" data-updated-at="{{ goal.updated_at }}"
+         data-version="{{ answer_version|default('') }}" data-context="{{ conversation_context }}"
+         data-status="{{ goal.status }}" data-structured="{{ '1' if rendered and rendered.structured else '0' }}"
+         data-operate="{{ '1' if can_operate else '0' }}">
+    <div id="result-section" class="answer" style="display: {% if goal.result %}block{% else %}none{% endif %};">
+      {% if rendered and rendered.structured %}
+        {% include "_deliverable.html" %}
+        <p id="deliverable-stale" class="muted" style="display: none; margin-top: var(--space-3);">
+          Deliverable updated — <a href="/chat/goal/{{ goal.id }}">reload to view it</a>.
+        </p>
+      {% else %}
+        <div id="result" tabindex="0" aria-label="Goal result" class="prose" data-markdown>{{ goal.result or '' }}</div>
+      {% endif %}
+      {% if deliverable and deliverable.gate %}
+        <div class="signoff" id="signoff">
+          {% if signoff %}
+            <div class="signoff__head">
+              <span class="badge {{ 'success' if signoff.decision == 'approved' else 'failure' }}">{{ signoff.decision | humanize }}</span>
+              <span class="muted">by {{ (signoff.decided_by | identity).name if signoff.decided_by else 'a reviewer' }} · <span data-when="{{ signoff.created_at }}"></span></span>
+            </div>
+            {% if signoff.note %}<p class="signoff__note muted">{{ signoff.note }}</p>{% endif %}
+            {% if signoff.decision == 'approved' and rendered.table %}
+              <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">Download for hand-off (CSV)</a>
+            {% endif %}
+          {% elif goal.status == 'done' and can_operate %}
+            <p class="signoff__prompt">Needs <strong>{{ "a manager's approval" if deliverable.gate == 'approval' else "a reviewer's sign-off" }}</strong> before it's acted on.</p>
+            <textarea id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
+            <div class="signoff__actions">
+              <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">Approve</button>
+              <button id="signoff-reject" class="btn btn--ghost" type="button" data-decision="rejected">Reject</button>
+            </div>
+            <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
+          {% else %}
+            <p class="signoff__prompt muted">{% if goal.status == 'done' %}An authorized task owner must review this result before sharing.{% else %}{{ "Approval" if deliverable.gate == 'approval' else "Sign-off" }} opens when the result is finished.{% endif %}</p>
+          {% endif %}
+        </div>
+      {% endif %}
+      {% if goal.status in ('done', 'blocked', 'failed') %}
+        {# Always-available thumbs up/down (unlike the gated sign-off above): any
+           finished result can be rated, and the verdict grounds a real outcome
+           into the learning loop. #}
+        <div id="feedback" class="feedback" role="group" aria-label="Rate this result">
+          {% if can_operate %}
+          <span class="feedback__q muted">Was this useful?</span>
+          <button id="feedback-up" class="btn btn--ghost" type="button"
+                  data-rating="up" aria-label="Yes, useful">👍</button>
+          <button id="feedback-down" class="btn btn--ghost" type="button"
+                  data-rating="down" aria-label="No, not useful">👎</button>
+          {% endif %}
+          <button id="copy-result" class="btn btn--ghost" type="button" aria-label="Copy the answer">⧉ Copy</button>
+          <button id="read-aloud" class="btn btn--ghost" type="button"
+                  data-voice-only="{{ '1' if voice_only else '0' }}"
+                  aria-label="Read the result aloud" aria-pressed="false">🔊 Read aloud</button>
+          {% if can_operate %}<button id="edit-toggle" class="btn btn--ghost" type="button">✎ Edit &amp; save</button>{% endif %}
+          <span id="feedback-msg" role="status" aria-live="polite" class="muted"
+                style="min-height: 1em;"></span>
+        </div>
+        {% if can_operate %}
+        <div id="edit-box" style="display:none; margin-top: var(--space-3);">
+          <textarea id="edit-text" class="input" rows="8" aria-label="Edit the deliverable"
+                    style="width:100%;">{{ goal.result or '' }}</textarea>
+          <div style="display:flex; gap:var(--space-2); margin-top: var(--space-2);">
+            <button id="edit-save" class="btn btn--primary" type="button">Save my version</button>
+            <span id="edit-msg" role="status" aria-live="polite" class="muted"></span>
+          </div>
+          <p class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">Your revision is saved as the current result. Any learning use is separate and governed by your organization's policy; saving does not mean training completed.</p>
+        </div>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% if artifacts %}
+    <div class="artifacts" aria-label="Files and results">
+      <div class="artifacts__head">Files and results <span class="badge">{{ artifacts|length }}</span></div>
+      {% for a in artifacts %}
+        <div class="artifact">
+          <div class="artifact__head">
+            <span class="artifact__title">{{ a.title or 'Untitled' }}</span>
+            <span class="badge">{{ {'markdown': 'Document', 'table': 'Table', 'text': 'Text', 'code': 'Code', 'json': 'Data', 'csv': 'Table'}.get(a.kind, a.kind | humanize) }}</span>
+            <span class="muted artifact__ver">Version {{ a.version }}{% if a.versions > 1 %} of {{ a.versions }}{% endif %}</span>
+          </div>
+          {% if a.table %}
+            <div class="deliverable__table-wrap">
+              <table class="deliverable__table">
+                <thead><tr>{% for h in a.table.headers %}<th scope="col">{{ h }}</th>{% endfor %}</tr></thead>
+                <tbody>
+                  {% for row in a.table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="artifact__body prose" tabindex="0" data-markdown>{{ a.prose }}</div>
+          {% endif %}
+          {% if a.versions > 1 %}
+            <details class="artifact__history" data-goal="{{ goal.id }}" data-title="{{ a.title }}">
+              <summary>Version history ({{ a.versions }})</summary>
+              <div class="artifact__history-body muted">Loading…</div>
+            </details>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+</section>

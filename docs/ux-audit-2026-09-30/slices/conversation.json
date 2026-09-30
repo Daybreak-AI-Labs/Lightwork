@@ -191,10 +191,21 @@
   },
   {
     "id": "LW-131",
-    "status": "planned",
-    "implementation_evidence": "PR2529 head326402bf115a6d6de2adc255e3a1cc9d75fd37a9 implements authoritative completion panel refresh/actions/artifacts; inspected read-only via GitHub connector.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Parent integration decision pending; not in this branch and no duplicate implementation claimed."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Shared _chat_answer_panel.html renders current saved result, structured tables, artifact versions, owner-only mutations and current sign-off in both initial and live views.",
+      "GET /chat/goal/{goal_id}/answer-panel revalidates exact content authority and source twice; no-store context-bound projection refuses concurrent source changes.",
+      "lightwork-answer-panel.js updates on terminal/artifact events, focus and bounded polling; preserves composer/focus/scroll, defers replacement of unsaved edits/review notes, provides retry and clears private content on access/context changes.",
+      "Migrated root integrated deliverable CAS controller into idempotent panel lifecycle; preserved operation receipt, dirty edit, explicit conflict compare and no reload.",
+      "Independent overlapping implementation, reviewed against separate PR2529 at SHA 326402bf115a6d6de2adc255e3a1cc9d75fd37a9; that PR was neither imported, modified nor closed."
+    ],
+    "validation": [
+      "Python AST, JavaScript syntax, Jinja parser when available and git whitespace checks. Authored test_answer_projection.py and js/answer_panel.test.js; not executed."
+    ],
+    "remaining": [
+      "Run authenticated running-to-completed parity, current permissions, sign-off/artifact freshness, keyboard focus, read-aloud lifecycle and narrow layout acceptance.",
+      "Root integration must preserve accessibility read-aloud lifecycle commit 5f84f082fcc763444e174981ca933b170e9df67b and merged identity gate."
+    ]
   },
   {
     "id": "LW-132",

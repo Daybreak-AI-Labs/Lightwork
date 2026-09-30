@@ -348,103 +348,10 @@
     <p id="question-status" role="status" aria-live="polite"></p>
     <button type="button" id="question-retry" class="btn btn--ghost" hidden>Retry loading question</button>
     <p id="stream-error" role="alert" class="muted" style="display: none; margin: 0 0 var(--space-4); color: var(--danger);"></p>
-    <div id="result-section" class="answer" style="display: {% if goal.result %}block{% else %}none{% endif %};">
-      {% if rendered and rendered.structured %}
-        {% include "_deliverable.html" %}
-        <p id="deliverable-stale" class="muted" style="display: none; margin-top: var(--space-3);">
-          Deliverable updated — <a href="/chat/goal/{{ goal.id }}">reload to view it</a>.
-        </p>
-      {% else %}
-        <div id="result" tabindex="0" aria-label="Goal result" class="prose" data-markdown>{{ goal.result or '' }}</div>
-      {% endif %}
-      {% if deliverable and deliverable.gate %}
-        <div class="signoff">
-          {% if signoff %}
-            <div class="signoff__head">
-              <span class="badge {{ 'success' if signoff.decision == 'approved' else 'failure' }}">{{ signoff.decision | humanize }}</span>
-              <span class="muted">by {{ (signoff.decided_by | identity).name if signoff.decided_by else 'a reviewer' }} · <span data-when="{{ signoff.created_at }}"></span></span>
-            </div>
-            {% if signoff.note %}<p class="signoff__note muted">{{ signoff.note }}</p>{% endif %}
-            {% if signoff.decision == 'approved' and rendered.table %}
-              <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">Download for hand-off (CSV)</a>
-            {% endif %}
-          {% elif goal.status == 'done' %}
-            <p class="signoff__prompt">Needs <strong>{{ "a manager's approval" if deliverable.gate == 'approval' else "a reviewer's sign-off" }}</strong> before it's acted on.</p>
-            <textarea id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
-            <div class="signoff__actions">
-              <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">Approve</button>
-              <button id="signoff-reject" class="btn btn--ghost" type="button" data-decision="rejected">Reject</button>
-            </div>
-            <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
-          {% else %}
-            <p class="signoff__prompt muted">{{ "Approval" if deliverable.gate == 'approval' else "Sign-off" }} opens when the result is finished.</p>
-          {% endif %}
-        </div>
-      {% endif %}
-      {% if goal.status in ('done', 'blocked', 'failed') %}
-        {% if goal.status in ('blocked', 'failed') %}
-        <p><a class="btn btn--ghost" href="/help?task={{ goal.id }}#issue-report">Prepare support report</a></p>
-        {% endif %}
-        {# Always-available thumbs up/down (unlike the gated sign-off above): any
-           finished result can be rated, and the verdict grounds a real outcome
-           into the learning loop. #}
-        <div id="feedback" class="feedback" role="group" aria-label="Rate this result">
-          <span class="feedback__q muted">Was this useful?</span>
-          <button id="feedback-up" class="btn btn--ghost" type="button"
-                  data-rating="up" aria-label="Yes, useful">👍</button>
-          <button id="feedback-down" class="btn btn--ghost" type="button"
-                  data-rating="down" aria-label="No, not useful">👎</button>
-          <button id="copy-result" class="btn btn--ghost" type="button" aria-label="Copy the answer">⧉ Copy</button>
-          <button id="read-aloud" class="btn btn--ghost" type="button"
-                  data-voice-only="{{ '1' if voice_only else '0' }}"
-                  aria-label="Read the result aloud" aria-pressed="false">🔊 Read aloud</button>
-          <button id="edit-toggle" class="btn btn--ghost" type="button">✎ Edit &amp; save</button>
-          <span id="feedback-msg" role="status" aria-live="polite" class="muted"
-                style="min-height: 1em;"></span>
-        </div>
-        <div id="edit-box" style="display:none; margin-top: var(--space-3);">
-          <textarea id="edit-text" class="input" rows="8" aria-label="Edit the deliverable"
-                    style="width:100%;">{{ goal.result or '' }}</textarea>
-          <div style="display:flex; gap:var(--space-2); margin-top: var(--space-2);">
-            <button id="edit-save" class="btn btn--primary" type="button">Save my version</button>
-            <span id="edit-msg" role="status" aria-live="polite" class="muted"></span>
-          </div>
-          <p class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">Your revision is saved as the current result. Any learning use is separate and governed by your organization's policy; saving does not mean training completed.</p>
-        </div>
-      {% endif %}
-    </div>
-    {% if artifacts %}
-    <div class="artifacts" aria-label="Files and results">
-      <div class="artifacts__head">Files and results <span class="badge">{{ artifacts|length }}</span></div>
-      {% for a in artifacts %}
-        <div class="artifact">
-          <div class="artifact__head">
-            <span class="artifact__title">{{ a.title or 'Untitled' }}</span>
-            <span class="badge">{{ {'markdown': 'Document', 'table': 'Table', 'text': 'Text', 'code': 'Code', 'json': 'Data', 'csv': 'Table'}.get(a.kind, a.kind | humanize) }}</span>
-            <span class="muted artifact__ver">Version {{ a.version }}{% if a.versions > 1 %} of {{ a.versions }}{% endif %}</span>
-          </div>
-          {% if a.table %}
-            <div class="deliverable__table-wrap">
-              <table class="deliverable__table">
-                <thead><tr>{% for h in a.table.headers %}<th scope="col">{{ h }}</th>{% endfor %}</tr></thead>
-                <tbody>
-                  {% for row in a.table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
-                </tbody>
-              </table>
-            </div>
-          {% else %}
-            <div class="artifact__body prose" tabindex="0" data-markdown>{{ a.prose }}</div>
-          {% endif %}
-          {% if a.versions > 1 %}
-            <details class="artifact__history" data-goal="{{ goal.id }}" data-title="{{ a.title }}">
-              <summary>Version history ({{ a.versions }})</summary>
-              <div class="artifact__history-body muted">Loading…</div>
-            </details>
-          {% endif %}
-        </div>
-      {% endfor %}
-    </div>
-    {% endif %}
+    <p id="answer-refresh-status" class="muted" role="status" aria-live="polite"></p>
+    <button type="button" id="answer-refresh" class="btn btn--ghost" hidden>Refresh saved result and controls</button>
+    {% include "_chat_answer_panel.html" %}
+    <script src="/static/lightwork-answer-panel.js" defer></script>
     <details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
       <summary>Show planning steps</summary>
       <p class="muted">See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the
@@ -601,13 +508,13 @@
       const placeholderEl = document.getElementById('loading-placeholder');
       const streamErrorEl = document.getElementById('stream-error');
       const statusEl = document.getElementById('status');
-      const resultEl = document.getElementById('result');  // null when structured
-      const resultSection = document.getElementById('result-section');
-      const deliverableStaleEl = document.getElementById('deliverable-stale');
+      let resultEl = document.getElementById('result');  // null when structured
+      let resultSection = document.getElementById('result-section');
+      let deliverableStaleEl = document.getElementById('deliverable-stale');
       // A structured deliverable (forecast/table/report) is rendered server-side
       // as a grid; the live stream can't re-parse it client-side, so on a live
       // change we prompt a reload rather than dumping raw text over the grid.
-      const STRUCTURED = {{ (rendered.structured if rendered else False)|tojson }};
+      let STRUCTURED = {{ (rendered.structured if rendered else False)|tojson }};
       const cancelBtn = document.getElementById('cancel-btn');
       const questionPanel = document.getElementById('question-panel');
       const questionText = document.getElementById('question-text');
@@ -766,6 +673,11 @@
         eventsEl.appendChild(stepRow(kind, label, text, fmtAgent(e.agent)));
       }
 
+      document.addEventListener('lightwork:answer-panel-updated', function () {
+        resultEl = document.getElementById('result'); resultSection = document.getElementById('result-section');
+        deliverableStaleEl = document.getElementById('deliverable-stale');
+        const panel = document.getElementById('answer-panel'); STRUCTURED = !!(panel && panel.dataset.structured === '1');
+      });
       function renderResult(text) {
         if (!resultEl) return;
         if (window.lwMarkdown) window.lwMarkdown.renderInto(resultEl, text);
@@ -1081,6 +993,10 @@
         if (stopRequested && currentStatus === 'cancelled') actionMsg.textContent = 'Stop recorded. Cleanup may still be finishing; already completed changes are not undone.';
         if (stopRequested && currentStatus === 'done') actionMsg.textContent = 'The task completed before the stop took effect. Review its result and any external changes.';
         syncComposer();
+        document.dispatchEvent(new CustomEvent('lightwork:task-projection', {detail: {
+          status: d.status, terminal: d.terminal === true, result: d.result,
+          artifactsChanged: evs.some(function (event) { return event.kind === 'artifact'; })
+        }}));
       }
 
       let stream = null;
@@ -1127,7 +1043,8 @@
               {credentials: 'same-origin', cache: 'no-store', signal: controller.signal});
             if ([401, 403, 404].includes(resp.status) || resp.redirected) {
               showStreamError(resp.status === 401 || resp.redirected ? 'Sign in again to reconnect task updates.' : 'Task access is no longer available.');
-              eventsEl.replaceChildren(); resultSection.style.display = 'none';
+              eventsEl.replaceChildren(); if (resultSection) resultSection.style.display = 'none';
+              document.dispatchEvent(new CustomEvent('lightwork:task-access-lost'));
               polling = false; document.getElementById('stream-retry').hidden = false; return;
             }
             if (!resp.ok) throw new Error('unavailable');
@@ -1194,108 +1111,9 @@
       });
     })();
   </script>
-  <script>
-    // Deliverable sign-off: record the human certify/reject decision, then
-    // reload to show the signed-off state (and the hand-off download).
-    (function () {
-      document.querySelectorAll('.signoff [data-when]').forEach(function (el) {
-        var ts = parseFloat(el.getAttribute('data-when'));
-        if (ts) el.textContent = window.mvWhen(ts);
-      });
-      var approve = document.getElementById('signoff-approve');
-      var reject = document.getElementById('signoff-reject');
-      if (!approve && !reject) return;
-      var note = document.getElementById('signoff-note');
-      var msg = document.getElementById('signoff-msg');
-      var goalId = {{ goal.id }};
-      // Bind the decision to the exact deliverable this page rendered. The
-      // server rejects this version if a result or artifact changed meanwhile.
-      var reviewedUpdatedAt = {{ goal.updated_at }};
-      var btns = [approve, reject];
-      function submit(decision) {
-        btns.forEach(function (b) { if (b) b.disabled = true; });
-        msg.style.color = 'var(--muted)';
-        msg.textContent = 'Recording…';
-        fetch('/api/v1/goals/' + goalId + '/signoff', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            decision: decision,
-            expected_updated_at: reviewedUpdatedAt,
-            note: (note && note.value.trim()) || null,
-          }),
-        }).then(function (r) {
-          if (r.ok) { location.reload(); return; }
-          return r.json().catch(function () { return {}; }).then(function (j) {
-            msg.style.color = 'var(--danger)';
-            window.mvRenderError(msg, r, 'record the sign-off', j);
-            btns.forEach(function (b) { if (b) b.disabled = false; });
-          });
-        }).catch(function (e) {
-          msg.style.color = 'var(--danger)';
-          msg.textContent = cgErr(e, 'record the sign-off');
-          btns.forEach(function (b) { if (b) b.disabled = false; });
-        });
-      }
-      if (approve) approve.addEventListener('click', function () { submit('approved'); });
-      if (reject) reject.addEventListener('click', function () { submit('rejected'); });
-    })();
-  </script>
 
-  <script>
-    // Thumbs up/down feedback: grounds a real outcome into the learning loop for
-    // any finished result. Reflects the current rating on load; textContent only.
-    (function () {
-      var box = document.getElementById('feedback');
-      if (!box) return;
-      var up = document.getElementById('feedback-up');
-      var down = document.getElementById('feedback-down');
-      var msg = document.getElementById('feedback-msg');
-      var goalId = {{ goal.id }};
-      function show(rating) {
-        [up, down].forEach(function (b) { if (b) b.classList.remove('is-active'); });
-        if (rating === 'up' && up) up.classList.add('is-active');
-        if (rating === 'down' && down) down.classList.add('is-active');
-      }
-      fetch('/api/v1/goals/' + goalId + '/feedback').then(function (r) {
-        return r.ok ? r.json() : {};
-      }).then(function (j) {
-        if (j && j.feedback && j.feedback.rating) show(j.feedback.rating);
-      }).catch(function () {});
-      function submit(rating) {
-        [up, down].forEach(function (b) { if (b) b.disabled = true; });
-        msg.style.color = 'var(--muted)';
-        msg.textContent = 'Recording…';
-        fetch('/api/v1/goals/' + goalId + '/feedback', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({rating: rating}),
-        }).then(function (r) {
-          [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          if (r.ok) { show(rating); msg.textContent = "Feedback saved. Learning use follows your organization's policy."; return; }
-          return r.json().catch(function () { return {}; }).then(function (j) {
-            msg.style.color = 'var(--danger)';
-            msg.textContent = cgErr(r, 'save your feedback');
-          });
-        }).catch(function (e) {
-          [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          msg.style.color = 'var(--danger)';
-          msg.textContent = cgErr(e, 'save your feedback');
-        });
-      }
-      if (up) up.addEventListener('click', function () { submit('up'); });
-      if (down) down.addEventListener('click', function () { submit('down'); });
-      var copy = document.getElementById('copy-result');
-      if (copy) copy.addEventListener('click', function () {
-        var src = document.getElementById('result') || document.getElementById('result-section');
-        var text = src ? (src.innerText || '').trim() : '';
-        if (!text || !navigator.clipboard) return;
-        navigator.clipboard.writeText(text).then(function () {
-          msg.style.color = 'var(--muted)'; msg.textContent = 'Copied.';
-        }).catch(function () {
-          msg.style.color = 'var(--danger)'; msg.textContent = 'Could not copy.';
-        });
-      });
-    })();
-  </script>
+
+
 
   <script>
     // "Show work" strip: mirror the latest trace line into the collapsed
@@ -1358,129 +1176,9 @@
     })();
   </script>
 
-  <script>
-    // Edit & save the deliverable: the human's revision replaces the result and
-    // its distance from the agent's draft grounds a graded learning signal.
-    (function () {
-      var toggle = document.getElementById('edit-toggle');
-      if (!toggle) return;
-      var box = document.getElementById('edit-box');
-      var textEl = document.getElementById('edit-text');
-      var saveBtn = document.getElementById('edit-save');
-      var editMsg = document.getElementById('edit-msg');
-      var goalId = {{ goal.id }};
-      toggle.addEventListener('click', function () {
-        box.style.display = box.style.display === 'none' ? 'block' : 'none';
-        if (box.style.display === 'block') textEl.focus();
-      });
-      var reviewedAt = {{ goal.updated_at|tojson }};
-      var pendingEdit = null;
-      var savedText = textEl.value;
-      window.addEventListener('beforeunload', function (event) {
-        if (textEl.value !== savedText) { event.preventDefault(); event.returnValue = ''; }
-      });
-      saveBtn.addEventListener('click', async function () {
-        if (saveBtn.disabled) return;
-        if (!pendingEdit || pendingEdit.text !== textEl.value || pendingEdit.expected_updated_at !== reviewedAt) {
-          pendingEdit = {text: textEl.value, expected_updated_at: reviewedAt, operation_id: crypto.randomUUID()};
-        }
-        saveBtn.disabled = true; textEl.readOnly = true;
-        editMsg.style.color = 'var(--muted)'; editMsg.textContent = 'Saving.';
-        try {
-          var response = await fetch('/api/v1/goals/' + goalId + '/deliverable/edit', {
-            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pendingEdit)
-          });
-          var receipt = await response.json();
-          if (response.status === 409 && receipt.detail && receipt.detail.current_updated_at) {
-            var compare = document.createElement('details');
-            var heading = document.createElement('summary'); heading.textContent = 'Compare with the current saved result';
-            var current = document.createElement('pre'); current.textContent = receipt.detail.current_text || '(empty)';
-            var review = document.createElement('button'); review.type = 'button'; review.className = 'btn btn--ghost';
-            review.textContent = 'Use this current version as the basis for my draft';
-            review.addEventListener('click', function () {
-              reviewedAt = receipt.detail.current_updated_at; pendingEdit = null; compare.remove();
-              editMsg.textContent = 'Draft kept. Review it, then choose Save to apply it to the current result.';
-            });
-            compare.append(heading, current, review); box.append(compare); compare.open = true;
-            editMsg.textContent = 'The result changed. Your draft is kept; compare before saving again.';
-            return;
-          }
-          if (!response.ok || !receipt.revision) throw response;
-          reviewedAt = receipt.revision; savedText = textEl.value; pendingEdit = null;
-          editMsg.textContent = 'Revision saved. Previous versions are kept; any earlier sign-off was cleared. Learning is a separate, policy-governed process.';
-        } catch (failure) {
-          editMsg.style.color = 'var(--danger)';
-          editMsg.textContent = cgErr(failure, 'save your edit') + ' Your draft is kept. Retry uses the same save reference.';
-        } finally { saveBtn.disabled = false; textEl.readOnly = false; }
-      });
-    })();
-  </script>
 
-  <script>
-    // Artifact version history: fetch on first expand, render newest-first with
-    // a unified diff per version (server-computed). textContent throughout — no
-    // untrusted content reaches innerHTML.
-    document.querySelectorAll('.artifact__history').forEach(function (d) {
-      d.addEventListener('toggle', function () {
-        if (!d.open || d.dataset.loaded) return;
-        d.dataset.loaded = '1';
-        const body = d.querySelector('.artifact__history-body');
-        body.textContent = 'Loading…';
-        body.classList.add('muted');
-        const url = '/api/v1/goals/' + encodeURIComponent(d.dataset.goal) +
-                    '/artifacts/history?title=' + encodeURIComponent(d.dataset.title);
-        // W3-75: a non-2xx (auth lapsed, goal gone, server error) used to
-        // render as "No history." or leave "Loading…" forever, and the loaded
-        // flag meant re-opening never retried. Check the status, and on any
-        // failure show why and clear the flag so the next toggle retries.
-        fetch(url).then(function (r) {
-          if (!r.ok) {
-            return r.json().catch(function () { return {}; }).then(function (j) {
-              throw new Error(cgErr(r, 'load earlier versions'));
-            });
-          }
-          return r.json();
-        }).then(function (j) {
-          body.textContent = '';
-          body.classList.remove('muted');
-          const versions = (j.versions || []).slice().reverse();  // newest first
-          if (!versions.length) { body.textContent = 'No history.'; return; }
-          versions.forEach(function (v) {
-            const wrap = document.createElement('div');
-            wrap.className = 'artifact__version';
-            const head = document.createElement('div');
-            head.className = 'artifact__version-head';
-            head.textContent = 'v' + v.version +
-              (v.created_at ? ' · ' + new Date(v.created_at * 1000).toLocaleString() : '');
-            wrap.appendChild(head);
-            if (v.diff) {
-              const pre = document.createElement('pre');
-              pre.className = 'artifact__diff';
-              v.diff.split('\n').forEach(function (line) {
-                const span = document.createElement('span');
-                if (line[0] === '+') span.className = 'add';
-                else if (line[0] === '-') span.className = 'del';
-                span.textContent = line + '\n';
-                pre.appendChild(span);
-              });
-              wrap.appendChild(pre);
-            } else {
-              const p = document.createElement('div');
-              p.className = 'muted';
-              p.textContent = '(initial version)';
-              wrap.appendChild(p);
-            }
-            body.appendChild(wrap);
-          });
-        }).catch(function (e) {
-          body.classList.add('muted');
-          body.textContent = 'Could not load history: ' + String(e && e.message || e) +
-                             '. Close and reopen to retry.';
-          delete d.dataset.loaded;
-        });
-      });
-    });
-  </script>
+
+
 
   <script src="/static/lightwork-deliverable-sharing.js" defer></script>
   <script>

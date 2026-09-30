@@ -10198,7 +10198,7 @@ async def _handle_issue_webhook(
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
 
-def _goal_deliverable(g):
+def _goal_deliverable(g, *, strict: bool = False):
     """A goal's result rendered as the deliverable its pack declares.
 
     Returns ``(contract, rendered)`` -- the pack's output contract (label /
@@ -10213,6 +10213,8 @@ def _goal_deliverable(g):
 
         prof = available_domains().get(g.domain) if g.domain else None
         if prof is None:
+            if strict and g.domain:
+                raise LookupError("The task's result policy is unavailable")
             return None, None
         rendered = render_deliverable(prof.output.shape, g.result)
         gate = enforced_gate(prof)
@@ -10227,8 +10229,21 @@ def _goal_deliverable(g):
             "gate": gate,
         }
         return contract, rendered
-    except Exception:  # never 500 the goal page if the factory layer is unavailable
+    except Exception:  # never 500 the full page if the factory layer is unavailable
+        if strict:
+            raise
         return None, None
+
+
+@app.get("/chat/goal/{goal_id}/answer-panel", response_class=HTMLResponse)
+def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
+    """Current authorized saved result, actions, release gate and artifact versions."""
+    from .answer_projection import projection
+
+    context = projection(request, _world(), goal_id)
+    return templates.TemplateResponse(request, "_chat_answer_panel.html", context,
+                                      headers={"Cache-Control": "no-store, private",
+                                               "X-Lightwork-Context": context["conversation_context"]})
 
 
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
@@ -10264,6 +10279,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     from maverick.runner import configured_max_dollars
 
     from ._event_stream import TERMINAL_RUN_STATUSES
+    from .answer_projection import version_for
 
     try:
         spend_ceiling = configured_max_dollars()
@@ -10275,6 +10291,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         "chat_goal.html",
         {
             "goal": g,
+            "can_operate": has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
             "submission_key": secrets.token_urlsafe(24),
             "can_operate": has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), g),
             "submission": SubmissionStore(w).for_goal(goal_id),
@@ -10293,6 +10310,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "rendered": rendered,
             "signoff": signoff,
             "artifacts": artifacts,
+            "answer_version": version_for(g, contract, signoff, artifacts),
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),
@@ -10338,7 +10356,7 @@ def _withheld_event_markers() -> list[str]:
         return []
 
 
-def _goal_artifacts(w, goal_id: int) -> list[dict]:
+def _goal_artifacts(w, goal_id: int, *, strict: bool = False) -> list[dict]:
     """A goal's latest artifacts, each pre-rendered by kind: a ``table`` artifact
     parses to a grid (reusing the deliverable renderer), everything else falls
     back to text. ``[]`` if the goal has none (the panel then doesn't render)."""
@@ -10351,7 +10369,9 @@ def _goal_artifacts(w, goal_id: int) -> list[dict]:
             r = render_deliverable(shape, a.get("content"))
             out.append({**a, "table": r.table, "prose": r.prose})
         return out
-    except Exception:  # pragma: no cover -- never 500 the goal page
+    except Exception:  # the live projection reports unavailable rather than empty
+        if strict:
+            raise
         return []
 
 
