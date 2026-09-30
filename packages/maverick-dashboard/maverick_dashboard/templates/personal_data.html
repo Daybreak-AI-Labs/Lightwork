@@ -16,6 +16,11 @@
 <section class="panel"><h2>Allowed use and retained data</h2>
 <p>Turning off personal recall stops future recall and preference collection. It does not delete business history or unlearn a model. Task exclusions separately stop automatic local reuse, examples and learning. Shared knowledge uses its own source purpose and consent; copied or external material needs its custodian.</p>
 <div id="pd-policy"></div><button class="btn" type="button" id="pd-inventory">Review my retained stores</button><div id="pd-stores"></div><div id="pd-tasks"></div></section>
+<section class="panel"><h2>Reviewed deletion and its status</h2>
+<p>Choose one verified conversation scope and the stores to remove. Account-wide drafts, preferences, companion history, notification receipts and diagnostic reports belong to your named dashboard account. A different workspace administrator confirms preservation obligations before dispatch. The review grants no access to private content.</p>
+<p>Shared outputs, prior models, external copies, content-minimized audit evidence and privacy restrictions remain separately reported. A point-in-time deletion does not disable your account or every future data collection path.</p>
+<form id="pd-delete" data-draft-recovery="off"><label>Verified scope <select class="select" id="pd-delete-scope"></select></label><fieldset id="pd-delete-stores"><legend>Stores in this request</legend></fieldset><button class="btn" type="submit">Preview exact deletion request</button></form>
+<div id="pd-delete-preview"></div><button class="btn" type="button" id="pd-delete-status">Refresh my deletion requests</button><button class="btn" type="button" id="pd-delete-review" hidden>Review workspace deletion requests</button><div id="pd-delete-requests"></div></section>
 <section class="panel"><h2>Source of a remembered preference</h2><pre id="pd-source-text" style="white-space:pre-wrap;overflow-wrap:anywhere">Choose a note's source to read the authorized original turn.</pre></section>
 <script id="pd-bootstrap" type="application/json">{{ personal_data|tojson }}</script>
 <script src="/static/lightwork-personal-data.js" defer></script>

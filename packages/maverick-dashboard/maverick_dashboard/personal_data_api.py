@@ -85,9 +85,21 @@ class ShareIn(RevisionIn):
     source: str | None = Field(default=None, max_length=64)
 
 
+class DeletionPreviewIn(ScopeIn):
+    stores: list[str] = Field(min_length=1, max_length=8)
+
+
+class DeletionRequestIn(DeletionPreviewIn):
+    snapshot: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class DeletionApplyIn(RevisionIn):
+    external_holds_clear: bool
+
+
 def _state(request):
     actor = _actor(request)
-    from maverick.config import get_dreaming, load_config
+    from maverick.config import get_dreaming, get_self_learning, load_config
     cfg = load_config()
     scopes = personal_memory.owned_scopes(actor)
     result = []
@@ -96,9 +108,13 @@ def _state(request):
         notes = personal_memory.records(scope["channel"], scope["user_id"])
         result.append({**scope, "revision": record["revision"], "recall": record["recall"], "notes": notes})
     return {"context": context_for(request), "identity": personal_identity.state(actor),
+            "can_review_deletion": auth.has_permission(request, "admin"),
             "scopes": result, "sharing": personal_memory.profile(actor),
             "policy": {"personal_recall": get_dreaming().get("user_notes") is True,
                        "organization_lesson_promotion": get_dreaming().get("promote_shared") is True,
+                       "effective_learning": {"personal_preference_collection": get_dreaming().get("user_notes") is True,
+                                              "local_skill_distillation": get_self_learning().get("distill_local") is True,
+                                              "governed_self_learning": get_self_learning().get("enable") is True},
                        "workflow_examples": "Existing workflow and task learning policy; exclude a task below to stop future local learning.",
                        "model_skill_learning": "Source-bound local collection, training ingestion, donation and skill distillation honor task exclusions. Prior models and external/manual datasets are not unlearned.",
                        "retention": cfg.get("retention", {}),
@@ -168,7 +184,8 @@ def source(request: Request, conversation_id: int, turn_id: int):
 def _inventory(request):
     from maverick.audit.preservation import preservation_snapshot
     from maverick.erasure_receipts import AUXILIARY_ERASURE_STORES, RECEIPT_STORES
-    from maverick.pilot_learning import excluded
+    from maverick.pilot_learning import restriction_state
+
     from .draft_store import DraftStore
 
     actor = _actor(request)
@@ -178,7 +195,7 @@ def _inventory(request):
     conversations = [{"id": c.id, "channel": c.channel, "user_id": c.user_id, "last_seen": c.last_seen}
                      for c in world.list_conversations() if (c.channel, c.user_id) in exact]
     goals = world.list_goals(limit=5001, order="desc", owner=actor)
-    tasks = [{"id": g.id, "title": g.title, "status": g.status, "local_learning_excluded": excluded(g.id)} for g in goals[:5000]]
+    tasks = [{"id": g.id, "title": g.title, "status": g.status, "learning_state": restriction_state(g.id)} for g in goals[:5000]]
     holds = preservation_snapshot()
     stores = [
         {"name": "Personal preference notes", "state": "available", "action": "Edit, suppress or turn off recall above", "use": "Personal recall only", "expiry": "Until source rebuild, correction, erasure or policy restriction"},
@@ -203,6 +220,23 @@ def _inventory(request):
                        "action": "Clear your history in Employee companion", "href": "/employee-companion"})
     except Exception:
         stores.append({"name": "Employee companion history", "state": "unavailable", "action": "Open Employee companion to review its current policy; no zero count is claimed"})
+    try:
+        from maverick.personal_notification_delivery import personal_history_inventory
+        history = personal_history_inventory(actor)
+        stores.append({"name": "Personal notification delivery receipts", "state": "partial" if history["partial"] else "available",
+                       "count": history["files"], "expiry": str(history["retention_days"]) + " days", "use": history["note"],
+                       "action": "Select Notification delivery receipts in the reviewed deletion request below."})
+    except Exception:
+        stores.append({"name": "Personal notification delivery receipts", "state": "unavailable", "action": "Its metadata could not be confirmed; no zero count is claimed."})
+    try:
+        from .personal_data_requests import _diagnostic_records
+        reports = _diagnostic_records(actor)
+        stores.append({"name": "Owned diagnostic reports", "state": "available", "count": len(reports),
+                       "use": "Employee-prepared task diagnostic metadata; manually shared copies remain external.",
+                       "expiry": "Download link expires after 15 minutes; report storage remains until governed deletion.",
+                       "action": "Select Diagnostic reports in the reviewed deletion request below."})
+    except Exception:
+        stores.append({"name": "Owned diagnostic reports", "state": "unavailable", "action": "Report inventory could not be confirmed; no zero count is claimed."})
     return {"context": context_for(request), "holds": holds, "scopes": scopes, "conversations": conversations,
             "tasks": tasks, "tasks_truncated": len(goals) > 5000, "stores": stores,
             "limits": "Links authorize this personal-data view, not task mutation. Copies, shared packets, external systems and prior trained derivatives are separate; nothing here claims they are deleted."}
@@ -211,6 +245,41 @@ def _inventory(request):
 @router.get("/api/v1/my-data/inventory")
 def inventory(request: Request):
     return _call(lambda: _inventory(request))
+
+
+@router.post("/api/v1/my-data/deletion-preview")
+def deletion_preview(request: Request, body: DeletionPreviewIn):
+    from . import personal_data_requests as deletion
+    return _call(lambda: deletion.preview(_write_actor(request, body), body.channel, body.user_id, body.stores, _app()._world()))
+
+
+@router.post("/api/v1/my-data/deletion-requests")
+def request_deletion(request: Request, body: DeletionRequestIn):
+    from . import personal_data_requests as deletion
+    return _call(lambda: deletion.request_deletion(_write_actor(request, body), body.channel, body.user_id,
+                                                  body.stores, body.snapshot, _app()._world()))
+
+
+@router.get("/api/v1/my-data/deletion-requests")
+def deletion_requests(request: Request, review: bool = False):
+    from . import personal_data_requests as deletion
+    actor = _actor(request)
+    if review:
+        auth.require_permission(request, "admin")
+    return _call(lambda: {"requests": deletion.list_requests(actor, reviewer=review)})
+
+
+@router.post("/api/v1/my-data/deletion-requests/{identifier}/apply")
+def apply_deletion(request: Request, identifier: str, body: DeletionApplyIn):
+    from . import personal_data_requests as deletion
+    def operation():
+        actor = _write_actor(request, body)
+        def authorize():
+            if _actor(request) != actor:
+                raise HTTPException(403, "The reviewing account changed.")
+            auth.require_permission(request, "admin")
+        return deletion.apply(identifier, body.expected_revision, actor, authorize, _app()._world(), external_holds_clear=body.external_holds_clear)
+    return _call(operation)
 
 
 @router.post("/api/v1/my-data/export")
@@ -242,7 +311,10 @@ def exclude_learning(request: Request, goal_id: int, body: ContextIn):
             goal = _app()._world().get_goal(goal_id)
             if goal is None or goal.owner != actor:
                 raise HTTPException(403, "Only the task owner can narrow this task's learning use.")
-            if not pilot_learning.excluded(goal_id):
+            restriction = pilot_learning.restriction_state(goal_id)
+            if restriction == "unavailable":
+                raise RuntimeError("Learning is blocked because its policy ledger is unavailable; exclusion receipt cannot be confirmed.")
+            if restriction == "permitted":
                 record = pilot_learning.protect(goal_id, pilot_id="personal-" + hashlib.sha256(actor.encode()).hexdigest()[:24],
                                                 plan_version=1, input_version=1, actor=actor)
                 if record.get("_audit_pending"):

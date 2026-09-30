@@ -6,7 +6,7 @@
       "personal_memory.py provides revision-bound owned note corrections, durable exact/topic suppression read by consolidation and recall; personal_data_api.py and My Data show source date/revision or legacy unavailable and re-authorize source reads.",
       "Encrypted controls and metadata-only audit preserve administrator content privacy; feature knob, installer and Account entry provide the direct journey."
     ],
-    "validation": "Local Python 3.12: 47 focused personal-data/recall/memory-tool tests passed; 144 broader recall/reflection/dreaming tests passed, six native-adapter cases skipped. Ruff import/bug/complexity checks passed. Integrated/browser acceptance remains pending.",
+    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending.",
     "remaining": "Local runtime and installed/browser acceptance remain unexecuted; global Copilot integration is tracked separately."
   },
   {
@@ -23,22 +23,25 @@
   },
   {
     "id": "LW-109",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "My Data separates personal recall and collection, organization lesson promotion, workflow examples, source-bound local training and prior/external derivatives.",
-      "Exact task owners can apply existing durable local-learning exclusions; user turns now bind goal_id for exclusion lineage. Personal choices cannot expand administrator ceilings or companion policy."
+      "Exact task owners can apply existing durable local-learning exclusions; user turns now bind goal_id for exclusion lineage. Personal choices cannot expand administrator ceilings or companion policy.",
+      "My Data now projects effective personal collection, organization shared-source promotion and local skill/self-learning ceilings. restriction_state distinguishes unavailable enforcement from a confirmed exclusion; source-bound recall and capture honor task exclusion."
     ],
-    "validation": "Local Python 3.12: 47 focused personal-data/recall/memory-tool tests passed; 144 broader recall/reflection/dreaming tests passed, six native-adapter cases skipped. Ruff import/bug/complexity checks passed. Integrated/browser acceptance remains pending.",
-    "remaining": "Complete current per-stage learning configuration presentation and account-bound capture review; prior/external unlearning remains explicitly outside the implemented control."
+    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending.",
+    "remaining": "Installed acceptance remains pending. Prior models and external/manual datasets are explicitly not claimed unlearned; shared knowledge requires its separate purpose/rights process."
   },
   {
     "id": "LW-112",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "Owner-only My Data inventory combines personal notes, exact verified conversation scopes, owned tasks, private draft metadata, companion retention and known preservation gates.",
-      "Selected-scope export uses strict existing subject-data export plus notes/controls; shared derivatives and external copies are labeled separately without false deletion claims."
+      "Selected-scope export uses strict existing subject-data export plus notes/controls; shared derivatives and external copies are labeled separately without false deletion claims.",
+      "personal_data_requests.py provides owner-requested exact-scope deletion, distinct current administrator review, held/requested/dispatching/purged/unconfirmed per-store records, signed database-closure receipts, fresh preservation gates, and retained/external exceptions.",
+      "Adapters cover selected conversations/tasks/attachments, personal notes, stale-tab-safe encrypted draft deletion, employee-companion history, personal style/display records, scoped model memory, private notification receipts and owned diagnostic reports. Current account identity and privacy restrictions remain explicit retained stores."
     ],
-    "validation": "Local Python 3.12: 47 focused personal-data/recall/memory-tool tests passed; 144 broader recall/reflection/dreaming tests passed, six native-adapter cases skipped. Ruff import/bug/complexity checks passed. Integrated/browser acceptance remains pending.",
-    "remaining": "Complete consolidated per-store deletion review/actions/receipts, personal preference erasure integration and authorized knowledge/packet derivative lineage."
+    "validation": "Local Python3.12:19 current deletion/personal-data regressions passed, including real SQLite erasure closure and stale-draft fencing;19 existing draft-recovery tests passed in prior combined run (one new adapter fixture failed there, corrected and rerun). Earlier47 focused memory/data tests and144 broader recall tests passed; six native-adapter cases skipped. Ruff/node syntax passed; installed/browser tests pending.",
+    "remaining": "Browser and installed multi-worker acceptance pending. Source/knowledge derivatives, shared packets, prior models, provider data and copied support downloads are explicit retained/external-unverified exceptions with governed rights handoff; local purge never claims whole-person deletion."
   }
 ]

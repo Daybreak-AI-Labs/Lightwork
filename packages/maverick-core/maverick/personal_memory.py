@@ -75,7 +75,24 @@ def note_id(row):
 
 def _suppressed(note, record):
     from .user_notes import _near_dup
-    return any(note == s["note"] or (s.get("topic") and _near_dup(note, s["note"])) for s in record["suppressed"])
+    candidate = suppression(note, topic=True)
+    for rule in record["suppressed"]:
+        if "note" in rule:  # existing restrictions remain enforced until migrated
+            if note == rule["note"] or rule.get("topic") and _near_dup(note, rule["note"]):
+                return True
+        elif candidate["note_hash"] == rule.get("note_hash"):
+            return True
+        elif rule.get("topic"):
+            left, right = set(candidate["token_hashes"]), set(rule.get("token_hashes", []))
+            if left and right and len(left & right) / min(len(left), len(right)) >= 0.8:
+                return True
+    return False
+
+
+def suppression(note, *, topic):
+    from .user_notes import _tokens
+    return {"note_hash": hashlib.sha256(note.encode()).hexdigest(), "topic": topic,
+            "token_hashes": sorted(hashlib.sha256(token.encode()).hexdigest() for token in _tokens(note)) if topic else []}
 
 
 def collection_allowed(channel, user_id, note):
@@ -121,7 +138,7 @@ def update(principal, channel, user_id, *, expected_revision, recall=None,
                     raise personal_identity.IdentityConflict("This note changed. Refresh before correcting it.")
                 if operation not in {"delete", "suppress", "edit"}:
                     raise ValueError("Choose edit, delete, or do not remember this topic again.")
-                record["suppressed"].append({"note": row["note"], "topic": operation == "suppress"})
+                record["suppressed"].append(suppression(row["note"], topic=operation == "suppress"))
                 record["edits"] = [r for r in record["edits"] if note_id(r) != note]
                 if operation == "edit":
                     from .safety.secret_detector import scan

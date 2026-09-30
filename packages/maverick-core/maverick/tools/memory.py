@@ -147,13 +147,15 @@ def _fits(root: Path, target: Path, new_text: str) -> str | None:
 
 
 def _run(args: dict) -> str:
+    from ..authority_effects import authority_effect_fence
     from ..crypto_at_rest import EncryptionUnavailable
     try:
-        if args.get("command") not in {"view", "delete"}:
-            from ..learning_guard import learning_write_allowed
-            if not learning_write_allowed("personal_memory"):
-                return "ERROR: This task cannot write durable memory under its current learning policy."
-        return _run_impl(args)
+        with authority_effect_fence():
+            if args.get("command") not in {"view", "delete"}:
+                from ..learning_guard import learning_write_allowed
+                if not learning_write_allowed("personal_memory"):
+                    return "ERROR: This task cannot write durable memory under its current learning policy."
+            return _run_impl(args)
     except ValueError:
         return "ERROR: Current memory ownership could not be verified."
     except EncryptionUnavailable as e:

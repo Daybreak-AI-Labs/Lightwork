@@ -38,6 +38,8 @@
     el('pd-source').replaceChildren(new Option('Channel-only recall', ''));
     state.scopes.forEach(scope => el('pd-source').appendChild(new Option('Use ' + scope.channel + ' preferences across linked channels', scope.id)));
     el('pd-source').value = state.sharing.shared_source || '';
+    el('pd-delete-scope').replaceChildren(...state.scopes.map(scope => new Option(scope.channel, scope.id)));
+    el('pd-delete-review').hidden = !state.can_review_deletion;
     el('pd-memory').replaceChildren();
     state.scopes.forEach(scope => {
       const card = text(el('pd-memory'), '', 'section'); card.className = 'panel';
@@ -65,7 +67,8 @@
       });
     });
     el('pd-policy').replaceChildren();
-    text(el('pd-policy'), 'Organization lesson promotion: ' + (state.policy.organization_lesson_promotion ? 'enabled by administrator policy' : 'disabled by administrator policy'));
+    text(el('pd-policy'), 'Organization lesson promotion for eligible shared sources: ' + (state.policy.organization_lesson_promotion ? 'enabled by administrator policy' : 'disabled by administrator policy') + '. Private task reflections are excluded from organization-wide lesson promotion. Shared knowledge requires its own source purpose and authorization.');
+    Object.entries(state.policy.effective_learning || {}).forEach(([name, enabled]) => text(el('pd-policy'), name.replaceAll('_', ' ') + ': ' + (enabled ? 'administrator policy permits; source restrictions still apply' : 'disabled by administrator policy')));
     text(el('pd-policy'), state.policy.model_skill_learning); text(el('pd-policy'), state.policy.companion);
   }
   el('pd-refresh').addEventListener('click', () => {
@@ -78,6 +81,57 @@
     return {message: 'Linking text created. It expires in ten minutes. Sharing is still off.'};
   }); });
   el('pd-share').addEventListener('submit', event => { event.preventDefault(); action(() => call('/sharing', {source: el('pd-source').value || null, expected_revision: state.sharing.revision})); });
+  const deletionKinds = {preference_notes: 'Remembered preference notes (also stops personal recall)', conversation_history: 'Selected conversation closure and its task/attachment data', recovery_drafts: 'All my private editor recovery copies', companion_history: 'My employee companion history', experience_preferences: 'My account and thread display/style preferences', model_memory: 'Selected scope model-managed memory files', notification_receipts: 'My notification delivery receipts', diagnostic_reports: 'My diagnostic reports'};
+  Object.entries(deletionKinds).forEach(([key, label]) => {
+    const row = text(el('pd-delete-stores'), '', 'label'); row.style.display = 'block';
+    const input = document.createElement('input'); input.type = 'checkbox'; input.value = key;
+    row.append(input, document.createTextNode(' ' + label));
+  });
+  function deletionSummary(parent, record) {
+    text(parent, (record.id || 'Preview') + ': ' + (record.status || (record.holds.blocked ? 'held' : 'review before requesting')), 'h3');
+    record.targets.forEach(target => {
+      text(parent, deletionKinds[target.store] + ' — ' + target.state);
+      if (target.count !== undefined) text(parent, target.count + ' retained items');
+      if (target.scope) text(parent, target.scope.conversation_ids.length + ' conversations; ' + target.scope.goal_ids.length + ' associated tasks; ' + target.scope.episode_ids.length + ' task episodes.');
+      ['message', 'retained', 'use', 'receipt_id'].forEach(key => { if (target[key]) text(parent, key.replaceAll('_', ' ') + ': ' + target[key]); });
+      if (target.stores) Object.entries(target.stores).forEach(([name, value]) => text(parent, name + ': ' + value.state + '; remaining ' + value.remaining));
+      if (target.attachment_files) text(parent, 'Attachment files: ' + target.attachment_files.state + '; failed removals ' + target.attachment_files.failures);
+    });
+    record.exceptions.forEach(exception => text(parent, exception.store.replaceAll('_', ' ') + ': ' + exception.state + '. ' + exception.reason));
+    if (record._audit_pending) text(parent, 'Activity receipt is pending. Nothing further may be dispatched until it is acknowledged.');
+  }
+  el('pd-delete').addEventListener('submit', event => { event.preventDefault(); action(async () => {
+    const scope = state.scopes.find(value => value.id === el('pd-delete-scope').value);
+    const selected = Array.from(el('pd-delete-stores').querySelectorAll('input:checked')).map(input => input.value);
+    const body = {channel: scope.channel, user_id: scope.user_id, stores: selected};
+    const preview = await call('/deletion-preview', body);
+    el('pd-delete-preview').replaceChildren(); deletionSummary(el('pd-delete-preview'), preview);
+    button(el('pd-delete-preview'), 'Request this exact deletion', () => action(async () => {
+      const request = await call('/deletion-requests', {...body, snapshot: preview.snapshot});
+      el('pd-delete-preview').replaceChildren(); deletionSummary(el('pd-delete-preview'), request);
+      return {message: 'Deletion request saved. Its displayed status is authoritative; requested or held does not mean deleted.'};
+    }, false));
+    return {message: 'Exact scope prepared. Review every retained exception before requesting deletion.'};
+  }, false); });
+  async function deletionRequests(review) {
+    const result = await call('/deletion-requests' + (review ? '?review=true' : ''));
+    el('pd-delete-requests').replaceChildren();
+    result.requests.forEach(record => {
+      const card = text(el('pd-delete-requests'), '', 'article'); deletionSummary(card, record);
+      if (review && ['requested', 'held'].includes(record.status)) {
+        text(card, 'Requested by ' + record.owner + '. The source owner must remain a current member; changed source scope requires a new request.');
+        const label = text(card, '', 'label'); const confirm = document.createElement('input'); confirm.type = 'checkbox'; label.append(confirm, document.createTextNode(' I checked external preservation obligations with the records owner and confirm no external hold prevents these deletions.'));
+        button(card, 'Apply reviewed deletion', () => action(async () => {
+          const receipt = await call('/deletion-requests/' + encodeURIComponent(record.id) + '/apply', {expected_revision: record.revision, external_holds_clear: confirm.checked});
+          card.replaceChildren(); deletionSummary(card, receipt);
+          return {message: 'Saved per-store deletion outcome loaded. Retained exceptions remain explicit.'};
+        }, false));
+      }
+    });
+    return {message: result.requests.length ? 'Current deletion requests loaded.' : 'No deletion requests in this authorized view.'};
+  }
+  el('pd-delete-status').addEventListener('click', () => action(() => deletionRequests(false), false));
+  el('pd-delete-review').addEventListener('click', () => action(() => deletionRequests(true), false));
   el('pd-inventory').addEventListener('click', () => action(async () => {
     const inventory = await call('/inventory'); el('pd-stores').replaceChildren(); el('pd-tasks').replaceChildren();
     text(el('pd-stores'), inventory.holds.blocked ? 'Preservation holds are active. A held record is not deleted; ask the records owner about permitted correction and retirement.' : 'No recorded workspace privacy-rights hold. External holds still need records-owner review.');
@@ -93,8 +147,8 @@
     text(el('pd-tasks'), 'Task-specific local learning', 'h3');
     if (inventory.tasks_truncated) text(el('pd-tasks'), 'Showing the latest 5,000 owned tasks; older tasks remain outside this view.');
     inventory.tasks.forEach(task => {
-      const row = text(el('pd-tasks'), '', 'p'); text(row, 'Task ' + task.id + ': ' + task.title + (task.local_learning_excluded ? ' - future local learning restricted' : ' - existing learning policy applies'), 'span');
-      if (!task.local_learning_excluded) button(row, 'Exclude future local learning', () => action(() => call('/tasks/' + task.id + '/exclude-learning', {}), false));
+      const row = text(el('pd-tasks'), '', 'p'); text(row, 'Task ' + task.id + ': ' + task.title + ' - ' + ({excluded: 'future local learning excluded', permitted: 'existing learning policy applies', unavailable: 'policy unavailable; learning blocked, exclusion receipt unconfirmed'}[task.learning_state] || 'learning policy unconfirmed'), 'span');
+      if (task.learning_state === 'permitted') button(row, 'Exclude future local learning', () => action(() => call('/tasks/' + task.id + '/exclude-learning', {}), false));
     });
     return {message: 'Current retained-store inventory loaded; unavailable and external-unverified stores are explicitly marked.'};
   }, false));
