@@ -224,7 +224,7 @@ def _page(request: Request, name: str, context: dict, status_code: int = 200) ->
     from .app import templates  # the dashboard's one Jinja environment (filters included)
 
     response = templates.TemplateResponse(
-        request, name, {"t": strings(), **context}, status_code=status_code)
+        request, name, {"rf": strings(), **context}, status_code=status_code)
     response.headers["Cache-Control"] = "no-store, private"
     response.headers["X-Robots-Tag"] = "noindex"
     return response

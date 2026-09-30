@@ -103,7 +103,7 @@ def test_module_off_means_404_everywhere(tmp_path):
     assert client.post("/rights/verify/abc").status_code == 404
     # Administration reads still work; writes say the module is off.
     assert client.get(f"{ADMIN}/properties").json()["enabled"] is False
-    r = client.put(f"{ADMIN}/properties/shop", json=_property.__defaults__ or {
+    r = client.put(f"{ADMIN}/properties/shop", json={
         "name": "n", "organisation": "o", "contact_email": "a@b.co",
         "jurisdictions": ["eu_gdpr"]})
     assert r.status_code == 403
@@ -134,13 +134,15 @@ def test_unknown_property_is_404_and_admin_round_trip():
     assert "<iframe" in created["embed_snippet"]
     listed = client.get(f"{ADMIN}/properties").json()
     assert listed["enabled"] is True and listed["properties"][0]["slug"] == "shop"
-    bad = client.put(f"{ADMIN}/properties/shop", json={**created, "jurisdictions": ["ca_quebec"]})
+    bad = client.put(f"{ADMIN}/properties/shop", json={
+        "name": "Acme Shop", "organisation": "Acme Ltd", "contact_email": "privacy@acme.example",
+        "jurisdictions": ["ca_quebec"]})
     assert bad.status_code == 422 and "verified jurisdiction" in bad.json()["detail"]
     regimes = client.get(f"{ADMIN}/regimes").json()
     assert {r["id"] for r in regimes["unverified"]} == {"ca_quebec", "sg_pdpa"}
     assert all(r["source"].startswith("http") for r in regimes["regimes"])
-    off = client.put(f"{ADMIN}/properties/shop", json={**_property(), "enabled": False})
-    assert off.status_code == 200
+    off = _property(enabled=False)
+    assert off["enabled"] is False
     assert client.get("/rights/shop").status_code == 404
     assert client.delete(f"{ADMIN}/properties/shop").status_code == 200
     assert client.delete(f"{ADMIN}/properties/shop").status_code == 404
@@ -196,7 +198,7 @@ def test_submit_verify_status_happy_path(_isolate):
     assert client.post("/" + path).status_code == 404
     assert client.post("/rights/verify/unknown").status_code == 404
     # Status page by its own token.
-    status_url = _link(sent[:1], "/rights/status/") if False else next(
+    status_url = next(
         line for line in sent[0]["body"].splitlines() if "/rights/status/" in line).strip()
     spath = status_url.split("://", 1)[1].split("/", 1)[1]
     page = client.get("/" + spath)
@@ -305,7 +307,7 @@ def test_templates_round_trip():
     hist = client.get(f"{ADMIN}/templates/gdpr/refusal/history").json()
     assert [v["version"] for v in hist["versions"]] == [1]
     reset = client.post(f"{ADMIN}/templates/gdpr/refusal/reset").json()
-    assert reset["version"] == 2 and "supervisory" in reset["body"]
+    assert reset["version"] == 2 and "data protection authority" in reset["body"]
     assert client.get(f"{ADMIN}/templates/nope/refusal/history").status_code == 404
 
 

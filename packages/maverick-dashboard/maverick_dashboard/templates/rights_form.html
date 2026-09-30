@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% block title %}{{ t.page_title }} · {{ form.property.organisation }}{% endblock %}
+{% block title %}{{ rf.page_title }} · {{ form.property.organisation }}{% endblock %}
 {% block content %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
   .rf-wrap { max-width: 44rem; margin: 0 auto; }
@@ -18,12 +18,12 @@
          data-slug="{{ slug }}"
          data-api="/api/v1/public/rights/{{ slug }}/requests"
          data-form="/api/v1/public/rights/{{ slug }}/form">
-  <h1>{{ t.heading.replace('{organisation}', form.property.organisation) }}</h1>
-  <p class="muted">{{ t.intro.replace('{organisation}', form.property.organisation) }}</p>
+  <h1>{{ rf.heading.replace('{organisation}', form.property.organisation) }}</h1>
+  <p class="muted">{{ rf.intro.replace('{organisation}', form.property.organisation) }}</p>
   <form id="rf-form" novalidate>
     <div class="rf-field">
-      <label for="rf-jurisdiction">{{ t.jurisdiction_label }}</label>
-      <span class="rf-help" id="rf-jurisdiction-help">{{ t.jurisdiction_help }}</span>
+      <label for="rf-jurisdiction">{{ rf.jurisdiction_label }}</label>
+      <span class="rf-help" id="rf-jurisdiction-help">{{ rf.jurisdiction_help }}</span>
       <select id="rf-jurisdiction" name="jurisdiction" class="select" aria-describedby="rf-jurisdiction-help" required>
         {% for j in form.jurisdictions %}
         <option value="{{ j.id }}" data-rights="{{ j.rights | join(',') }}"{% if j.id == form.default_jurisdiction %} selected{% endif %}>{{ j.name }}</option>
@@ -31,7 +31,7 @@
       </select>
     </div>
     <div class="rf-field">
-      <label for="rf-type">{{ t.request_type_label }}</label>
+      <label for="rf-type">{{ rf.request_type_label }}</label>
       <select id="rf-type" name="request_type" class="select" required>
         {% for key, label in form.request_type_labels.items() %}
         <option value="{{ key }}">{{ label | capitalize }}</option>
@@ -39,53 +39,53 @@
       </select>
     </div>
     <div class="rf-field">
-      <label for="rf-name">{{ t.name_label }}</label>
+      <label for="rf-name">{{ rf.name_label }}</label>
       <input id="rf-name" name="name" class="input" maxlength="200" autocomplete="name">
     </div>
     <div class="rf-field">
-      <label for="rf-email">{{ t.email_label }}</label>
-      <span class="rf-help" id="rf-email-help">{{ t.email_help }}</span>
+      <label for="rf-email">{{ rf.email_label }}</label>
+      <span class="rf-help" id="rf-email-help">{{ rf.email_help }}</span>
       <input id="rf-email" name="email" class="input" type="email" maxlength="200" autocomplete="email" aria-describedby="rf-email-help" required>
     </div>
     <div class="rf-field">
       <fieldset>
-        <legend>{{ t.relationship_label.replace('{organisation}', form.property.organisation) }}</legend>
-        <div class="rf-check"><input type="radio" id="rf-rel-customer" name="relationship" value="customer" checked><label for="rf-rel-customer">{{ t.relationship_customer }}</label></div>
-        <div class="rf-check"><input type="radio" id="rf-rel-employee" name="relationship" value="employee"><label for="rf-rel-employee">{{ t.relationship_employee }}</label></div>
-        <div class="rf-check"><input type="radio" id="rf-rel-other" name="relationship" value="other"><label for="rf-rel-other">{{ t.relationship_other }}</label></div>
+        <legend>{{ rf.relationship_label.replace('{organisation}', form.property.organisation) }}</legend>
+        <div class="rf-check"><input type="radio" id="rf-rel-customer" name="relationship" value="customer" checked><label for="rf-rel-customer">{{ rf.relationship_customer }}</label></div>
+        <div class="rf-check"><input type="radio" id="rf-rel-employee" name="relationship" value="employee"><label for="rf-rel-employee">{{ rf.relationship_employee }}</label></div>
+        <div class="rf-check"><input type="radio" id="rf-rel-other" name="relationship" value="other"><label for="rf-rel-other">{{ rf.relationship_other }}</label></div>
       </fieldset>
     </div>
     <div class="rf-field">
-      <label for="rf-message">{{ t.message_label }}</label>
-      <span class="rf-help" id="rf-message-help">{{ t.message_help }}</span>
+      <label for="rf-message">{{ rf.message_label }}</label>
+      <span class="rf-help" id="rf-message-help">{{ rf.message_help }}</span>
       <textarea id="rf-message" name="message" class="textarea" rows="4" maxlength="{{ form.max_message_chars }}" aria-describedby="rf-message-help"></textarea>
     </div>
     <div class="rf-field">
       <div class="rf-check">
         <input type="checkbox" id="rf-agent" name="authorised_agent" value="1" aria-describedby="rf-agent-help">
-        <label for="rf-agent">{{ t.agent_label }}</label>
+        <label for="rf-agent">{{ rf.agent_label }}</label>
       </div>
-      <span class="rf-help" id="rf-agent-help">{{ t.agent_help }}</span>
+      <span class="rf-help" id="rf-agent-help">{{ rf.agent_help }}</span>
     </div>
     <div class="rf-hp" aria-hidden="true">
       <label for="rf-website">Website</label>
       <input id="rf-website" name="website" type="text" tabindex="-1" autocomplete="off">
     </div>
     <div class="rf-field">
-      <label for="rf-answer" id="rf-challenge-label">{{ t.challenge_label.replace('{question}', form.challenge.question) }}</label>
-      <span class="rf-help" id="rf-challenge-help">{{ t.challenge_help }}</span>
+      <label for="rf-answer" id="rf-challenge-label">{{ rf.challenge_label.replace('{question}', form.challenge.question) }}</label>
+      <span class="rf-help" id="rf-challenge-help">{{ rf.challenge_help }}</span>
       <input id="rf-answer" name="challenge_answer" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="3" aria-describedby="rf-challenge-help" required>
       <input type="hidden" id="rf-token" name="challenge_token" value="{{ form.challenge.token }}">
     </div>
     <div class="rf-actions">
-      <button class="btn btn--primary" type="submit" id="rf-submit">{{ t.submit }}</button>
+      <button class="btn btn--primary" type="submit" id="rf-submit">{{ rf.submit }}</button>
       <span id="rf-msg" role="status" aria-live="polite"></span>
     </div>
   </form>
   <p class="rf-note">
-    {% if form.property.privacy_policy_url %}<a href="{{ form.property.privacy_policy_url }}" rel="noopener">{{ t.privacy_policy }}</a> · {% endif %}
-    {{ t.contact.replace('{contact_email}', form.property.contact_email) }}<br>
-    {{ t.non_legal_advice }}
+    {% if form.property.privacy_policy_url %}<a href="{{ form.property.privacy_policy_url }}" rel="noopener">{{ rf.privacy_policy }}</a> · {% endif %}
+    {{ rf.contact.replace('{contact_email}', form.property.contact_email) }}<br>
+    {{ rf.non_legal_advice }}
   </p>
 </section>
 <script{% if csp_script_nonce is defined %} nonce="{{ csp_script_nonce }}"{% endif %}>
@@ -96,9 +96,9 @@
     var msg = document.getElementById('rf-msg');
     var btn = document.getElementById('rf-submit');
     var T = {
-      sending: {{ t.sending | tojson }}, generic: {{ t.error_generic | tojson }},
-      challenge: {{ t.error_challenge | tojson }}, rate: {{ t.error_rate | tojson }},
-      label: {{ t.challenge_label | tojson }}, submit: {{ t.submit | tojson }}
+      sending: {{ rf.sending | tojson }}, generic: {{ rf.error_generic | tojson }},
+      challenge: {{ rf.error_challenge | tojson }}, rate: {{ rf.error_rate | tojson }},
+      label: {{ rf.challenge_label | tojson }}, submit: {{ rf.submit | tojson }}
     };
     var jurisdiction = document.getElementById('rf-jurisdiction');
     var type = document.getElementById('rf-type');
