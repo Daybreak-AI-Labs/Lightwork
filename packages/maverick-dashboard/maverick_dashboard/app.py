@@ -102,7 +102,6 @@ from .draft_api import context_for as _conversation_context
 from .draft_api import page_context as _draft_page_context
 from .draft_api import router as draft_router
 from .employee_activation import router as employee_activation_router
-from .model_tests_api import router as model_tests_router
 from .health_routes import (
     health_response as _health_response,
 )
@@ -112,6 +111,7 @@ from .health_routes import (
 from .health_routes import (
     readiness_response as _readiness_response,
 )
+from .model_tests_api import router as model_tests_router
 from .my_work_api import router as my_work_router
 from .oidc_login import router as oidc_login_router
 from .outcome_accounting_api import router as outcome_accounting_router

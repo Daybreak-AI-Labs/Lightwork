@@ -334,10 +334,10 @@ def _workflow_spec(row):
 
 
 @router.post("/api/v1/employee-activation/{identity}/workflow")
-async def workflow(request: Request, identity: str, body: ActionIn):
+def workflow(request: Request, identity: str, body: ActionIn):
     from maverick.templates import load_template
 
-    from .api import save_workflow
+    from .api import save_workflow_native
     from .api_schemas import WorkflowSaveIn
     owner, row = _action(request, identity, body)
     result = _accepted_result(request, row, body.result_fingerprint)
@@ -352,7 +352,7 @@ async def workflow(request: Request, identity: str, body: ActionIn):
         if existing.owner != owner or existing.title != spec["title"] or existing.body.strip() != spec["body"].strip():
             raise product_error(409, "activation_workflow_changed", "The saved workflow changed. Open its current draft; it has not been overwritten.")
     else:
-        await save_workflow(request, WorkflowSaveIn(**spec, overwrite=False))
+        save_workflow_native(request, WorkflowSaveIn(**spec, overwrite=False))
     actor(request, operate=True)
     row = _update(row, {"workflow": spec["name"], "message": "Reusable private workflow draft saved. Review its inputs and publication in Workflow Builder before scheduling."}, row["revision"], owner, "save_workflow")
     return public(request, row)

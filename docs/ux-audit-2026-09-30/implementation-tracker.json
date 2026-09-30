@@ -8,7 +8,7 @@
       "Existing employee companion supports conversation independent from tasks."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Durable editable queued turns/files, guidance consumption receipts/conflict decisions and checkpoint execution still required.",
+    "remaining": "Transferred to settings_integrity by root; dedicated slice-conversation-inbox owns durable queue/guidance/independent submission and safe checkpoint acknowledgement. No placeholder implementation claimed here.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -371,13 +371,13 @@
     "id": "LW-030",
     "title": "Define personal workspace and organization preference scopes",
     "category": "Personalization and settings",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Encrypted scoped hierarchy, global-only policy ceilings, named-account runtime, source/inherit controls and in-place conflict comparison; organization policy editor settings_catalog_personalization; display defaults and personal-only pins/cards; notification adapter e3ad241 + peer cdab036; typed shared Copilot preferences.status/update use native scope/context/CAS with encrypted atomic receipt and explicit before/after review"
+      "Existing encrypted experience_preferences resolves product, organization, selected workspace, named personal and conversation scopes with allowlisted keys and administrator locks; native Preferences exposes effective source and explicit inherit. Root Today/template preferences enforce canonical template read access, and native notifications own quiet-window preferences. preference_memory.describe now joins the verified personal_identity/personal_memory controls in Preferences using content-free effective recall, administrator policy, saved source and channel-only/shared-source posture; edits/reset/narrowing link directly to current My Data controls. No generic memory toggle or guessed channel mapping. Personal recall gates both destination and explicitly chosen verified source under administrator ceiling."
     ],
-    "validation": "17 focused local Python tests passed (registry freshness/context/confirmation/idempotence and preference inheritance/receipts). Python AST, two JS node --check and targeted Ruff passed. No live provider calls. Broader integrated runtime/browser tests pending.",
-    "remaining": "Memory narrowing and erasure require verified dashboard-principal-to-channel/store mapping. Root owns template preference adapters and Today projections. Native Copilot writing/display preference journey implemented; no placeholder memory toggle.",
-    "evidence_slice": "slices/settings.json"
+    "validation": "14 local tests passed: six content-free memory projection/policy/identity/failure cases plus eight experience-preference scope and idempotency regressions. Targeted Ruff passed. No live provider calls. Root runs integrated suites.",
+    "remaining": "Integrated browser/accessibility and PostgreSQL multi-workspace qualification remain required; native preference and My Data implementations are complete, but this checkpoint does not claim deployed qualification.",
+    "evidence_slice": "slices/preference-scopes.json"
   },
   {
     "id": "LW-031",
@@ -601,12 +601,12 @@
     "id": "LW-049",
     "title": "Evolve mobile from read-only oversight to a least-privilege decision companion",
     "category": "Accessibility language and mobile",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "README and native/mobile request client remain explicitly read-only; no mutation authority was added based on a broad bearer token. LW185 scoped own-work credentials now support separately opted-in, default-off reviewed action enrollment; scope allowlist reserves only device answer/stop preparation/execution endpoints. No ordinary API write becomes authorized by token breadth."
+      "device_actions.py admits only own-task answer/Stop after explicit device action enrollment plus current admin policy. Sealed expiring previews bind current context/revision/exact input; explicit confirmation executes shared synchronous clarification submission and goal_stop native CAS/receipt services under authority fence. Stop preserves partial results and never claims cleanup or external rollback. React TaskActions handles fresh online state, background invalidation, retained in-screen draft, explicit same-review recovery and no queued offline effects. Configuration/installer and browser pairing approval are supplied by device_pairing. product_operations_stop supplies the same reviewed native Stop to authorized Copilot registry."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement reviewed own-task answer/Stop adapters and mobile controls through the existing governed native handlers, with fresh revisions and idempotent receipts. Native signing/device qualification remains separate validation.",
+    "validation": "2026-09-30: 25 local Python tests passed (Stop database CAS/receipt, device action freshness/explicit confirmation/recovery, pairing/authentication); All 83 mobile mocked tests passed, including 4 reviewed-action lifecycle tests; strict TypeScript check had zero diagnostics; Ruff and whitespace checks passed. No live provider effects. Native iOS/Android transport, keychain, accessibility and installed-device qualification require native hosts.",
+    "remaining": "Native installed-host qualification still needed; root must integrate typed product_operations_stop registry registration and shared synchronous clarification_submission dependency. Mobile decisions remain preview until platform qualification; no signing/publication performed.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -1258,10 +1258,11 @@
       "Reviewed identity/session retirement, generation-bound local credential removal, pending run-goal cancellation, durable dispatch/result steps and retained-data custodian.",
       "Per-item human handoff reports remain explicitly unverified; no private-content ACL transfer.",
       "Fresh-inventory closure requires every reviewed item and external boundary to have a current active named owner; explicit preserved obligations remain human-attested, with no private-content ACL grant.",
-      "All owned queued kinds and recurring schedule definitions inventoried; recurring definitions retired before cancellation. Exact verified-channel task scopes included, and linked inactive members denied new channel work even with sharing disabled."
+      "All owned queued kinds and recurring schedule definitions inventoried; recurring definitions retired before cancellation. Exact verified-channel task scopes included, and linked inactive members denied new channel work even with sharing disabled.",
+      "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed."
     ],
     "validation": "45 local departure/identity/recurrence/dispatcher regression tests passed. Ruff import/bug/complexity checks and extracted inline JavaScript syntax passed. Installed authenticated browser/provider acceptance remains unrun.",
-    "remaining": "Installed offboarding with running work, OAuth consent and pending reviews must be qualified. Provider-side revocation and unlinked external identities remain explicit named retained obligations, never automatically verified. Native global Copilot adapter integration is tracked by consolidated PR owner.",
+    "remaining": "Installed offboarding with running work, OAuth consent and pending reviews must be qualified. Provider-side revocation and unlinked external identities remain explicit named retained obligations, never automatically verified.",
     "evidence_slice": "slices/identity.json"
   },
   {
@@ -1275,7 +1276,8 @@
       "Current checkpoint adds approval-card content fingerprints and governed reads independent of decision authority; shoring, safety, Cortex, replay and overview side-path privacy.",
       "4424b8f: source ownership and stop-use rechecks before task/reflection/dream/skill recall and model-memory tools; 144 passed, 6 unavailable native-adapter tests skipped.",
       "7f65700: canonical bundled/publication receipt/exact-owner template visibility across catalog, builders, workflow history, suggestions and consumers.",
-      "Current follow-up: named employee donations refused; signed insight exchange and training corpus require known shared ownership and current nonexcluded source; 120 local regression tests passed."
+      "Current follow-up: named employee donations refused; signed insight exchange and training corpus require known shared ownership and current nonexcluded source; 120 local regression tests passed.",
+      "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed."
     ],
     "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Complete consolidated route/model-recall review across sibling slices, integration of all embedded approval surfaces and global Copilot operations; authenticated cross-user acceptance remains unrun.",
@@ -1285,15 +1287,16 @@
     "id": "LW-096",
     "title": "Explain effective permissions and their owner",
     "category": "Identity administration and privacy",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "e18aa52: Account exposes explicit allowed/blocked tool names, configured ceilings, broad policy source and administrator contact ownership.",
       "access_explanations follows actual pinned/workspace/explicit/group/default role ordering; role denials name the current ceiling and administrator owner. Account uses the actual dashboard channel/current user root grant and concrete file-read/file-write/command examples with effective denial reasons.",
       "permission_requests.py and direct API/UI provide exact layered root-capability provenance plus tenant-scoped requests to independent current policy owners; no raw resource data and no implicit grant changes.",
-      "Feature configuration and installer gate saved reviews. Effective status requires fresh actual permissions, while task/resource/consent/provider constraints remain explicitly separate."
+      "Feature configuration and installer gate saved reviews. Effective status requires fresh actual permissions, while task/resource/consent/provider constraints remain explicitly separate.",
+      "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed."
     ],
     "validation": "Eight focused local permission/identity regressions passed. Ruff bug/import/complexity checks and JavaScript syntax passed. Installed browser acceptance remains unrun.",
-    "remaining": "Shared global Copilot adapters in progress; final runtime denial/Account consistency sweep remains before closing this entry. Current root explanations explicitly do not claim all task-specific constraints are resolved.",
+    "remaining": "Installed authenticated role/tool denial and permission-change acceptance remains unrun. Root-grant explanations explicitly distinguish separately evaluated task, resource, consent and provider constraints.",
     "evidence_slice": "slices/identity.json"
   },
   {
@@ -1339,12 +1342,13 @@
     "category": "Identity administration and privacy",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Complements identity fresh scope projection: lightwork-task-authority.js gates send, stop, edit, feedback, share, sign-off, upload and resume controls, rechecks permissions on focus/visibility and before click/submit, fails closed and preserves draft.",
-      "chat_goal.html uses can_operate and read-only reason; live _chat_answer_panel.html exposes mutations only when fresh exact-owner operate projection permits them. MutationObserver applies revocation to replaced controls. Server ownership and role revalidation remains authoritative."
+      "e18aa52 + 072ae1c: chat and trajectory contexts and fresh permissions endpoint combine operate with exact ownership; grant-only task reads stay read-only.",
+      "Conversation worker shared authority script rechecks before click/submit and on focus/visibility; current SSR/API gate combines operate with exact task ownership, with native action revalidation.",
+      "Initial send/stop/upload/planning/project/share/resume controls are disabled for read-only users before script execution. Project onchange now uses requestSubmit, so fresh authority checks cannot be bypassed; initial role-disabled state can recover only after a fresh allowed response."
     ],
-    "validation": "Static source review and existing authority/projection regression cases authored; root-coordinated local authenticated role/revocation qualification pending.",
-    "remaining": "Verify viewer/member/admin and mid-session revocation with the integrated application; exceptional content read grants must continue to render read-only.",
-    "evidence_slice": "slices/conversation.json"
+    "validation": "Four local Node permission tests passed, including mid-session project revocation preserving entered value, initial read-only controls, renewed authority and select interaction. Template Jinja parse, JavaScript syntax and whitespace passed; installed authenticated browser qualification remains unrun.",
+    "remaining": "Actual viewer/member/admin sessions, cross-owner approved read grants and mid-session role changes need installed authenticated browser acceptance; server ownership and permission checks remain authoritative.",
+    "evidence_slice": "slices/identity.json"
   },
   {
     "id": "LW-101",
@@ -1479,13 +1483,19 @@
     "id": "LW-111",
     "title": "Bring source confidence and freshness into reused answers",
     "category": "Memory knowledge and search",
-    "status": "planned",
-    "implementation_evidence": [],
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "assessment_memory.py ties a suggested note and supporting provenance to the winning answer; keeps dissent separate; agreement explicitly differs from certainty. Current approved, stale and unreviewed states use exact pinned questionnaire/current policy digest, review/renewal expiry and named approval.",
+      "Assessment review per-question source panel opens exact saved answer or current comparison; source-date/version/approval/reuse explanation; rejecting one suggestion leaves other questions unchanged; explicit reviewed use rechecks exact source then changes only local draft. Existing assessments.learn gate controls suggestions.",
+      "Native precedent API rechecks current department/context, exact revision and private no-store response; shared typed Copilot read adapter delegates native suggestion service."
+    ],
     "validation": [
-      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+      "28 local Python assessment-memory/discovery tests passed, including dissenting-note regression, policy/expiry staleness, current department and exact fragment checks.",
+      "12 per-answer JS fixtures plus12 assessment mutation-lifecycle fixtures passed (latter fixture updated to evaluate its intended first script after a second script was added to approval queue).",
+      "Focused Ruff and diff whitespace passed; no models or external providers called."
     ],
     "remaining": [
-      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+      "Integrated suites and real-browser/installed-product accessibility qualification remain."
     ],
     "evidence_slice": "slices/knowledge.json"
   },
@@ -1733,12 +1743,15 @@
     "id": "LW-129",
     "title": "Transfer tasks with selected evidence and explicit acceptance",
     "category": "Review deliverables and collaboration",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "User chose explicit recipient acceptance; existing ownership remains unchanged."
+      "task_handoffs.py native named selected-bundle offer, exact source/recipient/cost/commitment/ceiling preview, explicit acceptance, decline/withdrawal and expiry. Current membership and source rights checked under the effect fence.",
+      "Acceptance holds shared native execution leases until safe boundary, then atomically creates a blocked recipient-owned selected-copy successor, closes the source conversation/subtask tree and persists original-author lineage and exact idempotency receipt; interrupted governed projection recovers from world receipt. Original private history and ownership remain unchanged.",
+      "Common runner and chat follow-up/restart gates reject closed source work; persistent successor spending ceiling can only tighten runtime budget. Credentials, connections, source bindings, learned memory and project memberships are not transferred.",
+      "Native /task-handoffs review/receipt UI, feature/settings/installer controls and tasks.offer_handoff/respond_handoff Copilot adapters use same service. Distinct continuation link requires explicit start; no automatic provider or external messaging."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Build selected-evidence transfer service with named recipient acceptance, safe in-flight boundary, independent authority/connection rebind and revocation.",
+    "validation": "25 focused local Python handoff/bundle/typed-operation tests passed (13 handoff, nine bundle, three operation cases), plus 10 task-operation/answer-projection tests and six jsdom answer/handoff controller tests. Static Python/JS/Jinja/Ruff/whitespace checked. No live provider calls.",
+    "remaining": "Qualify native PostgreSQL/distributed session leases and installed authenticated browser. Accepted/downloaded copies cannot be recalled. Root-coordinated full integrated suite remains required.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1752,7 +1765,7 @@
       "Native /deliverable-bundles UI, per-file/export authorization, feature knob, settings labels, installer question and source-task link implemented. Copilot artifact share/accept/revoke/download adapters use same service.",
       "Root confirmed shared catalog multiselect typed arrays and safe local href links implemented for bundle create/download and pending integration commit."
     ],
-    "validation": "Ruff, Python AST, Jinja syntax and JavaScript syntax/whitespace checks. Native selection/replay/revocation/source-change/ZIP-integrity/render-safety/export-failure tests authored, pending root-coordinated local run. No provider calls or installed-browser/PostgreSQL qualification.",
+    "validation": "Nine bundle cases within 21 passing native SQLite bundle/handoff tests. Added online safe preview routes map captured originals to authorized file endpoints; supplemental CSV/manifest/verifier links retrieve complete ZIP. Python/JS/Jinja/Ruff and whitespace reviewed; full PostgreSQL/installed browser acceptance pending.",
     "remaining": "Root must preserve shared catalog multiselect/local-link additions during integration. Local native/browser/PostgreSQL acceptance still required; offline consistency is not source authenticity, factual validation or external filing.",
     "evidence_slice": "slices/conversation.json"
   },
@@ -1885,25 +1898,40 @@
     "id": "LW-140",
     "title": "Help users choose models by capability and tradeoff",
     "category": "Notifications models and costs",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "model_guidance.py projects only typed provider capability evidence and existing provenance-bearing prices; bounded model_discovery preserves metadata; picker filters tools/images/self-hosted/unknown, preserves selected/manual entry and existing allow-list enforcement, warns about unsupported/unknown capabilities, labels stale/expired rates, context/output/latency unknown. Config models.guidance plus All settings and installer question added. Existing bounded availability refresh is accurately labelled as discovery, not generation."
+      "Existing model_guidance.py/model_pickers.py and lightwork-model-guidance.js preserve capability/local/vision/unknown filters, manual choices, reported limits, stale/expired pricing provenance and unsupported/unknown capability warnings under the approved-model policy.",
+      "model_tests.py implements an explicitly reviewed text-generation or generated synthetic-image sample through the existing LLM facade: one physical attempt, no failover/hedge/retry/tools, narrowed configured Budget ceilings, test-only SDK timeout snapshot, current authority/model/tenant/route and quota checks, and ordinary provider/quota settlement.",
+      "model_tests_api.py and Settings model-test controls provide review, explicit paid confirmation, stop, private account/workspace history and original-receipt recovery. Durable claims survive response loss and restarts without redispatch; policy disablement retains readable history and cannot start work.",
+      "product_operations_models.py implements native-authorized model comparison, reviewed test, history and stop for the existing Models Copilot action family. models.capability_tests defaults off and has All settings plus installer controls.",
+      "Corrected model_pickers.build guidance import shadowing the discovery-enabled boolean; disabling discovery now remains accurately represented alongside enabled guidance. Extracted installer pairing consent group to keep pick_advanced below the complexity limit."
     ],
-    "validation": "2026-09-30: Python AST parsed six changed/new model files; standalone JavaScript syntax passed; git diff --check passed. Model metadata regressions authored unrun. No live discovery/provider/browser tests run.",
-    "remaining": "Explicit paid bounded generation/capability test and authorized Copilot operation coverage remain unimplemented; discovery is not claimed as a generation test. Browser/runtime validation deferred.",
-    "evidence_slice": "slices/mobile.json"
+    "validation": [
+      "45 focused Python tests passed: model test service, native/Copilot routes, model guidance, guarded LLM physical-attempt boundary and installer serialization/consent grouping. All provider and accounting work mocked.",
+      "53 existing model picker/allowlist/role/discovery/installer tests passed after fixing the discovered guidance/discovery shadowing defect and an obsolete attribute-order-dependent assertion.",
+      "2 DOM tests passed for explicit review/confirmation, duplicate suppression, response-loss recovery, account changes, disabled policy and safe receipt rendering. Python 3.10 AST, new/changed feature-file Ruff, JavaScript syntax and git diff --check passed. Root owns remaining pre-existing app.py integration-import lint."
+    ],
+    "remaining": [
+      "No live provider test or rendered customer/installed qualification was performed. A matched sample demonstrates only that single synthetic response; task quality, context limits and reliable latency remain unqualified.",
+      "Tool capability remains explicitly provider-reported and untested; the bounded guarded facade rejects tool-bearing requests because not all provider compatibility resends are independently observed. Text/image success never certifies tool support.",
+      "Cancellation cannot retract a transmitted request or prove provider billing stopped. Unknown outcomes retain their original durable receipt and require accounting review before a user deliberately chooses another test."
+    ],
+    "evidence_slice": "slices/model-tests.json"
   },
   {
     "id": "LW-141",
     "title": "Add personal notification preferences and quiet hours",
     "category": "Notifications models and costs",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "personal_notifications.py validates recipient-scoped subscriptions, IANA quiet hours/daily digest, explicit organization+user critical exceptions, per-task mute and project watches; encrypted bounded personal inbox deduplicates semantic versions, rehydrates only current authorized source labels, purges revoked sources and separates available/seen. /notifications UI provides direct preference/CAS/recovery journey with own-task/assigned-decision projection. Config and installer controls added; foundation delegation supplied by settings e3ad241. Dashboard-owned personal_notification_scheduler now observes explicitly enrolled encrypted recipient records across active tenants with current named-account and assigned-decision authority, fair bounded recipient polling, lifecycle shutdown, status timestamps, policy/installer controls, and full source projection including budget warnings. Revocation withdraws exact account enrollment/inbox. personal_notification_delivery adds explicitly opted-in Slack/Telegram private routing bound to verified link id+time+provider account digest, current sender allowlist, named-account membership and policy; no room targets or organization webhook reuse. Minimal count/authenticated deep links, atomic encrypted per-link claims, once-per-local-day digests, visible accepted/failed/unknown distinct from seen, no automatic uncertain resend, account-local inventory/erasure and bounded expiry cleanup. Config+installer+UI private-channel choices included. product_operations_personal_notifications provides typed reviewed delivery/quiet-hours/event/project/mute/private-channel changes and read-only status through the direct API, current source/link validation, native preference CAS and operation receipts."
+      "Native personal subscription, project watches, temporary task mutes, timezone/quiet-hours/digest/critical policy and verified private channel delivery use exact named account authority; typed Copilot operations share the native preference CAS and receipt.",
+      "Migration44 adds transactionally advanced status and post-completion result generations in SQLite/PostgreSQL; repeated states/heartbeats do not emit new identities, and rollback restores generations. Inbox suppresses identical content rewrites.",
+      "Owner/tenant keyset projection covers all unresolved work, recent seven-day terminal activity, all open questions and assigned approvals. No latest200 task/20question/200approval/1000source truncation. Current-actionable coalescing is explicit; this inbox is not an event audit. Empty owned projects can be watched.",
+      "Native reads/delivery/open links recheck current authority, private messages omit task text, accepted versus unknown/failed service outcomes remain separate from seen status, and uncertain sends are not automatically replayed."
     ],
-    "validation": "2026-09-30: focused mock-only core receipts6 + private routing/ledger8 + personal-policy/DST5 + offline-policy2 =21 distinct tests (20 passed together; final8 delivery tests rerun after full scope-binding hardening); private inbox denial DOM1 and earlier accessibility DOM4 plus mobile mock75. Static AST/JS syntax/strict mobile TS and new-service Ruff checked. No live sends/provider calls; root integration and broader test run still pending. Personal/organization notification Copilot adapter mocks passed8/8 using slice sources plus integrated collaborator dependency modules.",
-    "remaining": "Durable event ingestion for transitions between observations, full-history pagination beyond latest200 owned tasks/bounded assigned decisions remain incomplete. Local mocked delivery is implemented for explicitly verified Slack/Telegram private identities; other channels unsupported. Requires personal_identity8429007, settings preference foundation, root budget_guidance, dashboard worker running. Native/provider-installed qualification remains required; no live outgoing notifications executed.",
-    "evidence_slice": "slices/mobile.json"
+    "validation": "80 focused local Python regressions passed covering notification policy/delivery, semantic generations, large source sets, owner isolation, result edits, migrations and Copilot recovery. One notification jsdom regression passed. Seven post-refactor focused cases also passed; final integrated suites and native PostgreSQL qualification remain pending. No provider calls.",
+    "remaining": "Final integrated local qualification; real service/native PostgreSQL acceptance is unclaimed.",
+    "evidence_slice": "slices/personal-notifications.json"
   },
   {
     "id": "LW-142",

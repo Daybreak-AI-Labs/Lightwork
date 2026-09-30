@@ -126,7 +126,7 @@ def _execute_action(action):
         if action == "launch":
             value = anyio.from_thread.run(partial(native.launch, request, selection["activation_id"], body, background))
         elif action == "workflow":
-            value = anyio.from_thread.run(partial(native.workflow, request, selection["activation_id"], body))
+            value = native.workflow(request, selection["activation_id"], body)
         else:
             value = native.accept(request, selection["activation_id"], body)
         return Outcome("queued" if action == "launch" else "confirmed", value["message"], _safe_result(value), background=background)

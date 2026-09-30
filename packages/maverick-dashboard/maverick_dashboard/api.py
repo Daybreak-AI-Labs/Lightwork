@@ -5648,7 +5648,7 @@ async def list_connections_endpoint(request: Request) -> dict:
 
 
 @router.get("/extension/policy")
-async def extension_capture_policy(request: Request) -> dict:
+def extension_capture_policy(request: Request) -> dict:
     """Current authorized disclosure; no page content or credentials are retained."""
     import hashlib
 
@@ -14964,6 +14964,11 @@ async def refine_workflow_draft(request: Request, payload: WorkflowRefineIn) -> 
 
 @router.post("/workflows", status_code=201)
 async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
+    """Save through the shared synchronous service without blocking the event loop."""
+    return await run_in_threadpool(save_workflow_native, request, payload)
+
+
+def save_workflow_native(request: Request, payload: WorkflowSaveIn) -> dict:
     """Persist an (AI-drafted, edited) workflow as a runnable user template."""
     require_permission(request, "operate")
     from maverick.config import load_config

@@ -6,7 +6,6 @@ confirmation or execution argument. Preparations are sealed and short lived.
 """
 from __future__ import annotations
 
-import importlib
 import json
 import secrets
 import time
@@ -30,12 +29,7 @@ from .draft_api import context_for
 router = APIRouter(prefix="/api/v1/copilot/product-operations", tags=["copilot-product-operations"])
 TTL = 600
 PURPOSE = "lightwork.product-operation.v1"
-ADAPTER_MODULES = ("product_operations_preferences", "product_operations_tasks",
-                   "product_operations_connections", "product_operations_notifications",
-                   "product_operations_budget", "product_operations_models", "product_operations_diagnostics",
-                   "product_operations_knowledge", "product_operations_today", "product_operations_activation",
-                   "product_operations_devices", "product_operations_plugins", "product_operations_projects",
-                   "product_operations_stop", "product_operations_identity")
+
 
 
 @dataclass(frozen=True)
@@ -136,16 +130,48 @@ def _context(request):
                    "families": sorted(enabled_families())})
 
 
+def _adapter_modules():
+    # Explicit lazy imports keep circular type references safe while making
+    # every advertised native capability statically reachable and mandatory.
+    from . import (
+        product_operations_activation,
+        product_operations_budget,
+        product_operations_connections,
+        product_operations_devices,
+        product_operations_diagnostics,
+        product_operations_identity,
+        product_operations_knowledge,
+        product_operations_models,
+        product_operations_notifications,
+        product_operations_plugins,
+        product_operations_preferences,
+        product_operations_projects,
+        product_operations_stop,
+        product_operations_tasks,
+        product_operations_today,
+    )
+    return (
+        product_operations_preferences,
+        product_operations_tasks,
+        product_operations_connections,
+        product_operations_notifications,
+        product_operations_budget,
+        product_operations_models,
+        product_operations_diagnostics,
+        product_operations_knowledge,
+        product_operations_today,
+        product_operations_activation,
+        product_operations_devices,
+        product_operations_plugins,
+        product_operations_projects,
+        product_operations_stop,
+        product_operations_identity,
+    )
+
+
 def adapters() -> dict[str, Adapter]:
     result = {}
-    for module_name in ADAPTER_MODULES:
-        full_name = __package__ + "." + module_name
-        try:
-            module = importlib.import_module(full_name)
-        except ModuleNotFoundError as exc:
-            if exc.name == full_name:
-                continue  # An unimplemented adapter is never advertised as a capability.
-            raise
+    for module in _adapter_modules():
         for adapter in module.entries():
             if adapter.id in result or adapter.family not in FAMILIES:
                 raise RuntimeError("Invalid product operation registry")

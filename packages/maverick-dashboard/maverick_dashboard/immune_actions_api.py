@@ -320,7 +320,7 @@ async def forget(request: Request, goal_id: int) -> dict:
     return {"deleted": True}
 
 @router.post("/immune/awareness", status_code=202)
-async def awareness(request: Request, body: AwarenessIn, bg: BackgroundTasks) -> dict:
+def awareness(request: Request, body: AwarenessIn, bg: BackgroundTasks) -> dict:
     require_permission(request, "admin")
     from maverick.immune import twin
     ids = sorted(set(body.goal_ids))
