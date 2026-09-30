@@ -4691,6 +4691,11 @@ def pick_advanced() -> dict[str, Any]:
             "Enable selected deliverable bundles with named recipient access, separate human acceptance and offline verification?",
             default=False,
         ),
+        "allow_project_workspaces": _q_confirm(
+            "Enable project workspaces with explicit outcomes, milestones and reviewed source context? "
+            "Only explicitly chosen colleagues see planning metadata; private tasks and review packets keep separate access rules.",
+            default=False,
+        ),
         "allow_employee_companions": _q_confirm(
             "Enable personal companions for employees enrolled by a workspace "
             "administrator, with own-task status and optional AI drafts? An "
@@ -8326,6 +8331,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("project_reviews = true")
     if advanced.get("allow_deliverable_bundles") is True:
         _feature_locks.append("deliverable_bundles = true")
+    if advanced.get("allow_project_workspaces") is True:
+        _feature_locks.append("project_workspaces = true")
     if advanced.get("allow_employee_companions") is True:
         _feature_locks.append("employee_companions = true")
     if advanced.get("allow_employee_content_access_requests") is True:

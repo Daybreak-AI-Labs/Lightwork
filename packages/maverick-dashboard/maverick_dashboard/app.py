@@ -111,6 +111,7 @@ from .outcome_pilot_costs_api import router as outcome_pilot_costs_router
 from .outcome_pilots_api import router as outcome_pilots_router
 from .project_reviews_api import router as project_reviews_router
 from .deliverable_bundles_api import router as deliverable_bundles_router
+from .project_workspaces_api import router as project_workspaces_router
 from .record_search_api import page_context as _record_search_page_context
 from .record_search_api import router as record_search_router
 from .route_identity import (
@@ -1114,6 +1115,7 @@ app.include_router(outcome_pilots_router)
 app.include_router(outcome_pilot_costs_router)
 app.include_router(project_reviews_router)
 app.include_router(deliverable_bundles_router)
+app.include_router(project_workspaces_router)
 from .my_work_api import router as my_work_router
 
 app.include_router(my_work_router)

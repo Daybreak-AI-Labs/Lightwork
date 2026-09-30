@@ -6,6 +6,7 @@
   {% if project.description %}<p class="page-subtitle">{{ project.description }}</p>{% endif %}
   <p><a class="btn btn--ghost" href="/project-reviews#project={{ project.id }}">Ask a colleague to review a result</a> <a class="btn btn--ghost" href="/settings">Turn on team reviews in Settings</a></p>
 
+  <p><a class="btn btn--ghost" href="/project-workspaces/{{ project.id }}">Open project workspace</a></p>
   <div class="panel">
     <p class="muted" style="margin: 0;">
       {% if project.domain %}Department: {{ project.domain|humanize }} · {% endif %}

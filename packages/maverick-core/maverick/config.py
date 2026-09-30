@@ -1056,6 +1056,7 @@ def get_features() -> dict:
         "workflow_readiness": cfg.get("workflow_readiness", True) is True,
         "project_reviews": cfg.get("project_reviews", False) is True,
         "deliverable_bundles": cfg.get("deliverable_bundles", False) is True,
+        "project_workspaces": cfg.get("project_workspaces", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
         "employee_companions": (
             not config_source_errors() and cfg.get("employee_companions", False) is True
