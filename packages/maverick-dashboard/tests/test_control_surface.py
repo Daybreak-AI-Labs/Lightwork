@@ -120,7 +120,7 @@ def test_open_questions_empty(monkeypatch, tmp_path: Path):
     client = _client()
     r = client.get(f"/api/v1/goals/{gid}/open_questions")
     assert r.status_code == 200
-    assert r.json() == {"open_questions": []}
+    assert r.json() == {"open_questions": [], "last_answer": None}
 
 
 def test_open_questions_returns_unanswered(monkeypatch, tmp_path: Path):
@@ -277,7 +277,7 @@ def test_base_renders_halt_pill(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
-    r = client.get("/")
+    r = client.get("/overview")
     assert "halt-pill" in r.text
 
 

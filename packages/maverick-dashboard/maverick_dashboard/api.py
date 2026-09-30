@@ -10321,8 +10321,7 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     if tz:
         job_payload["__tz__"] = tz
     owner = caller_principal(request) or ""
-    if owner:
-        job_payload["owner"] = owner
+    job_payload["owner"] = owner
     allowed_suites = caller_suites(request)
     if allowed_suites is not None:
         job_payload["allowed_suites"] = sorted(allowed_suites)
@@ -10364,7 +10363,7 @@ async def delete_schedule(request: Request, job_id: int) -> dict:
     owner = goal_owner_filter(request)
     if owner is not None:
         job = q.get(job_id)
-        if job is None or (job.payload or {}).get("owner") != owner:
+        if job is None or (job.payload or {}).get("owner", "") != owner:
             raise HTTPException(status_code=404, detail="no pending schedule with that id")
     job = q.get(job_id)
     if job is not None and job.recurrence_id:

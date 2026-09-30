@@ -334,9 +334,9 @@ def test_viewer_cannot_mutate_owned_goal(monkeypatch, tmp_path):
     assert c.post(f"/api/v1/goals/{gid}/answer",
                   json={"question_id": 1, "answer": "x"}).status_code == 403
     assert c.post(f"/api/v1/goals/{gid}/retitle",
-                  json={"title": "new"}).status_code == 403
+                  json={"title": "new", "expected_updated_at": 1}).status_code == 403
     assert c.post(f"/api/v1/goals/{gid}/reparent",
-                  json={"parent_id": None}).status_code == 403
+                  json={"parent_id": None, "expected_updated_at": 1}).status_code == 403
 
 
 def test_redact_preview_requires_operate(monkeypatch, tmp_path):

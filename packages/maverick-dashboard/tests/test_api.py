@@ -412,15 +412,16 @@ class TestAttachments:
         monkeypatch.setattr("maverick.attachments.DEFAULT_ROOT", tmp_path / "attachments")
 
         f = _File()
-        # upload_attachment now takes the Request first (for owner scoping); a
-        # bare object has no .state.principal, so auth is treated as OFF here.
+        # Use a real local request so current authority validation still runs.
         # BackgroundTasks (third) receives the companion-generation task; not
         # executing it here keeps the test focused on the size-cap read.
         from fastapi import BackgroundTasks
+        from starlette.requests import Request
+        request = Request({"type": "http", "method": "POST", "path": "/attachments", "headers": []})
         with WorldModel(tmp_path / "world.db") as world:
             monkeypatch.setattr(api_mod, "_world", lambda: world)
             goal_id = world.create_goal("Upload")
-            out = asyncio.run(api_mod.upload_attachment(object(), goal_id, BackgroundTasks(), f))
+            out = asyncio.run(api_mod.upload_attachment(request, goal_id, BackgroundTasks(), f))
             assert world.list_attachments(goal_id)[0].size_bytes == 1
 
         assert f.read_sizes == [8, 7]

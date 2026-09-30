@@ -173,8 +173,7 @@ async def schedule_add(request: Request, body: ScheduleAddIn) -> dict:
     job_payload = {"goal_id": int(body.goal_id), "title": title, "__cron__": cron, "__tz__": zone,
                    "schedule_id": schedule_id}
     owner = caller_principal(request) or ""
-    if owner:
-        job_payload["owner"] = owner
+    job_payload["owner"] = owner
     suites = caller_suites(request)
     if suites is not None:
         job_payload["allowed_suites"] = sorted(suites)

@@ -385,14 +385,21 @@ def test_goal_resume_api_blocks_pending_pilot_without_state_change_and_allows_ex
     client = TestClient(app, headers={"Origin": "http://testserver"})
     refused = client.post(f"/api/v1/goals/{goal_id}/resume")
     assert refused.status_code == 409, refused.text
-    assert refused.json()["detail"]["code"] == "outcome_pilot_admission_incomplete"
+    assert refused.json()["detail"]["code"] == "admission_hold"
     assert world.get_goal(goal_id).status == "blocked"
     assert world.get_goal(goal_id).result == sources.PREPARED
     assert not dispatched and world.list_episodes(goal_id=goal_id) == []
 
     finish_admission(pending, runtime_records)
-    resumed = client.post(f"/api/v1/goals/{goal_id}/resume")
-    assert resumed.status_code == 204, resumed.text
+    review = client.get(f"/api/v1/goals/{goal_id}/resume-review")
+    assert review.status_code == 200, review.text
+    state = review.json()
+    body = {"operation_id": "e" * 32, "expected_context": state["context"],
+            "expected_updated_at": state["expected_updated_at"],
+            "expected_owner": state["expected_owner"]}
+    resumed = client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body)
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["admitted"]
     assert world.get_goal(goal_id).status == "pending"
     assert len(dispatched) == 1
     world.close()

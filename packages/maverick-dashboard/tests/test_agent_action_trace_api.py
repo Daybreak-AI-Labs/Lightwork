@@ -12,12 +12,13 @@ BASE = "/api/v1/security/governance/agent-actions"
 
 
 class _Goal:
-    def __init__(self, owner: str) -> None:
+    def __init__(self, goal_id: int, owner: str) -> None:
+        self.id = goal_id
         self.owner = owner
 
 
 class _World:
-    goals = {7: _Goal("user:alice"), 8: _Goal("user:alice"), 9: _Goal("user:bob")}
+    goals = {7: _Goal(7, "user:alice"), 8: _Goal(8, "user:alice"), 9: _Goal(9, "user:bob")}
 
     def get_goal(self, goal_id):
         return self.goals.get(goal_id)
@@ -26,6 +27,8 @@ class _World:
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from maverick_dashboard import api as dashboard_api
+    from maverick_dashboard import auth
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
 
     monkeypatch.setattr(dashboard_api, "_world", _World)
     permissions: list[str] = []
@@ -73,7 +76,9 @@ def test_lineage_and_impact_come_from_the_workspace_store(client) -> None:
     assert set(permissions) == {"view"}
 
 
-def test_a_broken_lineage_chain_is_reported(client) -> None:
+def test_a_broken_lineage_chain_is_reported(client, monkeypatch) -> None:
+    from maverick_dashboard import auth
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:bob")
     test_client, _, store = client
     governed_actions.record_tool_lineage(9, "send_email", {}, force=True)
     path = store / "9.ndjson"

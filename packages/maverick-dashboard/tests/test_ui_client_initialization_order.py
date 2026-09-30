@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 @pytest.mark.parametrize(("path", "helper_call"), [
     ("/deliverables", "window.mvWhen(ts)"),
     ("/perf", 'mvEl("td", null, c)'),
-    ("/chat/goal/{goal_id}", "window.mvWhen(ts)"),
+    ("/chat/goal/{goal_id}", "/static/lightwork-answer-panel.js"),
 ])
 def test_page_initializers_follow_shared_helpers(monkeypatch, tmp_path, path, helper_call):
     from maverick import world_model
@@ -28,4 +28,18 @@ def test_page_initializers_follow_shared_helpers(monkeypatch, tmp_path, path, he
     dependency = page.text.index('<script src="/static/lightwork-ui.js')
     dependent_call = page.text.index(helper_call)
     initializer = page.text.rfind("<script", 0, dependent_call)
-    assert dependency < initializer < dependent_call
+    if helper_call.startswith("/static/"):
+        # This external controller is deferred until parsing completes. The
+        # synchronous shared helper loads in the shell before deferred scripts run.
+        assert "defer" in page.text[initializer:page.text.index(">", initializer)]
+        dependency_tag = page.text[dependency:page.text.index(">", dependency)]
+        assert "defer" not in dependency_tag and "async" not in dependency_tag
+    else:
+        assert dependency < initializer < dependent_call
+
+
+def test_answer_controller_asset_uses_shared_helpers():
+    from maverick_dashboard.app import app
+    response = TestClient(app).get("/static/lightwork-answer-panel.js")
+    assert response.status_code == 200
+    assert "window.mvWhen" in response.text

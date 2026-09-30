@@ -108,7 +108,7 @@ def list_definitions(queue, *, owner=None):
     with queue._conn() as connection:
         rows = connection.execute("SELECT * FROM schedule_definitions ORDER BY created_at DESC,id").fetchall()
         return [public_definition(connection, row) for row in rows
-                if owner is None or json.loads(row["payload"]).get("owner") == owner]
+                if owner is None or json.loads(row["payload"]).get("owner", "") == owner]
 
 
 def _record_version(connection, row, *, payload, state, actor, rationale, now):
@@ -148,7 +148,7 @@ def change_definition(queue, identity, *, expected_revision, state, actor,
     now = time.time()
     with mutation_gate(), queue._transaction() as connection:
         row = connection.execute("SELECT * FROM schedule_definitions WHERE id=?", (identity,)).fetchone()
-        if row is None or (owner is not None and json.loads(row["payload"]).get("owner") != owner):
+        if row is None or (owner is not None and json.loads(row["payload"]).get("owner", "") != owner):
             raise KeyError("Schedule is unavailable.")
         if row["revision"] != expected_revision:
             raise ValueError("This schedule changed. Review its current version.")
