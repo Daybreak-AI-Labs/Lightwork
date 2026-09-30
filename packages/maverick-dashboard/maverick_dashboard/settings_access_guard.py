@@ -552,13 +552,58 @@ def _prerequisites(changed: set[str], values: dict[str, object]) -> None:
                           "hold yet, so Lightwork would refuse to start. Fix those first.")
 
 
+def review_allowed_addresses(request, changes: list[dict],
+                             prospective: dict[str, object]) -> None:
+    """The request that saves the allowed-address list must itself match it,
+    or the person saving would be locked out the moment it is written."""
+    if not any(c["setting"].id == "auth.ip_allowlist.cidrs" for c in changes):
+        return
+    from . import ip_allowlist
+
+    entries = prospective.get("auth.ip_allowlist.cidrs") or []
+    if not isinstance(entries, list) or not entries:
+        return
+    networks, rejected = ip_allowlist.parse_networks(entries)
+    if rejected:
+        raise Refused("These entries are not network addresses or ranges: "
+                      + ", ".join(rejected) + ". Nothing was changed.")
+    address = ip_allowlist.client_ip(request)
+    shown = str(address) if address is not None else "unknown"
+    if address is None or not any(address in network for network in networks):
+        raise Refused(f"The address you are using now ({shown}) is not in that list, so "
+                      "saving it would lock you out. Add it, or the range it belongs to, "
+                      "first.")
+
+
+def review_second_factor(request, changes: list[dict],
+                         prospective: dict[str, object]) -> None:
+    """Turning on "Require a second factor" from a session that has none
+    would end that session at the next request: refuse, and say why."""
+    if not any(c["setting"].id == "auth.mfa.require" and c["new"] is True
+               for c in changes):
+        return
+    route, principal = caller_route(request)
+    if route in {"token", "local"} or not principal:
+        return
+    from .mfa_policy import principal_mfa
+
+    proved, _when = principal_mfa(getattr(request.state, "principal", None))
+    if not proved:
+        raise Refused("Your current sign-in didn't include a second factor, so requiring "
+                      "one now would sign you out. Sign in again with your authenticator "
+                      "first, then turn this on.")
+
+
 def review(request, changes: list[dict], layers: dict[str, Any], writes: dict,
            prospective: dict[str, object]) -> list[dict]:
     """Every confirmation the save needs; :class:`Refused` when it must not happen."""
     _prerequisites({c["setting"].id for c in changes}, prospective)
+    review_allowed_addresses(request, changes, prospective)
+    review_second_factor(request, changes, prospective)
     return (review_sign_in(request, changes, layers, writes, prospective)
             + review_keys(changes, prospective))
 
 
 __all__ = ["Access", "Refused", "access_for", "caller_route", "merged_config", "review",
-           "review_keys", "review_sign_in"]
+           "review_allowed_addresses", "review_keys", "review_second_factor",
+           "review_sign_in"]

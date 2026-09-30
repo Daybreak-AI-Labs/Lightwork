@@ -45,6 +45,7 @@ from starlette.responses import (
     StreamingResponse,
 )
 
+from . import step_up
 from ._event_stream import TERMINAL_RUN_STATUSES, event_page, replay_cursor
 from ._shared import (
     _any_provider_key_set,
@@ -1175,6 +1176,7 @@ async def delete_tenant(
     purge: bool = False,
 ) -> Response:
     require_global_permission(request, "admin")
+    step_up.require_recent_mfa(request, "delete_workspace")
     from maverick.tenant import registry as tenant_registry
 
     _get_tenant_or_404(tenant_id)
@@ -1228,6 +1230,7 @@ async def set_tenant_role(
     body: TenantRoleIn,
 ) -> Response:
     require_global_permission(request, "admin")
+    step_up.require_recent_mfa(request, "change_role")
     _reject_tenant_role_assignment_under_per_user_tenancy()
     from maverick_dashboard import rbac
 
@@ -1250,6 +1253,7 @@ async def remove_tenant_role(
     principal: str,
 ) -> Response:
     require_global_permission(request, "admin")
+    step_up.require_recent_mfa(request, "change_role")
     from maverick_dashboard import rbac
 
     _get_tenant_or_404(tenant_id)
@@ -9023,6 +9027,7 @@ def halt_clear(  # noqa: C901 - explicit fail-safe cross-authority transaction
 ) -> None:
     """Clear the verified local HALT authority and any configured shared one."""
     shared = _require_halt_permission(request)
+    step_up.require_recent_mfa(request, "clear_emergency_stop")
     from maverick import killswitch
     from maverick.file_lock import cross_process_lock, require_private_directory
     from maverick.killswitch import (

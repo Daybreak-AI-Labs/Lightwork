@@ -6,7 +6,8 @@
     <p class="muted" style="max-width: 36rem; margin: 0 auto 1.5rem;">{{ message }}</p>
     <div style="display: flex; justify-content: center; gap: var(--space-3); flex-wrap: wrap; margin-top: 1.5rem;">
       {% if gate == 'off' %}<a class="btn btn--primary" href="/settings#settings-sections">Open Settings</a>{% endif %}
-      <a class="btn{% if gate != 'off' %} btn--primary{% endif %}" href="{{ path }}">Reload this page</a>
+      {% if gate == 'step_up' %}<a class="btn btn--primary" href="{{ reauthenticate or path }}">Sign in again</a>{% endif %}
+      <a class="btn{% if gate not in ('off', 'step_up') %} btn--primary{% endif %}" href="{{ path }}">Reload this page</a>
       {% if status == 403 %}<a class="btn" href="/workspace/tenant">Choose a workspace</a>{% endif %}
       <a class="btn" href="/">Back to home</a>
     </div>

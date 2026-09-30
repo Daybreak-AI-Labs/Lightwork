@@ -1127,6 +1127,18 @@ PAGES: tuple[dict, ...] = (
         "floor": "admin",
         "default": "admin",
     },
+    # Everyone may see and end their own sign-in sessions; administrators
+    # see everyone's. Reached from the Users page, not the rail.
+    {
+        "path": "/settings/sessions",
+        "label": "Sessions",
+        "aliases": "signed in devices sign out everywhere",
+        "group": "Admin",
+        "icon": "users",
+        "floor": "view",
+        "default": "view",
+        "in_nav": False,
+    },
     {
         "path": "/spending-limits",
         "label": "Spending limits",

@@ -71,8 +71,11 @@ program, HR controls, physical/environmental security (inherited from the
 hosting provider's SOC 2), and a documented risk-assessment program. These are
 enumerated in [soc2-controls.md §Gap summary](../compliance/soc2-controls.md).
 
-**In progress (named, not implied):** SOC 2 Type II attestation, a third-party
-penetration test, and SCIM/SAML provisioning (OIDC ships today).
+**In progress (named, not implied):** SOC 2 Type II attestation and a
+third-party penetration test. OIDC, SAML SSO and SCIM provisioning all ship
+today (see [security-overview.md](security-overview.md)); SAML and SCIM have
+not yet been certified against a live identity provider, only against the
+protocol test suites in this repository.
 
 ## Reproduce the whole verification pass
 
