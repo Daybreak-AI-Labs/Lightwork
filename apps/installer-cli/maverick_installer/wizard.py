@@ -4652,6 +4652,11 @@ def pick_advanced() -> dict[str, Any]:
             "cannot take task actions or use connected sources.",
             default=False,
         ),
+        "allow_employee_content_access_requests": _q_confirm(
+            "Employee tasks and chats are private to their owner. Enable exceptional "
+            "content-read requests with a separate reviewer, a stated purpose, "
+            "expiry within one hour and a recorded receipt for each read?", default=False,
+        ),
         "allow_outcome_measurement": _q_confirm(
             "Enable measured workflow pilots with paired baseline observations "
             "and explicit accepted outcomes? No savings are assumed.", default=False,
@@ -8181,6 +8186,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("project_reviews = true")
     if advanced.get("allow_employee_companions") is True:
         _feature_locks.append("employee_companions = true")
+    if advanced.get("allow_employee_content_access_requests") is True:
+        _feature_locks.append("employee_content_access_requests = true")
     if advanced.get("allow_outcome_measurement") is True:
         _feature_locks.append("outcome_measurement = true")
     if advanced.get("allow_workspace_recovery") is True:

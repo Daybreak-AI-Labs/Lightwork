@@ -350,13 +350,13 @@ class RetentionIn(BaseModel):
 
 
 def _current_retention() -> dict[str, int | None]:
-    from maverick.config import load_config
+    from maverick.config import load_global_config
 
-    section = (load_config() or {}).get("retention") or {}
+    section = (load_global_config() or {}).get("retention") or {}
     out: dict[str, int | None] = {}
     for key, _label in RETENTION_FIELDS:
         value = section.get(key) if isinstance(section, dict) else None
-        out[key] = value if isinstance(value, int) and not isinstance(value, bool) else None
+        out[key] = value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
     return out
 
 
@@ -377,25 +377,33 @@ async def retention_settings(request: Request) -> dict:
 async def save_retention(request: Request, body: RetentionIn) -> dict:
     require_global_permission(request, "admin")
     updates = {
-        ("retention", key): value
-        for key, value in body.model_dump().items()
-        if value is not None
+        ("retention", key): 0 if value is None else value
+        for key, value in body.model_dump(exclude_unset=True).items()
     }
     if not updates:
         raise HTTPException(status_code=422, detail="Choose at least one period.")
     await _save_recorded(request, updates)
-    return {"saved": True, "message": "Retention periods saved."}
+    effective = await run_in_threadpool(_current_retention)
+    if any(effective[key] != (value or None) for (_, key), value in updates.items()):
+        raise HTTPException(409, {
+            "message": "The saved preference is overridden by installation policy. Effective periods have not changed; ask your installation administrator.",
+            "effective": effective,
+        })
+    return {"saved": True, "effective": effective, "message": "Retention periods saved. Keep until I choose disables automatic pruning for that record type."}
 
 
 def _summarize_retention(report: dict) -> dict:
     if report.get("status") == "disabled":
         return {"applied": False, "removed": 0, "message": "No retention periods are set yet. Choose them first."}
     removed = 0
+    unresolved = []
 
     def walk(value: Any) -> None:
         nonlocal removed
         if isinstance(value, dict):
             for k, v in value.items():
+                if (k in {"error", "failed", "skipped", "unknown"} and v) or (k == "status" and v in {"partial", "unknown", "failed", "running"}):
+                    unresolved.append(k)
                 counted = str(k).startswith(("deleted", "removed"))
                 if counted and isinstance(v, int) and not isinstance(v, bool):
                     removed += v
@@ -409,40 +417,62 @@ def _summarize_retention(report: dict) -> dict:
 
     walk(report)
     return {
-        "applied": True,
+        "applied": not unresolved,
         "removed": removed,
+        "unresolved": bool(unresolved),
         "message": (
-            f"Retention applied. {removed} old record(s) were removed."
+            f"Retention needs attention. {removed} removals are confirmed; some records were skipped or have an unknown outcome. Review the per-store receipt before retrying."
+            if unresolved else f"Retention applied. {removed} old record(s) were removed."
             if removed
             else "Retention applied. Nothing was old enough to remove."
         ),
     }
 
 
-@router.post("/retention/apply")
-async def apply_retention(request: Request) -> dict:
-    """Run the retention rules now (every workspace; global admin)."""
-    require_global_permission(request, "admin")
-    from maverick.audit import AuditRefused, audit_event
-    from maverick.audit.retention import enforce
+class RetentionApplyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
+    review_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    confirm_no_holds: bool = False
+    retry: bool = False
+
+
+@router.post("/retention/preview")
+async def preview_retention(request: Request) -> dict:
+    require_global_permission(request, "admin")
+    from . import retention_runs
     from .auth import caller_principal
 
-    # Recorded before anything is removed: a refused record removes nothing.
+    return await run_in_threadpool(retention_runs.preview, caller_principal(request) or "local administrator")
+
+
+@router.get("/retention/runs/{run_id}")
+async def retention_receipt(request: Request, run_id: str) -> dict:
+    require_global_permission(request, "admin")
+    from . import retention_runs
+    from .auth import caller_principal
+
+    return await run_in_threadpool(retention_runs.read, run_id, caller_principal(request) or "local administrator")
+
+
+@router.post("/retention/apply")
+async def apply_retention(request: Request, body: RetentionApplyIn) -> dict:
+    """Apply a reviewed, frozen cutoff in its actual workspace scope."""
+    require_global_permission(request, "admin")
+    from maverick.audit import AuditRefused
+
+    from . import retention_runs
+    from .auth import caller_principal
+
     try:
-        await run_in_threadpool(
-            lambda: audit_event("retention_applied", agent="dashboard", _global=True,
-                                actor=caller_principal(request) or "local administrator",
-                                source="compliance"))
+        receipt = await run_in_threadpool(
+            retention_runs.apply, body.review_id, caller_principal(request) or "local administrator",
+            confirm_holds=body.confirm_no_holds, retry=body.retry,
+            authorize=lambda: require_global_permission(request, "admin"),
+        )
     except AuditRefused as exc:
-        raise HTTPException(
-            status_code=503, detail="This could not be recorded, so nothing was removed."
-        ) from exc
-    try:
-        report = await run_in_threadpool(enforce)
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Retention could not be applied.") from exc
-    return _summarize_retention(report if isinstance(report, dict) else {})
+        raise HTTPException(503, "The deletion approval could not be recorded; no new store was started.") from exc
+    return {**_summarize_retention(receipt), "receipt": receipt}
 
 
 # ---- People: export / erase ---------------------------------------------
@@ -522,6 +552,10 @@ async def export_person(request: Request, person: PersonIn) -> Response:
     """Download everything held about one person (right of access)."""
     require_permission(request, "admin")
     channel, user = _validated(person)
+    from .content_access import require_employee_content
+    resource_id = json.dumps([channel, user], separators=(",", ":"))
+    require_employee_content(request, "channel:" + resource_id,
+                             resource_kind="subject_data", resource_id=resource_id)
     from maverick.audit import AuditRefused, audit_event
     from maverick.dsar import export_subject_data
 

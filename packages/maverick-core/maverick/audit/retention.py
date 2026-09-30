@@ -73,6 +73,8 @@ def purge_audit_files(
     removed: list[str] = []
     purged: list[dict] = []
     kept = 0
+    skipped: list[str] = []
+    marker_failed = False
     for path in sorted(audit_dir.glob("*.ndjson")):
         try:
             day = datetime.strptime(path.stem, "%Y-%m-%d").date()
@@ -110,6 +112,7 @@ def purge_audit_files(
                 # with writers or prove which bytes it is deleting.
                 log.warning("retention: cannot safely purge %s: %s", path, e)
                 kept += 1
+                skipped.append(path.name)
                 continue
 
             removed.append(path.name)
@@ -134,11 +137,14 @@ def purge_audit_files(
         # failure-policy: fail_soft_with_audit
         except Exception as e:  # pragma: no cover - must not undo the purge
             log.warning("retention: could not record anchor purge marker: %s", e)
+            marker_failed = True
     log.info(
         "retention: audit purge cutoff=%s removed=%d kept=%d dry_run=%s",
         cutoff_day, len(removed), kept, dry_run,
     )
-    return {"removed": removed, "kept": kept, "cutoff_day": str(cutoff_day)}
+    return {"removed": removed, "kept": kept, "cutoff_day": str(cutoff_day),
+            "skipped": skipped, "status": "partial" if skipped or marker_failed else "completed",
+            "purge_marker": "failed" if marker_failed else "recorded" if purged and not dry_run else "not_needed"}
 
 
 def _tip_and_count(path: Path) -> tuple[str, int]:

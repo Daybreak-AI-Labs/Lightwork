@@ -114,6 +114,7 @@ CAPABILITY_DEFAULTS = {
     "mobile_tools": False, "ros": False, "code_exec": False,
 }
 FEATURE_DEFAULTS = {
+    "employee_content_access_requests": False,
     "employee_companions": False,
     "workflow_readiness": True,
     "project_reviews": False,
@@ -154,6 +155,7 @@ CAPABILITY_INFO = {
                  "before shell commands run.",
 }
 FEATURE_INFO = {
+    "employee_content_access_requests": "Allow named administrators to request a specific employee task or subject export for a stated purpose. Another administrator or the content owner must approve; access expires within one hour and every exceptional read is recorded. Turning this off revokes use of existing approvals. Private content remains owner-only by default.",
     "employee_companions": (
         "Let workspace administrators enroll employees for a personal companion "
         "with own-task status and optional AI draft conversations. AI drafts "
@@ -1308,7 +1310,7 @@ def set_compliance_settings(updates: dict[tuple[str, str], object]) -> None:
             value = list(dict.fromkeys(value))
         elif kind is int:
             low, high = _RETENTION_DAY_BOUNDS
-            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            if isinstance(value, bool) or not isinstance(value, int) or not (value == 0 or low <= value <= high):
                 raise ValueError("retention days are out of range")
         elif not isinstance(value, str) or not value.strip() or len(value) > 1000:
             raise ValueError("text setting is empty or too long")

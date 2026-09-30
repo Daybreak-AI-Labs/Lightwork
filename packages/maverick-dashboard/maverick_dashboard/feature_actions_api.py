@@ -156,7 +156,7 @@ def _account(request: Request) -> dict[str, Any]:
         "profile": profile,
         "enterprise_boundary": boundary,
         "profile_overridden": profile == "enterprise" and not boundary,
-        "privacy_scope": "Your employee companion conversation is private to your account. Ordinary tasks and shared work keep their existing workspace access rules.",
+        "privacy_scope": "Employee tasks, chats and companion conversations are private to their owner. Administrators manage policy and audit metadata. Specific task reads or subject exports require an independent, expiring content-access approval; shared result packets retain their explicit reviewer access.",
         "can": {name: bool(has_permission(request, name)) for name in ("view", "operate", "audit", "admin")}
         | {"installation_admin": bool(has_global_permission(request, "admin"))},
     }

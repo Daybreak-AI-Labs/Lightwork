@@ -12436,6 +12436,8 @@ async def audit_tail(request: Request, n: int = 100, day: str | None = None) -> 
     def read():
         report = ReadReport()
         events = default_audit_log().tail(n, day=safe_day, report=report)
+        from .content_access import audit_metadata
+        events = [audit_metadata(event) for event in events]
         return {"events": events, "read_report": report.as_dict()}
 
     return await run_in_threadpool(read)
@@ -12479,6 +12481,8 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
         total_matches = 0
         for event in iter_events(day=effective_day, audit_dir=audit_dir, report=report):
             scanned += 1
+            from .content_access import audit_metadata
+            event = audit_metadata(event)
             if needle in json.dumps(event, ensure_ascii=False, default=str).casefold():
                 total_matches += 1
                 if len(matches) < 200:

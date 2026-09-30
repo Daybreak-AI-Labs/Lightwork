@@ -659,14 +659,11 @@ def require_suite(request: Request, suite: str | None) -> None:
 def goal_owner_filter(request: Request) -> str | None:
     """The ``owner`` value to pass to ``WorldModel.list_goals``.
 
-    Returns None (no owner filter -> all goals) when the caller is unauthenticated
-    (auth off) or an admin; otherwise the caller's principal so the listing is
-    scoped to the rows they own. ``owner=None`` is the historical default, so the
-    auth-off path is unchanged.
+    Every named account, including an administrator, lists its own content.
+    A separately reviewed read opens a specific record; it never broadens a
+    list. Explicit local single-operator mode keeps its historical scope.
     """
     principal = _authorization_principal(request)
-    if principal is None or is_dashboard_admin(principal):
-        return None
     return principal
 
 
@@ -679,20 +676,25 @@ def can_access_goal_principal(principal: str | None, goal) -> bool:
     """
     if principal is None:
         return True
-    if is_dashboard_admin(principal):
-        return True
     return getattr(goal, "owner", "") == principal
 
 
 def can_access_goal(request: Request, goal) -> bool:
     """Whether the caller may read/mutate ``goal``.
 
-    Allowed iff auth is off (no principal), the caller is an admin, or the
-    caller owns the goal. Legacy ``owner == ""`` goals (created before this
-    layer, or by an external/webhook path) are therefore reachable only by the
-    no-auth/admin paths, never by a different authenticated user.
+    Ownership grants normal access. A named administrator needs an independent
+    scoped read approval for another person's content or unowned legacy work.
+    A read approval never grants mutation or publishing authority.
     """
-    return can_access_goal_principal(_authorization_principal(request), goal)
+    if can_access_goal_principal(_authorization_principal(request), goal):
+        return True
+    # A reviewed content read never confers authority to mutate or publish.
+    if str(getattr(request, "method", "GET")).upper() not in {"GET", "HEAD"}:
+        return False
+    from .content_access import may_read_employee_content
+
+    return may_read_employee_content(request, getattr(goal, "owner", ""),
+                                     resource_kind="goal", resource_id=str(goal.id))
 
 
 def assert_goal_access(request: Request, goal) -> None:

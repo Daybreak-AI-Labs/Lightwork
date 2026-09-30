@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Activity log · Lightwork{% endblock %}
 {% block content %}
+  <p class="panel">This is the audit metadata view. Private prompts, task text and tool inputs are withheld from display, search and downloads. Projected downloads are not the original signed audit bytes. <a href="/content-access">Review specific content access</a>.</p>
   <style>
     .aud-detail { display: flex; flex-direction: column; gap: 2px; max-width: 46rem; }
     .aud-kv { display: grid; grid-template-columns: 9rem 1fr; gap: var(--space-2); align-items: baseline; }

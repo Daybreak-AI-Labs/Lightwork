@@ -1412,6 +1412,9 @@ app.include_router(settings_all_router)
 from .employee_companion_api import router as employee_companion_router  # noqa: E402
 
 app.include_router(employee_companion_router)
+from .content_access_api import router as content_access_router  # noqa: E402
+
+app.include_router(content_access_router)
 # Settings > License (/settings/license + its install, sign and key-pair API).
 from .license_ops_api import router as license_ops_router  # noqa: E402
 
@@ -10223,7 +10226,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             ),
             "thread_title": root.title,
             "latest_chat_goal_id": ChatThreads(w).latest(g.id),
-            "thread_turns": _thread_turns(w, g),
+            "thread_turns": _thread_turns(w, g) if caller_principal(request) in {None, g.owner} else [],
             "threads": _chat_threads(request, w, active_root=root_id),
             "run_open": g.status not in TERMINAL_RUN_STATUSES and g.status != "draft",
             "can_recover_task_files": bool(g.owner and g.owner.startswith("user:") and caller_principal(request) == g.owner),

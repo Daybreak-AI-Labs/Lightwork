@@ -144,50 +144,113 @@
     });
   });
 
-  // Retention periods.
+  // Retention saves explicit nulls; deletion is bound to a reviewed receipt.
   var retentionForm = $('cmp-retention-form');
   var retentionResult = $('cmp-retention-result');
+  var retentionReview = $('cmp-retention-review');
+  var retentionReceipt = null;
+  var retentionDirty = false;
+  var retentionBusy = false;
+  var saveRet = $('cmp-retention-save');
+  var applyRet = $('cmp-retention-apply');
+  var confirmRet = $('cmp-retention-confirm');
+  function retentionBusyState(busy) {
+    retentionBusy = busy;
+    [saveRet, applyRet, confirmRet].forEach(function (button) { if (button) button.disabled = busy; });
+  }
+  function showReceipt(receipt) {
+    if (!retentionReview) return;
+    retentionReceipt = receipt;
+    retentionReview.hidden = false;
+    var summary = $('cmp-retention-summary'); summary.textContent = '';
+    (receipt.targets || []).forEach(function (target) {
+      var title = doc.createElement('h4'); title.textContent = target.name; summary.appendChild(title);
+      var policy = doc.createElement('p');
+      policy.textContent = (receipt.steps || []).filter(function (step) { return step.tenant === target.tenant; }).map(function (step) {
+        return step.label + ': ' + human(step.days) + ', ' + step.eligible + ' eligible at review';
+      }).join('; ') || 'No automatic deletion periods.';
+      summary.appendChild(policy);
+    });
+    (receipt.steps || []).forEach(function (step) {
+      var line = doc.createElement('p');
+      line.textContent = step.workspace + ' / ' + step.label + ': ' + (step.status === 'running' ? 'outcome not yet confirmed' : step.status) +
+        (step.removed !== undefined ? ', ' + step.removed + ' confirmed removed' : '') +
+        (step.skipped ? ', ' + step.skipped + ' skipped' : '') +
+        (step.audit_record === 'unconfirmed' ? ', activity record unconfirmed' : '') +
+        (step.uncertain_prior ? ', earlier attempt still needs reconciliation' : '');
+      summary.appendChild(line);
+    });
+    confirmRet.hidden = receipt.status === 'completed' || !receipt.steps.length;
+    confirmRet.textContent = receipt.status === 'review' ? 'Delete reviewed old records' : 'Retry unresolved stores only';
+    try { sessionStorage.setItem('lightwork-retention-receipt', receipt.id); } catch (_) {}
+  }
   function loadRetention() {
     if (!retentionForm) return Promise.resolve();
     return getJSON('/api/v1/compliance/retention').then(function (body) {
       (body.fields || []).forEach(function (field) {
         var sel = $('cmp-ret-' + field.key);
         if (!sel) return;
+        while (sel.options.length > 1) sel.remove(1);
         var choices = (body.choices || []).slice();
         if (field.days && choices.indexOf(field.days) < 0) choices.push(field.days);
         choices.sort(function (a, b) { return a - b; });
         choices.forEach(function (days) {
-          var opt = doc.createElement('option');
-          opt.value = String(days); opt.textContent = human(days);
-          sel.appendChild(opt);
+          var opt = doc.createElement('option'); opt.value = String(days); opt.textContent = human(days); sel.appendChild(opt);
         });
         sel.value = field.days ? String(field.days) : '';
       });
+      retentionDirty = false;
     }).catch(function (failure) { say(retentionResult, errorText(failure, 'load the retention periods')); });
   }
-  var saveRet = $('cmp-retention-save');
-  if (saveRet) saveRet.addEventListener('click', function () {
+  if (retentionForm) retentionForm.addEventListener('change', function () {
+    retentionDirty = true; retentionReceipt = null;
+    if (retentionReview) retentionReview.hidden = true;
+    say(retentionResult, 'Unsaved periods. Save them before reviewing deletion.');
+  });
+  if (saveRet) saveRet.addEventListener('click', async function () {
+    if (retentionBusy) return;
     var body = {};
-    Array.prototype.forEach.call(retentionForm.querySelectorAll('select'), function (sel) {
-      if (sel.value) body[sel.name] = parseInt(sel.value, 10);
-    });
-    if (!Object.keys(body).length) { say(retentionResult, 'Choose at least one period first.'); return; }
-    post('/api/v1/compliance/retention', body).then(function (r) { return r.json(); }).then(function (res) {
-      say(retentionResult, res.message || 'Saved.');
-    }).catch(function (failure) { say(retentionResult, errorText(failure, 'save the retention periods')); });
+    retentionForm.querySelectorAll('select').forEach(function (sel) { body[sel.name] = sel.value ? parseInt(sel.value, 10) : null; });
+    retentionBusyState(true); retentionReceipt = null; retentionReview.hidden = true;
+    try {
+      var res = await (await post('/api/v1/compliance/retention', body)).json();
+      await loadRetention(); say(retentionResult, res.message);
+    } catch (failure) { say(retentionResult, errorText(failure, 'save the retention periods')); }
+    finally { retentionBusyState(false); }
   });
-  var applyRet = $('cmp-retention-apply');
-  if (applyRet) applyRet.addEventListener('click', function () {
-    confirmAction('Delete every record that is older than the periods you chose, in every workspace? This cannot be undone.', 'Delete old records').then(function (ok) {
+  if (applyRet) applyRet.addEventListener('click', async function () {
+    if (retentionBusy) return;
+    if (retentionDirty) { say(retentionResult, 'Save your edited periods before reviewing deletion.'); return; }
+    retentionBusyState(true);
+    try {
+      showReceipt(await (await post('/api/v1/compliance/retention/preview')).json());
+      $('cmp-retention-holds').checked = false;
+      say(retentionResult, 'Review the saved effective policy and exact workspace scope below. No records have been deleted.');
+    } catch (failure) { say(retentionResult, errorText(failure, 'preview old records')); }
+    finally { retentionBusyState(false); }
+  });
+  if (confirmRet) confirmRet.addEventListener('click', async function () {
+    if (retentionBusy || !retentionReceipt || retentionDirty) return;
+    if (!$('cmp-retention-holds').checked) { say(retentionResult, 'Check preservation holds with your records owner first.'); return; }
+    retentionBusyState(true);
+    try {
+      var ok = await confirmAction('Permanently delete the reviewed old records in the listed workspaces? Completed deletions cannot be undone.', 'Delete reviewed records');
       if (!ok) return;
-      applyRet.disabled = true;
-      post('/api/v1/compliance/retention/apply').then(function (r) { return r.json(); }).then(function (res) {
-        say(retentionResult, res.message || 'Done.');
-      }).catch(function (failure) {
-        say(retentionResult, errorText(failure, 'delete old records'));
-      }).then(function () { applyRet.disabled = false; });
-    });
+      var result = await (await post('/api/v1/compliance/retention/apply', {
+        review_id: retentionReceipt.id, confirm_no_holds: true, retry: retentionReceipt.status !== 'review'
+      })).json();
+      showReceipt(result.receipt); say(retentionResult, result.message);
+    } catch (failure) {
+      say(retentionResult, 'The request did not finish cleanly. Reading the saved receipt; completed deletions cannot be undone.');
+      try { showReceipt(await getJSON('/api/v1/compliance/retention/runs/' + retentionReceipt.id)); }
+      catch (_) { say(retentionResult, 'The receipt is temporarily unavailable. Reopen this page before retrying; some deletions may already have completed.'); }
+    } finally { retentionBusyState(false); }
   });
+  if (retentionReview) {
+    var lastReceipt = null;
+    try { lastReceipt = sessionStorage.getItem('lightwork-retention-receipt'); } catch (_) {}
+    if (lastReceipt && /^[a-f0-9]{32}$/.test(lastReceipt)) getJSON('/api/v1/compliance/retention/runs/' + lastReceipt).then(showReceipt).catch(function () {});
+  }
 
   // Assessment downloads.
   var assessment = $('cmp-assessment');

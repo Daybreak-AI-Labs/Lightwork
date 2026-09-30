@@ -241,7 +241,9 @@ def csv_safe(value: object) -> object:
 
 def _rows(since: str | None, until: str | None, fmt: str) -> Iterator[str]:
     from maverick.audit.export import iter_audit_events, to_cef, to_jsonl
+    from .content_access import audit_metadata
     events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events(all_days=True)
+    events = (audit_metadata(event) for event in events)
     if fmt == "csv":
         buf = io.StringIO()
         writer = csv.writer(buf)
@@ -295,7 +297,8 @@ async def forward(request: Request, body: ForwardIn) -> dict:
         from maverick.audit.export import iter_audit_events, to_jsonl
         forwarder.parse_dest(dest)
         events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events(all_days=True)
-        return forwarder.forward((to_jsonl(ev) for ev in events), dest)
+        from .content_access import audit_metadata
+        return forwarder.forward((to_jsonl(audit_metadata(ev)) for ev in events), dest)
     try:
         sent = await run_in_threadpool(_run)
     except Exception as exc:  # noqa: BLE001 -- a transport failure is reported plainly
