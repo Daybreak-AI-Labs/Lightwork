@@ -54,21 +54,22 @@
       "Shared hero title/lede/copy autoescape ordinary text; only literal template-owned formatting is explicitly trusted. Dynamic role text is captured through autoescaped Jinja rendering."
     ],
     "validation": [
-      "Same corrected focused tests on prepatch base:17 failures/12 passes; after repair29 passed in ordinary and secure modes. Nearest page/API group119 passed/11 failures, all11 reproduced unchanged on baseline and are being repaired separately. Independent review inspected177 macro calls and16 read-only render controls without another bypass. Ruff/Vulture/a11y passed at candidate."
+      "Same corrected focused tests on prepatch base:17 failures/12 passes; after repair29 passed in ordinary and secure modes. Nearest page/API group119 passed/11 failures, all11 reproduced unchanged on baseline. The confirmed 12-case neighboring fixture/assertion repairs are integrated at b6d19b4; their ordinary group passed57 cases and secure group71, with denial controls retained. Independent review inspected177 macro calls and16 read-only render controls without another bypass. Ruff/Vulture/a11y passed at candidate."
     ]
   },
   {
     "id": "UX-005",
     "title": "Preserve tenant identity retirement across provisioning and restore",
-    "status": "active: restore retirement barrier repair",
+    "status": "implemented; independent restore replay and final qualification pending",
     "commits": [
-      "2dec058"
+      "2dec058",
+      "de69952"
     ],
     "evidence": [
-      "Immutable namespace reservations and deletion tombstones prevent same-ID/case/Unicode-alias provisioning; stale roster admission refuses. Automatic setup chooses fresh IDs. SCIM compensation deletes only proven successful creation. Retained data and memberships are not reassigned."
+      "Immutable namespace reservations and deletion tombstones prevent same-ID/case/Unicode-alias provisioning; stale roster admission refuses. Automatic setup chooses fresh IDs. SCIM compensation deletes only proven successful creation. Retained data and memberships are not reassigned. Public restore, rollback and interrupted older journals preserve lifecycle barriers monotonically, including concurrently created barriers; snapshots cannot rewrite or erase identity retirement history."
     ],
     "validation": [
-      "Original same-ID reopen reproduced. Candidate passed252 distinct local core/API/CLI/SCIM/isolation cases. Independent review reproduced a whole-home rollback deleting a post-snapshot tombstone and reviving a stale roster; monotonic restore publication and classification are being repaired. Candidate is not called complete."
+      "Original same-ID reopen reproduced. Candidate passed252 distinct local core/API/CLI/SCIM/isolation cases. Independent review reproduced a whole-home rollback deleting a post-snapshot tombstone and reviving a stale roster; corrected public restore adds13 regression models, all passed. Eight-file secure cohort219 passed with2 Windows symlink privilege skips. Ordinary cohort218 passed with2 skips and an inventory omission; corrected inventory gate4/4 passed. Independent exact-trigger replay and final combined qualification remain pending."
     ]
   }
 ]

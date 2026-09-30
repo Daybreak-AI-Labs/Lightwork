@@ -14,7 +14,7 @@ No deployment configuration or credentials were changed.
 | `9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c` | Ordinary run stopped during collection | Its long native temporary path was replaced after Windows file tests demonstrated a bounded environment requirement. No pass/fail total is claimed. |
 | `cfa16bfc6659b59d4e855beb024914409cad44a7` | Incomplete; stopped after worker crash and scheduler stall at99% | Read-only stack inspection showed all workers waiting, not executing tests. No final JUnit or pass/fail total exists; progress dots are not acceptance. The actual assertion failures remain unresolved. |
 | `f036cef90a6d6fd1ddaa3f76bd857b9ca9bd4c3e` | All1,680 dashboard JavaScript tests passed across176 files | Zero failures/skips/cancellations. Exact manifests and source boundaries: dashboard-javascript-qualification.md. |
-| `12ff6b8ad9e42f73a13467c3514f9687ba57465f` | Fresh ordinary Python run in progress | Immutable source, matching environment, streamed per-test/failure reports and bounded worker restarts. No completed result claimed. |
+| `12ff6b8ad9e42f73a13467c3514f9687ba57465f` | Incomplete: 5,669 passed, 10 skipped, two worker crashes | Run ended after 837.37 seconds with both settings catalog cases losing their workers. Remaining cases were not executed. Streamed reports and JUnit retain the partial result; this is not a full-suite pass. |
 
 The initial failures are not dismissed as a single fixture problem. Production
 repairs include exact ownership for local schedules, employee content reads in
@@ -61,7 +61,25 @@ remain separate evidence requirements. Local JetBrains and Zed builds are
 recorded in `native-build-evidence.json`; they are not distribution approval.
 The five independently traced PR2530 findings were separately approved.
 `additional-security-fixes.json` records implementation, regression evidence and
-the outstanding tenant restore-boundary repair, separate from the195-entry register.
+tenant restore-boundary regression evidence, separate from the195-entry register.
+
+The tenant restore repair preserves namespace claims and deletion tombstones
+through publication, rollback, older interrupted journals and concurrent claims.
+Its eight-file secure-default cohort passed 219 tests with two Windows
+symbolic-link privilege skips. All 13 new public-restore models passed. The
+ordinary cohort's one inventory omission was corrected and its four-case gate
+passed again; independent replay of the original restore bypass remains part
+of final qualification. Failed restores may conservatively retain newly
+published identity barriers; they never release those identities.
+
+The two settings worker losses are being investigated separately from assertion
+failures. An unchanged isolated governance case passed in 196.03 seconds,
+including 135.656 seconds rendering settings groups. Repeated authenticated
+credential-key permission checks are a measured hot path. The native access
+violation seen during a diagnostic dump has not been independently reproduced;
+its cause remains unresolved. A batch-local decryption optimization is undergoing
+rotation, corruption, permission and unchanged exhaustive-case checks, without
+changing timeouts or weakening access checks.
 
 At cfa16bf,15 of16 offline contract gates and all8 package wheels passed. The
 remaining constraint check required pip26.2.1 rather than the installed25.0.1.
