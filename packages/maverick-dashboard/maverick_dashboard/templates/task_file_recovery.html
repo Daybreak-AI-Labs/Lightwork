@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Task files · Lightwork{% endblock %}
+{% block title %}{{ ut("Task files") }} · Lightwork{% endblock %}
 {% block content %}
 <section id="task-files" data-goal="{{ goal.id }}" class="tf-wrap">
   <p><a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}">{{ ui("Back to task") }}</a></p>
   <h1 class="page-title">{{ ui("Review and restore task files") }}</h1>
-  <p class="page-subtitle">{{ goal.title }}</p>
+  <p class="page-subtitle" lang="und" dir="auto" data-user-content>{{ goal.title }}</p>
   <div class="panel">
     <p class="tf-flush">{{ ui("Put back the files this task changed during its latest run on this computer. You see every change first. Things done outside these files, such as commands, online files or tickets, are not undone.") }}</p>
   </div>

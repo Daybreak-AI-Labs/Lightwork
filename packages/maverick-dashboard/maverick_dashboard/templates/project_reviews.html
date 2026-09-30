@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Project team reviews · Lightwork{% endblock %}
+{% block title %}{{ ut("Project team reviews") }} · Lightwork{% endblock %}
 {% block content %}
 <div id="pr-root" data-context="{{ review_context }}">
   <p><a href="/projects">{{ ui("← Projects") }}</a></p>
@@ -25,7 +25,7 @@
       <h3>{{ ui("Select a result to share") }}</h3>
       <label for="pr-goal">{{ ui("Stopped task with a saved result") }}</label><select id="pr-goal" class="input"></select>
       <button id="pr-preview" class="btn" type="button">{{ ui("Preview selected result") }}</button>
-      <div id="pr-preview-panel" hidden><h4 id="pr-preview-title"></h4><pre lang="und" dir="auto" data-user-content id="pr-preview-text"></pre></div>
+      <div id="pr-preview-panel" hidden><h4 id="pr-preview-title" lang="und" dir="auto" data-user-content></h4><pre lang="und" dir="auto" data-user-content id="pr-preview-text"></pre></div>
       <form data-product-validation id="pr-send" data-draft-recovery="off">
         <label for="pr-reviewer">{{ ui("Assigned reviewer") }}</label><select id="pr-reviewer" class="input" required></select>
         <label for="pr-due">{{ ui("Review due") }}</label><input id="pr-due" class="input" type="datetime-local" required>
@@ -40,8 +40,8 @@
     </div>
   </section>
   <section id="pr-packet" class="panel" hidden aria-labelledby="pr-packet-title">
-    <h2 id="pr-packet-title" tabindex="-1"></h2><p id="pr-packet-summary"></p><p id="pr-stale" role="status"></p>
-    <h3>{{ ui("Owner's review request") }}</h3><p id="pr-packet-note"></p>
+    <h2 id="pr-packet-title" lang="und" dir="auto" data-user-content tabindex="-1"></h2><p id="pr-packet-summary"></p><p id="pr-stale" role="status"></p>
+    <h3>{{ ui("Owner's review request") }}</h3><p id="pr-packet-note" lang="und" dir="auto" data-user-content></p>
     <p id="pr-review-provenance"></p><ol id="pr-outcome-timeline"></ol>
     <h3>{{ ui("Captured result") }}</h3><pre lang="und" dir="auto" data-user-content id="pr-result"></pre>
     <p id="pr-owner-task"></p>

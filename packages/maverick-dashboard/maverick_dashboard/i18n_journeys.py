@@ -15,12 +15,14 @@ from .i18n_journey_common import ROWS as COMMON_ROWS
 from .i18n_journey_conversation import ROWS as CONVERSATION_ROWS
 from .i18n_journey_employee import ROWS as EMPLOYEE_ROWS
 from .i18n_journey_receipts import ROWS as RECEIPT_ROWS
+from .i18n_journey_recovery_controls import ROWS as RECOVERY_CONTROL_ROWS
 from .i18n_journey_resume import ROWS as RESUME_ROWS
 from .i18n_journey_review import ROWS as REVIEW_ROWS
 from .i18n_journey_task_controls import ROWS as TASK_CONTROL_ROWS
 from .i18n_journey_workflow import ROWS as WORKFLOW_ROWS
 
-ROWS = [*COMMON_ROWS, *EMPLOYEE_ROWS, *REVIEW_ROWS, *WORKFLOW_ROWS, *CONVERSATION_ROWS, *RECEIPT_ROWS, *RESUME_ROWS, *TASK_CONTROL_ROWS]
+ROWS = [*COMMON_ROWS, *EMPLOYEE_ROWS, *REVIEW_ROWS, *WORKFLOW_ROWS, *CONVERSATION_ROWS,
+        *RECEIPT_ROWS, *RECOVERY_CONTROL_ROWS, *RESUME_ROWS, *TASK_CONTROL_ROWS]
 
 TRANSLATION_LANGS = ("fr", "de", "ja", "zh")
 # Rows are source, French, German, Japanese, Chinese. No Arabic machine completion.
