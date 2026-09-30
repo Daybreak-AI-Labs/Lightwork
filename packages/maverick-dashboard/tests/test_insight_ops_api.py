@@ -135,7 +135,11 @@ def test_typed_questions_are_stopped_at_the_time_limit(client, monkeypatch):
 
 def test_health_uses_the_kernel_score_and_the_task_access_check(client, monkeypatch):
     gid = _task("user:ada", "Ada's report", 1.0)
-    h = client.get(f"/api/v1/goals/{gid}/health").json()
+    assert client.get(f"/api/v1/goals/{gid}/health").status_code == 404
+    _as(monkeypatch, "operator", "user:ada")
+    response = client.get(f"/api/v1/goals/{gid}/health")
+    assert response.status_code == 200, response.text
+    h = response.json()
     from maverick.health_score import goal_health
     _goal, kernel = goal_health(_world(), gid)
     assert h["score"] == kernel.score and h["grade"] == kernel.grade and h["finished"] is True
@@ -149,6 +153,8 @@ def test_health_uses_the_kernel_score_and_the_task_access_check(client, monkeypa
 
 def test_recorded_steps_are_read_through_the_verified_reader(client, monkeypatch, tmp_path):
     gid = _task("user:ada", "Ada's report", 1.0)
+    assert client.get(f"/api/v1/goals/{gid}/recorded-steps").status_code == 404
+    _as(monkeypatch, "operator", "user:ada")
     off = client.get(f"/api/v1/goals/{gid}/recorded-steps").json()
     assert off["recording"] is False
     traces = tmp_path / "traces"

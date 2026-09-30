@@ -22,7 +22,7 @@ def _button(markup: str, element_id: str) -> str:
 
 def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_path):
     from maverick import config, runtime_overrides, world_model
-    from maverick_dashboard import api
+    from maverick_dashboard import api, auth
     from maverick_dashboard import app as dashboard_app
 
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
@@ -31,6 +31,7 @@ def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "overrides.toml")
     monkeypatch.setattr(dashboard_app, "has_global_permission", lambda _r, _p: False)
+    monkeypatch.setattr(auth, "has_global_permission", lambda _r, _p: False)
     monkeypatch.setattr(dashboard_app, "has_permission", lambda _r, _p: True)
     monkeypatch.setattr(api, "_shared_halt_backend", lambda: True)
     config.reset_config_cache()
@@ -48,7 +49,9 @@ def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_
     assert "only an administrator can change learning settings" in learning.text
     assert "Run learning now" not in learning.text
     assert "disabled" in _button(learning.text, "lrn-enable")
-    assert "disabled" in _button(learning.text, "lrn-auto-evolve")
+    # Global learning-policy summaries are unavailable to a tenant operator;
+    # the privileged section is omitted rather than populated with fake zeros.
+    assert 'id="lrn-auto-evolve"' not in learning.text
     assert "only a global administrator can change where work runs" in permissions.text
     assert "var canManageSandbox = false" in permissions.text
     # Tenant operate authority remains truthful and independently enables the
