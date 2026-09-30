@@ -347,7 +347,13 @@ def _remote_id_from(response: str) -> str | None:
 
 
 def _response_is_uncertain(response: Any, *, op: str) -> bool:
+    from .connector_attempts import ConnectorResult
+
+    if isinstance(response, ConnectorResult):
+        return response.attempt.outcome_unknown
     if not isinstance(response, str):
+        return True
+    if response.startswith("INDETERMINATE:"):
         return True
     # The shared REST adapter deliberately renders errors without upstream
     # bodies or secrets. Its transport-error strings do not prove that the

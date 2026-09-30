@@ -36,7 +36,14 @@ function source(relative, mocks = {}) {
     if (name === 'react-native') return native;
     if (name === 'expo-status-bar') return { StatusBar: 'StatusBar' };
     if (name.endsWith('/connectionValidation')) return source('src/connectionValidation.ts', mocks);
-    if (name === '../components/ConnectionNotice') return source('src/components/ConnectionNotice.tsx', mocks);
+    if (name.endsWith('/api')) return source('src/api.ts', mocks);
+    if (name.endsWith('/runReplay')) return source('src/runReplay.ts', mocks);
+    if (name.endsWith('/poll')) return source('src/poll.ts', mocks);
+    if (name.endsWith('/format')) return source('src/format.ts', mocks);
+    if (name.endsWith('/theme')) return source('src/theme.ts', mocks);
+    if (name.endsWith('/offlineCache') && Object.hasOwn(mocks, '@react-native-async-storage/async-storage')) return source('src/offlineCache.ts', mocks);
+    if (name.endsWith('/components/ConnectionNotice')) return source('src/components/ConnectionNotice.tsx', mocks);
+    if (name.endsWith('/components/ui')) return source('src/components/ui.tsx', mocks);
     if (name.includes('/screens/')) {
       const screen = name.split('/').at(-1);
       if (screen === 'SettingsScreen') return source('src/screens/SettingsScreen.tsx', mocks);
@@ -46,11 +53,15 @@ function source(relative, mocks = {}) {
   }
   vm.runInNewContext(compiled.outputText, {
     module, exports: module.exports, require: requireMock, console, Error, URL,
-    fetch: mocks.fetch,
+    fetch: mocks.fetch, AbortController, TextDecoder,
+    Response: Object.hasOwn(mocks, 'Response') ? mocks.Response : Response,
+    ReadableStream: Object.hasOwn(mocks, 'ReadableStream') ? mocks.ReadableStream : ReadableStream,
     expo: Object.hasOwn(mocks, 'expo') ? mocks.expo : { uuidv4: randomUUID },
     crypto: mocks.crypto,
     setInterval: mocks.setInterval || (() => 1),
     clearInterval: mocks.clearInterval || (() => {}),
+    setTimeout: mocks.setTimeout || setTimeout,
+    clearTimeout: mocks.clearTimeout || clearTimeout,
   }, { filename });
   return module.exports;
 }

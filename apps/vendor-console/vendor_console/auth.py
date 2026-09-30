@@ -29,25 +29,25 @@ def _session(request: Request) -> dict | None:
 
 
 def load_staff(request: Request, *, stage: str = "full") -> Staff | None:
-    """The Staff behind a session at exactly ``stage``, or None. A ``full``
-    session is additionally bound to the staff's ``session_epoch``, so logout /
-    forced sign-out revokes a stolen cookie server-side (not just client-side)."""
+    """The Staff behind a session at exactly ``stage``, or None. Every stage
+    (``totp``, ``enroll`` and ``full``) is bound to the staff's ``session_epoch``,
+    so logout, a new set-up link, turning access off or a password change
+    revokes a stolen cookie server-side (not just client-side), even one that
+    is only part-way through signing in or setting up."""
     payload = _session(request)
     if not payload or payload.get("stage") != stage:
         return None
     st = store.get_staff(get_conn(request), int(payload.get("sid", 0)))
     if st is None or st.disabled:
         return None
-    if stage == "full" and payload.get("ep") != st.session_epoch:
+    if payload.get("ep") != st.session_epoch:
         return None
     return st
 
 
 def set_session(response, *, staff_id: int, stage: str, role: str = "",
                 epoch: int = 0, secure: bool = False) -> None:
-    payload = {"sid": staff_id, "stage": stage, "role": role}
-    if stage == "full":
-        payload["ep"] = epoch
+    payload = {"sid": staff_id, "stage": stage, "role": role, "ep": epoch}
     token = security.sign_session(
         payload, security.session_key(), ttl=12 * 3600 if stage == "full" else 600)
     response.set_cookie(
@@ -83,4 +83,12 @@ def require_support(request: Request) -> Staff:
     st = require_staff(request)
     if st.role not in SUPPORT_ROLES:
         raise HTTPException(status_code=403, detail="requires a support role")
+    return st
+
+
+def require_owner(request: Request) -> Staff:
+    """Only an owner may add team members, change roles or turn access off."""
+    st = require_staff(request)
+    if st.role != "owner":
+        raise HTTPException(status_code=403, detail="requires the owner role")
     return st

@@ -10,7 +10,7 @@ from unittest.mock import patch
 def test_env_file_created_at_0600(tmp_path: Path, monkeypatch):
     """``write_text`` then ``chmod`` left a window where the file existed at 0644.
 
-    The atomic ``os.open(..., O_CREAT|O_WRONLY|O_TRUNC, 0o600)`` path
+    The private temporary file and atomic replacement path
     eliminates the race: the file's first ``stat`` after creation must
     already be 0o600.
     """
@@ -24,10 +24,13 @@ def test_env_file_created_at_0600(tmp_path: Path, monkeypatch):
 
     def _watching_open(path, flags, mode=0o777):
         fd = real_open(path, flags, mode)
-        try:
-            observed_modes.append(stat.S_IMODE(os.stat(path).st_mode))
-        except OSError:
-            pass
+        # Only files this write CREATES must be private from their first
+        # instant; opening an existing directory to fsync it is not creation.
+        if flags & os.O_CREAT:
+            try:
+                observed_modes.append(stat.S_IMODE(os.stat(path).st_mode))
+            except OSError:
+                pass
         return fd
 
     with patch("maverick_installer.wizard.os.open", side_effect=_watching_open):
@@ -38,7 +41,7 @@ def test_env_file_created_at_0600(tmp_path: Path, monkeypatch):
             channels={},
             safety={"profile": "balanced"},
             budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
-            sandbox={"backend": "local", "workdir": "~/maverick-workspace"},
+            sandbox={"backend": "local", "workdir": str(tmp_path / "workspace")},
             keys={"ANTHROPIC_API_KEY": "sk-ant-test"},
             capabilities={},
         )
@@ -73,7 +76,7 @@ def test_env_file_overwrites_existing(tmp_path: Path, monkeypatch):
         channels={},
         safety={"profile": "balanced"},
         budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
-        sandbox={"backend": "local", "workdir": "~/maverick-workspace"},
+        sandbox={"backend": "local", "workdir": str(tmp_path / "workspace")},
         keys={"OPENAI_API_KEY": "sk-new"},
         capabilities={},
     )
@@ -115,7 +118,7 @@ def test_existing_env_backup_created_at_0600(tmp_path: Path, monkeypatch):
             channels={},
             safety={"profile": "balanced"},
             budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
-            sandbox={"backend": "local", "workdir": "~/maverick-workspace"},
+            sandbox={"backend": "local", "workdir": str(tmp_path / "workspace")},
             keys={"ANTHROPIC_API_KEY": "sk-new"},
             capabilities={},
         )
@@ -147,7 +150,7 @@ def test_identical_wizard_retry_does_not_rewrite_or_create_backups(
             "max_wall_seconds": 600,
             "max_tool_calls": 30,
         },
-        "sandbox": {"backend": "local", "workdir": "~/maverick-workspace"},
+        "sandbox": {"backend": "local", "workdir": str(tmp_path / "workspace")},
         "keys": {"ANTHROPIC_API_KEY": "sk-ant-test"},
         "capabilities": {},
     }
@@ -158,7 +161,9 @@ def test_identical_wizard_retry_does_not_rewrite_or_create_backups(
     def unexpected_open(*_args, **_kwargs):
         raise AssertionError("identical retry must not open a wizard write path")
 
-    monkeypatch.setattr(wizard.os, "open", unexpected_open)
+    # Workspace probes and the writer lock may open their own files; an
+    # identical retry must still never publish either active configuration.
+    monkeypatch.setattr("maverick.file_lock.atomic_write_text", unexpected_open)
     wizard.write_config(**kwargs)
 
     config_after = wizard.CONFIG_FILE.stat()

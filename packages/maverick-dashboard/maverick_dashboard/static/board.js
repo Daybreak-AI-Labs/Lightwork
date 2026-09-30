@@ -422,16 +422,17 @@ window.LWBoard = (function () {
     function load() {
       fetch(url())
         .then(function (r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
+          if (!r.ok) throw r;
           return r.json();
         })
         .then(function (D) {
           cfg.render(D);
-          stamp('refreshed ' + new Date().toLocaleTimeString() +
-                ' · auto-refreshes every 60s');
+          stamp('Updated ' + new Date().toLocaleTimeString() +
+                ' · updates every minute');
         })
         .catch(function (e) {
-          stamp('could not load the board (' + e.message + ') — retrying in 60s');
+          var why = window.mvErrorText ? window.mvErrorText(e, 'load the board') : 'Could not load the board.';
+          stamp(why + ' Trying again in a minute.');
         });
     }
     document.querySelectorAll('.bd-slicer button').forEach(function (b) {

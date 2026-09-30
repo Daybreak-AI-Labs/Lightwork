@@ -335,6 +335,29 @@ def _deployment_policy(cfg, full_cfg, backend, sandbox_config):
     return {**cfg, **deployment}, {**(full_cfg or {}), **deployment}
 
 
+def _offline_policy(full_cfg: dict | None, backend) -> dict | None:
+    """The network policy's no-network rule for the work area.
+
+    When ``[security] network_policy`` is not open, or ``[sandbox]
+    network_policy = "deny-all"``, commands get no network: container and
+    micro-machine backends start without it (the Kubernetes backend verifies
+    its deny-all NetworkPolicy first), ``local`` must become a container (or
+    is refused when none is installed), and backends that cannot be kept
+    offline are refused. Only ever narrows; open leaves settings untouched.
+    """
+    from .network_policy import work_area_offline
+
+    if not work_area_offline():
+        return full_cfg
+    chosen = str(backend or "local").strip().lower()
+    if chosen == "ssh" or chosen.startswith("ep:"):
+        raise SandboxPolicyError(
+            "the network policy blocks internet access for commands, but the "
+            f"{chosen!r} work area cannot be kept offline; choose a container work area")
+    return {**(full_cfg or {}), "allow_network": False, "network": "egress-deny",
+            "require_container": True}
+
+
 def build_sandbox(
     workdir: str | Path | None = None,
     backend: str | None = None,
@@ -344,8 +367,52 @@ def build_sandbox(
     """Construct the configured sandbox backend.
 
     Reads ``[sandbox]`` from ``~/.maverick/config.toml``; either argument
-    overrides the corresponding config value.
+    overrides the corresponding config value. Under containment mode
+    (:mod:`maverick.containment`) the backend gets no network and, except for
+    remote and project-folder backends, a throwaway 0700 folder that lives as
+    long as the returned backend.
     """
+    from ..containment import active_profile
+
+    held: list = []
+    box = _build_sandbox(workdir, backend, sandbox_config=sandbox_config,
+                         contained=active_profile(), held=held)
+    for ephemeral in held:
+        try:
+            box._containment_workdir = ephemeral  # type: ignore[attr-defined]
+        except AttributeError:  # pragma: no cover -- slotted third-party backend
+            _EPHEMERAL_WORKDIRS.append(ephemeral)
+    return box
+
+
+# Throwaway folders of backends that cannot carry one (kept until exit).
+_EPHEMERAL_WORKDIRS: list = []
+
+
+def _contain(contained, chosen: str, full_cfg: dict | None, wd: Path, held: list):
+    """Containment's changes to one backend's settings: no network, and a
+    throwaway folder unless the folder is remote or a project's own."""
+    if contained is None:
+        return full_cfg, wd
+    if contained.no_network:
+        full_cfg = {**(full_cfg or {}), "allow_network": False, "network": "egress-deny"}
+    if contained.ephemeral_workspace and chosen not in ("ssh", "devcontainer"):
+        from ..containment import make_ephemeral_workdir
+
+        ephemeral = make_ephemeral_workdir()
+        held.append(ephemeral)
+        wd = ephemeral.path
+    return full_cfg, wd
+
+
+def _build_sandbox(
+    workdir: str | Path | None,
+    backend: str | None,
+    *,
+    sandbox_config: dict | None,
+    contained,
+    held: list,
+) -> Sandbox:
     if sandbox_config is not None:
         # Privileged callers (DGM) pass an already scope-pinned policy snapshot
         # so request-tenant config cannot swap the evaluator after preflight.
@@ -366,6 +433,7 @@ def build_sandbox(
             full_cfg = {}
 
     cfg, full_cfg = _deployment_policy(cfg, full_cfg, backend, sandbox_config)
+    full_cfg = _offline_policy(full_cfg, backend or cfg.get("backend"))
 
     # Normalize the backend selector: it comes from user-typed TOML (or a CLI
     # flag) and is matched case-sensitively against the literals below, so
@@ -380,6 +448,7 @@ def build_sandbox(
     chosen = _resolve_local_under_policy(chosen, full_cfg)
     read_only_paths = _read_only_paths_for_backend(chosen, full_cfg)
     wd = Path(workdir or cfg.get("workdir", str(Path.cwd()))).expanduser()
+    full_cfg, wd = _contain(contained, chosen, full_cfg, wd, held)
     # Coerce defensively: [sandbox] timeout is hand-editable, and a non-numeric
     # ("fast") or non-positive value would otherwise raise here and crash the
     # kernel at startup -- config.py's contract is to fall back to defaults on
@@ -433,9 +502,9 @@ def build_sandbox(
             allow_root=_config_bool(full_cfg.get("allow_root"), False),
         )
         # Opt-in cross-run pooling (default OFF -> this block is dead and
-        # behavior is byte-identical): reuse a parked, still-healthy backend
-        # for the same engine + image digest + security flags. See pool.py
-        # for the scrub contract. Docker's reuse_container is the WITHIN-run
+        # behavior is unchanged): consume an explicitly transferred policy
+        # into a fresh backend with the same image digest + security flags.
+        # Ordinary runner teardown does not park. Docker's reuse_container is the WITHIN-run
         # warm knob and is not cross-run pool eligible because it keeps a live
         # container mounted to the run workdir.
         reuse_container = _config_bool(full_cfg.get("reuse_container"), False)
@@ -527,7 +596,7 @@ def build_sandbox(
         return SSHBackend(
             host=host,
             workdir=PurePosixPath(
-                str(full_cfg.get("workdir", "~/maverick-workspace"))
+                str(workdir if workdir is not None else full_cfg.get("workdir", "~/maverick-workspace"))
             ),
             timeout=timeout,
             ssh_args=full_cfg.get("ssh_args", []),

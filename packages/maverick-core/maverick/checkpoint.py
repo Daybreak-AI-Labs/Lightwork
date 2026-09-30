@@ -505,6 +505,10 @@ def snapshot_budget(budget: Any) -> dict:
         out["_elapsed"] = 0.0
     if getattr(budget, "_checkpoint_settled", None):
         out["_settled"] = dict(budget._checkpoint_settled)
+    from .tenant.provider_admission import snapshot as organization_snapshot
+    organization = organization_snapshot(budget)
+    if organization is not None:
+        out['_organization'] = organization
     return out
 
 
@@ -542,6 +546,8 @@ def restore_budget(snapshot: dict, *, into=None):
     if into is not None:
         with into._lock:
             if not getattr(into, "_checkpoint_restored", False):
+                from .tenant.provider_admission import merge_snapshot
+                merge_snapshot(into, snapshot.get('_organization'))
                 for key, value in counters.items():
                     setattr(into, key, getattr(into, key) + value)
                 into._started_monotonic -= elapsed

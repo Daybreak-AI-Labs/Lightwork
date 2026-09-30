@@ -24,15 +24,23 @@ def client(monkeypatch, tmp_path):
 
 
 def test_initial_settings_create_once_and_preserve_private_configuration(client, tmp_path):
+    from maverick.budget import budget_from_config
     from maverick.file_lock import private_path_is_restricted
 
+    page = client.get("/start")
+    assert page.status_code == 200
+    assert "There is no spending or time limit for each task yet" in page.text
+    assert "$1 limit" not in page.text
     with ThreadPoolExecutor(max_workers=2) as workers:
         responses = list(workers.map(lambda _: client.post("/api/v1/setup/initialize", json={"confirm": True}), range(2)))
     assert sorted(response.status_code for response in responses) == [201, 409]
     path = tmp_path / "config.toml"
     before = path.read_bytes()
     config = tomllib.loads(before.decode())
-    assert config["budget"]["max_dollars"] == 1.0
+    assert config["budget"] == {"strict_pricing": True}
+    budget = budget_from_config()
+    for key in ("max_dollars", "max_wall_seconds", "max_input_tokens", "max_output_tokens", "max_tool_calls"):
+        assert getattr(budget, key) is None
     assert config["capabilities"]["code_exec"] is False
     assert "shell" in config["security"]["denied_tools"]
     assert private_path_is_restricted(path)
@@ -58,12 +66,14 @@ def test_invalid_overlay_is_checked_fresh_and_preserved(client, tmp_path):
 
 
 def test_initial_settings_preserves_existing_settings_overlay(client, tmp_path):
+    from maverick.budget import budget_from_config
     from maverick.config import load_config
 
     overlay = tmp_path / "dashboard-config.toml"
     overlay.write_text("[budget]\nmax_dollars = 0.5\n", encoding="utf-8")
     assert client.post("/api/v1/setup/initialize", json={"confirm":True}).status_code == 201
     assert load_config()["budget"]["max_dollars"] == 0.5
+    assert budget_from_config().max_dollars == 0.5
     assert overlay.read_text() == "[budget]\nmax_dollars = 0.5\n"
 
 

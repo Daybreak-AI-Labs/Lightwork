@@ -19,6 +19,7 @@ tool on a fresh ``MCPServer`` instance (isolated per-call state; no stdio).
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
@@ -28,6 +29,8 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
+
+from .execution import CompletionSignal, ExecutionCancelled, ExecutionHandle
 
 log = logging.getLogger(__name__)
 
@@ -57,9 +60,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _env_int(name: str, default: int, *, lo: int, hi: int) -> int:
+def _env_int(name: str, default: int, *, lo: int, hi: int, key: str = "") -> int:
+    """``name`` from the environment, else ``[mcp] <key>``, else ``default``;
+    read when the task manager starts."""
+    from .settings import mcp_setting
+
+    raw = mcp_setting(key) if key else os.environ.get(name)
     try:
-        v = int(os.environ.get(name, default))
+        v = int(raw if raw is not None else default)
     except (TypeError, ValueError):
         v = default
     return max(lo, min(hi, v))
@@ -105,7 +113,8 @@ class McpTask:
         self.future: Future | None = None
         self.cancel_requested = False
         # Set when the task reaches a terminal status; tasks/result blocks on it.
-        self.done = threading.Event()
+        self.done = CompletionSignal()
+        self.execution = ExecutionHandle(deadline=time.monotonic() + ttl_ms / 1000.0)
         # Frozen "working" snapshot for the CreateTaskResult. Captured here,
         # before the worker is submitted, so the acceptance ack always reports
         # the spec-mandated initial `working` status even if a fast tool has
@@ -137,6 +146,7 @@ class McpTask:
         }
         if self.status_message:
             d["statusMessage"] = self.status_message
+        d["_meta"] = {"lightwork/execution": self.execution.snapshot()}
         return d
 
 
@@ -168,7 +178,7 @@ class TaskStore:
         # server can push notifications/tasks/status. Fired outside the lock.
         self._on_status_change = on_status_change
         self._max_tasks = max_tasks if max_tasks is not None else _env_int(
-            "MAVERICK_MCP_MAX_TASKS", 256, lo=1, hi=100_000)
+            "MAVERICK_MCP_MAX_TASKS", 256, lo=1, hi=100_000, key="max_tasks")
         # Per-caller sub-cap (HTTP multi-client mode only). The global cap above
         # is shared, and _make_room only evicts TERMINAL tasks, so without this
         # one principal could fill all 256 slots with active tasks and block
@@ -179,25 +189,27 @@ class TaskStore:
         self._max_tasks_per_owner = (
             max_tasks_per_owner if max_tasks_per_owner is not None else _env_int(
                 "MAVERICK_MCP_MAX_TASKS_PER_OWNER",
-                min(32, self._max_tasks), lo=1, hi=self._max_tasks)
+                min(32, self._max_tasks), lo=1, hi=self._max_tasks, key="max_tasks_per_owner")
         )
         self._default_ttl_ms = default_ttl_ms if default_ttl_ms is not None else _env_int(
-            "MAVERICK_MCP_TASK_TTL_MS", 3_600_000, lo=1_000, hi=604_800_000)
+            "MAVERICK_MCP_TASK_TTL_MS", 3_600_000, lo=1_000, hi=604_800_000, key="task_ttl_ms")
         self._max_ttl_ms = max_ttl_ms if max_ttl_ms is not None else _env_int(
-            "MAVERICK_MCP_TASK_MAX_TTL_MS", 86_400_000, lo=1_000, hi=604_800_000)
+            "MAVERICK_MCP_TASK_MAX_TTL_MS", 86_400_000, lo=1_000, hi=604_800_000, key="task_max_ttl_ms")
         self._poll_ms = poll_interval_ms if poll_interval_ms is not None else _env_int(
-            "MAVERICK_MCP_TASK_POLL_MS", 1_000, lo=50, hi=3_600_000)
+            "MAVERICK_MCP_TASK_POLL_MS", 1_000, lo=50, hi=3_600_000, key="task_poll_ms")
         # Upper bound on how long a single ``tasks/result`` call blocks a worker
         # thread, INDEPENDENT of the task's ttl (see result()). Defaults to 60s.
         self._result_block_ms = result_block_ms if result_block_ms is not None else _env_int(
-            "MAVERICK_MCP_TASK_RESULT_BLOCK_MS", 60_000, lo=1_000, hi=600_000)
+            "MAVERICK_MCP_TASK_RESULT_BLOCK_MS", 60_000, lo=1_000, hi=600_000, key="task_result_block_ms")
         self._page_size = max(1, page_size)
         workers = max_workers if max_workers is not None else _env_int(
-            "MAVERICK_MCP_TASK_WORKERS", 4, lo=1, hi=64)
+            "MAVERICK_MCP_TASK_WORKERS", 4, lo=1, hi=64, key="task_workers")
         self._executor = ThreadPoolExecutor(
             max_workers=workers, thread_name_prefix="mcp-task")
         self._tasks: dict[str, McpTask] = {}
         self._lock = threading.Lock()
+        self._closed = False
+        self._result_waiters = 0
 
     # ---- lifecycle ------------------------------------------------------
 
@@ -221,6 +233,8 @@ class TaskStore:
             quota_owner=quota_owner,
         )
         with self._lock:
+            if self._closed:
+                raise TaskError(_INVALID_PARAMS, "task store is shutting down")
             self._reject_if_owner_over_quota_locked(task.quota_owner)
             self._make_room_for_task_locked()
             self._tasks[task.id] = task
@@ -229,6 +243,7 @@ class TaskStore:
             # inserted task with `future is None` and evict a starting worker.
             task.future = self._executor.submit(
                 self._run, task, name, arguments, context)
+            task.future.add_done_callback(lambda _future: task.execution.finished.set())
         return task
 
     def _resolve_ttl(self, task_param: dict) -> int:
@@ -248,8 +263,32 @@ class TaskStore:
         arguments: dict,
         context: object | None,
     ) -> None:
-        if task.cancel_requested:  # cancelled before the worker picked it up
-            return
+        try:
+            with task.execution.scope():
+                self._run_owned(task, name, arguments, context)
+        except ExecutionCancelled:
+            changed = False
+            with self._lock:
+                if task.status not in TASK_TERMINAL:
+                    self._cancel_task_locked(task, "The task execution stopped after cancellation or expiry.")
+                    changed = True
+            if changed:
+                self._notify(task)
+        except BaseException as exc:
+            changed = False
+            with self._lock:
+                if task.status not in TASK_TERMINAL:
+                    if isinstance(exc, asyncio.CancelledError):
+                        self._cancel_task_locked(task, "The owned runner was cancelled.")
+                    else:
+                        task.result = {"isError": True, "content": [{"type": "text", "text": f"task failed: {type(exc).__name__}"}]}
+                        task.set_status("failed", f"task failed: {type(exc).__name__}")
+                    changed = True
+            if changed:
+                self._notify(task)
+            raise
+
+    def _run_owned(self, task, name, arguments, context) -> None:
         try:
             if context is not None:
                 if self._context_runner is None:
@@ -257,8 +296,11 @@ class TaskStore:
                 result = self._context_runner(name, arguments, context)
             else:
                 result = self._runner(name, arguments)
+            task.execution.check()
+        except ExecutionCancelled:
+            raise
         except Exception as e:  # noqa: BLE001 -- a runner crash must fail the task, not the pool
-            log.exception("mcp task %s (%s) crashed", task.id, name)
+            log.error("mcp task %s (%s) failed: %s", task.id, name, type(e).__name__)
             changed = False
             with self._lock:
                 if task.status not in TASK_TERMINAL:
@@ -267,7 +309,7 @@ class TaskStore:
                         "content": [{"type": "text",
                                      "text": f"task failed: {type(e).__name__}"}],
                     }
-                    task.set_status("failed", f"{type(e).__name__}: {e}"[:500])
+                    task.set_status("failed", f"task failed: {type(e).__name__}")
                     changed = True
             if changed:
                 self._notify(task)
@@ -305,20 +347,36 @@ class TaskStore:
         reauthorize: TaskAuthorizer | None = None,
     ) -> dict:
         task = self._require(task_id, owner=owner, authorize=authorize)
-        # Block until terminal (spec requirement) -- but bound how long a SINGLE
-        # call blocks, independent of the task's ttl. result() runs on the HTTP
-        # dispatch thread pool, so waiting the full ttl (up to 24h) lets a caller
-        # pin every worker thread with a few large-ttl tasks and freeze the whole
-        # server (auth, /healthz, everything). Cap at _result_block_ms (default
-        # 60s); on timeout raise so the client re-issues tasks/result or polls
-        # tasks/get. The task keeps running until it terminates or its ttl lapses.
+        # Synchronous embedding compatibility. Both transports use result_async
+        # so result waits do not occupy dispatch workers. Either API bounds a
+        # single wait independently of the task TTL and rechecks authority.
         wait_s = max(1.0, min((task.ttl_ms or 0) / 1000.0 + 5.0,
                               self._result_block_ms / 1000.0))
         task.done.wait(timeout=wait_s)
+        return self._result_response(task, reauthorize or authorize)
+
+    async def result_async(
+        self, task_id: str, *, owner: str | None = None,
+        authorize: TaskAuthorizer | None = None,
+        reauthorize: TaskAuthorizer | None = None,
+    ) -> dict:
+        task = self._require(task_id, owner=owner, authorize=authorize)
+        with self._lock:
+            if self._result_waiters >= self._max_tasks:
+                raise TaskError(_INVALID_PARAMS, "too many pending task result waits")
+            self._result_waiters += 1
+        try:
+            wait_s = max(0.001, min((task.ttl_ms or 0) / 1000.0 + 5.0, self._result_block_ms / 1000.0))
+            await task.done.wait_async(wait_s)
+            return self._result_response(task, reauthorize or authorize)
+        finally:
+            with self._lock:
+                self._result_waiters -= 1
+
+    def _result_response(self, task: McpTask, final_authorizer: TaskAuthorizer | None) -> dict:
         # Re-check after the potentially long wait: an operator revocation or
         # capability narrowing that lands while result() blocks must prevent
         # the now-sensitive result from crossing the boundary.
-        final_authorizer = reauthorize or authorize
         if final_authorizer is not None and not final_authorizer(task.tool_name):
             raise TaskError(_INVALID_PARAMS, "task not found")
         with self._lock:
@@ -331,6 +389,7 @@ class TaskStore:
         out = dict(res)
         meta = dict(out.get("_meta") or {})
         meta[RELATED_TASK_META] = {"taskId": task.id}
+        meta["lightwork/execution"] = task.execution.snapshot()
         out["_meta"] = meta
         return out
 
@@ -358,9 +417,8 @@ class TaskStore:
                 raise TaskError(
                     _INVALID_PARAMS,
                     f"cannot cancel task in terminal status {task.status!r}")
-            # Best effort: an in-flight run isn't force-killed, but queued work
-            # remains counted until a worker drains it and running results are
-            # discarded.
+            # Request cooperative stop; retain queued/running capacity until
+            # the real future exits, and expose acknowledgment separately.
             self._cancel_task_locked(task, "The task was cancelled by request.")
             snapshot = task.to_dict()
         self._notify(task)
@@ -472,12 +530,13 @@ class TaskStore:
 
     def _cancel_task_locked(self, task: McpTask, message: str) -> None:
         task.cancel_requested = True
+        task.execution.cancel()
         # Do not call Future.cancel() here: ThreadPoolExecutor leaves cancelled
         # work items in its internal queue until a worker drains them. Keeping
         # the future pending makes the task continue counting toward
         # _max_tasks, so repeated cancel/expire cycles cannot grow that queue
-        # without bound. Running tasks cannot be force-killed; _run drops their
-        # results after observing cancel_requested.
+        # without bound. Running tasks stop at owned cooperative boundaries;
+        # noncooperative results are discarded without claiming rollback.
         task.set_status("cancelled", message)
 
     def _purge_expired(self) -> None:
@@ -504,4 +563,11 @@ class TaskStore:
             log.warning("mcp task %s status-notify failed", task.id, exc_info=True)
 
     def shutdown(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        with self._lock:
+            self._closed = True
+            for task in self._tasks.values():
+                if task.status not in TASK_TERMINAL:
+                    self._cancel_task_locked(task, "The task store is shutting down.")
+        # Retain queued futures until workers drain them. Their owned handles
+        # acknowledge cancellation before invoking the runner.
+        self._executor.shutdown(wait=False, cancel_futures=False)

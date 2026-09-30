@@ -11,7 +11,7 @@ Seams: the embedders are **injected** (``audio_embed(bytes) -> vector``,
 ``text_embed(labels) -> vectors``) so the ranking math is testable offline.
 The default adapters lazy-load transformers' ClapModel behind the ``[clap]``
 extra (``python -m pip install -e './packages/maverick-core[clap]'``); model name comes from
-``MAVERICK_CLAP_MODEL`` (default ``laion/clap-htsat-unfused``). Nothing is
+``[models] clap`` / ``MAVERICK_CLAP_MODEL`` (default ``laion/clap-htsat-unfused``). Nothing is
 downloaded until a default adapter is actually called.
 
 ops:
@@ -48,6 +48,22 @@ def _env_int(name: str, default: int) -> int:
 # decode runs unconditionally before any CLAP model load. 64 MiB default (a few
 # minutes of 16-bit PCM); tunable for legitimately larger clips.
 MAX_AUDIO_BYTES = _env_int("MAVERICK_AUDIO_MAX_BYTES", 64 * 1024 * 1024)
+
+
+def _audio_limit() -> int:
+    """The byte cap in force: ``MAVERICK_AUDIO_MAX_BYTES`` when set, else
+    ``[attachments] audio_max_bytes`` (the All settings page), else the
+    built-in 64 MiB. Read per call so a saved change applies to the next clip."""
+    if os.environ.get("MAVERICK_AUDIO_MAX_BYTES", "").strip():
+        return MAX_AUDIO_BYTES
+    try:
+        from ..config import load_config
+        value = ((load_config() or {}).get("attachments") or {}).get("audio_max_bytes")
+    except Exception:  # pragma: no cover - config never blocks the tool
+        return MAX_AUDIO_BYTES
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return MAX_AUDIO_BYTES
+    return value
 
 
 # ---------- pure math (no model, no deps) ----------
@@ -93,9 +109,10 @@ def decode_wav(data: bytes) -> tuple[list[float], int]:
     # ``wave`` raises wave.Error / EOFError on malformed or truncated input;
     # normalise those to ValueError so callers (the tool's _run) get the same
     # "bad audio" contract they already handle for the non-16-bit case.
-    if len(data) > MAX_AUDIO_BYTES:
+    limit = _audio_limit()
+    if len(data) > limit:
         raise ValueError(
-            f"audio too large: {len(data)} bytes (limit {MAX_AUDIO_BYTES}); "
+            f"audio too large: {len(data)} bytes (limit {limit}); "
             "raise MAVERICK_AUDIO_MAX_BYTES if this is expected"
         )
     try:
@@ -106,9 +123,9 @@ def decode_wav(data: bytes) -> tuple[list[float], int]:
             # Bound the PCM payload before readframes materializes it and the
             # per-sample float list below; getnframes/getnchannels are header
             # values, so reject a lying/huge header without allocating.
-            if w.getnframes() * max(1, n_ch) * max(1, width) > MAX_AUDIO_BYTES:
+            if w.getnframes() * max(1, n_ch) * max(1, width) > limit:
                 raise ValueError(
-                    f"audio too large: declared PCM exceeds limit {MAX_AUDIO_BYTES}; "
+                    f"audio too large: declared PCM exceeds limit {limit}; "
                     "raise MAVERICK_AUDIO_MAX_BYTES if this is expected"
                 )
             frames = w.readframes(w.getnframes())
@@ -149,9 +166,17 @@ def _load_clap():
                 "CLAP audio understanding needs transformers + torch. "
                 "Run: python -m pip install -e './packages/maverick-core[clap]'"
             ) from e
-        name = os.environ.get("MAVERICK_CLAP_MODEL", DEFAULT_CLAP_MODEL)
+        name = clap_model_name()
         _clap = (ClapModel.from_pretrained(name), ClapProcessor.from_pretrained(name))
         return _clap
+
+
+def clap_model_name() -> str:
+    """``[models] clap`` (env ``MAVERICK_CLAP_MODEL`` wins), else the default."""
+    from ..env_setting import env_or_config
+
+    return (env_or_config("MAVERICK_CLAP_MODEL", "models", "clap") or "").strip() \
+        or DEFAULT_CLAP_MODEL
 
 
 def embed_waveform(waveform: list[float], rate: int) -> list[float]:
@@ -196,10 +221,11 @@ def _read_audio(args: dict[str, Any], sandbox: Any) -> bytes | str:
         return f"ERROR: {e}"
     if not path.exists() or not path.is_file():
         return f"ERROR: audio file not found: {src!r}"
-    if path.stat().st_size > MAX_AUDIO_BYTES:
+    limit = _audio_limit()
+    if path.stat().st_size > limit:
         return (
             f"ERROR: audio file too large: {path.stat().st_size} bytes "
-            f"(limit {MAX_AUDIO_BYTES}); raise MAVERICK_AUDIO_MAX_BYTES if expected"
+            f"(limit {limit}); raise MAVERICK_AUDIO_MAX_BYTES if expected"
         )
     return path.read_bytes()
 

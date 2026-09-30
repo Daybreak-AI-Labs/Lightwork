@@ -6,13 +6,10 @@
 // real key, and forwards to the single configured upstream. The key never lives
 // in the agent's address space.
 //
-// Why Go: the security-critical decision logic (BuildRequest / Authenticate /
-// RouteAllowed) is a faithful, byte-for-byte port of the Python original and is
-// exhaustively parity-tested against it. The reason to run it here rather than
-// in Python is the listener: this sits in the inference data path, and Go's
-// goroutine-per-request model forwards concurrent calls without the GIL
-// serialization of Python's ThreadingHTTPServer — throughput/density, not
-// per-call latency. Behaviour is identical; concurrency is not.
+// BuildRequest / Authenticate / RouteAllowed share generated parity fixtures
+// with Python. Both listeners stream bounded responses and own cancellation;
+// Go offers a standalone deployment binary without a Python runtime. No
+// latency or throughput advantage over Python is implied by the language.
 package proxy
 
 import (
@@ -35,6 +32,7 @@ var hopByHop = map[string]struct{}{
 // Client credential headers stripped before forwarding. Mirrors _AUTH_HEADERS.
 var authHeaders = map[string]struct{}{
 	"authorization": {}, "x-api-key": {}, "api-key": {},
+	"x-maverick-proxy-token": {},
 }
 
 // DefaultPort matches model_proxy.DEFAULT_PORT.
@@ -57,14 +55,18 @@ var DefaultAllowedRoutes = map[string]struct{}{
 
 // Config is the proxy configuration. Mirrors model_proxy.ProxyConfig.
 type Config struct {
-	Upstream      string
-	APIKey        string
-	ListenHost    string
-	ListenPort    int
-	AuthStyle     string // "bearer" | "x-api-key"
-	AllowHosts    map[string]struct{}
-	ClientToken   string
-	AllowedRoutes map[string]struct{}
+	Upstream         string
+	APIKey           string
+	ListenHost       string
+	ListenPort       int
+	AuthStyle        string // "bearer" | "x-api-key"
+	AllowHosts       map[string]struct{}
+	ClientToken      string
+	AllowedRoutes    map[string]struct{}
+	MaxRequestBytes  int64
+	MaxResponseBytes int64
+	TotalSeconds     float64
+	MaxConnections   int
 }
 
 // allowed returns the host allow-set: AllowHosts if set, else the single
@@ -196,17 +198,7 @@ func BuildRequest(c *Config, path string, headers map[string]string) (string, ma
 	if _, ok := allowed[host]; !ok {
 		return "", nil, &HostNotAllowedError{Host: host, Allowed: sortedKeys(allowed)}
 	}
-	out := map[string]string{}
-	for k, v := range headers {
-		lk := strings.ToLower(k)
-		if _, hop := hopByHop[lk]; hop {
-			continue
-		}
-		if _, auth := authHeaders[lk]; auth {
-			continue
-		}
-		out[k] = v
-	}
+	out := StripResponseHeaders(headers)
 	if c.AuthStyle == "x-api-key" {
 		out["x-api-key"] = c.APIKey
 	} else {
@@ -218,9 +210,23 @@ func BuildRequest(c *Config, path string, headers map[string]string) (string, ma
 // StripResponseHeaders drops hop-by-hop headers from an upstream response,
 // mirroring the filtering in model_proxy.forward.
 func StripResponseHeaders(headers map[string]string) map[string]string {
+	nominated := map[string]struct{}{}
+	for k, v := range headers {
+		if strings.EqualFold(k, "connection") {
+			for _, name := range strings.Split(v, ",") {
+				nominated[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+			}
+		}
+	}
 	out := map[string]string{}
 	for k, v := range headers {
 		if _, hop := hopByHop[strings.ToLower(k)]; hop {
+			continue
+		}
+		if _, auth := authHeaders[strings.ToLower(k)]; auth {
+			continue
+		}
+		if _, named := nominated[strings.ToLower(k)]; named {
 			continue
 		}
 		out[k] = v

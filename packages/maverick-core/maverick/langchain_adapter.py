@@ -36,7 +36,7 @@ def run_maverick_goal(
     goal: str,
     description: str = "",
     *,
-    max_dollars: float = 2.0,
+    max_dollars: float | None = None,
     channel: str | None = None,
     user_id: str | None = None,
     capability: Any | None = None,
@@ -84,7 +84,7 @@ def _close(world: Any) -> None:
 
 def maverick_langchain_tool(
     *,
-    max_dollars: float = 2.0,
+    max_dollars: float | None = None,
     channel: str | None = None,
     user_id: str | None = None,
     capability: Any | None = None,

@@ -815,7 +815,7 @@ def _eval_budget(settings: dict):
         from .budget import Budget
         big = 10**9
         return Budget(max_dollars=float(dollars), max_input_tokens=big,
-                      max_output_tokens=big, max_tool_calls=big)
+                      max_output_tokens=big, max_tool_calls=big, max_wall_seconds=3600.0)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(
             "self-harness evaluation budget policy is invalid") from exc
@@ -1840,6 +1840,24 @@ def run_corpus_quality(*, key: str | None = None, corpus_path: str | None = None
         return []
 
 
+#: Largest deployed system-prompt snapshot a self-harness run accepts.
+EVALUATION_SYSTEM_LIMIT = 1024 * 1024
+
+
+def read_evaluation_system(raw: bytes) -> str:
+    """Validate the exact deployed system-prompt snapshot that risk-limited
+    evaluation uses as both A/B arms' baseline (``self-harness run
+    --system-prompt-file`` and the dashboard's upload). Callers read at most
+    ``EVALUATION_SYSTEM_LIMIT + 1`` bytes so an oversize file is refused here.
+    Raises ``ValueError`` (``UnicodeDecodeError`` for bad UTF-8)."""
+    if len(raw) > EVALUATION_SYSTEM_LIMIT:
+        raise ValueError("system prompt exceeds the 1 MiB limit")
+    text = raw.decode("utf-8")
+    if not text.strip() or "\x00" in text:
+        raise ValueError("system prompt must be non-empty UTF-8 text without NULs")
+    return text
+
+
 def harness_fleet_models() -> list[str]:
     """The DISTINCT set of models the fleet runs, resolved across every role in
     ``llm.ROLE_MODELS`` (each via ``model_for_role``, deduped, sorted for a
@@ -1861,7 +1879,8 @@ def harness_fleet_models() -> list[str]:
     return sorted(models)
 
 
-def run_self_harness_all_models(*, limit: int = 500, retire: bool = True, **cycle_kwargs):
+def run_self_harness_all_models(*, limit: int = 500, retire: bool = True,
+                                should_stop: Callable[[], bool] | None = None, **cycle_kwargs):
     """Run a self-harness cycle for EVERY distinct configured role model, so
     WORKER models learn their own harness, not just the orchestrator -- the
     harness is model-specific and a real fleet runs several models. Returns
@@ -1872,13 +1891,17 @@ def run_self_harness_all_models(*, limit: int = 500, retire: bool = True, **cycl
     scorers it is a fleet-wide DRY inspection + stale-line retirement; live
     per-model A/B scoring is the operator's to wire (a real evaluation needs a
     real model). Operational failures are isolated per sweep; :class:`Halted`
-    is re-raised for the caller."""
+    is re-raised for the caller. ``should_stop`` (optional) is asked before
+    each model, so an operator's stop request ends the sweep between models
+    and never inside one model's cycle."""
     out: dict[str, tuple] = {}
     try:
         from . import self_harness
         if not self_harness.enabled():
             return out
         for m in harness_fleet_models():
+            if should_stop is not None and should_stop():
+                break
             out[m] = run_self_harness_cycle(
                 model_id=m, limit=limit, retire=retire, **cycle_kwargs)
     except Halted:

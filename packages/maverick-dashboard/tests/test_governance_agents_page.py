@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -49,7 +50,7 @@ def page_client() -> TestClient:
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
-def test_page_exposes_all_agents_and_confirmation_gated_operations(page_client) -> None:
+def test_page_exposes_all_agents_with_buttons_that_start_disabled(page_client) -> None:
     response = page_client.get("/governance-agents")
     assert response.status_code == 200
     page = response.text
@@ -61,16 +62,11 @@ def test_page_exposes_all_agents_and_confirmation_gated_operations(page_client) 
         "Third-party risk",
     ):
         assert label in page
-    assert "Decision support, not autonomous authority" in page
-    assert "/api/v1/governance-agents" in page
+    assert "A person decides" in page
+    assert 'data-api="/api/v1/governance-agents"' in page
     for operation in (
-        "policy-publish",
-        "policy-revoke",
         "analysis",
-        "review",
-        "execute",
-        "recover",
-        "run-revoke",
+        "run-list",
         "retention-purge",
         "maintenance-readiness",
         "adapter-rotate",
@@ -78,27 +74,23 @@ def test_page_exposes_all_agents_and_confirmation_gated_operations(page_client) 
         "dispatcher-rotate",
         "dispatcher-revoke",
         "custody-rotate",
-        "custody-retire",
-        "token-revoke",
         "token-reconcile",
         "integrity",
         "intent-list",
     ):
-        assert f'value="{operation}"' in page
-    assert "ga-confirm" in page
-    assert "textContent" in page
-    assert 'id="ga-operation-controls" disabled aria-disabled="true"' in page
-    operation_options = page.split('id="ga-operation"', 1)[1].split(
-        "</select>", 1
-    )[0]
-    assert operation_options.count("<option ") == operation_options.count(
-        "<option value="
-    )
-    assert operation_options.count("<option value=") == operation_options.count(
-        " disabled>"
-    )
-    assert "configured for an attempt" in page
-    assert "does not open the store" in page
+        assert f'data-op="{operation}"' in page
+    # Every server-rendered operation button starts disabled until the
+    # status response confirms its composition.
+    buttons = re.findall(r"<button[^>]*data-op=\"[^\"]+\"[^>]*>", page)
+    assert buttons and all(" disabled" in button for button in buttons)
+    # No operation console, typed path values or raw request bodies remain.
+    assert "ga-path-values" not in page and "ga-body" not in page and "<textarea" not in page
+    script = (
+        Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork-governance-agents.js"
+    ).read_text(encoding="utf-8")
+    for row_operation in ("review", "execute", "recover", "run-revoke", "policy-revoke"):
+        assert f'"{row_operation}"' in script
+    assert "window.mvConfirm" in script and "window.mvForm" in script
 
 
 @pytest.mark.parametrize(
@@ -106,74 +98,24 @@ def test_page_exposes_all_agents_and_confirmation_gated_operations(page_client) 
     [
         (
             "operator",
-            {"analysis", "run-get", "run-list", "review"},
-            {
-                "policy-publish",
-                "policy-revoke",
-                "execute",
-                "recover",
-                "run-revoke",
-                "retention-purge",
-                "maintenance-readiness",
-                "adapter-rotate",
-                "adapter-revoke",
-                "dispatcher-rotate",
-                "dispatcher-revoke",
-                "custody-rotate",
-                "custody-retire",
-                "token-revoke",
-                "token-reconcile",
-                "integrity",
-                "intent-list",
-            },
+            {"analysis", "run-list"},
+            {"retention-purge", "maintenance-readiness", "adapter-rotate", "adapter-revoke",
+             "dispatcher-rotate", "dispatcher-revoke", "custody-rotate", "token-reconcile",
+             "integrity", "intent-list"},
         ),
         (
             "auditor",
-            {"run-get", "run-list", "integrity", "intent-list"},
-            {
-                "policy-publish",
-                "policy-revoke",
-                "analysis",
-                "review",
-                "execute",
-                "recover",
-                "run-revoke",
-                "retention-purge",
-                "maintenance-readiness",
-                "adapter-rotate",
-                "adapter-revoke",
-                "dispatcher-rotate",
-                "dispatcher-revoke",
-                "custody-rotate",
-                "custody-retire",
-                "token-revoke",
-                "token-reconcile",
-            },
+            {"run-list", "integrity", "intent-list"},
+            {"analysis", "retention-purge", "maintenance-readiness", "adapter-rotate",
+             "adapter-revoke", "dispatcher-rotate", "dispatcher-revoke", "custody-rotate",
+             "token-reconcile"},
         ),
         (
             "viewer",
-            {"run-get", "run-list"},
-            {
-                "policy-publish",
-                "policy-revoke",
-                "analysis",
-                "review",
-                "execute",
-                "recover",
-                "run-revoke",
-                "retention-purge",
-                "maintenance-readiness",
-                "adapter-rotate",
-                "adapter-revoke",
-                "dispatcher-rotate",
-                "dispatcher-revoke",
-                "custody-rotate",
-                "custody-retire",
-                "token-revoke",
-                "token-reconcile",
-                "integrity",
-                "intent-list",
-            },
+            {"run-list"},
+            {"analysis", "retention-purge", "maintenance-readiness", "adapter-rotate",
+             "adapter-revoke", "dispatcher-rotate", "dispatcher-revoke", "custody-rotate",
+             "token-reconcile", "integrity", "intent-list"},
         ),
     ],
 )
@@ -186,21 +128,28 @@ def test_page_server_renders_only_exact_role_operations(
     page = page_client.get("/governance-agents", params={"role": role}).text
 
     for operation in present:
-        assert f'value="{operation}"' in page
+        assert f'data-op="{operation}"' in page
     for operation in absent:
-        assert f'value="{operation}"' not in page
+        assert f'data-op="{operation}"' not in page
+    script = (
+        Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork-governance-agents.js"
+    ).read_text(encoding="utf-8")
+    # Row buttons are created only for the matching role; the server still
+    # enforces each permission.
+    assert 'if (can.operate && run.state === "pending_review")' in script
+    assert "if (can.admin && run.state === \"approved\" && policy && policy.execution_enabled)" in script
 
 
 def test_page_client_fails_closed_on_status_and_response_contracts() -> None:
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"
-        / "templates"
-        / "governance_agents.html"
+        / "static"
+        / "lightwork-governance-agents.js"
     ).read_text(encoding="utf-8")
 
     for required in (
-        "MAX_RESPONSE_BYTES = 64 * 1024",
+        "MAX_RESPONSE_BYTES = 1024 * 1024",
         'headers.get("Content-Length")',
         "response.body.getReader()",
         "reader.cancel()",
@@ -227,7 +176,7 @@ def test_page_client_fails_closed_on_status_and_response_contracts() -> None:
     [
         ("operator", "analysis", "integrity"),
         ("auditor", "integrity", "analysis"),
-        ("admin", "policy-publish", None),
+        ("admin", "custody-rotate", None),
     ],
 )
 def test_dashboard_route_passes_exact_tenant_and_global_permissions(
@@ -283,9 +232,9 @@ def test_dashboard_route_passes_exact_tenant_and_global_permissions(
     assert response.headers["cache-control"] == "no-store, private, max-age=0"
     assert response.headers["pragma"] == "no-cache"
     assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
-    assert f'value="{visible}"' in response.text
+    assert f'data-op="{visible}"' in response.text
     if hidden is not None:
-        assert f'value="{hidden}"' not in response.text
+        assert f'data-op="{hidden}"' not in response.text
 
 
 def test_page_fails_closed_and_static_dom_is_safe(page_client) -> None:
@@ -331,3 +280,25 @@ def test_dashboard_mounts_page_api_visibility_and_security_link(
         Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "security.html"
     ).read_text(encoding="utf-8")
     assert 'href="/governance-agents"' in security
+
+
+def test_page_is_plain_language(page_client) -> None:
+    body = page_client.get("/governance-agents").text
+    main = body.split('<main id="content"', 1)[-1].split("</main>", 1)[0]
+    text = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", main, flags=re.DOTALL))
+    banned = re.compile(
+        r"\b(tenant|principals?|payload|endpoint|schema|uuid|sha-?256|digest|idempoten\w*|"
+        r"revision|json|composition|adapter|dispatcher|custody|intent|fail-closed)\b|/api/v1|HTTP \d{3}",
+        re.IGNORECASE,
+    )
+    assert banned.search(text) is None, banned.search(text)
+    for label in ("Start a review", "See past reviews", "Reviews", "Policies", "Technical details"):
+        assert label in text
+
+
+def test_governance_assistant_script_is_served() -> None:
+    from maverick_dashboard.app import app
+
+    response = TestClient(app).get("/static/lightwork-governance-agents.js")
+    assert response.status_code == 200
+    assert "ga-root" in response.text

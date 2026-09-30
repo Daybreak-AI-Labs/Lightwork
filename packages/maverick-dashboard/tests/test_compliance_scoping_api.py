@@ -562,3 +562,57 @@ def test_all_core_operations_are_mounted_and_adapter_has_no_network_client(
     source = Path(api.__file__).read_text(encoding="utf-8")
     for primitive in ("requests.", "httpx.", "urllib.request", "socket."):
         assert primitive not in source
+
+
+def test_records_list_every_kind_for_the_workspace_and_report_uses_the_default_key(
+    environment,
+) -> None:
+    client, _database, state = environment
+    empty = client.get(f"{API}/records")
+    assert empty.status_code == 200
+    assert empty.json() == {"questionnaires": [], "assessments": [], "scopes": [], "reports": []}
+    _create_and_publish(client)
+    assessment = _answer_all(client, _create_assessment(client))
+    computed = client.put(
+        f"{API}/assessments/assessment-a/scopes/scope-a",
+        headers={"X-Test-Subject": "operator"},
+        json={
+            "responsibility_assignments": {
+                "first_line": "ref:business-owner",
+                "second_line": "ref:risk-owner",
+                "control_owner": "ref:control-owner",
+                "evidence_owner": "ref:evidence-owner",
+            },
+            "expected_assessment_revision": assessment["revision"],
+            "idempotency_key": "compute",
+        },
+    ).json()
+    listed = client.get(f"{API}/records").json()
+    assert [q["status"] for q in listed["questionnaires"]] == ["published"]
+    assert listed["assessments"][0]["assessment_id"] == "assessment-a"
+    assert listed["assessments"][0]["answered"] == 9
+    assert listed["scopes"][0]["scope_id"] == "scope-a"
+    assert listed["scopes"][0]["revision"] == computed["revision"]
+    assert ("tenant", "view") in state["permission_calls"]
+
+    approved = client.post(
+        f"{API}/scopes/scope-a/approve",
+        headers={"X-Test-Subject": "approver"},
+        json={"expected_revision": computed["revision"], "idempotency_key": "approve"},
+    ).json()
+    client.post(
+        f"{API}/scopes/scope-a/finalize",
+        headers={"X-Test-Subject": "operator"},
+        json={"expected_revision": approved["revision"], "idempotency_key": "finalize"},
+    )
+    report = client.post(
+        f"{API}/scopes/scope-a/report",
+        headers={"X-Test-Subject": "operator"},
+        json={"idempotency_key": "report-1"},
+    )
+    assert report.status_code == 200, report.text
+    assert report.json()["signing_key_ref"] == api.DEFAULT_REPORT_SIGNING_KEY_REF
+    assert client.get(f"{API}/records").json()["reports"][0]["scope_id"] == "scope-a"
+
+    state["tenant"] = "tenant-b"
+    assert client.get(f"{API}/records").json()["scopes"] == []

@@ -98,6 +98,7 @@ def test_subprocess_tools_import_scrub_helper():
             or "scrub_child_env" in src
             or "scrub_env" in src
             or "sandbox.exec" in src
+            or (name == "ocr" and "run_document_job" in src)
         ), f"{name} no longer scrubs the child env nor routes through the sandbox"
 
 
@@ -160,7 +161,15 @@ def test_media_tools_route_through_sandbox_chokepoint():
     tdir = pathlib.Path(T.__file__).parent
     for name in ["ffmpeg_tool", "imagemagick_tool", "pandoc_tool", "ocr", "a11y"]:
         src = (tdir / f"{name}.py").read_text()
-        assert "sandbox_run" in src, f"{name} must route shell through sandbox_run"
+        if name == "ocr":
+            # OCR now owns an immutable staged document job. The common job
+            # service, not the caller, invokes the explicitly selected backend.
+            assert "run_document_job" in src
+            jobs = (tdir / "document_processing.py").read_text()
+            assert 'worker.exec(command, timeout=request["timeout"])' in jobs
+            assert "subprocess.run(" not in jobs
+        else:
+            assert "sandbox_run" in src, f"{name} must route shell through sandbox_run"
         # No leftover direct host subprocess invocation.
         assert "subprocess.run(" not in src, (
             f"{name} still calls subprocess.run directly; route via sandbox_run"

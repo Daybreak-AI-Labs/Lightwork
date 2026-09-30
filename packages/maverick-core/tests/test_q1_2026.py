@@ -169,7 +169,7 @@ def test_killswitch_default_path_follows_current_home(tmp_path, monkeypatch):
     ("aws_access_key_id",  "AKIAIOSFODNN7EXAMPLE"),
     ("github_pat_classic", "ghp_AbCdEf1234567890AbCdEf1234567890abcd"),
     ("google_api_key",     "AIzaSyB6CdEf1234567890abcdefghijklmnopq"),
-    ("stripe_live_key",    "sk_live_1234567890abcdefghijklmnop"),
+    ("stripe_live_key",    "sk_live_1234567890abcdefghijklmnop"),  # pragma: allowlist secret -- synthetic sequential digits and alphabet detector fixture
     ("jwt",                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.signature"),
 ])
 def test_secret_detector_finds(secret_name, secret_value):

@@ -14,6 +14,9 @@ dashboard origin, not a hosted service.
 - `data-maverick-title` — header/button label.
 
 The widget `fetch`es `POST {base}/chat/send` with `credentials: include`, so the
-embedding origin must be allowed by the dashboard's auth / CORS policy (serve the
-widget from the same origin, or configure CORS). No build step, no dependencies —
+widget must run on the dashboard's own origin; it refuses a cross-origin base.
+Unconfirmed starts retain their request key through reload. **Check start status**
+reads the original receipt without submitting another goal. No build step, no dependencies —
 one `<script>` tag.
+
+See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

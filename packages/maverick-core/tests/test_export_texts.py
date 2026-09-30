@@ -56,8 +56,8 @@ def test_export_texts_builds_id_to_transcript_map():
     fetch = lambda rec: _events() if rec["goal_id"] == 1 else []  # noqa: E731
     out = export_texts.export_texts(records, fetch)
     # only the record with events gets a transcript; the empty one is omitted
-    assert set(out) == {"h1-10"}
-    assert "patch applied" in out["h1-10"]
+    assert set(out) == {export_texts.record_trajectory_id(records[0])}
+    assert "patch applied" in out[export_texts.record_trajectory_id(records[0])]
 
 
 # ---------- rejected-draft text rides in the sidecar ----------
@@ -69,7 +69,7 @@ def test_export_texts_emits_rejected_draft_text():
     rec = _record("h1", 10, 1)
     rec["rejected_attempts"] = [{"text": "the weak first draft", "confidence": 0.6}]
     out = export_texts.export_texts([rec], lambda r: _events())
-    assert out["h1-10"]                                  # chosen transcript
+    assert out[export_texts.record_trajectory_id(rec)]    # chosen transcript
     rej_id = rejected_trajectory_id(rec, 0)
     assert out[rej_id] == "the weak first draft"         # rejected half
 
@@ -77,7 +77,7 @@ def test_export_texts_skips_rejected_without_text():
     rec = _record("h1", 10, 1)
     rec["rejected_attempts"] = [{"confidence": 0.6}]     # stripped (no donate_text)
     out = export_texts.export_texts([rec], lambda r: _events())
-    assert set(out) == {"h1-10"}                          # no rejected entry
+    assert set(out) == {export_texts.record_trajectory_id(rec)}  # no rejected entry
 
 
 def test_export_texts_emits_candidate_patches():
@@ -107,7 +107,8 @@ def test_main_writes_sidecar_loadable_by_rlaif(tmp_path, monkeypatch):
     rc = export_texts.main(["--in", str(outbox), "--out", str(out)])
     assert rc == 0 and out.exists()
     side = rlaif.load_text_sidecar(out)        # the consumer reads it back
-    assert side["hh-99"] and "patch applied" in side["hh-99"]
+    identity = export_texts.record_trajectory_id(_record("hh", 99, 5))
+    assert side[identity] and "patch applied" in side[identity]
 
 
 def test_main_empty_outbox_writes_empty_and_warns(tmp_path, capsys):

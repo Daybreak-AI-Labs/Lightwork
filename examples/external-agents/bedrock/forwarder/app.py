@@ -17,6 +17,7 @@ import logging
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import boto3
@@ -39,6 +40,9 @@ OPERATIONS: dict[str, tuple[str, str]] = {
     "executeAction": ("POST", "/api/v1/external/execute"),
     "executionStatus": ("GET", "/api/v1/external/executions/{execution_id}"),
     "commitExecution": ("POST", "/api/v1/external/executions/{execution_id}/commit"),
+    "evaluateRuntimeContent": ("POST", "/api/v1/external/runtime/evaluate"),
+    "pullRedTeamCases": ("GET", "/api/v1/external/red-team/{campaign_id}/cases"),
+    "submitRedTeamResult": ("POST", "/api/v1/external/red-team/{campaign_id}/results"),
 }
 _BY_ROUTE: dict[tuple[str, str], tuple[str, str]] = {
     (method, path): (method, path) for method, path in OPERATIONS.values()
@@ -100,9 +104,17 @@ def _path_parameters(event: dict) -> dict[str, str]:
 
 def _coerce(value: object, declared_type: str) -> object:
     """Best-effort cast of Bedrock's stringly-typed property values."""
+    kind = (declared_type or "").lower()
+    if kind == "object":
+        try:
+            parsed = json.loads(value) if isinstance(value, str) else value
+        except ValueError as err:
+            raise ValueError("object property must contain valid JSON") from err
+        if not isinstance(parsed, dict):
+            raise ValueError("object property must contain a JSON object")
+        return parsed
     if not isinstance(value, str):
         return value
-    kind = (declared_type or "").lower()
     try:
         if kind == "integer":
             return int(value)
@@ -125,7 +137,10 @@ def _request_body(event: dict) -> dict:
     for prop in properties:
         name = prop.get("name")
         if name:
-            body[str(name)] = _coerce(prop.get("value"), str(prop.get("type") or ""))
+            try:
+                body[str(name)] = _coerce(prop.get("value"), str(prop.get("type") or ""))
+            except ValueError as err:
+                raise ValueError(f"{name}: {err}") from err
     return body
 
 
@@ -172,9 +187,19 @@ def lambda_handler(event: dict, _context: object) -> dict:
         return _bedrock_response(event, 400, json.dumps({"detail": str(err)}))
 
     path = template
+    query = {}
     for name, value in _path_parameters(event).items():
-        path = path.replace("{" + name + "}", value)
-    body = _request_body(event)
+        marker = "{" + name + "}"
+        if marker in template:
+            path = path.replace(marker, urllib.parse.quote(value, safe=""))
+        else:
+            query[name] = value
+    if query:
+        path += "?" + urllib.parse.urlencode(query)
+    try:
+        body = _request_body(event)
+    except ValueError as err:
+        return _bedrock_response(event, 400, json.dumps({"detail": str(err)}))
 
     status, text = _forward(method, path, body, _bearer_token())
     if status == 401:

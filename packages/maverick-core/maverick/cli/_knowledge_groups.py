@@ -19,6 +19,31 @@ def knowledge() -> None:
     """Knowledge base: seed corpora, inspect collections, verify erasure."""
 
 
+@knowledge.command("reindex")
+@click.argument("collection")
+@click.option("--tenant", default=None, help="Tenant data plane (default: active).")
+def knowledge_reindex(collection: str, tenant: str | None) -> None:
+    """Explicitly migrate a collection to the configured embedding model.
+
+    SQLite and pgvector replace vectors atomically, preserving source content.
+    Other stores require ingesting originals into a new collection, validating
+    it, then switching sources. Provider embedding calls may incur costs.
+    """
+    from ..knowledge_admin import open_knowledge_base
+    kb = None
+    try:
+        kb = open_knowledge_base(tenant=tenant, require_existing=True)
+        if kb is None:
+            raise click.ClickException("knowledge is disabled")
+        count = kb.reindex(collection)
+        click.echo(f"reindexed {count} chunk(s) in {collection}")
+    except (RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        if kb is not None:
+            kb.close()
+
+
 @knowledge.command("collections")
 @click.option("--tenant", default=None, help="Tenant data plane (default: active).")
 def knowledge_collections(tenant: str | None) -> None:

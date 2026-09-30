@@ -324,7 +324,8 @@ def test_consent_delivery_page_exposes_named_adapter_workbench(authorities) -> N
     ):
         assert provider in source
     assert "cd-adapter-status" in source
-    assert "cd-adapter-reconcile" in source
+    assert "cd-ambiguous-table" in source
+    assert "/reconcile" in source
     assert "/destination-adapters" in source
 
 
@@ -350,3 +351,32 @@ def test_delivery_api_is_tenant_scoped_strict_and_default_off(
 
     config.reset_config_cache()
     assert client.get(f"{API}/status").status_code == 403
+
+
+def test_destination_list_is_read_only_tenant_scoped_and_needs_audit(
+    authorities, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi import HTTPException
+    from maverick_dashboard import consent_delivery_api
+
+    _enroll("crm")
+    _enroll("email")
+    listed = _ok(client.get(f"{API}/destinations"))
+    assert {item["destination_id"] for item in listed["items"]} == {"crm", "email"}
+    assert listed["truncated"] is False
+    crm = next(item for item in listed["items"] if item["destination_id"] == "crm")
+    assert crm["revision"] == 1 and crm["active_key_id"] == "crm-key-v1"
+    assert client.post(f"{API}/destinations", json={}).status_code == 405
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    assert _ok(client.get(f"{API}/destinations"))["items"] == []
+
+    asked: list[str] = []
+
+    def deny(_request, permission):
+        asked.append(permission)
+        raise HTTPException(status_code=403, detail="insufficient role for this action")
+
+    monkeypatch.setattr(consent_delivery_api, "require_global_permission", deny)
+    assert client.get(f"{API}/destinations").status_code == 403
+    assert asked == ["audit"]

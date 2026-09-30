@@ -21,7 +21,7 @@ type = "desktop"       # desktop | docker | vps | phone
 # the self-learning/self-improvement lifecycle; the level sets the governance
 # posture around it:
 #   essentials  small business (a gym, a studio) — learning, no ceremony
-#   standard    growing company — + signed audit trail, enforced daily quotas
+#   standard    growing company — + signed audit trail (no spending caps)
 #   regulated   bank/clinic/government — + human sign-off (Ed25519) for
 #               code/weights promotions, WORM audit export, long retention
 # A label for humans + dashboards: the wizard expands it into the concrete
@@ -92,13 +92,19 @@ revisor         = "anthropic:claude-opus-4-8"
 verifier        = "anthropic:claude-sonnet-4-6"
 summarizer      = "anthropic:claude-haiku-4-5"
 skill_distiller = "anthropic:claude-sonnet-4-6"
+# Work that names no role (background runs started from the dashboard, MCP,
+# the GitHub app, agent-to-agent tasks) uses "default". Unset, it follows the
+# dashboard's default-model choice, then claude-sonnet-4-6.
+# default       = "anthropic:claude-sonnet-4-6"
 
 [budget]
-max_dollars         = 5.0
-max_wall_seconds    = 3600
-max_tool_calls      = 500
-max_input_tokens    = 1000000
-max_output_tokens   = 200000
+# Omitted task limits stay unset. These examples are explicit opt-in limits.
+task_limits_enabled = true
+# max_dollars       = 25.0
+# max_wall_seconds  = 3600
+# max_tool_calls    = 500
+# max_input_tokens  = 1000000
+# max_output_tokens = 200000
 strict_pricing      = true
 
 [safety]
@@ -107,6 +113,14 @@ block_threshold = "high"       # low | medium | high | critical
 scan_input      = true
 scan_tool_calls = true
 scan_output     = true
+# Task-start check (off by default). Lightwork reads each task's wording
+# (pay, delete, deploy, passwords, all customers, production ...) before it
+# starts. When set, tasks at or above this level wait on the dashboard's
+# Approvals page until a person approves them, and do not start if nobody
+# does within MAVERICK_CONSENT_DASHBOARD_TIMEOUT (300 s). It reads only the
+# words: every action is still checked on its own once the task runs.
+# goal_risk_require_human = "high"   # never (default) | high | medium
+# goal_risk_floor         = "low"    # low (default) | medium | high
 
 [sandbox]
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes
@@ -260,6 +274,31 @@ minimum_holdout_families = 20
 # Regime policies combine strictest-wins. Existing `pci` configurations now
 # identify PCI DSS 4.0.1; the key remains backward compatible.
 regimes = ["sox", "gaap", "dora", "basel_iii", "ifrs_17", "pci"]
+# Finance Operating Profile (docs/FINANCE_OPERATIONS.md). Every key below is
+# read only while [finance_operations] enable = true; unset keeps today's
+# behaviour.
+# framework = "us_gaap"      # us_gaap | ifrs: adds that framework's policy pack
+#                            # (strictest-wins with regimes)
+# materiality = 50000        # anomaly findings totalling this or more need a
+#                            # second reviewer; auto_threshold never acts alone
+#                            # above it
+
+# [finance.automation]
+# Automation level of the finance actions: draft (agent prepares, a person
+# acts; the agent's call is refused) | approve (a person approves each call) |
+# auto_threshold (acts alone only under the approval limit) | straight_through.
+# Payments, postings, payroll, bank-detail/supplier changes, period close,
+# chart of accounts, tax and filings never go below approve.
+# default = "draft"
+# "ap.approve_expense" = "approve"   # one action class (department.action or action)
+
+# [finance.sod]
+# mode = "enforce"   # enforce: block a separation-of-duties conflict when the
+#                    # action runs | warn: record a finding and ask a person
+
+# [finance.approvals]
+# timeout = "fail_closed"   # the only value: an unanswered finance approval
+#                           # is refused and withdrawn, never auto-approved
 
 [finance_operations]
 # Deterministic regulatory, anomaly, AML/KYC/sanctions, and GRC control-testing
@@ -455,6 +494,9 @@ allow_provider_egress = false # extra learning-only model calls may cross provid
 preflight = true           # default uses a local redacted catalog match; the
                            # LLM needs-analysis call requires provider egress above
 distill_local = true
+auto_distill = false       # a model writes a recallable skill straight from each
+                           #   finished run (untrusted run text: keep off unless
+                           #   reviewed). MAVERICK_AUTO_DISTILL, when set, decides.
 provision_packs = true     # equip a freshly-approved pack with the skills + tools
                            #   its workflow needs at creation time (capability
                            #   provisioning at pack-birth). Default on once
@@ -501,6 +543,11 @@ evaluator_evolution = true  # promote a BETTER judge instead of only freezing wh
                            #   Override via MAVERICK_EVALUATOR_EVOLUTION. See FEATURES.md.
 evaluator_eps = 0.05       # confidence level of the eps-best-belief lower bound used
                            #   for evaluator promotion (lower = more conservative).
+prm_backend = "null"       # step scorer: null | heuristic | remote | learned | linear
+prm_endpoint = ""          # remote scorer address (https, or http on loopback)
+prm_api_key = ""           # remote scorer key (sealed when set from the dashboard)
+prm_path = ""              # learned-model folder or linear artifact file
+                           #   Each MAVERICK_PRM* variable, when set, wins over its key.
 
 [self_modify]              # research-only code DGM (default off)
 enable = false             # dashboard/API arming changes only this gate
@@ -706,6 +753,166 @@ MAVERICK_MAX_CONCURRENT_GOALS=4 maverick dashboard
 Default is 16. Raise on a beefy machine; lower on a Raspberry Pi. (A
 separate per-principal cap also limits concurrent goals from any one caller.)
 
+## Swarm size
+
+One goal may create up to 64 agents by default. To run larger swarms, raise
+the cap and bound the goal's model calls so the swarm queues for the provider
+instead of tripping its rate limits (the installer asks both):
+
+```toml
+[swarm]
+max_total_spawns = 256          # agents one goal may create (default 64)
+max_concurrent_model_calls = 16 # model calls in flight per goal (0 = unbounded, the default)
+finding_post_max_chars = 1500   # how much of a helper's final answer is posted to the shared board (min 200)
+```
+
+`MAVERICK_MAX_TOTAL_SPAWNS`, `MAVERICK_MAX_CONCURRENT_MODEL_CALLS` and
+`MAVERICK_FINDING_POST_MAX_CHARS` override these. The per-call fan-out cap and the goal's budget still apply at any size.
+
+## Runtime settings on Settings > All settings
+
+These keys were environment variables only, or were read by code nothing
+called. Each is now used by the running product and can be changed on
+Settings > All settings; the environment variable in the comment, when set,
+still wins, and an unset key keeps the behaviour shown as the default.
+
+```toml
+[memory]
+learning_cache = false        # MAVERICK_LEARNING_CACHE: start a repeated task from its checked answer
+weaviate_grpc_host = ""       # MAVERICK_WEAVIATE_GRPC_HOST (default: the weaviate_url host)
+weaviate_grpc_port = 50051    # MAVERICK_WEAVIATE_GRPC_PORT (443 for a standard HTTPS address)
+weaviate_vectorizer = ""      # MAVERICK_WEAVIATE_VECTORIZER (default text2vec-transformers)
+
+[tools]
+speculative = false           # MAVERICK_SPECULATIVE_TOOLS: read ahead for repeated look-ups (needs output_cache)
+openapi_spec_max_bytes = 10000000   # MAVERICK_OPENAPI_SPEC_MAX_BYTES (read at startup)
+openapi_call_max_bytes = 1000000    # MAVERICK_OPENAPI_CALL_MAX_BYTES (read at startup)
+
+[models]
+embed = ""                    # MAVERICK_EMBED_MODEL (default BAAI/bge-small-en-v1.5)
+clap = ""                     # MAVERICK_CLAP_MODEL (default laion/clap-htsat-unfused)
+openai_max_tools = 128        # MAVERICK_OPENAI_MAX_TOOLS (read at startup)
+
+[energy]                      # used by the energy_accounting tool's estimates
+wh_per_1k_tokens = 0.3        # MAVERICK_ENERGY_WH_PER_1K_TOKENS
+grid_co2_g_per_kwh = 400      # MAVERICK_ENERGY_GRID_CO2_G_PER_KWH
+
+[logging]
+crash_log = false             # MAVERICK_CRASH_LOG: fsync'd copy of warnings/errors in logs/crash-only.jsonl
+crash_only_fsync = "always"   # MAVERICK_CRASH_ONLY_FSYNC: or "never" (faster, may lose the last lines)
+
+[replay]
+record = false                # MAVERICK_TRACE_DIR (set = on, in that folder): record each task's steps
+trace_dir = ""                # default: Lightwork's own traces folder
+
+[security]
+network_policy = "open"       # "allowlist" or "deny-all"; enforced (web tools + work area), see below
+
+[sandbox]
+network_policy = ""           # "deny-all": the work area never gets internet (Kubernetes verifies it)
+
+[perf.profiling]              # started with the dashboard when enabled (needs py-spy)
+enabled = false               # MAVERICK_PROFILING
+interval_seconds = 300        # MAVERICK_PROFILING_INTERVAL
+duration_seconds = 30         # MAVERICK_PROFILING_DURATION
+format = "speedscope"         # MAVERICK_PROFILING_FORMAT: or "flamegraph", "raw"
+
+[ebpf_monitor]
+enable = false                # started with the dashboard (needs root and bpftrace)
+
+[model_proxy]
+enable = false                # started with the dashboard; the key stays in MAVERICK_PROXY_KEY
+upstream = ""                 # MAVERICK_PROXY_UPSTREAM
+listen = ""                   # MAVERICK_PROXY_LISTEN (default 127.0.0.1:8765)
+auth_style = "bearer"         # MAVERICK_PROXY_AUTH_STYLE: or "x-api-key"
+client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on the page)
+
+[tui.keys]                    # MAVERICK_TUI_KEYS ("quit=x,refresh=g"); keys of `maverick monitor`
+# quit = "q"
+
+[director.profiles.supervised] # `maverick start --director supervised "<outcome>"`
+# consent_mode = "ask"
+# budget_multiplier = 0.5      # clamped to the configured spending cap
+# dollars = 2.0                # review checkpoint
+# tool_calls = 25
+
+[analytics]
+task_questions = true         # Insights page questions (need the dashboard's "duckdb" extra)
+
+[env_hunt.enrichment_sources.intel_feed]  # a lookup service your server registered
+enable = true
+
+[mcp]                         # tool server for outside apps: every MAVERICK_MCP_* variable
+token = ""                    # MAVERICK_MCP_TOKEN (sealed when set on the page)
+http_tasks = false            # MAVERICK_MCP_HTTP_TASKS
+rate_limit = 600              # MAVERICK_MCP_RATE_LIMIT (per minute; 0 = none)
+# also: max_body_bytes, max_resource_sessions, allowed_origins, sse_heartbeat,
+# sse_max_progress_events, max_dollars, max_wall_seconds, elicitation_timeout,
+# elicit_allowed_hosts, max_depth, max_elicit_rounds, max_tasks,
+# max_tasks_per_owner, task_ttl_ms, task_max_ttl_ms, task_poll_ms,
+# task_result_block_ms, task_workers
+```
+
+Read once when the process starts (the environment still wins):
+`[agent] loop_guard`, `loop_guard_threshold`, `loop_guard_block`,
+`step_budget_warning`, `max_concurrent_goals`,
+`max_concurrent_goals_per_principal`; `[latency] retry_attempts` (3),
+`retry_base_delay` (1.0), `retry_max_delay` (30.0); `[swarm] max_fanout` (8),
+`default_max_depth` (3); `[verification] confidence_accept` (0.75),
+`disagreement_high` (0.5); `[compaction] keep_recent`, `digest_every`,
+`max_tool_bytes`, `max_total_bytes`; `[attachments] max_file_bytes` (100 MiB),
+`max_goal_bytes` (500 MiB).
+
+`[security] network_policy` is enforced, never only displayed: `deny-all`
+removes the web tools (http_fetch, web_search, browser, websocket, webrtc) and
+keeps the work area offline (container backends start without a network, the
+`local` backend must become a container or is refused, and `ssh` is refused);
+`allowlist` lets the web tools reach only hosts on a tool's `allow_egress` or
+`[egress] allow` list, removes web_search and webrtc, and keeps the work area
+offline. A value it does not know blocks everything.
+
+`[ekko] provider_egress` stays off: Ekko has no reviewed network path, so the
+setting page refuses to turn it on.
+
+## Upload size
+
+The dashboard refuses any request larger than 600 MB (above the largest batch
+of task attachments one request may carry) before reading it, with a plain
+"That upload is too large" message:
+
+```toml
+[dashboard]
+max_request_mb = 600   # MAVERICK_DASHBOARD_MAX_REQUEST_MB overrides
+```
+
+## Spending limits
+
+There is no spending limit by default. An administrator sets limits in the
+dashboard under **Admin > Spending limits**, for the workspace they are in:
+
+- **Whole workspace:** the most everyone together may spend per day or month.
+- **Everyone:** a limit each person gets on their own, per task, day or month.
+- **A named person:** replaces the limit for everyone for that person.
+
+When a limit is reached, new work is refused and running work stops before its
+next paid step, with a plain message naming the limit. Every change is recorded
+in the audit trail (`spending_limits_changed`). The installer's advanced step
+can seed starting limits; what an administrator saves in the dashboard wins:
+
+```toml
+[spending_limits]
+workspace_dollars = 500.0       # 0 or unset = no workspace limit
+workspace_period = "month"      # "day" or "month"
+default_user_dollars = 50.0     # 0 or unset = no limit for each person
+default_user_period = "month"   # "task", "day" or "month"
+```
+
+Spend is counted from the usage ledger plus runs still going in the dashboard
+process. Runs in separate worker processes are counted once they settle, so
+several of them running at once can pass a limit by what they spend before
+settling. A workspace provisioned on **Workspaces** can also carry a daily cap;
+whichever limit is reached first applies. New workspaces have no daily cap.
+
 ## Go-live check
 
 `maverick launch-check` verifies the deliberate production switches are on and
@@ -713,7 +920,8 @@ exits non-zero if any is off, so a deploy pipeline can gate on it. It is
 distinct from `maverick doctor` (which checks whether the install *works*). Each
 row reads real config/env:
 
-- `[quotas] enforce = true` with at least one non-zero cap (cost governance);
+- a workspace or everyone limit in **Admin > Spending limits**, or
+  `[quotas] enforce = true` with at least one non-zero cap (cost governance);
 - `[tenancy] by_user = true` (per-user tenant isolation);
 - a license trust anchor present (`[license] publisher_pubkeys` /
   `MAVERICK_LICENSE_PUBKEYS`);

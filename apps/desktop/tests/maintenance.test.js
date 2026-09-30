@@ -4,18 +4,23 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function render(invoke) {
+function node() {
+  return { textContent: "", value: "", hidden: false, disabled: false, className: "", handlers: {}, children: [],
+    addEventListener(name, handler) { this.handlers[name] = handler; },
+    appendChild(child) { this.children.push(child); } };
+}
+function render(invoke, extra = {}) {
   const elements = Object.fromEntries([
     "installed-version", "maintenance-status", "maintenance-details", "check-update",
     "repair-install", "install-update", "update-review", "update-version", "update-notes", "back",
     "maintenance-authorization", "maintenance-incomplete", "maintenance-recovery-result", "rollback-install", "resume-maintenance",
     "maintenance-logs", "maintenance-log-point",
     "identity-transition-notice", "save-identity-transition",
-  ].map(id => [id, { textContent: "", value: "", hidden: false, disabled: false, handlers: {}, children: [],
-    addEventListener(name, handler) { this.handlers[name] = handler; },
-    appendChild(child) { this.children.push(child); } }]));
+    "maintenance-authorization-hint", "paste-authorization", "clear-authorization", "update-steps", "repair-steps",
+    "maintenance-details-copy", "maintenance-details-save", "maintenance-details-copied",
+  ].map(id => [id, node()]));
   const context = { document: { getElementById: id => elements[id], createElement: () => ({}) },
-    window: { __TAURI__: { core: { invoke } }, location: { replace() {} } } };
+    window: { __TAURI__: { core: { invoke } }, location: { replace() {} } }, ...extra };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../ui/maintenance.js"), "utf8"), context);
   return elements;
 }
@@ -123,7 +128,7 @@ test("completed and pending repair receipts use end-user repair language", async
   assert.match(elements["maintenance-recovery-result"].textContent, /repaired 1\.0\.0/);
   assert.match(elements["maintenance-recovery-result"].textContent, /returned to 1\.0\.0/);
   assert.equal(elements["maintenance-incomplete"].children.length, 1);
-  assert.match(elements["maintenance-incomplete"].children[0].textContent, /awaiting finalization/);
+  assert.match(elements["maintenance-incomplete"].children[0].textContent, /needs finishing/);
 });
 
 test("unfinished maintenance offers recovery language instead of candidate replay", async () => {
@@ -139,6 +144,88 @@ test("unfinished maintenance offers recovery language instead of candidate repla
   }));
   await settle();
   assert.equal(elements["resume-maintenance"].textContent, "Recover and restart");
-  assert.match(elements["maintenance-recovery-result"].textContent, /Recover the previously verified installation/);
-  assert.match(elements["maintenance-status"].textContent, /Recover it above/);
+  assert.match(elements["maintenance-recovery-result"].textContent, /Recover and restart to put back the last working version/);
+  assert.match(elements["maintenance-status"].textContent, /Finish it under Go back to the previous version/);
+});
+
+const CODE = "a".repeat(32) + ":" + "b".repeat(64);
+const updateStatus = async command => {
+  if (command === "maintenance_status") return { version: "1.0.0", updates_configured: true };
+  if (command === "check_desktop_update") return { review: "7", version: "1.0.1", repair: false, notes: "" };
+};
+
+test("approval code forgives stray spaces and line breaks but still checks the full format", async () => {
+  const calls = [];
+  const elements = render(async (command, payload) => { calls.push([command, payload]); return updateStatus(command); });
+  await settle();
+  assert.match(elements["maintenance-authorization-hint"].textContent, /No code yet/);
+  await elements["check-update"].handlers.click();
+  assert.equal(elements["update-steps"].hidden, false);
+  assert.equal(elements["repair-steps"].hidden, true);
+  elements["maintenance-authorization"].value = CODE.slice(0, 60);
+  elements["maintenance-authorization"].handlers.input();
+  assert.equal(elements["install-update"].disabled, true);
+  assert.equal(elements["rollback-install"].disabled, true);
+  assert.match(elements["maintenance-authorization-hint"].textContent, /isn't a complete approval code/);
+  assert.match(elements["maintenance-authorization-hint"].className, /bad/);
+  elements["maintenance-authorization"].value = "  " + CODE.slice(0, 50) + "\n" + CODE.slice(50) + " \r\n";
+  elements["maintenance-authorization"].handlers.input();
+  assert.equal(elements["install-update"].disabled, false);
+  assert.match(elements["maintenance-authorization-hint"].textContent, /Code ready/);
+  await elements["install-update"].handlers.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ["install_desktop_update", { review: "7", confirm: true, authorization: CODE }]);
+  assert.equal(elements["maintenance-authorization"].value, "");
+});
+
+test("paste button fills the code from the clipboard and clear removes it", async () => {
+  const elements = render(updateStatus, { navigator: { clipboard: { readText: async () => "\n" + CODE + "\n" } } });
+  await settle();
+  await elements["paste-authorization"].handlers.click();
+  assert.equal(elements["maintenance-authorization"].value, CODE);
+  assert.equal(elements["rollback-install"].disabled, false);
+  elements["clear-authorization"].handlers.click();
+  assert.equal(elements["maintenance-authorization"].value, "");
+  assert.equal(elements["rollback-install"].disabled, true);
+});
+
+test("paste explains the keyboard fallback when the clipboard cannot be read", async () => {
+  const elements = render(updateStatus, { navigator: { clipboard: { readText: async () => { throw new Error("denied"); } } } });
+  await settle();
+  await elements["paste-authorization"].handlers.click();
+  assert.match(elements["maintenance-authorization-hint"].textContent, /Ctrl\+V/);
+  assert.equal(elements["maintenance-authorization"].value, "");
+});
+
+test("an expired approval code gets a plain next step and the raw reason stays in support details", async () => {
+  const elements = render(async command => {
+    if (command === "maintenance_status") return { version: "1.0.0", updates_configured: true };
+    throw "This maintenance authorization expired or was already used. Review it again in Workspace recovery.";
+  });
+  await settle();
+  elements["maintenance-authorization"].value = CODE;
+  elements["maintenance-authorization"].handlers.input();
+  await elements["rollback-install"].handlers.click();
+  assert.match(elements["maintenance-status"].textContent, /^Lightwork could not complete that step\. The approval code has expired/);
+  assert.doesNotMatch(elements["maintenance-status"].textContent, /authorization/);
+  assert.match(elements["maintenance-authorization-hint"].textContent, /get a new one|Get a new one/);
+  assert.match(elements["maintenance-details"].textContent, /maintenance authorization expired/);
+});
+
+test("repair review hides the approval steps and saved history uses plain labels", async () => {
+  const elements = render(async command => {
+    if (command === "maintenance_status") return { version: "1.0.0", updates_configured: true, recovery: { recovery_points: [
+      { id: "a", old_version: "1.0.0", new_version: "1.1.0", status: "upgrade_recovered", pending_finalization: false },
+    ] } };
+    return { review: "r", version: "1.0.0", repair: true, notes: "" };
+  });
+  await settle();
+  assert.equal(elements["maintenance-log-point"].children[0].textContent, "1.0.0 → 1.1.0 · returned to the previous version");
+  await elements["repair-install"].handlers.click();
+  assert.equal(elements["update-steps"].hidden, true);
+  assert.equal(elements["repair-steps"].hidden, false);
+  assert.equal(elements["install-update"].disabled, false);
+  const page = fs.readFileSync(path.join(__dirname, "../ui/maintenance.html"), "utf8");
+  for (const phrase of ["dual-signed", "signing trust", "pre-upgrade", "exact-release", "Troubleshooting details"]) {
+    assert.equal(page.includes(phrase), false, phrase);
+  }
 });

@@ -1287,6 +1287,10 @@ def test_task_result_reloads_authority_after_blocking_wait(
             waiting.set()
             return original_done.wait(timeout)
 
+        async def wait_async(self, timeout=None):
+            waiting.set()
+            return await original_done.wait_async(timeout)
+
     task.done = _ObservedDone()
     box = {}
 

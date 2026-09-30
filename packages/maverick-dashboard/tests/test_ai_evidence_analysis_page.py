@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -24,7 +25,7 @@ class _Markup(HTMLParser):
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setattr(page, "_tenant_selected", lambda: None)
+    monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
     app = FastAPI()
@@ -72,14 +73,13 @@ def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> 
 
     assert "AI evidence analysis" in response.text
     assert 'id="evidence-operations" disabled' in response.text
-    assert "not legal advice, certification, or compliance conclusions" in response.text
-    assert "Uploaded files are processed within size limits" in response.text
-    assert "Extracted text is not saved" in response.text
-    assert "distinct authorized human" in response.text
-    assert "Immediate erasure from processing memory is not guaranteed" in response.text
+    assert "not legal advice or a compliance conclusion" in response.text
+    assert "Uploaded files are read within size limits and are not kept" in response.text
+    assert "The text read from them is not stored either" in response.text
+    assert "a different, authorized person" in response.text
     assert "/api/v1/ai-evidence-analysis" in response.text
     assert "may be sent to that provider" in response.text
-    assert "Do not enter document contents, secrets, personal" in response.text
+    assert "Do not type in document contents, passwords," in response.text
     assert 'aria-describedby="mv-copilot-egress"' in response.text
 
 
@@ -123,7 +123,8 @@ def test_workbench_has_only_closed_evidence_controls(client: TestClient) -> None
         "/static/lightwork-ai-evidence-analysis.css",
     }.issubset(style_sources)
     assert forms and all("action" not in form for form in forms)
-    assert sum(item.get("type") == "file" for item in inputs) == 1
+    # One file chooser to analyze, one for administrators to register.
+    assert sum(item.get("type") == "file" for item in inputs) == 2
     for selector in selectors:
         for forbidden in (
             "tenant",
@@ -139,22 +140,13 @@ def test_workbench_has_only_closed_evidence_controls(client: TestClient) -> None
         ):
             assert forbidden not in selector
 
-    required = {
-        "artifact_file",
-        "artifact_id",
-        "source_ref",
-        "source_revision",
-        "acquired_at",
-        "expected_artifact_authority_sha256",
-        "criteria_set_id",
-        "expected_criteria_revision",
-        "expected_criteria_authority_sha256",
-        "analysis_id",
-        "decision",
-        "reason_code",
-        "limit",
-    }
+    # Choices only: pins, versions and fingerprints are carried from the
+    # chosen registry rows, never typed.
+    required = {"artifact_file", "artifact", "criteria", "analysis-filter", "register_file"}
     assert required.issubset(set(selectors))
+    for typed in ("artifact_id", "source_ref", "source_revision", "expected_artifact_authority_sha256",
+                  "criteria_set_id", "expected_criteria_revision", "analysis_id", "reason_code"):
+        assert typed not in selectors
 
 
 @pytest.mark.parametrize(
@@ -189,18 +181,18 @@ def test_workbench_server_renders_exact_role_controls(
     }
 
     assert ("disabled" in by_id["evidence-analyze-controls"]) is operate_disabled
-    assert ("disabled" in by_id["evidence-review-controls"]) is operate_disabled
-    assert ("disabled" in by_id["load-history"]) is audit_disabled
     assert ("disabled" in by_id["verify-integrity"]) is audit_disabled
-    assert ("disabled" in by_id["retention-due"]) is audit_disabled
-    assert ("disabled" in by_id["evidence-revoke-controls"]) is admin_disabled
-    assert ("disabled" in by_id["evidence-purge-controls"]) is admin_disabled
+    assert ("purge-expired" not in by_id) is admin_disabled
+    root = by_id["evidence-shell"]
+    assert root["data-can-operate"] == ("false" if operate_disabled else "true")
+    assert root["data-can-audit"] == ("false" if audit_disabled else "true")
+    assert root["data-can-admin"] == ("false" if admin_disabled else "true")
 
 
 def test_custom_theme_css_uses_a_per_response_csp_nonce(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(page, "_tenant_selected", lambda: None)
+    monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
     templates.env.globals.update(
@@ -262,8 +254,11 @@ def test_client_uses_raw_file_body_without_persistent_or_html_injection_channels
         'referrerPolicy: "no-referrer"',
         'schema: "lightwork.ai-evidence.upload-metadata.v1"',
         'fileInput.value = ""',
-        'apiRequest("/integrity")',
+        'apiRequest("/integrity"',
         'apiRequest("/retention/purge"',
+        '"/authorities/artifacts"',
+        '"/authorities/criteria"',
+        "window.mvConfirm",
     ):
         assert required in source
     assert ":focus-visible" in css
@@ -271,12 +266,12 @@ def test_client_uses_raw_file_body_without_persistent_or_html_injection_channels
     assert "forced-colors" in css
     assert "configured_for_operation_attempt" in source
     assert "operational_composition_verified" in source
-    assert "Evidence analysis is configured." in source
-    assert "Image text recognition is unavailable because OCR support is not installed" in source
+    assert "Evidence analysis is set up." in source
+    assert "Text inside images can't be read on this installation." in source
     assert "enabled and composed for operations" not in source
     assert ".status-card > .governance-details" in css
     assert "Grounded in the current page" not in copilot_source
-    assert "Model-generated guidance is unverified" in copilot_source
+    assert "AI answers can be wrong" in copilot_source
     assert 'history.push({role: "user", content: message})' in copilot_source
     assert '{role: "assistant", content: payload.reply}' not in copilot_source
 
@@ -289,15 +284,11 @@ def test_workbench_rejects_query_material_and_requires_tenant(
     assert query.status_code == 404
     assert "AI evidence analysis" not in query.text
 
-    def missing_tenant() -> None:
-        raise page.HTTPException(
-            status_code=409,
-            detail="select an active tenant before using AI evidence analysis",
-        )
-
-    monkeypatch.setattr(page, "_tenant_selected", missing_tenant)
+    monkeypatch.setattr(page, "_tenant_selected", lambda: False)
     missing = client.get(ROUTE)
-    assert missing.status_code == 409
+    assert missing.status_code == 200
+    assert "Choose a workspace first" in missing.text
+    assert "lightwork-ai-evidence-analysis.js" not in missing.text
 
 
 def test_workbench_template_and_assets_are_packaged() -> None:
@@ -334,3 +325,25 @@ def test_dashboard_mounts_page_api_visibility_and_security_link() -> None:
     assert selected["in_nav"] is True
     security = (PACKAGE / "templates" / "security.html").read_text(encoding="utf-8")
     assert 'href="/ai-evidence-analysis"' in security
+
+
+_BANNED = re.compile(
+    r"\b(tenant|principals?|payload|endpoint|schema|uuid|sha-?256|digest|"
+    r"idempoten\w*|revision|json|yaml|toml|artifact|adapter|authority|revoke)\b"
+    r"|\[[a-z_]+\]|/api/v1|HTTP \d{3}",
+    re.IGNORECASE,
+)
+
+
+def test_workbench_is_plain_language_with_lists_and_row_actions(client: TestClient) -> None:
+    body = client.get(ROUTE).text
+    main = body.split('<main id="content"', 1)[-1].split("</main>", 1)[0]
+    text = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", main, flags=re.DOTALL))
+    assert _BANNED.search(text) is None, _BANNED.search(text)
+    for label in ("Analyze a document", "Analyses", "Register a document for analysis",
+                  "Check records are intact", "Delete expired records", "Technical details"):
+        assert label in text
+    assert 'id="analyses-rows"' in body
+    source = (PACKAGE / "static" / "lightwork-ai-evidence-analysis.js").read_text(encoding="utf-8")
+    for label in ('"View findings"', '"Approve"', '"Reject"', '"Withdraw"', '"History"'):
+        assert label in source

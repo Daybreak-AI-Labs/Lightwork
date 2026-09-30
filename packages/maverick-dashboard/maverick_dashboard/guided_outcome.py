@@ -108,4 +108,4 @@ def for_request(request, world, selected: str = "deliverable") -> dict:
         except Exception:
             outcome = {"complete":False, "status":"unavailable", "detail":"This path's prerequisites or review records are unavailable. Open the module to complete setup; success has not been assumed."}
     return {"plans":plans, "selected_plan":selected, "plan":plan, "outcome":outcome,
-            "role_label":caller_role(request) or "Local operator"}
+            "role_label":caller_role(request) or "Administrator on this computer"}

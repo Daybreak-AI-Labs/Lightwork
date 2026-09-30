@@ -261,6 +261,20 @@ def test_source_rights_require_independent_human_approval_and_idempotency(store)
     assert approved.approved_by == "privacy-counsel"
 
 
+def test_historical_search_survives_newer_publication(store) -> None:
+    approve_source(store)
+    ingest_document(store, publication_date="2025-01-10", superseded_date="2025-06-01")
+    past = store.search("tenant-a", "access", as_of="2025-03-01")
+    ingest_document(store, expected_version=1, publication_date="2025-05-01", content="New access request policy.")
+    assert store.search("tenant-a", "access", as_of="2025-03-01") == past
+    assert past[0].version == 1
+    assert store.search("tenant-a", "access", as_of="2025-01-09") == ()
+    # Search is publication-based: forthcoming effective dates are evidence
+    # metadata, not permission to hide a publicly available publication.
+    assert store.search("tenant-a", "access", as_of="2025-01-10")[0].version == 1
+    assert store.search("tenant-a", "access", as_of="2025-05-01")[0].version == 2
+
+
 def test_immutable_versioning_supersession_and_cas(store) -> None:
     approve_source(store)
     first = ingest_document(store)

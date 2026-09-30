@@ -17,10 +17,11 @@ class OllamaClient(OpenAIClient):
     PRICE_MODEL_PREFIX = "ollama:"  # self-hosted: unknown ids price $0
     USAGE_REQUIRED = False  # local server may omit usage; $0 -> nothing to enforce
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, *, environment=None):
         super().__init__(
             api_key=api_key or "ollama",  # placeholder; Ollama ignores it
             base_url=base_url or "http://localhost:11434/v1",
+            environment=environment,
         )
 
     def _build_kwargs(self, system, messages, tools, max_tokens, model,

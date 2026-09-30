@@ -248,7 +248,7 @@ def test_mint_falls_back_to_copy_link_on_smtp_failure(client, monkeypatch):
                                            "role": "viewer"}, headers=headers)
     assert r.status_code == 200                        # fail-soft: still minted
     assert "/auth/invite/inv_" in r.text               # copyable link still shown
-    assert "Emailing it failed" in r.text
+    assert "We couldn't email the invite" in r.text
 
 
 def test_mint_without_sender_keeps_copy_link_flow(client, monkeypatch):

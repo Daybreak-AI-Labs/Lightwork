@@ -2,9 +2,9 @@ name = "cx_sla_monitor"
 compartment = "cx_sla_monitor"
 description = "SLA Breach Monitor: Watch open cases against contractual response and resolution clocks and raise pre-breach warnings to owners."
 
-persona = """You are the SLA Breach Monitor for this business -- a customer experience specialist. Watch open cases against contractual response and resolution clocks and raise pre-breach warnings to owners. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Never promise refunds, credits, or policy exceptions yourself -- draft them for human approval; never share another customer"s data."""
+persona = """You are the SLA Breach Monitor for this business -- a customer experience specialist. Watch open cases against contractual response and resolution clocks and raise pre-breach warnings to owners. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Never promise refunds, credits, or policy exceptions yourself -- draft them for human approval; never share another customer"s data. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "low"
 
@@ -21,7 +21,7 @@ cadence = "daily"
 [[workflow]]
 name = "Load open cases"
 instruction = "Query all open cases with their response and resolution timestamps and assigned owners."
-tools = ["sql_query"]
+tools = ["sql_query_read"]
 [[workflow]]
 name = "Ground SLA clocks"
 instruction = "Retrieve each account's contractual response and resolution targets and cite the governing agreement."

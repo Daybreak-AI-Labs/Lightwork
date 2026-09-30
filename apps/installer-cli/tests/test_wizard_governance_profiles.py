@@ -111,9 +111,10 @@ def test_governance_split_by_level():
     # Essentials: learning without the ceremony.
     for key in ("audit_sign", "enforce_quotas", "signed_approval", "audit_worm"):
         assert key not in ess
-    # Standard: signed audit + enforced quotas, but no human-signature gate.
+    # Standard: signed audit, but no human-signature gate and no spending
+    # caps (administrators set those in the dashboard).
     assert std["audit_sign"] is True
-    assert std["enforce_quotas"] is True
+    assert "enforce_quotas" not in std
     assert "signed_approval" not in std
     # Regulated: everything, signed and immutable.
     assert reg["signed_approval"] is True
@@ -198,14 +199,14 @@ def test_consumer_standard_level(monkeypatch, tmp_path: Path):
     wizard = _stub_wizard_io(monkeypatch, tmp_path)
     monkeypatch.setattr(
         wizard, "_q_select",
-        _select_stub("standard   - growing company: + budgets enforced, "
-                     "signed audit trail (a manufacturer, an agency)"))
+        _select_stub("standard   - growing company: + signed audit trail, fairness "
+                     "and memory checks (a manufacturer, an agency)"))
     assert wizard.run_consumer() == 0
     config = _load_config(tmp_path)
     assert config["governance"]["profile"] == "standard"
     assert config["audit"]["sign"] is True
-    assert config["quotas"]["enforce"] is True
-    assert config["quotas"]["max_dollars_per_day"] == 25.0
+    # No spending caps by default; administrators set them in the dashboard.
+    assert "quotas" not in config
     assert config["retention"]["audit_days"] == 90
     assert config["retention"]["messages_days"] == 90
     # Ladder on; still no human-signature gate and no WORM at standard.
@@ -228,7 +229,7 @@ def test_consumer_regulated_level(monkeypatch, tmp_path: Path):
     assert config["governance"]["profile"] == "regulated"
     assert config["audit"]["sign"] is True
     assert config["audit"]["worm"]["provider"] == "local"
-    assert config["quotas"]["enforce"] is True
+    assert "quotas" not in config
     assert config["self_improvement"]["enable"] is True
     assert config["self_improvement"]["require_signed_approval"] is True
     assert config["retention"]["audit_days"] == 365
@@ -253,7 +254,7 @@ def test_express_regulated_adds_governance(monkeypatch, tmp_path: Path):
     assert config["flows"]["enable"] is True
     assert config["self_learning"]["enable"] is True
     # ...plus the regulated posture on top.
-    assert config["quotas"]["enforce"] is True
+    assert "quotas" not in config
     assert config["self_improvement"]["enable"] is True
     assert config["self_improvement"]["require_signed_approval"] is True
     assert config["retention"]["audit_days"] == 365

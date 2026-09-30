@@ -27,7 +27,8 @@ import logging
 
 from ..context_compactor import _message_text
 from ..llm import model_for_role
-from . import KEEP_RECENT_TURNS, compact_messages
+from . import KEEP_RECENT_TURNS, compact_messages, digest_cutoff
+from .requests import request, run_async, run_sync
 
 log = logging.getLogger(__name__)
 
@@ -52,11 +53,15 @@ def _heuristic_triples(text: str) -> list[list[str]]:
 
 
 def _llm_triples(text: str, llm, budget=None) -> list[list[str]]:
+    """Synchronous entry for the shared compaction algorithm."""
+    return run_sync(_llm_triples_steps(text, llm, budget))
+
+def _llm_triples_steps(text: str, llm, budget=None):
     """Extra triples via the injected llm seam; [] on any failure."""
     if llm is None:
         return []
     try:
-        resp = llm.complete(
+        resp = yield request(llm,
             system=_EXTRACT_SYSTEM,
             messages=[{"role": "user", "content": text}],
             max_tokens=_EXTRACT_MAX_TOKENS,
@@ -73,6 +78,18 @@ def _llm_triples(text: str, llm, budget=None) -> list[list[str]]:
 def extract_triples(
     text: str, *, llm=None, budget=None, max_triples: int = MAX_TRIPLES,
 ) -> list[list[str]]:
+    """Synchronous entry for the shared compaction algorithm."""
+    return run_sync(_extract_triples_steps(text, llm=llm, budget=budget, max_triples=max_triples))
+
+async def extract_triples_async(
+    text: str, *, llm=None, budget=None, max_triples: int = MAX_TRIPLES,
+) -> list[list[str]]:
+    """Native async entry; cancellation never falls back to sync I/O."""
+    return await run_async(_extract_triples_steps(text, llm=llm, budget=budget, max_triples=max_triples))
+
+def _extract_triples_steps(
+    text: str, *, llm=None, budget=None, max_triples: int = MAX_TRIPLES,
+):
     """Deduped ``[subject, relation, object]`` triples from ``text``.
 
     Heuristic extraction always runs; llm-backed extraction (when a seam is
@@ -80,7 +97,7 @@ def extract_triples(
     """
     out: list[list[str]] = []
     seen: set[tuple[str, str, str]] = set()
-    for triple in _heuristic_triples(text) + _llm_triples(text, llm, budget=budget):
+    for triple in _heuristic_triples(text) + (yield from _llm_triples_steps(text, llm, budget=budget)):
         if len(triple) != 3:
             continue
         key = (triple[0].lower(), triple[1].lower(), triple[2].lower())
@@ -116,6 +133,26 @@ def compact_graph(
     budget=None,
     max_triples: int = MAX_TRIPLES,
 ) -> list[dict]:
+    """Synchronous entry for the shared compaction algorithm."""
+    return run_sync(_compact_graph_steps(messages, keep_recent=keep_recent, llm=llm, budget=budget, max_triples=max_triples))
+
+async def compact_graph_async(
+    messages: list[dict], *,
+    keep_recent: int = KEEP_RECENT_TURNS,
+    llm=None,
+    budget=None,
+    max_triples: int = MAX_TRIPLES,
+) -> list[dict]:
+    """Native async entry; cancellation never falls back to sync I/O."""
+    return await run_async(_compact_graph_steps(messages, keep_recent=keep_recent, llm=llm, budget=budget, max_triples=max_triples))
+
+def _compact_graph_steps(
+    messages: list[dict], *,
+    keep_recent: int = KEEP_RECENT_TURNS,
+    llm=None,
+    budget=None,
+    max_triples: int = MAX_TRIPLES,
+):
     """Strategy entry: fold ``messages[1:-keep_recent]`` into a graph digest.
 
     The first message and the recent tail pass through verbatim (mirroring
@@ -124,13 +161,15 @@ def compact_graph(
     """
     if len(messages) <= keep_recent + 1:
         return list(messages)
-    cutoff = len(messages) - keep_recent
+    cutoff = digest_cutoff(messages, keep_recent)
+    if cutoff <= 1:
+        return list(messages)
     middle = messages[1:cutoff]
     # No role prefixes: a "user: " prefix would leak into triple subjects.
     text = "\n".join(_message_text(m) for m in middle)
     if len(text) > _MAX_EXTRACT_CHARS:
         text = text[-_MAX_EXTRACT_CHARS:]
-    triples = extract_triples(
+    triples = yield from _extract_triples_steps(
         text, llm=llm, budget=budget, max_triples=max_triples)
     if not triples:
         return compact_messages(messages, keep_recent=keep_recent)

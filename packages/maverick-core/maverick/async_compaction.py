@@ -1,42 +1,30 @@
-"""Async compaction (roadmap: 2027 H1 performance).
+"""Opt-in, bounded feature reuse for conversation-history compaction.
 
-Compaction quality costs latency exactly where it hurts — at the start of a
-turn, while the user waits. The fix is structural: a conversation's history is
-a *stable prefix* plus a couple of fresh turns, so the expensive part (ranking
-and trimming the long prefix) can be precomputed in the background between
-turns. On the hot path we then compact ``compact(prefix_result + tail)``,
-which is cheap because the prefix is already at budget.
+The legacy background worker compacted an old prefix twice and could reuse a
+lossy result under a changed query/budget. The compatibility API now retains
+only immutable token counts and lexical features of exact text. Every call
+ranks and trims the complete source with its current query and token budget.
+There is no worker, queued work or cached compacted output.
 
-Shape:
-
-* ``compact_with_precompute(key, messages, target_tokens)`` — the hot-path
-  call. If a background-precomputed prefix matching ``messages`` exists, use
-  it (cheap tail-merge); otherwise compact inline (first turn / cold start).
-  Either way, schedule a background refresh for the *current* window so the
-  next turn hits.
-* One daemon worker thread, last-write-wins per key, bounded queue — a slow
-  compaction can never back up the agent. Tests inject a synchronous executor.
-
-Opt-in via ``[context] async_compaction = true`` (or
-``MAVERICK_ASYNC_COMPACTION=1``) on top of ``[context] compact``; when off,
-nothing here is imported by the hot path.
+Both [context] compact and async_compaction must be enabled in the orchestrator;
+their existing environment overrides and default-off behavior are unchanged.
 """
 from __future__ import annotations
 
-import hashlib
-import json
-import logging
 import threading
-from collections.abc import Callable
+from collections import OrderedDict
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 
 from . import context_compactor as _cc
 from .config import env_flag
+from .paths import current_tenant_id_strict
 
-log = logging.getLogger(__name__)
-
-# Fresh turns kept OUT of the precomputed prefix (they change every turn).
-TAIL_TURNS = 4
+TAIL_TURNS = 4  # Public compatibility constant; no prefix is removed from ranking.
 _MAX_KEYS = 256
+_MAX_BYTES = 8 * 1024 * 1024
+_MAX_WINDOW_BYTES = 1024 * 1024
 
 
 def enabled() -> bool:
@@ -49,122 +37,90 @@ def enabled() -> bool:
         return False
 
 
-def _fingerprint(messages: list[dict]) -> str:
-    try:
-        canon = json.dumps(messages, sort_keys=True, default=str)
-    except (TypeError, ValueError):
-        canon = repr(messages)
-    return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:24]
+
+@dataclass(frozen=True)
+class _FeatureWindow:
+    identity: tuple
+    features: Mapping[str, _cc.TextFeatures]
+    size: int
 
 
-class _Precomputed:
-    __slots__ = ("prefix_len", "fingerprint", "messages")
-
-    def __init__(self, prefix_len: int, fingerprint: str, messages: list[dict]):
-        self.prefix_len = prefix_len
-        self.fingerprint = fingerprint
-        self.messages = messages
+def _feature_size(text: str, feature: _cc.TextFeatures) -> int:
+    # Conservative storage accounting, including worst-case Unicode and set
+    # entries. It is a bound on retained features, not a process RSS promise.
+    return 256 + 4 * len(text) + sum(64 + 4 * len(term) for term in feature.terms)
 
 
 class BackgroundCompactor:
-    """Single-worker precompute cache for compacted conversation prefixes."""
+    """Compatibility name for a bounded cache; no background thread is started."""
 
     def __init__(self, executor: Callable[[Callable[[], None]], None] | None = None):
+        # Retain the old constructor seam; no executor work is necessary now.
+        del executor
         self._lock = threading.Lock()
-        self._cache: dict[str, _Precomputed] = {}
-        # Pending keys (last-write-wins): key -> (prefix, target_tokens)
-        self._pending: dict[str, tuple[list[dict], int]] = {}
-        self._executor = executor
-        self._worker: threading.Thread | None = None
-        self._wake = threading.Event()
-
-    # -- worker plumbing ------------------------------------------------
-
-    def _ensure_worker(self) -> None:
-        if self._executor is not None:
-            return
-        with self._lock:
-            if self._worker is None or not self._worker.is_alive():
-                self._worker = threading.Thread(
-                    target=self._drain, name="maverick-async-compaction", daemon=True)
-                self._worker.start()
-
-    def _drain(self) -> None:
-        while True:
-            self._wake.wait(timeout=60.0)
-            self._wake.clear()
-            while True:
-                with self._lock:
-                    if not self._pending:
-                        break
-                    key, (prefix, target) = next(iter(self._pending.items()))
-                    del self._pending[key]
-                self._compute(key, prefix, target)
-
-    def _compute(self, key: str, prefix: list[dict], target_tokens: int) -> None:
-        try:
-            result = _cc.compact(prefix, target_tokens=target_tokens).messages
-        except Exception:  # a compactor bug must never kill the worker
-            log.exception("async compaction failed for %s", key)
-            return
-        with self._lock:
-            self._cache[key] = _Precomputed(len(prefix), _fingerprint(prefix), result)
-            while len(self._cache) > _MAX_KEYS:
-                self._cache.pop(next(iter(self._cache)))
-
-    def _schedule(self, key: str, prefix: list[dict], target_tokens: int) -> None:
-        if not prefix:
-            return
-        with self._lock:
-            self._pending[key] = (list(prefix), target_tokens)
-            # Bound the queue like the result cache: a burst of distinct
-            # conversation keys must not grow it without limit (each entry holds
-            # a prefix copy). Precompute is best-effort, so dropping the oldest
-            # pending entry just defers that compaction to the on-demand path.
-            while len(self._pending) > _MAX_KEYS:
-                self._pending.pop(next(iter(self._pending)))
-        if self._executor is not None:
-            # Test seam: run synchronously through the injected executor.
-            with self._lock:
-                pending = dict(self._pending)
-                self._pending.clear()
-            for k, (p, t) in pending.items():
-                self._executor(lambda k=k, p=p, t=t: self._compute(k, p, t))
-        else:
-            self._ensure_worker()
-            self._wake.set()
-
-    # -- hot path ---------------------------------------------------------
+        self._cache: OrderedDict[tuple, _FeatureWindow] = OrderedDict()
+        self._bytes = 0
+        self._closed = False
 
     def compact_with_precompute(
         self, key: str, messages: list[dict], *, target_tokens: int,
     ) -> list[dict]:
-        """Compact ``messages`` using the precomputed prefix when it matches."""
+        """Reuse exact text features, always recomputing selection from source."""
         key = str(key)
-        prefix_len = max(0, len(messages) - TAIL_TURNS)
-        prefix, tail = messages[:prefix_len], messages[prefix_len:]
-
-        hit: _Precomputed | None = None
+        namespace = current_tenant_id_strict()
+        cache_key = (namespace, key)
+        identity = _cc.feature_identity()
         with self._lock:
-            cached = self._cache.get(key)
-        if cached is not None and cached.prefix_len == prefix_len \
-                and cached.fingerprint == _fingerprint(prefix):
-            hit = cached
-
-        if hit is not None:
-            # Cheap: the prefix is already at budget; merge in the fresh tail.
-            out = _cc.compact(list(hit.messages) + tail, target_tokens=target_tokens).messages
-        else:
-            out = _cc.compact(messages, target_tokens=target_tokens).messages
-
-        # Refresh for the next turn (its prefix is the current full window
-        # minus the tail it will grow).
-        self._schedule(key, prefix, target_tokens)
-        return out
+            cached = self._cache.get(cache_key) if not self._closed else None
+        previous = cached.features if cached is not None and cached.identity == identity else {}
+        features = {}
+        size = 256 + 4 * (len(key) + len(namespace or ""))
+        retain = len(key) <= 512 and len(namespace or "") <= 512
+        for message in messages:
+            text = _cc._message_text(message)
+            if text in features:
+                continue
+            if size + 256 + 4 * len(text) > _MAX_WINDOW_BYTES:
+                retain = False
+                features = {}
+                break
+            feature = previous.get(text)
+            if feature is None:
+                feature = _cc.prepare_features(text)
+            size += _feature_size(text, feature)
+            if size > _MAX_WINDOW_BYTES:
+                # Do not build an unbounded temporary feature map for an
+                # oversized caller. The normal compactor remains the fallback.
+                retain = False
+                features = {}
+                break
+            features[text] = feature
+        immutable = MappingProxyType(features)
+        with _cc.feature_scope(immutable):
+            result = _cc.compact(messages, target_tokens=target_tokens).messages
+        with self._lock:
+            old = self._cache.pop(cache_key, None)
+            if old is not None:
+                self._bytes -= old.size
+            if retain and not self._closed:
+                self._cache[cache_key] = _FeatureWindow(identity, immutable, size)
+                self._bytes += size
+            while len(self._cache) > _MAX_KEYS or self._bytes > _MAX_BYTES:
+                _, evicted = self._cache.popitem(last=False)
+                self._bytes -= evicted.size
+        return result
 
     def stats(self) -> dict[str, int]:
         with self._lock:
-            return {"cached_keys": len(self._cache), "pending": len(self._pending)}
+            return {"cached_keys": len(self._cache), "pending": 0,
+                    "retained_feature_bytes": self._bytes}
+
+    def close(self) -> None:
+        """Release retained history; subsequent calls remain correct and uncached."""
+        with self._lock:
+            self._closed = True
+            self._cache.clear()
+            self._bytes = 0
 
 
 _shared: BackgroundCompactor | None = None

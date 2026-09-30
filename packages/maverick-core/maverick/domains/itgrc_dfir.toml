@@ -3,9 +3,9 @@ name = "itgrc_dfir"
 compartment = "itgrc_secops"
 description = "Digital forensics & incident response."
 
-persona = """You are the DFIR specialist: memory/disk forensics and triage collection (Velociraptor, Volatility, Plaso, KAPE), timeline analysis, and chain-of-custody (NIST 800-86). You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only."""
+persona = """You are the DFIR specialist: memory/disk forensics and triage collection (Velociraptor, Volatility, Plaso, KAPE), timeline analysis, and chain-of-custody (NIST 800-86). You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only. Live connectors crowdstrike_read, sentinelone_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "crowdstrike_read", "sentinelone_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 effort = "high"
 deny_tools = ["shell", "write_file"]
@@ -26,11 +26,11 @@ gate = "review"
 [[workflow]]
 name = "Scope incident"
 instruction = "Read the incident ticket and pull affected-host context from EDR to scope collection targets."
-tools = ["read_file", "crowdstrike_read", "sentinelone_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Triage collect"
 instruction = "Review triage and forensic artifacts preserving chain-of-custody and hashes per NIST 800-86."
-tools = ["read_file", "crowdstrike_read", "sentinelone_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Build timeline"
 instruction = "Correlate artifacts and detections into a unified timeline of attacker activity."

@@ -233,7 +233,7 @@ def test_qdrant_store_full_governance_cycle(monkeypatch):
     assert store2.count("itgrc") == 0
 
 
-def test_qdrant_backend_contract_preserves_exact_idempotent_document(monkeypatch):
+def test_qdrant_preserves_existing_reads_and_refuses_unfenced_publication(monkeypatch):
     _install_fake_qdrant(monkeypatch)
     store = QdrantStore(url="http://fake:6333", dim=8, namespace="tenant-a")
     kb = KnowledgeBase(
@@ -245,14 +245,33 @@ def test_qdrant_backend_contract_preserves_exact_idempotent_document(monkeypatch
     text = "alpha beta gamma delta epsilon zeta eta theta"
     digest = sha256(text.encode("utf-8")).hexdigest()
 
-    count = kb.ingest_text("finance", text, source="quarterly.txt")
+    # Seed an existing exact document through the low-level adapter, without
+    # pretending that its upsert supplies atomic governed admission.
+    with KnowledgeBase(embedder=DeterministicEmbedder(dim=8), chunk_size=18, chunk_overlap=4) as admitted:
+        count = admitted.ingest_text("finance", text, source="quarterly.txt")
+        rows = admitted.store.read_where("finance", "doc_sha256", digest, limit=100)
+        store.add("finance", [(row.chunk_id, row.text, kb.embedder.embed([row.text])[0], row.meta)
+                              for row in rows])
+    monkeypatch.setattr(kb.embedder, "embed", lambda _texts: pytest.fail("unexpected embedding work"))
+    monkeypatch.setattr(store, "add", lambda *_args: pytest.fail("unexpected unfenced publication"))
+    monkeypatch.setattr(store._client, "create_collection", lambda **_kwargs: pytest.fail("unexpected collection creation"))
+    monkeypatch.setattr(store._client, "upsert", lambda **_kwargs: pytest.fail("unexpected point publication"))
     assert kb.ingest_text("finance", text, source="quarterly.txt") == count
     assert store.count_where("finance", "doc_sha256", digest) == count
     assert kb.exact_document("finance", digest)["text"] == text
+    with pytest.raises(RuntimeError, match="atomically publish.*SQLite or pgvector"):
+        kb.ingest_text("finance", "A new document", source="new.txt")
+    with pytest.raises(RuntimeError, match="atomically publish.*SQLite or pgvector"):
+        kb.ingest_text("empty", "A new document", source="new.txt")
+    with pytest.raises(RuntimeError, match="different provenance"):
+        kb.ingest_text("finance", text, source="different.txt")
+    assert store.count("finance") == count and store.count("empty") == 0
 
     other = QdrantStore(url="http://fake:6333", dim=8, namespace="tenant-b")
     other._client = store._client
     assert other.read_where("finance", "doc_sha256", digest, limit=10) == []
+    assert kb.erase_source("quarterly.txt") == {"finance": count}
+    assert store.count("finance") == 0
 
 
 def test_qdrant_dim_mismatch_raises(monkeypatch):

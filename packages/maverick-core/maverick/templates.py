@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -68,8 +69,8 @@ class Template:
     name: str
     title: str
     body: str
-    budget_dollars: float = 5.0
-    budget_wall_seconds: float = 3600.0
+    budget_dollars: float | None = None
+    budget_wall_seconds: float | None = None
     params: list[str] = field(default_factory=list)
     path: Path | None = None
     sig: str | None = None
@@ -92,13 +93,18 @@ class Template:
         else:
             meta, body = {}, text
 
-        def _num(key: str, default: float) -> float:
+        def _num(key: str) -> float | None:
             # A user-authored template with a non-numeric budget used to raise a
             # raw ValueError traceback out of float() (user-testing finding);
             # give a clear, catchable message the CLI can surface instead.
-            raw = meta.get(key, default)
+            raw = meta.get(key)
+            if raw is None:
+                return None
             try:
-                return float(raw)
+                value = float(raw)
+                if not math.isfinite(value) or value < 0:
+                    raise ValueError
+                return value
             except (TypeError, ValueError):
                 raise ValueError(
                     f"template {name!r}: [{key}] must be a number, got {raw!r}"
@@ -117,8 +123,8 @@ class Template:
             name=name,
             title=str(meta.get("title", name)),
             body=body.strip(),
-            budget_dollars=_num("budget_dollars", 5.0),
-            budget_wall_seconds=_num("budget_wall_seconds", 3600),
+            budget_dollars=_num("budget_dollars"),
+            budget_wall_seconds=_num("budget_wall_seconds"),
             params=meta.get("params", []) if isinstance(meta.get("params"), list) else [],
             path=path,
             sig=meta.get("sig") if isinstance(meta.get("sig"), str) else None,
@@ -231,14 +237,26 @@ def load_template(name: str) -> Template:
     )
 
 
+def _optional_template_budget(value: float | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("template budgets must be numbers") from None
+    if isinstance(value, bool) or not math.isfinite(amount) or amount < 0:
+        raise ValueError("template budgets must be finite non-negative numbers")
+    return amount
+
+
 def save_user_template(
     name: str,
     *,
     title: str,
     body: str,
     params: list[str] | None = None,
-    budget_dollars: float = 5.0,
-    budget_wall_seconds: float = 3600.0,
+    budget_dollars: float | None = None,
+    budget_wall_seconds: float | None = None,
     overwrite: bool = True,
     owner: str | None = None,
     expected_generation: int | None = None,
@@ -289,17 +307,8 @@ def save_user_template(
         placeholder = m.group(1)
         if placeholder not in clean_params:
             clean_params.append(placeholder)
-    try:
-        bd = float(budget_dollars)
-        bw = float(budget_wall_seconds)
-    except (TypeError, ValueError):
-        raise ValueError("budget_dollars and budget_wall_seconds must be numbers") from None
-    # Clamp to the same bounds the REST layer enforces (WorkflowSaveIn / GoalIn):
-    # the drafting prompt only suggests 0.5-20, but a hand-edited value must still
-    # land in a sane, bounded per-run range rather than 0 (never runs) or an
-    # arbitrarily large spend.
-    bd = min(max(bd, 0.5), 100.0)
-    bw = min(max(bw, 1.0), 86400.0)
+    bd = _optional_template_budget(budget_dollars)
+    bw = _optional_template_budget(budget_wall_seconds)
 
     dest = user_templates_dir() / f"{name}.md"
     from .file_lock import (
@@ -348,11 +357,13 @@ def save_user_template(
             )
         front = [
             f"title: {title}",
-            f"budget_dollars: {bd}",
-            f"budget_wall_seconds: {bw}",
             f"owner: {owner}",
             f"generation: {generation}",
         ]
+        if bd is not None:
+            front.append(f"budget_dollars: {bd}")
+        if bw is not None:
+            front.append(f"budget_wall_seconds: {bw}")
         if clean_params:
             front.append("params:")
             front.extend(f"  - {p}" for p in clean_params)

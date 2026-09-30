@@ -241,3 +241,21 @@ def test_operator_overlay_research_profile_is_visible_but_not_dashboard_writable
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_write_refuses_text_that_would_not_read_back(monkeypatch, tmp_path):
+    """A value TOML cannot hold must never replace a readable overlay."""
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("MAVERICK_CONFIG_OVERLAY", raising=False)
+    config.reset_config_cache()
+    settings_store.set_catalog_values({("sandbox", "timeout"): 30})
+    before = config.dashboard_overrides_path().read_text()
+    with pytest.raises(settings_store.SecuritySuiteConfigUnavailable):
+        settings_store.set_catalog_values({("persona", "name"): "\ud800"})
+    assert config.dashboard_overrides_path().read_text() == before
+    assert settings_store.load_overlay()["sandbox"]["timeout"] == 30
+    config.reset_config_cache()

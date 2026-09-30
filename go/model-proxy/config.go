@@ -29,14 +29,42 @@ func ConfigFromEnv() *Config {
 	}
 	host, port := splitListen(listen)
 	return &Config{
-		Upstream:      upstream,
-		APIKey:        key,
-		ListenHost:    host,
-		ListenPort:    port,
-		AuthStyle:     authStyle,
-		ClientToken:   clientToken,
-		AllowedRoutes: allowedRoutes,
+		Upstream:         upstream,
+		APIKey:           key,
+		ListenHost:       host,
+		ListenPort:       port,
+		AuthStyle:        authStyle,
+		ClientToken:      clientToken,
+		AllowedRoutes:    allowedRoutes,
+		MaxRequestBytes:  envPositiveInt("MAVERICK_PROXY_MAX_REQUEST_BYTES"),
+		MaxResponseBytes: envPositiveInt("MAVERICK_PROXY_MAX_RESPONSE_BYTES"),
+		MaxConnections:   int(envPositiveInt("MAVERICK_PROXY_MAX_CONNECTIONS")),
+		TotalSeconds:     envPositiveFloat("MAVERICK_PROXY_TOTAL_SECONDS"),
 	}
+}
+
+func envPositiveInt(name string) int64 {
+	value := os.Getenv(name)
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return -1
+	}
+	return parsed
+}
+
+func envPositiveFloat(name string) float64 {
+	value := os.Getenv(name)
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed <= 0 {
+		return -1
+	}
+	return parsed
 }
 
 // splitListen mirrors model_proxy._split_listen: "host:port", "host", or empty.

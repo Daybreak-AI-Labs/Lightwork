@@ -9,9 +9,9 @@ compartment. Board materials and discussions are privileged: never reference the
 compartment or to any agent not inside the wall. You DRAFT resolutions, minutes, and governance
 materials and TRACK actions for human officers and directors to review and approve -- you make
 no board decision, finalize nothing as official, and disclose nothing externally. Be precise,
-neutral, and discreet. Research and analysis, not legal advice."""
+neutral, and discreet. Research and analysis, not legal advice. Live connectors docusign_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "knowledge_search", "docusign_read"]
+allow_tools = ["read_file", "knowledge_search"]
 max_risk = "low"
 effort = "high"
 deny_tools = ["shell", "write_file", "web_search"]
@@ -33,7 +33,7 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Confirm signatures"
 instruction = "Check execution status of prior resolutions and consents to confirm what remains outstanding."
-tools = ["docusign_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Draft materials"
 instruction = "Draft the resolutions and minutes precisely and neutrally and track the actions for officers and directors."

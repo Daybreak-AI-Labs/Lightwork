@@ -71,6 +71,57 @@ def test_sources_lists_modes():
     assert sources["zapier"] == "connect-and-trigger"
 
 
+def test_graph_repair_refuses_whole_batch_before_materializing_or_arming(monkeypatch):
+    from copy import deepcopy
+    from unittest.mock import Mock
+
+    from maverick import automation_import
+
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    broken = deepcopy(N8N_WF)
+    broken["id"] = "repair-needed"
+    broken["nodes"][1] = {
+        "name": "Notify", "type": "n8n-nodes-base.if", "parameters": {"conditions": {
+            "conditions": [{"leftValue": "={{ $json.amount + 1 }}", "operator": "gt", "rightValue": 1}],
+        }},
+    }
+    materialize = Mock(side_effect=AssertionError("batch preflight must precede every write"))
+    monkeypatch.setattr(automation_import, "materialize", materialize)
+    response = _client().post("/api/v1/import/run", json={
+        "source": "n8n", "definitions": [N8N_WF, broken], "as_flows": True,
+        "create_webhook_triggers": True, "activate_schedules": True,
+    })
+    assert response.status_code == 422, response.text
+    assert "requires repair before execution" in response.json()["detail"]
+    materialize.assert_not_called()
+
+
+@pytest.mark.parametrize("expression", [
+    {"equals": ["yes", "yes"]},
+    {"equals": ["@triggerBody()?['customer.status']", "ready"]},
+])
+def test_wdl_reference_repair_refuses_batch_before_writes(monkeypatch, expression):
+    from unittest.mock import Mock
+
+    from maverick import automation_import
+
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    good = {"name": "valid", "actions": {"Compose": {"type": "Compose", "inputs": "ready"}}}
+    broken = {"name": "repair", "actions": {
+        "Check": {"type": "If", "expression": expression,
+                  "actions": {"Compose": {"type": "Compose", "inputs": "ready"}}},
+    }}
+    materialize = Mock(side_effect=AssertionError("batch preflight must precede every write"))
+    monkeypatch.setattr(automation_import, "materialize", materialize)
+    response = _client().post("/api/v1/import/run", json={
+        "source": "power_automate", "definitions": [good, broken], "as_flows": True,
+        "create_webhook_triggers": True, "activate_schedules": True,
+    })
+    assert response.status_code == 422, response.text
+    assert "requires repair before execution" in response.json()["detail"]
+    materialize.assert_not_called()
+
+
 def test_run_creates_template_from_definitions():
     r = _client().post("/api/v1/import/run", json={
         "source": "n8n", "definitions": [N8N_WF],

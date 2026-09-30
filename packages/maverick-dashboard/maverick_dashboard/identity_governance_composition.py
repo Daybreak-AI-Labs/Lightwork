@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from maverick import ai_identity_governance_controls as controls
+from maverick.ai_identity_governance_connectors import CONFIG_SECTION
 from maverick.paths import canonical_tenant_id, current_tenant_id_strict, tenant_scope
 
 from . import identity_governance_runtime as runtime
@@ -74,7 +75,7 @@ def _load_tenant_section(tenant_id: str) -> dict[str, Any]:
         raise IdentityGovernanceCompositionError(
             "identity governance configuration is unavailable"
         )
-    section = config.get("ai_identity_governance_connectors", {})
+    section = config.get(CONFIG_SECTION, {})
     if not isinstance(section, Mapping):
         raise IdentityGovernanceCompositionError(
             "identity governance configuration is invalid"

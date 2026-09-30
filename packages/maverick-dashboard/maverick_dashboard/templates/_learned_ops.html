@@ -1,0 +1,73 @@
+{#- Learned page: the rest of the self-coaching tools -- a clash check by
+    meaning, trying proven lessons on other models, the test cases (find,
+    download, add) and the one-time hold-out record. Global administrators
+    only; filled by lightwork-learned-ops.js. -#}
+{% if can_manage %}
+<div id="lpo-root" class="lpo">
+  <div class="section-head"><h2 id="lpo-title">More self-coaching tools</h2></div>
+  <div class="panel">
+    <p class="muted" id="lpo-plan" role="status" aria-live="polite">Loading…</p>
+
+    <h3 id="lpo-clash-h">Check lessons for clashes by meaning</h3>
+    <p class="muted">The list above catches clashes by wording. This asks the answer checker to compare each pair of
+      lessons by meaning, which catches reworded clashes. It uses a little of the spending limit; you can stop it.</p>
+    <div class="lpo-row">
+      <label for="lpo-clash-model">Model</label>
+      <select id="lpo-clash-model" class="select"><option value="">Every model</option></select>
+      <button type="button" class="btn btn--ghost" id="lpo-clash-run">Check by meaning</button>
+    </div>
+    <p class="muted" id="lpo-clash-status" role="status" aria-live="polite"></p>
+    <div id="lpo-clash-out"></div>
+
+    <h3 id="lpo-transfer-h">Try proven lessons on other models</h3>
+    <p class="muted">Lessons that proved themselves for one model are tested on another. Any that pass start on trial,
+      and real results decide whether they stay.</p>
+    <div class="lpo-row">
+      <label for="lpo-transfer-source">From</label>
+      <select id="lpo-transfer-source" class="select"></select>
+      <label for="lpo-transfer-target">To</label>
+      <select id="lpo-transfer-target" class="select"><option value="">Every other model</option></select>
+      <label><input type="checkbox" id="lpo-transfer-retry"> Try again even for lessons already tried</label>
+      <button type="button" class="btn btn--ghost" id="lpo-transfer-run">Try the lessons</button>
+    </div>
+    <p class="muted" id="lpo-transfer-status" role="status" aria-live="polite"></p>
+    <div id="lpo-transfer-out"></div>
+
+    <h3 id="lpo-cases-h">Test cases</h3>
+    <p class="muted">Test cases are the tasks Lightwork uses to check that a new lesson really helps.</p>
+    <div class="lpo-row">
+      <label for="lpo-harvest-mode">New test cases from past work</label>
+      <select id="lpo-harvest-mode" class="select">
+        <option value="propose" selected>Suggest them for review first</option>
+        <option value="auto">Add them straight away</option>
+      </select>
+      <button type="button" class="btn btn--ghost" id="lpo-harvest">Find new test cases</button>
+    </div>
+    <div class="lpo-row">
+      <button type="button" class="btn btn--ghost" id="lpo-export">Download the test cases</button>
+    </div>
+    <div class="lpo-row">
+      <label for="lpo-import-file">Add test cases from a file</label>
+      <input type="file" id="lpo-import-file" class="input" accept=".json,application/json">
+      <label for="lpo-import-how">How</label>
+      <select id="lpo-import-how" class="select">
+        <option value="merge" selected>Add new ones, keep the rest</option>
+        <option value="replace">Replace all test cases with the file</option>
+      </select>
+      <button type="button" class="btn btn--ghost" id="lpo-import-check">Show what would change</button>
+    </div>
+    <p class="muted" id="lpo-cases-status" role="status" aria-live="polite"></p>
+    <div id="lpo-cases-out"></div>
+
+    <h3 id="lpo-holdout-h">Hold-out record</h3>
+    <p class="muted">A private record of every use of the questions kept aside for fair testing. It is set up once and
+      never replaced.</p>
+    <div id="lpo-holdout"></div>
+    <p class="muted" id="lpo-holdout-status" role="status" aria-live="polite"></p>
+  </div>
+</div>
+<style>
+  .lpo-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: .5rem 0 1rem; }
+</style>
+<script src="/static/lightwork-learned-ops.js" defer></script>
+{% endif %}

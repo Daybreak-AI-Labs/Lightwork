@@ -136,6 +136,28 @@
         "upstream": "https://api.anthropic.com"
       },
       "headers": {
+        "Connection": "x-private",
+        "x-maverick-proxy-token": "<client-token>",
+        "x-private": "drop-me"
+      },
+      "path": "/v1/messages",
+      "result": {
+        "headers": {
+          "Authorization": "Bearer <upstream-key>"
+        },
+        "url": "https://api.anthropic.com/v1/messages"
+      }
+    },
+    {
+      "config": {
+        "allow_hosts": [],
+        "allowed_routes": [],
+        "api_key": "<upstream-key>",
+        "auth_style": "bearer",
+        "client_token": "<client-token>",
+        "upstream": "https://api.anthropic.com"
+      },
+      "headers": {
         "Authorization": "Bearer <client-token>",
         "X-Custom": "v"
       },

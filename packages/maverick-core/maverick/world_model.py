@@ -28,6 +28,8 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
+from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from .event_admission import SQLITE_SCHEMA as _EVENT_ADMISSION_SCHEMA
 from .file_lock import (
     atomic_create_bytes,
     cross_process_lock,
@@ -47,7 +49,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 36
+SCHEMA_VERSION = 41
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -420,6 +422,12 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    40: [statement for statement in _EVENT_ADMISSION_SCHEMA.split(";") if statement.strip()],
+    41: [
+        "ALTER TABLE event_goal_admissions ADD COLUMN request_digest TEXT",
+        "ALTER TABLE event_goal_admissions ADD COLUMN sealed_contract TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_event_admission_goal ON event_goal_admissions(goal_id)",
+    ],
     # v11: per-goal owner principal for multi-user dashboard authz (owner-scoped
     # reads/mutations). Legacy goals get '' (treated as unowned -> admin-only).
     11: ["ALTER TABLE goals ADD COLUMN owner TEXT NOT NULL DEFAULT ''"],
@@ -644,6 +652,13 @@ MIGRATIONS: dict[int, list[str]] = {
         "ALTER TABLE approvals ADD COLUMN department TEXT NOT NULL DEFAULT ''",
         "CREATE INDEX IF NOT EXISTS idx_goals_domain_completed ON goals(domain, completed_at)",
     ],
+    37: [
+        "CREATE INDEX IF NOT EXISTS idx_goals_root_owner ON goals(owner, id DESC) WHERE parent_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_goals_root_id ON goals(id DESC) WHERE parent_id IS NULL",
+    ],
+    38: [_ATTACHMENT_SUBMISSION_SCHEMA],
+    # PostgreSQL v39 scopes learning keys by tenant; SQLite files already do.
+    39: [],
 }
 
 
@@ -1092,6 +1107,8 @@ class WorldModel:
         *,
         _managed_path: bool = False,
     ):
+        from .paths import current_tenant_id_strict
+        self._event_admission_tenant = current_tenant_id_strict()
         path, default_managed = _resolve_world_path(path)
         _managed_path = _managed_path or default_managed
         self.path = path
@@ -2038,6 +2055,39 @@ class WorldModel:
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
 
+    def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
+        """Record a pre-dispatch refusal without replacing a terminal outcome."""
+        with self._writing() as conn:
+            cur = conn.execute(
+                "UPDATE goals SET status = 'blocked', completed_at = NULL, "
+                "updated_at = MAX(updated_at + 0.000001, ?), result = ? "
+                "WHERE id = ? AND status IN ('pending', 'active', 'running', 'blocked')",
+                (time.time(), _enc_field(result), int(goal_id)),
+            )
+            changed = cur.rowcount == 1
+            if changed:
+                conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
+            return changed
+
+    def set_goal_partial_result(self, goal_id: int, text: str) -> bool:
+        """Replace a RUNNING goal's result with the answer written so far.
+
+        The chat page's live preview. It never touches a terminal goal, so the
+        orchestrator's final write wins any race with a late preview; it
+        advances the optimistic review version like every goal write; and it
+        revokes no sign-off because a non-terminal goal cannot carry one.
+        Returns whether a row changed.
+        """
+        now = time.time()
+        with self._writing() as conn:
+            cur = conn.execute(
+                "UPDATE goals SET result = ?, updated_at = MAX(updated_at + 0.000001, ?) "
+                "WHERE id = ? AND status NOT IN "
+                "('done', 'completed', 'failed', 'cancelled', 'blocked', 'error')",
+                (_enc_field(text), now, goal_id),
+            )
+            return cur.rowcount == 1
+
     def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
         """Complete department totals in one read snapshot, without a row cap."""
         from .shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements
@@ -2186,6 +2236,37 @@ class WorldModel:
             params = params + (max(1, int(limit)), max(0, int(offset)))
         rows = self._read_all(sql, params)
         return [_goal_from_row(r) for r in rows]
+
+    def conversation_summaries(self, *, owner: str | None = None,
+                               limit: int = 25, before_id: int | None = None):
+        """Root creation order, newest first; children never consume the limit."""
+        from .goal_views import ConversationSummary
+
+        sql = "SELECT id,title,status,updated_at,owner FROM goals WHERE parent_id IS NULL"
+        params: list[Any] = []
+        if owner is not None:
+            sql += " AND owner=?"
+            params.append(owner)
+        if before_id is not None:
+            sql += " AND id<?"
+            params.append(int(before_id))
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(max(1, min(100, int(limit))))
+        rows = self._read_all(sql, tuple(params))
+        titles = _dec_fields([row["title"] for row in rows])
+        return [ConversationSummary(row["id"], title, row["status"], row["updated_at"], row["owner"])
+                for row, title in zip(rows, titles, strict=True)]
+
+    def goal_stream_state(self, goal_id: int, *, include_result: bool = False):
+        """Read authorization/status fields; decrypt the result only on demand."""
+        from .goal_views import GoalStreamState
+
+        columns = "id,status,owner,result" if include_result else "id,status,owner"
+        row = self._read_one(f"SELECT {columns} FROM goals WHERE id=?", (goal_id,))
+        if row is None:
+            return None
+        return GoalStreamState(row["id"], row["status"], row["owner"],
+                               _dec_field(row["result"]) if include_result else "")
 
     def search_goals(
         self,
@@ -2951,7 +3032,7 @@ class WorldModel:
         """All approvals, newest first (the Operating Record's human-decision
         feed); ``pending_approvals`` remains the queue view."""
         rows = self._read_all(
-            "SELECT * FROM approvals ORDER BY requested_at DESC LIMIT ?",
+            "SELECT * FROM approvals ORDER BY requested_at DESC, id DESC LIMIT ?",
             (max(1, int(limit)),),
         )
         return [_approval_from_row(r) for r in rows]
@@ -3931,6 +4012,11 @@ class WorldModel:
                 for chunk in self._chunks(goal_ids):
                     goal_placeholders = ",".join("?" * len(chunk))
                     conn.execute(
+                        "UPDATE event_goal_admissions SET sealed_contract=NULL, "
+                        "delivery_state='federation_retired' WHERE admission_key LIKE 'federation:%' "
+                        f"AND goal_id IN ({goal_placeholders})", chunk,
+                    )
+                    conn.execute(
                         f"DELETE FROM goals WHERE id IN ({goal_placeholders})",
                         chunk,
                     )
@@ -4419,13 +4505,11 @@ class WorldModel:
         sha256: str,
         path: str,
     ) -> int:
-        with self._writing() as conn:
-            cur = conn.execute(
-                "INSERT INTO attachments(goal_id, filename, mime, size_bytes, sha256, path, created_at) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?)",
-                (goal_id, filename, mime, size_bytes, sha256, path, time.time()),
-            )
-            return cur.lastrowid
+        from .attachment_submissions import AttachmentAdmission, SubmissionStore
+
+        return SubmissionStore(self).admit(
+            goal_id, [AttachmentAdmission(filename, mime, size_bytes, sha256, path)],
+        )[0]
 
     def list_attachments(self, goal_id: int) -> list[Attachment]:
         rows = self._read_all(
@@ -4469,10 +4553,17 @@ def reclaim_window_seconds(default: float = 60.0) -> float:
     heartbeats) can tell callers how often they must refresh liveness."""
     import os
     raw = os.environ.get("MAVERICK_ORPHAN_RECLAIM_SECONDS")
+    if raw is None:
+        # ``[world_model] orphan_reclaim_seconds`` (All settings); env wins.
+        try:
+            from .config import load_config
+            raw = ((load_config() or {}).get("world_model") or {}).get("orphan_reclaim_seconds")
+        except Exception:
+            raw = None
     if raw is not None:
         try:
             return max(0.0, float(raw))
-        except ValueError:
+        except (TypeError, ValueError):
             pass
     return default
 

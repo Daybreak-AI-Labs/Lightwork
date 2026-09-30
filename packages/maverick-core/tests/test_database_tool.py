@@ -136,12 +136,18 @@ def test_row_returning_read_classified_sql_is_not_committed(monkeypatch):
         def fetchmany(self, _size):
             return [(1,)]
 
+        def close(self):
+            pass
+
     class _Conn:
         def execute(self, _stmt):
             return _Result()
 
         def commit(self):
             committed["called"] = True
+
+        def rollback(self):
+            pass
 
         def __enter__(self):
             return self
@@ -258,11 +264,17 @@ def test_row_limit_is_clamped(monkeypatch):
             captured["size"] = size
             return []
 
+        def close(self):
+            pass
+
     class _Conn:
         def execute(self, _stmt):
             return _Result()
 
         def commit(self):
+            pass
+
+        def rollback(self):
             pass
 
         def __enter__(self):
@@ -295,7 +307,7 @@ def test_row_limit_is_clamped(monkeypatch):
         "sql": "SELECT 1",
         "limit": 100_000_000,
     })
-    assert captured["size"] == 1000  # clamped to _DEFAULT_MAX_ROWS
+    assert captured["size"] == 1001  # bounded row allowance plus one completeness sentinel
     assert disposed["called"] is True  # engine pool released
 
 

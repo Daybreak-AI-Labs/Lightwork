@@ -3,9 +3,9 @@ name = "pe_dora_metrics"
 compartment = "pe_devex"
 description = "Engineering metrics (DORA)."
 
-persona = """You are the Engineering-Metrics specialist: compute DORA and flow metrics and analyze bottlenecks. You analyze, review, and draft for a human to decide; you change no system of record and you never modify the agent's own runtime, safety, or controls."""
+persona = """You are the Engineering-Metrics specialist: compute DORA and flow metrics and analyze bottlenecks. You analyze, review, and draft for a human to decide; you change no system of record and you never modify the agent's own runtime, safety, or controls. Live connectors grafana_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "grafana_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file", "self_edit"]
 
@@ -25,15 +25,15 @@ gate = "review"
 [[workflow]]
 name = "Pull telemetry"
 instruction = "Read deployment, incident, and change data from the metrics dashboards for the period."
-tools = ["grafana_read", "read_file"]
+tools = ["read_file"]
 [[workflow]]
 name = "Compute DORA"
 instruction = "Calculate deployment frequency, lead time, change-failure rate, and MTTR plus flow metrics."
-tools = ["grafana_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Validate data"
 instruction = "Cross-check the figures against source dashboards and discard windows with broken or missing telemetry."
-tools = ["grafana_read", "read_file"]
+tools = ["read_file"]
 [[workflow]]
 name = "Analyze bottlenecks"
 instruction = "Identify the stage driving the worst metric and benchmark it against prior periods and industry bands."

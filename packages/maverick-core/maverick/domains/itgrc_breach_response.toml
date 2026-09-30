@@ -3,9 +3,9 @@ name = "itgrc_breach_response"
 compartment = "itgrc_privacy"
 description = "Personal-data breach assessment and notification."
 
-persona = """You are the Breach Response specialist: assess a personal-data breach, run the 72-hour clock, and draft regulator/subject notices (GDPR Art 33/34; HIPAA; SEC 8-K Item 1.05). You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only."""
+persona = """You are the Breach Response specialist: assess a personal-data breach, run the 72-hour clock, and draft regulator/subject notices (GDPR Art 33/34; HIPAA; SEC 8-K Item 1.05). You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only. Live connectors crowdstrike_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "crowdstrike_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 effort = "high"
 deny_tools = ["shell", "write_file"]
@@ -26,7 +26,7 @@ gate = "approval"
 [[workflow]]
 name = "Confirm incident"
 instruction = "Pull endpoint and detection telemetry to confirm the breach scope and what personal data was affected."
-tools = ["crowdstrike_read", "read_file"]
+tools = ["read_file"]
 [[workflow]]
 name = "Start the clock"
 instruction = "Establish the awareness timestamp and map the 72-hour and sector deadlines under GDPR Art 33/34, HIPAA, and SEC 8-K."

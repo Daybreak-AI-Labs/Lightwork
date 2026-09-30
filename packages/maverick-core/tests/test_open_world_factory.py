@@ -96,16 +96,28 @@ def test_open_world_returns_real_postgres_model(monkeypatch):
     monkeypatch.setenv("MAVERICK_WORLD_BACKEND", "postgres")
     monkeypatch.setenv("MAVERICK_PG_DSN", "postgres://test")
 
+    from maverick.postgres_io import BoundedConnection
     from maverick.world_model_backends import PostgresWorldModel
 
     monkeypatch.setattr(PostgresWorldModel, "_migrate", lambda self: None)
-    import psycopg
-    monkeypatch.setattr(psycopg, "connect", lambda *a, **k: object())
+    connection = object()
+    connect_calls = []
+
+    def connect(dsn, **kwargs):
+        connect_calls.append((dsn, kwargs))
+        return connection
+
+    monkeypatch.setattr(BoundedConnection, "connect", connect)
 
     from maverick.world_model import open_world
 
     world = open_world()
     assert isinstance(world, PostgresWorldModel)
+    assert world.conn is connection
+    assert len(connect_calls) == 1
+    assert connect_calls[0][0] == "postgres://test"
+    assert connect_calls[0][1]["autocommit"] is False
+    assert connect_calls[0][1]["io_timeout_seconds"] == world._io_timeout_seconds
 
 
 def test_closing_no_path_tenant_world_is_ignored(tmp_path, monkeypatch):

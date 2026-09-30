@@ -88,6 +88,22 @@ def verify_signature(
     return hmac.compare_digest(expected.encode("utf-8"), sig.encode("utf-8"))
 
 
+def gitlab_webhook_token() -> str:
+    """The shared GitLab webhook token: ``MAVERICK_GITLAB_WEBHOOK_TOKEN`` wins;
+    otherwise ``[webhooks] gitlab_token``, saved sealed on the All settings
+    page and opened by ``load_config``. Empty means GitLab webhooks are
+    refused."""
+    env = os.environ.get("MAVERICK_GITLAB_WEBHOOK_TOKEN", "").strip()
+    if env:
+        return env
+    try:
+        from .config import load_config
+        value = ((load_config() or {}).get("webhooks") or {}).get("gitlab_token")
+    except Exception:  # pragma: no cover - unreadable config means "not set"
+        return ""
+    return value.strip() if isinstance(value, str) else ""
+
+
 def verify_gitlab_token(token_header: str | None, secret: str | None) -> bool:
     """Constant-time check of GitLab's ``X-Gitlab-Token`` shared secret.
 
@@ -164,10 +180,25 @@ _BOT_ENVS = {
     "jira": "MAVERICK_BOT_JIRA_ACCOUNT_ID",
     "gitlab": "MAVERICK_BOT_GITLAB_USERNAME",
 }
+# The same identities saved on the All settings page ([webhooks] table); the
+# environment variable above wins when it is set.
+_BOT_KEYS = {
+    "linear": "linear_bot_id",
+    "jira": "jira_bot_id",
+    "gitlab": "gitlab_bot_username",
+}
 
 
 def _bot_id(provider: str) -> str:
-    return os.environ.get(_BOT_ENVS.get(provider, ""), "").strip().lower()
+    env = os.environ.get(_BOT_ENVS.get(provider, ""), "").strip()
+    if env or provider not in _BOT_KEYS:
+        return env.lower()
+    try:
+        from .config import load_config
+        value = ((load_config() or {}).get("webhooks") or {}).get(_BOT_KEYS[provider])
+    except Exception:  # pragma: no cover - config never blocks a webhook
+        return ""
+    return value.strip().lower() if isinstance(value, str) else ""
 
 
 def _is_bot(assignee_candidates: list[str], provider: str) -> bool:

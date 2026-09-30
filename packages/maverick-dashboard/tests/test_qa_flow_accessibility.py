@@ -71,10 +71,10 @@ def test_qa_065_generated_property_condition_and_approval_controls_are_named() -
         source.index("function input(val, oninput, ph)")
     ]
     condition = source[
-        source.index("function conditionField(n, label, placeholder)") :
-        source.index("// a datalist of the keys this node can see")
+        source.index("function conditionField(n, label)") :
+        source.index("// ---- serialize / api ----")
     ]
-    approval_start = source.index("// form fields collected on sign-off")
+    approval_start = source.index("if (n.kind === 'approval') {")
     approval = source[
         approval_start : source.index("if (n.kind === 'delay')", approval_start)
     ]
@@ -82,18 +82,11 @@ def test_qa_065_generated_property_condition_and_approval_controls_are_named() -
     assert "l.id = labelId" in generic_field
     assert "inputEl.setAttribute('aria-labelledby', labelId)" in generic_field
     assert "l.htmlFor = inputEl.id" in generic_field
-    assert "ta.setAttribute('aria-labelledby', conditionLabelId)" in condition
-    assert "keyIn.setAttribute('aria-label', label + ' data key')" in condition
-    assert "opSel.setAttribute('aria-label', label + ' operator')" in condition
-    assert "valIn.setAttribute('aria-label', label + ' comparison value')" in condition
-    assert (
-        "nm.setAttribute('aria-label', 'Approval field ' + (fi + 1) + ' key')"
-        in approval
-    )
-    assert (
-        "lb.setAttribute('aria-label', 'Approval field ' + (fi + 1) + ' prompt')"
-        in approval
-    )
+    assert "keySel.setAttribute('aria-label', label + ': information to check')" in condition
+    assert "opSel.setAttribute('aria-label', label + ': comparison')" in condition
+    assert "valIn.setAttribute('aria-label', label + ': value')" in condition
+    assert "lb.setAttribute('aria-label', 'Approver question ' + (fi + 1))" in approval
+    assert "ci0.setAttribute('aria-label', 'Extra answer ' + (ci + 1))" in approval
 
 
 def test_qa_066_workflow_picker_traps_escape_tab_and_restores_opener() -> None:
@@ -132,26 +125,29 @@ def _designer_css_rules() -> tuple[str, list[tuple[str, str]]]:
     return style, rules
 
 
-def test_qa_067_flow_designer_copilot_drawer_stays_inside_its_canvas_track() -> None:
-    """The Canvas-view copilot drawer is absolutely positioned inside the
-    canvas wrap (overflow:hidden). A fixed 320px width overflowed the wrap's
-    start edge whenever the middle grid track was narrower than the drawer --
-    inside the app shell (248px sidebar + main padding) that was every
-    viewport between ~900 and ~1200px: the header read "...pilot", messages
-    were left-truncated and the user's own bubble survived as a stray
-    rectangle. The drawer must size to its track and the track needs a floor."""
+def test_qa_067_flow_designer_copilot_drawer_stays_inside_the_window() -> None:
+    """The copilot drawer used to sit absolutely positioned inside the canvas
+    wrap (overflow:hidden), where a fixed 320px width overflowed the wrap's
+    start edge whenever the middle grid track was narrower than the drawer:
+    the header read "...pilot" and messages were left-truncated. It is now one
+    shared drawer fixed to the window, outside the view containers, so it must
+    size to the window and still hug the end edge; the canvas track keeps its
+    floor for the canvas itself."""
     style, rules = _designer_css_rules()
+    source = _source("flow_designer.html")
+    canvas_wrap = source[source.index('<div class="fd__canvas-wrap">'):source.index('id="fd-canvas"')]
+    assert 'id="fd-chat"' not in canvas_wrap
 
     chat_rules = [body for sel, body in rules if sel == ".fd__chat"]
     assert chat_rules, "the .fd__chat drawer rule is missing"
-    assert any("width: min(320px, calc(100% - 16px))" in body for body in chat_rules)
-    assert any("max-width: calc(100% - 16px)" in body for body in chat_rules)
+    assert any("position: fixed" in body for body in chat_rules)
+    assert any("width: min(25rem, calc(100vw - 2rem))" in body for body in chat_rules)
     for body in chat_rules:
         widths = re.findall(r"(?<![\w-])width:\s*([^;]+);", body)
         assert all("min(" in width for width in widths), widths
         # Logical insets: the drawer hugs the END edge, so RTL mirrors it.
         assert "right:" not in body and "left:" not in body
-    assert any("inset-inline-end: 8px" in body for body in chat_rules)
+    assert any("inset-inline-end: 1rem" in body for body in chat_rules)
     for overlay in (".fd__crumbs", ".fd__minimap"):
         bodies = [body for sel, body in rules if sel == overlay]
         assert any("inset-inline-start: 8px" in body for body in bodies), overlay

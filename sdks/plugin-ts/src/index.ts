@@ -12,30 +12,33 @@
  * convention of Lightwork's built-in Python tools. Anything you log must go to
  * stderr (console.error) — stdout belongs to the protocol.
  */
-import { createInterface } from "node:readline";
+import type { Readable } from "node:stream";
 
-export const PROTOCOL = "maverick-plugin/1";
-
-// Same constraint the model-facing tool catalog imposes (Anthropic tool names).
+export const PROTOCOL = "maverick-plugin/2";
+export const MAX_FRAME_BYTES = 1024 * 1024;
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-export interface ToolDef {
-  /** Tool name as the model sees it: [A-Za-z0-9_-], max 64 chars. */
-  name: string;
-  /** One or two sentences telling the model when to use the tool. */
-  description: string;
-  /** JSON Schema for the args object. */
-  inputSchema: Record<string, unknown>;
-  /** Returns the tool result string (or a promise of one). */
-  handler: (args: Record<string, unknown>) => string | Promise<string>;
+export interface InvocationContext {
+  /** Stable logical invocation id, not an idempotency guarantee. */
+  requestId: string | number | null;
+  attempt: number;
+  deadlineUnixMs: number | null;
+  /** Aborted at the deadline; handlers must pass it into owned async work. */
+  signal: AbortSignal;
+  /** Neither the host nor SDK automatically repeats a handler. */
+  replay: "never";
 }
 
-/** Validate a tool definition; throws TypeError on a bad one. */
+export interface ToolDef {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  handler: (args: Record<string, unknown>, context: InvocationContext) => string | Promise<string>;
+}
+
 export function defineTool(def: ToolDef): ToolDef {
   if (typeof def?.name !== "string" || !NAME_RE.test(def.name)) {
-    throw new TypeError(
-      `defineTool: invalid tool name ${JSON.stringify(def?.name)} (want ${NAME_RE})`,
-    );
+    throw new TypeError("defineTool: invalid tool name");
   }
   if (typeof def.description !== "string" || def.description.length === 0) {
     throw new TypeError(`defineTool(${def.name}): description must be a non-empty string`);
@@ -49,8 +52,11 @@ export function defineTool(def: ToolDef): ToolDef {
   return def;
 }
 
+type Effect = "not_started" | "completed" | "unknown";
 interface WireResponse {
   id: unknown;
+  attempt?: number;
+  effect?: Effect;
   result?: string;
   error?: string;
 }
@@ -58,6 +64,7 @@ interface WireResponse {
 function manifest(tools: ToolDef[]): string {
   return JSON.stringify({
     protocol: PROTOCOL,
+    execution: { replay: "never", deadline: "cooperative", framingBytes: MAX_FRAME_BYTES },
     tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
   });
 }
@@ -70,74 +77,113 @@ async function answer(byName: Map<string, ToolDef>, line: string): Promise<WireR
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
-  } catch (e) {
-    return { id: null, error: `invalid request: ${errorMessage(e)}` };
+  } catch {
+    return { id: null, error: "invalid request: malformed JSON" };
   }
-  const req = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<string, unknown>;
+  const req = (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {}) as Record<string, unknown>;
   const id = "id" in req ? req.id : null;
-  if (typeof req.tool !== "string") {
-    return { id, error: "invalid request: missing tool" };
+  const versioned = req.protocol === PROTOCOL;
+  const reply = (effect: Effect, content: { result: string } | { error: string }): WireResponse => ({
+    id, ...(versioned ? { attempt: 1, effect } : {}), ...content,
+  });
+  if (req.protocol !== undefined && !versioned && req.protocol !== "maverick-plugin/1") {
+    return reply("not_started", { error: "unsupported protocol" });
   }
+  if (versioned && (
+    typeof id !== "string" || id.length === 0 || id.length > 128
+    || req.attempt !== 1 || req.replay !== "never"
+    || typeof req.deadline_unix_ms !== "number" || !Number.isSafeInteger(req.deadline_unix_ms)
+  )) {
+    return reply("not_started", { error: "invalid execution metadata" });
+  }
+  if (typeof req.tool !== "string") return reply("not_started", { error: "invalid request: missing tool" });
   const tool = byName.get(req.tool);
-  if (tool === undefined) {
-    return { id, error: `unknown tool: ${req.tool}` };
+  if (tool === undefined) return reply("not_started", { error: `unknown tool: ${req.tool}` });
+  const deadline = versioned ? req.deadline_unix_ms as number : null;
+  if (deadline !== null && deadline <= Date.now()) {
+    return reply("not_started", { error: "invocation deadline expired before dispatch" });
   }
-  const args = (typeof req.args === "object" && req.args !== null && !Array.isArray(req.args)
-    ? req.args
-    : {}) as Record<string, unknown>;
+  const controller = new AbortController();
+  const context: InvocationContext = {
+    requestId: typeof id === "string" || typeof id === "number" ? id : null,
+    attempt: 1, deadlineUnixMs: deadline, signal: controller.signal, replay: "never",
+  };
+  const timer = deadline === null ? undefined : setTimeout(
+    () => controller.abort(new Error("invocation deadline exceeded")),
+    Math.min(deadline - Date.now(), 2147483647),
+  );
+  const args = (typeof req.args === "object" && req.args !== null && !Array.isArray(req.args) ? req.args : {}) as Record<string, unknown>;
   try {
-    const result = await tool.handler(args);
-    if (typeof result === "string") {
-      return { id, result };
+    // Do not race the handler against a timeout and then start another effect:
+    // retain serial ownership until it settles. The host owns hard termination.
+    const result = await tool.handler(args, context);
+    if (controller.signal.aborted || (deadline !== null && Date.now() >= deadline)) {
+      return reply("unknown", { error: "deadline exceeded; effect outcome unknown" });
     }
+    if (typeof result === "string") return reply("completed", { result });
     const serialized = JSON.stringify(result);
     if (serialized === undefined) {
-      // undefined / a function / a Symbol all make JSON.stringify return the
-      // JS value undefined, which would drop the "result" key off the wire
-      // entirely (the message carries neither result nor error, and the host
-      // reads that as a bogus null). Surface it as a readable error instead --
-      // most often a handler that falls through without an explicit return.
-      return { id, result: `ERROR: ${tool.name} returned a non-serializable value (${typeof result})` };
+      return reply("unknown", { result: `ERROR: ${tool.name} returned a non-serializable value (${typeof result})` });
     }
-    return { id, result: serialized };
+    return reply("completed", { result: serialized });
   } catch (e) {
-    // Same convention as Lightwork's Python tools: a failure is an
-    // "ERROR: ..." result string the model can read, not a protocol error.
-    return { id, result: `ERROR: ${tool.name} failed: ${errorMessage(e)}` };
+    return reply("unknown", { result: `ERROR: ${tool.name} failed: ${errorMessage(e)}` });
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
 export interface ServeOptions {
-  /** Request stream (default process.stdin). */
   input?: NodeJS.ReadableStream;
-  /** Response stream (default process.stdout). */
   output?: NodeJS.WritableStream;
-  /** CLI args (default process.argv.slice(2)). */
   argv?: string[];
 }
 
-/**
- * Serve the tools over the NDJSON wire protocol until stdin closes; with
- * `--describe` in argv, print the manifest and return immediately. Call this
- * at the end of your plugin script.
- */
+async function writeFrame(output: NodeJS.WritableStream, frame: string): Promise<void> {
+  if (Buffer.byteLength(frame) > MAX_FRAME_BYTES) throw new Error("plugin response frame too large");
+  // The callback waits for this write, including backpressure. Only one response
+  // is outstanding; a slow host cannot cause an unbounded output queue.
+  await new Promise<void>((resolve, reject) => {
+    const failure = (error: Error): void => { output.off("error", failure); reject(error); };
+    output.once("error", failure);
+    try {
+      output.write(frame + "\n", (error?: Error | null) => {
+        if (error) reject(error);
+        else { output.off("error", failure); resolve(); }
+      });
+    } catch (error) {
+      output.off("error", failure);
+      reject(error);
+    }
+  });
+}
+
+/** Bounded UTF-8 frames; serialized handlers; deadline context for version 2. */
 export async function servePlugin(tools: ToolDef[], opts: ServeOptions = {}): Promise<void> {
   const checked = tools.map(defineTool);
-  const byName = new Map(checked.map((t) => [t.name, t]));
-  if (byName.size !== checked.length) {
-    throw new TypeError("servePlugin: duplicate tool names");
-  }
+  const byName = new Map(checked.map((tool) => [tool.name, tool]));
+  if (byName.size !== checked.length) throw new TypeError("servePlugin: duplicate tool names");
   const output = opts.output ?? process.stdout;
-  const argv = opts.argv ?? process.argv.slice(2);
-  if (argv.includes("--describe")) {
-    output.write(manifest(checked) + "\n");
+  if ((opts.argv ?? process.argv.slice(2)).includes("--describe")) {
+    await writeFrame(output, manifest(checked));
     return;
   }
-  const lines = createInterface({ input: opts.input ?? process.stdin, crlfDelay: Infinity });
-  for await (const line of lines) {
-    if (line.trim() === "") continue;
-    output.write(JSON.stringify(await answer(byName, line)) + "\n");
+  let pending = Buffer.alloc(0);
+  for await (const raw of (opts.input ?? process.stdin) as Readable) {
+    const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as string);
+    let start = 0;
+    for (let index = 0; index < chunk.length; index++) {
+      if (chunk[index] !== 10) continue;
+      if (pending.length + index - start > MAX_FRAME_BYTES) throw new Error("plugin request frame too large");
+      const line = Buffer.concat([pending, chunk.subarray(start, index)]).toString("utf8");
+      pending = Buffer.alloc(0);
+      start = index + 1;
+      if (line.trim()) await writeFrame(output, JSON.stringify(await answer(byName, line)));
+    }
+    if (pending.length + chunk.length - start > MAX_FRAME_BYTES) throw new Error("plugin request frame too large");
+    pending = Buffer.concat([pending, chunk.subarray(start)]);
   }
+  if (pending.length) throw new Error("plugin input ended inside a frame");
 }
 
 // --------------------------------------------------------------------------

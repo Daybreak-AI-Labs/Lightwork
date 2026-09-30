@@ -79,7 +79,7 @@ def test_every_explicitly_granted_destination_can_reach_driver(intercepted_engin
         "op": "query", "sql": "SELECT 1", "url": url,
         "_capability_allow_hosts": hosts,
     })
-    assert "test connection intercepted" in result
+    assert result.startswith("ERROR: database query failed (RuntimeError)")
     assert intercepted_engine and intercepted_engine[0][0] == url
 
 
@@ -87,7 +87,7 @@ def test_unscoped_operator_connection_keeps_service_options(monkeypatch, interce
     url = "postgresql+psycopg://fixture@db.corp.internal/db?service=customer"
     monkeypatch.setenv("DATABASE_URL", url)
     result = database_tool().fn({"op": "query", "sql": "SELECT 1"})
-    assert "test connection intercepted" in result
+    assert result.startswith("ERROR: database query failed (RuntimeError)")
     assert intercepted_engine[0][0] == url
 
 
@@ -117,7 +117,7 @@ def test_real_driver_receives_only_explicitly_granted_targets(monkeypatch, query
         "url": "postgresql+psycopg://fixture@db.corp.internal/db?" + query,
         "_capability_allow_hosts": ("*.corp.internal", "outside.example", "127.0.0.1"),
     })
-    assert "test driver intercepted" in result and len(calls) == 1
+    assert result.startswith("ERROR: database query failed (OperationalError)") and len(calls) == 1
     assert all(calls[0][key] == value for key, value in expected.items())
 
 

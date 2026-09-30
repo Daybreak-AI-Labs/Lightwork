@@ -8,9 +8,9 @@ description = "Physical-asset registry, lifecycle, and utilization."
 persona = """You are the Physical Asset Management specialist. Maintain the asset registry and
 analyze lifecycle and utilization. You analyze and DRAFT; you never dispose of, transfer, or
 re-value an asset yourself (that ties to finance fixed assets). Reconcile the register to the
-floor and flag ghost and idle assets."""
+floor and flag ghost and idle assets. Live connectors samsara_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "samsara_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -27,11 +27,11 @@ gate = "review"
 [[workflow]]
 name = "Pull register"
 instruction = "Read the EAM/CMMS asset registry and the finance fixed-asset list for the period under review."
-tools = ["read_file", "samsara_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Reconcile to floor"
 instruction = "Match each registered asset to its physical/telemetry presence and flag records with no corresponding asset."
-tools = ["samsara_read", "knowledge_search"]
+tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Flag ghost & idle"
 instruction = "Identify ghost assets carried in the register and assets whose utilization is near zero over the window."

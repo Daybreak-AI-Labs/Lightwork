@@ -47,10 +47,13 @@ Multiple indexes merge; earlier indexes win on name collision.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import hmac
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -176,6 +179,63 @@ def _cache_path(url: str) -> Path:
     return _CACHE_DIR / f"{h}.json"
 
 
+# Latency-sensitive callers (the per-goal self-learning preflight) opt into
+# serving the on-disk index whatever its age and refreshing it off the hot
+# path, so a chat turn never waits on the catalog host.
+_CACHED_FIRST: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "maverick_catalog_cached_first", default=False,
+)
+_REFRESHING: set[str] = set()
+_REFRESH_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def cached_first():
+    """Inside this block ``load_catalog`` never awaits the network: a cached
+    index is served at any age and refreshed in the background; a missing one
+    counts as empty for this call and is fetched for the next."""
+    token = _CACHED_FIRST.set(True)
+    try:
+        yield
+    finally:
+        _CACHED_FIRST.reset(token)
+
+
+def _refresh_in_background(url: str) -> None:
+    with _REFRESH_LOCK:
+        if url in _REFRESHING:
+            return
+        _REFRESHING.add(url)
+
+    def _run() -> None:
+        try:
+            _fetch_index_raw(url)
+        except Exception:  # pragma: no cover -- a refresh never raises anywhere visible
+            log.debug("catalog: background refresh of %s failed", url, exc_info=True)
+        finally:
+            with _REFRESH_LOCK:
+                _REFRESHING.discard(url)
+
+    threading.Thread(target=_run, name="maverick-catalog-refresh", daemon=True).start()
+
+
+def _fetch_index_cached_first(url: str) -> dict | None:
+    """The cached index for ``url`` at any age (None when there is none),
+    scheduling a background refresh when it is stale or missing."""
+    cache = _cache_path(url)
+    data = None
+    fresh = False
+    if cache.exists():
+        try:
+            data = json.loads(cache.read_text())
+            fresh = (time.time() - cache.stat().st_mtime) < _CACHE_TTL
+        except (OSError, ValueError):
+            data = None
+    if not fresh:
+        _refresh_in_background(url)
+    return data
+
+
 def _fetch_index_raw(url: str) -> dict | None:
     """Fetch + parse one index JSON, with a 6h on-disk cache.
 
@@ -230,9 +290,10 @@ def load_catalog(kind: str, *, indexes: list[str] | None = None) -> list[Catalog
         raise CatalogError(f"unknown kind {kind!r}; valid: {', '.join(VALID_KINDS)}")
     bases = indexes if indexes is not None else _configured_indexes()
     seen: dict[str, CatalogEntry] = {}
+    fetch = _fetch_index_cached_first if _CACHED_FIRST.get() else _fetch_index_raw
     for base in bases:
         url = f"{base.rstrip('/')}/{kind}/index.json"
-        data = _fetch_index_raw(url)
+        data = fetch(url)
         if not data:
             continue
         for raw in data.get("entries", []):

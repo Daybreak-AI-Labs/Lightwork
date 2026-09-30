@@ -1,6 +1,7 @@
 """Signed central-sink invariants for cross-suite audit projections."""
 from __future__ import annotations
 
+import hashlib
 import json
 
 import maverick.audit.signing as signing
@@ -12,6 +13,14 @@ from maverick.audit.writer import (
     AuditLog,
     AuditWriteRefused,
     _prepare_private_audit_file,
+)
+from maverick.paths import data_dir, tenant_scope
+from maverick.unified_audit import (
+    StrictAuditProjectionSink,
+    UnifiedAuditConfigError,
+    UnifiedAuditError,
+    UnifiedAuditIntegrityError,
+    canonical_sha256,
 )
 
 
@@ -53,6 +62,105 @@ def _event(ts: float, **payload_overrides: object) -> AuditEvent:
         agent="unified-audit-projector",
         payload=payload,
     )
+
+
+@pytest.fixture
+def sealed_history_sink(monkeypatch):
+    from maverick.audit.sealing import seal_closed_segments
+    from maverick.crypto_at_rest import is_sealed
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    with tenant_scope(tenant="sealed-sink-tenant"):
+        audit_dir = data_dir("audit")
+        old_path = audit_dir / "2026-08-29.ndjson"
+        new_path = audit_dir / "2026-08-30.ndjson"
+        _prepare_private_audit_file(old_path)
+        _prepare_private_audit_file(new_path)
+        old_log = AuditLog(audit_dir, sign=True)
+        monkeypatch.setattr(old_log, "_rotate_if_needed", lambda: old_path)
+        old_sink = StrictAuditProjectionSink(
+            tenant_id="sealed-sink-tenant", audit_log=old_log, clock=lambda: 101.0,
+        )
+        event = _payload() | {"tenant_sha256": old_sink.tenant_sha256}
+        old_receipt = old_sink.append(event)
+        assert seal_closed_segments(audit_dir, today="2026-08-30")[old_path.name] == "sealed"
+        assert is_sealed(old_path.read_bytes())
+        assert verify_chain(old_path) == []
+
+        new_log = AuditLog(audit_dir, sign=True)
+        monkeypatch.setattr(new_log, "_rotate_if_needed", lambda: new_path)
+        sink = StrictAuditProjectionSink(
+            tenant_id="sealed-sink-tenant", audit_log=new_log, clock=lambda: 102.0,
+        )
+        yield sink, new_log, event, old_receipt, old_path, new_path
+
+
+@pytest.mark.parametrize("replay_old", [False, True])
+def test_strict_sink_reads_sealed_history_and_preserves_receipt_identity(
+    sealed_history_sink, replay_old,
+) -> None:
+    from maverick.audit.sealing import segment_text
+
+    sink, _log, old_event, old_receipt, old_path, new_path = sealed_history_sink
+    event = old_event if replay_old else old_event | {"projection_event_id": "f" * 64}
+    sealed_before = old_path.read_bytes()
+
+    receipt = sink.append(event)
+
+    assert receipt.projection_event_id == event["projection_event_id"]
+    assert receipt.event_sha256 == canonical_sha256(event)
+    assert receipt.tenant_sha256 == sink.tenant_sha256
+    assert receipt.sink_identity_sha256 == sink.sink_identity_sha256
+    assert sink.append(event) == receipt
+    if replay_old:
+        assert receipt == old_receipt
+    rows = [
+        json.loads(line)
+        for path in (old_path, new_path)
+        for line in segment_text(path, fail_soft=False).splitlines()
+    ]
+    assert len(rows) == (1 if replay_old else 2)
+    matched = [row for row in rows if row["projection_event_id"] == event["projection_event_id"]]
+    assert len(matched) == 1
+    assert receipt.chain_sha256 == matched[0]["hash"]
+    assert receipt.key_id_sha256 == hashlib.sha256(matched[0]["key_id"].encode("ascii")).hexdigest()
+    assert receipt.signature_sha256 == hashlib.sha256(matched[0]["sig"].encode("ascii")).hexdigest()
+    assert old_path.read_bytes() == sealed_before
+    assert verify_chain(old_path) == verify_chain(new_path) == []
+
+
+def test_strict_sink_sealed_history_keeps_tenant_and_conflict_rejections(
+    sealed_history_sink,
+) -> None:
+    sink, log, event, _receipt, old_path, new_path = sealed_history_sink
+    sealed_before = old_path.read_bytes()
+    with pytest.raises(UnifiedAuditConfigError, match="outside the tenant"):
+        StrictAuditProjectionSink(tenant_id="other-tenant", audit_log=log)
+    with pytest.raises(UnifiedAuditError, match="refused an append"):
+        sink.append(event | {"source_payload_sha256": "f" * 64})
+    assert old_path.read_bytes() == sealed_before
+    assert new_path.read_bytes() == b""
+
+
+def test_strict_sink_refuses_unreadable_sealed_history_after_append(
+    sealed_history_sink, monkeypatch,
+) -> None:
+    sink, log, event, _receipt, old_path, new_path = sealed_history_sink
+    record = log.record_strict_signed
+
+    def corrupt_after_append(audit_event):
+        result = record(audit_event)
+        assert result is True
+        sealed = old_path.read_bytes()
+        old_path.write_bytes(sealed[:-1] + bytes([sealed[-1] ^ 1]))
+        return result
+
+    monkeypatch.setattr(log, "record_strict_signed", corrupt_after_append)
+    with pytest.raises(UnifiedAuditIntegrityError, match="receipt is unavailable"):
+        sink.append(event | {"projection_event_id": "f" * 64})
+    # The append happened; unreadable history must not yield a false receipt.
+    assert verify_chain(new_path) == []
+    assert len(new_path.read_text(encoding="utf-8").splitlines()) == 1
 
 
 @pytest.mark.parametrize("sign", [False, True])

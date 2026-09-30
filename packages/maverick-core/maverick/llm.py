@@ -37,6 +37,7 @@ from .pricing import (
     VersionedPricingProvider,
     load_pricing_evidence_pack,
 )
+from .providers.configuration import ProviderConfig as _ProviderClientConfig
 from .runtime_overrides import RuntimeOverridesSecurityError
 
 # Latest Claude family as of 2026-05.
@@ -72,6 +73,10 @@ ROLE_MODELS: dict[str, str] = {
     "translator":      MODEL_SONNET,
     "coding":          MODEL_SONNET,
     "reviewer":        MODEL_OPUS,
+    # The cascaded shield's deeper check (safety/shield_judge.py) and the
+    # cheap first try of cascaded model routing (routing.py, [models] cascade).
+    "shield_judge":    MODEL_HAIKU,
+    "cascade_draft":   MODEL_HAIKU,
 }
 
 
@@ -633,6 +638,16 @@ def model_for_role(role: str) -> str:
     return _apply_allowed_model_policy(_resolve_model_for_role(role))
 
 
+def _note_bandit(provider: str, model_id: str, error: object, dollars: object) -> None:
+    """Credit a finished call to the routing bandit ([routing] bandit)."""
+    try:
+        from .cost.router_v3 import note_call
+
+        note_call(provider, model_id, success=not error, dollars=float(dollars or 0.0))
+    except Exception:  # pragma: no cover -- learning never fails a call
+        logging.getLogger(__name__).debug("routing bandit update skipped", exc_info=True)
+
+
 def _canonical_spec(spec: str) -> str:
     """``provider:model-id`` canonical form so a bare vs provider-qualified
     spelling of the same model compares equal in the admin allow-list check."""
@@ -951,11 +966,13 @@ def _reserve_provider_call(
     *,
     sequence: _ProviderAttemptSequence,
     service: str,
+    budget=None,
 ):
     from .provider_cost_cap import reserve
     return reserve(
         provider,
         projected_dollars,
+        organization_budget=budget,
         **sequence.next(default_service=service),
     )
 
@@ -1085,6 +1102,7 @@ class _ProviderAttemptTracker:
                 self.projected,
                 sequence=self.sequence,
                 service=self.service,
+                budget=self.budget,
             ),
             baseline=self.budget.dollars if self.budget is not None else 0.0,
         )
@@ -1154,6 +1172,30 @@ class _ProviderAttemptTracker:
             from .provider_cost_cap import ProviderAccountingUnavailable
 
             raise ProviderAccountingUnavailable
+
+
+def _stream_kwargs(provider: str, on_delta) -> dict[str, Any]:
+    """Token streaming is an Anthropic-provider feature (see ``complete``);
+    every other provider gets the buffered call."""
+    if on_delta is not None and provider == "anthropic":
+        return {"on_delta": on_delta}
+    return {}
+
+
+def _attempt_delta(on_delta):
+    """The delta callback for one failover attempt: a callback that keeps a
+    buffer (``reset``) starts empty, so a failed attempt's partial text is
+    never concatenated with the next model's answer."""
+    reset = getattr(on_delta, "reset", None)
+    if callable(reset):
+        reset()
+    return on_delta
+
+
+def _hedge_ms_for(on_delta) -> float | None:
+    """A hedged backup would stream a second copy of the answer into the same
+    callback, so a streaming call is never hedged."""
+    return None if on_delta is not None else _hedge_ms()
 
 
 def _hedge_ms() -> float | None:
@@ -1296,32 +1338,11 @@ _BEDROCK_CLIENT_ENV_NAMES = (
     "BEDROCK_AUTH_MODE",
     "BEDROCK_ENDPOINT",
     "BEDROCK_MODEL_ID",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
 )
 _PROVIDER_SNAPSHOT_RETRIES = 3
 _CLIENT_CACHE_MAX = 32
-
-
-@dataclass(frozen=True, repr=False)
-class _ProviderClientConfig:
-    """One immutable provider-client admission snapshot.
-
-    The secret-bearing values intentionally do not appear in ``repr``.  Cache
-    identity uses only ``fingerprint`` so credentials and auth headers never
-    become dict keys that diagnostics might print.
-    """
-
-    api_key: str | None
-    base_url: str | None
-    default_headers: tuple[tuple[str, str], ...]
-    auth_mode: str | None
-    provider_environment: tuple[tuple[str, str], ...]
-    fingerprint: str
-
-    def headers_dict(self) -> dict[str, str] | None:
-        return dict(self.default_headers) if self.default_headers else None
-
-    def environment_dict(self) -> dict[str, str]:
-        return dict(self.provider_environment)
 
 
 def _provider_config_snapshot(
@@ -1340,7 +1361,7 @@ def _provider_config_snapshot(
         before = dict(os.environ)
         try:
             raw = get_provider_config(provider) or {}
-            provider_config = dict(raw) if isinstance(raw, dict) else {}
+            provider_config = dict(raw) if isinstance(raw, dict) else raw
         except Exception:  # pragma: no cover -- provider config remains fail-soft
             provider_config = {}
         after = dict(os.environ)
@@ -1354,16 +1375,8 @@ def _provider_config_snapshot(
 
 
 def _canonical_headers(value: object) -> tuple[tuple[str, str], ...]:
-    if not isinstance(value, dict):
-        return ()
-    headers: dict[str, str] = {}
-    for raw_name, raw_value in value.items():
-        if not isinstance(raw_name, str):
-            continue
-        name = raw_name.strip()
-        if name:
-            headers[name] = str(raw_value)
-    return tuple(sorted(headers.items(), key=lambda item: (item[0].casefold(), item[0])))
+    from .providers.configuration import canonical_headers
+    return canonical_headers(value)
 
 
 def _provider_config_fingerprint(
@@ -1373,6 +1386,7 @@ def _provider_config_fingerprint(
     default_headers: tuple[tuple[str, str], ...],
     auth_mode: str | None,
     provider_environment: tuple[tuple[str, str], ...],
+    adapter_options: tuple[tuple[str, str | float], ...] = (),
 ) -> str:
     canonical = json.dumps(
         {
@@ -1385,12 +1399,32 @@ def _provider_config_fingerprint(
             ),
             "auth_mode": auth_mode,
             "provider_environment": provider_environment,
+            "adapter_options": adapter_options,
         },
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _configured_timeouts(present: dict) -> dict[str, str]:
+    """``[latency] read_timeout`` / ``connect_timeout`` for the provider client,
+    for each timeout the environment does not already set."""
+    try:
+        from .config import load_config
+
+        latency = (load_config() or {}).get("latency") or {}
+    except Exception:  # pragma: no cover -- config never blocks a call
+        return {}
+    out: dict[str, str] = {}
+    for env_name, key in (("MAVERICK_LLM_READ_TIMEOUT", "read_timeout"),
+                          ("MAVERICK_LLM_CONNECT_TIMEOUT", "connect_timeout")):
+        value = latency.get(key) if isinstance(latency, dict) else None
+        if env_name not in present and isinstance(value, (int, float)) \
+                and not isinstance(value, bool) and value > 0:
+            out[env_name] = str(float(value))
+    return out
 
 
 def _run_preflight(model_id, system, messages, tools, max_tokens) -> None:
@@ -1407,7 +1441,12 @@ def _run_preflight(model_id, system, messages, tools, max_tokens) -> None:
     borderline-but-valid request into a false refusal (the estimate is a
     cheap chars/token heuristic); operators opt into hard-refuse explicitly.
     """
-    mode = os.environ.get("MAVERICK_PREFLIGHT", "warn").strip().lower()
+    from .env_setting import env_or_config
+
+    # ``[context] preflight`` is the same choice made in the dashboard; the
+    # environment variable still wins.
+    mode = (env_or_config("MAVERICK_PREFLIGHT", "context", "preflight", "warn")
+            or "warn").strip().lower()
     if mode not in ("warn", "strict"):
         return  # 'off' / unrecognized -> skip
     try:
@@ -1654,8 +1693,12 @@ class LLM:
     Drop-in replacement for the previous anthropic-only LLM class.
     """
 
-    def __init__(self, model: str = DEFAULT_MODEL, api_key: str | None = None):
-        self.model = model
+    def __init__(self, model: str | None = None, api_key: str | None = None):
+        # No model named: resolve the "default" role like any other (kernel
+        # rule 2), so the dashboard's default-model pin, [models] default, the
+        # --model flag and the admin allow-list reach background runs. With
+        # nothing configured this is DEFAULT_MODEL, as before.
+        self.model = model or model_for_role("default")
         self._anthropic_api_key = api_key  # legacy back-compat
         # Compatibility/debug view: latest client created for each provider.
         self._clients: dict[str, Any] = {}
@@ -1678,6 +1721,9 @@ class LLM:
         # separate get_provider_config() reads, so a rotation between them could
         # pair old credentials with a new gateway.
         pcfg, environment = _provider_config_snapshot(provider)
+        from .providers.configuration import adapter_options, validate_fields
+        validate_fields(provider, pcfg)
+        options = adapter_options(provider, pcfg)
         key = _provider_api_key(
             provider,
             self._anthropic_api_key,
@@ -1705,7 +1751,22 @@ class LLM:
                 environment.get("AZURE_OPENAI_AUTH", "").strip().lower() or None
             )
 
+        # Pass an explicit environment to every adapter, including an empty
+        # snapshot. A missing value must not fall back to a newer generation.
         provider_environment: tuple[tuple[str, str], ...] = ()
+        common_environment = {
+            name: environment[name] for name in (
+                "MAVERICK_LLM_READ_TIMEOUT", "MAVERICK_LLM_CONNECT_TIMEOUT",
+            ) if name in environment
+        }
+        # [latency] read/connect timeouts apply when the environment sets none.
+        common_environment.update(_configured_timeouts(common_environment))
+        if provider == "anthropic" and "ANTHROPIC_AUTH_TOKEN" in environment:
+            common_environment["ANTHROPIC_AUTH_TOKEN"] = environment["ANTHROPIC_AUTH_TOKEN"]
+        if provider not in ("anthropic", "bedrock", "codex_cli"):
+            common_environment.update({
+                name: environment[name] for name in ("OPENAI_ORG_ID", "OPENAI_PROJECT_ID") if name in environment
+            })
         if provider == "azure":
             azure_environment = {
                 name: environment.get(name, "")
@@ -1713,7 +1774,15 @@ class LLM:
             }
             if auth_mode is not None:
                 azure_environment["AZURE_OPENAI_AUTH"] = auth_mode
-            provider_environment = tuple(sorted(azure_environment.items()))
+            # [providers.azure] deployment / api_version fill what the
+            # environment leaves empty (an exported variable still wins).
+            for env_name, field in (("AZURE_OPENAI_DEPLOYMENT", "deployment"),
+                                    ("AZURE_OPENAI_API_VERSION", "api_version")):
+                value = pcfg.get(field)
+                if not azure_environment[env_name].strip() and isinstance(value, str) \
+                        and value.strip():
+                    azure_environment[env_name] = value.strip()
+            common_environment.update(azure_environment)
         elif provider == "bedrock":
             # The native client derives its endpoint from the region and picks
             # IAM vs bearer auth; ``[providers.bedrock] auth_mode`` / ``endpoint``
@@ -1727,7 +1796,21 @@ class LLM:
             raw_endpoint = pcfg.get("endpoint")
             if isinstance(raw_endpoint, str) and raw_endpoint.strip():
                 bedrock_environment["BEDROCK_ENDPOINT"] = raw_endpoint.strip().lower()
-            provider_environment = tuple(sorted(bedrock_environment.items()))
+            # [providers.bedrock] region applies only when neither AWS region
+            # variable is exported.
+            raw_region = pcfg.get("region")
+            if (isinstance(raw_region, str) and raw_region.strip()
+                    and not bedrock_environment["AWS_REGION"].strip()
+                    and not bedrock_environment["AWS_DEFAULT_REGION"].strip()):
+                bedrock_environment["AWS_REGION"] = raw_region.strip()
+            common_environment.update(bedrock_environment)
+        elif provider == "codex_cli":
+            from .providers.codex_cli_provider import _ENV_ALLOWLIST
+            common_environment = {
+                name: environment[name] for name in (*_ENV_ALLOWLIST, "COMSPEC", "PATHEXT", "USERPROFILE")
+                if name in environment
+            }
+        provider_environment = tuple(sorted(common_environment.items()))
 
         fingerprint = _provider_config_fingerprint(
             api_key=key,
@@ -1735,6 +1818,7 @@ class LLM:
             default_headers=default_headers,
             auth_mode=auth_mode,
             provider_environment=provider_environment,
+            adapter_options=options,
         )
         return _ProviderClientConfig(
             api_key=key,
@@ -1743,6 +1827,7 @@ class LLM:
             auth_mode=auth_mode,
             provider_environment=provider_environment,
             fingerprint=fingerprint,
+            adapter_options=options,
         )
 
     def _get_client(self, provider: str):
@@ -1764,12 +1849,10 @@ class LLM:
                 "api_key": config.api_key,
                 "base_url": config.base_url,
                 "default_headers": config.headers_dict(),
+                "environment": config.environment_dict(),
             }
-            if provider in ("azure", "bedrock"):
-                # Azure's key-vs-Entra selection, static token, deployment, and
-                # API version -- and Bedrock's region, auth mode and endpoint --
-                # must consume the same environment snapshot too.
-                factory_kwargs["environment"] = config.environment_dict()
+            if provider == "codex_cli":
+                factory_kwargs["provider_options"] = config.options_dict()
             client = get_provider_client(provider, **factory_kwargs)
 
             # A provider/tenant has exactly one current client in this LLM.
@@ -1828,7 +1911,7 @@ class LLM:
                     (m, (lambda m=m: self.complete(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
-                        model=m, on_delta=on_delta, effort=effort,
+                        model=m, on_delta=_attempt_delta(on_delta), effort=effort,
                         tool_choice=tool_choice, _no_failover=True,
                         _provider_sequence=_provider_sequence)))
                     for m in order_chain([requested_model, *_chain])
@@ -1966,6 +2049,7 @@ class LLM:
                             latency_ms=_dt_ms, dollars=_spent, error=_err)
             except Exception:  # pragma: no cover -- never fail on stats
                 pass
+            _note_bandit(provider, model_id, _err, _spent)
             _feed_circuit(provider, _err)
             try:
                 from .observability import record_metric as _rm
@@ -1991,6 +2075,7 @@ class LLM:
         model: str | None = None,
         effort: str | None = None,
         tool_choice: dict | None = None,
+        on_delta=None,
         _no_failover: bool = False,
         _provider_sequence: _ProviderAttemptSequence | None = None,
     ) -> LLMResponse:
@@ -2015,7 +2100,7 @@ class LLM:
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
                         model=m, effort=effort, tool_choice=tool_choice,
-                        _no_failover=True,
+                        on_delta=_attempt_delta(on_delta), _no_failover=True,
                         _provider_sequence=_provider_sequence)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
@@ -2096,6 +2181,7 @@ class LLM:
                     if model_effort:
                         _ekw["effort"] = model_effort
                 _add_tool_choice(_ekw, tool_choice, client, "complete_async", tools)
+                _ekw.update(_stream_kwargs(provider, on_delta))
 
                 async def _call():
                     # Each physical hedge has independent capacity and a receipt.
@@ -2122,7 +2208,7 @@ class LLM:
                     finally:
                         tracker.finalize(response, sys.exc_info()[1])
 
-                hedge = _hedge_ms()
+                hedge = _hedge_ms_for(on_delta)
                 if hedge is None:
                     _resp = await _call()
                     return _resp
@@ -2186,6 +2272,7 @@ class LLM:
                             latency_ms=_dt_ms, dollars=_spent, error=_err)
             except Exception:  # pragma: no cover
                 pass
+            _note_bandit(provider, model_id, _err, _spent)
             _feed_circuit(provider, _err)
             try:
                 from .observability import record_metric as _rm
@@ -2214,7 +2301,9 @@ class LLM:
         a no-op unless caching is on. When a budget is provided, reserve an
         estimated cache-write cost before sending and let the provider record
         returned usage. Returns whether a warm request was sent; never raises."""
-        if os.environ.get("MAVERICK_CACHE_MESSAGES", "1") == "0":
+        from .env_setting import env_or_config
+
+        if env_or_config("MAVERICK_CACHE_MESSAGES", "cache", "messages", "1") == "0":
             return False
         provider, model_id = _parse_spec(
             require_model_allowed(model or self.model)

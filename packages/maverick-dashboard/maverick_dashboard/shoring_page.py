@@ -24,6 +24,33 @@ from .auth import has_global_permission, require_permission
 PAGE_PATH = "/shoring"
 API_BASE = "/api/v1/shoring"
 
+LIFECYCLE_LABELS = {
+    "scoping": ("Planning", "Deciding what work moves and what good looks like."),
+    "demonstrating": ("Trying it out", "Lightwork does the work alongside your team."),
+    "running": ("Running", "Lightwork does the work; people handle exceptions."),
+    "proving": ("Proving results", "Measuring savings and service levels over time."),
+}
+METRIC_LABELS = {
+    "throughput_per_day": ("Items completed per day", "at least", "per day"),
+    "max_exception_rate_pct": ("Items needing a person (%)", "at most", "%"),
+    "max_turnaround_hours": ("Longest time to finish (hours)", "at most", "hours"),
+}
+
+
+def _people() -> list[dict]:
+    from .ui_choices_api import people_choices
+
+    try:
+        return people_choices()
+    except Exception:  # the picker degrades to "No owner"; saving still works
+        return []
+
+
+def _department_choices(world, functions) -> dict:
+    from .ui_choices_api import work_area_choices
+
+    return work_area_choices(world, [f.get("department") for f in functions or []])
+
 
 def create_shoring_page_router(templates: Jinja2Templates) -> APIRouter:
     if not isinstance(templates, Jinja2Templates):
@@ -37,7 +64,12 @@ def create_shoring_page_router(templates: Jinja2Templates) -> APIRouter:
         from maverick import shoring
 
         if not shoring.enabled():
-            raise HTTPException(status_code=404, detail="autonomous shoring is disabled")
+            # Friendly turned-off page (still 404 for clients probing it).
+            return templates.TemplateResponse(
+                request, "shoring.html",
+                {"disabled": True, "api_base": API_BASE,
+                 "can_turn_on": has_global_permission(request, "admin")},
+                status_code=404)
 
         world = _world()
         try:
@@ -48,6 +80,7 @@ def create_shoring_page_router(templates: Jinja2Templates) -> APIRouter:
                 status_code=503,
                 detail="Shoring data is unavailable. Restore access to the work store and reload.",
             ) from exc
+        can_manage = has_global_permission(request, "operate")
         return templates.TemplateResponse(
             request,
             "shoring.html",
@@ -60,7 +93,14 @@ def create_shoring_page_router(templates: Jinja2Templates) -> APIRouter:
                     {"key": key, "unit": spec["unit"], "direction": spec["direction"]}
                     for key, spec in shoring.METRICS.items()
                 ],
-                "can_manage": has_global_permission(request, "operate"),
+                "metric_labels": METRIC_LABELS,
+                "lifecycle_labels": LIFECYCLE_LABELS,
+                "can_manage": can_manage,
+                "people": _people() if can_manage else [],
+                "departments": (
+                    await run_in_threadpool(_department_choices, world, functions)
+                    if can_manage else {"recent": [], "groups": []}
+                ),
                 "approvals_path": "/approvals",
             },
         )

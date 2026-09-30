@@ -26,13 +26,15 @@ def _quiet_dispatch(monkeypatch) -> None:
     for name in (
         "_enforce_circuit",
         "_enforce_provider_cap",
-        "_estimate_call_cost",
         "_feed_circuit",
         "_record_provider_call",
         "_record_provider_spend",
         "_run_preflight",
     ):
         monkeypatch.setattr(llm, name, lambda *args, **kwargs: None)
+    # These synthetic clients have no paid usage. Keep the numeric projection
+    # contract intact while this fixture isolates model selection/failover.
+    monkeypatch.setattr(llm, "_estimate_call_cost", lambda *args, **kwargs: 0.0)
 
 
 def test_provider_snapshot_rotation_never_mixes_generations(monkeypatch):
@@ -118,7 +120,7 @@ def test_header_rotation_rekeys_and_evicts_stale_client(monkeypatch):
         def __init__(self, headers):
             self.headers = headers
 
-    def factory(_provider, *, api_key=None, base_url=None, default_headers=None):
+    def factory(_provider, *, api_key=None, base_url=None, default_headers=None, environment=None):
         del api_key, base_url
         client = Client(default_headers)
         created.append(client)

@@ -20,6 +20,9 @@ Payload shapes (kind -> required fields, all events also carry
                      call_commitment_algorithm:str, status:str, output_summary:str;
                      status=ok is the execution-completion evidence
   shield_block:      stage:str (input|tool|output), reason:str, score:float|None
+  ifc_flow:          tool:str, labels:list[str], explicit:list[str], mode:str,
+                     outcome:str (recorded|approved|denied|blocked); labelled data
+                     reaching an external sink (maverick.ifc); never arguments
   capability_denied: tool:str, principal:str, channel:str|None, user_id:str|None
   egress_blocked:    provider:str (enterprise-mode egress lock denial)
   consent_prompt:    action:str, risk:str (low|medium|high|critical)
@@ -156,6 +159,7 @@ class EventKind:
     TOOL_CALL       = "tool_call"
     TOOL_RESULT     = "tool_result"
     SHIELD_BLOCK    = "shield_block"
+    IFC_FLOW        = "ifc_flow"
     CAPABILITY_DENIED = "capability_denied"
     SANDBOX_DENIED = "sandbox_denied"
     # Per-call token exchange (zero-trust): one row per minted, single-tool,
@@ -167,6 +171,9 @@ class EventKind:
     # denial the compiled rules produced, ``obligations_checked`` (ids) on a
     # call that ran while obligations covering it were active. Additive.
     GOVERNANCE_DENIED = "governance_denied"
+    # A finance separation-of-duties conflict found when an action was about to
+    # run ([finance.sod] mode): tool, compartment, mode, outcome, conflicts.
+    FINANCE_SOD_FINDING = "finance_sod_finding"
     AUTONOMY_ESCALATED = "autonomy_escalated"
     AUTONOMY_GATED = "autonomy_gated"
     EGRESS_BLOCKED  = "egress_blocked"
@@ -194,6 +201,25 @@ class EventKind:
     # not a silent edit. payload: tenant, field ("plan"|"quota"), old, new.
     TENANT_PLAN_CHANGED = "tenant_plan_changed"
     TENANT_QUOTA_CHANGED = "tenant_quota_changed"
+    # An administrator changed the workspace or per-person spending limits.
+    # payload: actor, workspace, default, people (count of personal limits).
+    SPENDING_LIMITS_CHANGED = "spending_limits_changed"
+    # An administrator changed one product setting on the dashboard's All
+    # settings page. One row per setting. payload: actor, section, key, old,
+    # new (secrets are recorded only as "set"/"not set", never their value),
+    # confirmed (True when the change weakened a protection and was confirmed).
+    SETTING_CHANGED = "setting_changed"
+    # The scheduled shared-threat-rules check ran ([shield] federated_updates).
+    # payload: outcome ("applied" | "unchanged" | "refused"), version,
+    # previous_version, added, removed (rule ids), reason (refusals).
+    SHIELD_RULES_UPDATE = "shield_rules_update"
+    # Voice unlock ([voice] biometric_unlock). Never the audio or the voice
+    # profile itself. VOICE_PROFILE_ENROLLED payload: actor, samples.
+    # VOICE_PROFILE_DELETED payload: actor. VOICE_UNLOCK_CHECKED payload:
+    # actor, surface ("check" | "spoken_request"), matched, score, threshold.
+    VOICE_PROFILE_ENROLLED = "voice_profile_enrolled"
+    VOICE_PROFILE_DELETED = "voice_profile_deleted"
+    VOICE_UNLOCK_CHECKED = "voice_unlock_checked"
     # Deployment-global tenant/workspace control-plane decisions. These are
     # deliberately separate from tenant-local work so provisioning and a
     # caller changing the active confidentiality boundary cannot disappear
@@ -209,6 +235,12 @@ class EventKind:
     # old/new names, and complete member-set deltas or bounded commitments.
     ACCESS_GRANT_CHANGED = "access_grant_changed"
     FEDERATION_DELEGATE = "federation_delegate"
+    # A bounded learned pure operator selected a value or the original agent.
+    # Payload contains only node/work/artifact digests, candidate count, status
+    # and reason. Agreement is not a grounded success label; examples and raw
+    # inputs/outputs are deliberately absent from this decision event.
+    FLOW_LEARNED_OPERATOR_DECISION = "flow_learned_operator_decision"
+    FLOW_ACTION_RECIPE_DECISION = "flow_action_recipe_decision"
     # Agent Trust Plane: an external agent was refused an inbound action or an
     # outbound dial because it is absent from the [agent_trust] registry, its
     # direction forbade the interaction, or it exceeded its tool/risk ceiling.

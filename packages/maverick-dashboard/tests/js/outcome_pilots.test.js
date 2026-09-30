@@ -28,6 +28,10 @@ async function setup(next) {
   w.eval(script);await tick();
   return {dom,w,d,calls};
 }
+function pickPilot(ui,id) {
+  const picker=ui.d.getElementById('op-review-reference');
+  picker.append(new ui.w.Option('A pilot',id));picker.value=id;
+}
 async function open(ui) {
   ui.d.getElementById('op-selected').value='OPL-test';
   ui.d.getElementById('op-selected').dispatchEvent(new ui.w.Event('change'));await tick();
@@ -114,7 +118,7 @@ test('duplicate-pilot conflict keeps the complete plan and exact retry reference
 test('independent review binds exact evidence and needs a separate confirmation',async()=>{
   const packet={...report(),learning_policy:{prior_exposure_statement:'Local inputs checked; external training unknown.',automatic_local_exclusion_enforced:true,evidence_version:'c'.repeat(64)}};
   const ui=await setup([packet,{context:'alice',id:'OPL-test',revision:3}]);
-  ui.d.getElementById('op-review-reference').value='OPL-test';ui.d.getElementById('op-review-load').click();await tick();
+  pickPilot(ui,'OPL-test');ui.d.getElementById('op-review-load').click();await tick();
   const form=ui.d.querySelector('#op-independent-report form');form.querySelector('textarea').value='Independent policy receipts and their limits checked.';
   form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();assert.equal(ui.calls.length,3);
   form.querySelector('input[type="checkbox"]').checked=true;form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
@@ -124,7 +128,7 @@ test('independent review binds exact evidence and needs a separate confirmation'
 
 test('HTML access loss during independent review clears private report, prepared inputs and picker labels',async()=>{
   const ui=await setup([report(),()=>({ok:false,status:403,json:async()=>{throw new SyntaxError('HTML');}})]);await open(ui);
-  ui.d.getElementById('op-prior-exposure').value='Private trial notes';ui.d.getElementById('op-review-reference').value='OPL-test';ui.d.getElementById('op-review-load').click();await tick();
+  ui.d.getElementById('op-prior-exposure').value='Private trial notes';pickPilot(ui,'OPL-test');ui.d.getElementById('op-review-load').click();await tick();
   assert.equal(ui.d.getElementById('op-report').textContent,'');assert.equal(ui.d.getElementById('op-prior-exposure').value,'');assert.equal(ui.d.getElementById('op-selected').options.length,0);
   assert.equal(ui.d.getElementById('op-review-load').disabled,true);ui.dom.window.close();
 });
@@ -133,7 +137,7 @@ test('structured account-context conflict still clears private pilot inputs',asy
   const changed=()=>({ok:false,status:409,json:async()=>({detail:{code:'pilot_context_changed',message:'The account or workspace changed. Reload the pilot page.'}})});
   const ui=await setup([changed]);
   ui.d.getElementById('op-prior-exposure').value='Private trial notes';
-  ui.d.getElementById('op-review-reference').value='OPL-test';ui.d.getElementById('op-review-load').click();await tick();
+  pickPilot(ui,'OPL-test');ui.d.getElementById('op-review-load').click();await tick();
   assert.equal(ui.d.getElementById('op-prior-exposure').value,'');
   assert.equal(ui.d.getElementById('op-review-reference').value,'');
   assert.equal(ui.d.getElementById('op-review-load').disabled,true);
@@ -168,4 +172,37 @@ test('pilot picker can load a later context-filtered page',async()=>{
   assert.equal(more.hidden,true);
   assert.ok(calls.some(call=>call.url.includes('cursor=OPL-page-one.json')));
   dom.window.close();
+});
+
+test('a code-like server detail is replaced by a plain sentence',()=>{
+  const source=require('node:fs').readFileSync(require('node:path').resolve(__dirname,'../../maverick_dashboard/static/lightwork-outcome-pilots.js'),'utf8');
+  assert.equal(source.includes("e.loc.slice(1)"),false);
+  assert.match(source,/const readable = raw && /);
+});
+
+test('reviewers choose a pilot from the waiting list instead of typing a reference',async()=>{
+  const ui=await setup([{context:'alice',items:[
+    {id:'OPL-one',title:'Invoice triage',frozen_at:1800000000,decision:null},
+    {id:'OPL-two',title:'Supplier checks',frozen_at:1800000500,decision:'needs_more_evidence'},
+    {id:'not a pilot',title:'Injected',frozen_at:1,decision:null}]}]);
+  const panel=ui.d.getElementById('op-review-panel');
+  assert.equal(ui.d.getElementById('op-review-reference').tagName,'SELECT');
+  Object.defineProperty(panel,'open',{value:true});panel.dispatchEvent(new ui.w.Event('toggle'));for(let i=0;i<10;i++)await tick();
+  const labels=[...ui.d.getElementById('op-review-reference').options].map(option=>option.textContent);
+  assert.equal(labels.length,3);assert.equal(labels[0],'Choose a pilot');
+  assert.match(labels[1],/^Invoice triage · planned /);assert.match(labels[2],/already reviewed \(more evidence requested\)/);
+  assert.match(ui.calls.at(-1).url,/independent-review$/);
+  assert.doesNotMatch(ui.d.getElementById('op-review-panel').textContent,/OPL-|reference shared/);
+  ui.dom.window.close();
+});
+
+test('a person who cannot review is told who can, without clearing the page',async()=>{
+  const ui=await setup([()=>({ok:false,status:403,json:async()=>({detail:'A different named global administrator must review this pilot.'})})]);
+  const panel=ui.d.getElementById('op-review-panel');
+  ui.d.getElementById('op-prior-exposure').value='Kept notes';
+  Object.defineProperty(panel,'open',{value:true});panel.dispatchEvent(new ui.w.Event('toggle'));for(let i=0;i<10;i++)await tick();
+  assert.match(ui.d.getElementById('op-review-note').textContent,/Only an administrator who did not create a pilot/);
+  assert.equal(ui.d.getElementById('op-prior-exposure').value,'Kept notes');
+  for(let i=0;i<10;i++)await tick();
+  ui.dom.window.close();
 });

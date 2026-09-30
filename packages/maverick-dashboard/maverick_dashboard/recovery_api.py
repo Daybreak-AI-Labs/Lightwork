@@ -71,8 +71,61 @@ class ReconciliationIn(ConfirmIn):
         "retire_and_create_new_request",
         "external_effect_absent",
         "external_effect_recorded",
+        "channel_readback_confirmed",
     ]
     evidence_reference: str | None = Field(default=None, max_length=512)
+    channel_readback: dict | None = None
+
+
+class ChannelReviewAnswers(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    checked_at: str = Field(max_length=64)
+    evidence_reference: str = Field(min_length=8, max_length=512)
+
+
+class ChannelChunkAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    outcome: Literal["absent", "recorded"]
+    provider_id: str = Field(max_length=512)
+
+
+class ChannelMessageAnswers(ChannelReviewAnswers):
+    kind: Literal["message"]
+    execution: Literal["absent", "recorded"]
+    delivery: Literal["absent", "recorded"]
+    chunks: dict[str, ChannelChunkAnswer] = Field(max_length=512)
+
+
+class ChannelRestartAnswers(ChannelReviewAnswers):
+    kind: Literal["delivery_restart"]
+
+
+class ChannelMessagePositionAnswers(ChannelReviewAnswers):
+    kind: Literal["imessage_position"]
+    position: str = Field(pattern=r"^[0-9]{1,4096}$", max_length=4096)
+
+
+class ChannelNotificationPositionAnswers(ChannelReviewAnswers):
+    kind: Literal["notification_position"]
+    position: str = Field(pattern=r"^[0-9]{1,40}$", max_length=40)
+
+
+class ChannelPollTimeAnswers(ChannelReviewAnswers):
+    kind: Literal["poll_time"]
+    resume_time: str = Field(max_length=64)
+
+
+class ChannelFinishAnswers(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["finish_recording"]
+    receipt: str = Field(pattern=r"^[a-f0-9]{64}$", max_length=64)
+
+
+class ChannelReviewIn(ConfirmIn):
+    item_id: str = Field(pattern=r"^[a-f0-9]{32}$", strict=True)
+    expected_review_token: str = Field(pattern=r"^[a-f0-9]{64}$", strict=True)
+    answers: (ChannelMessageAnswers | ChannelRestartAnswers | ChannelMessagePositionAnswers
+              | ChannelNotificationPositionAnswers | ChannelPollTimeAnswers | ChannelFinishAnswers) = Field(discriminator="kind")
 
 
 class RestoreIn(ConfirmIn):
@@ -155,7 +208,12 @@ def _confirm(body: ConfirmIn) -> None:
 async def recovery_page(request: Request):
     require_global_permission(request, "admin")
     from .app import templates
-    response = templates.TemplateResponse(request, "workspace_recovery.html", {"recovery_mode": enabled(request.app)})
+    try:
+        feature_on = config.get_features().get("workspace_recovery") is True
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows the switched-off note
+        feature_on = False
+    response = templates.TemplateResponse(request, "workspace_recovery.html", {
+        "recovery_mode": enabled(request.app), "feature_on": feature_on})
     response.headers["Cache-Control"] = "private, no-store"
     return response
 
@@ -420,6 +478,7 @@ async def resolve_reconciliation(
         evidence_reference=body.evidence_reference,
         isolated=isolated(request.app),
         actor=actor,
+        **({"channel_readback": body.channel_readback} if body.channel_readback is not None else {}),
     )
     return Response(
         json.dumps(result),
@@ -442,6 +501,19 @@ async def complete_reconciliation(request: Request, body: ConfirmIn):
         media_type="application/json",
         headers={"Cache-Control": "private, no-store"},
     )
+
+
+@router.post("/api/v1/recovery/operations/channel-review")
+async def record_channel_review(request: Request, body: ChannelReviewIn):
+    actor = _admit(request, mutation=True)
+    _confirm(body)
+    result = await _call(
+        recovery.resolve_reconciliation, body.item_id, "channel_readback_confirmed",
+        evidence_reference=None, isolated=isolated(request.app), actor=actor,
+        channel_answers=body.answers.model_dump(), expected_review_token=body.expected_review_token,
+    )
+    return Response(json.dumps(result), media_type="application/json",
+                    headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/api/v1/recovery/snapshots/{identifier}/retire")

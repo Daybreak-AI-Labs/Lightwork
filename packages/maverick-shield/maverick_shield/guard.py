@@ -88,6 +88,21 @@ def _normalize_config_token(value: Any, default: str) -> str:
     return str(value).strip().lower() or default
 
 
+def _decode_disabled() -> bool:
+    """Skip decoding hidden layers (``MAVERICK_SHIELD_NO_DECODE``, else
+    ``[safety] decode_hidden = false`` when the kernel is installed)."""
+    raw = os.environ.get("MAVERICK_SHIELD_NO_DECODE", "").strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    try:
+        from maverick.config import load_config
+
+        value = ((load_config() or {}).get("safety") or {}).get("decode_hidden")
+    except Exception:  # standalone shield or unreadable config: keep decoding
+        return False
+    return value is False
+
+
 @dataclass
 class ShieldVerdict:
     allowed: bool
@@ -207,13 +222,23 @@ class Shield:
             required = shield_required()
         except ImportError:  # standalone shield package, without the kernel
             required = bool(safety.get("require_shield", False))
+        constitution = list(safety.get("constitution") or [])
+        try:
+            # Signed shared threat rules ([shield] federated_updates), verified
+            # again on load. Added to the operator's rules, never replacing them.
+            from maverick.shield_updates import load_verified_rules
+            constitution += load_verified_rules()
+        except ImportError:  # standalone shield package, without the kernel
+            pass
+        except Exception:  # noqa: BLE001 -- shared rules never stop the shield
+            log.warning("shared threat rules could not be loaded", exc_info=True)
         return cls(
             profile=safety.get("profile", "balanced"),
             block_threshold=safety.get("block_threshold"),
             scan_input=safety.get("scan_input", True),
             scan_tool_calls=safety.get("scan_tool_calls", True),
             scan_output=safety.get("scan_output", True),
-            constitution=safety.get("constitution"),
+            constitution=constitution or safety.get("constitution"),
             warn_if_missing=warn_if_missing,
             fail_closed=required,
         )
@@ -333,9 +358,7 @@ class Shield:
         payload the literal surface form hid), else ``None``. A pre-pass error
         follows the selected failure policy and retains scan_error. Escape hatch:
         ``MAVERICK_SHIELD_NO_DECODE=1``."""
-        if (not isinstance(text, str)
-                or os.environ.get("MAVERICK_SHIELD_NO_DECODE", "").strip().lower()
-                in {"1", "true", "yes", "on"}):
+        if not isinstance(text, str) or _decode_disabled():
             return None
         failure = None
         try:

@@ -82,6 +82,20 @@ def test_gate_on_preflight_answered(monkeypatch):
     assert "POST" in resp.headers["access-control-allow-methods"]
 
 
+def test_idempotency_header_is_limited_to_goal_admission_and_receipt_read(monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ALLOW_EXTENSION", "1")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "sekret")
+    headers = {**PREFLIGHT_HEADERS, "Access-Control-Request-Headers": "authorization,idempotency-key"}
+    for path in ("/api/v1/goals", "/api/v1/goal-submissions/receipt"):
+        response = _client().options(path, headers=headers)
+        assert response.status_code == 204
+        assert "idempotency-key" in response.headers["access-control-allow-headers"].lower()
+    other = _client().options("/api/v1/connections", headers=headers)
+    assert "idempotency-key" not in other.headers["access-control-allow-headers"].lower()
+    foreign = _client().options("/api/v1/goals", headers={**headers, "Origin": "https://foreign.example"})
+    assert "access-control-allow-origin" not in foreign.headers
+
+
 def test_gate_on_extension_post_creates_goal(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_ALLOW_EXTENSION", "1")
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "sekret")

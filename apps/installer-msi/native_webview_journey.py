@@ -471,7 +471,7 @@ const visibleText = selector => {
 };
 const status = visibleText('#maintenance-status');
 const result = visibleText('#maintenance-recovery-result');
-if (status === 'Lightwork could not complete that step. Open Troubleshooting details for the reason, then check again or contact your administrator.') return 'visible_refusal';
+if (status.startsWith('Lightwork could not complete that step.')) return 'visible_refusal';
 if (result.startsWith('An unfinished installation is blocking normal workspace startup.')) return 'incomplete';
 return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
 """

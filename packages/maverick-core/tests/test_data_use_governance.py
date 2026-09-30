@@ -602,3 +602,57 @@ def test_persisted_record_corruption_is_detected(
         )
     with pytest.raises(DataUseCorruptionError):
         store.get_record(TENANT, "asset", "corrupt-me")
+
+
+def _installation_limits(monkeypatch: pytest.MonkeyPatch, **limits: int) -> None:
+    from maverick import config
+
+    monkeypatch.setattr(
+        config, "load_config", lambda *a, **k: {"data_use_governance": {"limits": limits}}
+    )
+
+
+def test_installation_caps_how_many_assets_fields_and_links_a_workspace_registers(
+    authority: tuple[DataUseGovernanceStore, Clock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, _clock = authority
+    _catalog(store)  # no limits set: nothing changes
+    _installation_limits(monkeypatch, max_assets=1, max_fields=3)
+    with pytest.raises(DataUseValidationError, match="most asset records"):
+        store.put_asset(
+            TENANT, "orders", asset_type="table",
+            catalog_binding_sha256=_digest("orders"), expected_revision=0,
+            idempotency_key="asset-over-cap",
+        )
+    with pytest.raises(DataUseValidationError, match="most field records"):
+        store.put_field(
+            TENANT, "customers", "phone", data_type="string", nullable=True,
+            catalog_binding_sha256=_digest("phone"), expected_revision=0,
+            idempotency_key="field-over-cap",
+        )
+    # Another workspace has its own count.
+    store.put_asset(
+        OTHER_TENANT, "customers", asset_type="table",
+        catalog_binding_sha256=_digest("other"), expected_revision=0,
+        idempotency_key="other-asset",
+    )
+
+
+def test_installation_context_age_limit_refuses_and_expires_old_facts(
+    authority: tuple[DataUseGovernanceStore, Clock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, _clock = authority
+    _catalog(store)
+    _installation_limits(monkeypatch, max_context_age_seconds=600)
+    with pytest.raises(DataUseValidationError, match="freshness is longer"):
+        _contexts(store)  # observed 900, declared fresh until 2000: 1100 s
+    _installation_limits(monkeypatch)
+    _contexts(store)
+    _label(store)
+    _request(store, "aged")
+    _installation_limits(monkeypatch, max_context_age_seconds=60)  # now 1000 - 900 > 60
+    decision = _authorize(store, "aged")
+    assert decision["outcome"] == "deny"
+    assert any(reason.startswith("stale_context:") for reason in decision["reasons"])

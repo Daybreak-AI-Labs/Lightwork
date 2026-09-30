@@ -62,6 +62,7 @@ _LOCK = threading.RLock()   # reentrant: start()/stop() call queue(), which also
 _queue = None
 _worker = None
 _worker_threads: list = []
+_worker_stopping = False
 
 
 def _db_path():
@@ -490,6 +491,7 @@ def enqueue_published_flow_run_once(
     user_id: str | None = None,
     allowed_suites=_SUITES_UNSET,
     expected_revision: str = "",
+    legacy_event: dict | None = None,
 ) -> tuple[str, bool]:
     """Queue the exact active release and report idempotent deduplication.
 
@@ -518,6 +520,27 @@ def enqueue_published_flow_run_once(
     with store.published_flow_guard(
         flow_id, expected_release_id=candidate_release_id,
     ) as (_locked_flow, locked_release):
+        # A pre-envelope event cursor can have an already committed run under
+        # the old display-field key. Read it under the same publication/claim
+        # locks as writers, and only adopt an identity proved by retained data.
+        legacy_key = str((legacy_event or {}).get("key") or "")
+        legacy_lock = (store.idempotency_lock(flow_id, legacy_key, owner=owner,
+                                              release_id=str(locked_release["release_id"]))
+                       if legacy_key else contextlib.nullcontext())
+        with legacy_lock:
+            existing = (store.find_run_by_idem(
+                flow_id, legacy_key, revision=_locked_flow.revision,
+                definition_digest=str(locked_release["definition_digest"]),
+                release_id=str(locked_release["release_id"]), owner=owner)
+                if legacy_key else None)
+            if existing is not None:
+                identity = (legacy_event or {}).get("identity")
+                original = existing.input_data
+                if (not isinstance(identity, dict) or not identity
+                        or any(k not in original or len(str(original[k])) >= 2000 for k in identity)):
+                    raise store.FlowSnapshotError("Legacy event identity is ambiguous; reconcile the existing run before retrying")
+                if all(str(original[k]) == str(v) for k, v in identity.items()):
+                    idem_key = legacy_key
         return enqueue_flow_run_once(
             flow_id,
             data,
@@ -547,6 +570,7 @@ def enqueue_published_flow_run(
     user_id: str | None = None,
     allowed_suites=_SUITES_UNSET,
     expected_revision: str = "",
+    legacy_event: dict | None = None,
 ) -> str:
     return enqueue_published_flow_run_once(
         flow_id,
@@ -558,19 +582,15 @@ def enqueue_published_flow_run(
         user_id=user_id,
         allowed_suites=allowed_suites,
         expected_revision=expected_revision,
+        legacy_event=legacy_event,
     )[0]
 
 
 def _flow_job_for_run(run_id: str):
     """Find any durable queue row for ``run_id`` (pending through terminal)."""
-    q = queue()
-    total = sum(q.counts().values())
-    # Queue history is normally purged; cap a corrupt/unbounded database scan.
-    for job in q.list(limit=min(max(1, total), 100_000)):
-        if (job.kind == FLOW_RUN_KIND
-                and str((job.payload or {}).get("run_id") or "") == run_id):
-            return job
-    return None
+    from maverick.paths import current_tenant_id
+
+    return queue().find_for_run(FLOW_RUN_KIND, run_id, current_tenant_id() or "")
 
 
 def _ensure_queued_flow_job(run, *, tenant: str = "") -> None:
@@ -619,11 +639,13 @@ def _repair_queued_flow_outbox() -> None:
     from maverick.paths import current_tenant_id
 
     def _repair() -> None:
+        from maverick.flow.payloads import FlowPayloadError
+
         tenant = current_tenant_id() or ""
-        runs = store.list_runs(limit=None)  # newest first
+        store.rebuild_run_index()  # legacy import / offline restore reconciliation
         # One bounded startup pass indexes pre-claim legacy runs. Afterwards a
         # random idempotency key never forces an attacker-amplifiable full scan.
-        for run in runs:
+        for run in store.iter_run_metadata():
             if run.idem_key:
                 with store.idempotency_lock(
                     run.flow_id,
@@ -640,9 +662,13 @@ def _repair_queued_flow_outbox() -> None:
                         owner=run.owner,
                         overwrite=False,
                     )
-        for run in runs:
             if run.status == "queued":
-                _ensure_queued_flow_job(run, tenant=tenant)
+                try:
+                    _ensure_queued_flow_job(run, tenant=tenant)
+                except FlowPayloadError:
+                    # Preserve the affected reservation for explicit recovery;
+                    # it must not prevent unrelated complete runs from arming.
+                    log.warning("queued flow checkpoint requires recovery: %s", run.run_id)
 
     # A reconcile invoked inside a tenant-pinned request must not republish that
     # reservation as a tenantless job before the global sweep clears ambient
@@ -665,6 +691,28 @@ def _user_id_from_owner(owner: str) -> str:
     return ""
 
 
+def enqueue_event_goal(goal_id: int) -> int:
+    """Publish an admitted template event to one permanent queue receipt."""
+    from maverick_dashboard.auth import stored_automation_identity
+
+    goal = _world().get_goal(goal_id)
+    if goal is None:
+        raise RuntimeError("event-created goal is unavailable")
+    owner, user_id, suites = stored_automation_identity(goal.owner)
+    payload: dict = {"goal_id": int(goal_id), **_job_tenant_payload()}
+    if user_id:
+        payload.update(user_id=user_id, channel="api")
+    if owner:
+        payload["concurrency_principal"] = owner
+    if suites is not None:
+        payload["allowed_suites"] = sorted(suites)
+    import hashlib
+    import json
+    identity = json.dumps([payload.get("tenant", ""), int(goal_id)], separators=(",", ":"))
+    key = "event-goal:" + hashlib.sha256(identity.encode()).hexdigest()
+    return queue().enqueue_once("run_goal", payload, idempotency_key=key)
+
+
 def _poll_due_triggers() -> None:
     from maverick_dashboard import event_poll, event_triggers_store
     due = [
@@ -674,7 +722,6 @@ def _poll_due_triggers() -> None:
     ]
     if not due:
         return
-    q = queue()
 
     # Group by owner and poll each group separately so the durable run_goal job
     # carries the trigger owner's execution identity -- otherwise every fired
@@ -687,26 +734,12 @@ def _poll_due_triggers() -> None:
 
     errored: set[str] = set()
     for owner, triggers in groups.items():
-        def _fire(goal_id: int, owner: str = owner) -> None:
-            from maverick_dashboard.auth import stored_automation_identity
-
-            identity_owner, user_id, suites = stored_automation_identity(owner)
-            payload: dict = {"goal_id": int(goal_id)}
-            payload.update(_job_tenant_payload())
-            if user_id:
-                payload["user_id"] = user_id
-                payload["channel"] = "api"
-            if identity_owner:
-                payload["concurrency_principal"] = identity_owner
-            if suites is not None:
-                payload["allowed_suites"] = sorted(suites)
-            q.enqueue("run_goal", payload)   # durable: retry + dead-letter
-
         group_results = event_poll.poll_and_fire(
             _world,
             triggers,
             principal=owner,
-            fire=_fire,
+            fire=enqueue_event_goal,
+            fire_is_durable=True,
             fire_flow=enqueue_published_flow_run,
         )
         for trigger, result in zip(triggers, group_results, strict=True):
@@ -747,6 +780,12 @@ def _handle_dream(_job=None) -> None:
     def _cycle() -> None:
         # Enablement can be overridden per tenant; check it inside the pin.
         if dreaming.enabled():
+            # Same rollback point `maverick dream` takes: a scheduled cycle must
+            # never mutate learned state that `dream --rollback` cannot undo.
+            # A snapshot failure raises before dream_cycle runs (fail closed).
+            cfg = dreaming.settings()
+            if cfg.get("snapshots", True):
+                dreaming.snapshot_learning_state(keep_last=int(cfg.get("snapshot_keep_last", 5)))
             dreaming.dream_cycle(_world())
 
     _run_for_active_tenants("scheduled dream cycle", _cycle)
@@ -929,7 +968,7 @@ def current_flow_approval_card(run, *, allow_expired: bool = False) -> dict:
         validate_approval_card,
     )
     from maverick.flow import store
-    from maverick.flow.redact import cap, redact
+    from maverick.flow.payloads import approval_data
 
     try:
         raw_card = (run.human or {}).get("approval_card")
@@ -948,7 +987,7 @@ def current_flow_approval_card(run, *, allow_expired: bool = False) -> dict:
             if next_node is not None
             else {"kind": "complete", "id": "end"}
         )
-        persisted_data = redact(cap(run.data or {}))
+        persisted_data = approval_data(run.data or {}, card)
         expected_target = digest({
             "flow_id": flow.id,
             "pause_node": paused.id,
@@ -969,6 +1008,9 @@ def current_flow_approval_card(run, *, allow_expired: bool = False) -> dict:
             versions.get("definition_digest") == run.definition_digest,
             versions.get("release_digest") == run.release_digest,
             versions.get("release_id") == run.release_id,
+            (run.budget_limit_dollars is None or
+             card["budget"].get("run_limit_dollars") == run.budget_limit_dollars
+            ),
             (
                 run.resume_at is None
                 or float(card["expires_at"]) == float(run.resume_at)
@@ -1036,6 +1078,7 @@ def enqueue_flow_resume(
     inputs: dict | None = None,
     expired: bool = False,
     from_failure: bool = False,
+    budget_limit_dollars: float | None = None,
     run_at: float | None = None,
     approval_binding_sha256: str = "",
     decision_authority: object | None = None,
@@ -1057,6 +1100,8 @@ def enqueue_flow_resume(
         payload["expired"] = True
     if from_failure:
         payload["from_failure"] = True
+    if budget_limit_dollars is not None:
+        payload["budget_limit_dollars"] = budget_limit_dollars
     payload.update({"tenant": tenant} if tenant else _job_tenant_payload())
 
     def _reserve() -> None:
@@ -1238,6 +1283,7 @@ def _notify_flow(flow, run) -> None:
     if flow is None or not getattr(flow, "notify", False):
         return
     from maverick.flow.runner import (
+        STATUS_BUDGET_LIMITED,
         STATUS_COMPLETED,
         STATUS_FAILED,
         STATUS_INDETERMINATE,
@@ -1250,6 +1296,8 @@ def _notify_flow(flow, run) -> None:
         body, prio = f"“{name}” finished.", "default"
     elif run.status == STATUS_FAILED:
         body, prio = f"“{name}” failed: {run.error or 'see the run'}", "high"
+    elif run.status == STATUS_BUDGET_LIMITED:
+        body, prio = f"“{name}” is saved and waiting for a larger spending allowance. Review the run to continue.", "high"
     elif run.status == STATUS_INDETERMINATE:
         body = (
             f"“{name}” stopped with an indeterminate external effect. "
@@ -1324,8 +1372,8 @@ def _active_run_count(flow_id: str, exclude_run_id: str) -> int:
     from maverick.flow import store
     from maverick.flow.runner import ACTIVE_STATUSES
     occupying = ACTIVE_STATUSES - {"queued"}
-    return sum(1 for r in store.list_runs(flow_id=flow_id, limit=None)
-               if r.run_id != exclude_run_id and r.status in occupying)
+    return sum(1 for r in store.iter_run_metadata(flow_id=flow_id, statuses=occupying)
+               if r.run_id != exclude_run_id)
 
 
 def _defer_for_slot(payload: dict) -> bool:
@@ -1557,6 +1605,7 @@ def _handle_flow_resume(job=None) -> None:  # noqa: C901
                 return
             from maverick.flow.runner import (
                 PAUSED_STATUSES,
+                STATUS_BUDGET_LIMITED,
                 STATUS_FAILED,
                 STATUS_RESUMING,
             )
@@ -1569,7 +1618,7 @@ def _handle_flow_resume(job=None) -> None:  # noqa: C901
                 return
             retryable_failure = (
                 bool(payload.get("from_failure"))
-                and prior.status == STATUS_FAILED
+                and prior.status in {STATUS_FAILED, STATUS_BUDGET_LIMITED}
                 and bool(prior.cursor)
             )
             if prior.status not in PAUSED_STATUSES and not retryable_failure:
@@ -1677,6 +1726,7 @@ def _handle_flow_resume(job=None) -> None:  # noqa: C901
                         "approval_decision_attestation"
                     ),
                     from_failure=bool(payload.get("from_failure")),
+                    budget_limit_dollars=payload.get("budget_limit_dollars"),
                     inputs=dict(payload.get("inputs") or {}),
                     record_outcomes=not dry_run,
                 )
@@ -1697,27 +1747,30 @@ def _handle_flow_resume(job=None) -> None:  # noqa: C901
 
 
 def _handle_flow_sweep(_job=None) -> None:
-    """Re-arm flow runs whose delay has elapsed. A delay node persists the run as
-    paused_delay with a resume_at; this cron (every minute when flows are on) is
-    the driver that continues it -- without it, 'wait N seconds' never resumes.
-    Fail-open + idempotent (a stale resume is a no-op)."""
+    """Recover due legacy delays/expiries missed by durable continuation jobs.
+
+    Normal pauses already schedule durable jobs. Keyset paging includes every
+    due record regardless of newer completed history; stale resumes are no-ops.
+    """
     from maverick import flow
     if not flow.enabled():
         return
 
     def _sweep_current_tenant() -> None:
         from maverick.flow import runner, store
+        from maverick.flow.payloads import FlowPayloadError
 
         now = time.time()
-        for run in store.list_runs(owner=None, limit=1000):
-            if not (run.resume_at and run.resume_at <= now):
-                continue
+        for run in store.iter_run_metadata(
+            statuses={runner.STATUS_PAUSED_DELAY, runner.STATUS_PAUSED_APPROVAL},
+            due_before=now,
+        ):
             if run.status == runner.STATUS_PAUSED_DELAY:
                 try:
                     enqueue_flow_resume(
                         run.flow_id, run.run_id, owner=run.owner,
                     )
-                except store.FlowSnapshotError:
+                except (store.FlowSnapshotError, FlowPayloadError):
                     continue
             elif run.status == runner.STATUS_PAUSED_APPROVAL:
                 # An approval whose node set an expiry resolves once it lapses.
@@ -1731,7 +1784,7 @@ def _handle_flow_sweep(_job=None) -> None:
                         owner=run.owner,
                         expired=True,
                     )
-                except store.FlowSnapshotError:
+                except (store.FlowSnapshotError, FlowPayloadError):
                     continue
             # paused_event runs are NEVER swept -- only their event resumes them.
 
@@ -1890,11 +1943,19 @@ def _handle_flow_cron(job=None) -> None:
     occurrence. The worker re-arms the next occurrence (payload carries
     ``__cron__``). Re-check the flow still exists and still carries THIS schedule,
     so a schedule that was removed or changed stops firing immediately -- before
-    the next reconcile() cancels the now-stale cron job. Fail-open."""
+    the next reconcile() cancels the now-stale cron job. Durable occurrence
+    identity deduplicates retries and pre-existing duplicate cron lineages."""
     payload = getattr(job, "payload", None) or {}
     flow_id = str(payload.get("flow_id") or "")
     if not flow_id:
         return
+    scheduled_at = getattr(job, "scheduled_at", None)
+    if (
+        isinstance(scheduled_at, bool)
+        or not isinstance(scheduled_at, (int, float))
+        or not math.isfinite(scheduled_at)
+    ):
+        raise ValueError("flow cron requires a durable scheduled_at occurrence")
     try:
         def _fire() -> None:
             from maverick import flow as flow_mod
@@ -1913,42 +1974,73 @@ def _handle_flow_cron(job=None) -> None:
             ):
                 return  # unpublished, or a newer release superseded this cron
             # The release helper captures the tenant restored from this payload.
+            import hashlib
+            import json
+
+            from maverick.paths import current_tenant_id
+
+            occurrence_key = hashlib.sha256(json.dumps([
+                current_tenant_id() or "", flow_id, release["release_id"],
+                float(scheduled_at).hex(),
+            ], separators=(",", ":")).encode()).hexdigest()
             enqueue_published_flow_run(
                 flow_id,
                 {},
                 owner=flow.owner,
                 origin=f"cron:{flow_id}",
+                idem_key=f"cron-occurrence:{occurrence_key}",
                 expected_revision=str(payload.get("__flow_revision__") or ""),
             )
 
         _run_in_payload_tenant(payload, _fire)
-    except Exception:  # pragma: no cover -- fail-open
+    except Exception:
         log.exception("scheduled flow run failed for %s", flow_id)
+        raise  # the durable worker retries admission without duplicating a run
 
 
 # ---- cron seeding -----------------------------------------------------------
 
 def _pending(kind: str) -> list:
-    return [j for j in queue().list(status="pending", limit=1000) if j.kind == kind]
+    return list(queue().iter_pending(kind))
+
+
+@contextlib.contextmanager
+def _cron_guard():
+    from maverick.file_lock import cross_process_lock
+
+    # Startup already holds _LOCK while reconciling. Keep that same order for
+    # request/background reconciliation, whose body may call queue() again.
+    with _LOCK, cross_process_lock(queue().db_path.with_suffix(".cron.lock"), strict=True):
+        yield
 
 
 def _ensure_cron(kind: str, expr: str) -> None:
-    """Ensure exactly one recurring job of ``kind`` is armed. The worker re-arms
-    it on each run (payload carries ``__cron__``); this seeds the first one, and
-    collapses to one lineage if two dashboard workers happened to seed
-    concurrently at boot (both saw no pending job before either enqueued). A
-    surviving duplicate is harmless anyway -- the poll flock serializes them."""
+    with _cron_guard():
+        _ensure_cron_locked(kind, expr)
+
+
+def _ensure_cron_locked(kind: str, expr: str) -> None:
+    """Keep one recurrence lineage, including retries and its future successor."""
     from maverick.scheduler import schedule_cron
     q = queue()
-    pending = _pending(kind)
-    if pending:
-        for extra in pending[1:]:
-            q.cancel(extra.id)
-        return
-    schedule_cron(q, expr, kind, {"__cron__": expr})
+    lineage = None
+    for job in q.iter_pending(kind, include_running=True):
+        current = job.recurrence_id or f"legacy:{job.id}"
+        matches = str(job.payload.get("__cron__") or "").strip() == expr.strip()
+        if matches and (lineage is None or current == lineage):
+            lineage = current
+        else:
+            q.cancel(job.id)
+    if lineage is None:
+        schedule_cron(q, expr, kind, {"__cron__": expr})
 
 
 def _reconcile_flow_crons() -> None:
+    with _cron_guard():
+        _reconcile_flow_crons_locked()
+
+
+def _reconcile_flow_crons_locked() -> None:
     """Seed one ``flow_cron`` job per scheduled flow and cancel the crons of
     flows that lost (or changed) their schedule. Keyed by ``flow_id`` in the
     payload, expression tracked in ``__cron__``: a job whose flow no longer has
@@ -1985,8 +2077,8 @@ def _reconcile_flow_crons() -> None:
         # that may belong to the tenant/store we could not read.
         return
     q = queue()
-    covered: set[tuple[str, str]] = set()
-    for j in _pending(FLOW_CRON_KIND):
+    covered: dict[tuple[str, str], str] = {}
+    for j in q.iter_pending(FLOW_CRON_KIND, include_running=True):
         p = j.payload or {}
         fid = str(p.get("flow_id") or "")
         tenant = str(p.get("tenant") or "")
@@ -1996,8 +2088,9 @@ def _reconcile_flow_crons() -> None:
             str(p.get("__tz__") or ""),
             str(p.get("__flow_revision__") or ""),
         )
-        if want.get(key) == cur and key not in covered:
-            covered.add(key)          # exactly one correct cron per scoped flow
+        lineage = j.recurrence_id or f"legacy:{j.id}"
+        if want.get(key) == cur and (key not in covered or covered[key] == lineage):
+            covered[key] = lineage  # retain retries AND the surviving lineage's successor
         else:
             q.cancel(j.id)            # stale (flow unscheduled, schedule/tz changed, or dup)
     for (tenant, fid), (expr, tz, flow_revision) in want.items():
@@ -2066,14 +2159,15 @@ def start() -> bool:
     """Start the automation worker pool + seed cron jobs. No-op when none of
     event triggers, dreaming, the data engine, or flows is enabled, and
     idempotent. Returns whether the pool was started."""
-    global _worker, _worker_threads
+    global _worker, _worker_threads, _worker_stopping
     from maverick import automation_events, data_engine, dreaming, flow
     if not (automation_events.enabled() or dreaming.enabled()
             or data_engine.enabled() or flow.enabled()):
         return False
     with _LOCK:
-        if _worker_threads:
-            return True
+        if any(thread.is_alive() for thread in _worker_threads):
+            return not _worker_stopping
+        _worker, _worker_threads = None, []
         from maverick.worker import Worker
         w = Worker(queue=queue())
         w.register(TICK_KIND, _handle_tick)
@@ -2097,25 +2191,39 @@ def start() -> bool:
             threading.Thread(target=w.run_forever, name=f"automation-worker-{i}", daemon=True)
             for i in range(_worker_count())
         ]
-        for t in threads:
-            t.start()
         _worker = w
-        _worker_threads = threads
+        _worker_stopping = False
+        try:
+            for t in threads:
+                t.start()
+                _worker_threads.append(t)
+        except BaseException:
+            # Started writers remain owned even if a later thread failed to
+            # start. Shutdown can observe them; a retry cannot overlap them.
+            _worker_stopping = True
+            w.stop()
+            raise
     log.info("automation worker started (%d threads, db=%s)", len(threads), _db_path())
     return True
 
 
-def stop() -> None:
-    global _worker, _worker_threads
+def stop(*, timeout: float = 5.0, wait: bool = True) -> None:
+    global _worker, _worker_threads, _worker_stopping
     with _LOCK:
         w = _worker
         threads = list(_worker_threads)
-        _worker = None
-        _worker_threads = []
-    if w is not None:
-        w.stop()
+        _worker_stopping = True
+        if w is not None:
+            w.stop()
+    if not wait:
+        return
+    deadline = time.monotonic() + max(0.0, min(float(timeout), 30.0))
     for t in threads:
-        t.join(timeout=5.0)
+        t.join(timeout=max(0.0, deadline - time.monotonic()))
+    with _LOCK:
+        if _worker is w and not any(t.is_alive() for t in threads):
+            _worker = None
+            _worker_threads = []
 
 
 __all__ = ["start", "stop", "reconcile", "queue",

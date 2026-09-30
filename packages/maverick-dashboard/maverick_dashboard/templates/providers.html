@@ -5,54 +5,75 @@
   {% from "_integration_readiness.html" import integration_readiness %}
   {% set configured = inventory | selectattr('configured') | list %}
   {% set verified = inventory | selectattr('readiness.live.status', 'equalto', 'verified') | list %}
-  {% call hero('Integrations', 'Providers', subtitle='AI service connections',
-               lede='Review which AI services are set up, whether your organization
-                     allows them, and the results of their connection tests.') %}
-    {{ state('Current state', configured | length ~ ' configured; ' ~ verified | length ~ ' live verified',
-             badge='live verified' if verified else 'verification unknown',
+  {% call hero('Integrations', 'Providers', subtitle='AI services',
+               lede='Which AI services are set up, whether your organization
+                     allows them, and whether their last connection test worked.') %}
+    {{ state('Current state', configured | length ~ ' set up · ' ~ verified | length ~ ' tested and working',
+             badge='Working' if verified else 'Not tested yet',
              badge_class='ok' if verified else 'idle',
-             copy='Saving an access key does not test the connection.
-                   A successful live test is shown separately below.') }}
+             copy='Saving a key does not test it. Use Test connection to check each one.') }}
   {% endcall %}
+
+  {% if tested %}
+  <div class="panel prov-saved" role="status"><strong>Connection test finished.</strong> The result is shown next to the provider.</div>
+  {% endif %}
+
 <section class="panel">
-  <h2 style="margin-top: 0;">Provider inventory</h2>
+  <div class="prov-head">
+    <h2>Your AI services</h2>
+    {% if is_admin %}<a class="btn btn--primary" href="/settings#settings-integrations">Add a provider</a>{% endif %}
+  </div>
   <table>
-    <thead><tr><th scope="col">provider</th><th scope="col">source</th><th scope="col">readiness</th></tr></thead>
+    <thead><tr><th scope="col">Provider</th><th scope="col">Key</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
     <tbody>
     {% for provider in inventory %}
+      {% set label = provider.label or (provider.name | humanize) %}
       <tr>
-        <td><code>{{ provider.name }}</code></td>
-        <td>{{ provider.via or 'not set' }}</td>
+        <td>{{ label }}</td>
+        <td>{% if provider.configured %}Saved, {{ provider.via | source_label or 'set up' }}{% else %}<span class="muted">Not set up</span>{% endif %}</td>
         <td>{{ integration_readiness(provider.readiness) }}</td>
+        <td class="prov-actions">
+          {% if is_admin and provider.configured %}
+          <form method="post" action="/settings/providers/test">
+            <input type="hidden" name="provider" value="{{ provider.name }}" />
+            <input type="hidden" name="next" value="providers" />
+            <button type="submit" class="btn" aria-label="Test the {{ label }} connection">Test connection</button>
+          </form>
+          {% elif is_admin %}
+          <a class="btn btn--ghost" href="/settings#provider-{{ provider.name }}" aria-label="Set up {{ label }}">Set up</a>
+          {% else %}<span class="muted">Ask an administrator to change this.</span>{% endif %}
+        </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 </section>
 <section class="panel">
-  <h2 style="margin-top: 0;">Recent service performance</h2>
+  <h2 class="prov-title">How each service is doing</h2>
   {% if not rows %}
-    <p class="muted">No requests recorded yet. These recent results are separate from connection tests and reset when Lightwork restarts.</p>
+    <p class="muted">No requests yet. Results appear here once tasks start using an AI service,
+      and start again from zero when Lightwork restarts.</p>
+    <p><a class="btn" href="/chat">Start a task</a></p>
   {% else %}
     <table>
       <thead>
         <tr>
-          <th scope="col">provider</th>
-          <th scope="col">model</th>
-          <th scope="col">calls</th>
-          <th scope="col">errors</th>
-          <th scope="col">Error rate</th>
-          <th scope="col" title="Half of requests completed within this time">Median response (ms)</th>
-          <th scope="col" title="95% of requests completed within this time">95th percentile (ms)</th>
-          <th scope="col">$ total</th>
-          <th scope="col">last seen</th>
+          <th scope="col">Provider</th>
+          <th scope="col">Model</th>
+          <th scope="col">Requests</th>
+          <th scope="col">Errors</th>
+          <th scope="col">Error Rate</th>
+          <th scope="col">Typical Response</th>
+          <th scope="col">Slowest 5% Took</th>
+          <th scope="col">Total Cost</th>
+          <th scope="col">Last Used</th>
         </tr>
       </thead>
       <tbody>
       {% for r in rows %}
         <tr>
-          <td><code>{{ r.provider }}</code></td>
-          <td><code>{{ r.model }}</code></td>
+          <td>{{ r.provider | humanize }}</td>
+          <td>{{ (r.provider ~ ':' ~ r.model) | model_label }}</td>
           <td>{{ r.calls }}</td>
           <td>{{ r.errors }}</td>
           <td>
@@ -64,21 +85,23 @@
               <span class="badge success">0%</span>
             {% endif %}
           </td>
-          <td>{{ '%.0f' % r.p50_ms if r.p50_ms is not none else '—' }}</td>
-          <td>{{ '%.0f' % r.p95_ms if r.p95_ms is not none else '—' }}</td>
-          <td>${{ '%.4f' % r.total_dollars }}</td>
+          <td>{{ '%.1f s' % (r.p50_ms / 1000) if r.p50_ms is not none else '—' }}</td>
+          <td>{{ '%.1f s' % (r.p95_ms / 1000) if r.p95_ms is not none else '—' }}</td>
+          <td>{{ r.total_dollars | money }}</td>
           <td class="muted">{{ r.last_seen | datetime }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   {% endif %}
+  <p class="muted prov-note">Spending limits and unfinished charges are on
+    <a href="/provider-spending">Provider spending</a>.</p>
 </section>
-<section class="panel">
-  <div class="section-head"><h2>Monitoring export</h2></div>
-  <details>
-    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">Advanced: connect a monitoring tool</summary>
-    <p class="muted" style="margin-top: var(--space-2);">JSON snapshot: <code>GET /api/v1/providers</code></p>
-  </details>
-</section>
+<style>
+  .prov-saved { border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4); }
+  .prov-head { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; justify-content: space-between; }
+  .prov-head h2, .prov-title { margin-top: 0; }
+  .prov-actions form { display: inline; }
+  .prov-note { font-size: var(--text-sm); margin-bottom: 0; }
+</style>
 {% endblock %}

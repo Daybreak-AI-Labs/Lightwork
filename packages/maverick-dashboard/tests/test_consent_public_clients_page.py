@@ -38,16 +38,37 @@ def isolated_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config.reset_config_cache()
 
 
-def test_public_clients_page_explains_once_only_credentials_and_sdk() -> None:
+def test_public_clients_page_explains_once_only_credentials_and_sdk(isolated_page: Path) -> None:
+    from maverick import config
+
+    from test_support.plain_language import developer_terms
+
+    isolated_page.write_text(
+        "[consent_preferences]\nenable = true\n"
+        "[consent_preferences.publishing]\nenable = true\n"
+        "[consent_preferences.public_api]\nenable = true\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
     response = client.get("/consent/public-clients")
     assert response.status_code == 200
-    assert "Public Consent Clients" in response.text
-    assert "returned once" in response.text
-    assert "LightworkConsent" in response.text
-    assert "/api/v1/public/consent/sdk.js" in response.text
-    assert "Revoke profile capability" in response.text
-    assert "List safe profile bindings" in response.text
-    assert "call('/profiles')" in response.text
+    page = response.text
+    assert "Website and App Keys" in page
+    assert "shown only once" in page and "Your new key (shown once)" in page
+    assert "LightworkConsent" in page
+    assert "/api/v1/public/consent/sdk.js" in page
+    assert "window.location.origin" in page and "YOUR-LIGHTWORK" not in page
+    # Existing keys and signed-in people load as rows with their own buttons.
+    assert 'id="pcc-table"' in page and 'id="pcc-profiles"' in page
+    assert 'call("/profiles?limit=500")' in page
+    for label in ("Create a key", "Revoke", "Revoke access", "Copy key", "Copy website code"):
+        assert label in page
+    assert page.count("CW.confirm(") >= 2
+    # Everything is chosen from lists; nothing is typed that a person cannot know.
+    for typed in ("Property ID", "Rule group version", "Receipt policy ID", "Client ID",
+                  "Review evidence SHA-256", "Profile reference"):
+        assert typed not in page
+    assert developer_terms(page) == []
 
 
 def test_public_clients_page_reports_gate_off(isolated_page: Path) -> None:

@@ -229,8 +229,8 @@ def seed_corpora(kb, *, only: str | None = None,
     ``only`` restricts to one collection. Each document is ingested as public,
     first-party reference material (``sensitivity="public"``, ``trust_tier=3``,
     no ``subject`` — reference corpora are never touched by subject erasure).
-    Idempotent per document: the content hash keys the store, so re-seeding
-    replaces rather than duplicates.
+    Matching content reuses its admitted rows. Revised content replaces the
+    prior source atomically only after embedding and provenance checks succeed.
     """
     report: dict[str, int] = {}
     for corpus in _CORPORA:
@@ -238,17 +238,11 @@ def seed_corpora(kb, *, only: str | None = None,
         if only and collection != only:
             continue
         for source, text in corpus["documents"]:
-            # Retract any prior copy of this document first so re-seeding
-            # replaces rather than duplicates (chunk ids are random per ingest,
-            # so INSERT OR REPLACE alone wouldn't dedup). Idempotent by source.
-            try:
-                kb.erase_source(source, [collection])
-            except Exception:  # pragma: no cover -- first seed has nothing to retract
-                pass
             n = kb.ingest_text(
                 collection, text, source=source,
                 sensitivity="public", trust_tier=3, ingested_by=ingested_by,
                 extra_meta={"corpus": corpus["title"]},
+                replace_source=True,
             )
             report[collection] = report.get(collection, 0) + n
     return report

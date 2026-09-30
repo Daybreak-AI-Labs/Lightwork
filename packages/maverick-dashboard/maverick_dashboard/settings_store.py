@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import threading
 from pathlib import Path
 
@@ -36,6 +37,10 @@ class SecuritySuiteRevisionConflict(RuntimeError):
 
 class SecuritySuiteConfigUnavailable(RuntimeError):
     """The security-suite overlay cannot be read without risking data loss."""
+
+
+class SettingsNotStorable(SecuritySuiteConfigUnavailable):
+    """The new overlay would not read back, so the file was left unchanged."""
 
 
 class ProviderRotationConflict(RuntimeError):
@@ -112,6 +117,7 @@ FEATURE_DEFAULTS = {
     "workflow_readiness": True,
     "project_reviews": False,
     "outcome_measurement": False,
+    "copilot_operations": False,
     "guided_onboarding": True,
     "action_center": True,
     "draft_recovery": True,
@@ -147,6 +153,7 @@ CAPABILITY_INFO = {
                  "before shell commands run.",
 }
 FEATURE_INFO = {
+    "copilot_operations": "Let Copilot show the current learning example and open its reviewed stop-use control. You confirm the decision in a protected form. Other product actions are not included; the page's own controls remain available when this is off.",
     "support_center": "Allow installation administrators to prepare, review and download redacted diagnostics in Help. Reports are never sent automatically.",
     "workflow_readiness": "Show available workflows, their supported boundaries, and the live or platform validation still required. Enablement never establishes customer acceptance.",
     "project_reviews": "Share selected, fixed task results with assigned workspace reviewers. Review does not execute or sign off the live task.",
@@ -176,80 +183,147 @@ FEATURE_INFO = {
 
 # The self-learning loop's subsystems -- ONE source of truth shared by the
 # one-click toggle (set_learning writes each (section, config_key) to the
-# overlay, which load_config deep-merges so every subsystem's enabled() sees it)
-# and the /learning status view (which pairs each key with its live enabled()).
+# overlay, which load_config deep-merges so every subsystem's enabled() sees it),
+# each subsystem's own switch (set_learning_subsystem writes one of them; ``env``
+# names the deployment variable that overrides it, ``needs`` a subsystem it only
+# works under) and the /learning status view (which pairs each key with its live
+# enabled()).
 # Keeping both off one list stops the button and the view from drifting when a
 # subsystem is added. Governed learning defaults ON; DGM is intentionally not
 # in this registry and has its own high-risk production control.
 LEARNING_SUBSYSTEMS: list[dict] = [
     {"key": "self_learning", "section": "self_learning", "config_key": "enable",
-     "label": "Governed capability learning",
+     "label": "Learn new skills from work",
+     "description": "Agents notice a skill a task needs and pick up an approved one "
+                    "from the catalog.",
+     "env": "MAVERICK_SELF_LEARNING",
      "how": "[self_learning] enable — or MAVERICK_SELF_LEARNING=0 to opt out"},
     {"key": "distill_local", "section": "self_learning", "config_key": "distill_local",
-     "label": "Local skill distillation",
+     "label": "Turn repeated successes into skills",
+     "description": "Write a reusable skill from work that went well, on this server.",
+     "env": "MAVERICK_DISTILL_LOCAL",
      "how": "[self_learning] distill_local — or MAVERICK_DISTILL_LOCAL=0"},
     {"key": "failure_telemetry", "section": "telemetry", "config_key": "failure_modes",
-     "label": "Local failure-mode telemetry",
+     "label": "Count the kinds of failures",
+     "description": "Keep a count of how tasks fail, so learning can focus on the "
+                    "common problems. Nothing leaves this server.",
+     "env": "MAVERICK_FAILURE_TELEMETRY",
      "how": "[telemetry] failure_modes or MAVERICK_FAILURE_TELEMETRY=0"},
     {"key": "budget_tuning", "section": "budget", "config_key": "self_tuning",
-     "label": "Evidence-based budget tuning",
+     "label": "Suggest task limits from experience",
+     "description": "Learn how much each kind of task really needs and suggest a "
+                    "spending limit for it. A limit you set always wins.",
+     "env": "MAVERICK_BUDGET_SELF_TUNING",
      "how": "[budget] self_tuning or MAVERICK_BUDGET_SELF_TUNING=0"},
     {"key": "consequence", "section": "consequence", "config_key": "enable",
-     "label": "Grounded outcomes (reality feedback)",
+     "label": "Learn from real results",
+     "description": "Learn from what really happened, such as an invoice paid, "
+                    "instead of the answer checker's guess.",
+     "env": "MAVERICK_CONSEQUENCE",
      "how": "[consequence] enable — or MAVERICK_CONSEQUENCE=0"},
     {"key": "reflexion", "section": "reflexion", "config_key": "enable",
-     "label": "Failure memory (learn from mistakes)",
+     "label": "Remember lessons from mistakes",
+     "description": "After a task goes wrong, write down what happened so later "
+                    "tasks avoid it.",
+     "env": "MAVERICK_REFLEXION",
      "how": "[reflexion] enable — or MAVERICK_REFLEXION=0"},
     {"key": "dreaming", "section": "dreaming", "config_key": "enable",
-     "label": "Consolidation (distil skills + insights)",
+     "label": "Learn from recent work on a schedule",
+     "description": "Regularly review finished work to write lessons and turn "
+                    "repeated successes into skills.",
+     "env": "MAVERICK_DREAMING",
      "how": "[dreaming] enable — or MAVERICK_DREAMING=0"},
     {"key": "experience", "section": "experience", "config_key": "enable",
-     "label": "Experience-guided planning",
+     "label": "Plan from past experience",
+     "description": "Use how similar past tasks went to plan and staff a new one.",
+     "env": "MAVERICK_EXPERIENCE_GUIDANCE",
      "how": "[experience] enable — or MAVERICK_EXPERIENCE_GUIDANCE=0"},
     {"key": "skill_synthesis", "section": "skill_synthesis", "config_key": "enable",
-     "label": "Task-specific skill synthesis",
+     "label": "Prepare guidance for each task",
+     "description": "Before a task starts, write short guidance for that task.",
+     "env": "MAVERICK_SKILL_SYNTHESIS",
      "how": "[skill_synthesis] enable — or MAVERICK_SKILL_SYNTHESIS=0"},
     {"key": "self_improvement", "section": "self_improvement", "config_key": "enable",
-     "label": "Governed improvement promotion",
+     "label": "Adopt proven improvements",
+     "description": "Adopt a learned change only after it passes its checks. Several "
+                    "parts below need this on.",
+     "env": "MAVERICK_SELF_IMPROVEMENT",
      "how": "[self_improvement] enable — or MAVERICK_SELF_IMPROVEMENT=0"},
     {"key": "prm_guidance", "section": "self_improvement", "config_key": "prm_guidance",
-     "label": "Process-reward guidance",
+     "label": "Nudge agents that stall",
+     "description": "Prompt an agent to change approach when several steps in a row "
+                    "make no progress.",
+     "env": "MAVERICK_PRM_GUIDANCE",
      "how": "[self_improvement] prm_guidance or MAVERICK_PRM_GUIDANCE=0"},
     {"key": "capture", "section": "self_improvement", "config_key": "capture",
-     "label": "Trajectory capture (fuel for the flywheel)",
+     "label": "Keep an outline of how tasks ran",
+     "description": "Save an outline of each task's steps, with secrets removed, as "
+                    "the material learning works from.",
+     "env": "MAVERICK_TRAJECTORY_CAPTURE",
      "how": "[self_improvement] capture — or MAVERICK_TRAJECTORY_CAPTURE=0"},
     {"key": "causal_promotion", "section": "self_improvement", "config_key": "causal_promotion",
-     "label": "Causal promotion evidence",
+     "label": "Check an improvement really caused the gain",
+     "description": "Before a learned change is adopted, check that it caused the "
+                    "improvement.",
+     "env": "MAVERICK_CAUSAL_PROMOTION", "needs": "self_improvement",
      "how": "[self_improvement] causal_promotion — or MAVERICK_CAUSAL_PROMOTION=0"},
     {"key": "factory_learning", "section": "self_improvement", "config_key": "factory_learning",
-     "label": "Self-improving agent factory",
+     "label": "Improve how new agents are built",
+     "description": "Learn from the gaps found when new agents are set up, so the "
+                    "next ones start better.",
+     "env": "MAVERICK_FACTORY_LEARNING", "needs": "self_improvement",
      "how": "[self_improvement] factory_learning — or MAVERICK_FACTORY_LEARNING=0"},
     {"key": "evaluator_evolution", "section": "self_improvement", "config_key": "evaluator_evolution",
-     "label": "Evaluator co-evolution",
+     "label": "Replace a drifting answer checker",
+     "description": "When the answer checker drifts, try a better one against fixed, "
+                    "locked examples.",
+     "env": "MAVERICK_EVALUATOR_EVOLUTION", "needs": "self_improvement",
      "how": "[self_improvement] evaluator_evolution — or MAVERICK_EVALUATOR_EVOLUTION=0"},
     {"key": "self_harness", "section": "self_harness", "config_key": "enable",
-     "label": "Risk-limited self-harness",
+     "label": "Improve agent instructions carefully",
+     "description": "Find recurring mistakes and test a fix to agents' instructions on "
+                    "unseen cases before using it.",
+     "env": "MAVERICK_SELF_HARNESS",
      "how": "[self_harness] enable — or MAVERICK_SELF_HARNESS=0"},
     {"key": "data_engine", "section": "data_engine", "config_key": "enable",
      "label": "Improvement flywheel",
+     "description": "Find the failures that cost the most and test a fix in a "
+                    "simulation first.",
+     "env": "MAVERICK_DATA_ENGINE",
      "how": "[data_engine] enable — or MAVERICK_DATA_ENGINE=0"},
     {"key": "operations_scientist", "section": "operations_scientist", "config_key": "enable",
-     "label": "Operations scientist",
+     "label": "Look for better ways of working",
+     "description": "Suggest a better step to replace one that keeps causing harm, "
+                    "tested in a simulation first.",
+     "env": "MAVERICK_OPERATIONS_SCIENTIST",
      "how": "[operations_scientist] enable — or MAVERICK_OPERATIONS_SCIENTIST=0"},
     {"key": "rehearsal", "section": "rehearsal", "config_key": "enable",
-     "label": "Pre-execution rehearsal",
+     "label": "Rehearse risky plans first",
+     "description": "Try a risky plan in a simulation before it runs, and ask a "
+                    "person when the result is uncertain.",
+     "env": "MAVERICK_REHEARSAL",
      "how": "[rehearsal] enable — or MAVERICK_REHEARSAL=0"},
     {"key": "credit", "section": "credit", "config_key": "enable",
-     "label": "Counterfactual agent credit",
+     "label": "Score each agent's part in team work",
+     "description": "Work out how much each agent in a team helped, to learn which "
+                    "agents to use.",
+     "env": "MAVERICK_CREDIT",
      "how": "[credit] enable — or MAVERICK_CREDIT=0"},
     {"key": "reasoning_reward", "section": "reasoning_reward", "config_key": "enable",
-     "label": "Structured reasoning rewards",
+     "label": "Detailed answer scoring",
+     "description": "Score final answers on several points, with a safety veto.",
+     "env": "MAVERICK_REASONING_REWARD",
      "how": "[reasoning_reward] enable or MAVERICK_REASONING_REWARD=0"},
     {"key": "reward_audit", "section": "reasoning_reward", "config_key": "audit_rewards",
-     "label": "Tamper-evident reward audit",
+     "label": "Record answer scores in the activity log",
+     "description": "Sign each detailed score into the tamper-evident activity log.",
+     "env": "MAVERICK_REASONING_REWARD_AUDIT",
      "how": "[reasoning_reward] audit_rewards or MAVERICK_REASONING_REWARD_AUDIT=0"},
     {"key": "jit_rl", "section": "jit_rl", "config_key": "enable",
-     "label": "JitRL test-time adaptation",
+     "label": "Favour answers that worked before",
+     "description": "When agents write several answers, lean toward the kind that "
+                    "checked out well before.",
+     "env": "MAVERICK_JIT_RL",
      "how": "[jit_rl] enable or MAVERICK_JIT_RL=0"},
 ]
 LEARNING_TOGGLES = [(s["section"], s["config_key"]) for s in LEARNING_SUBSYSTEMS]
@@ -292,6 +366,11 @@ CHANNELS: list[dict] = [
         {"key": "smtp_user", "label": "SMTP user", "secret": False},
         {"key": "smtp_password", "label": "SMTP password", "secret": True},
         {"key": "smtp_port", "label": "SMTP port", "secret": False, "type": "int"},
+    ]},
+    {"name": "mattermost", "label": "Mattermost", "fields": [
+        {"key": "url", "label": "Server address", "secret": False, "type": "url"},
+        {"key": "bot_token", "label": "Bot access token", "secret": True,
+         "env": "MATTERMOST_BOT_TOKEN"},
     ]},
 ]
 _CHANNELS_BY_NAME = {c["name"]: c for c in CHANNELS}
@@ -370,7 +449,18 @@ def _load_security_suite_overlay() -> dict:
 
 
 def _toml_str(value: str) -> str:
-    return json.dumps(str(value))  # JSON strings are valid TOML basic strings
+    # JSON strings are valid TOML basic strings, except that JSON leaves the
+    # DEL character bare where TOML requires it escaped.
+    return json.dumps(str(value)).replace("\x7f", "\\u007f")
+
+
+_BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _toml_key(key: object) -> str:
+    """A table key, quoted unless TOML allows it bare (``"mcp_*"`` must be)."""
+    text = str(key)
+    return text if _BARE_KEY.fullmatch(text) else _toml_str(text)
 
 
 def _toml_value(value) -> str:
@@ -425,35 +515,103 @@ def _dump_value(lines: list[str], val: dict) -> None:
 
 
 def _dump_selector_sections(lines: list[str], data: dict) -> None:
-    """Emit the single-key selector tables the dashboard owns: [dashboard]
-    active_tenant (set_active_tenant) and [sandbox] backend
-    (set_sandbox_backend). _dump is an allowlist serializer, so a key missing
-    here would be silently dropped by the next save."""
-    dash = data.get("dashboard") or {}
-    if dash.get("active_tenant"):
-        lines.append("[dashboard]")
-        lines.append(f"active_tenant = {_toml_str(dash['active_tenant'])}")
+    """Emit the [dashboard] and [sandbox] tables the dashboard owns:
+    active_tenant (set_active_tenant), backend (set_sandbox_backend) and the
+    catalog keys the All settings page writes (compress, timeout). _dump is an
+    allowlist serializer, so a key missing here would be silently dropped by
+    the next save."""
+    for section in ("dashboard", "sandbox"):
+        tbl = data.get(section) or {}
+        keys = [k for k in sorted(tbl) if tbl[k] is not None and tbl[k] != ""]
+        if not keys:
+            continue
+        sealed = _dashboard_secret_keys() if section == "dashboard" else frozenset()
+        lines.append(f"[{section}]")
+        for k in keys:
+            value = tbl[k]
+            if k in sealed and isinstance(value, str):
+                # The sign-in session key: never written in the clear, even
+                # when it arrived from a hand-edited overlay.
+                value = _seal_global_secret(value)
+            lines.append(f"{_toml_key(k)} = {_toml_value(value)}")
         lines.append("")
-    sandbox = data.get("sandbox") or {}
-    if sandbox.get("backend"):
-        lines.append("[sandbox]")
-        lines.append(f"backend = {_toml_str(sandbox['backend'])}")
-        lines.append("")
+
+
+def _dashboard_secret_keys() -> frozenset[str]:
+    """[dashboard] keys the All settings page keeps sealed."""
+    from .settings_catalog import SETTINGS
+
+    return frozenset(s.key for s in SETTINGS if s.section == "dashboard" and s.secret)
 
 
 def _dump_plugins(lines: list[str], plugins: dict) -> None:
     """Emit [plugins] -- the dashboard-install allowlist + opt-in switch
-    (set_installable_plugins / set_plugin_install_allowed)."""
-    if not plugins:
+    (set_installable_plugins / set_plugin_install_allowed) and every plugin
+    setting the All settings page writes (permission grants, signing,
+    isolation, version lock, usage counts). An emptied install allowlist is
+    dropped, as before; every other key is written as stored."""
+    keys = [
+        k for k in sorted(plugins or {})
+        if plugins[k] is not None and plugins[k] != ""
+        and not (k == "installable" and not plugins[k])
+    ]
+    if not keys:
         return
     lines.append("[plugins]")
-    if "allow_install" in plugins:
-        lines.append(
-            f"allow_install = {'true' if plugins['allow_install'] else 'false'}"
-        )
-    if plugins.get("installable"):
-        lines.append(f"installable = {_toml_value(list(plugins['installable']))}")
+    for k in keys:
+        lines.append(f"{_toml_key(k)} = {_toml_value(plugins[k])}")
     lines.append("")
+
+
+def _dump_webhooks(lines: list[str], whk: dict) -> None:
+    """Emit [webhooks]: the signing key the Settings page manages (sealed
+    before persistence, never logged or re-displayed), the outbound addresses,
+    and the delivery limits and tracker identities the All settings page
+    writes. _dump is an allowlist serializer, so a catalog key missing here
+    would be silently dropped by the next save."""
+    keys = [k for k in sorted(whk) if whk[k] is not None and whk[k] != ""
+            and (k not in {"secret", "outbound"} or whk[k])]
+    if not keys:
+        return
+    lines.append("[webhooks]")
+    for k in keys:
+        if k == "secret":
+            lines.append(f"secret = {_toml_str(_seal_global_secret(whk['secret']))}")
+        elif k == "outbound":
+            lines.append(f"outbound = {_toml_value(list(whk['outbound']))}")
+        else:
+            # Catalog secrets arrive already sealed (set_catalog_values).
+            lines.append(f"{_toml_key(k)} = {_toml_value(whk[k])}")
+    lines.append("")
+
+
+# Provider fields the dashboard writes: keys and addresses on the Settings
+# page, and sign-in mode, Bedrock endpoint/region and Azure deployment/version
+# on the All settings page.
+_PROVIDER_FIELDS = ("api_key", "base_url", "auth_mode", "endpoint", "region",
+                    "deployment", "api_version")
+
+
+def _dump_providers(lines: list[str], providers: dict) -> None:
+    """Emit [providers] switches (per_tenant_keys) and each provider's table."""
+    switches = {k: v for k, v in providers.items()
+                if not isinstance(v, dict) and v is not None and v != ""}
+    if switches:
+        lines.append("[providers]")
+        for k in sorted(switches):
+            lines.append(f"{_toml_key(k)} = {_toml_value(switches[k])}")
+        lines.append("")
+    for name in sorted(k for k, v in providers.items() if isinstance(v, dict)):
+        pcfg = providers[name]
+        fields = [(f, pcfg.get(f)) for f in _PROVIDER_FIELDS if pcfg.get(f)]
+        if not fields:
+            continue
+        lines.append(f"[providers.{name}]")
+        for field, val in fields:
+            if field == "api_key":
+                val = _seal_global_secret(val)
+            lines.append(f"{field} = {_toml_str(val)}")
+        lines.append("")
 
 
 def _dump(data: dict) -> str:
@@ -474,14 +632,20 @@ def _dump(data: dict) -> str:
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control", "oauth", "workspace",
-                    "research_execution",
+                    # Portal link keyring (portal_routing_key_api); sealed values.
+                    "third_party_portal",
+                    # Consent publication signing keyring
+                    # (consent_publication_signing_api); sealed values.
+                    "consent_publication_signing",
+                    "research_execution", "models", "catalogs", "agent_trust", "immune",
+                    *COMPLIANCE_SETTING_SECTIONS,
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,
-                    *SWITCHABLE_SECTIONS)):
+                    *SWITCHABLE_SECTIONS, *_catalog_generic_sections())):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")
             for k in sorted(tbl):
-                lines.append(f"{k} = {_toml_value(tbl[k])}")
+                lines.append(f"{_toml_key(k)} = {_toml_value(tbl[k])}")
             lines.append("")
     _dump_selector_sections(lines, data)
     _dump_plugins(lines, data.get("plugins") or {})
@@ -494,30 +658,26 @@ def _dump(data: dict) -> str:
         for model in sorted(tiers):
             lines.append(f"{_toml_str(model)} = {_toml_str(str(tiers[model]))}")
         lines.append("")
-    # [webhooks] secret -- the signing key the Settings page manages. Sealed
-    # before persistence and never logged or re-displayed.
-    whk = data.get("webhooks") or {}
-    if whk.get("secret"):
-        lines.append("[webhooks]")
-        lines.append(f"secret = {_toml_str(_seal_global_secret(whk['secret']))}")
+    _dump_webhooks(lines, data.get("webhooks") or {})
+    _dump_providers(lines, data.get("providers") or {})
+    channels = data.get("channels") or {}
+    # Settings for every chat app at once ([channels] rich_render) sit in the
+    # table itself; each app's own settings are a [channels.<name>] table.
+    shared = {k: v for k, v in channels.items() if not isinstance(v, dict) and v is not None}
+    if shared:
+        lines.append("[channels]")
+        for k in sorted(shared):
+            lines.append(f"{_toml_key(k)} = {_toml_value(shared[k])}")
         lines.append("")
-    for name in sorted(data.get("providers") or {}):
-        pcfg = data["providers"][name] or {}
-        fields = [(f, pcfg.get(f)) for f in ("api_key", "base_url") if pcfg.get(f)]
-        if not fields:
-            continue
-        lines.append(f"[providers.{name}]")
-        for field, val in fields:
-            if field == "api_key":
-                val = _seal_global_secret(val)
-            lines.append(f"{field} = {_toml_str(val)}")
-        lines.append("")
-    for name in sorted(data.get("channels") or {}):
-        ccfg = data["channels"][name] or {}
-        if not ccfg:
+    for name in sorted(channels):
+        ccfg = channels[name] or {}
+        if not isinstance(ccfg, dict) or not ccfg:
             continue
         lines.append(f"[channels.{name}]")
-        lines.append(f"enabled = {'true' if ccfg.get('enabled') else 'false'}")
+        # Only an explicit on/off is written: a channel whose allow list alone
+        # was set on the All settings page must keep the installer's on/off.
+        if "enabled" in ccfg:
+            lines.append(f"enabled = {'true' if ccfg.get('enabled') else 'false'}")
         secret_fields = {
             field["key"]
             for field in (_CHANNELS_BY_NAME.get(name) or {}).get("fields", [])
@@ -527,14 +687,10 @@ def _dump(data: dict) -> str:
             if k == "enabled":
                 continue
             v = ccfg[k]
-            if isinstance(v, bool):
-                lines.append(f"{k} = {'true' if v else 'false'}")
-            elif isinstance(v, int):
-                lines.append(f"{k} = {v}")
-            else:
-                if k in secret_fields:
-                    v = _seal_global_secret(v)
-                lines.append(f"{k} = {_toml_str(v)}")
+            if isinstance(v, str) and k in secret_fields:
+                v = _seal_global_secret(v)
+            # Catalog secrets arrive already sealed (set_catalog_values).
+            lines.append(f"{_toml_key(k)} = {_toml_value(v)}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -543,7 +699,17 @@ def _write(data: dict) -> None:
     # Unique temp + os.replace (0600): the fixed ".toml.tmp" collided between two
     # concurrent workers. RMW serialization is in the mutators via _locked().
     from maverick.file_lock import atomic_write_text
-    atomic_write_text(config.dashboard_overrides_path(), _dump(data))
+    text = _dump(data)
+    # Read the new text back before it replaces the file: a value the file
+    # format cannot hold would otherwise leave an overlay nothing can read,
+    # and every dashboard-managed setting (and the dashboard itself) with it.
+    try:
+        _tomllib().loads(text)
+    except ValueError as exc:
+        raise SettingsNotStorable(
+            "A value could not be saved safely, so the settings were not changed."
+        ) from exc
+    atomic_write_text(config.dashboard_overrides_path(), text)
 
 
 def set_provider(name: str, api_key: str | None = None, base_url: str | None = None) -> None:
@@ -836,29 +1002,96 @@ def clear_provider(name: str) -> None:
         raise ValueError("unknown provider")
     with _locked():
         data = _load_overlay_for_update()
-        (data.get("providers") or {}).pop(name, None)
+        table = (data.get("providers") or {}).get(name)
+        if isinstance(table, dict):
+            # Only the key and address are cleared; a sign-in method chosen on
+            # the All settings page stays.
+            table.pop("api_key", None)
+            table.pop("base_url", None)
+            if not table:
+                data["providers"].pop(name, None)
+        else:
+            (data.get("providers") or {}).pop(name, None)
         _write(data)
 
 
-def set_webhooks_secret(secret: str | None) -> None:
-    """Set (or clear, when empty) the inbound/outbound webhook signing secret
-    in the dashboard overlay -- the same [webhooks] secret knob operators set
-    in config; the MAVERICK_WEBHOOK_SECRET env var still takes precedence."""
+def set_webhooks_secret(secret: str, *, expected_generation: str, principal: str,
+                        authorize, action: str = "set") -> dict:
+    """Rotate only a reviewed effective generation; never silently save a shadow key."""
+    from .webhook_settings import rotate
+    return rotate(secret=secret, action=action, expected_generation=expected_generation,
+                  principal=principal, authorize=authorize)
+
+
+def set_model_discovery(enabled: bool) -> None:
+    """Turn automatic model lists ([models] discovery) on or off in the overlay.
+
+    The MAVERICK_MODEL_DISCOVERY environment variable still wins; the Settings
+    page only offers this switch when no such override is present."""
     with _locked():
         data = _load_overlay_for_update()
-        cleaned = (secret or "").strip()
+        models = data.setdefault("models", {})
+        if not isinstance(models, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "dashboard settings are unreadable; settings were not changed"
+            )
+        models["discovery"] = bool(enabled)
+        _write(data)
+
+
+def set_catalog_indexes(urls) -> None:
+    """Replace the skill-catalog addresses ([catalogs] indexes) in the overlay.
+
+    Each entry must be a plain https web address (no credentials in it); at
+    most five. An empty list removes the key so the built-in catalog is used
+    again. Installing from any catalog still needs the admin role and the
+    server's skill-install opt-in; this only changes what the Store lists."""
+    from urllib.parse import urlsplit
+
+    cleaned: list[str] = []
+    for raw in urls or []:
+        url = str(raw or "").strip().rstrip("/")
+        if not url:
+            continue
+        parts = urlsplit(url)
+        if (parts.scheme != "https" or not parts.hostname or parts.username
+                or parts.password or len(url) > 300 or any(c.isspace() for c in url)):
+            raise ValueError("catalog addresses must be plain https web addresses")
+        if url not in cleaned:
+            cleaned.append(url)
+    if len(cleaned) > 5:
+        raise ValueError("at most five catalog addresses")
+    with _locked():
+        data = _load_overlay_for_update()
+        catalogs = data.setdefault("catalogs", {})
+        if not isinstance(catalogs, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "dashboard settings are unreadable; settings were not changed"
+            )
         if cleaned:
-            data.setdefault("webhooks", {})["secret"] = cleaned
+            catalogs["indexes"] = cleaned
         else:
-            (data.get("webhooks") or {}).pop("secret", None)
-            if not data.get("webhooks"):
-                data.pop("webhooks", None)
+            catalogs.pop("indexes", None)
         _write(data)
 
 
 def set_toggle(section: str, name: str, enabled: bool) -> None:
     """Override a [capabilities] or [features] flag in the overlay."""
     set_toggles(section, {name: enabled})
+
+
+class FeatureSettingNotEffective(ValueError):
+    """A higher-priority source still controls a dashboard-saved feature."""
+
+
+def assert_effective_copilot_operations(enabled: bool) -> None:
+    """Never report this optional action as enabled after a shadow overlay save."""
+    from maverick import config
+
+    if config.get_features().get("copilot_operations") is not bool(enabled):
+        raise FeatureSettingNotEffective(
+            "Copilot actions are controlled by another setting. The requested change is not active."
+        )
 
 
 def set_toggles(section: str, updates: dict[str, bool]) -> None:
@@ -959,7 +1192,35 @@ def set_research_execution(value: dict, *, expected_settings_sha256: str) -> dic
 SWITCHABLE_SECTIONS: tuple[str, ...] = (
     "dreaming", "self_improvement", "self_harness", "fleet_memory",
     "rehearsal", "flows", "threat_hunt", "env_hunt", "entity_graph",
+    "shoring",
 )
+
+
+def set_agent_trust_enforce(enforced: bool) -> None:
+    """Overlay ``[agent_trust] enforce`` (block outside agents not on the list)."""
+    with _locked():
+        data = _load_overlay_for_update()
+        data.setdefault("agent_trust", {})["enforce"] = bool(enforced)
+        _write(data)
+
+
+def set_immune_settings(*, canaries: bool | None = None, twin_record: bool | None = None) -> None:
+    """Overlay the Safety monitoring page's two switches: reviewer tests
+    (``[immune] canaries``) and recording tasks for practice re-runs
+    (``[immune] twin_record``). Only these two keys, only booleans."""
+    changes = {k: bool(v) for k, v in (("canaries", canaries), ("twin_record", twin_record))
+               if v is not None}
+    if not changes:
+        raise ValueError("unknown setting")
+    with _locked():
+        data = _load_overlay_for_update()
+        table = data.setdefault("immune", {})
+        if not isinstance(table, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "dashboard settings are unreadable; settings were not changed"
+            )
+        table.update(changes)
+        _write(data)
 
 
 def set_section_enable(section: str, enabled: bool) -> None:
@@ -972,6 +1233,77 @@ def set_section_enable(section: str, enabled: bool) -> None:
         _write(data)
 
 
+# Compliance controls the /compliance page can strengthen from inside the app.
+# Only these exact (section, key) pairs are writable, and only to the value
+# types listed; nothing here can turn a protection off except retention
+# periods, which only accept whole days within the bounds below.
+COMPLIANCE_SETTINGS: dict[tuple[str, str], type] = {
+    ("audit", "sign"): bool,
+    ("privacy", "anonymous"): bool,
+    ("encryption", "at_rest"): bool,
+    ("enterprise", "mode"): bool,
+    ("compliance", "disclosure_text"): str,
+    ("compliance", "profiles"): list,
+    ("retention", "audit_days"): int,
+    ("retention", "episodes_days"): int,
+    ("retention", "events_days"): int,
+    ("retention", "messages_days"): int,
+    ("retention", "usage_days"): int,
+}
+COMPLIANCE_SETTING_SECTIONS: tuple[str, ...] = tuple(
+    dict.fromkeys(section for section, _key in COMPLIANCE_SETTINGS)
+)
+_RETENTION_DAY_BOUNDS = (1, 3650)
+_PROFILE_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
+
+def set_compliance_settings(updates: dict[tuple[str, str], object]) -> None:
+    """Write a bounded group of compliance settings in one overlay save."""
+    if not isinstance(updates, dict) or not updates:
+        raise ValueError("unknown setting")
+    clean: dict[tuple[str, str], object] = {}
+    for pair, value in updates.items():
+        kind = COMPLIANCE_SETTINGS.get(pair)
+        if kind is None:
+            raise ValueError("unknown setting")
+        if kind is bool:
+            if value is not True:
+                # Protections can only be switched on from the dashboard.
+                raise ValueError("unknown setting")
+        elif kind is list:
+            # Regulation keys only; callers must pass a superset of what is
+            # already active (checked where the active set is known).
+            if (
+                not isinstance(value, list)
+                or not value
+                or len(value) > 16
+                or any(
+                    not isinstance(item, str) or not _PROFILE_KEY.fullmatch(item)
+                    for item in value
+                )
+            ):
+                raise ValueError("regulation list is invalid")
+            value = list(dict.fromkeys(value))
+        elif kind is int:
+            low, high = _RETENTION_DAY_BOUNDS
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError("retention days are out of range")
+        elif not isinstance(value, str) or not value.strip() or len(value) > 1000:
+            raise ValueError("text setting is empty or too long")
+        clean[pair] = value
+    with _locked():
+        data = _load_overlay_for_update()
+        for (section, key), value in clean.items():
+            table = data.setdefault(section, {})
+            if not isinstance(table, dict):
+                raise SecuritySuiteConfigUnavailable(
+                    "dashboard settings are unreadable; settings were not changed"
+                )
+            table[key] = value
+        _write(data)
+    config.reset_config_cache()
+
+
 # Governance-module enable flags an admin may switch from inside the app --
 # each entry is a dotted path whose final table carries the ``enable``
 # boolean the module's fail-closed gate reads (e.g.
@@ -979,6 +1311,7 @@ def set_section_enable(section: str, enabled: bool) -> None:
 # enable). The single authority the /features/switches API trusts for
 # module switching; anything not listed stays config-file-only.
 MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
+    "codebase",
     "connections",
     "ai_inventory",
     "ai_entity_tasks",
@@ -993,12 +1326,17 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "assessment_evidence_autopopulation",
     "consent_preferences",
     "consent_preferences.analytics",
+    "consent_preferences.application_scanner",
+    "consent_preferences.bulk_jobs",
     "consent_preferences.delivery",
     "consent_preferences.experiments",
+    "consent_preferences.global_opt_out",
     "consent_preferences.native_sdk",
     "consent_preferences.profile_data",
+    "consent_preferences.profile_data.custom_index",
     "consent_preferences.public_api",
     "consent_preferences.publishing",
+    "consent_preferences.publishing.web_settings",
     "consent_preferences.scanner",
     "consent_preferences.scanner.notice_proposals",
     "consent_preferences.trust_center",
@@ -1030,6 +1368,36 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "third_party_management.lifecycle",
     "third_party_management.lifecycle.portal",
     "vendor_management",
+    "control_plane",
+    "eu_conformity",
+    "ai_literacy",
+    "policy_packs",
+    "evidence_gateway",
+    "drift_monitoring",
+    "ai_incident_reporting",
+    "privacy_automation.drop_management",
+    "explainability",
+    "content_provenance",
+    "breach_notification",
+    # agent_topology.enabled also needs the entity graph, which is on by
+    # default and has its own switch on the Learning page.
+    "agent_topology",
+    "ai_regulatory_feed",
+    "ai_business_intake",
+    "ai_dynamic_risk",
+    "ai_policy_management",
+    "ai_runtime_guardrails",
+    "ai_explainability",
+    "ai_conformity_workflow",
+    "ai_insurability",
+    "ai_regulated_verticals",
+    "ai_bank_mrm",
+    "ai_discovery_sensors",
+    "portfolio_risk",
+    "ai_cost_roi",
+    "eu_ai_incidents",
+    "grc_outbound_sync",
+    "incident_attachment_metadata",
 })
 
 # Top-level tables the module paths live under; _dump is an allowlist, so a
@@ -1065,6 +1433,96 @@ def set_module_enables(paths, enabled: bool) -> None:
                 node = child
             node["enable"] = bool(enabled)
         _write(data)
+
+
+# Tables with their own serializer above; every other catalog table goes
+# through the generic allowlisted loop in _dump.
+_CATALOG_SPECIAL_SECTIONS = frozenset({
+    "channels", "dashboard", "plugins", "providers", "sandbox", "webhooks",
+})
+
+
+def _catalog_generic_sections() -> tuple[str, ...]:
+    from .settings_catalog import CATALOG_TOP_SECTIONS
+
+    return tuple(s for s in CATALOG_TOP_SECTIONS if s not in _CATALOG_SPECIAL_SECTIONS)
+
+
+#: Marker for "remove this key from the dashboard overlay".
+REMOVE = object()
+
+
+def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str, ...], object]:
+    """Write All-settings values to the overlay in ONE locked save.
+
+    ``changes`` maps a catalog key path (``("safety", "profile")``) to its
+    already-validated value, or :data:`REMOVE` to drop the dashboard value so
+    the installer's choice (or the default) applies again. Only paths in the
+    settings catalog are writable. Secret values are sealed with the
+    deployment key before they are stored. Returns the previous raw overlay
+    value of each path (``REMOVE`` when absent) so a caller can undo the save
+    if the change cannot be recorded in the audit trail.
+    """
+    from .settings_catalog import SETTINGS
+
+    by_path = {s.path: s for s in SETTINGS if s.key_kind != "entries"}
+    # "entries" tables (usage limits for any tool) own every other key of
+    # their table: one path per row, never a key another setting owns.
+    entries = {s.path: s for s in SETTINGS if s.key_kind == "entries"}
+    if not isinstance(changes, dict) or not changes:
+        raise ValueError("no settings given")
+    for path in changes:
+        table = entries.get(tuple(path[:-1]))
+        if path in by_path:
+            continue
+        if table is None or not path[-1] or path[-1] in table.fixed_keys:
+            raise ValueError("unknown setting")
+        by_path[path] = table
+    previous: dict[tuple[str, ...], object] = {}
+    with _locked():
+        data = _load_overlay_for_update()
+        for path, value in changes.items():
+            node = data
+            for part in path[:-1]:
+                child = node.get(part)
+                if child is None:
+                    child = {}
+                    node[part] = child
+                if not isinstance(child, dict):
+                    raise SecuritySuiteConfigUnavailable(
+                        "dashboard settings are unreadable; settings were not changed"
+                    )
+                node = child
+            key = path[-1]
+            previous[path] = node.get(key, REMOVE)
+            if value is REMOVE or value is None:
+                node.pop(key, None)
+            elif by_path[path].secret:
+                node[key] = _seal_global_secret(value)
+            else:
+                node[key] = value
+        _prune_empty_tables(data, {path[0] for path in changes})
+        _write(data)
+    config.reset_config_cache()
+    return previous
+
+
+def _prune_empty_tables(data: dict, tops: set[str]) -> None:
+    """Drop tables a reset emptied, so the overlay stays minimal."""
+    def prune(node: dict) -> None:
+        for key in list(node):
+            child = node[key]
+            if isinstance(child, dict):
+                prune(child)
+                if not child:
+                    node.pop(key)
+
+    for top in tops:
+        table = data.get(top)
+        if isinstance(table, dict):
+            prune(table)
+            if not table:
+                data.pop(top, None)
 
 
 SANDBOX_BACKENDS: tuple[str, ...] = ("local", "docker", "podman")
@@ -1328,6 +1786,51 @@ def set_learning(enabled: bool, *, actor: str = "local") -> None:
         reset_config_cache()
 
 
+def set_learning_subsystem(key: str, enabled: bool, *, actor: str = "local") -> None:
+    """Turn ONE learning subsystem of ``LEARNING_SUBSYSTEMS`` on or off.
+
+    The Learning page's per-system switch. ``set_learning`` still writes every
+    subsystem at once, so the master switch can always turn everything off
+    again. Raises ``KeyError`` for an unknown subsystem. The deployment
+    variable named by ``env`` still overrides the value written here."""
+    spec = next((s for s in LEARNING_SUBSYSTEMS if s["key"] == key), None)
+    if spec is None:
+        raise KeyError(key)
+    with _locked():
+        before = _load_overlay_for_update()
+        data = json.loads(json.dumps(before))
+        section = data.setdefault(spec["section"], {})
+        if not isinstance(section, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "dashboard settings are unreadable; settings were not changed"
+            )
+        if spec["section"] == "self_harness" and not config.load_global_config().get(
+                "self_harness"):
+            # The first key in an empty [self_harness] table would switch the
+            # kernel to its historical, weaker defaults: keep the careful
+            # profile the pristine default already gives (as set_learning does).
+            section.setdefault("risk_limited", True)
+            section.setdefault("auto_run", True)
+        section[spec["config_key"]] = bool(enabled)
+        from maverick.audit import EventKind, audit_event
+        from maverick.config import reset_config_cache
+
+        # Record the authorization before publishing the control bit.
+        audited = audit_event(
+            EventKind.LEARNING_CONTROL_CHANGED,
+            _global=True,
+            control=key,
+            enabled=bool(enabled),
+            actor=actor,
+            acknowledged=False,
+            phase="authorized",
+        )
+        if not audited:
+            raise RuntimeError("learning control audit could not be persisted")
+        _write(data)
+        reset_config_cache()
+
+
 def set_dgm(
     enabled: bool,
     *,
@@ -1336,8 +1839,9 @@ def set_dgm(
 ) -> dict:
     """Set only the canonical, default-off DGM request bit.
 
-    Editable surfaces, challenge tests, evaluator policy and adoption authority
-    are deliberately not dashboard-editable. The production runner rechecks all
+    The editable surface and challenge tests are separate All settings rows
+    (global admin, confirmed before they widen); evaluator policy and adoption
+    authority are not dashboard-editable. The production runner rechecks all
     of them and never adopts code.
     """
     with _locked():
@@ -1578,9 +2082,26 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
                     ccfg[key] = int(val)
                 except (TypeError, ValueError) as exc:
                     raise ValueError(f"{field['label']} must be a number") from exc
+            elif field.get("type") == "url":
+                ccfg[key] = _channel_server_address(field["label"], val)
             else:
                 ccfg[key] = str(val)
         _write(data)
+
+
+def _channel_server_address(label: str, value: object) -> str:
+    """A chat server's web address: https, or plain http only on this computer
+    (the channel's access token is sent to it with every request)."""
+    from urllib.parse import urlsplit
+
+    text = str(value).strip().rstrip("/")
+    parts = urlsplit(text)
+    local = parts.scheme == "http" and parts.hostname in {"localhost", "127.0.0.1", "::1"}
+    if (len(text) > 300 or not parts.netloc or parts.query or parts.fragment or parts.username
+            or parts.password or not (parts.scheme == "https" or local)
+            or any(ch.isspace() for ch in text)):
+        raise ValueError(f"{label} must be a secure web address starting with https://")
+    return text
 
 
 def clear_channel(name: str) -> None:
@@ -1674,12 +2195,15 @@ def channels_state() -> list[dict]:
             raw_v = raw.get(f["key"])
             v = ov_v if ov_v not in (None, "") else raw_v
             configured = v not in (None, "")
+            # A value set on the server (environment) wins over this page.
+            from_server = bool(f.get("env") and os.environ.get(f["env"], "").strip())
             fields.append({
                 "key": f["key"], "label": f["label"],
                 "secret": bool(f.get("secret")), "type": f.get("type", "text"),
                 "value": "" if f.get("secret") else (str(v) if configured else ""),
-                "hint": _mask(v) if (configured and f.get("secret")) else "",
-                "configured": configured,
+                "hint": ("on the server" if from_server else
+                         _mask(v) if (configured and f.get("secret")) else ""),
+                "configured": configured or from_server,
             })
         out.append({
             "name": name, "label": spec["label"],
@@ -1701,6 +2225,7 @@ __all__ = [
     "research_execution_state", "set_research_execution",
     "security_suite_revision",
     "set_dgm", "set_ekko", "set_security_suite",
-    "set_toggle", "set_toggles", "set_learning", "set_flow_autonomy", "state", "set_channel", "clear_channel",
+    "set_toggle", "set_toggles", "set_learning", "set_learning_subsystem",
+    "set_flow_autonomy", "state", "set_channel", "clear_channel",
     "channels_state",
 ]

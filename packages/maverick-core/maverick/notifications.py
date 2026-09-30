@@ -2,7 +2,8 @@
 
 Wraps the most common consumer push services:
   - ntfy.sh (default, no account required; just a topic)
-  - Pushover (PUSHOVER_USER_KEY + PUSHOVER_APP_TOKEN)
+  - Pushover (PUSHOVER_USER_KEY + PUSHOVER_APP_TOKEN, else the sealed
+    [notifications] user_key + app_token saved on the All settings page)
   - Discord webhook (DISCORD_NOTIFY_WEBHOOK_URL)
   - Slack webhook (SLACK_NOTIFY_WEBHOOK_URL)
 
@@ -93,9 +94,24 @@ def _send_ntfy(title: str, body: str, priority: str, server: str, topic: str) ->
         return False
 
 
-def _send_pushover(title: str, body: str, priority: str) -> bool:
-    user = os.environ.get("PUSHOVER_USER_KEY")
-    app = os.environ.get("PUSHOVER_APP_TOKEN")
+def _pushover_credentials(cfg: dict | None = None) -> tuple[str, str]:
+    """``(user_key, app_token)``: ``PUSHOVER_USER_KEY`` / ``PUSHOVER_APP_TOKEN``
+    win; otherwise ``[notifications] user_key`` / ``app_token`` -- the sealed
+    values saved on the All settings page (opened by ``load_config``), or the
+    installer's ``${PUSHOVER_...}`` references."""
+    section = _load_config() if cfg is None else cfg
+    values = []
+    for env_name, key in (("PUSHOVER_USER_KEY", "user_key"), ("PUSHOVER_APP_TOKEN", "app_token")):
+        value = os.environ.get(env_name, "").strip()
+        if not value:
+            saved = _resolve_env_ref(section.get(key)) if isinstance(section.get(key), str) else None
+            value = (saved or "").strip()
+        values.append(value)
+    return values[0], values[1]
+
+
+def _send_pushover(title: str, body: str, priority: str, cfg: dict | None = None) -> bool:
+    user, app = _pushover_credentials(cfg)
     if not user or not app:
         return False
     try:
@@ -204,9 +220,14 @@ def notify(
             return batcher.submit(body, title=title, priority=priority,
                                   category=category)
 
+    def _legacy_url(section: dict, backend: str):
+        # Older installers wrote ``webhook_url`` next to a single backend.
+        return section.get("webhook_url") if section.get("backend") == backend else None
+
     def _dispatch(backend: str) -> bool:
         if backend == "ntfy":
-            topic = _resolve_env_ref(cfg.get("ntfy_topic"))
+            # ``topic`` is what older installers wrote; keep honouring it.
+            topic = _resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
             server = _resolve_env_ref(cfg.get("ntfy_server")) or "https://ntfy.sh"
             if not topic:
                 topic = os.environ.get("MAVERICK_NTFY_TOPIC")
@@ -215,13 +236,13 @@ def notify(
                 return False
             return _send_ntfy(title, body, priority, server, topic)
         if backend == "pushover":
-            return _send_pushover(title, body, priority)
+            return _send_pushover(title, body, priority, cfg)
         if backend == "discord":
-            url = _resolve_env_ref(cfg.get("discord_webhook")) or \
+            url = _resolve_env_ref(cfg.get("discord_webhook") or _legacy_url(cfg, "discord")) or \
                   os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
             return _send_discord(title, body, url or "")
         if backend == "slack":
-            url = _resolve_env_ref(cfg.get("slack_webhook")) or \
+            url = _resolve_env_ref(cfg.get("slack_webhook") or _legacy_url(cfg, "slack")) or \
                   os.environ.get("SLACK_NOTIFY_WEBHOOK_URL")
             return _send_slack(title, body, url or "")
         log.warning("notify: unknown backend %r", backend)

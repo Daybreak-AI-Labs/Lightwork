@@ -18,13 +18,17 @@ Design:
     point; tests pass a fake store with the same ``add``/``query``
     interface, so the wiring is exercised without the heavy extras.
 
-Document id convention: ``goal:<id>`` so re-indexing a goal upserts rather
-than duplicates (delete-then-add).
+Document id convention: ``goal:<id>``. Replacements use a native single-record
+upsert; adapters without that contract explicitly fall back to lexical recall.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import math
 import os
+import uuid
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -154,7 +158,8 @@ def build_store(backend: str | None = None) -> Any | None:
             return ChromaStore(collection=(f"t_{ns}__goals" if ns else "goals") + sfx)
         if backend == "qdrant":
             from .vector_store import QdrantStore
-            return QdrantStore(collection=(f"t_{ns}__goals" if ns else "goals") + sfx)
+            # Explicit local vectors must not mix with legacy named-vector spaces.
+            return QdrantStore(collection=(f"t_{ns}__goals" if ns else "goals") + "_v2" + sfx)
         if backend == "weaviate":
             from .vector_store import WeaviateStore
             # Weaviate class names must start with an uppercase letter.
@@ -182,6 +187,38 @@ def _goal_text(goal) -> str:
     return f"{getattr(goal, 'title', '') or ''}\n\n{getattr(goal, 'description', '') or ''}".strip()
 
 
+_PROCESS_STATE = uuid.uuid4().hex
+
+
+def _state_dir(store: Any) -> Path:
+    from .paths import data_dir
+
+    identity = getattr(store, "recall_identity", None) or f"{_PROCESS_STATE}:{id(store)}"
+    key = hashlib.sha256(f"{type(store).__module__}.{type(store).__name__}:{identity}:{_sealed_recall()}".encode()).hexdigest()
+    return data_dir("semantic_recall_state") / key
+
+
+def index_status(*, store: Any | None = None) -> str:
+    """Local lifecycle state, not a claim that every world goal was indexed.
+
+    Pending markers survive crashes/unknown transport outcomes. Only an explicit
+    successful retry of that goal clears its marker; another goal cannot do so.
+    """
+    store = store if store is not None else build_store()
+    if store is None:
+        return "unavailable" if backend_name() else "disabled"
+    if (not callable(getattr(store, "upsert_one", None))
+            or not getattr(store, "supports_atomic_recall", True)):
+        return "unsupported"
+    try:
+        state = _state_dir(store)
+        if next(state.glob("*.pending"), None) is not None:
+            return "rebuild_required"
+        return "ready" if (state / "revision").is_file() else "absent"
+    except Exception:
+        return "unavailable"
+
+
 def index_goal(goal, *, store: Any | None = None) -> bool:
     """Upsert one goal into the vector store. Returns True if indexed.
 
@@ -197,44 +234,77 @@ def index_goal(goal, *, store: Any | None = None) -> bool:
     skipped (returns False) rather than shipping plaintext to the store -- the
     caller falls back to lexical recall over the sealed world DB. Never raises.
     """
-    from .pilot_learning import excluded
-    if excluded(getattr(goal, "id", None)):
-        return False
-    store = store if store is not None else build_store()
-    if store is None:
-        return False
-    text = _goal_text(goal)
-    if not text:
-        return False
-    doc_id = f"goal:{getattr(goal, 'id', '')}"
-    # Routing only -- no sensitive content (see search() callers).
-    metas = [{
-        "goal_id": getattr(goal, "id", None),
-        "status": getattr(goal, "status", None),
-    }]
     try:
-        document = text
-        embedding_args: dict[str, Any] = {}
-        if _sealed_recall():
-            vecs = _embed_texts([text])
-            if vecs is None:
-                # at-rest on, no local embedder: don't leak plaintext to the
-                # store and don't ship a sealed doc with a useless backend-side
-                # embedding -- skip so the caller falls back to lexical recall.
+        from .file_lock import atomic_write_text, cross_process_lock
+        from .pilot_learning import excluded
+        from .skill.embeddings import validate_vectors
+
+        gid = getattr(goal, "id", None)
+        if isinstance(gid, bool) or not isinstance(gid, int) or gid <= 0 or excluded(gid):
+            return False
+        store = store if store is not None else build_store()
+        if (store is None or not callable(getattr(store, "upsert_one", None))
+                or not getattr(store, "supports_atomic_recall", True)):
+            return False
+        text = _goal_text(goal)
+        state = _state_dir(store)
+        with cross_process_lock(state / "write", strict=True):
+            if (state / f"{gid}.removed").exists():
                 return False
-            from .crypto_at_rest import seal_to_str
-            document = seal_to_str(text)
-            embedding_args["embeddings"] = vecs
-        # Preparing a replacement must not erase a previously searchable goal
-        # when the embedder or encryption key is temporarily unavailable.
-        try:
-            store.delete([doc_id])
-        except Exception:  # pragma: no cover -- delete of absent id may raise
-            pass
-        store.add([document], ids=[doc_id], metadatas=metas, **embedding_args)
-        return True
+            pending = state / f"{gid}.pending"
+            atomic_write_text(pending, "rebuild_required")
+            if not text or len(text) > 65536:
+                return False
+            document, vector = text, None
+            if _sealed_recall() or getattr(store, "requires_precomputed_embeddings", False):
+                vector = validate_vectors(_embed_texts([text]), 1)[0]
+            if _sealed_recall():
+                from .crypto_at_rest import seal_to_str
+                document = seal_to_str(text)
+            # Authority can change during preparation. Recheck before publishing
+            # and before releasing search results, without caching decisions.
+            if excluded(gid):
+                return False
+            store.upsert_one(document, id=f"goal:{gid}",
+                             metadata={"goal_id": gid, "status": getattr(goal, "status", None)},
+                             embedding=vector)
+            if excluded(gid):
+                store.delete([f"goal:{gid}"])
+                return False
+            atomic_write_text(state / "revision", uuid.uuid4().hex)
+            pending.unlink()
+            return True
     except Exception as e:  # pragma: no cover -- backend write error
         log.debug("semantic index of goal failed: %s", e)
+        return False
+
+
+def remove_goal(goal_id: int, *, store: Any | None = None) -> bool:
+    """Explicit semantic removal; late indexing cannot resurrect this goal ID.
+
+    This removes only the derived semantic record, not the canonical world goal.
+    A persisted tombstone shares the index publication fence. Failed deletion is
+    incomplete, remains invisible to search, and may be explicitly retried.
+    """
+    try:
+        from .file_lock import atomic_write_text, cross_process_lock
+
+        if isinstance(goal_id, bool) or not isinstance(goal_id, int) or goal_id <= 0:
+            return False
+        store = store if store is not None else build_store()
+        if store is None or not callable(getattr(store, "delete", None)):
+            return False
+        state = _state_dir(store)
+        with cross_process_lock(state / "write", strict=True):
+            atomic_write_text(state / f"{goal_id}.removed", "removed")
+            pending = state / f"{goal_id}.pending"
+            atomic_write_text(pending, "rebuild_required")
+            store.delete([f"goal:{goal_id}"])
+            atomic_write_text(state / "revision", uuid.uuid4().hex)
+            pending.unlink()
+            return True
+    except Exception as exc:
+        log.debug("semantic removal failed: %s", exc)
         return False
 
 
@@ -255,31 +325,45 @@ def search(
     the caller knows to fall back to lexical/embedding recall (an empty list
     means "backend present, no matches"). Never raises.
     """
-    if not query:
+    if not query or len(query) > 65536 or isinstance(k, bool) or not isinstance(k, int) or k <= 0:
         return None
     store = store if store is not None else build_store()
     if store is None:
         return None
     try:
+        if index_status(store=store) != "ready":
+            return None
+        state = _state_dir(store)
+        revision = (state / "revision").read_text()
+        k = min(k, 99)
         # Over-fetch so we can drop the current goal then trim to k. Under at-rest
         # the stored documents are sealed, so the query is embedded client-side
         # (same model the index used) and searched by vector; otherwise the
         # backend embeds the query text as before.
-        if _sealed_recall():
-            qv = _embed_texts([query])
-            if qv is None:
-                return None  # no local embedder -> fall back to lexical recall
+        if _sealed_recall() or getattr(store, "requires_precomputed_embeddings", False):
+            from .skill.embeddings import validate_vectors
+            qv = validate_vectors(_embed_texts([query]), 1)
             hits = store.query(top_k=k + 1, embedding=qv[0])
         else:
             hits = store.query(query, top_k=k + 1)
     except Exception as e:  # pragma: no cover -- backend query error
         log.debug("semantic search failed: %s", e)
         return None
+    from .pilot_learning import excluded
+
     out: list[tuple[float, dict]] = []
     for h in hits or []:
+        if not isinstance(h, dict):
+            return None
         meta = h.get("metadata") or {}
+        if not isinstance(meta, dict):
+            return None
         gid = meta.get("goal_id")
+        if isinstance(gid, bool) or not isinstance(gid, int) or gid <= 0:
+            return None
         if exclude_goal_id is not None and gid == exclude_goal_id:
+            continue
+        if excluded(gid) or (state / f"{gid}.removed").exists():
             continue
         dist = h.get("distance")
         # Chroma returns L2/cosine distance; map to a [0,1] similarity.
@@ -287,13 +371,22 @@ def search(
             score = 0.0
         else:
             try:
-                score = max(0.0, min(1.0, 1.0 - float(dist)))
+                distance = float(dist)
+                if not math.isfinite(distance):
+                    return None
+                score = max(0.0, min(1.0, 1.0 - distance))
             except (TypeError, ValueError):
                 score = 0.0
-        out.append((score, meta))
+        out.append((score, {"goal_id": gid, "status": meta.get("status")}))
         if len(out) >= k:
             break
-    return out
+    try:
+        if index_status(store=store) != "ready" or (state / "revision").read_text() != revision:
+            return None
+        return [(score, meta) for score, meta in out
+                if not excluded(meta["goal_id"]) and not (state / f"{meta['goal_id']}.removed").exists()]
+    except Exception:
+        return None
 
 
-__all__ = ["backend_name", "build_store", "index_goal", "search"]
+__all__ = ["backend_name", "build_store", "index_goal", "index_status", "remove_goal", "search"]

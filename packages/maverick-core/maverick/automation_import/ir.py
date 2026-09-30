@@ -16,6 +16,8 @@ the orchestrator runs the work.
 from __future__ import annotations
 
 import hashlib
+import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -39,11 +41,27 @@ _MAX_PARAM_CHARS = 200
 _MAX_PARAM_DEPTH = 6
 # Cap the number of rendered steps so a huge imported workflow can't produce a
 # multi-megabyte template body that is re-read into the model prompt every run.
-# Env-overridable for legitimately large imports.
-try:
-    _MAX_RENDER_STEPS = max(1, int(os.environ.get("MAVERICK_IMPORT_MAX_STEPS", "200")))
-except ValueError:
-    _MAX_RENDER_STEPS = 200
+# Raisable for legitimately large imports: MAVERICK_IMPORT_MAX_STEPS wins, else
+# ``[automation_import] max_steps`` (the All settings page); read per render.
+_DEFAULT_RENDER_STEPS = 200
+_MAX_RENDER_STEPS_LIMIT = 5000
+
+
+def _max_render_steps() -> int:
+    raw = os.environ.get("MAVERICK_IMPORT_MAX_STEPS", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return _DEFAULT_RENDER_STEPS
+    try:
+        from ..config import load_config
+        value = ((load_config() or {}).get("automation_import") or {}).get("max_steps")
+    except Exception:  # pragma: no cover - config never blocks an import
+        return _DEFAULT_RENDER_STEPS
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return _DEFAULT_RENDER_STEPS
+    return min(value, _MAX_RENDER_STEPS_LIMIT)
 _SECRET_QUERY_RE = re.compile(
     r"(?i)([?&][^=]*(?:token|key|secret|password|credential)[^=]*=)[^&\s]+"
 )
@@ -99,6 +117,51 @@ def safe_params(params: dict[str, Any]) -> dict[str, Any]:
             else _safe_param_value(value)
         )
     return safe
+
+
+def operational_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Redact imported execution inputs without silently dropping their meaning.
+
+    Display previews may be shortened; an execution brief must retain values,
+    whitespace and nesting. Oversized/unsupported input requires manual repair.
+    """
+    remaining = 512
+
+    def clean(value: Any, depth: int = 0) -> Any:
+        nonlocal remaining
+        remaining -= 1
+        if remaining < 0 or depth > 12:
+            raise ValueError("Imported step inputs require repair: structure exceeds supported size")
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if not isinstance(key, str) or len(key) > 128:
+                    raise ValueError("Imported step inputs require repair: unsupported parameter name")
+                result[key] = ("[REDACTED:automation_import_secret]"
+                               if _SENSITIVE_PARAM_RE.search(key) else clean(item, depth + 1))
+            return result
+        if isinstance(value, list):
+            return [clean(item, depth + 1) for item in value]
+        if isinstance(value, str):
+            if len(value) > 16384:
+                raise ValueError("Imported step inputs require repair: value exceeds supported size")
+            return _SECRET_QUERY_RE.sub(r"\1[REDACTED:automation_import_secret]", _redact_text(value))
+        if value is None or isinstance(value, (bool, int)):
+            return value
+        if isinstance(value, float) and math.isfinite(value):
+            return value
+        raise ValueError("Imported step inputs require repair: unsupported parameter type")
+
+    cleaned = clean(params)
+    rendered = json.dumps(cleaned, ensure_ascii=False, sort_keys=True)
+    if len(rendered) > 32768:
+        raise ValueError("Imported step inputs require repair: total exceeds supported size")
+    return cleaned
+
+
+def operational_inputs(params: dict[str, Any]) -> str:
+    """Render the same complete, bounded inputs used by deterministic actions."""
+    return json.dumps(operational_params(params), ensure_ascii=False, sort_keys=True)
 
 
 def slugify(text: str) -> str:
@@ -312,7 +375,7 @@ class ImportedAutomation:
             "",
         ]
         if self.steps:
-            shown_steps = self.steps[:_MAX_RENDER_STEPS]
+            shown_steps = self.steps[:_max_render_steps()]
             lines += [s.render(i) for i, s in enumerate(shown_steps, 1)]
             omitted = len(self.steps) - len(shown_steps)
             if omitted > 0:

@@ -54,3 +54,30 @@ def test_inflight_accounting_never_goes_negative(caplog):
     runner._mark_inflight_finished()
     assert runner.inflight_goals() == 0
     assert "underflow" in caplog.text
+
+
+def test_shutdown_racing_with_slot_admission_does_not_start_an_orphan_goal(monkeypatch):
+    releases = []
+
+    class Lane:
+        def acquire(self, *, timeout):
+            return True
+
+        def release(self):
+            releases.append("principal")
+
+    class Global:
+        def acquire(self, *, timeout):
+            runner.close_goal_admission()  # drain wins after slots were requested
+            return True
+
+        def release(self):
+            releases.append("global")
+
+    monkeypatch.setattr(runner, "_principal_semaphore", lambda _principal: Lane())
+    monkeypatch.setattr(runner, "_run_semaphore", Global())
+    assert runner.run_goal_in_thread(123, acquire_timeout=0) is None
+    assert releases == ["global", "principal"]
+    assert runner.inflight_goals() == 0 and not runner._accepting_goals
+    runner.open_goal_admission()
+    assert runner._accepting_goals

@@ -1,8 +1,8 @@
 (function (global) {
   "use strict";
 
+  // ---- Bounded client helpers (also used by the unit tests) -----------------
   var MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-  var MAX_RENDER_CHARS = 256 * 1024;
   var MAX_INPUT_BYTES = 32 * 1024;
   var ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
   var OPERATION_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$/;
@@ -15,15 +15,11 @@
     error.status = status || 0;
     return error;
   }
-
   function identifier(value, label, operation) {
     var selected = String(value || "").trim();
-    if (!(operation ? OPERATION_ID : ID).test(selected)) {
-      throw problem(label + " is invalid.");
-    }
+    if (!(operation ? OPERATION_ID : ID).test(selected)) { throw problem(label + " is invalid."); }
     return selected;
   }
-
   function environmentReference(value, label) {
     var selected = String(value || "").trim();
     if (!ENVIRONMENT_REF.test(selected)) {
@@ -31,22 +27,17 @@
     }
     return selected;
   }
-
   function savedReference(value, label, evidence) {
     var selected = String(value || "").trim();
     var pattern = evidence ? /^evidence-key:[a-z0-9][a-z0-9_-]{0,63}:[1-9][0-9]{0,9}$/ : /^connection:[a-z0-9][a-z0-9_-]{0,63}:[0-9a-f]{32}$/;
     if (!pattern.test(selected)) { return environmentReference(selected, label); }
     return selected;
   }
-
   function digest(value, label) {
     var selected = String(value || "").trim();
-    if (!DIGEST.test(selected)) {
-      throw problem(label + " must be a lowercase SHA-256 digest.");
-    }
+    if (!DIGEST.test(selected)) { throw problem(label + " must be a lowercase SHA-256 digest."); }
     return selected;
   }
-
   function finiteNumber(value, label, minimum, maximum, integerOnly) {
     var selected = Number(value);
     if (!Number.isFinite(selected) || (integerOnly && !Number.isSafeInteger(selected)) || selected < minimum || selected > maximum) {
@@ -54,27 +45,20 @@
     }
     return selected;
   }
-
   function parseBoundedObject(value, label) {
     var text = String(value || "");
-    if (!text || new TextEncoder().encode(text).length > MAX_INPUT_BYTES) {
-      throw problem(label + " is empty or exceeds its byte bound.");
-    }
+    if (!text || new TextEncoder().encode(text).length > MAX_INPUT_BYTES) { throw problem(label + " is empty or exceeds its byte bound."); }
     var parsed;
-    try { parsed = JSON.parse(text); }
-    catch (_error) { throw problem(label + " is not valid JSON."); }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw problem(label + " must be a JSON object.");
-    }
+    try { parsed = JSON.parse(text); } catch (_error) { throw problem(label + " is not valid JSON."); }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) { throw problem(label + " must be a JSON object."); }
     return parsed;
   }
-
+  // Reads at most 2 MiB; a non-OK answer rejects with an error carrying the
+  // status so the page can explain it in plain words.
   async function readBoundedJson(response) {
     var declared = response.headers.get("content-length");
     if (declared !== null && Number(declared) > MAX_RESPONSE_BYTES) {
-      if (response.body && typeof response.body.cancel === "function") {
-        await response.body.cancel();
-      }
+      if (response.body && typeof response.body.cancel === "function") { await response.body.cancel(); }
       throw problem("Server response exceeded the 2 MiB safety limit.", "response_too_large", response.status);
     }
     if (!response.body || typeof response.body.getReader !== "function") {
@@ -95,22 +79,14 @@
     }
     var bytes = new Uint8Array(total);
     var offset = 0;
-    chunks.forEach(function (chunk) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    });
+    chunks.forEach(function (chunk) { bytes.set(chunk, offset); offset += chunk.byteLength; });
     var text;
     try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
     catch (_error) { throw problem("Server response was not valid UTF-8.", "invalid_response", response.status); }
     var payload;
     try { payload = text ? JSON.parse(text) : {}; }
     catch (_error) { throw problem("Request failed: the server returned an invalid JSON response.", "invalid_response", response.status); }
-    if (!response.ok) {
-      var detail = payload && typeof payload.detail === "string"
-        ? payload.detail.slice(0, 500)
-        : "Privacy discovery request failed.";
-      throw problem(detail, "request_failed", response.status);
-    }
+    if (!response.ok) { throw problem("request failed", "request_failed", response.status); }
     return payload;
   }
 
@@ -126,415 +102,495 @@
     readBoundedJson: readBoundedJson
   };
 
+  // ---- Page -------------------------------------------------------------------
   if (typeof document === "undefined") { return; }
   var root = document.getElementById("pdd-root");
-  if (!root) { return; }
+  var R = global.LwRecords;
+  if (!root || !R || root.dataset.featureEnabled !== "true") { return; }
   if (root.dataset.clientBound === "true") { return; }
   root.dataset.clientBound = "true";
   var apiBase = root.dataset.apiBase || "/api/v1/privacy/data-discovery";
-  var status = document.getElementById("pdd-status");
-  var result = document.getElementById("pdd-result");
+  var can = { operate: root.dataset.canOperate === "true", audit: root.dataset.canAudit === "true", admin: root.dataset.canAdmin === "true" };
+  var statusEl = document.getElementById("pdd-status");
+  var DEFAULT_KEY = "privacy-inventory";
+  var DEFAULT_LIMITS = { max_records: 10000, max_files: 1000, max_bytes: 67108864, max_seconds: 300.0, max_findings: 10000, max_fields_per_record: 256, max_record_bytes: 262144, max_document_bytes: 4194304 };
+  var setup = { providers: [], connections: [], evidence_keys: [] };
+  var state = { sources: [], jobs: [], reports: [] };
+  var openReport = null;
 
-  function formValue(form, name) {
-    return String(form.elements[name].value || "").trim();
+  var PROVIDERS = {
+    aws_s3: "Amazon S3", azure_blob: "Azure Blob Storage", gcs: "Google Cloud Storage", google_cloud_storage: "Google Cloud Storage",
+    snowflake_metadata: "Snowflake", snowflake: "Snowflake", servicenow_cmdb: "ServiceNow CMDB", microsoft_entra: "Microsoft Entra",
+  };
+  var CATEGORY = {
+    authentication_secret: "Password or secret key", biometric_identifier: "Biometric data", date_of_birth: "Date of birth",  // pragma: allowlist secret
+    email_address: "Email address", financial_account: "Bank or financial account", government_identifier: "Government ID number",
+    health_information: "Health information", ip_address: "IP address", payment_card: "Payment card number",
+    person_name: "Person's name", phone_number: "Phone number", physical_address: "Home or postal address",
+    precise_location: "Precise location", unknown_personal_data: "Other personal data",
+  };
+  var SOURCE_STATE = { active: ["Active", "active"], suspended: ["Paused", "warn"], revoked: ["Removed", "idle"] };
+  var JOB_STATE = { queued: ["Waiting to run", "info"], leased: ["Running", "info"], complete: ["Done", "active"], dead_letter: ["Failed", "blocked"] };
+  var WORK_STATE = {
+    queued: ["Waiting", "info"], leased: ["In progress", "info"], applied: ["Done", "active"], no_change: ["Already up to date", "active"],
+    ambiguous: ["Needs checking", "warn"], dead_letter: ["Failed", "blocked"], cancelled: ["Cancelled", "idle"],
+  };
+  var COMPLETENESS = { complete: "Fully checked", partial: "Partly checked", truncated: "Stopped at a limit", failed: "Could not finish" };
+  var DECISION = { confirmed: "Correct", reclassified: "Different kind of data", false_positive: "Not personal data" };
+
+  function say(text) { statusEl.textContent = text; }
+  function fail(f, action) { say(R.errorText(f, action)); }
+  function badge(map, v) { var s = map[v] || [R.human(v), "info"]; return R.badge(s[0], s[1]); }
+  function provider(name) { return PROVIDERS[name] || R.human(name); }
+  function category(name) { return CATEGORY[name] || R.human(name); }
+  async function call(path, method, body) {
+    var settings = { method: method || "GET", credentials: "same-origin", headers: { Accept: "application/json" } };
+    if (body !== undefined) { settings.headers["Content-Type"] = "application/json"; settings.body = JSON.stringify(body); }
+    return readBoundedJson(await global.fetch(apiBase + path, settings));
+  }
+  function sourceName(id) { return R.human(id); }
+  function latestReport(sourceId) {
+    return state.reports.filter(function (r) { return r.source_id === sourceId; })
+      .sort(function (a, b) { return b.finished_at - a.finished_at; })[0];
   }
 
-  function optionalNumber(form, name) {
-    var selected = formValue(form, name);
-    return selected ? finiteNumber(selected, name, 0.001, 100000000000, false) : null;
+  // ---- loading ------------------------------------------------------------------
+  async function loadReadiness() {
+    var el = document.getElementById("pdd-ready");
+    try {
+      var st = await call("/status");
+      el.textContent = st.ready ? "Ready: scanning is set up for this workspace." :
+        "Scanning is not fully set up yet. Ask an administrator to turn on the storage services you use in Settings.";
+    } catch (f) { el.textContent = R.errorText(f, "check whether scanning is set up"); }
   }
 
-  async function call(path, options) {
-    if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//") || path.length > 4096) {
-      throw problem("Request path is invalid.");
-    }
-    var settings = Object.assign(
-      { credentials: "same-origin", headers: { Accept: "application/json" } },
-      options || {}
-    );
-    if (settings.body !== undefined) {
-      settings.headers["Content-Type"] = "application/json";
-    }
-    return readBoundedJson(await fetch(apiBase + path, settings));
+  async function load() {
+    try {
+      var both = await Promise.all([call("/sources?limit=500"), call("/jobs?limit=200"), call("/reports?limit=200")]);
+      state.sources = both[0].items || [];
+      state.jobs = both[1].items || [];
+      state.reports = both[2].items || [];
+      render();
+      loadReviews();
+      loadInventory();
+      if (can.admin) loadWork();
+    } catch (f) { fail(f, "load your data sources"); }
   }
 
-  function show(payload, message) {
-    var rendered = JSON.stringify(payload, null, 2);
-    if (rendered.length > MAX_RENDER_CHARS) {
-      rendered = rendered.slice(0, MAX_RENDER_CHARS) + "\n… display truncated at 256 KiB; use the bounded API for the complete response.";
-    }
-    result.textContent = rendered;
-    status.textContent = message;
+  function render() {
+    R.table(document.getElementById("pdd-sources"), [
+      { label: "Source", value: function (s) { return sourceName(s.source_id); } },
+      { label: "Where", value: function (s) { return provider(s.provider) + " – " + s.resource_ref; } },
+      { label: "Status", value: function (s) { return badge(SOURCE_STATE, s.state); } },
+      { label: "Last scan", value: function (s) { var r = latestReport(s.source_id); return r ? R.when(r.finished_at) : "Never"; } },
+    ], state.sources, [
+      { label: "Scan now", kind: "primary", when: function (s) { return can.operate && s.state === "active"; }, run: scanNow },
+      { label: "Scan regularly", when: function (s) { return can.admin && s.state === "active"; }, run: scheduleSource },
+      { label: "Test access", when: function (s) { return can.admin && s.state === "active"; }, run: testAccess },
+      { label: "Pause", when: function (s) { return can.admin && s.state === "active"; }, run: function (s) { setState(s, "suspended"); } },
+      { label: "Resume", when: function (s) { return can.admin && s.state === "suspended"; }, run: function (s) { setState(s, "active"); } },
+      { label: "Remove", kind: "danger", when: function (s) { return can.admin && s.state !== "revoked"; }, run: function (s) { setState(s, "revoked"); } },
+    ], { text: can.admin ? "No data sources yet. Use “Add a data source”." : "No data sources yet. Ask an administrator to add one." });
+
+    R.table(document.getElementById("pdd-jobs"), [
+      { label: "Source", value: function (j) { return sourceName(j.source_id); } },
+      { label: "Status", value: function (j) { return badge(JOB_STATE, j.state); } },
+      { label: "Tries", value: function (j) { return j.attempts + " of " + j.max_attempts; } },
+      { label: "Started by", value: function (j) { return j.schedule_id ? "Schedule" : "Someone on your team"; } },
+    ], state.jobs, [
+      { label: "Run now", kind: "primary", when: function (j) { return can.admin && j.state === "queued"; }, run: runJob },
+      { label: "Try again", when: function (j) { return can.admin && j.state === "dead_letter"; }, run: retryJob },
+      { label: "Cancel", kind: "danger", when: function (j) { return can.operate && j.state === "queued"; }, run: cancelJob },
+    ], { text: "No scans yet. Use “Scan now” on a data source." });
+
+    R.table(document.getElementById("pdd-reports"), [
+      { label: "Source", value: function (r) { return sourceName(r.source_id); } },
+      { label: "Finished", value: function (r) { return R.when(r.finished_at); } },
+      { label: "Checked", value: function (r) { return (r.records_seen || 0) + " records, " + (r.files_seen || 0) + " files"; } },
+      { label: "Found", value: function (r) { return r.findings_count + (r.ambiguous_count ? " (" + r.ambiguous_count + " to check)" : ""); } },
+      { label: "Coverage", value: function (r) { return COMPLETENESS[r.completeness] || R.human(r.completeness); } },
+    ], state.reports, [
+      { label: "See findings", kind: "primary", run: showFindings },
+      { label: "Compare with earlier", when: function (r) { return earlierReports(r).length > 0; }, run: compare },
+    ], { text: "No reports yet. Reports appear here after a scan finishes." });
   }
 
-  function fail(error) {
-    var message = String(error && error.message ? error.message : error).slice(0, 500);
-    status.textContent = message;
-    result.textContent = JSON.stringify({ error: message }, null, 2);
+  function earlierReports(r) {
+    return state.reports.filter(function (x) { return x.source_id === r.source_id && x.finished_at < r.finished_at; });
   }
 
-  function bind(id, eventName, handler) {
-    var element = document.getElementById(id);
-    if (!element) { throw problem("The workbench is missing " + id + ".", "invalid_page"); }
-    element.addEventListener(eventName, function (event) {
-      try { Promise.resolve(handler(event)).catch(fail); }
-      catch (error) { fail(error); }
-    });
+  // ---- data sources -----------------------------------------------------------------
+  async function scanNow(s) {
+    try {
+      await call("/sources/" + encodeURIComponent(s.source_id) + "/jobs", "POST",
+        { limits: DEFAULT_LIMITS, max_attempts: 3, retention_seconds: 90 * 86400, idempotency_key: R.newKey() });
+      say(can.admin ? "Scan queued. Use “Run now” in the Scans list to start it." : "Scan queued. It runs when an administrator starts it or the scheduler picks it up.");
+      await load();
+    } catch (f) { fail(f, "queue the scan"); }
   }
 
-  function applyPermissions() {
-    var allowed = {
-      operate: root.dataset.canOperate === "true",
-      audit: root.dataset.canAudit === "true",
-      admin: root.dataset.canAdmin === "true"
-    };
-    root.querySelectorAll("[data-requires]").forEach(function (control) {
-      var permitted = allowed[control.dataset.requires] === true;
-      if (!permitted) {
-        control.disabled = true;
-        control.dataset.permissionDisabled = "true";
-        control.setAttribute("aria-disabled", "true");
-        control.title = control.dataset.requires + " permission is required";
-      }
-    });
-  }
-
-  function requirePermission(name) {
-    var attribute = "can" + name.charAt(0).toUpperCase() + name.slice(1);
-    if (root.dataset[attribute] !== "true") {
-      throw problem(name + " permission is required.", "permission_required", 403);
-    }
-  }
-
-  bind("pdd-source", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    var sourceId = identifier(formValue(form, "source_id"), "Source ID", false);
-    var payload = {
-      kind: formValue(form, "kind"),
-      provider: identifier(formValue(form, "provider"), "Provider", false),
-      origin: formValue(form, "origin"),
-      resource_ref: identifier(formValue(form, "resource_ref"), "Resource reference", false),
-      credential_env: savedReference(formValue(form, "credential_env"), "Credential reference", false),
-      evidence_key_env: savedReference(formValue(form, "evidence_key_env"), "Evidence-key reference", true),
-      expected_revision: finiteNumber(formValue(form, "expected_revision"), "Expected revision", 0, 2147483647, true),
-      idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true)
-    };
-    var saved = await call("/sources/" + encodeURIComponent(sourceId), { method: "PUT", body: JSON.stringify(payload) });
-    form.elements.expected_revision.value = saved.revision;
-    newRequest(form);
-    show(saved, "Source settings saved. Test the saved source to check bounded read access.");
-  });
-
-  bind("pdd-list-sources", "click", async function () {
-    show(await call("/sources?limit=500"), "Workspace sources loaded.");
-  });
-
-  bind("pdd-source-state", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    var sourceId = identifier(formValue(form, "source_id"), "Source ID", false);
-    var payload = {
-      state: formValue(form, "state"),
-      expected_revision: finiteNumber(formValue(form, "expected_revision"), "Expected revision", 1, 2147483647, true),
-      idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true)
-    };
-    show(await call("/sources/" + encodeURIComponent(sourceId) + "/state", { method: "POST", body: JSON.stringify(payload) }), "Source state changed under revision control.");
-  });
-
-  bind("pdd-schedule", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    var scheduleId = identifier(formValue(form, "schedule_id"), "Schedule ID", false);
-    var payload = {
-      source_id: identifier(formValue(form, "source_id"), "Source ID", false),
-      interval_seconds: finiteNumber(formValue(form, "interval_seconds"), "Interval", 1, 31536000, true),
-      limits: parseBoundedObject(formValue(form, "limits"), "Scan limits"),
-      max_attempts: finiteNumber(formValue(form, "max_attempts"), "Maximum attempts", 1, 20, true),
-      retention_seconds: finiteNumber(formValue(form, "retention_seconds"), "Retention", 1, 315360000, true),
-      active: formValue(form, "active") === "true",
-      expected_revision: finiteNumber(formValue(form, "expected_revision"), "Expected revision", 0, 2147483647, true),
-      idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true),
-      next_run_at: optionalNumber(form, "next_run_at")
-    };
-    show(await call("/schedules/" + encodeURIComponent(scheduleId), { method: "PUT", body: JSON.stringify(payload) }), "Bounded schedule stored. Provider I/O has not started.");
-  });
-
-  bind("pdd-list-schedules", "click", async function () {
-    show(await call("/schedules?limit=500"), "Schedules loaded.");
-  });
-
-  bind("pdd-enqueue-due", "click", async function () {
-    requirePermission("operate");
-    show(await call("/schedules/enqueue-due", { method: "POST", body: JSON.stringify({ limit: 100 }) }), "Due jobs enqueued without provider I/O.");
-  });
-
-  bind("pdd-manual", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("operate");
-    var form = event.currentTarget;
-    var sourceId = identifier(formValue(form, "source_id"), "Source ID", false);
-    var payload = {
-      limits: parseBoundedObject(formValue(form, "limits"), "Scan limits"),
-      max_attempts: finiteNumber(formValue(form, "max_attempts"), "Maximum attempts", 1, 20, true),
-      retention_seconds: finiteNumber(formValue(form, "retention_seconds"), "Retention", 1, 315360000, true),
-      idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true)
-    };
-    show(await call("/sources/" + encodeURIComponent(sourceId) + "/jobs", { method: "POST", body: JSON.stringify(payload) }), "Manual scan queued; provider I/O has not started.");
-  });
-
-  bind("pdd-claim", "click", async function () {
-    requirePermission("operate");
-    show(await call("/jobs/claim", { method: "POST", body: JSON.stringify({ limit: 10, lease_seconds: 600.0 }) }), "Due jobs leased to this authenticated principal.");
-  });
-
-  bind("pdd-list-jobs", "click", async function () {
-    show(await call("/jobs?limit=500"), "Jobs loaded.");
-  });
-
-  bind("pdd-job", "submit", async function (event) {
-    event.preventDefault();
-    var form = event.currentTarget;
-    var action = event.submitter && event.submitter.value ? event.submitter.value : "execute";
-    if (["execute", "fail", "replay"].indexOf(action) < 0) { throw problem("Job action is invalid."); }
-    requirePermission(action === "fail" ? "operate" : "admin");
-    var jobId = identifier(formValue(form, "job_id"), "Job ID", false);
-    var payload;
-    if (action === "fail") {
-      payload = {
-        error_code: formValue(form, "error_code"),
-        base_backoff_seconds: finiteNumber(formValue(form, "base_backoff_seconds"), "Backoff", 0.1, 3600, false)
+  async function scheduleSource(s) {
+    var values = await R.form("Scan " + sourceName(s.source_id) + " regularly", [
+      { key: "every", label: "How often", type: "select", default: "86400", options: [
+        { value: "3600", label: "Every hour" }, { value: "86400", label: "Every day" }, { value: "604800", label: "Every week" }, { value: "2592000", label: "Every month" },
+      ] },
+      { key: "first", label: "First scan on", type: "date", default: R.isoDateIn(0) },
+      { key: "keep", label: "Keep scan reports for", type: "select", default: "7776000", options: [
+        { value: "2592000", label: "30 days" }, { value: "7776000", label: "90 days" }, { value: "31536000", label: "1 year" },
+      ] },
+      { key: "active", label: "Schedule is on", type: "bool", default: true },
+    ], "Save schedule");
+    if (!values) return;
+    var id = ("schedule-" + s.source_id).slice(0, 128);
+    try {
+      var existing = null;
+      try { existing = await call("/schedules/" + encodeURIComponent(id)); } catch (f) { if (!f || f.status !== 404) throw f; }
+      var first = R.toEpoch(values.first);
+      var body = {
+        source_id: s.source_id, interval_seconds: parseInt(values.every, 10), limits: DEFAULT_LIMITS, max_attempts: 3,
+        retention_seconds: parseInt(values.keep, 10), active: !!values.active,
+        expected_revision: existing ? existing.revision : 0, idempotency_key: R.newKey(),
+        next_run_at: first ? Math.max(first - 86399, Math.floor(Date.now() / 1000) + 60) : null,
       };
-    } else if (action === "replay") {
-      payload = {
-        expected_revision: finiteNumber(formValue(form, "expected_revision"), "Expected revision", 1, 2147483647, true),
-        idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true)
-      };
-    }
-    if (action === "execute" && !global.confirm("Run the stock provider adapter against the exact enrolled source now? This performs bounded external reads.")) { return; }
-    var options = { method: "POST" };
-    if (payload !== undefined) { options.body = JSON.stringify(payload); }
-    var response = await call("/jobs/" + encodeURIComponent(jobId) + "/" + action, options);
-    show(response, action === "execute" ? "Provider scan returned. Inspect completeness and truncation before review." : "Job lifecycle updated.");
-  });
-
-  bind("pdd-read", "submit", async function (event) {
-    event.preventDefault();
-    var form = event.currentTarget;
-    var action = event.submitter && event.submitter.value ? event.submitter.value : "inventory";
-    var source = formValue(form, "source_id");
-    var report = formValue(form, "report_id");
-    var base = formValue(form, "base_report_id");
-    var target = formValue(form, "target_report_id");
-    var path = "/inventory";
-    if (action === "inventory" && source) { path += "?source_id=" + encodeURIComponent(identifier(source, "Source ID", false)); }
-    else if (action === "reports") { path = "/reports?limit=500" + (source ? "&source_id=" + encodeURIComponent(identifier(source, "Source ID", false)) : ""); }
-    else if (action === "report") { path = "/reports/" + encodeURIComponent(identifier(report, "Report ID", false)); }
-    else if (action === "findings") { path = "/reports/" + encodeURIComponent(identifier(report, "Report ID", false)) + "/findings?limit=500"; }
-    else if (action === "diff") {
-      path = "/reports/diff?base_report_id=" + encodeURIComponent(identifier(base, "Base report ID", false)) + "&target_report_id=" + encodeURIComponent(identifier(target, "Target report ID", false)) + "&limit=1000";
-    } else if (action !== "inventory") { throw problem("Read action is invalid."); }
-    show(await call(path), "Discovery findings loaded without source content. No findings does not prove that no personal data exists.");
-  });
-
-  bind("pdd-propose", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    var findingId = identifier(formValue(form, "finding_id"), "Finding ID", false);
-    var effective = formValue(form, "effective_category");
-    var payload = {
-      decision: formValue(form, "decision"),
-      effective_category: effective || null,
-      freshness_seconds: finiteNumber(formValue(form, "freshness_seconds"), "Freshness", 1, 31536000, true),
-      expected_finding_revision: finiteNumber(formValue(form, "expected_finding_revision"), "Finding revision", 1, 2147483647, true),
-      idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true)
-    };
-    show(await call("/findings/" + encodeURIComponent(findingId) + "/reviews", { method: "POST", body: JSON.stringify(payload) }), "Review proposed. No data-map delivery occurs before independent approval.");
-  });
-
-  bind("pdd-approve", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    var reviewId = identifier(formValue(form, "review_id"), "Review ID", false);
-    var payload = {
-      expected_version: finiteNumber(formValue(form, "expected_version"), "Expected version", 1, 2147483647, true),
-      expected_integrity_sha256: digest(formValue(form, "expected_integrity_sha256"), "Review integrity"),
-      idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true)
-    };
-    show(await call("/reviews/" + encodeURIComponent(reviewId) + "/approve", { method: "POST", body: JSON.stringify(payload) }), "Four-eyes review approved. Inspect durable outbox acknowledgement and reconcile the data map separately.");
-  });
-
-  bind("pdd-remediation-worker", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    var payload = {
-      limit: finiteNumber(formValue(form, "limit"), "Worker batch limit", 1, 100, true),
-      lease_seconds: finiteNumber(formValue(form, "lease_seconds"), "Lease seconds", 1, 3600, true)
-    };
-    show(await call("/remediation/worker/run-once", { method: "POST", body: JSON.stringify(payload) }), "Bounded remediation worker completed. Inspect applied, retry, ambiguous, and dead-letter counts.");
-  });
-
-  bind("pdd-remediation-list", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    var state = formValue(form, "state");
-    var admitted = ["", "queued", "leased", "applied", "no_change", "ambiguous", "dead_letter", "cancelled"];
-    if (admitted.indexOf(state) === -1) { throw problem("Work state is invalid."); }
-    var limit = finiteNumber(formValue(form, "limit"), "List limit", 1, 100, true);
-    var query = "?limit=" + encodeURIComponent(String(limit));
-    if (state) { query += "&state=" + encodeURIComponent(state); }
-    show(await call("/remediation/work" + query), "Remediation tasks loaded. Select an uncertain result and its current version to check what happened.");
-  });
-
-  bind("pdd-remediation-reconcile", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    var workId = identifier(formValue(form, "work_id"), "Work ID", false);
-    var payload = {
-      expected_revision: finiteNumber(formValue(form, "expected_revision"), "Expected revision", 1, 2147483647, true),
-      absent_backoff_seconds: finiteNumber(formValue(form, "absent_backoff_seconds"), "Absent backoff", 0, 86400, true),
-      idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true)
-    };
-    show(await call("/remediation/work/" + encodeURIComponent(workId) + "/reconcile", { method: "POST", body: JSON.stringify(payload) }), "Exact digest-only data-map reconciliation completed without optimistic replay.");
-  });
-
-  bind("pdd-remediation-maintenance", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    var payload = {
-      idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true),
-      target_limit: finiteNumber(formValue(form, "target_limit"), "Target purge limit", 1, 1000, true)
-    };
-    show(await call("/remediation/maintenance", { method: "POST", body: JSON.stringify(payload) }), "Remediation retention and integrity maintenance completed.");
-  });
-
-  bind("pdd-retention", "submit", async function (event) {
-    event.preventDefault();
-    requirePermission("admin");
-    var form = event.currentTarget;
-    if (!global.confirm("Permanently delete expired reports? Audit records of the deletions will remain.")) { return; }
-    var payload = { idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true) };
-    show(await call("/retention/purge", { method: "POST", body: JSON.stringify(payload) }), "Retention purge completed.");
-  });
-
-  bind("pdd-audit", "click", async function () { requirePermission("audit"); show(await call("/audit?limit=500"), "Audit events loaded."); });
-  bind("pdd-verify", "click", async function () { requirePermission("audit"); show(await call("/audit/verify"), "Workspace audit history verified."); });
-  bind("pdd-posture", "click", async function () { show(await call("/posture"), "Privacy posture and limits loaded."); });
-  bind("pdd-runtime", "click", async function () { show(await call("/status"), "Availability loaded. Operation with a live provider has not been verified by this check."); });
-
-  var setupState = {providers: [], connections: [], evidence_keys: []};
-  var savedSources = [];
-  var setupBusy = false;
-  function newRequest(form) {
-    if (global.crypto && typeof global.crypto.randomUUID === "function" && form.elements.idempotency_key)
-      form.elements.idempotency_key.value = global.crypto.randomUUID();
+      await call("/schedules/" + encodeURIComponent(id), "PUT", body);
+      say("Schedule saved.");
+    } catch (f) { fail(f, "save the schedule"); }
   }
-  function choices(select, rows, placeholder, selected) {
-    select.replaceChildren();
-    var empty = document.createElement("option"); empty.value = ""; empty.textContent = placeholder; select.append(empty);
-    rows.forEach(function (row) { var option = document.createElement("option"); option.value = row.value; option.textContent = row.label; select.append(option); });
-    if (selected && !rows.some(function (row) { return row.value === selected; })) {
-      var old = document.createElement("option"); old.value = selected; old.textContent = "Previous selection is unavailable or changed — choose a current version"; old.disabled = true; select.append(old);
+
+  async function testAccess(s) {
+    var ok = await R.confirm("Check that Lightwork can read " + sourceName(s.source_id) + "? It reads a small sample and stores nothing.", "Test access");
+    if (!ok) return;
+    try {
+      await call("/sources/" + encodeURIComponent(s.source_id) + "/test-access", "POST", { confirm: true, expected_revision: s.revision });
+      say("Lightwork can read this source.");
+    } catch (f) {
+      if (f && (f.status === 409 || f.status === 422)) { say("Lightwork could not read this source. Check the saved connection and that this storage service is turned on in Settings."); return; }
+      fail(f, "test access");
     }
-    select.value = selected || "";
+  }
+
+  async function setState(s, next) {
+    var messages = {
+      suspended: ["Pause scanning " + sourceName(s.source_id) + "?", "Pause", "Paused."],
+      active: ["Resume scanning " + sourceName(s.source_id) + "?", "Resume", "Resumed."],
+      revoked: ["Remove " + sourceName(s.source_id) + "? It can no longer be scanned. Past reports are kept until they expire.", "Remove", "Removed."],
+    }[next];
+    if (!(await R.confirm(messages[0], messages[1]))) return;
+    try {
+      await call("/sources/" + encodeURIComponent(s.source_id) + "/state", "POST", { state: next, expected_revision: s.revision, idempotency_key: R.newKey() });
+      say(messages[2]);
+      await load();
+    } catch (f) { fail(f, "change the source"); }
+  }
+
+  // ---- add a source (administrators) --------------------------------------------------
+  function fillSelect(select, rows, placeholder) {
+    select.textContent = "";
+    var empty = R.el("option", "", placeholder); empty.value = ""; select.appendChild(empty);
+    rows.forEach(function (row) { var o = R.el("option", "", row.label); o.value = row.value; select.appendChild(o); });
   }
   function renderConnections() {
-    var form = document.getElementById("pdd-source");
-    var provider = formValue(form, "provider");
-    choices(document.getElementById("pdd-connection"), setupState.connections.filter(function (row) { return row.provider === provider; }).map(function (row) {
-      return {value: row.reference, label: row.name + " · " + row.origin};
-    }), "Choose a compatible saved connection", formValue(form, "credential_env"));
-    var descriptor = setupState.providers.find(function (row) { return row.provider === provider; });
-    document.getElementById("pdd-resource-help").textContent = descriptor ? "Source scope: " + descriptor.resource_ref_contract.replace(/_/g, " ") : "Choose an enabled provider. Enable additional providers in Settings.";
-    if (descriptor) form.elements.kind.value = descriptor.kind;
+    var chosen = document.getElementById("pdd-provider").value;
+    var rows = setup.connections.filter(function (c) { return c.provider === chosen; })
+      .map(function (c) { return { value: c.reference, label: c.name }; });
+    fillSelect(document.getElementById("pdd-connection"), rows, rows.length ? "Choose a saved connection" : "No saved connection for this service yet");
+    var descriptor = setup.providers.filter(function (p) { return p.provider === chosen; })[0];
+    document.getElementById("pdd-resource-help").textContent = descriptor
+      ? "Enter the " + R.human(descriptor.resource_ref_contract).toLowerCase() + " to scan." : "";
   }
   async function loadSetup() {
-    requirePermission("admin");
-    var data = await Promise.all([call("/setup"), call("/sources?limit=500")]);
-    setupState = data[0]; savedSources = data[1].items || [];
-    if (!Array.isArray(setupState.providers) || !Array.isArray(setupState.connections) || !Array.isArray(setupState.evidence_keys)) throw problem("Setup choices are incomplete; reload before saving.");
-    var form = document.getElementById("pdd-source");
-    choices(form.elements.provider, setupState.providers.map(function (row) { return {value: row.provider, label: row.provider.replace(/_/g, " ")}; }), "Choose an enabled provider", formValue(form, "provider"));
+    setup = await call("/setup");
+    if (!Array.isArray(setup.providers) || !Array.isArray(setup.connections) || !Array.isArray(setup.evidence_keys)) throw problem("setup incomplete");
+    fillSelect(document.getElementById("pdd-provider"),
+      setup.providers.map(function (p) { return { value: p.provider, label: provider(p.provider) }; }),
+      setup.providers.length ? "Choose a storage service" : "No storage services are turned on yet");
     renderConnections();
-    choices(document.getElementById("pdd-evidence-key"), setupState.evidence_keys.map(function (row) { return {value:row.reference, label:row.name + " · version " + row.revision}; }), "Choose an evidence key", formValue(form, "evidence_key_env"));
-    choices(document.getElementById("pdd-key-picker"), setupState.evidence_keys.map(function (row) { return {value:row.reference, label:row.name + " · version " + row.revision}; }), "Create a new key", "");
-    choices(document.getElementById("pdd-source-picker"), savedSources.map(function (row) { return {value:row.source_id, label:row.source_id + " · version " + row.revision}; }), "New source", savedSources.some(function (row) {return row.source_id===formValue(form,"source_id");}) ? formValue(form,"source_id") : "");
-    show({providers:setupState.providers.length, connections:setupState.connections.length, evidence_keys:setupState.evidence_keys.length}, "Setup choices loaded. Selecting a new key or connection does not update a source until you save it.");
   }
-  async function setupAction(action) {
-    if (setupBusy) return;
-    setupBusy = true;
-    var controls = root.querySelectorAll("#pdd-source input,#pdd-source select,#pdd-source button,#pdd-key-form input,#pdd-key-form select,#pdd-key-form button,#pdd-load-setup,#pdd-source-picker");
-    var prior = Array.from(controls).map(function (control) { return control.disabled; });
-    controls.forEach(function (control) { control.disabled=true; });
-    try { await action(); }
-    catch (error) { fail(error); }
-    finally { controls.forEach(function (control,index) { control.disabled=prior[index]; }); setupBusy=false; applyPermissions(); }
+  async function protectionKey() {
+    var keys = setup.evidence_keys.slice().sort(function (a, b) { return b.revision - a.revision; });
+    var existing = keys.filter(function (k) { return k.name === DEFAULT_KEY; })[0] || keys[0];
+    if (existing) return existing.reference;
+    var created = await call("/evidence-keys/" + DEFAULT_KEY, "PUT", { expected_revision: 0, idempotency_key: R.newKey() });
+    await loadSetup();
+    return created.reference || (setup.evidence_keys.filter(function (k) { return k.name === DEFAULT_KEY; })[0] || {}).reference;
   }
-  if (document.getElementById("pdd-load-setup")) {
-    bind("pdd-load-setup", "click", function () { return setupAction(loadSetup); });
-    var sourceForm = document.getElementById("pdd-source"), keyForm = document.getElementById("pdd-key-form");
-    newRequest(sourceForm); newRequest(keyForm);
-    [sourceForm,keyForm].forEach(function (form) { form.addEventListener("input", function (event) {
-      if (event.target.name !== "idempotency_key") newRequest(form);
-      if (form===keyForm && event.target.name==="name") form.elements.expected_revision.value="0";
-      if (form===sourceForm && event.target.name==="source_id") form.elements.expected_revision.value="0";
-    }); });
-    sourceForm.elements.provider.addEventListener("change", function () { sourceForm.elements.credential_env.value=""; sourceForm.elements.origin.value=""; renderConnections(); newRequest(sourceForm); });
-    bind("pdd-connection", "change", function (event) {
-      var selected=setupState.connections.find(function (row) {return row.reference===event.currentTarget.value;});
-      sourceForm.elements.credential_env.value=selected ? selected.reference : "";
-      sourceForm.elements.origin.value=selected ? selected.origin : ""; newRequest(sourceForm);
-    });
-    bind("pdd-evidence-key", "change", function (event) { sourceForm.elements.evidence_key_env.value=event.currentTarget.value; newRequest(sourceForm); });
-    bind("pdd-source-picker", "change", function (event) {
-      var selected=savedSources.find(function (row) {return row.source_id===event.currentTarget.value;});
-      if (!selected) { sourceForm.reset(); sourceForm.elements.expected_revision.value="0"; newRequest(sourceForm); return; }
-      choices(sourceForm.elements.provider,setupState.providers.map(function (row) {return {value:row.provider,label:row.provider.replace(/_/g," ")};}),"Choose an enabled provider",selected.provider);
-      ["source_id","kind","provider","origin","resource_ref","credential_env","evidence_key_env"].forEach(function (name) { sourceForm.elements[name].value=selected[name]; });
-      sourceForm.elements.expected_revision.value=selected.revision;
-      renderConnections();
-      choices(document.getElementById("pdd-evidence-key"),setupState.evidence_keys.map(function (row) {return {value:row.reference,label:row.name+" · version "+row.revision};}),"Choose a current evidence key",selected.evidence_key_env);
-      newRequest(sourceForm);
-    });
-    bind("pdd-key-picker", "change", function (event) {
-      var key=setupState.evidence_keys.find(function (row) {return row.reference===event.currentTarget.value;});
-      keyForm.elements.name.value=key ? key.name : ""; keyForm.elements.expected_revision.value=key ? key.revision : 0; newRequest(keyForm);
-    });
-    bind("pdd-key-form", "submit", function (event) {
-      event.preventDefault(); requirePermission("admin");
-      var payload={expected_revision:finiteNumber(formValue(keyForm,"expected_revision"),"Key version",0,2147483647,true), idempotency_key:identifier(formValue(keyForm,"idempotency_key"),"Request reference",true)};
-      var name=formValue(keyForm,"name");
-      if (payload.expected_revision && !global.confirm("Rotate this evidence key? Sources using the previous version will stop scanning until their settings are explicitly updated.")) return;
-      return setupAction(async function () {
-        var saved=await call("/evidence-keys/"+encodeURIComponent(name),{method:"PUT",body:JSON.stringify(payload)});
-        await loadSetup(); keyForm.elements.expected_revision.value=saved.revision; newRequest(keyForm);
-        show(saved,"Evidence key saved securely. Select its current version for each source and save those source settings; existing sources were not changed.");
+
+  var newSource = document.getElementById("pdd-new-source");
+  if (newSource) newSource.addEventListener("click", async function () {
+    try {
+      await loadSetup();
+      var panel = document.getElementById("pdd-source-panel");
+      panel.hidden = false;
+      panel.scrollIntoView({ block: "start" });
+    } catch (f) { fail(f, "load the storage services"); }
+  });
+  var cancelSource = document.getElementById("pdd-source-cancel");
+  if (cancelSource) cancelSource.addEventListener("click", function () { document.getElementById("pdd-source-panel").hidden = true; });
+  var providerSelect = document.getElementById("pdd-provider");
+  if (providerSelect) providerSelect.addEventListener("change", renderConnections);
+
+  var sourceForm = document.getElementById("pdd-source-form");
+  if (sourceForm) sourceForm.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    var chosenProvider = document.getElementById("pdd-provider").value;
+    var connectionRef = document.getElementById("pdd-connection").value;
+    var connection = setup.connections.filter(function (c) { return c.reference === connectionRef; })[0];
+    var descriptor = setup.providers.filter(function (p) { return p.provider === chosenProvider; })[0];
+    var resource = document.getElementById("pdd-resource").value.trim();
+    if (!descriptor) { say("Choose where the data lives."); return; }
+    if (!connection) { say("Choose a saved connection. You can add one on the Connections page."); return; }
+    if (!ID.test(resource)) { say("Enter the name exactly as it appears in " + provider(chosenProvider) + " (letters, numbers, dots, dashes and underscores)."); return; }
+    var id = R.slug(document.getElementById("pdd-name").value, "data-source");
+    var existing = state.sources.filter(function (s) { return s.source_id === id; })[0];
+    try {
+      var keyRef = await protectionKey();
+      await call("/sources/" + encodeURIComponent(id), "PUT", {
+        kind: descriptor.kind, provider: chosenProvider, origin: connection.origin, resource_ref: resource,
+        credential_env: savedReference(connection.reference, "Connection", false),
+        evidence_key_env: savedReference(keyRef, "Protection key", true),
+        expected_revision: existing ? existing.revision : 0, idempotency_key: R.newKey(),
       });
-    });
-    bind("pdd-test-source", "click", function () {
-      requirePermission("admin");
-      var sourceId=identifier(formValue(sourceForm,"source_id"),"Source",false);
-      var revision=finiteNumber(formValue(sourceForm,"expected_revision"),"Saved source version",1,2147483647,true);
-      if (!global.confirm("Test the saved source's read access with a bounded provider read? Unsaved form changes are not used; no findings or report will be stored.")) return;
-      return setupAction(async function () { show(await call("/sources/"+encodeURIComponent(sourceId)+"/test-access",{method:"POST",body:JSON.stringify({confirm:true,expected_revision:revision})}),"Saved source access checked within a small read bound. This does not verify complete coverage or customer acceptance."); });
-    });
+      sourceForm.reset();
+      document.getElementById("pdd-source-panel").hidden = true;
+      say("Data source saved. Use “Test access” to check Lightwork can read it.");
+      await load();
+    } catch (f) { fail(f, "save the data source"); }
+  });
+
+  var rotate = document.getElementById("pdd-rotate-key");
+  if (rotate) rotate.addEventListener("click", async function () {
+    var ok = await R.confirm("Replace the protection key? Sources using the old key stop scanning until you save each of them again, and new reports cannot be compared with older ones.", "Replace key");
+    if (!ok) return;
+    try {
+      await loadSetup();
+      var current = setup.evidence_keys.filter(function (k) { return k.name === DEFAULT_KEY; })[0];
+      await call("/evidence-keys/" + DEFAULT_KEY, "PUT", { expected_revision: current ? current.revision : 0, idempotency_key: R.newKey() });
+      say("Protection key replaced. Existing sources were not changed; save each one again to use the new key.");
+    } catch (f) { fail(f, "replace the protection key"); }
+  });
+
+  // ---- scans --------------------------------------------------------------------------
+  async function runJob(j) {
+    var ok = await R.confirm("Scan " + sourceName(j.source_id) + " now? Lightwork will read from it within the scan limits.", "Scan now");
+    if (!ok) return;
+    try {
+      var res = await call("/jobs/" + encodeURIComponent(j.job_id) + "/execute", "POST");
+      var rep = res && res.report;
+      say(rep ? "Scan finished: " + rep.findings_count + " possible item(s) of personal data found. " + (COMPLETENESS[rep.completeness] || "") : "Scan finished.");
+      await load();
+    } catch (f) {
+      if (f && f.status === 409) { say("This scan is not ready to run. It may already be running, or the source changed."); await load(); return; }
+      fail(f, "run the scan");
+    }
   }
-  applyPermissions();
-  if (root.dataset.featureEnabled === "true") {
-    call("/status").then(function (payload) {
-      show(payload, "Privacy discovery status loaded. Confirm authorization for the provider before starting a scan.");
-    }).catch(fail);
-  } else {
-    status.textContent = "Privacy data discovery is disabled by configuration.";
+  async function retryJob(j) {
+    try {
+      await call("/jobs/" + encodeURIComponent(j.job_id) + "/replay", "POST", { expected_revision: j.revision, idempotency_key: R.newKey() });
+      say("Scan queued again.");
+      await load();
+    } catch (f) { fail(f, "retry the scan"); }
   }
+  async function cancelJob(j) {
+    if (!(await R.confirm("Cancel this scan?", "Cancel scan"))) return;
+    try {
+      await call("/jobs/" + encodeURIComponent(j.job_id) + "/fail", "POST", { error_code: "operator_cancelled", base_backoff_seconds: 5.0 });
+      say("Scan cancelled.");
+      await load();
+    } catch (f) { fail(f, "cancel the scan"); }
+  }
+  var due = document.getElementById("pdd-enqueue-due");
+  if (due) due.addEventListener("click", async function () {
+    try {
+      var res = await call("/schedules/enqueue-due", "POST", { limit: 100 });
+      say((res.enqueued || 0) + " scheduled scan(s) queued.");
+      await load();
+    } catch (f) { fail(f, "queue the scheduled scans"); }
+  });
+
+  // ---- findings and reviews -------------------------------------------------------------
+  async function showFindings(r) {
+    openReport = r;
+    var panel = document.getElementById("pdd-findings-panel");
+    document.getElementById("pdd-diff").textContent = "";
+    try {
+      var res = await call("/reports/" + encodeURIComponent(r.report_id) + "/findings?limit=500");
+      var findings = res.items || [];
+      document.getElementById("pdd-findings-summary").textContent =
+        sourceName(r.source_id) + ", scanned " + R.when(r.finished_at) + ". " + (COMPLETENESS[r.completeness] || "") +
+        ((r.limitations || []).length ? ". Some items could not be read." : ".");
+      R.table(document.getElementById("pdd-findings"), [
+        { label: "Kind of data", value: function (x) { return category(x.category); } },
+        { label: "How sure", value: function (x) { return Math.round((x.confidence || 0) * 100) + "%"; } },
+        { label: "Needs a closer look", value: function (x) { return x.ambiguous ? "Yes" : "No"; } },
+      ], findings, [
+        { label: "Check", kind: "primary", when: function () { return can.admin; }, run: proposeReview },
+      ], { text: "Nothing was found in this scan. That does not prove there is no personal data." });
+      panel.hidden = false;
+      panel.scrollIntoView({ block: "start" });
+    } catch (f) { fail(f, "load the findings"); }
+  }
+
+  async function compare(r) {
+    var earlier = earlierReports(r);
+    var values = await R.form("Compare with an earlier scan", [
+      { key: "base", label: "Earlier scan", type: "select", default: earlier[0].report_id,
+        options: earlier.map(function (x) { return { value: x.report_id, label: R.when(x.finished_at) }; }) },
+    ], "Compare");
+    if (!values) return;
+    try {
+      var d = await call("/reports/diff?base_report_id=" + encodeURIComponent(values.base) + "&target_report_id=" + encodeURIComponent(r.report_id) + "&limit=1000");
+      if (openReport !== r) await showFindings(r);
+      var box = document.getElementById("pdd-diff");
+      box.textContent = "";
+      box.appendChild(R.el("h3", "", "Changes since the earlier scan"));
+      box.appendChild(R.el("p", "", (d.added_finding_sha256 || []).length + " new item(s), " + (d.removed_finding_sha256 || []).length +
+        " no longer found, " + (d.unchanged_count || 0) + " unchanged."));
+    } catch (f) {
+      if (f && f.status === 409) { say("These two scans used different protection keys, so they cannot be compared."); return; }
+      fail(f, "compare the scans");
+    }
+  }
+
+  async function proposeReview(x) {
+    var options = Object.keys(CATEGORY).map(function (k) { return { value: k, label: CATEGORY[k] }; });
+    var values = await R.form("Check this finding: " + category(x.category), [
+      { key: "decision", label: "Is it right?", type: "select", default: "confirmed", options: [
+        { value: "confirmed", label: "Yes, it is " + category(x.category).toLowerCase() },
+        { value: "reclassified", label: "It is personal data, but a different kind" },
+        { value: "false_positive", label: "It is not personal data" },
+      ] },
+      { key: "category", label: "If a different kind, which?", type: "select", default: x.category, options: options },
+    ], "Send for approval");
+    if (!values) return;
+    var effective = values.decision === "false_positive" ? null : values.decision === "confirmed" ? x.category : values.category;
+    try {
+      await call("/findings/" + encodeURIComponent(x.finding_id) + "/reviews", "POST", {
+        decision: values.decision, effective_category: effective, freshness_seconds: 7 * 86400,
+        expected_finding_revision: x.revision, idempotency_key: R.newKey(),
+      });
+      say("Sent for approval. A different person must approve it.");
+      await loadReviews();
+    } catch (f) { fail(f, "send the check for approval"); }
+  }
+
+  async function loadReviews() {
+    var box = document.getElementById("pdd-reviews");
+    try {
+      var res = await call("/reviews?status=pending&limit=200");
+      R.table(box, [
+        { label: "Decision", value: function (v) { return DECISION[v.decision] || R.human(v.decision); } },
+        { label: "Kind of data", value: function (v) { return v.effective_category ? category(v.effective_category) : "Not personal data"; } },
+        { label: "Checked", value: function (v) { return R.when(v.prepared_at); } },
+      ], res.items || [], [
+        { label: "Approve", kind: "primary", when: function () { return can.admin; }, run: approveReview },
+      ], { text: "Nothing is waiting for approval." });
+    } catch (f) { box.textContent = R.errorText(f, "load the approvals"); }
+  }
+
+  async function approveReview(v) {
+    if (!(await R.confirm("Approve this check and add it to your data map? You must not be the person who made the check.", "Approve"))) return;
+    try {
+      await call("/reviews/" + encodeURIComponent(v.review_id) + "/approve", "POST", {
+        expected_version: v.version, expected_integrity_sha256: digest(v.integrity_sha256, "Review"), idempotency_key: R.newKey(),
+      });
+      say("Approved and sent to your data map.");
+      await loadReviews();
+      await loadInventory();
+    } catch (f) {
+      if (f && f.status === 409) { say("This check cannot be approved: you made it yourself, it has expired, or it changed. Ask someone else, or check the finding again."); await loadReviews(); return; }
+      fail(f, "approve the check");
+    }
+  }
+
+  async function loadInventory() {
+    var box = document.getElementById("pdd-inventory");
+    try {
+      var inv = await call("/inventory");
+      var counts = inv.counts_by_category || {};
+      var rows = Object.keys(counts).map(function (k) { return { k: k, n: counts[k] }; }).sort(function (a, b) { return b.n - a.n; });
+      R.table(box, [
+        { label: "Kind of data", value: function (r) { return category(r.k); } },
+        { label: "Places found", value: function (r) { return r.n; } },
+      ], rows, null, { text: "Nothing recorded yet. Scan a data source to start building your data map." });
+      if (rows.length) {
+        box.appendChild(R.el("p", "muted", (inv.unreviewed_count || 0) + " finding(s) not checked yet; " + (inv.false_positive_count || 0) +
+          " marked as not personal data. " + (inv.truncated ? "Some scans stopped at a limit, so this may be incomplete." : "")));
+      }
+    } catch (f) { box.textContent = R.errorText(f, "load the summary"); }
+  }
+
+  // ---- data map updates (administrators) ------------------------------------------------
+  async function loadWork() {
+    var box = document.getElementById("pdd-work");
+    if (!box) return;
+    try {
+      var res = await call("/remediation/work?limit=100");
+      R.table(box, [
+        { label: "Update", value: function (w) { return "Data map update"; } },
+        { label: "Status", value: function (w) { return badge(WORK_STATE, w.state); } },
+        { label: "Tries", value: function (w) { return w.attempts != null ? w.attempts + (w.max_attempts ? " of " + w.max_attempts : "") : ""; } },
+      ], res.items || [], [
+        { label: "Check again", when: function (w) { return w.state === "ambiguous"; }, run: reconcile },
+      ], { text: "No data map updates yet. They appear after a check is approved." });
+    } catch (f) {
+      if (f && f.status === 503) { box.textContent = "Data map updates are not set up for this workspace yet."; return; }
+      box.textContent = R.errorText(f, "load the data map updates");
+    }
+  }
+  async function reconcile(w) {
+    try {
+      var res = await call("/remediation/work/" + encodeURIComponent(w.work_id) + "/reconcile", "POST",
+        { expected_revision: w.revision, absent_backoff_seconds: 0, idempotency_key: R.newKey() });
+      say("Checked again: " + (WORK_STATE[res.state] || [R.human(res.state)])[0] + ".");
+      await loadWork();
+    } catch (f) { fail(f, "check the update again"); }
+  }
+  var processBtn = document.getElementById("pdd-process");
+  if (processBtn) processBtn.addEventListener("click", async function () {
+    processBtn.disabled = true;
+    try {
+      await call("/remediation/worker/run-once", "POST", { limit: 10, lease_seconds: 60 });
+      say("Waiting data map updates processed.");
+      await loadWork();
+      await loadInventory();
+    } catch (f) {
+      if (f && f.status === 503) { say("Data map updates are not set up for this workspace yet."); }
+      else fail(f, "process the updates");
+    } finally { processBtn.disabled = false; }
+  });
+  var maintenance = document.getElementById("pdd-maintenance");
+  if (maintenance) maintenance.addEventListener("click", async function () {
+    if (!(await R.confirm("Delete expired data map update records and check the rest are intact?", "Tidy up"))) return;
+    try {
+      await call("/remediation/maintenance", "POST", { idempotency_key: R.newKey(), target_limit: 500 });
+      say("Old data map updates tidied up; the rest are intact.");
+      await loadWork();
+    } catch (f) { fail(f, "tidy up the updates"); }
+  });
+
+  // ---- history and retention ------------------------------------------------------------------
+  var verify = document.getElementById("pdd-verify");
+  if (verify) verify.addEventListener("click", async function () {
+    try {
+      var res = await call("/audit/verify");
+      say(res && res.valid === false ? "The activity history has a problem. Tell whoever installed Lightwork." : "The activity history is intact.");
+    } catch (f) { fail(f, "check the activity history"); }
+  });
+  var audit = document.getElementById("pdd-audit");
+  if (audit) audit.addEventListener("click", async function () {
+    try { R.download("data-discovery-activity.json", await call("/audit?limit=500")); say("Activity history downloaded."); }
+    catch (f) { fail(f, "download the activity history"); }
+  });
+  var purge = document.getElementById("pdd-purge");
+  if (purge) purge.addEventListener("click", async function () {
+    if (!(await R.confirm("Permanently delete scan reports whose keep-until date has passed? A record of the deletion is kept.", "Delete"))) return;
+    try {
+      await call("/retention/purge", "POST", { idempotency_key: R.newKey() });
+      say("Expired reports deleted.");
+      await load();
+    } catch (f) { fail(f, "delete expired reports"); }
+  });
+
+  loadReadiness();
+  load();
 }(typeof window !== "undefined" ? window : this));

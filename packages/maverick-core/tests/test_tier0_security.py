@@ -220,10 +220,12 @@ async def test_tool_output_wrapped_when_allowed(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_tool_output_shield_error_fails_open_but_is_observable(tmp_path, caplog):
-    """A shield whose scan_output raises must fail-open (output still flows)
-    but NOT silently: it logs a warning and posts to the blackboard, so the
-    bypass is observable rather than a clean hole."""
+async def test_tool_output_shield_error_withholds_content_and_is_observable(tmp_path, caplog):
+    """Configured screening must finish before content reaches any consumer.
+
+    Missing optional Shield remains supported; a configured scanner failing
+    after an effect is a different, observable non-replayable state.
+    """
     import logging
 
     from maverick.agent import Agent
@@ -264,10 +266,10 @@ async def test_tool_output_shield_error_fails_open_but_is_observable(tmp_path, c
     with caplog.at_level(logging.WARNING):
         result = await agent._run_tool("benign", {})
 
-    # Fail-open: the tool output is still returned (not blocked by the bug).
-    assert "harmless output" in result
+    assert "harmless output" not in result
+    assert "INDETERMINATE" in result and "do not retry" in result
     # Observable: a warning was logged AND posted to the blackboard.
-    assert any("fail-open" in r.message for r in caplog.records)
+    assert any("content withheld" in r.message for r in caplog.records)
     assert any("output-scan errored" in e.content for e in bb.entries)
 
 

@@ -130,6 +130,10 @@ def forest_html(nodes: list[dict]) -> str:
     def esc(s: Any) -> str:
         return _html.escape(str(s), quote=True) if s is not None else ""
 
+    def _word(status: Any) -> str:  # "in_progress" -> "In progress"
+        text = str(status or "").replace("_", " ").strip()
+        return text[:1].upper() + text[1:]
+
     children: dict[int | None, list[dict]] = {}
     ids = {n["id"] for n in nodes}
     for n in nodes:
@@ -143,8 +147,7 @@ def forest_html(nodes: list[dict]) -> str:
         seen = seen | {n["id"]}
         item = (
             f'<a href="/goals/{n["id"]}/plan">'
-            f'<span class="nid">#{esc(n["id"])}</span> '
-            f'<span class="badge {esc(n["status"])}">{esc(n["status"])}</span> '
+            f'<span class="badge {esc(n["status"])}">{esc(_word(n["status"]))}</span> '
             f'<span class="title">{esc(n.get("title") or "(untitled)")}</span></a>'
         )
         kids = children.get(n["id"], [])
@@ -155,7 +158,7 @@ def forest_html(nodes: list[dict]) -> str:
 
     roots = children.get(None, [])
     if not roots:
-        return '<p class="muted">No goals yet.</p>'
+        return '<p class="muted">No tasks yet.</p>'
     return "<ul>" + "".join(render(r, set()) for r in roots) + "</ul>"
 
 

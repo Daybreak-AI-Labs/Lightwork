@@ -1199,6 +1199,40 @@ class ThirdPartyIntelligenceStore:
             )
         )
 
+    def list_risk_policies(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[RiskPolicy, ...]:
+        """Every stored policy version, integrity-checked; read-only."""
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 1_000)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM risk_policies WHERE tenant_id=? "
+                "ORDER BY policy_id, version DESC LIMIT ?",
+                (tenant, bounded),
+            ).fetchall()
+        return tuple(
+            self._policy_from(self._row(row, "risk policy"), row["integrity_sha256"])
+            for row in rows
+        )
+
+    def list_exchange_consents(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[ExchangeConsent, ...]:
+        """This workspace's own sharing consents, integrity-checked; read-only."""
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 1_000)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM exchange_consents WHERE tenant_id=? "
+                "ORDER BY consent_id LIMIT ?",
+                (tenant, bounded),
+            ).fetchall()
+        return tuple(
+            self._consent_from(self._row(row, "exchange consent"), row["integrity_sha256"])
+            for row in rows
+        )
+
     def context_record_counts(self, tenant_id: str) -> Mapping[str, int]:
         """Return exact current-head counts for context truncation disclosure."""
 

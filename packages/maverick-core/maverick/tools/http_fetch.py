@@ -20,7 +20,9 @@ import urllib.request
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
+from ..env_setting import env_or_config as _env_or_config
 from . import Tool
+from ._ssrf import BlockedAddress, address_is_blocked, allow_private
 
 log = logging.getLogger(__name__)
 
@@ -136,14 +138,7 @@ def _is_private_ip(host: str) -> bool:
             ip = ipaddress.ip_address(ip_str)
         except ValueError:
             continue
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
+        if address_is_blocked(ip):
             return True
     return False
 
@@ -158,10 +153,16 @@ def is_blocked_host(hostname: str) -> bool:
     with no override, so the broadened ranges made legitimate local hosts
     unreachable with no recourse.
     """
-    import os
-    if os.environ.get("MAVERICK_FETCH_ALLOW_PRIVATE") == "1":
+    if allow_private():
         return False
     return _is_private_ip(hostname or "")
+
+
+def _resolves(host: str) -> bool:
+    try:
+        return bool(host) and bool(socket.getaddrinfo(host, None))
+    except (socket.gaierror, UnicodeError):
+        return False
 
 
 def _check_url_allowed(url: str, *, allow_http: bool) -> None:
@@ -177,7 +178,10 @@ def _check_url_allowed(url: str, *, allow_http: bool) -> None:
     if scheme == "http" and not allow_http:
         raise ValueError(f"insecure http:// not allowed for {url!r}; use https://")
     if is_blocked_host(parsed.hostname or ""):
-        raise ValueError(
+        # A name that does not resolve is refused too, but it is not "inside
+        # the network": only a resolved private address is a BlockedAddress.
+        refused = BlockedAddress if _resolves(parsed.hostname or "") else ValueError
+        raise refused(
             f"refusing to fetch {url!r}: {parsed.hostname!r} resolves to a "
             "private/loopback/link-local/reserved address (SSRF guard). "
             "Set MAVERICK_FETCH_ALLOW_PRIVATE=1 to override."
@@ -217,8 +221,7 @@ def _resolve_pinned(host: str) -> str:
     result set raises ``ValueError`` rather than letting the connection layer
     re-resolve to an unvalidated address.
     """
-    import os
-    if os.environ.get("MAVERICK_FETCH_ALLOW_PRIVATE") == "1":
+    if allow_private():
         return host
     try:
         addrs = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
@@ -234,15 +237,8 @@ def _resolve_pinned(host: str) -> str:
             ip = ipaddress.ip_address(ip_str)
         except ValueError:
             continue
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            raise ValueError(
+        if address_is_blocked(ip):
+            raise BlockedAddress(
                 f"refusing to fetch {host!r}: resolves to blocked address "
                 f"{ip_str} (SSRF guard). Set MAVERICK_FETCH_ALLOW_PRIVATE=1 "
                 "to override."
@@ -383,8 +379,6 @@ def _preflight_fetch(url: str, parsed: Any) -> str | None:
 
     Returns an ``ERROR: ...`` string if the fetch must be refused, else None.
     """
-    import os
-
     # Enterprise mode: tool egress is held to local/allow-listed hosts so the data
     # boundary covers tools too, not just the LLM call. Run this before any
     # hostname-resolution or robots.txt preflight so a denied URL cannot leak via
@@ -408,14 +402,14 @@ def _preflight_fetch(url: str, parsed: Any) -> str | None:
     except Exception:  # pragma: no cover -- policy never breaks a fetch
         pass
 
-    if os.environ.get("MAVERICK_FETCH_ALLOW_PRIVATE") != "1":
+    if not allow_private():
         if _is_private_ip(parsed.hostname or ""):
             return (
                 f"ERROR: refusing to fetch {parsed.hostname!r}: it resolves to a "
                 "private/loopback/link-local/reserved address. "
                 "Set MAVERICK_FETCH_ALLOW_PRIVATE=1 to override."
             )
-    if os.environ.get("MAVERICK_FETCH_RESPECT_ROBOTS") == "1":
+    if _env_or_config("MAVERICK_FETCH_RESPECT_ROBOTS", "tools", "fetch_respect_robots") == "1":
         if not _check_robots(url):
             return f"ERROR: blocked by robots.txt for {url!r}"
 
@@ -548,8 +542,9 @@ def _scan_fetched(rendered: str) -> tuple[str, str]:
     module isn't importable, the content passes through untouched. Disable
     with ``MAVERICK_FETCH_NO_SCAN=1``.
     """
-    import os
-    if os.environ.get("MAVERICK_FETCH_NO_SCAN") == "1":
+    from ..env_setting import env_or_config
+
+    if env_or_config("MAVERICK_FETCH_NO_SCAN", "tools", "fetch_skip_scan") == "1":
         return rendered, ""
     try:
         from ..safety import scan_remote_content

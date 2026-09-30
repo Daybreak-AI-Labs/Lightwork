@@ -43,11 +43,37 @@ written before it was enabled are returned unchanged until rewritten (run
 | Episode summaries | world DB | `episodes.summary`, `episodes.outcome` |
 | Parked approvals | world DB | `approvals.action`, `approvals.scope`, `approvals.detail` |
 | Semantic-recall documents | `vector_store` (chroma/pgvector) | sealed document; vector from plaintext |
+| Attachments | `~/.maverick/attachments/**` and the S3 mirror | whole files, bound to tenant + goal + stored name |
 
 Sealing is transparent — values are encrypted on write and decrypted on read, so
 application behaviour is unchanged. A value written **before** encryption was enabled
 carries no seal marker and is read back as-is, so enabling encryption is a gradual
 migration, not a flag-day re-encrypt.
+
+**Context binding.** Attachments are sealed with the tenant and their
+`attachment/<goal>/<stored name>` identity as authenticated data: a sealed file
+copied to another goal, name or tenant fails GCM authentication rather than
+decrypting there. Content addresses (sha256) remain those of the plaintext, the
+S3 mirror stores the same sealed bytes under a tenant-scoped key
+(`<prefix><tenant>/<goal>/<name>`, falling back to the pre-scoping key for older
+objects), and files written before sealing stay readable. Downloads of sealed
+files are decrypted in full (bounded by the attachment size cap) because GCM
+authenticates the whole blob before releasing plaintext; external tools
+(transcription, document extraction) receive a private temporary plaintext copy
+that is removed afterwards.
+
+World-model columns are not context-bound yet: in per-tenant mode a sealed value
+is bound to its tenant, but within one tenant a sealed value copied to another
+row or column still opens. Binding each field to its row needs the row id at
+write time, which the insert paths do not have; treat database write access as
+able to rearrange sealed values within a tenant.
+
+**Per-tenant keys** (`[encryption] per_tenant`, off by default) give each
+tenant its own data key. A tenant data key is generated and wrapped on the host
+that first needs it, so it is not shared between replicas: attachments are
+therefore always sealed with the deployment (or keyring) key, with the tenant
+bound as authenticated data, so the S3 mirror opens on every replica that
+shares that key. The tenant id is bound in its canonical (NFC) form.
 
 ## Seal existing data
 
@@ -98,12 +124,11 @@ Store the copies at least as well-protected as the originals, and not next to th
 data they unlock. Operators who inject `MAVERICK_ENCRYPTION_KEY` already hold the
 key in their secrets manager and need no on-disk backup.
 
-**Backend:** at-rest sealing is implemented in the **SQLite** backend only. The
-**Postgres** backend does not seal content at rest yet, so `open_world` **fails closed**
-— selecting Postgres (`[world_model] backend = "postgres"` / `MAVERICK_WORLD_BACKEND`)
-while encryption-at-rest is enabled raises `PostgresAtRestUnsupported` rather than
-silently storing plaintext. Use the SQLite backend for encrypted / regulated
-deployments until Postgres sealing lands (tracked in `FIXES.md`).
+**Backend:** both backends seal the same sensitive content columns through the
+shared field-sealing path, so selecting Postgres (`[world_model] backend =
+"postgres"` / `MAVERICK_WORLD_BACKEND`) keeps content encrypted at rest. Postgres
+additionally needs TLS to the database (`sslmode=verify-full`, see
+`deploy/postgres/README.md`) to protect data in transit.
 
 ## Search trade-off
 
@@ -134,8 +159,6 @@ key matches still work.
   plaintext). With at-rest off, behaviour is unchanged. Metadata never carries the
   sensitive `title`/`result` on any backend (hydrated from the sealed DB by
   `goal_id`).
-- **Attachments** (`~/.maverick/attachments/**`) — on-disk uploaded files; only the
-  metadata row lives in the DB.
 - **`config.toml` / `.env`** — configuration and API keys; `.env` is already
   `chmod 600`. Protect these with filesystem permissions / full-disk encryption.
 

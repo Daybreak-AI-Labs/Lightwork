@@ -38,7 +38,7 @@ def test_page_renders_finance_worklist_and_catalog():
     assert resp.status_code == 200
     html = resp.text
     assert "Q3 revenue controls" in html
-    assert 'class="pw-review-btn"' in html
+    assert 'class="btn btn--primary pw-review-btn"' in html
     # The shared pop-out rides the chassis.
     assert 'id="arv-dialog"' in html
     # The catalog lists the FINANCE frameworks — and only those.
@@ -48,7 +48,7 @@ def test_page_renders_finance_worklist_and_catalog():
     assert "Privacy Impact Assessment" not in html
     # No privacy-records UI on the finance chassis.
     assert "Privacy records" not in html and "open DSARs" not in html
-    assert "Deterministic finance operations" in html
+    assert "Automated finance checks" in html
     assert 'data-module-gate="finance_operations"' in html
     assert "[finance_operations] enable = true" not in html
 
@@ -89,11 +89,12 @@ control_test_interval_seconds = 0
     response = client.get("/finance")
     assert response.status_code == 200
     html = response.text
-    assert "Regulatory-change review queue" in html
-    assert "State licensing source packs" in html
-    assert "source_check_required" in html
-    assert "does not claim counsel-verified" in html
-    assert "Finance anomaly findings" in html
-    assert "AML, KYC &amp; sanctions cases" in html
-    assert "two independent reviewers" in html
-    assert "needs_review" in html
+    assert "Regulation changes to review" in html
+    assert "State licensing guides" in html
+    # The legal caveat stays, in plain words.
+    assert "Always confirm" in html and "with the regulator or your lawyer" in html
+    assert "Unusual payments" in html
+    assert "Anti-money-laundering, customer checks and sanctions" in html
+    assert "two different reviewers agree" in html
+    assert "never mark themselves as passed or failed" in html
+    assert "sha256:" not in html and "source_check_required" not in html

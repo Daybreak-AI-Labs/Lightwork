@@ -1854,3 +1854,15 @@ def test_integrity_rejects_recomputed_tombstone_with_live_run(harness):
     principal.value = "auditor"
     with pytest.raises(GovernanceAgentIntegrityError, match="tombstone conflicts"):
         store.verify_integrity("tenant-a")
+
+
+def test_list_policies_returns_current_revision_per_policy_for_the_tenant(harness):
+    store, principal, clock = harness
+    publish(store, principal, clock, policy_id="policy:one")
+    publish(store, principal, clock, policy_id="policy:two", agent_kind="privacy_risk_assessment")
+    listed = store.list_policies("tenant-a")
+    assert [policy.policy_id for policy in listed] == ["policy:one", "policy:two"]
+    assert {policy.agent_kind for policy in listed} == {"breach_response", "privacy_risk_assessment"}
+    assert store.list_policies("tenant-b") == ()
+    with pytest.raises(ValueError):
+        store.list_policies("tenant-a", limit=0)

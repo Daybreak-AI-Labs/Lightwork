@@ -60,8 +60,9 @@ def test_plan_page_keeps_noscript_fallback(client, world_with_tree):
     _, g1, *_ = world_with_tree
     body = client.get(f"/goals/{g1}/plan").text
     assert "<noscript>" in body
-    # The root goal id appears in the fallback markup.
-    assert f"#{g1}" in body
+    # The root task links from the fallback markup (by address, not a "#id").
+    assert f'href="/chat/goal/{g1}"' in body
+    assert "in_progress" not in body.split("<noscript>")[1].split("</noscript>")[0]
 
 
 def test_tree_api_still_returns_json(client, world_with_tree):

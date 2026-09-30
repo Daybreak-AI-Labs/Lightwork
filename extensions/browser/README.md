@@ -94,3 +94,5 @@ types, focuses, submits, or otherwise mutates the page.
 - **No remote code.** All scripts are local files; the extension-page CSP is
   `script-src 'self'`. CI parses `manifest.json` and statically checks these
   invariants (`packages/maverick-dashboard/tests/test_extension_static.py`).
+
+See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

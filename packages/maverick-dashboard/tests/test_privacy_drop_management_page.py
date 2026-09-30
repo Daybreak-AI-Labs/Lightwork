@@ -54,7 +54,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
-def test_drop_workbench_uses_shared_shell_and_fail_closed_controls(
+def test_drop_workbench_uses_shared_shell_and_lists_on_arrival(
     client: TestClient,
 ) -> None:
     response = client.get(ROUTE)
@@ -63,26 +63,29 @@ def test_drop_workbench_uses_shared_shell_and_fail_closed_controls(
     assert response.headers["cache-control"] == "no-store, private, max-age=0"
     assert response.headers["pragma"] == "no-cache"
     assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
-    assert "California DROP requests" in response.text
-    assert 'id="drop-operations" disabled' in response.text
-    assert 'src="/static/lightwork-privacy-drop-management.js"' in response.text
-    assert 'src="/static/lightwork-copilot.js' in response.text
-    assert 'href="/static/lightwork.css' in response.text
-    assert "/api/v1/privacy/drop" in response.text
-    assert "No subject identity enters this page" in response.text
-    for control_id in (
-        "drop-authorities",
-        "drop-revisions",
-        "drop-authority-integrity",
-        "drop-broker-form",
-        "drop-record-form",
+    text = response.text
+    assert "California DROP requests" in text
+    assert "California Delete Request and Opt-out Platform (DROP)" in text
+    assert 'src="/static/lightwork-record-workflows.js"' in text
+    assert 'src="/static/lightwork-privacy-drop-management.js"' in text
+    assert 'src="/static/lightwork-copilot.js' in text
+    assert 'href="/static/lightwork.css' in text
+    assert "/api/v1/privacy/drop" in text
+    for element_id in (
+        "drop-requests",
+        "drop-waiting",
+        "drop-brokers",
+        "drop-import-form",
         "drop-outcome-form",
-        "drop-key-form",
-        "drop-approval-form",
+        "drop-broker-form",
+        "drop-integrity",
+        "drop-keys-panel",
+        "drop-rotate",
     ):
-        assert f'id="{control_id}"' in response.text
-    assert 'name="binding_digest"' in response.text
-    assert "different authenticated administrator" in response.text
+        assert f'id="{element_id}"' in text
+    assert "approval from a second administrator" in text
+    assert 'type="date"' in text
+    assert 'type="file"' in text
 
 
 def test_drop_page_never_collects_server_owned_identity_material(
@@ -95,21 +98,16 @@ def test_drop_page_never_collects_server_owned_identity_material(
         'name="actor',
         'name="principal',
         'name="subject',
-        'name="broker_registration',
-        'name="outcome_evidence',
         'name="credential',
+        "sha-256",
+        "unix seconds",
+        "uuid",
+        "idempotency",
+        "proposal uuid",
+        "current version",
+        "expected version",
     ):
         assert forbidden not in lowered
-    for required in (
-        'name="drop_id"',
-        'name="request_type"',
-        'name="template_id"',
-        'name="idempotency_key"',
-        'name="expected_revision"',
-        'name="status"',
-        'name="confirmation"',
-    ):
-        assert required in lowered
 
 
 def test_drop_page_marks_only_the_most_specific_navigation_link(
@@ -135,10 +133,11 @@ def test_drop_page_hides_global_controls_without_their_exact_permissions(
 
     assert audit_only.status_code == 200
     assert 'id="drop-integrity"' in audit_only.text
-    assert 'id="drop-update-form"' not in audit_only.text
-    assert 'id="drop-authorities"' in audit_only.text
+    assert 'id="drop-waiting"' in audit_only.text
+    assert 'id="drop-import"' not in audit_only.text
     assert 'id="drop-broker-form"' not in audit_only.text
-    assert "Global administrator permission is required" in audit_only.text
+    assert 'id="drop-outcome-form"' not in audit_only.text
+    assert 'id="drop-rotate"' not in audit_only.text
 
     monkeypatch.setattr(
         page,
@@ -149,24 +148,26 @@ def test_drop_page_hides_global_controls_without_their_exact_permissions(
 
     assert admin_only.status_code == 200
     assert 'id="drop-integrity"' not in admin_only.text
-    assert 'id="drop-update-form"' in admin_only.text
-    assert 'id="drop-authorities"' not in admin_only.text
+    assert 'id="drop-import"' in admin_only.text
+    assert 'id="drop-outcome-form"' in admin_only.text
     assert 'id="drop-broker-form"' in admin_only.text
-    assert "Global audit permission is required" in admin_only.text
+    assert 'data-can-admin="true"' in admin_only.text
 
 
-def test_drop_page_server_disables_create_for_non_operators(
+def test_drop_page_offers_lookup_to_viewers(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: False)
+    monkeypatch.setattr(page, "has_global_permission", lambda _request, _permission: False)
 
     response = client.get(ROUTE)
 
     assert response.status_code == 200
-    assert 'id="drop-create-controls" disabled aria-disabled="true"' in response.text
-    assert "Operator permission is required to create" in response.text
-    assert 'id="drop-get-form"' in response.text
+    assert 'data-can-operate="false"' in response.text
+    assert "Ask an administrator for access to the full list" in response.text
+    assert 'id="drop-waiting"' not in response.text
+    assert 'id="drop-import"' not in response.text
 
 
 def test_drop_page_rejects_query_material_and_requires_tenant(
@@ -220,18 +221,16 @@ def test_drop_client_has_bounded_transport_and_safe_rendering() -> None:
     for required in (
         'credentials: "same-origin"',
         'cache: "no-store"',
-        "operations.disabled = true",
-        "operations.disabled = false",
-        "element.textContent",
         "Number.isSafeInteger",
         "encodeURIComponent(dropId)",
-        "refreshStatus();",
-        "MAX_RESPONSE_BYTES = 64 * 1024",
+        "refreshStatus().then(",
+        "/authority/overview",
+        "R.fingerprint",
+        "R.confirm",
         'headers.get("Content-Length")',
         "response.body.getReader()",
         "reader.cancel()",
         "JSON.parse(responseText)",
-        "readiness was verified for this workspace".capitalize(),
     ):
         assert required in source
     for forbidden in (
@@ -243,5 +242,7 @@ def test_drop_client_has_bounded_transport_and_safe_rendering() -> None:
         "document.cookie",
         "eval(",
         "response.json()",
+        "window.prompt",
+        "alert(",
     ):
         assert forbidden not in source

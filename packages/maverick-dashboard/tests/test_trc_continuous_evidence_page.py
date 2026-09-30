@@ -38,13 +38,13 @@ def page_client() -> TestClient:
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
-def test_page_is_liquid_glass_live_and_names_all_stock_collectors(page_client):
+def test_page_lists_sources_and_names_all_stock_collectors(page_client):
     response = page_client.get("/compliance/continuous-evidence")
     assert response.status_code == 200
     page = response.text
     assert "Continuous Evidence Operations" in page
-    assert "backdrop-filter:blur" in page
     assert "/api/v1/compliance/continuous-evidence" in page
+    assert "/static/lightwork-trc-continuous-evidence.js" in page
     for name in (
         "AWS Security Hub",
         "AWS Config",
@@ -55,21 +55,15 @@ def test_page_is_liquid_glass_live_and_names_all_stock_collectors(page_client):
         "Okta policy posture",
     ):
         assert name in page
-    for operation in (
-        "definition-register",
-        "definition-approve",
-        "enrollment-create",
-        "enrollment-state",
-        "enqueue",
-        "job-requeue",
-        "observations",
-        "integrity",
-        "retention",
-    ):
-        assert f'value="{operation}"' in page
-    assert "/scheduler/run-once" in page
-    assert "status_secret_resolution" not in page
-    assert "live provider/customer acceptance" in page
+    for host in ("trc-sources", "trc-definitions", "trc-runs", "trc-alerts"):
+        assert f'id="{host}"' in page
+    assert "Collect evidence now" in page and "Run one bounded scheduler cycle" not in page
+    for gone in ('id="trc-operation"', "trc-path-values", "Strict request body", "<textarea"):
+        assert gone not in page
+    assert "isn't a compliance certificate" in page
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(page) == []
 
 
 def test_page_fails_closed_and_uses_safe_dom_only(page_client):

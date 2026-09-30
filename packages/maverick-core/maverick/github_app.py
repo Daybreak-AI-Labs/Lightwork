@@ -70,6 +70,21 @@ class WebhookPayload:
     sender_login: str = ""
 
 
+def webhook_secret() -> str:
+    """The GitHub App webhook secret: ``MAVERICK_GH_APP_WEBHOOK_SECRET`` wins;
+    otherwise ``[github] app_webhook_secret``, saved sealed on the All settings
+    page and opened by ``load_config``. Empty means requests are refused."""
+    env = os.environ.get("MAVERICK_GH_APP_WEBHOOK_SECRET", "").strip()
+    if env:
+        return env
+    try:
+        from .config import load_config
+        value = ((load_config() or {}).get("github") or {}).get("app_webhook_secret")
+    except Exception:  # pragma: no cover - unreadable config means "not set"
+        return ""
+    return value.strip() if isinstance(value, str) else ""
+
+
 def verify_signature(
     body: bytes,
     signature_header: str | None,
@@ -87,7 +102,8 @@ def verify_signature(
     if not secret:
         log.warning(
             "GH webhook signature check FAILED CLOSED: no secret configured "
-            "(set MAVERICK_GH_APP_WEBHOOK_SECRET). Rejecting the request."
+            "(set MAVERICK_GH_APP_WEBHOOK_SECRET or the GitHub app webhook "
+            "secret in All settings). Rejecting the request."
         )
         return False
     if not signature_header or not signature_header.startswith("sha256="):
@@ -155,9 +171,21 @@ def parse_webhook(event: str, payload: dict) -> WebhookPayload | None:
 
 
 def _trigger_labels() -> set[str]:
+    """Issue labels that start a run: ``MAVERICK_GH_TRIGGER_LABELS`` (comma
+    separated) wins, else ``[github] trigger_labels`` (the All settings page),
+    else :data:`DEFAULT_LABELS`."""
     raw = os.environ.get("MAVERICK_GH_TRIGGER_LABELS", "")
     if raw:
         return {x.strip().lower() for x in raw.split(",") if x.strip()}
+    try:
+        from .config import load_config
+        labels = ((load_config() or {}).get("github") or {}).get("trigger_labels")
+    except Exception:  # pragma: no cover - config never blocks a webhook
+        labels = None
+    if isinstance(labels, list):
+        chosen = {x.strip().lower() for x in labels if isinstance(x, str) and x.strip()}
+        if chosen:
+            return chosen
     return set(DEFAULT_LABELS)
 
 
@@ -342,8 +370,8 @@ async def process_issue(
     payload: WebhookPayload,
     *,
     token: str | None = None,
-    max_dollars: float = 5.0,
-    max_wall_seconds: float = 1800.0,
+    max_dollars: float | None = None,
+    max_wall_seconds: float | None = None,
     draft: bool = True,
 ) -> PRResult:
     """End-to-end: clone, run swarm, push branch, open PR.

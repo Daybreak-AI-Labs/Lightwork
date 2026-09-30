@@ -33,7 +33,7 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
     assert "</main>" not in source
 
     heading_levels = [int(level) for level in re.findall(r"<h([1-6])(?:\s|>)", source)]
-    if "{% call hero(" in source:
+    if "{% call hero(" in source or "{{ hero(" in source:
         # _hero.html renders the page title as the single H1.
         heading_levels.insert(0, 1)
     assert heading_levels.count(1) == 1
@@ -46,50 +46,54 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
         (
             "permissions.html",
             (
-                'aria-label="Add dashboard block for {{ t.name }} tool"',
-                'aria-label="Clear dashboard block for {{ t.name }} tool"',
+                'aria-label="Block the {{ t.name | humanize }} tool"',
+                'aria-label="Allow the {{ t.name | humanize }} tool"',
                 "btn.setAttribute('aria-label'",
             ),
         ),
         (
             "plugins.html",
             (
-                'aria-label="Disable {{ p.name }} plugin"',
-                'aria-label="Enable {{ p.name }} plugin"',
-                'aria-label="Reset {{ p.name }} plugin"',
+                'aria-label="Turn off {{ pname }}"',
+                'aria-label="Turn on {{ pname }}"',
+                'aria-label="Use your organization\'s default for {{ pname }}"',
+                'aria-label="Install {{ plabel }}"',
             ),
         ),
-        ("mcp.html", ('aria-label="Remove {{ s.name }} MCP server"',)),
+        ("mcp.html", ('aria-label="Test {{ label }}"', 'aria-label="Remove {{ label }}"')),
         (
             "trust.html",
             (
-                'aria-label="Restore {{ a.id }} external agent"',
-                'aria-label="Revoke {{ a.id }} external agent"',
-                'aria-label="Remove {{ a.id }} external agent"',
+                'aria-label="Unblock {{ label }}"',
+                'aria-label="Block {{ label }}"',
+                'aria-label="Remove {{ label }}"',
+                'aria-label="Check access for {{ label }}"',
+                'aria-label="Edit {{ label }}"',
             ),
         ),
         (
             "users.html",
             (
-                'aria-label="Delete {{ name }} role"',
-                'aria-label="Save role for {{ principal | identity }}"',
-                'aria-label="Remove {{ principal | identity }} user assignment"',
-                'aria-label="Save department access for {{ principal | identity }}"',
-                'aria-label="Remove department override for {{ principal | identity }}"',
+                'aria-label="Delete the {{ name | role_label }} role"',
+                'aria-label="Save role for {{ name_of(principal) }}"',
+                'aria-label="Remove {{ name_of(principal) }}\'s role"',
+                'aria-label="Save departments for {{ name_of(principal) }}"',
+                'aria-label="Use standard departments for {{ name_of(principal) }}"',
+                'aria-label="Cancel the invitation for {{ inv.email }}"',
             ),
         ),
         (
             "model_risk_assurance.html",
             (
-                'aria-label="Review {{ row.vendor }} assessment"',
-                'aria-label="Project {{ row.vendor }} assessment to asset"',
+                'aria-label="Review the {{ row.vendor }} assessment"',
+                'aria-label="Attach the {{ row.vendor }} review to an AI system"',
             ),
         ),
         (
             "_workspace_worklist.html",
             (
-                'aria-label="Assign {{ s.subject }} assessment"',
-                'aria-label="Review {{ s.subject }} assessment"',
+                'aria-label="Assign the {{ s.subject }} assessment"',
+                'aria-label="Review the {{ s.subject }} assessment"',
             ),
         ),
         (

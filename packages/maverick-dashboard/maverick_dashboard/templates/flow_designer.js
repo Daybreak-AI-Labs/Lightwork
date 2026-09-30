@@ -6,7 +6,36 @@
   var KIND_ICON = { agent: '🧠', action: '⚙️', branch: '🔀', switch: '🔃',
                     foreach: '🔁', while: '🔄', parallel: '🔱', approval: '✅',
                     delay: '⏱', wait_event: '📥', scope: '🛡', subflow: '📎', setvar: '📝' };
-  var BODY_KINDS = { foreach: '🔁 loop body', while: '🔄 while body', scope: '🛡 try body' };
+  var BODY_KINDS = { foreach: '🔁 Steps repeated for each item', while: '🔄 Steps repeated', scope: '🛡 Steps that might fail' };
+  // Plain names for each kind of step (shared with the Steps view).
+  var KIND_LABEL = { agent: 'AI task', action: 'Connected action', branch: 'Decision', switch: 'Choose a path',
+    foreach: 'Repeat for each item', while: 'Repeat while', parallel: 'Run together', approval: 'Approval',
+    delay: 'Wait', wait_event: 'Wait for another app', scope: 'Handle a failure',
+    subflow: 'Run another flow', setvar: 'Update data' };
+  function kindLabel(k) { return KIND_LABEL[k] || human(k || 'step'); }
+  function human(v) {
+    if (window.mvHuman) return window.mvHuman(v);
+    v = String(v == null ? '' : v).replace(/[_.-]+/g, ' ').trim();
+    return v.charAt(0).toUpperCase() + v.slice(1);
+  }
+  function stepName(n) { return (n && (n.label || '').trim()) || (n ? kindLabel(n.kind) : 'step'); }
+  // Duration choices shown as words; values are seconds.
+  var DURATIONS = [{ v: '60', t: '1 minute' }, { v: '300', t: '5 minutes' }, { v: '900', t: '15 minutes' },
+    { v: '1800', t: '30 minutes' }, { v: '3600', t: '1 hour' }, { v: '14400', t: '4 hours' },
+    { v: '86400', t: '1 day' }, { v: '259200', t: '3 days' }, { v: '604800', t: '1 week' }];
+  function durationOptions(value, none) {
+    var opts = [{ v: '0', t: none }].concat(DURATIONS);
+    var cur = String(Math.round(Number(value) || 0));
+    if (!opts.some(function (o) { return o.v === cur; })) opts.push({ v: cur, t: durationText(Number(cur)) });
+    return opts;
+  }
+  function durationText(sec) {
+    sec = Number(sec) || 0;
+    if (sec % 86400 === 0) return (sec / 86400) + (sec === 86400 ? ' day' : ' days');
+    if (sec % 3600 === 0) return (sec / 3600) + (sec === 3600 ? ' hour' : ' hours');
+    if (sec % 60 === 0) return (sec / 60) + (sec === 60 ? ' minute' : ' minutes');
+    return sec + (sec === 1 ? ' second' : ' seconds');
+  }
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var rootFlow = flow;  // the top-level flow (save/run/history operate on this)
@@ -22,6 +51,10 @@
   var toolCategories = [];   // display-ordered category names from the server
   var toolFilterCategory = ''; // '' = all; else browse one category in the picker
   var flowSchema = {};  // output key -> {type, keys[]} learned from real runs (nested pills)
+  var toolQuery = '';   // the action search box's text
+  var people = [];      // [{ref, label}] who can be asked to approve
+  var savedFlows = [];  // [{id, name, inputs}] other saved flows (for "Run another flow")
+  var flowNames = {};   // flow id -> name
   var selected = null;
   var multiSel = {};        // node id -> true when marquee-selected (group drag/delete)
   var selectedEdge = null;  // {from, port} when an edge is selected (click to select, Del to cut)
@@ -72,10 +105,12 @@
     var before = JSON.stringify(recoveryPayload());
     if (source.version) {
       var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(source.id));
-      var current = response.ok && await response.json();
+      var current = response.ok && await (typeof FDRecipeInputs !== 'undefined' && typeof response.text === 'function'
+        ? FDRecipeInputs.responseJson(response) : response.json());
       if (!current || current.id !== source.id || current.revision !== source.revision || current.version !== source.version) throw new Error('The saved flow changed after this recovery copy. Current work was kept. Compare the copies and copy your edits into the latest flow before saving.');
     }
     if (before !== JSON.stringify(recoveryPayload())) throw new Error('Your newer canvas edits were kept. Review the recovery copy again.');
+    if (state.flow.learned_recipe != null) FDRecipeInputs.flowText(state.flow);
     pushHistory();
     rootFlow = JSON.parse(JSON.stringify(state.flow)); flow = rootFlow;
     rootFlow.version = source.version; rootFlow.revision = source.revision;
@@ -144,8 +179,8 @@
     if (box) {
       var stateName = box.querySelector('.hero-statebox__row strong');
       var badge = box.querySelector('.badge');
-      if (stateName) stateName.textContent = 'Editing ' + id;
-      if (badge) { badge.textContent = 'saved flow'; badge.className = 'badge ok'; }
+      if (stateName) stateName.textContent = 'Editing “' + (rootFlow.name || nameInput.value || 'this flow') + '”';
+      if (badge) { badge.textContent = 'Saved flow'; badge.className = 'badge ok'; }
     }
   }
   window.addEventListener('beforeunload', function (event) {
@@ -161,13 +196,24 @@
     return e;
   }
 
-  // ---- undo/redo: whole-root snapshots (the same serialized form a save uses),
-  // so a chat edit, a draft, or a hand edit all undo the same way ----
+  // ---- undo/redo: whole-editor snapshots, including unfinished work.
+  // Save serialization deliberately drops buffers/blank rows; history must not. ----
   function snapState() {
-    return JSON.stringify(FDCore.cloneFlow({
-      id: idInput.value || rootFlow.id, name: nameInput.value || rootFlow.name,
-      start: rootFlow.start, nodes: rootFlow.nodes }));
+    var snapshot = JSON.parse(JSON.stringify(rootFlow));
+    snapshot._editorSettings = { id: idInput.value, name: nameInput.value,
+      inputs: JSON.parse(JSON.stringify(flowInputs)) };
+    [['fd-maxsec', 'max_seconds'], ['fd-maxdollars', 'max_dollars'], ['fd-schedule', 'schedule'],
+      ['fd-tz', 'timezone'], ['fd-maxconc', 'max_concurrent']].forEach(function (pair) {
+      var field = document.getElementById(pair[0]);
+      snapshot._editorSettings[pair[1]] = field ? field.value : '';
+    });
+    var notify = document.getElementById('fd-notify');
+    snapshot._editorSettings.notify = !!(notify && notify.checked);
+    return snapshot.learned_recipe == null ? JSON.stringify(snapshot) : FDRecipeInputs.flowText(snapshot);
   }
+  // An explicit creation receipt can bind the exact unsaved history that
+  // preceded that request. Empty revisions alone never match saved history.
+  var firstSaveHistory = null;
   function pushHistory() {
     var s = snapState();
     if (undoStack[undoStack.length - 1] === s) return;
@@ -185,14 +231,45 @@
     pendingSnap = null;
   }
   function restoreState(s) {
-    var f = JSON.parse(s);
+    var f = FDRecipeInputs.parseText(s);
+    var settings = f._editorSettings || f;
+    delete f._editorSettings;
+    if (firstSaveHistory && firstSaveHistory.snapshots.indexOf(s) >= 0 &&
+        !(f.version || 0) && !f.revision && f.id === firstSaveHistory.sourceId) {
+      f.id = firstSaveHistory.receipt.id;
+      settings.id = f.id;
+      ['version', 'revision', 'published', 'published_version', 'published_revision'].forEach(function (key) {
+        f[key] = firstSaveHistory.receipt[key];
+      });
+    }
+    // Undo edits, not a successful server save/publication. Retain the latest
+    // receipts only for the same saved identity; never borrow another flow's.
+    if (f.id && f.id === rootFlow.id && f.revision && f.revision === rootFlow.revision &&
+        Number.isInteger(rootFlow.version) && rootFlow.version > 0) {
+      ['version', 'revision', 'published', 'published_version', 'published_revision'].forEach(function (key) {
+        if (rootFlow[key] !== undefined) f[key] = rootFlow[key];
+      });
+    }
     stack = []; crumbs = ['Main flow']; renderCrumbs();
-    flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
-    (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
+    flow = f;
+    flow.nodes = (f.nodes || []).map(function (nd, i) { return normalizeNode(nd, i); });
     rootFlow = flow;
-    nameInput.value = flow.name; idInput.value = flow.id;
+    flowInputs = JSON.parse(JSON.stringify(settings.inputs || []));
+    [['fd-maxsec', 'max_seconds'], ['fd-maxdollars', 'max_dollars'], ['fd-schedule', 'schedule'],
+      ['fd-tz', 'timezone'], ['fd-maxconc', 'max_concurrent']].forEach(function (pair) {
+      var field = document.getElementById(pair[0]);
+      if (field) field.value = settings[pair[1]] == null ? '' : settings[pair[1]];
+    });
+    var notify = document.getElementById('fd-notify'); if (notify) notify.checked = !!settings.notify;
+    syncScheduleControls();
+    var samplePanel = document.getElementById('fd-test-data');
+    if (samplePanel) samplePanel.hidden = rootFlow.learned_recipe != null;
+    nameInput.value = settings.name == null ? flow.name : settings.name;
+    idInput.value = settings.id == null ? flow.id : settings.id;
     selected = null; selectedEdge = null;
     autoLayout(); render(); renderProps();
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function')
+      window.dispatchEvent(new Event('lightwork:flow-loaded'));
   }
   function undo() {
     if (!undoStack.length) { say('Nothing to undo.'); return; }
@@ -212,27 +289,25 @@
   function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
   function summary(n) {
-    if (n.kind === 'agent') return trunc(n.brief || '(no brief)', 30);
-    if (n.kind === 'action') return trunc(n.tool || '(no tool)', 30);
-    if (n.kind === 'branch') return trunc(n.condition || '(condition)', 30);
-    if (n.kind === 'switch') return 'on ' + trunc(n.condition || '…', 16) + ' (' + ((n.cases || []).length) + ' cases)';
-    if (n.kind === 'foreach') return 'for each ' + trunc(n.items || '…', 20) + (n.concurrent ? ' ∥' : '');
-    if (n.kind === 'while') return 'while ' + trunc(n.condition || '…', 24);
-    if (n.kind === 'parallel') return (n.branches ? n.branches.length : 0) + ' branches';
-    if (n.kind === 'approval') return trunc(n.prompt || '(approve?)', 30);
-    if (n.kind === 'delay') return (n.seconds || 0) + 's';
-    if (n.kind === 'wait_event') return trunc(n.prompt || '(wait for event)', 30);
-    if (n.kind === 'scope') return 'try ' + (((n.body || {}).nodes || []).length) + ' step(s)';
-    if (n.kind === 'subflow') return '↳ ' + trunc(n.flow_ref || '(flow)', 24);
-    if (n.kind === 'switch') return (n.cases ? n.cases.length : 0) + ' cases';
-    if (n.kind === 'setvar') return 'set ' + trunc(Object.keys(n.assignments || {}).join(', ') || '…', 22);
-    if (n.kind === 'try') return 'try / catch';
-    return n.kind;
+    if (n.kind === 'agent') return trunc(n.brief || 'No instructions yet', 30);
+    if (n.kind === 'action') return trunc(n.tool ? human(n.tool) : 'No action chosen yet', 30);
+    if (n.kind === 'branch') return trunc(n.condition ? conditionText(n.condition) : 'No question yet', 30);
+    if (n.kind === 'switch') return (n.cases || []).length + ' paths by ' + trunc(n.condition ? human(n.condition) : '…', 14);
+    if (n.kind === 'foreach') return 'For each of ' + trunc(n.items ? human(n.items) : '…', 18);
+    if (n.kind === 'while') return 'While ' + trunc(n.condition ? conditionText(n.condition) : '…', 24);
+    if (n.kind === 'parallel') return (n.branches ? n.branches.length : 0) + ' paths at once';
+    if (n.kind === 'approval') return trunc(n.prompt || 'No question yet', 30);
+    if (n.kind === 'delay') return 'Wait ' + durationText(n.seconds || 0);
+    if (n.kind === 'wait_event') return trunc(n.prompt || 'Waiting for another app', 30);
+    if (n.kind === 'scope') return (((n.body || {}).nodes || []).length) + ' step(s) that might fail';
+    if (n.kind === 'subflow') return 'Runs ' + trunc(n.flow_ref ? (flowNames[n.flow_ref] || human(n.flow_ref)) : 'another flow', 24);
+    if (n.kind === 'setvar') return 'Saves ' + trunc(Object.keys(n.assignments || {}).map(human).join(', ') || '…', 22);
+    return kindLabel(n.kind);
   }
   function ports(n) {
     if (n.kind === 'branch') return [
-      { key: 'if_true', x: 50, cls: 't', label: 'yes' },
-      { key: 'if_false', x: W - 50, cls: 'f', label: 'no' }];
+      { key: 'if_true', x: 50, cls: 't', label: 'Yes' },
+      { key: 'if_false', x: W - 50, cls: 'f', label: 'No' }];
     return [{ key: 'next', x: W / 2, cls: '', label: '' }];
   }
   function runClass(id) {
@@ -282,22 +357,22 @@
       g.setAttribute('data-node', n.id);
       g.setAttribute('tabindex', '0');
       g.setAttribute('role', 'button');
-      g.setAttribute('aria-label', (n.label || summary(n) || n.id) + ', ' + n.kind
-        + ' step' + (n.id === flow.start ? ', start step' : '')
+      g.setAttribute('aria-label', (n.label || summary(n)) + ', ' + kindLabel(n.kind)
+        + ' step' + (n.id === flow.start ? ', first step' : '')
         + '. Press Enter to edit; use arrow keys to move.');
       g.setAttribute('aria-pressed', n.id === selected ? 'true' : 'false');
       g.appendChild(el('rect', { class: 'card', width: W, height: H, rx: 10 }));
       g.appendChild(el('rect', { class: 'swatch k-' + n.kind, x: 0, y: 0, width: 8, height: H, rx: 4 }));
-      g.appendChild(el('text', { class: 'kind', x: 16, y: 20 }, (KIND_ICON[n.kind] || '') + ' ' + n.kind));
+      g.appendChild(el('text', { class: 'kind', x: 16, y: 20 }, (KIND_ICON[n.kind] || '') + ' ' + kindLabel(n.kind)));
       g.appendChild(el('text', { x: 16, y: 40 }, trunc(n.label || summary(n), 26)));
       var badge = runBadge(n.id);
       if (badge) g.appendChild(el('text', { class: 'runbadge', x: W - 20, y: 20 }, badge));
       if (proposals[n.id]) {
         var lamp = el('text', { class: 'runbadge', x: W - (badge ? 40 : 20), y: 20 }, '💡');
-        lamp.appendChild(el('title', {}, 'Learned suggestion — select this node to review it'));
+        lamp.appendChild(el('title', {}, 'Suggestion — select this step to review it'));
         g.appendChild(lamp);
       }
-      if (n.id === flow.start) g.appendChild(el('text', { x: 16, y: 56, class: 'fd-edge-label' }, '▶ start'));
+      if (n.id === flow.start) g.appendChild(el('text', { x: 16, y: 56, class: 'fd-edge-label' }, '▶ First step'));
       ports(n).forEach(function (p) {
         var c = el('circle', { class: 'port', cx: p.x, cy: H, r: 6 });
         c.setAttribute('data-port', p.key); c.setAttribute('data-node', n.id);
@@ -373,7 +448,7 @@
       } else {
         selectedEdge = { from: ef, port: ep };
         selected = null; renderProps(); render();
-        say('Edge selected — click it again (or press Delete) to cut it.');
+        say('Connection selected — click it again (or press Delete) to remove it.');
       }
       evt.preventDefault(); return;
     }
@@ -424,7 +499,7 @@
     pushHistory(); selected = id; multiSel = {};
     n.x += dx; n.y += dy;
     renderProps(); render();
-    say('Moved ' + (n.label || id) + '.');
+    say('Moved ' + stepName(n) + '.');
   });
   canvas.addEventListener('keydown', function (evt) {
     if (evt.target !== canvas) return;
@@ -443,7 +518,7 @@
     var n = nodeById(edge.from);
     if (n) { pushHistory(); n[edge.port] = null; }
     selectedEdge = null; render(); renderProps();
-    say('Edge removed.');
+    say('Connection removed.');
   }
   canvas.addEventListener('dblclick', function (evt) {
     var nodeEl = evt.target.closest('[data-node]'); if (!nodeEl) return;
@@ -548,7 +623,7 @@
         n.y = tgt && from ? Math.round((from.y + tgt.y) / 2) : from.y + 110;
         selectedEdge = null;
         flow.nodes.push(n); selectNode(n.id); render();
-        say('Inserted into the edge.');
+        say('Added between the two steps.');
         return;
       }
     }
@@ -582,7 +657,7 @@
     if (multiSel[flow.start]) flow.start = flow.nodes.length ? flow.nodes[0].id : '';
     multiSel = {};
     selectNode(null); render();
-    say('Removed ' + ids.length + ' node' + (ids.length === 1 ? '' : 's') + '.');
+    say('Removed ' + ids.length + ' step' + (ids.length === 1 ? '' : 's') + '.');
   }
   // Build an independent copy of a serialized node with a fresh id and ALL
   // outgoing edges cleared -- so a clone never smuggles a stale reference to the
@@ -601,21 +676,21 @@
     pushHistory();
     var copy = makeClone(FDCore.serializeNode(src), (src.x || 0) + 30, (src.y || 0) + 40);
     flow.nodes.push(copy); selectNode(copy.id); render();
-    say('Duplicated as ' + copy.id + '.');
+    say('Duplicated ' + stepName(src) + '.');
   }
   function selectNode(id) { selected = id; if (id) selectedEdge = null; renderProps(); render(); }
   var clipboard = null;    // serialized node (Ctrl+C), pasted with Ctrl+V
   function copyNode(id) {
     var n = nodeById(id); if (!n) return;
     clipboard = FDCore.serializeNode(n);
-    say('Copied ' + id + ' — Ctrl+V pastes it.');
+    say('Copied ' + stepName(n) + ' — press Ctrl+V to paste it.');
   }
   function pasteNode() {
     if (!clipboard) { say('Nothing copied yet.'); return; }
     pushHistory();
     var copy = makeClone(clipboard, (clipboard.x || 60) + 32, (clipboard.y || 60) + 48);
     flow.nodes.push(copy); selectNode(copy.id); render();
-    say('Pasted as ' + copy.id + '.');
+    say('Pasted a copy of ' + stepName(copy) + '.');
   }
   function zoomToFit() {
     var r = canvas.getBoundingClientRect();
@@ -647,12 +722,13 @@
     } else {
       node.branches = node.branches || [];
       if (!node.branches[index]) node.branches[index] = { id: '', name: 'branch ' + (index + 1), start: '', nodes: [] };
-      sub = node.branches[index]; label = '🔱 ' + (node.label || 'parallel') + ' · branch ' + (index + 1);
+      sub = node.branches[index]; label = '🔱 ' + (node.label || 'Run together') + ' · path ' + (index + 1);
     }
     normalizeFlow(sub);
     stack.push({ flow: flow, selected: selected });
     crumbs.push(label);
     flow = sub; selected = null;
+    if (window.__fdShowCanvas) window.__fdShowCanvas();
     autoLayout(); renderCrumbs(); render(); renderProps();
   }
   function exitToDepth(d) {
@@ -712,11 +788,53 @@
     opts.forEach(function (o) { var op = document.createElement('option'); op.value = o.v; op.textContent = o.t; if (o.v === val) op.selected = true; s.appendChild(op); });
     s.addEventListener('change', function () { onchange(s.value); }); return s;
   }
+  // Small row editor: name/value pairs (used for action settings, saved data
+  // and inputs passed to another flow). Never a code box.
+  function pairRows(container, obj, opts) {
+    Object.keys(obj).forEach(function (k, idx) {
+      var row = document.createElement('div'); row.className = 'fd__pair';
+      var shown = human(k);
+      var keyIn = input(shown, null, opts.keyPlaceholder || 'Name');
+      keyIn.setAttribute('aria-label', (opts.keyAria || 'Name') + ' ' + (idx + 1));
+      keyIn.addEventListener('change', function () {
+        if (keyIn.value.trim() === shown) return;
+        var nv = slugKey(keyIn.value);
+        if (nv && nv !== k) { obj[nv] = obj[k]; delete obj[k]; renderProps(); render(); }
+      });
+      var valIn = input(obj[k] == null ? '' : String(obj[k]), function (v) { obj[k] = v; }, opts.valuePlaceholder || 'Value');
+      valIn.setAttribute('aria-label', (opts.valueAria || 'Value for') + ' ' + human(k));
+      var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = 'Remove';
+      rm.setAttribute('aria-label', 'Remove ' + human(k));
+      rm.addEventListener('click', function () { delete obj[k]; renderProps(); render(); });
+      row.appendChild(keyIn); row.appendChild(valIn); row.appendChild(rm);
+      container.appendChild(row);
+      var pills = pillsRow(selected, valIn); if (pills) container.appendChild(pills);
+    });
+  }
+  function addButton(text, onClick) {
+    var b = document.createElement('button'); b.className = 'btn btn--ghost'; b.type = 'button'; b.style.width = '100%';
+    b.textContent = text; b.addEventListener('click', onClick); return b;
+  }
+  function stepChoices(n, none) {
+    return [{ v: '', t: none }].concat(flow.nodes.filter(function (m) { return m.id !== n.id; })
+      .map(function (m) { return { v: m.id, t: stepName(m) + ' (' + kindLabel(m.kind) + ')' }; }));
+  }
+  function keyChoices(n, cur, none) {
+    var keys = availableKeys(n.id);
+    var opts = [{ v: '', t: none || 'Choose information…' }].concat(keys.map(function (k) { return { v: k, t: human(k) }; }));
+    if (cur && keys.indexOf(cur) < 0) opts.push({ v: cur, t: human(cur) });
+    return opts;
+  }
+  function numberSelect(value, choices, onchange) {
+    var cur = String(value == null ? '' : value);
+    var opts = choices.slice();
+    if (cur && !opts.some(function (o) { return o.v === cur; })) opts.push({ v: cur, t: cur });
+    return select(cur || opts[0].v, opts, onchange);
+  }
   function renderProps() {
-    // Preserve focus + caret in the connector-search field across a rebuild:
+    // Preserve focus + caret in the action search field across a rebuild:
     // the debounced registry search repaints this panel while the user is
-    // still typing in it (loadTools -> renderProps). Without this the field
-    // would blur mid-search.
+    // still typing in it (loadTools -> renderProps).
     var _toolCaret = null;
     if (document.activeElement && document.activeElement.id === 'fd-tool-input') {
       try { _toolCaret = document.activeElement.selectionStart; } catch (e) { _toolCaret = -1; }
@@ -725,325 +843,323 @@
     var selCount = Object.keys(multiSel).length;
     if (selCount) {
       var mh = document.createElement('div'); mh.style.fontWeight = '600'; mh.style.marginBottom = 'var(--space-3)';
-      mh.textContent = selCount + ' nodes selected';
+      mh.textContent = selCount + ' steps selected';
       props.appendChild(mh);
-      props.appendChild(hint('Drag any selected node to move the group. Delete removes them all; Esc deselects.'));
-      var db = document.createElement('button'); db.className = 'btn btn--ghost'; db.type = 'button';
-      db.textContent = '🗑 Delete ' + selCount + ' nodes';
+      props.appendChild(hint('Drag any selected step to move the group. Delete removes them all; Esc clears the selection.'));
+      var db = document.createElement('button'); db.className = 'btn btn--ghost btn--danger'; db.type = 'button';
+      db.textContent = 'Delete ' + selCount + ' steps';
       db.addEventListener('click', deleteSelection);
       props.appendChild(db);
       return;
     }
     if (!selected) {
       var p = document.createElement('p'); p.className = 'fd__empty';
-      p.textContent = "Select a node to edit it, or add a step. Connect steps by dragging from a node's bottom dot to another node. Shift-drag selects several.";
+      p.textContent = 'Select a step to change it, or add one. Connect steps by dragging from a step’s bottom dot to another step, or choose the next step in its settings. Shift-drag selects several.';
       props.appendChild(p);
-      // Flow-level: declared manual-run inputs (a typed run form + validation).
+      // Flow-level: questions asked each time someone starts the flow by hand.
       var ih = document.createElement('div'); ih.style.fontWeight = '600'; ih.style.margin = 'var(--space-4) 0 var(--space-2)';
-      ih.textContent = 'Manual-run inputs'; props.appendChild(ih);
+      ih.textContent = 'Questions to ask when someone starts this flow'; props.appendChild(ih);
       flowInputs.forEach(function (spec, ii) {
-        var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = '4px'; row.style.marginBottom = '4px'; row.style.flexWrap = 'wrap';
-        var keyIn = input(spec.key || '', function (v) { spec.key = v; }, 'key'); keyIn.style.flex = '2';
-        keyIn.setAttribute('aria-label', 'Manual input ' + (ii + 1) + ' key');
+        var row = document.createElement('div'); row.className = 'fd__pair';
+        var qIn = input(spec.label || (spec.key ? human(spec.key) : ''), function (v) {
+          spec.label = v;
+          if (!spec._keyLocked) spec.key = slugKey(v);
+        }, 'For example: Customer name');
+        qIn.setAttribute('aria-label', 'Question ' + (ii + 1));
+        if (spec.key && !spec.label) spec._keyLocked = true;
         var typeSel = select(spec.type || 'text',
-          ['text', 'number', 'bool', 'date'].map(function (t) { return { v: t, t: t }; }),
-          function (v) { spec.type = v; }); typeSel.style.flex = '1';
-        typeSel.setAttribute('aria-label', 'Manual input ' + (ii + 1) + ' type');
-        var reqWrap = document.createElement('label'); reqWrap.style.display = 'flex'; reqWrap.style.alignItems = 'center'; reqWrap.style.gap = '2px'; reqWrap.style.fontSize = '11px';
+          [{ v: 'text', t: 'Text' }, { v: 'number', t: 'Number' }, { v: 'bool', t: 'Yes or no' }, { v: 'date', t: 'Date' }],
+          function (v) { spec.type = v; });
+        typeSel.setAttribute('aria-label', 'Answer type for question ' + (ii + 1));
+        var reqWrap = document.createElement('label'); reqWrap.className = 'fd__check';
         var reqCb = document.createElement('input'); reqCb.type = 'checkbox'; reqCb.checked = !!spec.required;
         reqCb.addEventListener('change', function () { spec.required = reqCb.checked; });
-        reqWrap.appendChild(reqCb); reqWrap.appendChild(document.createTextNode('req'));
-        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
-        rm.setAttribute('aria-label', 'Remove input');
-        rm.addEventListener('click', function () { flowInputs.splice(ii, 1); renderProps(); });
-        row.appendChild(keyIn); row.appendChild(typeSel); row.appendChild(reqWrap); row.appendChild(rm);
+        reqWrap.appendChild(reqCb); reqWrap.appendChild(document.createTextNode('Required'));
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = 'Remove';
+        rm.setAttribute('aria-label', 'Remove question ' + (ii + 1));
+        rm.addEventListener('click', function () { flowInputs.splice(ii, 1); renderProps(); renderSampleFields(); });
+        row.appendChild(qIn); row.appendChild(typeSel); row.appendChild(reqWrap); row.appendChild(rm);
         props.appendChild(row);
       });
-      var addI = document.createElement('button'); addI.className = 'btn btn--ghost'; addI.type = 'button'; addI.style.width = '100%';
-      addI.textContent = '+ Add input';
-      addI.addEventListener('click', function () { flowInputs.push({ key: '', type: 'text', required: false }); renderProps(); });
-      props.appendChild(addI);
-      props.appendChild(hint('Declared inputs make the Run button prompt for typed values and are validated/coerced server-side.'));
+      props.appendChild(addButton('Add a question', function () { flowInputs.push({ key: '', label: '', type: 'text', required: false }); renderProps(); renderSampleFields(); }));
+      props.appendChild(hint('Lightwork asks these each time someone starts the flow, and checks the answers.'));
       return;
     }
     var n = nodeById(selected); if (!n) return;
     var head = document.createElement('div'); head.style.fontWeight = '600'; head.style.marginBottom = 'var(--space-3)';
-    head.textContent = (KIND_ICON[n.kind] || '') + ' ' + n.kind + ' node';
+    head.textContent = (KIND_ICON[n.kind] || '') + ' ' + kindLabel(n.kind);
     props.appendChild(head);
-    props.appendChild(field('Label (optional)', input(n.label, function (v) { n.label = v; render(); }, 'shown on the card')));
+    props.appendChild(field('Step name (optional)', input(n.label, function (v) { n.label = v; render(); }, 'Shown on the step')));
     if (n.kind === 'agent') {
-      var briefTa = textarea(n.brief, function (v) { n.brief = v; render(); }, 'Summarize {{issue_body}} and draft a reply');
+      var briefTa = textarea(n.brief, function (v) { n.brief = v; render(); }, 'Summarize the customer request and draft a reply');
       props.appendChild(withPills(n.id, field('Brief (what the agent should do)', briefTa), briefTa));
+      if (n.learned_operator != null) {
+        props.appendChild(hint('Learned computation attached. The original agent handles inputs the learned rules cannot resolve. Remove this attachment before changing the brief or output.'));
+        var removeLearned = document.createElement('button');
+        removeLearned.className = 'btn btn--ghost'; removeLearned.type = 'button';
+        removeLearned.textContent = 'Remove learned computation';
+        removeLearned.addEventListener('click', function () {
+          pushHistory(); delete n.learned_operator; renderProps(); render();
+        });
+        props.appendChild(removeLearned);
+      }
     }
     if (n.kind === 'action') {
-      // Category filter: browse one bucket instead of a 3k-name typeahead.
       if (toolCategories.length) {
-        var catOpts = [{ v: '', t: 'All categories' }].concat(
-          toolCategories.map(function (c) { return { v: c, t: c }; }));
+        var catOpts = [{ v: '', t: 'All kinds of actions' }].concat(
+          toolCategories.map(function (c) { return { v: c, t: human(c) }; }));
         var catSel = select(toolFilterCategory, catOpts, function (v) {
           toolFilterCategory = v;
-          loadTools('', v);   // browse the whole bucket (or curated set when cleared)
+          loadTools('', v);
         });
-        props.appendChild(field('Category', catSel));
+        props.appendChild(field('Kind of action', catSel));
       }
-      // No renderProps() here: rebuilding the panel on every keystroke would
-      // destroy this very input and blur it. The debounced scheduleToolSearch
-      // refreshes the catalog + meta hints, and renderProps restores focus.
-      var toolIn = input(n.tool, function (v) { n.tool = v; scheduleToolSearch(v); render(); },
-        toolFilterCategory ? ('search ' + toolFilterCategory + '…') : 'search all connectors…');
-      toolIn.setAttribute('list', 'fd-tools');
-      toolIn.id = 'fd-tool-input';
-      props.appendChild(field('Connector / tool', toolIn));
+      // Search narrows the list; the choice itself is a dropdown of real actions.
+      var toolSearch = input(toolQuery, function (v) { toolQuery = v; scheduleToolSearch(v); }, 'Search actions, for example “Slack”');
+      toolSearch.id = 'fd-tool-input';
+      props.appendChild(field('Find an action', toolSearch));
+      var names = Object.keys(toolCatalog).filter(function (name) {
+        var meta = toolCatalog[name];
+        return !toolFilterCategory || meta.category === toolFilterCategory || name === n.tool;
+      }).sort(function (x, y) { return human(x).localeCompare(human(y)); });
+      if (n.tool && names.indexOf(n.tool) < 0) names.unshift(n.tool);
+      var toolOpts = [{ v: '', t: names.length ? 'Choose an action…' : 'No matching actions — try another search' }]
+        .concat(names.map(function (name) { return { v: name, t: human(name) }; }));
+      var toolSel = select(n.tool || '', toolOpts, function (v) { n.tool = v; render(); renderProps(); });
+      toolSel.id = 'fd-tool-select';
+      props.appendChild(field('Action', toolSel));
       var meta = toolCatalog[n.tool];
-      if (meta && meta.category) {
-        var tc = document.createElement('p'); tc.className = 'toolhint'; tc.style.opacity = '0.75';
-        tc.textContent = 'Category: ' + meta.category; props.appendChild(tc);
-      }
       if (meta && meta.description) { var th = document.createElement('p'); th.className = 'toolhint'; th.textContent = meta.description; props.appendChild(th); }
-      // Known params -> a labeled input each (no raw JSON for a recognized tool)
+      n.params = n.params || {};
+      if (n._paramsRaw !== undefined) {
+        try { var parsedRaw = JSON.parse(n._paramsRaw || '{}'); if (parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)) n.params = parsedRaw; delete n._paramsRaw; }
+        catch (e) { /* keep the buffered text; Save explains which step needs attention */ }
+      }
       var known = (meta && meta.params) || [];
       if (known.length) {
         known.forEach(function (pk) {
           var pin = input(n.params[pk] != null ? String(n.params[pk]) : '',
             function (v) { if (v === '') delete n.params[pk]; else n.params[pk] = v; }, '');
-          props.appendChild(withPills(n.id, field(pk, pin), pin));
+          props.appendChild(withPills(n.id, field(human(pk), pin), pin));
         });
-        props.appendChild(hint('Use {{key}} to insert an earlier step’s result.'));
-      } else {
-        var pta = textarea(n._paramsRaw !== undefined ? n._paramsRaw : jsonOr(n.params), function (v) { n._paramsRaw = v; });
-        props.appendChild(withPills(n.id, field('Params (JSON)', pta), pta));
+        props.appendChild(hint('Use the buttons under a box to insert a result from an earlier step.'));
+      } else if (n.tool) {
+        var pw = document.createElement('div'); pw.className = 'field';
+        var pl0 = document.createElement('div'); pl0.className = 'fd__label'; pl0.textContent = 'Action settings'; pw.appendChild(pl0);
+        pairRows(pw, n.params, { keyPlaceholder: 'Setting', valuePlaceholder: 'Value', keyAria: 'Setting', valueAria: 'Value for' });
+        pw.appendChild(addButton('Add a setting', function () { var key = 'setting_' + (Object.keys(n.params).length + 1); n.params[key] = ''; renderProps(); }));
+        props.appendChild(pw);
       }
     }
     if (n.kind === 'branch') {
-      props.appendChild(conditionField(n, 'Condition', 'amount > 100'));
-      props.appendChild(hint('Drag the green (yes) and red (no) dots to the next steps.'));
+      props.appendChild(conditionField(n, 'Question to decide the path'));
+      props.appendChild(hint('Drag the green (Yes) and red (No) dots to the next steps, or choose them below.'));
     }
     if (n.kind === 'switch') {
-      var keyIn = input(n.condition, function (v) { n.condition = v; render(); }, 'status');
-      props.appendChild(withPills(n.id, field('Route on (data key)', keyIn), keyIn, true));
+      props.appendChild(field('Choose the path by', select(n.condition || '', keyChoices(n, n.condition), function (v) { n.condition = v; render(); })));
       var cwrap = document.createElement('div'); cwrap.className = 'field';
-      var cl = document.createElement('label'); cl.textContent = 'Cases (value → step)'; cwrap.appendChild(cl);
-      var targets = [{ v: '', t: '(pick a step)' }].concat(
-        flow.nodes.filter(function (m) { return m.id !== n.id; })
-          .map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
+      var cl = document.createElement('div'); cl.className = 'fd__label'; cl.textContent = 'Paths (when the value is… go to…)'; cwrap.appendChild(cl);
+      var targets = stepChoices(n, 'Choose a step…');
       (n.cases = n.cases || []).forEach(function (c, ci) {
-        var rowc = document.createElement('div'); rowc.style.display = 'flex'; rowc.style.gap = '4px'; rowc.style.marginBottom = '4px';
-        var vi = input(c.value != null ? String(c.value) : '', function (v) { c.value = v; render(); }, 'value');
-        vi.style.flex = '1';
-        vi.setAttribute('aria-label', 'Case ' + (ci + 1) + ' value');
+        var rowc = document.createElement('div'); rowc.className = 'fd__pair';
+        var vi = input(c.value != null ? String(c.value) : '', function (v) { c.value = v; render(); }, 'Value');
+        vi.setAttribute('aria-label', 'Path ' + (ci + 1) + ' value');
         var ts = select(c.to || '', targets, function (v) { c.to = v || null; render(); });
-        ts.style.flex = '1';
-        ts.setAttribute('aria-label', 'Case ' + (ci + 1) + ' destination step');
-        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
-        rm.setAttribute('aria-label', 'Remove case');
-        rm.title = 'Remove case';
+        ts.setAttribute('aria-label', 'Path ' + (ci + 1) + ' next step');
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = 'Remove';
+        rm.setAttribute('aria-label', 'Remove path ' + (ci + 1));
         rm.addEventListener('click', function () { n.cases.splice(ci, 1); renderProps(); render(); });
         rowc.appendChild(vi); rowc.appendChild(ts); rowc.appendChild(rm); cwrap.appendChild(rowc);
       });
-      var addc = document.createElement('button'); addc.className = 'btn btn--ghost'; addc.type = 'button'; addc.style.width = '100%';
-      addc.textContent = '+ Add case';
-      addc.addEventListener('click', function () { n.cases.push({ value: '', to: null }); renderProps(); });
-      cwrap.appendChild(addc); props.appendChild(cwrap);
-      props.appendChild(hint('No match falls through to this node’s normal next step (the default).'));
+      cwrap.appendChild(addButton('Add a path', function () { n.cases.push({ value: '', to: null }); renderProps(); }));
+      props.appendChild(cwrap);
+      props.appendChild(hint('When nothing matches, the flow continues to this step’s usual next step.'));
     }
     if (n.kind === 'while') {
-      props.appendChild(conditionField(n, 'Keep looping while', 'done != yes'));
-      props.appendChild(field('Max passes (0 = 100)', input(String(n.limit || ''), function (v) { n.limit = parseInt(v, 10) || 0; }, '100')));
+      props.appendChild(conditionField(n, 'Keep repeating while'));
+      props.appendChild(field('At most', numberSelect(n.limit || '', [{ v: '', t: '100 times (default)' }, { v: '5', t: '5 times' }, { v: '10', t: '10 times' }, { v: '25', t: '25 times' }, { v: '50', t: '50 times' }],
+        function (v) { n.limit = parseInt(v, 10) || 0; })));
       var wbodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
-      var wb = document.createElement('button'); wb.className = 'btn btn--ghost'; wb.type = 'button';
-      wb.style.width = '100%'; wb.textContent = '✏️ Edit loop body (' + wbodyN + (wbodyN === 1 ? ' step)' : ' steps)') + ' ↳';
-      wb.addEventListener('click', function () { enterSub(n, 'while'); });
-      props.appendChild(field('Loop body (visual)', wb));
-      props.appendChild(hint('The body runs on the SAME data, so it can change what the condition sees; it may set _break to stop early.'));
+      var wb = addButton('Edit the repeated steps (' + wbodyN + ')', function () { enterSub(n, 'while'); });
+      props.appendChild(field('Repeated steps', wb));
+      props.appendChild(hint('The repeated steps can change the information this question checks, so the repeat ends on its own.'));
     }
     if (n.kind === 'wait_event') {
-      props.appendChild(field('Waiting for (shown while paused)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'the payment provider callback')));
-      props.appendChild(hint('The run pauses here until an event resumes it: POST /webhook/run {"resume": "<run id>", "data": {...}} — the data merges into the flow.'));
+      props.appendChild(field('Waiting for (shown while paused)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: the payment to be confirmed')));
+      props.appendChild(hint('The flow pauses here until the connected app sends a signal. Anything the app sends is added to the flow’s information.'));
     }
     if (n.kind === 'scope') {
       var sbodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
-      var sb = document.createElement('button'); sb.className = 'btn btn--ghost'; sb.type = 'button';
-      sb.style.width = '100%'; sb.textContent = '✏️ Edit try body (' + sbodyN + (sbodyN === 1 ? ' step)' : ' steps)') + ' ↳';
-      sb.addEventListener('click', function () { enterSub(n, 'scope'); });
-      props.appendChild(field('Try these steps (visual)', sb));
-      var scErr = [{ v: '', t: '(no catch — a failure fails the run)' }].concat(
-        flow.nodes.filter(function (m) { return m.id !== n.id; })
-          .map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
-      props.appendChild(field('On failure, go to (the catch step)', select(n.on_error || '', scErr, function (v) { n.on_error = v || null; render(); })));
-      props.appendChild(hint('The catch step can read what went wrong from {{_error}}.'));
+      props.appendChild(field('Steps that might fail', addButton('Edit these steps (' + sbodyN + ')', function () { enterSub(n, 'scope'); })));
+      props.appendChild(field('If they fail, go to', select(n.on_error || '', stepChoices(n, 'Stop the run'), function (v) { n.on_error = v || null; render(); })));
+      props.appendChild(hint('The step you choose can see what went wrong.'));
     }
     if (n.kind === 'foreach') {
-      props.appendChild(field('Items (data key with a list)', input(n.items, function (v) { n.items = v; render(); }, 'rows')));
-      props.appendChild(field('Loop variable', input(n.var, function (v) { n.var = v; }, 'item')));
-      props.appendChild(field('Max iterations (0 = all)', input(String(n.limit || ''), function (v) { n.limit = parseInt(v, 10) || 0; }, '0')));
-      props.appendChild(field('Concurrency (1 = one at a time)', input(String(n.concurrency || ''), function (v) { n.concurrency = parseInt(v, 10) || 1; }, '1')));
+      props.appendChild(field('Repeat for each item in', select(n.items || '', keyChoices(n, n.items, 'Choose a list…'), function (v) { n.items = v; render(); })));
+      props.appendChild(field('At most', numberSelect(n.limit || '', [{ v: '', t: 'Every item' }, { v: '10', t: 'First 10 items' }, { v: '50', t: 'First 50 items' }, { v: '100', t: 'First 100 items' }],
+        function (v) { n.limit = parseInt(v, 10) || 0; })));
       var bodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
-      var eb = document.createElement('button'); eb.className = 'btn btn--ghost'; eb.type = 'button';
-      eb.style.width = '100%'; eb.textContent = '✏️ Edit loop body (' + bodyN + (bodyN === 1 ? ' step)' : ' steps)') + ' ↳';
-      eb.addEventListener('click', function () { enterSub(n, 'foreach'); });
-      props.appendChild(field('Loop body (visual)', eb));
-      var conc = document.createElement('label');
-      conc.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:var(--text-sm);margin-bottom:var(--space-3);';
+      props.appendChild(field('Steps for each item', addButton('Edit these steps (' + bodyN + ')', function () { enterSub(n, 'foreach'); })));
+      var conc = document.createElement('label'); conc.className = 'fd__check';
       var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!n.concurrent;
-      cb.addEventListener('change', function () { n.concurrent = cb.checked; render(); });
-      conc.appendChild(cb); conc.appendChild(document.createTextNode('Run iterations in parallel (bounded pool; _break doesn’t apply)'));
+      cb.addEventListener('change', function () { n.concurrent = cb.checked; if (cb.checked && !(n.concurrency > 1)) n.concurrency = 4; render(); renderProps(); });
+      conc.appendChild(cb); conc.appendChild(document.createTextNode('Handle several items at once'));
       props.appendChild(conc);
-      props.appendChild(hint('Opens the body as its own canvas. It can set _break to true to stop early.'));
+      if (n.concurrent) {
+        props.appendChild(field('How many at once', numberSelect(n.concurrency || 4, [{ v: '2', t: '2' }, { v: '4', t: '4' }, { v: '8', t: '8' }],
+          function (v) { n.concurrency = parseInt(v, 10) || 1; })));
+      }
+      props.appendChild(hint('Each item is available to the repeated steps as “Item”.'));
     }
     if (n.kind === 'parallel') {
       var wrap = document.createElement('div'); wrap.className = 'field';
-      var wl = document.createElement('label'); wl.textContent = 'Branches (each runs concurrently)'; wrap.appendChild(wl);
+      var wl = document.createElement('div'); wl.className = 'fd__label'; wl.textContent = 'Paths that run at the same time'; wrap.appendChild(wl);
       (n.branches || []).forEach(function (br, bi) {
         var cnt = (br && br.nodes && br.nodes.length) || 0;
-        var rowb = document.createElement('div'); rowb.style.display = 'flex'; rowb.style.gap = '4px'; rowb.style.marginBottom = '4px';
-        var edit = document.createElement('button'); edit.className = 'btn btn--ghost'; edit.type = 'button'; edit.style.flex = '1';
-        edit.textContent = '✏️ Branch ' + (bi + 1) + ' (' + cnt + ')'; edit.addEventListener('click', function () { enterSub(n, 'parallel', bi); });
-        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
-        rm.setAttribute('aria-label', 'Remove branch');
-        rm.title = 'Remove branch ' + (bi + 1);
+        var rowb = document.createElement('div'); rowb.className = 'fd__pair';
+        var edit = document.createElement('button'); edit.className = 'btn btn--ghost'; edit.type = 'button';
+        edit.textContent = 'Edit path ' + (bi + 1) + ' (' + cnt + (cnt === 1 ? ' step)' : ' steps)'); edit.addEventListener('click', function () { enterSub(n, 'parallel', bi); });
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = 'Remove';
+        rm.setAttribute('aria-label', 'Remove path ' + (bi + 1));
         rm.addEventListener('click', function () { n.branches.splice(bi, 1); renderProps(); render(); });
         rowb.appendChild(edit); rowb.appendChild(rm); wrap.appendChild(rowb);
       });
-      var add = document.createElement('button'); add.className = 'btn btn--ghost'; add.type = 'button'; add.style.width = '100%';
-      add.textContent = '+ Add branch';
-      add.addEventListener('click', function () { n.branches = n.branches || []; n.branches.push({ id: '', name: 'branch ' + (n.branches.length + 1), start: '', nodes: [] }); renderProps(); render(); });
-      wrap.appendChild(add); props.appendChild(wrap);
-      props.appendChild(hint('Each branch is an isolated sub-flow; they run in parallel and their outputs merge.'));
+      wrap.appendChild(addButton('Add a path', function () { n.branches = n.branches || []; n.branches.push({ id: '', name: 'path ' + (n.branches.length + 1), start: '', nodes: [] }); renderProps(); render(); }));
+      props.appendChild(wrap);
+      props.appendChild(hint('Each path runs on its own at the same time; their results are combined afterwards.'));
     }
     if (n.kind === 'approval') {
-      props.appendChild(field('Prompt (what a human approves)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'Send this reply?')));
-      props.appendChild(field('Assignee (who to notify, optional)',
-        input(n.assignee, function (v) { n.assignee = v; }, 'ops@team or @alice')));
-      props.appendChild(field('Choices beyond approve/reject (comma-separated, optional)',
-        input((n.choices || []).join(', '), function (v) {
-          n.choices = v.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-        }, 'ship, hold, escalate')));
-      props.appendChild(field('Expires after (seconds; 0 = waits forever)',
-        input(String(n.expires_after || ''), function (v) { n.expires_after = parseFloat(v) || 0; render(); }, '0')));
-      var expOpts = [{ v: '', t: '(on expiry: reject)' }].concat(
-        flow.nodes.filter(function (m) { return m.id !== n.id; })
-          .map(function (m) { return { v: m.id, t: 'escalate to ' + (m.label || m.id) }; }));
-      props.appendChild(field('On expiry, go to', select(n.on_expire || '', expOpts, function (v) { n.on_expire = v || null; render(); })));
-      // form fields collected on sign-off (merged into flow data)
+      props.appendChild(field('What should the person approve?', input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: Send this reply?')));
+      var who = [{ v: '', t: 'Anyone who can approve' }].concat(people.map(function (pp) { return { v: pp.ref, t: pp.label }; }));
+      if (n.assignee && !people.some(function (pp) { return pp.ref === n.assignee; })) who.push({ v: n.assignee, t: human(n.assignee) });
+      props.appendChild(field('Who should be asked', select(n.assignee || '', who, function (v) { n.assignee = v; })));
+      var chWrap = document.createElement('div'); chWrap.className = 'field';
+      var chl = document.createElement('div'); chl.className = 'fd__label'; chl.textContent = 'Extra answers besides Approve and Reject (optional)'; chWrap.appendChild(chl);
+      (n.choices = n.choices || []).forEach(function (choice, ci) {
+        var rowch = document.createElement('div'); rowch.className = 'fd__pair';
+        var ci0 = input(choice, function (v) { n.choices[ci] = v.trim(); }, 'For example: Hold');
+        ci0.setAttribute('aria-label', 'Extra answer ' + (ci + 1));
+        var rmc = document.createElement('button'); rmc.className = 'btn btn--ghost'; rmc.type = 'button'; rmc.textContent = 'Remove';
+        rmc.setAttribute('aria-label', 'Remove extra answer ' + (ci + 1));
+        rmc.addEventListener('click', function () { n.choices.splice(ci, 1); renderProps(); });
+        rowch.appendChild(ci0); rowch.appendChild(rmc); chWrap.appendChild(rowch);
+      });
+      chWrap.appendChild(addButton('Add an answer', function () { n.choices.push(''); renderProps(); }));
+      props.appendChild(chWrap);
+      props.appendChild(field('Stop waiting after', select(String(Math.round(n.expires_after || 0)), durationOptions(n.expires_after, 'Never — wait until someone decides'),
+        function (v) { n.expires_after = parseFloat(v) || 0; render(); renderProps(); })));
+      if (n.expires_after) {
+        props.appendChild(field('When time runs out', select(n.on_expire || '', stepChoices(n, 'Reject the request').map(function (o) {
+          return o.v ? { v: o.v, t: 'Go to ' + o.t } : o;
+        }), function (v) { n.on_expire = v || null; render(); })));
+      }
       var fwrap = document.createElement('div'); fwrap.className = 'field';
-      var fl = document.createElement('label'); fl.textContent = 'Collect on approval (form fields, optional)'; fwrap.appendChild(fl);
+      var fl = document.createElement('div'); fl.className = 'fd__label'; fl.textContent = 'Questions to ask the approver (optional)'; fwrap.appendChild(fl);
       (n.form = n.form || []).forEach(function (fld, fi) {
-        var frow = document.createElement('div'); frow.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
-        var nm = input(fld.name || '', function (v) { fld.name = v; }, 'key'); nm.style.flex = '1';
-        nm.setAttribute('aria-label', 'Approval field ' + (fi + 1) + ' key');
-        var lb = input(fld.label || '', function (v) { fld.label = v; }, 'prompt shown'); lb.style.flex = '1';
-        lb.setAttribute('aria-label', 'Approval field ' + (fi + 1) + ' prompt');
-        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
-        rm.setAttribute('aria-label', 'Remove field');
+        var frow = document.createElement('div'); frow.className = 'fd__pair';
+        var lb = input(fld.label || (fld.name ? human(fld.name) : ''), function (v) { fld.label = v; if (!fld._keyLocked) fld.name = slugKey(v); }, 'For example: Reason');
+        if (fld.name && !fld.label) fld._keyLocked = true;
+        lb.setAttribute('aria-label', 'Approver question ' + (fi + 1));
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = 'Remove';
+        rm.setAttribute('aria-label', 'Remove approver question ' + (fi + 1));
         rm.addEventListener('click', function () { n.form.splice(fi, 1); renderProps(); });
-        frow.appendChild(nm); frow.appendChild(lb); frow.appendChild(rm); fwrap.appendChild(frow);
+        frow.appendChild(lb); frow.appendChild(rm); fwrap.appendChild(frow);
       });
-      var addF = document.createElement('button'); addF.className = 'btn btn--ghost'; addF.type = 'button'; addF.style.width = '100%';
-      addF.textContent = '+ Add field'; addF.addEventListener('click', function () { n.form.push({ name: '', label: '' }); renderProps(); });
-      fwrap.appendChild(addF); props.appendChild(fwrap);
-      props.appendChild(hint('A chosen verdict + any form fields are recorded in flow data, so a switch after this can route on them.'));
+      fwrap.appendChild(addButton('Add a question', function () { n.form.push({ name: '', label: '' }); renderProps(); }));
+      props.appendChild(fwrap);
+      props.appendChild(hint('The decision and the approver’s answers are saved, so a later “Choose a path” step can use them.'));
     }
-    if (n.kind === 'delay') props.appendChild(field('Seconds', input(String(n.seconds || ''), function (v) { n.seconds = parseFloat(v) || 0; render(); }, '60')));
+    if (n.kind === 'delay') {
+      props.appendChild(field('How long to wait', select(String(Math.round(n.seconds || 0)), durationOptions(n.seconds, 'No wait'),
+        function (v) { n.seconds = parseFloat(v) || 0; render(); })));
+    }
     if (n.kind === 'subflow') {
-      props.appendChild(field('Flow to run (saved flow id)', input(n.flow_ref, function (v) { n.flow_ref = v; render(); }, 'onboard-customer')));
-      var si = document.createElement('div'); si.className = 'field';
-      var sil = document.createElement('label'); sil.textContent = 'Inputs to pass (child key ← value/{{…}})'; si.appendChild(sil);
+      var flowOpts = [{ v: '', t: savedFlows.length ? 'Choose a saved flow…' : 'No other saved flows yet' }].concat(
+        savedFlows.filter(function (f) { return f.id !== rootFlow.id; }).map(function (f) { return { v: f.id, t: f.name || human(f.id) }; }));
+      if (n.flow_ref && !flowOpts.some(function (o) { return o.v === n.flow_ref; })) flowOpts.push({ v: n.flow_ref, t: human(n.flow_ref) });
+      props.appendChild(field('Flow to run', select(n.flow_ref || '', flowOpts, function (v) { n.flow_ref = v; render(); renderProps(); })));
       n.subflow_inputs = n.subflow_inputs || {};
-      Object.keys(n.subflow_inputs).forEach(function (k) {
-        var rowi = document.createElement('div'); rowi.style.display = 'flex'; rowi.style.gap = '4px'; rowi.style.marginBottom = '4px';
-        var keyIn = input(k, null, 'child key'); keyIn.style.flex = '1';
-        keyIn.setAttribute('aria-label', 'Child input key ' + k);
-        keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.subflow_inputs[nv] = n.subflow_inputs[k]; delete n.subflow_inputs[k]; renderProps(); } });
-        var valIn = input(n.subflow_inputs[k], function (v) { n.subflow_inputs[k] = v; }, '{{order_id}}'); valIn.style.flex = '2';
-        valIn.setAttribute('aria-label', 'Value passed to child input ' + k);
-        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
-        rm.setAttribute('aria-label', 'Remove input');
-        rm.addEventListener('click', function () { delete n.subflow_inputs[k]; renderProps(); render(); });
-        rowi.appendChild(keyIn); rowi.appendChild(valIn); rowi.appendChild(rm); si.appendChild(rowi);
-      });
-      var addi = document.createElement('button'); addi.className = 'btn btn--ghost'; addi.type = 'button'; addi.style.width = '100%';
-      addi.textContent = '+ Add input';
-      addi.addEventListener('click', function () { var key = 'in' + (Object.keys(n.subflow_inputs).length + 1); n.subflow_inputs[key] = ''; renderProps(); render(); });
-      si.appendChild(addi); props.appendChild(si);
+      var child = savedFlows.filter(function (f) { return f.id === n.flow_ref; })[0];
+      var declared = (child && child.inputs) || [];
+      var si = document.createElement('div'); si.className = 'field';
+      var sil = document.createElement('div'); sil.className = 'fd__label'; sil.textContent = 'Information to give it'; si.appendChild(sil);
+      if (declared.length) {
+        declared.forEach(function (spec) {
+          if (!spec || !spec.key) return;
+          var vin = input(n.subflow_inputs[spec.key] == null ? '' : String(n.subflow_inputs[spec.key]), function (v) {
+            if (v === '') delete n.subflow_inputs[spec.key]; else n.subflow_inputs[spec.key] = v;
+          }, 'Type a value or insert a result');
+          si.appendChild(withPills(n.id, field(spec.label || human(spec.key), vin), vin));
+        });
+      } else {
+        pairRows(si, n.subflow_inputs, { keyPlaceholder: 'Name', valuePlaceholder: 'Value or earlier result', keyAria: 'Information name', valueAria: 'Value for' });
+        si.appendChild(addButton('Add information', function () { var key = 'input_' + (Object.keys(n.subflow_inputs).length + 1); n.subflow_inputs[key] = ''; renderProps(); render(); }));
+      }
+      props.appendChild(si);
       props.appendChild(hint(Object.keys(n.subflow_inputs).length
-        ? 'Isolated: the child sees ONLY these inputs (can’t read or clobber this flow’s other data); its result returns under the Output key.'
-        : 'No inputs mapped → the child shares this flow’s data (reads it, and its outputs flow back). Add inputs to isolate it. Cyclic references are blocked.'));
+        ? 'The other flow sees only the information listed here. Its result comes back under the name below.'
+        : 'With nothing listed, the other flow can use all of this flow’s information and its results come back here.'));
     }
     if (n.kind === 'setvar') {
       var sv = document.createElement('div'); sv.className = 'field';
-      var svl = document.createElement('label'); svl.textContent = 'Set data keys (value can use {{…}})'; sv.appendChild(svl);
+      var svl = document.createElement('div'); svl.className = 'fd__label'; svl.textContent = 'Information to save'; sv.appendChild(svl);
       n.assignments = n.assignments || {};
-      Object.keys(n.assignments).forEach(function (k) {
-        var rowv = document.createElement('div'); rowv.style.display = 'flex'; rowv.style.gap = '4px'; rowv.style.marginBottom = '4px';
-        var keyIn = input(k, null, 'key'); keyIn.style.flex = '1';
-        keyIn.setAttribute('aria-label', 'Assignment key ' + k);
-        keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.assignments[nv] = n.assignments[k]; delete n.assignments[k]; renderProps(); } });
-        var valIn = input(n.assignments[k], function (v) { n.assignments[k] = v; }, '{{add(count,1)}}'); valIn.style.flex = '2';
-        valIn.setAttribute('aria-label', 'Value assigned to ' + k);
-        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
-        rm.setAttribute('aria-label', 'Remove assignment');
-        rm.addEventListener('click', function () { delete n.assignments[k]; renderProps(); render(); });
-        rowv.appendChild(keyIn); rowv.appendChild(valIn); rowv.appendChild(rm); sv.appendChild(rowv);
-      });
-      var addv = document.createElement('button'); addv.className = 'btn btn--ghost'; addv.type = 'button'; addv.style.width = '100%';
-      addv.textContent = '+ Add assignment';
-      addv.addEventListener('click', function () { var key = 'var' + (Object.keys(n.assignments).length + 1); n.assignments[key] = ''; renderProps(); render(); });
-      sv.appendChild(addv); props.appendChild(sv);
+      pairRows(sv, n.assignments, { keyPlaceholder: 'Name, for example: status', valuePlaceholder: 'Value or earlier result', keyAria: 'Information name', valueAria: 'Value for' });
+      sv.appendChild(addButton('Add information', function () { var key = 'value_' + (Object.keys(n.assignments).length + 1); n.assignments[key] = ''; renderProps(); render(); }));
+      props.appendChild(sv);
     }
     if (['agent', 'action', 'foreach', 'parallel', 'while', 'approval', 'subflow'].indexOf(n.kind) >= 0)
-      props.appendChild(field('Output key (optional)', input(n.output, function (v) { n.output = v; }, 'store result under…')));
-    // error handling: retry (work nodes) then route on failure (work + subflow;
-    // a scope node's catch arm is edited in its own props block above)
-    if (n.kind === 'agent' || n.kind === 'action') {
-      props.appendChild(field('Retries on failure', input(String(n.retries || ''), function (v) { n.retries = parseInt(v, 10) || 0; }, '0')));
-      props.appendChild(field('Retry backoff (base seconds, 0 = no wait)', input(String(n.retry_backoff || ''), function (v) { n.retry_backoff = parseFloat(v) || 0; }, '0')));
-      props.appendChild(field('Timeout (seconds, 0 = none)', input(String(n.timeout || ''), function (v) { n.timeout = parseFloat(v) || 0; }, '0')));
-    }
+      props.appendChild(field('Name this result (so later steps can use it)', input(n.output, function (v) { n.output = slugKey(v) || v; }, 'For example: summary')));
+    // What happens when this step fails (collapsed; sensible defaults).
     if (['agent', 'action', 'subflow'].indexOf(n.kind) >= 0) {
-      var errOpts = [{ v: '', t: '(none — continue)' }].concat(flow.nodes.filter(function (m) { return m.id !== n.id; }).map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
-      props.appendChild(field('On failure, go to', select(n.on_error || '', errOpts, function (v) { n.on_error = v || null; render(); })));
+      var fails = document.createElement('details'); fails.className = 'fd__fails';
+      var fs = document.createElement('summary'); fs.textContent = 'If this step fails'; fails.appendChild(fs);
+      if (n.kind !== 'subflow') {
+        fails.appendChild(field('Try again', numberSelect(n.retries || 0, [{ v: '0', t: 'Don’t try again' }, { v: '1', t: 'Once' }, { v: '2', t: 'Twice' }, { v: '3', t: '3 times' }],
+          function (v) { n.retries = parseInt(v, 10) || 0; })));
+        fails.appendChild(field('Wait between tries', select(String(Math.round(n.retry_backoff || 0)), [{ v: '0', t: 'No wait' }, { v: '10', t: '10 seconds' }].concat(DURATIONS.slice(0, 3)).concat(
+          (n.retry_backoff && [0, 10, 60, 300, 900].indexOf(Math.round(n.retry_backoff)) < 0) ? [{ v: String(Math.round(n.retry_backoff)), t: durationText(n.retry_backoff) }] : []),
+          function (v) { n.retry_backoff = parseFloat(v) || 0; })));
+        fails.appendChild(field('Give up after', select(String(Math.round(n.timeout || 0)), durationOptions(n.timeout, 'No time limit'),
+          function (v) { n.timeout = parseFloat(v) || 0; })));
+      }
+      fails.appendChild(field('Then go to', select(n.on_error || '', stepChoices(n, 'Stop the run'), function (v) { n.on_error = v || null; render(); })));
+      if (n.retries || n.timeout || n.on_error) fails.open = true;
+      props.appendChild(fails);
     }
-    // Every canvas edge also has a keyboard-operable equivalent. This makes
-    // creating, changing, and clearing the normal/yes/no routes possible
-    // without dragging a six-pixel SVG port.
-    var connectionTargets = [{ v: '', t: '(no next step)' }].concat(
-      flow.nodes.filter(function (m) { return m.id !== n.id; })
-        .map(function (m) { return { v: m.id, t: (m.label || m.id) + ' · ' + m.kind }; }));
+    // Every canvas connection also has a keyboard-operable equivalent.
     ports(n).forEach(function (port) {
-      var connectionLabel = port.key === 'if_true' ? 'Yes path — next step'
-        : (port.key === 'if_false' ? 'No path — next step' : 'Next step');
-      props.appendChild(field(connectionLabel, select(n[port.key] || '', connectionTargets, function (v) {
+      var connectionLabel = port.key === 'if_true' ? 'If yes, go to'
+        : (port.key === 'if_false' ? 'If no, go to' : 'Next step');
+      props.appendChild(field(connectionLabel, select(n[port.key] || '', stepChoices(n, 'End the flow here'), function (v) {
         pushHistory(); n[port.key] = v || null; render();
       })));
     });
-    // last run outcome for this node (from the live/last run overlay)
+    // last run outcome for this step (from the live/last run overlay)
     var rs = runState[n.id];
     if (rs || n.id === runCursor) {
       var badge = runBadge(n.id);
       var rl = document.createElement('p'); rl.className = 'fd__empty'; rl.style.marginTop = 'var(--space-2)';
       rl.textContent = 'Last run: ' + (n.id === runCursor ? 'waiting here'
-        : (rs.status || '') + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : ''))
-        + (rs && rs.seconds != null ? ' · ' + rs.seconds + 's' : '') + ' ' + badge;
+        : (rs.outcome === 1 ? 'worked' : (rs.outcome === 0 ? 'failed' : (rs.status === 'true' ? 'answered yes' : (rs.status === 'false' ? 'answered no' : 'ran')))))
+        + (rs && rs.seconds != null ? ' · took ' + (rs.seconds < 1 ? 'under a second' : Math.round(rs.seconds) + ' seconds') : '') + ' ' + badge;
       props.appendChild(rl);
     }
-    // grounded signal for this node across ALL its runs (not just the last):
-    // an approval's human accept-rate, a work node's success rate.
     var sig = signals.nodes[n.id];
     if (sig && sig.n) {
       var sl = document.createElement('p'); sl.className = 'fd__empty'; sl.style.marginTop = 'var(--space-2)';
       var pct = Math.round(sig.mean * 100);
-      if (n.kind === 'approval') sl.textContent = '🧑‍⚖️ humans approved ' + pct + '% of ' + sig.n + ' decisions';
-      else sl.textContent = '📊 succeeds ' + pct + '% over ' + sig.n + ' runs';
+      if (n.kind === 'approval') sl.textContent = '🧑‍⚖️ People approved ' + pct + '% of ' + sig.n + ' requests';
+      else sl.textContent = '📊 Worked in ' + pct + '% of ' + sig.n + ' runs';
       props.appendChild(sl);
     }
-    // measured impact of a prior self-rewrite on this node (before vs. after)
     var imp = impacts[n.id];
     if (imp && imp.changed && imp.impact) {
       var d = imp.impact.delta;
       var il = document.createElement('p'); il.className = 'fd__empty'; il.style.marginTop = 'var(--space-2)';
-      il.textContent = '📈 since → ' + (imp.applied && imp.applied.to_kind) + ': '
-        + (typeof d === 'number' ? (d >= 0 ? '+' : '') + Math.round(d * 100) + '% vs before'
-          : 'measuring (' + (imp.impact.after && imp.impact.after.n || 0) + ' runs so far)');
+      il.textContent = '📈 Since this step became ' + (imp.applied && imp.applied.to_kind === 'action' ? 'a fixed action' : 'an AI task') + ': '
+        + (typeof d === 'number' ? (d >= 0 ? '+' : '') + Math.round(d * 100) + '% compared with before'
+          : 'still measuring (' + (imp.impact.after && imp.impact.after.n || 0) + ' runs so far)');
       props.appendChild(il);
     }
     // self-rewrite proposal for this node (from grounded per-node outcomes)
@@ -1053,30 +1169,33 @@
       pbox.style.cssText = 'margin-top:var(--space-3);padding:var(--space-2);border:1px solid var(--accent);border-radius:8px;';
       var pl = document.createElement('p'); pl.className = 'fd__empty'; pl.style.marginBottom = 'var(--space-2)';
       pl.textContent = '💡 ' + prop.reason;
-      // Persisted apply: saves a new version + logs the change so its impact is measured.
       var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
       pb.setAttribute('data-apply-node', n.id);
       pb.setAttribute('data-apply-blocked', String(prop.applicable === false));
       pb.disabled = saveInFlight || publishInFlight || applyInFlight;
-      pb.textContent = 'Apply & track (→ ' + prop.to_kind
-        + (prop.inferred_tool ? ' · ' + prop.inferred_tool : '') + ')';
+      pb.textContent = prop.to_kind === 'action'
+        ? 'Apply: always use ' + (prop.inferred_tool ? human(prop.inferred_tool) : 'a fixed action')
+        : 'Apply: let the AI handle this step';
       if (prop.applicable === false) {
         pb.disabled = true;
-        pb.title = prop.blocking_reason || 'Review parameter bindings before applying.';
+        pb.title = prop.blocking_reason || 'Check this step’s settings before applying.';
       }
       pb.addEventListener('click', function () { applyProposal(n, prop, pb); });
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
     // actions
     var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = 'var(--space-2)'; row.style.marginTop = 'var(--space-3)'; row.style.flexWrap = 'wrap';
-    var mk = document.createElement('button'); mk.className = 'btn btn--ghost'; mk.type = 'button'; mk.textContent = 'Make start';
-    mk.addEventListener('click', function () { flow.start = n.id; render(); });
-    var dup = document.createElement('button'); dup.className = 'btn btn--ghost'; dup.type = 'button'; dup.textContent = '⧉ Duplicate';
+    if (n.id !== flow.start) {
+      var mk = document.createElement('button'); mk.className = 'btn btn--ghost'; mk.type = 'button'; mk.textContent = 'Make this the first step';
+      mk.addEventListener('click', function () { flow.start = n.id; render(); renderProps(); });
+      row.appendChild(mk);
+    }
+    var dup = document.createElement('button'); dup.className = 'btn btn--ghost'; dup.type = 'button'; dup.textContent = 'Duplicate';
     dup.title = 'Ctrl+D';
     dup.addEventListener('click', function () { duplicateNode(n.id); });
-    var del = document.createElement('button'); del.className = 'btn btn--ghost'; del.type = 'button'; del.textContent = '🗑 Delete';
+    var del = document.createElement('button'); del.className = 'btn btn--ghost btn--danger'; del.type = 'button'; del.textContent = 'Delete step';
     del.addEventListener('click', function () { deleteNode(n.id); });
-    row.appendChild(mk); row.appendChild(dup); row.appendChild(del); props.appendChild(row);
+    row.appendChild(dup); row.appendChild(del); props.appendChild(row);
     if (_toolCaret !== null) {
       var _ti = document.getElementById('fd-tool-input');
       if (_ti) {
@@ -1084,6 +1203,9 @@
         if (_toolCaret >= 0) { try { _ti.setSelectionRange(_toolCaret, _toolCaret); } catch (e) {} }
       }
     }
+  }
+  function slugKey(v) {
+    return String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48);
   }
   function hint(t) { var p = document.createElement('p'); p.className = 'fd__empty'; p.textContent = t; return p; }
 
@@ -1101,12 +1223,10 @@
         });
       }
     });
-    try {   // the sample-input keys are the trigger payload's shape
-      var raw = document.getElementById('fd-sample').value.trim();
-      if (raw) Object.keys(JSON.parse(raw)).forEach(function (k) {
-        if (keys.indexOf(k) < 0) keys.push(k);
-      });
-    } catch (e) { /* not JSON yet -- no payload pills */ }
+    // The questions asked at start and the sample test values are the flow's
+    // starting information.
+    flowInputs.forEach(function (i) { if (i.key && keys.indexOf(i.key) < 0) keys.push(i.key); });
+    Object.keys(sampleData().data).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); });
     return keys;
   }
   function insertAtCursor(target, text) {
@@ -1122,7 +1242,7 @@
     var row = document.createElement('div'); row.className = 'fd__pills';
     keys.forEach(function (k) {
       var b = document.createElement('button'); b.type = 'button'; b.className = 'fd__pill';
-      b.textContent = raw ? k : '{{' + k + '}}'; b.title = 'Insert ' + (raw ? k : '{{' + k + '}}');
+      b.textContent = '+ ' + human(k); b.title = 'Insert the result “' + human(k) + '”';
       b.addEventListener('mousedown', function (evt) { evt.preventDefault(); });   // keep target's focus
       b.addEventListener('click', function () { insertAtCursor(target, raw ? k : '{{' + k + '}}'); });
       row.appendChild(b);
@@ -1140,45 +1260,40 @@
   // Grammar lives in FDCore (the unit-tested shared module) -- no copy here.
   var COND_OPS = FDCore.COND_OPS;
   var COND_RE = FDCore.COND_RE;
-  function conditionField(n, label, placeholder) {
+  var OP_WORDS = { '==': 'is', '!=': 'is not', '>': 'is more than', '<': 'is less than',
+    '>=': 'is at least', '<=': 'is at most', 'contains': 'contains' };
+  function conditionText(c) {
+    var m = COND_RE.exec(c || '');
+    if (!m || / (and|or) /.test(c)) return String(c || '');
+    return human(m[1]) + ' ' + (OP_WORDS[m[2]] || m[2]) + ' ' + m[3];
+  }
+  function conditionField(n, label) {
     var wrap = document.createElement('div'); wrap.className = 'field';
-    var head = document.createElement('div'); head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;';
-    var l = document.createElement('label'); l.textContent = label;
+    var l = document.createElement('div'); l.className = 'fd__label'; l.textContent = label;
     var conditionLabelId = 'fd-condition-label-' + (++fieldSeq);
-    l.id = conditionLabelId; head.appendChild(l);
-    var isAdvanced = n._condAdvanced || / (and|or) /.test(n.condition || '') || (!COND_RE.test(n.condition || '') && !!(n.condition || '').trim());
-    var toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'fd__pill';
-    toggle.textContent = isAdvanced ? 'simple' : 'advanced';
-    toggle.title = 'Switch between the dropdown builder and raw text (for and/or)';
-    toggle.addEventListener('click', function () { n._condAdvanced = !isAdvanced; renderProps(); });
-    head.appendChild(toggle); wrap.appendChild(head);
-    if (isAdvanced) {
-      var ta = input(n.condition, function (v) { n.condition = v; render(); }, (placeholder || 'a > 1') + ' and b == x');
-      ta.setAttribute('aria-labelledby', conditionLabelId);
-      wrap.appendChild(ta);
-      var pills = pillsRow(n.id, ta, true); if (pills) wrap.appendChild(pills);
+    l.id = conditionLabelId; wrap.appendChild(l);
+    var complex = / (and|or) /.test(n.condition || '') || (!COND_RE.test(n.condition || '') && !!(n.condition || '').trim());
+    if (complex) {
+      // A combined question written earlier (several parts): keep it, shown in
+      // words, with a way to start over using the builder.
+      var shownText = document.createElement('p'); shownText.className = 'fd__empty'; shownText.textContent = n.condition;
+      wrap.appendChild(shownText);
+      wrap.appendChild(addButton('Replace with a simple question', function () { n.condition = ''; renderProps(); render(); }));
       return wrap;
     }
     var m = COND_RE.exec(n.condition || '');
     var cur = { key: m ? m[1] : '', op: m ? m[2] : '==', value: m ? m[3] : '' };
-    function commit() { n.condition = (cur.key + ' ' + cur.op + ' ' + cur.value).trim(); render(); }
-    var row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;';
-    var keyIn = input(cur.key, function (v) { cur.key = v; commit(); }, 'data key');
-    keyIn.setAttribute('aria-label', label + ' data key');
-    keyIn.setAttribute('list', 'fd-condkeys'); keyIn.style.flex = '1';
-    var opSel = select(cur.op, COND_OPS.map(function (o) { return { v: o, t: o }; }), function (v) { cur.op = v; commit(); });
-    opSel.setAttribute('aria-label', label + ' operator');
-    opSel.style.flex = '0 0 88px';
-    var valIn = input(cur.value, function (v) { cur.value = v; commit(); }, 'value');
-    valIn.setAttribute('aria-label', label + ' comparison value');
-    valIn.style.flex = '1';
-    row.appendChild(keyIn); row.appendChild(opSel); row.appendChild(valIn);
+    function commit() { n.condition = cur.key ? (cur.key + ' ' + cur.op + ' ' + (cur.value || '')).trim() : ''; render(); }
+    var row = document.createElement('div'); row.className = 'fd__pair';
+    var keySel = select(cur.key, keyChoices(n, cur.key, 'Choose information…'), function (v) { cur.key = v; commit(); });
+    keySel.setAttribute('aria-label', label + ': information to check');
+    var opSel = select(cur.op, COND_OPS.map(function (o) { return { v: o, t: OP_WORDS[o] || o }; }), function (v) { cur.op = v; commit(); });
+    opSel.setAttribute('aria-label', label + ': comparison');
+    var valIn = input(cur.value, function (v) { cur.value = v; commit(); }, 'Value');
+    valIn.setAttribute('aria-label', label + ': value');
+    row.appendChild(keySel); row.appendChild(opSel); row.appendChild(valIn);
     wrap.appendChild(row);
-    // a datalist of the keys this node can see (upstream outputs + payload)
-    var dl = document.getElementById('fd-condkeys');
-    if (!dl) { dl = document.createElement('datalist'); dl.id = 'fd-condkeys'; document.body.appendChild(dl); }
-    dl.textContent = '';
-    availableKeys(n.id).forEach(function (k) { var o = document.createElement('option'); o.value = k; dl.appendChild(o); });
+    if (!availableKeys(n.id).length) wrap.appendChild(hint('Name an earlier step’s result, or add a question asked at start, to choose it here.'));
     return wrap;
   }
 
@@ -1190,7 +1305,9 @@
   function toApiFlow() {
     var notifyEl = document.getElementById('fd-notify');
     var out = serializeFlow({ id: (idInput.value || rootFlow.id || '').trim(),
-      name: nameInput.value || rootFlow.name || 'Untitled flow', start: rootFlow.start, nodes: rootFlow.nodes });
+      name: nameInput.value || rootFlow.name || 'Untitled flow', start: rootFlow.start, nodes: rootFlow.nodes,
+      learned_recipe: rootFlow.learned_recipe, recipe_lineage: rootFlow.recipe_lineage,
+      recipe_teaching: rootFlow.recipe_teaching });
     out.notify = !!(notifyEl && notifyEl.checked);
     out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
     out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
@@ -1202,25 +1319,139 @@
     out.revision = String(rootFlow.revision || '');
     return out;
   }
+  // ---- schedule picker: frequency, days, time and time zone -> timetable ----
+  var WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  function clockWords(h, m) {
+    var hour = Number(h), mm = ('0' + m).slice(-2);
+    return (hour % 12 || 12) + (mm === '00' ? '' : ':' + mm) + (hour < 12 ? ' am' : ' pm');
+  }
+  function ordinalWords(n) { n = Number(n); var t = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (t[(v - 20) % 10] || t[v] || t[0]); }
+  function scheduleWords(cron) {
+    var f = String(cron || '').trim().split(/\s+/);
+    if (f.length !== 5) return 'a custom timetable';
+    var mi = f[0], hr = f[1], dom = f[2], mon = f[3], dow = f[4];
+    if (/^\d+$/.test(mi) && hr === '*' && dom === '*' && mon === '*' && dow === '*') return 'every hour at ' + ('0' + mi).slice(-2) + ' minutes past';
+    if (!/^\d+$/.test(mi) || !/^\d+$/.test(hr) || mon !== '*') return 'a custom timetable';
+    var at = ' at ' + clockWords(hr, mi);
+    if (dom === '*' && dow === '*') return 'every day' + at;
+    if (dom === '*' && dow === '1-5') return 'weekdays' + at;
+    if (dom === '*' && /^[0-7](,[0-7])*$/.test(dow)) return 'every ' + dow.split(',').map(function (d) { return WEEKDAYS[Number(d) % 7]; }).join(', ') + at;
+    if (/^\d+$/.test(dom) && dow === '*') return 'monthly on the ' + ordinalWords(dom) + at;
+    return 'a custom timetable';
+  }
+  function schedEl(id) { return document.getElementById(id); }
+  function parseSchedule(cron) {
+    var f = String(cron || '').trim().split(/\s+/);
+    if (!cron || !String(cron).trim()) return { freq: '' };
+    if (f.length !== 5) return { freq: 'custom' };
+    var mi = f[0], hr = f[1], dom = f[2], mon = f[3], dow = f[4];
+    if (mon !== '*' || !/^\d+$/.test(mi)) return { freq: 'custom' };
+    if (hr === '*' && dom === '*' && dow === '*') return { freq: 'hourly', minute: mi };
+    if (!/^\d+$/.test(hr)) return { freq: 'custom' };
+    var time = ('0' + hr).slice(-2) + ':' + ('0' + mi).slice(-2);
+    if (dom === '*' && dow === '*') return { freq: 'daily', time: time };
+    if (dom === '*' && dow === '1-5') return { freq: 'weekdays', time: time };
+    if (dom === '*' && /^[0-7](,[0-7])*$/.test(dow)) return { freq: 'weekly', time: time, days: dow.split(',').map(function (d) { return String(Number(d) % 7); }) };
+    if (/^\d+$/.test(dom) && Number(dom) >= 1 && Number(dom) <= 28 && dow === '*') return { freq: 'monthly', time: time, dom: dom };
+    return { freq: 'custom' };
+  }
+  function buildSchedule() {
+    var freq = (schedEl('fd-sched-freq') || {}).value || '';
+    var time = String((schedEl('fd-sched-time') || {}).value || '09:00').split(':');
+    var hr = String(Number(time[0]) || 0), mi = String(Number(time[1]) || 0);
+    if (freq === '') return '';
+    if (freq === 'custom') return ((schedEl('fd-schedule') || {}).value || '').trim();
+    if (freq === 'hourly') return String(Number((schedEl('fd-sched-minute') || {}).value) || 0) + ' * * * *';
+    if (freq === 'daily') return mi + ' ' + hr + ' * * *';
+    if (freq === 'weekdays') return mi + ' ' + hr + ' * * 1-5';
+    if (freq === 'weekly') {
+      var days = Array.prototype.filter.call(document.querySelectorAll('#fd-sched-days input[type=checkbox]'), function (c) { return c.checked; })
+        .map(function (c) { return c.value; });
+      return mi + ' ' + hr + ' * * ' + (days.length ? days.join(',') : '1');
+    }
+    if (freq === 'monthly') return mi + ' ' + hr + ' ' + ((schedEl('fd-sched-dom') || {}).value || '1') + ' * *';
+    return '';
+  }
+  function showScheduleParts() {
+    var freq = (schedEl('fd-sched-freq') || {}).value || '';
+    var rows = { 'fd-sched-days': freq === 'weekly', 'fd-sched-dom-row': freq === 'monthly',
+      'fd-sched-minute-row': freq === 'hourly',
+      'fd-sched-time-row': ['daily', 'weekdays', 'weekly', 'monthly'].indexOf(freq) >= 0,
+      'fd-sched-tz-row': freq !== '' };
+    Object.keys(rows).forEach(function (id) { var e = schedEl(id); if (e) e.hidden = !rows[id]; });
+    var words = schedEl('fd-sched-words'), cron = ((schedEl('fd-schedule') || {}).value || '').trim();
+    if (words) words.textContent = cron ? 'Runs ' + scheduleWords(cron) + '. Publish to turn schedule changes on.' : 'Runs only when started by hand or by another app.';
+  }
   function syncScheduleControls() {
-    var preset = document.getElementById('fd-schedule-preset');
-    var schedule = document.getElementById('fd-schedule');
-    if (!preset || !schedule) return;
-    var value = schedule.value.trim();
-    preset.value = Array.from(preset.options).some(function (option) { return option.value === value; })
-      ? value : 'custom';
+    var schedule = schedEl('fd-schedule'), freqSel = schedEl('fd-sched-freq');
+    if (!schedule || !freqSel) return;
+    var parsed = parseSchedule(schedule.value);
+    var customOpt = freqSel.querySelector ? freqSel.querySelector('option[value="custom"]') : null;
+    if (customOpt) customOpt.hidden = parsed.freq !== 'custom';
+    freqSel.value = parsed.freq;
+    if (parsed.time && schedEl('fd-sched-time')) schedEl('fd-sched-time').value = parsed.time;
+    if (parsed.minute != null && schedEl('fd-sched-minute')) schedEl('fd-sched-minute').value = String(Number(parsed.minute));
+    if (parsed.dom && schedEl('fd-sched-dom')) schedEl('fd-sched-dom').value = String(Number(parsed.dom));
+    if (parsed.days) Array.prototype.forEach.call(document.querySelectorAll('#fd-sched-days input[type=checkbox]'), function (c) {
+      c.checked = parsed.days.indexOf(c.value) >= 0;
+    });
+    showScheduleParts();
   }
   function chooseSchedule() {
-    var preset = document.getElementById('fd-schedule-preset');
-    var schedule = document.getElementById('fd-schedule');
-    var advanced = document.getElementById('fd-schedule-advanced');
-    if (preset.value === 'custom') {
-      advanced.open = true;
-      schedule.focus();
-    } else {
-      schedule.value = preset.value;
-      advanced.open = false;
+    var schedule = schedEl('fd-schedule');
+    if ((schedEl('fd-sched-freq') || {}).value !== 'custom') schedule.value = buildSchedule();
+    var tz = schedEl('fd-tz');
+    if (tz && !tz.value && schedule.value) { try { tz.value = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { /* keep UTC */ } }
+    showScheduleParts();
+  }
+  function fillTimeZones() {
+    var tz = schedEl('fd-tz'); if (!tz || tz.options.length > 1) return;
+    var zones = [];
+    try { zones = Intl.supportedValuesOf('timeZone'); } catch (e) {
+      zones = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London',
+        'Europe/Paris', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney'];
     }
+    zones.forEach(function (z) {
+      var o = document.createElement('option'); o.value = z;
+      var parts = z.split('/'); o.textContent = parts.length > 1 ? parts.slice(1).join(' / ').replace(/_/g, ' ') + ' (' + parts[0].replace(/_/g, ' ') + ')' : z.replace(/_/g, ' ');
+      tz.appendChild(o);
+    });
+  }
+  function setSelectValue(id, value, label) {
+    var sel = schedEl(id); if (!sel) return;
+    var v = value == null ? '' : String(value);
+    if (sel.tagName === 'SELECT' && v && !Array.prototype.some.call(sel.options, function (o) { return o.value === v; })) {
+      var o = document.createElement('option'); o.value = v; o.textContent = label ? label(v) : v; sel.appendChild(o);
+    }
+    sel.value = v;
+  }
+  // ---- sample answers for a test: one box per question asked at start ----
+  function renderSampleFields() {
+    var box = schedEl('fd-sample-fields'); if (!box) return;
+    var prior = sampleData().data;
+    box.textContent = '';
+    var keys = [];
+    flowInputs.forEach(function (spec) {
+      if (!spec.key || keys.indexOf(spec.key) >= 0) return; keys.push(spec.key);
+      var inp = document.createElement('input'); inp.className = 'input';
+      inp.id = 'fd-sample-' + spec.key; inp.setAttribute('data-sample-key', spec.key);
+      inp.value = prior[spec.key] || '';
+      box.appendChild(field(spec.label || human(spec.key), inp));
+    });
+    Object.keys(prior).forEach(function (k) {
+      if (keys.indexOf(k) >= 0) return;
+      addSampleRow(k, prior[k]);
+    });
+    if (!keys.length && !Object.keys(prior).length) box.appendChild(hint('Add questions under “Questions to ask when someone starts this flow” (select no step to see them), or add a sample value below.'));
+  }
+  function addSampleRow(k, v) {
+    var box = schedEl('fd-sample-fields'); if (!box) return;
+    var row = document.createElement('div'); row.className = 'fd__pair fd__sample-extra';
+    var n = input(k ? human(k) : '', null, 'Name'); n.setAttribute('data-extra-name', ''); n.setAttribute('aria-label', 'Sample value name');
+    var val = input(v || '', null, 'Value'); val.setAttribute('data-extra-value', ''); val.setAttribute('aria-label', 'Sample value');
+    var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = 'Remove';
+    rm.addEventListener('click', function () { row.remove(); });
+    row.appendChild(n); row.appendChild(val); row.appendChild(rm); box.appendChild(row);
   }
   function fromApiFlow(f, savedSnapshot) {
     runState = {}; runCursor = null; impacts = {};
@@ -1231,22 +1462,30 @@
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [],
       max_seconds: f.max_seconds || 0, version: parseInt(f.version, 10) || 0,
       revision: String(f.revision || ''), published: !!f.published,
+      learned_recipe: f.learned_recipe == null ? null : JSON.parse(JSON.stringify(f.learned_recipe)),
+      recipe_lineage: f.recipe_lineage == null ? null : JSON.parse(JSON.stringify(f.recipe_lineage)),
+      recipe_teaching: f.recipe_teaching == null ? null : JSON.parse(JSON.stringify(f.recipe_teaching)),
       published_version: parseInt(f.published_version, 10) || 0,
       published_revision: String(f.published_revision || '') };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
-    var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
     var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
     var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
     syncScheduleControls();
-    var tzEl = document.getElementById('fd-tz'); if (tzEl) tzEl.value = f.timezone || '';
-    var mcEl = document.getElementById('fd-maxconc'); if (mcEl) mcEl.value = f.max_concurrent || '';
+    if (document.getElementById('fd-tz')) setSelectValue('fd-tz', f.timezone || '');
+    if (document.getElementById('fd-maxsec')) setSelectValue('fd-maxsec', f.max_seconds || '', function (v) { return durationText(Number(v)); });
+    if (document.getElementById('fd-maxconc')) setSelectValue('fd-maxconc', f.max_concurrent || '', function (v) { return 'Up to ' + v + ' at once'; });
     flowInputs = (f.inputs || []).map(function (i) { return Object.assign({}, i); });
+    if (document.getElementById('fd-sample-fields')) renderSampleFields();
     (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
     rootFlow = flow;
+    var samplePanel = document.getElementById('fd-test-data');
+    if (samplePanel) samplePanel.hidden = rootFlow.learned_recipe != null;
     autoLayout();
     nameInput.value = flow.name; idInput.value = flow.id;
     selected = null; selectedEdge = null; view = { x: 40, y: 20, k: 1 }; render(); renderProps();
     if (savedSnapshot) markClean();
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function')
+      window.dispatchEvent(new Event('lightwork:flow-loaded'));
   }
   function autoLayout() {
     var need = flow.nodes.some(function (n) { return !n.x && !n.y; });
@@ -1270,20 +1509,47 @@
   function apiFetch(url, opts) {
     return fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
   }
+  var ACTION_WORDS = { Save: 'save the flow', Publish: 'publish the flow', Run: 'start the run',
+    Draft: 'draft the flow', Apply: 'apply the suggestion' };
+  function failText(response, action) {
+    var what = ACTION_WORDS[action] || String(action || 'do that').toLowerCase();
+    if (window.mvErrorText) return window.mvErrorText(response, what);
+    var status = response && response.status;
+    if (status === 409) return 'Could not ' + what + '. This flow was changed since you opened it. Reload it and try again.';
+    return 'Could not ' + what + '. Please try again.';
+  }
+  // Problems in words, naming the step ("The step “Send to Slack” needs an action chosen.").
+  function problemText(f) {
+    var list = FDCore.plainProblems ? FDCore.plainProblems(f) : FDCore.validateFlow(f);
+    return list.slice(0, 3).join(' ');
+  }
+  // The sample answers entered for a test (one box per question asked at
+  // start, plus any extra name/value rows).
+  function sampleData() {
+    var out = {}, box = document.getElementById('fd-sample-fields');
+    if (!box || !box.querySelectorAll) return { data: out };
+    Array.prototype.forEach.call(box.querySelectorAll('[data-sample-key]'), function (inp) {
+      var v = (inp.value || '').trim(); if (v) out[inp.getAttribute('data-sample-key')] = v;
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('.fd__sample-extra'), function (row) {
+      var k = slugKey((row.querySelector('[data-extra-name]') || {}).value), v = ((row.querySelector('[data-extra-value]') || {}).value || '').trim();
+      if (k && v) out[k] = v;
+    });
+    return { data: out };
+  }
   function unconfirmedMutation(action) {
     return action + ' could not be confirmed. ' + (action === 'Run'
       ? 'Check recent runs before retrying.' : 'Reload the flow before retrying.');
   }
   async function readMutationResult(response, action) {
     var result;
-    try { result = await response.json(); }
+    try { result = typeof FDRecipeInputs !== 'undefined' && typeof response.text === 'function'
+      ? await FDRecipeInputs.responseJson(response) : await response.json(); }
     catch (e) { throw new Error(unconfirmedMutation(action)); }
     if (!result || typeof result !== 'object' || Array.isArray(result)) {
       throw new Error(unconfirmedMutation(action));
     }
-    if (!response.ok) {
-      throw new Error(typeof result.detail === 'string' ? result.detail : action + ' failed (' + response.status + ').');
-    }
+    if (!response.ok) throw new Error(failText(response, action));
     return result;
   }
   function validPublication(result) {
@@ -1298,20 +1564,24 @@
   async function save(forApply) {
     if (saveInFlight || (applyInFlight && forApply !== true)) return false;
     var bad = commitRawFields();
-    if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return false; }
+    if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return false; }
     var body = toApiFlow();
     if (!body.id) { body.id = slugify(body.name); idInput.value = body.id; }   // auto-id from the name
     if (!body.id) { say('Give the flow a name (top-left).', true); return false; }
     if (!body.nodes.length) { say('Add at least one step.', true); return false; }
     var verrs = FDCore.validateFlow(body);
+    if (verrs.length) { say('Before saving: ' + problemText(body), true); return false; }
     if (verrs.length) { say('Fix first: ' + verrs.slice(0, 3).join(' · '), true); return false; }
+    var creationHistory = body.version === 0 && body.revision === ''
+      ? { sourceId: rootFlow.id, snapshots: undoStack.concat(redoStack, pendingSnap ? [pendingSnap] : []) } : null;
     rootFlow.id = body.id;
     var savedDraftSnapshot = draftSnapshot();
     saveInFlight = true; syncSaveButtons();
     say('Saving…');
     try {
       var response = await apiFetch('/api/v1/flows', {
-        method: 'POST', body: JSON.stringify({ flow: body })
+        method: 'POST', body: body.learned_recipe == null ? JSON.stringify({ flow: body })
+          : '{"flow":' + FDRecipeInputs.flowText(body) + '}'
       });
       var result = await readMutationResult(response, 'Save');
       if (result.id !== body.id || !Number.isInteger(result.version) || result.version < 1 ||
@@ -1323,9 +1593,16 @@
       rootFlow.published = result.published;
       rootFlow.published_version = result.published_version || 0;
       rootFlow.published_revision = result.published_revision;
+      if (creationHistory) {
+        creationHistory.receipt = { id: result.id, version: result.version, revision: result.revision,
+          published: result.published, published_version: result.published_version || 0,
+          published_revision: result.published_revision };
+        firstSaveHistory = creationHistory;
+      }
       markClean(savedDraftSnapshot);
       canonicalizeSavedFlow(rootFlow.id);
       say('Saved ✓');
+      if (window.__fdStepsRefresh) window.__fdStepsRefresh();
       return true;
     } catch (e) {
       say(e.message || unconfirmedMutation('Save'), true); return false;
@@ -1353,62 +1630,59 @@
       rootFlow.published = true;
       rootFlow.published_version = result.published_version;
       rootFlow.published_revision = result.published_revision;
-      say('Published v' + rootFlow.published_version);
+      say('Published — version ' + rootFlow.published_version + ' is now the one that runs.');
     } catch (e) {
       say(e.message || unconfirmedMutation('Publish'), true);
     } finally {
       publishInFlight = false; syncSaveButtons();
     }
   }
-  function inputFields() {
+  function inputFields(definitions) {
     // The declared manual-run inputs as an mvForm field spec.
-    return flowInputs.filter(function (s) { return (s.key || '').trim(); }).map(function (s) {
+    return (definitions || flowInputs).filter(function (s) { return (s.key || '').trim(); }).map(function (s) {
       return { key: s.key, label: s.label || s.key, type: (s.type || 'text'),
                required: !!s.required, default: (s.default != null ? s.default : undefined) };
     });
   }
+  var learnedInputPending = false;
   function run(dryRun) {
-    if (runInFlight) return;
+    if (runInFlight || learnedInputPending) return;
     var data = {};
-    var raw = document.getElementById('fd-sample').value.trim();
-    if (raw) { try { data = JSON.parse(raw); } catch (e) {
-      var testData = document.getElementById('fd-test-data'); if (testData) testData.open = true;
-      document.getElementById('fd-sample').focus();
-      say('Check the JSON in Advanced test data, then test again.', true); return;
-    } }
+    var learnedPlan = null;
+    var pinnedDraft = JSON.stringify(rootFlow), pinnedSnapshot = draftSnapshot(), selectedFlow = rootFlow, releaseId = '';
+    function unchanged() { return JSON.stringify(rootFlow) === pinnedDraft && draftSnapshot() === pinnedSnapshot; }
     async function proceed() {
       if (runInFlight) return;
       var url, payload;
       if (dryRun) {
         var bad = commitRawFields();
-        if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return; }
+        if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return; }
         var draftBody = toApiFlow();
         if (!draftBody.id) draftBody.id = slugify(draftBody.name);
         if (!draftBody.id) { say('Give the flow a name (top-left).', true); return; }
         if (!draftBody.nodes.length) { say('Add at least one step.', true); return; }
         var errors = FDCore.validateFlow(draftBody);
-        if (errors.length) { say('Fix first: ' + errors.slice(0, 3).join(' / '), true); return; }
+        if (errors.length) { say('Before testing: ' + problemText(draftBody), true); return; }
         // The unsaved graph is the execution input. This endpoint does not save,
         // publish, or let a draft schedule enter the scheduler inventory.
         url = '/api/v1/flows/dry-run'; payload = { flow: draftBody, data: data };
       } else {
-        if (!rootFlow.id) { say('Publish the flow before running it for real.', true); return; }
-        if (!rootFlow.published) { say('Publish a reviewed draft before running it for real.', true); return; }
-        url = '/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run';
-        payload = { data: data, dry_run: false };
+        url = '/api/v1/flows/' + encodeURIComponent(selectedFlow.id) + '/run';
+        payload = { data: data, dry_run: false, expected_release_id: releaseId };
       }
       var buttons = ['fd-run', 'fd-run-real'].map(function (id) { return document.getElementById(id); });
       runInFlight = true;
       buttons.forEach(function (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
       try {
-        var response = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+        var response = await apiFetch(url, { method: 'POST',
+          body: learnedPlan ? FDRecipeInputs.payloadText(learnedPlan, payload) : JSON.stringify(payload) });
         var result = await readMutationResult(response, 'Run');
         if (typeof result.run_id !== 'string' || !result.run_id.trim() ||
             typeof result.status !== 'string' || !result.status.trim() || result.dry_run !== dryRun) {
           throw new Error(unconfirmedMutation('Run'));
         }
         runState = {}; runCursor = null; lastRunId = result.run_id;
-        say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + result.run_id.slice(0, 8) + '…)');
+        say(dryRun ? 'Test started — nothing is sent to other apps.' : 'Run started.');
         document.getElementById('fd-legend').classList.add('on');
         watchRun(result.run_id);
       } catch (e) {
@@ -1416,28 +1690,53 @@
       } finally {
         runInFlight = false;
         buttons.forEach(function (button) { button.disabled = false; button.removeAttribute('aria-busy'); });
+        var invoker = document.getElementById(dryRun ? 'fd-run' : 'fd-run-real');
+        if (learnedPlan && invoker && typeof invoker.focus === 'function' &&
+            (document.activeElement === document.body || document.activeElement === invoker)) invoker.focus();
       }
     }
-    var fields = inputFields();
-    if (fields.length) {   // the typed-input form doubles as the run confirmation
-      window.mvForm((dryRun ? 'Dry run' : 'Run published') + ' “' + (rootFlow.name || rootFlow.id || 'flow') + '”',
-        fields, { okText: dryRun ? 'Dry run' : 'Run published' }).then(function (vals) {
-        if (vals === null) { say('Run cancelled.'); return; }
-        Object.keys(vals).forEach(function (k) { data[k] = vals[k]; });   // declared inputs win over sample
-        proceed();
-      });
-      return;
+    async function prepare() {
+      if (!dryRun) {
+        if (!rootFlow.id) { say('Publish the reviewed workflow before running it.', true); return; }
+        say('Loading the published workflow…');
+        var previewResponse = await apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/published');
+        var preview = await readMutationResult(previewResponse, 'Published workflow');
+        if (!preview.flow || preview.flow.id !== rootFlow.id || !Array.isArray(preview.flow.nodes) ||
+            typeof preview.release_id !== 'string' || !/^[0-9a-f]{64}$/.test(preview.release_id))
+          throw new Error('The published workflow could not be confirmed. Reload it before trying again.');
+        selectedFlow = preview.flow; releaseId = preview.release_id;
+      }
+      if (!unchanged()) { say('The workflow changed. Open the input form again.', true); return; }
+      var title = (dryRun ? 'Test' : 'Run published') + ' “' + (selectedFlow.name || selectedFlow.id || 'workflow') + '”';
+      if (selectedFlow.learned_recipe != null) {
+        learnedPlan = FDRecipeInputs.plan(selectedFlow.learned_recipe);
+        data = await FDRecipeInputs.prompt(learnedPlan, {title: title, okText: dryRun ? 'Test workflow' : 'Run published',
+          restoreFocus: document.getElementById(dryRun ? 'fd-run' : 'fd-run-real')});
+        if (data === null) { say('Run cancelled.'); return; }
+      } else {
+        data = typeof sampleData === 'function' ? sampleData().data : {};
+        var fields = inputFields(dryRun ? flowInputs : (selectedFlow.inputs || []));
+        if (fields.length) {
+          var values = await window.mvForm(title, fields, {okText: dryRun ? 'Test workflow' : 'Run published'});
+          if (values === null) { say('Run cancelled.'); return; }
+          Object.keys(values).forEach(function (key) { data[key] = values[key]; });
+        } else if (!dryRun && !(await window.mvConfirm('Run the published version? This starts real work and uses connected services.', {okText: 'Run published'}))) {
+          say('Run cancelled.'); return;
+        }
+      }
+      if (!unchanged()) { say('The workflow changed while entering inputs. Open the form again.', true); return; }
+      await proceed();
     }
-    if (dryRun) { proceed(); return; }
-    window.mvConfirm('Run the published version? This starts real work and uses connected services.', { okText: 'Run published' })
-      .then(function (ok) { if (ok) proceed(); });
+    learnedInputPending = true;
+    prepare().catch(function (error) { say(error.message || 'Could not open workflow inputs.', true); })
+      .finally(function () { learnedInputPending = false; });
   }
   function runUrl(runId) {
     return '/flows/' + encodeURIComponent(rootFlow.id) + '/runs/' + encodeURIComponent(runId);
   }
   function sayWithRunLink(text, runId) {
     say(text);
-    var a = document.createElement('a'); a.href = runUrl(runId); a.textContent = 'view run →';
+    var a = document.createElement('a'); a.href = runUrl(runId); a.textContent = 'Open the run →';
     a.style.marginLeft = '6px';
     msg.appendChild(a);
   }
@@ -1447,10 +1746,14 @@
     runState = run.nodes || {};
     runCursor = (['paused_approval', 'paused_delay', 'paused_event'].indexOf(run.status) >= 0) ? run.cursor : null;
     render(); if (selected) renderProps();
-    if (run.status === 'paused_approval') { sayWithRunLink('⏸ waiting for approval —', runId); return true; }
-    if (run.status === 'paused_event') { sayWithRunLink('📥 waiting for an external event —', runId); return true; }
+    if (run.status === 'paused_approval') { sayWithRunLink('⏸ Waiting for someone to approve —', runId); return true; }
+    if (run.status === 'paused_event') { sayWithRunLink('📥 Waiting for a signal from another app —', runId); return true; }
+    if (run.status === 'budget_limited') {
+      sayWithRunLink('Saved work is waiting for a larger spending allowance. Review and continue this run —', runId);
+      return true;
+    }
     if (run.status === 'indeterminate') {
-      sayWithRunLink('⚠️ effect state is indeterminate; reconcile the external system before retrying —', runId);
+      sayWithRunLink('⚠️ We couldn’t tell whether the last step finished in the other app. Check it there before running again —', runId);
       return true;
     }
     if (run.status === 'failed') {
@@ -1507,7 +1810,7 @@
     // One-click repair: open the copilot pre-armed with a diagnose+fix turn
     // grounded in the failed run's trace.
     var a = document.createElement('button');
-    a.className = 'btn btn--ghost'; a.type = 'button'; a.textContent = '🔧 Fix it';
+    a.className = 'btn btn--ghost'; a.type = 'button'; a.textContent = 'Ask the assistant to fix it';
     a.style.marginLeft = '6px';
     a.addEventListener('click', function () {
       lastRunId = runId;
@@ -1521,10 +1824,11 @@
   function runSummary(run) {
     var ok = 0, err = 0, ns = run.nodes || {};
     for (var k in ns) { if (ns[k].outcome === 1) ok++; else if (ns[k].outcome === 0) err++; }
-    var head = run.status === 'completed' ? '✓ completed' : (run.status === 'rejected' ? '✋ rejected' : '⚠ ' + (run.error || run.status));
+    var head = run.status === 'completed' ? '✓ Finished' : (run.status === 'rejected' ? '✋ Rejected' : '⚠ The run stopped with a problem');
     var cost = run.cost_dollars ? ' · $' + Number(run.cost_dollars).toFixed(2) : '';
-    var origin = (run.origin && run.origin !== 'manual') ? ' · via ' + run.origin : '';
-    return head + ' · ' + ok + ' ok' + (err ? ', ' + err + ' failed' : '') + cost + origin;
+    var ORIGINS = { webhook: 'started by another app', schedule: 'started on schedule', event_trigger: 'started by a new item' };
+    var origin = (run.origin && run.origin !== 'manual') ? ' · ' + (ORIGINS[run.origin] || human(run.origin)) : '';
+    return head + ' · ' + ok + ' step' + (ok === 1 ? '' : 's') + ' worked' + (err ? ', ' + err + ' failed' : '') + cost + origin;
   }
   async function draft() {
     var desc = document.getElementById('fd-nl').value.trim();
@@ -1563,9 +1867,9 @@
       pushHistory();                    // the pre-draft canvas is one Ctrl+Z away
       fromApiFlow(draftedFlow);
       say(Array.isArray(result.notes) && typeof result.notes[0] === 'string'
-        ? result.notes[0] : 'Drafted ✓ — edit and save.');
+        ? result.notes[0] : 'Drafted ✓ — review the steps, then save.');
     } catch (e) {
-      if (generation === draftGeneration) say(e.message || 'Draft failed', true);
+      if (generation === draftGeneration) say(e.message || 'Could not draft the flow. Please try again.', true);
     } finally {
       if (generation === draftGeneration) {
         pendingDraft = null;
@@ -1577,7 +1881,8 @@
     var loadingFlow = rootFlow;
     return apiFetch('/api/v1/flows/' + encodeURIComponent(id)).then(function (r) {
       if (!r.ok) { say('Could not load flow', true); return; }
-      return r.json().then(function (saved) {
+      return (typeof FDRecipeInputs !== 'undefined' && typeof r.text === 'function'
+        ? FDRecipeInputs.responseJson(r) : r.json()).then(function (saved) {
         if (expectedDraftSnapshot !== undefined &&
             (rootFlow !== loadingFlow || draftSnapshot() !== expectedDraftSnapshot)) {
           say('Applied on the server. Your newer canvas edits were kept; reload when ready to inspect the applied version.');
@@ -1587,7 +1892,7 @@
         loadSuggestions(id);
         loadSchema(id);
       });
-    }).catch(function () { say('Could not load flow', true); });
+    }).catch(function (e) { say(failText(e, 'open this flow'), true); });
   }
   function loadSchema(id) {
     // learned output shapes -> nested data pills (order.total, etc.)
@@ -1603,7 +1908,7 @@
     }).then(function (j) {
       proposals = {};
       (j.proposals || []).forEach(function (p) { proposals[p.node_id] = p; });
-      if (j.proposals && j.proposals.length) say('💡 ' + j.proposals.length + ' learned suggestion(s) — select a node to see them.');
+      if (j.proposals && j.proposals.length) say('💡 ' + j.proposals.length + (j.proposals.length === 1 ? ' suggestion' : ' suggestions') + ' — select a step marked 💡 to see it.');
       if (selected) renderProps();
     }).catch(function () {});
     // measured impact of changes already applied (before/after), via the aggregate
@@ -1624,8 +1929,8 @@
       var lg = document.getElementById('fd-signal');
       if (lg) {
         if (signals.trigger && signals.trigger.n) {
-          lg.textContent = '📊 triggered runs succeed ' + Math.round(signals.trigger.mean * 100) +
-            '% (' + signals.trigger.n + ')';
+          lg.textContent = '📊 Automatic runs worked ' + Math.round(signals.trigger.mean * 100) +
+            '% of the time (' + signals.trigger.n + ' runs)';
           lg.hidden = false;
         } else { lg.hidden = true; }
       }
@@ -1643,7 +1948,7 @@
     }
     var tool = n.tool || (prop.inferred_tool || '');
     if (prop.to_kind === 'action' && !tool) {
-      say('Give this step a Tool first, then Apply (an action needs one).', true); return;
+      say('Choose an action for this step first, then apply.', true); return;
     }
     var applyingFlow = rootFlow, fromKind = n.kind, confirmed = false;
     var body = { node_id: n.id, to_kind: prop.to_kind, tool: tool, brief: n.brief || n.label || '' };
@@ -1674,7 +1979,7 @@
         say('Applied on the server. Your newer canvas edits were kept; reload when ready to inspect the applied version.');
         return;
       }
-      say('Applied ✓ — now v' + result.version + '. Impact appears as new runs land.');
+      say('Applied ✓ — now version ' + result.version + '. Results appear as new runs finish.');
       await load(flowId, snapshot);                  // retain edits made during the refresh too
     } catch (e) {
       say(e.message || unconfirmedMutation('Apply'), true);
@@ -1686,25 +1991,38 @@
   }
   function showHistory() {
     if (!rootFlow.id) { say('Save the flow first.', true); return; }
+    if (window.__fdShowProps) window.__fdShowProps();
     apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/versions')
-      .then(function (r) { return r.ok ? r.json() : { versions: [] }; })
+      .then(function (r) { if (!r.ok) throw r; return r.json(); })
       .then(function (j) {
+        selected = null; render();
         props.textContent = '';
         var h = document.createElement('div'); h.style.fontWeight = '600'; h.style.marginBottom = 'var(--space-3)';
-        h.textContent = '⏱ Version history';
+        h.textContent = 'Earlier versions';
         props.appendChild(h);
-        (j.versions || []).forEach(function (v) {
+        var versions = j.versions || [];
+        if (!versions.length) props.appendChild(hint('No earlier versions yet. Each save keeps a version you can go back to.'));
+        versions.forEach(function (v) {
           var row = document.createElement('div'); row.className = 'field';
-          var kinds = Object.keys(v.kinds || {}).map(function (k) { return v.kinds[k] + ' ' + k; }).join(', ');
-          var lbl = document.createElement('div'); lbl.textContent = 'v' + v.version + ' — ' + v.nodes + ' nodes (' + kinds + ')';
+          var when = v.saved_at || v.created_at || v.updated;
+          var who = v.saved_by || v.author || '';
+          var lbl = document.createElement('div');
+          lbl.textContent = 'Version ' + v.version + ' — ' + v.nodes + (v.nodes === 1 ? ' step' : ' steps')
+            + (when && window.mvWhen ? ' · saved ' + window.mvWhen(when) : '') + (who ? ' by ' + who : '')
+            + (v.version === rootFlow.version ? ' (current)' : '');
           row.appendChild(lbl);
-          var rb = document.createElement('button'); rb.className = 'btn btn--ghost'; rb.type = 'button'; rb.textContent = 'Roll back to v' + v.version;
-          rb.addEventListener('click', function () { rollback(v.version); });
-          row.appendChild(rb); props.appendChild(row);
+          if (v.version !== rootFlow.version) {
+            var rb = document.createElement('button'); rb.className = 'btn btn--ghost'; rb.type = 'button'; rb.textContent = 'Restore this version';
+            rb.addEventListener('click', function () { rollback(v.version); });
+            row.appendChild(rb);
+          }
+          props.appendChild(row);
         });
-      }).catch(function () { say('Could not load history', true); });
+      }).catch(function (e) { say(failText(e, 'load earlier versions'), true); });
   }
-  function rollback(version) {
+  async function rollback(version) {
+    var ok = await (window.mvConfirm ? window.mvConfirm('Restore version ' + version + '? It becomes the current draft; your current version stays in the list.', { okText: 'Restore' }) : Promise.resolve(false));
+    if (!ok) return;
     apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/rollback', {
       method: 'POST',
       body: JSON.stringify({
@@ -1713,11 +2031,11 @@
         revision: rootFlow.revision
       })
     })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, r: r, j: j }; }); })
       .then(function (res) {
-        if (!res.ok) { say(res.j.detail || 'Rollback failed', true); return; }
-        say('Rolled back — now v' + res.j.version + '.'); load(rootFlow.id);
-      }).catch(function () { say('Rollback failed', true); });
+        if (!res.ok) { say(failText(res.r, 'restore that version'), true); return; }
+        say('Restored — now version ' + res.j.version + '.'); load(rootFlow.id);
+      }).catch(function (e) { say(failText(e, 'restore that version'), true); });
   }
 
   var EXAMPLES = [
@@ -1737,26 +2055,29 @@
   // ---- export / import (flow JSON as a file) ----
   function exportJson() {
     var bad = commitRawFields();
-    if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return; }
+    if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return; }
     var body = toApiFlow();
-    var blob = new Blob([JSON.stringify(body, null, 2)], { type: 'application/json' });
+    var wire;
+    try { wire = body.learned_recipe == null ? JSON.stringify(body, null, 2) : FDRecipeInputs.flowText(body); }
+    catch (error) { say(error.message, true); return; }
+    var blob = new Blob([wire], { type: 'application/json' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = (body.id || slugify(body.name) || 'flow') + '.json';
     a.click();
     URL.revokeObjectURL(a.href);
-    say('Exported.');
+    say('A copy was downloaded.');
   }
   function importJsonFile(file) {
     var reader = new FileReader();
     reader.onload = function () {
       try {
-        var f = JSON.parse(String(reader.result || ''));
+        var f = FDRecipeInputs.parseText(String(reader.result || ''));
         if (!f || !Array.isArray(f.nodes)) throw new Error('not a flow');
         pushHistory();
         fromApiFlow(f);
-        say('Loaded from file — review and Save.');
-      } catch (e) { say('That file is not a flow JSON.', true); }
+        say('Opened the saved copy — review it, then save.');
+      } catch (e) { say('That file isn’t a Lightwork flow.', true); }
     };
     reader.readAsText(file);
   }
@@ -1764,60 +2085,66 @@
   // ---- triggers panel: everything that starts THIS flow, in one place ----
   function showTriggers() {
     if (!rootFlow.id) { say('Save the flow first.', true); return; }
+    if (window.__fdShowProps) window.__fdShowProps();
+    selected = null; render();
     props.textContent = '';
     var h = document.createElement('div'); h.style.fontWeight = '600'; h.style.marginBottom = 'var(--space-3)';
-    h.textContent = '⚡ What starts this flow';
+    h.textContent = 'What starts this flow';
     props.appendChild(h);
     var sch = ((document.getElementById('fd-schedule') || {}).value || '').trim();
-    props.appendChild(hint(sch ? ('⏰ Cron schedule: ' + sch + ' (edit it in the toolbar, then Save).')
-                               : '⏰ No cron schedule — set one in the toolbar field.'));
-    // inbound webhook triggers bound to this flow
+    props.appendChild(hint(sch ? ('⏰ On a schedule: ' + scheduleWords(sch) + '. Change it under Schedule, then publish.')
+                               : '⏰ No schedule. Choose one under Schedule.'));
     apiFetch('/api/v1/triggers').then(function (r) { return r.ok ? r.json() : { triggers: [] }; })
       .then(function (j) {
         var mine = (j.triggers || []).filter(function (t) { return t.flow === rootFlow.id; });
+        var address = window.location.origin + (j.webhook_url || '/webhook/run');
         var wl = document.createElement('div'); wl.className = 'field';
-        var lab = document.createElement('label'); lab.textContent = '📡 Inbound webhooks (POST ' + (j.webhook_url || '/webhook/run') + ')';
+        var lab = document.createElement('div'); lab.className = 'fd__label'; lab.textContent = '📡 Started by another app';
         wl.appendChild(lab);
         mine.forEach(function (t) {
-          var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = '4px'; row.style.marginBottom = '4px';
-          var nm = document.createElement('span'); nm.style.flex = '1'; nm.textContent = '‘' + t.name + '’ → this flow';
-          var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
-          rm.setAttribute('aria-label', 'Remove webhook trigger');
-          rm.addEventListener('click', function () {
+          var row = document.createElement('div'); row.className = 'fd__pair';
+          var nm = document.createElement('span'); nm.textContent = '“' + t.name + '”';
+          var copy = document.createElement('button'); copy.className = 'btn btn--ghost'; copy.type = 'button'; copy.textContent = 'Copy address';
+          copy.addEventListener('click', function () { if (window.mvCopy) window.mvCopy(address); });
+          var rm = document.createElement('button'); rm.className = 'btn btn--ghost btn--danger'; rm.type = 'button'; rm.textContent = 'Remove';
+          rm.setAttribute('aria-label', 'Remove the start “' + t.name + '”');
+          rm.addEventListener('click', async function () {
+            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove' }))) return;
             apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
-              .then(function () { showTriggers(); }).catch(function () {});
+              .then(function (r) { if (!r.ok) say(failText(r, 'remove it'), true); showTriggers(); })
+              .catch(function (e) { say(failText(e, 'remove it'), true); });
           });
-          row.appendChild(nm); row.appendChild(rm); wl.appendChild(row);
+          row.appendChild(nm); row.appendChild(copy); row.appendChild(rm); wl.appendChild(row);
         });
-        if (!mine.length) {
-          var none = document.createElement('div'); none.className = 'fd__empty'; none.textContent = 'None yet.'; wl.appendChild(none);
-        }
-        var add = document.createElement('button'); add.className = 'btn btn--ghost'; add.type = 'button'; add.style.width = '100%';
-        add.textContent = '+ Add a webhook trigger for this flow';
-        add.addEventListener('click', function () {
+        if (mine.length) wl.appendChild(hint('In the other app, send a web request to the copied address and include the start’s name.'));
+        else wl.appendChild(hint('None yet.'));
+        wl.appendChild(addButton('Let another app start this flow', function () {
           apiFetch('/api/v1/triggers', { method: 'POST', body: JSON.stringify({ flow: rootFlow.id }) })
-            .then(function (r) { return r.json().then(function (jj) { return { ok: r.ok, j: jj }; }); })
+            .then(function (r) { return r.json().catch(function () { return {}; }).then(function (jj) { return { ok: r.ok, r: r, j: jj }; }); })
             .then(function (res) {
-              if (!res.ok) { say(res.j.detail || 'Could not create the trigger', true); return; }
-              if (!res.j.secret_configured) say('Trigger armed — set a [webhooks] secret so it can fire.', true);
+              if (!res.ok) { say(failText(res.r, 'set that up'), true); return; }
+              if (!res.j.secret_configured) {
+                say('Almost ready — an administrator must create the security key in Settings before other apps can start flows.', true);
+                var link = document.createElement('a'); link.href = '/settings#webhook-secret'; link.textContent = ' Open Settings';
+                msg.appendChild(link);
+              }
               showTriggers();
-            }).catch(function () { say('Could not create the trigger', true); });
-        });
-        wl.appendChild(add); props.appendChild(wl);
+            }).catch(function (e) { say(failText(e, 'set that up'), true); });
+        }));
+        props.appendChild(wl);
       }).catch(function () {});
-    // polled event triggers bound to this flow (managed on Automations)
     apiFetch('/api/v1/event-triggers').then(function (r) { return r.ok ? r.json() : { triggers: [] }; })
       .then(function (j) {
         var mine = (j.triggers || []).filter(function (t) { return t.flow === rootFlow.id; });
         var el2 = document.createElement('div'); el2.className = 'field';
-        var lab2 = document.createElement('label'); lab2.textContent = '🛰 Polled event triggers';
+        var lab2 = document.createElement('div'); lab2.className = 'fd__label'; lab2.textContent = '🛰 Started when new items arrive';
         el2.appendChild(lab2);
         mine.forEach(function (t) {
           var d = document.createElement('div'); d.className = 'fd__empty';
-          d.textContent = '‘' + t.name + '’ — ' + t.source; el2.appendChild(d);
+          d.textContent = '“' + t.name + '” — ' + human(t.source); el2.appendChild(d);
         });
-        var link = document.createElement('a'); link.href = '/automations';
-        link.textContent = (mine.length ? 'Manage' : 'Add one') + ' on the Automations page →';
+        var link = document.createElement('a'); link.href = '/automations#auto-event-section';
+        link.textContent = (mine.length ? 'Manage' : 'Set one up') + ' on the Automations page →';
         el2.appendChild(link); props.appendChild(el2);
       }).catch(function () {});
   }
@@ -1830,8 +2157,10 @@
         if (r.status === 403) {
           var msg = document.getElementById('fd-msg');
           if (msg && !msg.textContent) {
-            msg.textContent = 'Flows are disabled on this server — you can design and export, '
-              + 'but Save/Run need an administrator to enable [flows].';
+            msg.textContent = 'Workflows are turned off. You can design a flow and download a copy, '
+              + 'but saving and running need an administrator to turn workflows on.';
+            var on = document.createElement('a'); on.href = '/learning'; on.textContent = ' Turn on workflows';
+            msg.appendChild(on);
           }
         }
         return r.ok ? r.json() : { flows: [] };
@@ -1846,7 +2175,8 @@
             fromApiFlow(g);
             var schEl = document.getElementById('fd-schedule');
             if (schEl && g.schedule) schEl.value = g.schedule;
-            say('Loaded “' + g.name + '” — edit it, or tell the Copilot what to change.');
+            if (typeof syncScheduleControls === 'function') syncScheduleControls();
+            say('Loaded “' + g.name + '” — edit it, or tell the assistant what to change.');
           });
           box.appendChild(c);
         });
@@ -1854,6 +2184,13 @@
   }
 
   // ---- copilot chat: converse to build, edit, explain, and repair the flow ----
+  var chatGeneration = 0;
+  var chatPending = [];
+  var chatSavedKeys = ['version', 'revision', 'published', 'published_version', 'published_revision'];
+  function chatSavedState() {
+    return JSON.stringify(chatSavedKeys.map(function (key) { return rootFlow[key]; }));
+  }
+  function chatBusy() { return saveInFlight || publishInFlight || applyInFlight || !!pendingDraft; }
   function chatMsgEl(role, text) {
     var d = document.createElement('div'); d.className = 'fd__chat-msg ' + role; d.textContent = text; return d;
   }
@@ -1882,47 +2219,134 @@
       maxY = Math.max(maxY, n.y);
     });
   }
-  function chatSend() {
-    var inp = document.getElementById('fd-chat-input');
-    var text = (inp.value || '').trim();
-    if (!text) return;
+  function chatRequest(text) {
+    if (chatBusy()) {
+      say('Wait for the current workflow update to finish, then ask Copilot again.', true);
+      return null;
+    }
     var bad = commitRawFields();
-    if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return; }
-    inp.value = '';
+    if (bad.length) { say('Finish correcting the highlighted step settings before asking Copilot.', true); return null; }
+    var snapshot = draftSnapshot(), savedState = chatSavedState();
+    if (chatPending.some(function (request) {
+      return request.text === text && request.base === rootFlow && request.snapshot === snapshot &&
+        request.savedState === savedState && request.draftGeneration === draftGeneration;
+    })) {
+      say('Copilot is already working on that request. Your message has been kept.');
+      return null;
+    }
+    var body, wire;
+    try {
+      body = { message: text, flow: toApiFlow(), history: chatHistory.concat([{ role: 'user', content: text }]).slice(-12), run_id: lastRunId || '' };
+      // Preserve retained evidence's exact numbers in both directions, just as
+      // Save/Test do. JSON.stringify alone changes integral floats into ints.
+      wire = body.flow.learned_recipe == null ? JSON.stringify(body)
+        : '{"message":' + JSON.stringify(text) + ',"flow":' + FDRecipeInputs.flowText(body.flow) +
+          ',"history":' + JSON.stringify(body.history) + ',"run_id":' + JSON.stringify(body.run_id) + '}';
+    } catch (e) {
+      say('This workflow could not be prepared for Copilot. Save your changes, reopen it, and try again.', true);
+      return null;
+    }
+    var request = { text: text, base: rootFlow, snapshot: snapshot, savedState: savedState,
+      draftGeneration: draftGeneration, generation: ++chatGeneration,
+      historyEntry: { role: 'user', content: text } };
+    chatPending.push(request);
     chatAppend('user', text);
-    chatHistory.push({ role: 'user', content: text });
-    // Track THIS request's note element so concurrent sends each remove their
-    // own "…thinking" line instead of blindly deleting whatever is last.
-    var thinking = chatAppend('note', '…thinking');
+    chatHistory.push(request.historyEntry);
+    // Keep each reply beside its own instruction even when requests finish
+    // out of order. An older reply is never described as a later instruction.
+    var replyBox = document.createElement('div');
+    document.getElementById('fd-chat-log').appendChild(replyBox);
+    function reply(role, value) {
+      var log = document.getElementById('fd-chat-log');
+      var follow = log.scrollTop + log.clientHeight >= log.scrollHeight - 40;
+      var element = replyBox.appendChild(chatMsgEl(role, value));
+      if (follow) log.scrollTop = log.scrollHeight;
+      return element;
+    }
+    var thinking = reply('note', 'Working on your request…');
     function clearThinking() { if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking); }
-    var body = { message: text, flow: toApiFlow(), history: chatHistory.slice(-12), run_id: lastRunId || '' };
-    apiFetch('/api/v1/flows/chat', { method: 'POST', body: JSON.stringify(body) })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (res) {
+    function recover(message) {
+      var note = reply('note', message);
+      var button = document.createElement('button');
+      button.type = 'button'; button.className = 'btn btn--ghost';
+      button.textContent = 'Update for current workflow';
+      button.addEventListener('click', function () {
+        if (button.disabled) return;
+        var next = chatRequest(text);
+        if (!next) return;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        next.finished.finally(function () {
+          button.disabled = false; button.removeAttribute('aria-busy');
+        });
+      });
+      note.appendChild(document.createElement('br')); note.appendChild(button);
+    }
+    request.finished = apiFetch('/api/v1/flows/chat', { method: 'POST', body: wire })
+      .then(async function (response) {
+        if (!response.ok) throw new Error('Copilot request failed');
+        return typeof FDRecipeInputs !== 'undefined' && typeof response.text === 'function'
+          ? FDRecipeInputs.responseJson(response) : response.json();
+      })
+      .then(function (j) {
         clearThinking();
-        if (!res.ok) { chatAppend('note', res.j.detail || 'The copilot call failed.'); return; }
-        var j = res.j;
-        chatAppend('assistant', j.reply || 'Done.');
-        chatHistory.push({ role: 'assistant', content: j.reply || '' });
-        (j.notes || []).forEach(function (nt) { chatAppend('note', nt); });
+        if (!j || typeof j !== 'object' || Array.isArray(j) || typeof j.reply !== 'string') throw new Error('Invalid Copilot reply');
+        reply('assistant', j.reply);
+        var current = request.generation === chatGeneration && request.base === rootFlow &&
+          request.snapshot === draftSnapshot() && request.savedState === chatSavedState() &&
+          request.draftGeneration === draftGeneration && !chatBusy();
+        var entry = { role: 'assistant', content: j.reply };
+        // Preserve request order in the next conversation, with an explicit
+        // distinction between suggested and applied edits.
+        chatHistory.splice(chatHistory.indexOf(request.historyEntry) + 1, 0, entry);
+        (Array.isArray(j.notes) ? j.notes : []).forEach(function (nt) { if (typeof nt === 'string') reply('note', nt); });
         if (j.flow) {
+          entry.content = 'Suggestion only; not applied to the workflow. ' + j.reply;
+          if (!current) {
+            recover('Your newer work was kept. This suggestion was not applied. Ask Copilot to update it for your current workflow.');
+            return;
+          }
+          if (typeof j.flow !== 'object' || Array.isArray(j.flow) || !Array.isArray(j.flow.nodes) ||
+              FDCore.validateFlow(j.flow).length) throw new Error('Invalid Copilot flow');
+          // Copilot edits do not save or publish. Never let its response replace
+          // the current server-issued compare-and-set/publication metadata.
+          chatSavedKeys.forEach(function (key) { j.flow[key] = rootFlow[key]; });
+          if (j.flow.learned_recipe != null) FDRecipeInputs.flowText(j.flow);
           pushHistory();                                      // "undo what the AI did" is one Ctrl+Z
           placeNewNodes(j.flow);
           var keep = { x: view.x, y: view.y, k: view.k };
           fromApiFlow(j.flow);
           view = keep; render();
-          if (j.applied && j.applied.length) chatAppend('note', '✏️ ' + j.applied.join(' · '));
-          say('🤖 Copilot edited the flow — review and Save.');
+          entry.content = 'Applied to the editable draft; not saved or published. ' + j.reply;
+          reply('note', 'Suggestion applied to your draft. Review the steps before saving. You can undo this change.');
+          say('Copilot updated your draft. Review the steps before saving.');
         }
       }).catch(function () {
         clearThinking();
-        chatAppend('note', 'The copilot call failed.');
+        recover('Copilot could not complete this update. Your workflow was kept. You can try again with your current workflow.');
+      }).finally(function () {
+        chatPending = chatPending.filter(function (pending) { return pending !== request; });
       });
+    return request;
+  }
+  function chatSend() {
+    var inp = document.getElementById('fd-chat-input');
+    var text = (inp.value || '').trim();
+    if (text && chatRequest(text)) inp.value = '';
   }
   function chatToggle(showOnly) {
     var box = document.getElementById('fd-chat');
-    if (showOnly) box.classList.add('on'); else box.classList.toggle('on');
-    if (box.classList.contains('on')) document.getElementById('fd-chat-input').focus();
+    var open = showOnly === true || (showOnly !== false && !box.classList.contains('on'));
+    box.hidden = !open; box.classList.toggle('on', open);
+    var toggle = document.getElementById('fd-chat-toggle');
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open) document.getElementById('fd-chat-input').focus();
+    else toggle.focus();
+  }
+  function chatKeydown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation(); chatToggle(false);
+    }
   }
 
   function loadTools(q, category) {
@@ -1933,17 +2357,14 @@
     apiFetch(url).then(function (r) { return r.ok ? r.json() : { tools: [] }; })
       .then(function (j) {
         if (j.categories && j.categories.length) toolCategories = j.categories;
-        var dl = document.getElementById('fd-tools'); if (dl) dl.textContent = '';
+        // A search replaces the choices (keeping the step's current action).
+        var keep = {};
+        if (q || category) {
+          flow.nodes.forEach(function (n) { if (n.tool && toolCatalog[n.tool]) keep[n.tool] = toolCatalog[n.tool]; });
+          toolCatalog = keep;
+        }
         (j.tools || []).forEach(function (t) {
           toolCatalog[t.name] = { description: t.description || '', params: t.params || [], category: t.category || '' };
-          if (dl) {
-            var o = document.createElement('option'); o.value = t.name;
-            // Native datalist option label = category + description, so the
-            // typeahead itself shows which bucket each connector is in.
-            var lbl = t.category ? ('[' + t.category + '] ') : '';
-            if (t.description) o.label = lbl + t.description; else if (lbl) o.label = lbl;
-            dl.appendChild(o);
-          }
         });
         if (selected) renderProps();
       }).catch(function () {});
@@ -1965,8 +2386,34 @@
     b.addEventListener('click', function () { addNode(b.getAttribute('data-add')); });
   });
   document.getElementById('fd-draft').addEventListener('click', draft);
-  document.getElementById('fd-schedule-preset').addEventListener('change', chooseSchedule);
-  document.getElementById('fd-schedule').addEventListener('input', syncScheduleControls);
+  ['fd-sched-freq', 'fd-sched-time', 'fd-sched-dom', 'fd-sched-minute'].forEach(function (id) {
+    var e = document.getElementById(id); if (e) e.addEventListener('change', chooseSchedule);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('#fd-sched-days input[type=checkbox]'), function (c) {
+    c.addEventListener('change', chooseSchedule);
+  });
+  fillTimeZones();
+  syncScheduleControls();
+  var sampleAdd = document.getElementById('fd-sample-add');
+  if (sampleAdd) sampleAdd.addEventListener('click', function () { addSampleRow('', ''); });
+  renderSampleFields();
+  // People who can be asked to approve, and other saved flows (for pickers).
+  fetch('/api/v1/people/assignable').then(function (r) { return r.ok ? r.json() : { items: [] }; })
+    .then(function (j) {
+      // An approver is stored as something a notification can reach (an email
+      // where there is one), never as a one-way fingerprint.
+      people = (j.items || []).filter(function (x) { return x && x.ref; }).map(function (x) {
+        return { ref: /^person:/.test(x.ref) ? String(x.label || '').replace(/\s*\(.*\)$/, '') : x.ref, label: x.label };
+      }).filter(function (x) { return x.ref; });
+      if (selected) renderProps();
+    })
+    .catch(function () {});
+  fetch('/api/v1/flows').then(function (r) { return r.ok ? r.json() : { flows: [] }; })
+    .then(function (j) {
+      savedFlows = (j.flows || []).filter(function (f) { return f && f.id; });
+      savedFlows.forEach(function (f) { flowNames[f.id] = f.name || human(f.id); });
+      if (selected) renderProps(); render();
+    }).catch(function () {});
   document.getElementById('fd-save').addEventListener('click', function () { save(); });
   document.getElementById('fd-publish').addEventListener('click', publishFlow);
   document.getElementById('fd-run').addEventListener('click', function () { run(true); });
@@ -1997,7 +2444,8 @@
     if (e.target.files && e.target.files[0]) { importJsonFile(e.target.files[0]); e.target.value = ''; }
   });
   document.getElementById('fd-chat-toggle').addEventListener('click', function () { chatToggle(); });
-  document.getElementById('fd-chat-close').addEventListener('click', function () { chatToggle(); });
+  document.getElementById('fd-chat-close').addEventListener('click', function () { chatToggle(false); });
+  document.getElementById('fd-chat').addEventListener('keydown', chatKeydown);
   document.getElementById('fd-chat-form').addEventListener('submit', function (e) { e.preventDefault(); chatSend(); });
   document.getElementById('fd-nl').addEventListener('keydown', function (e) { if (e.key === 'Enter') draft(); });
   nameInput.addEventListener('input', function () { rootFlow.name = nameInput.value; });
@@ -2059,7 +2507,7 @@
   var editId = canvas.getAttribute('data-flow-id');
   var seedEl = document.getElementById('fd-seed');
   var seed = null;
-  if (seedEl) { try { seed = JSON.parse(seedEl.textContent); } catch (e) { seed = null; } }
+  if (seedEl) { try { seed = FDRecipeInputs.parseText(seedEl.textContent); } catch (e) { seed = null; } }
   // Baseline the untouched blank canvas immediately. Loading an existing flow
   // replaces this with its server snapshot; gallery/import/AI drafts remain
   // dirty and therefore receive the unload warning until saved.
@@ -2079,5 +2527,46 @@
   // The friendly Steps view renders the LIVE graph (not just the server seed),
   // so nodes built on the canvas show up the moment you switch views.
   window.__fdLiveFlow = toApiFlow;
+  // The Steps view edits the same live graph through these helpers.
+  function linearOrder() {
+    var order = [], seen = {}, id = rootFlow.start;
+    while (id && !seen[id]) { var n = nodeById(id); if (!n) break; seen[id] = 1; order.push(n); id = n.next; }
+    rootFlow.nodes.forEach(function (n) { if (!seen[n.id]) order.push(n); });
+    return order;
+  }
+  function moveStep(id, dir) {
+    if (flow !== rootFlow) return false;
+    var order = linearOrder();
+    var i = order.findIndex(function (n) { return n.id === id; }), j = i + dir;
+    if (i < 0 || j < 0 || j >= order.length) return false;
+    var simple = order.every(function (n) { return ports(n).length === 1 && !(n.cases && n.cases.length); });
+    var chained = order.every(function (n, k) { return k === order.length - 1 ? !n.next : n.next === order[k + 1].id; });
+    if (!simple || !chained) { say('This flow has more than one path. Use the Advanced canvas to change the order.', true); return false; }
+    pushHistory();
+    var t = order[i]; order[i] = order[j]; order[j] = t;
+    order.forEach(function (n, k) { n.next = k < order.length - 1 ? order[k + 1].id : null; });
+    rootFlow.start = order[0].id;
+    autoLayoutForce(); render(); return true;
+  }
+  function autoLayoutForce() { flow.nodes.forEach(function (n) { n.x = 0; n.y = 0; }); autoLayout(); }
+  function addStepAtEnd(kind) {
+    if (flow !== rootFlow) exitToDepth(0);
+    var order = linearOrder(), last = null;
+    for (var k = order.length - 1; k >= 0; k--) { if (ports(order[k]).length === 1 && !order[k].next) { last = order[k]; break; } }
+    selected = last ? last.id : null; selectedEdge = null;
+    addNode(kind);
+    return selected;
+  }
+  window.__fdEngine = {
+    order: function () { return linearOrder().map(function (n) { return { id: n.id, kind: n.kind, title: stepName(n), summary: summary(n), start: n.id === rootFlow.start }; }); },
+    select: function (id) { if (flow !== rootFlow) exitToDepth(0); multiSel = {}; selectNode(id); },
+    remove: function (id) { if (flow !== rootFlow) exitToDepth(0); deleteNode(id); },
+    move: moveStep,
+    add: addStepAtEnd,
+    selected: function () { return selected; },
+    kindLabel: kindLabel
+  };
+  var _render = render;
+  render = function () { _render(); if (window.__fdStepsRefresh) window.__fdStepsRefresh(); };
 })();
 {% endraw %}

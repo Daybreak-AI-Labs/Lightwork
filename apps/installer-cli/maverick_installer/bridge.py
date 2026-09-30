@@ -124,19 +124,14 @@ def run() -> None:
     # Q5: budget
     _send(_step(
         "budget",
-        "Stop after spending how much per task?",
-        ["$1", "$5", "$20"],
+        "Add an optional spending limit to each task?",
+        ["No task limit", "$1", "$5", "$20"],
     ))
-    budget_ans = _recv().strip() or "$5"
-    try:
-        dollars = float(budget_ans.lstrip("$"))
-    except ValueError:
-        dollars = 5.0
-    budget = {
-        "max_dollars": dollars,
-        "max_wall_seconds": 600.0,
-        "max_tool_calls": 100,
-    }
+    budget_ans = _recv().strip() or "No task limit"
+    if budget_ans not in {"No task limit", "$1", "$5", "$20"}:
+        raise ValueError("Choose no task limit or one of the offered spending limits")
+    budget = ({"max_dollars": float(budget_ans[1:])}
+              if budget_ans in {"$1", "$5", "$20"} else {})
 
     write_consumer_config(
         user_name=user_name, keys=keys, workdir=workdir, budget=budget,

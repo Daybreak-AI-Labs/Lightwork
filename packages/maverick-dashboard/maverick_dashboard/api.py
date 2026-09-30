@@ -33,8 +33,9 @@ from fastapi import (
 from maverick.governed_records import RecordConflict
 from maverick.runner import (
     DEFAULT_MAX_DEPTH,
-    DEFAULT_MAX_DOLLARS,
-    DEFAULT_MAX_WALL_SECONDS,
+    clamp_task_limit,
+    configured_max_dollars,
+    configured_max_wall_seconds,
 )
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import (
@@ -52,6 +53,7 @@ from ._shared import (
     require_provider_or_400,
 )
 from ._shared import _world_cache as _world_cache  # re-export: tests clear api._world_cache
+from ._shared import dashboard_token as _dashboard_token
 from .api_schemas import (
     ActiveTenantIn,
     AgentOverrideIn,
@@ -227,11 +229,6 @@ def _deliverable_edit_similarity(original: str, revised: str) -> float:
     return difflib.SequenceMatcher(None, original, revised).ratio()
 
 
-# Shared-store channel for Idempotency-Key dedup on goal creation (see
-# create_goal). Distinct from the channel/webhook idempotency namespaces.
-_IDEMPOTENCY_CHANNEL = "idempotency:api:goals"
-
-
 def _shared_halt_backend() -> bool:
     """Resolve whether the shared-store halt is authoritative.
 
@@ -298,12 +295,17 @@ def _active_cache_context() -> tuple[str, str]:
 
 
 def _to_goal_out(g) -> GoalOut:
+    from .plain_labels import risk_label
+
+    risk = risk_label(g) or {}
     return GoalOut(
         id=g.id,
         status=g.status,
         title=g.title,
         description=g.description,
         result=g.result,
+        risk_tier=risk.get("tier"),
+        risk_reasons=risk.get("reasons"),
     )
 
 
@@ -1008,9 +1010,20 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
 
+    tenant_id = body.id.strip()
+    if not tenant_id:
+        # People name a workspace; the stable id is made from that name.
+        from .plain_labels import unique_slug
+        if not body.display_name.strip():
+            raise HTTPException(status_code=422, detail="Give the workspace a name.")
+        tenant_id = unique_slug(
+            body.display_name,
+            {t.id for t in tenant_registry.list_tenants()},
+            fallback="workspace",
+        )
     try:
         rec = tenant_registry.create_tenant(
-            body.id,
+            tenant_id,
             plan=body.plan,
             display_name=body.display_name,
             max_daily_dollars=body.max_daily_dollars,
@@ -1309,12 +1322,7 @@ async def remove_user_suites(request: Request, principal: str) -> Response:
                 "Idempotency-Replayed": {"schema": {"type": "boolean"}},
             },
         },
-        503: {
-            "description": "Idempotency state is temporarily indeterminate",
-            "headers": {
-                "Retry-After": {"schema": {"type": "integer"}},
-            },
-        },
+        409: {"description": "Request identity conflicts or needs reconciliation; no repeat dispatch"},
     },
 )
 def create_goal(
@@ -1353,6 +1361,7 @@ def create_goal(
     title = (title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
+    director, description = _api_director(payload, title, description)
     # Run AS a specialist pack (JD hires, department deploys): the orchestrator
     # inherits a domain stamped on the goal row, binding that pack's persona,
     # capability envelope and compartment. Validate against the enabled roster
@@ -1365,81 +1374,67 @@ def create_goal(
             raise HTTPException(status_code=400, detail=f"unknown specialist: {domain!r}")
         require_suite(request, suite_for(domain))
     w = _world()
-    # Idempotency-Key (optional, RFC-style): a client whose POST times out at the
-    # LB and retries must not double-create / double-bill a paid run -- and on a
-    # multi-replica deployment the retry can land on a different replica, so the
-    # dedup must be in the shared store (reusing the backend-agnostic
-    # mark/lookup_processed_message primitive). The key is scoped to the caller so
-    # it can't collide across principals. A replay returns the ORIGINAL goal and
-    # dispatches no second run.
+    # Keyed admission uses the same atomic goal/receipt transaction as chat
+    # attachments, binding the complete reviewed payload and effective limits.
+    # Replays and read reconciliation never dispatch work a second time.
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
-    idem_ext = ""
+    # A director autonomy level can only lower the cap (None = no own cap).
+    max_dollars = clamp_task_limit(getattr(director, "max_dollars", None),
+                                   clamp_task_limit(payload.max_dollars, configured_max_dollars()))
+    max_wall_seconds = clamp_task_limit(payload.max_wall_seconds, configured_max_wall_seconds())
+    max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
+    receipt = None
     if idem_key:
-        if len(idem_key) > 255:
-            raise HTTPException(status_code=400, detail="Idempotency-Key too long (max 255)")
-        idem_ext = f"{caller_principal(request) or ''}:{idem_key}"
-        prior = w.lookup_processed_message(_IDEMPOTENCY_CHANNEL, idem_ext)
-        if prior is not None:
-            g0 = w.get_goal(prior)
-            if g0 is not None:
-                response.headers["Location"] = f"/api/v1/goals/{g0.id}"
-                response.headers["Idempotency-Replayed"] = "true"
-                return _to_goal_out(g0)  # replay: original goal, no new run
-    goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
-    if domain:
-        w.set_goal_domain(goal_id, domain)
-    if idem_key and not w.mark_message_processed(_IDEMPOTENCY_CHANNEL, idem_ext, goal_id=goal_id):
-        # Lost a concurrent race on the same key: return the winner's goal and do
-        # NOT dispatch a run for this never-run goal row. Mark the loser
-        # terminal so it cannot remain a permanently-pending ghost in the
-        # operator worklist.
-        prior = w.lookup_processed_message(_IDEMPOTENCY_CHANNEL, idem_ext)
-        g0 = w.get_goal(prior) if prior is not None else None
-        if g0 is not None:
-            try:
-                w.set_goal_status(
-                    goal_id,
-                    "cancelled",
-                    result="superseded by a concurrent idempotent request",
-                )
-            except Exception:
-                log.warning(
-                    "could not mark idempotency-race loser goal #%s cancelled",
-                    goal_id,
-                    exc_info=True,
-                )
+        from .goal_submission import reserve_api
+
+        receipt = reserve_api(w, key=idem_key, owner=caller_principal(request) or "",
+            payload=payload, title=title, description=description, domain=domain,
+            caps={"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds, "max_depth": max_depth})
+        goal_id = receipt["goal_id"]
+        if not receipt["created"]:
+            g0 = w.get_goal(goal_id)
+            if g0 is None:
+                raise HTTPException(status_code=409, detail="Submission goal unavailable; reconcile before retrying")
+            if (g0.owner or "") != (caller_principal(request) or ""):
+                raise HTTPException(status_code=404, detail="No matching submission receipt")
+            assert_goal_access(request, g0)
             response.headers["Location"] = f"/api/v1/goals/{g0.id}"
             response.headers["Idempotency-Replayed"] = "true"
-            return _to_goal_out(g0)
-        # A claim without its referenced goal is indeterminate shared-store
-        # state. Never return the newly-created goal as accepted: it was not
-        # dispatched, and doing so leaves the client polling forever.
-        try:
-            w.set_goal_status(
-                goal_id,
-                "blocked",
-                result="idempotency claim is temporarily indeterminate",
-            )
-        except Exception:
-            log.warning(
-                "could not mark indeterminate idempotency goal #%s blocked",
-                goal_id,
-                exc_info=True,
-            )
-        raise HTTPException(
-            status_code=503,
-            detail="idempotency claim is temporarily indeterminate; retry shortly",
-            headers={"Retry-After": "1"},
-        )
+            if g0.status != "draft":
+                return _to_goal_out(g0)
+            # The first request stopped between admission and its dispatch
+            # claim, so nothing is running. The payload (and so its limits) is
+            # bound by the fingerprint: finish the claim below. The claim is an
+            # atomic draft->pending move, so concurrent replays run it once.
+            replay_resume = True
+        else:
+            replay_resume = False
+    else:
+        goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
+        if domain:
+            w.set_goal_domain(goal_id, domain)
+    _record_api_director(w, goal_id, director, receipt)
     from maverick.runner import run_goal_in_background_async
-
-    # Enforce server-side execution caps even when callers request larger values.
-    max_dollars = min(payload.max_dollars, DEFAULT_MAX_DOLLARS)
-    max_wall_seconds = min(payload.max_wall_seconds, DEFAULT_MAX_WALL_SECONDS)
-    max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
 
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
+    if receipt is not None:
+        from .goal_submission import try_claim_api_dispatch
+
+        intent = {"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds,
+                  "max_depth": max_depth, "channel": "api", "user_id": user_id,
+                  "allowed_suites": sorted(allowed_suites) if allowed_suites is not None else None}
+        if not try_claim_api_dispatch(w, receipt, intent):
+            # A concurrent same-key request claimed the draft first (a replay
+            # can win the claim before the request that created it): the work
+            # was dispatched exactly once, so this request gets the same goal.
+            g1 = w.get_goal(goal_id)
+            if g1 is not None and g1.status != "draft":
+                response.headers["Location"] = f"/api/v1/goals/{goal_id}"
+                response.headers["Idempotency-Replayed"] = "true" if replay_resume else "false"
+                return _to_goal_out(g1)
+            raise HTTPException(status_code=409, detail=(
+                "Request retained; execution admission is unconfirmed. Reconcile before retrying."))
     if user_id:
         bg.add_task(
             run_goal_in_background_async,
@@ -1464,8 +1459,52 @@ def create_goal(
     if g is None:
         raise HTTPException(status_code=500, detail="goal vanished after create")
     response.headers["Location"] = f"/api/v1/goals/{goal_id}"
-    response.headers["Idempotency-Replayed"] = "false"
+    response.headers["Idempotency-Replayed"] = "true" if receipt is not None and replay_resume else "false"
     return _to_goal_out(g)
+
+
+def _api_director(payload: GoalIn, title: str, description: str):
+    """``(director run or None, description to store)`` for a REST start."""
+    if not payload.director_profile:
+        return None, description
+    from maverick_dashboard.app import _director_run
+
+    director = _director_run(payload.director_profile, title, description,
+                             clamp_task_limit(payload.max_dollars, configured_max_dollars()))
+    return director, director.goal_description
+
+
+def _record_api_director(w, goal_id: int, director, receipt: dict | None) -> None:
+    """Record a new goal's director envelope before it is dispatched."""
+    if director is not None and (receipt is None or receipt.get("created")):
+        from maverick.director_mode import record
+
+        record(w, goal_id, director)
+
+
+@router.get("/goal-submissions/receipt")
+def reconcile_goal_submission(request: Request, response: Response, kind: str = "api") -> dict:
+    """Recover an acknowledgement by its original key, without submitting work."""
+    from .goal_submission import lookup_receipt
+
+    try:
+        require_permission(request, "operate")
+        receipt, goal = lookup_receipt(_world(), key=request.headers.get("Idempotency-Key") or "",
+                                      owner=caller_principal(request) or "", kind=kind)
+        assert_goal_access(request, goal)
+        if goal.domain:
+            from maverick.domain import suite_for
+            require_suite(request, suite_for(goal.domain))
+    except HTTPException as exc:
+        exc.headers = {**(exc.headers or {}), "Cache-Control": "no-store"}
+        raise
+    response.headers["Cache-Control"] = "no-store"
+    # A draft was admitted but never dispatched: replaying the request with the
+    # same Idempotency-Key runs it. Do not report that as accepted work.
+    return {"state": "not_dispatched" if goal.status == "draft" else "accepted",
+            "submission_state": receipt["state"],
+            "goal": {"id": goal.id, "status": goal.status},
+            "replayed": True, "execution_confirmed": False}
 
 
 @router.get(
@@ -1573,11 +1612,9 @@ def goal_events(
 
 def _sse_event(e) -> str:
     """Format one goal event as a Server-Sent Event frame."""
-    data = json.dumps(
-        {"id": e.id, "agent": e.agent, "kind": e.kind, "content": e.content, "ts": e.ts}
-    )
-    kind = str(e.kind or "message").replace("\n", " ").replace("\r", " ")
-    return f"id: {e.id}\nevent: {kind}\ndata: {data}\n\n"
+    from ._event_stream import sse_event
+
+    return sse_event(e)
 
 
 _TERMINAL_STATUSES = TERMINAL_RUN_STATUSES
@@ -1616,71 +1653,30 @@ async def goal_events_stream(
     server controls polling cadence and idle backoff.
     """
     del poll
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
+    from ._event_stream import LeasedStreamingResponse, StreamLease, goal_stream, stream_state
+    from .auth import can_access_goal
 
-    since = replay_cursor(since, request.headers.get("last-event-id"))
+    world = _world()
+    goal = await run_in_threadpool(stream_state, world, goal_id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, goal)
     sem = _get_sse_semaphore()
     if sem.locked():
-        raise HTTPException(
-            status_code=503,
-            detail="too many concurrent event streams; retry shortly",
-            headers={"Retry-After": "5"},
-        )
+        raise HTTPException(status_code=503, detail="too many concurrent event streams; retry shortly",
+                            headers={"Retry-After": "5"})
     await sem.acquire()
-
-    async def _gen():
-        started = asyncio.get_running_loop().time()
-        last = since
-        sent = 0
-        idle_for = 0.0
-        poll_interval = _SSE_POLL_INTERVAL
-        try:
-            yield ": connected\n\n"  # open the stream immediately
-            while True:
-                if await request.is_disconnected():
-                    break
-                if (asyncio.get_running_loop().time() - started) >= _SSE_MAX_STREAM_SECONDS:
-                    yield 'event: timeout\ndata: {"detail": "stream lifetime exceeded"}\n\n'
-                    return
-                events = await run_in_threadpool(w.goal_events, goal_id, last, _SSE_MAX_BATCH)
-                for e in events:
-                    yield _sse_event(e)
-                    last = e.id
-                    sent += 1
-                    if limit and sent >= limit:
-                        return
-                cur = await run_in_threadpool(w.get_goal, goal_id)
-                if cur is None:
-                    yield 'event: error\ndata: {"detail": "goal vanished"}\n\n'
-                    return
-                if events:
-                    idle_for = 0.0
-                    poll_interval = _SSE_POLL_INTERVAL
-                else:
-                    idle_for += poll_interval
-                    if idle_for >= _SSE_IDLE_HEARTBEAT_EVERY:
-                        yield ": heartbeat\n\n"
-                        idle_for = 0.0
-                    poll_interval = min(_SSE_MAX_POLL_INTERVAL, poll_interval * 1.5)
-                if cur is not None and cur.status in _TERMINAL_STATUSES:
-                    if len(events) < _SSE_MAX_BATCH:
-                        yield f"event: end\ndata: {json.dumps({'status': cur.status, 'next_id': last, 'terminal': True})}\n\n"
-                        return
-                    # A full batch means more backlog may remain: keep draining
-                    # (without sleeping) and end only once a read comes up short.
-                    continue
-                await asyncio.sleep(poll_interval)
-        except asyncio.CancelledError:
-            return
-        finally:
-            sem.release()
-
-    return StreamingResponse(_gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    lease = StreamLease(sem)
+    content = goal_stream(
+        request, world, goal_id,
+        since=replay_cursor(since, request.headers.get("last-event-id")),
+        lease=lease, visible=lambda state: can_access_goal(request, state),
+        limit=limit, max_batch=_SSE_MAX_BATCH, poll=_SSE_POLL_INTERVAL,
+        max_poll=_SSE_MAX_POLL_INTERVAL, heartbeat=_SSE_IDLE_HEARTBEAT_EVERY,
+        lifetime=_SSE_MAX_STREAM_SECONDS,
+    )
+    return LeasedStreamingResponse(content, lease=lease, media_type="text/event-stream",
+                                   headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/goals/{goal_id}/answer", status_code=204)
@@ -1699,14 +1695,12 @@ def answer_question(
     qs = w.open_questions(goal_id=goal_id)
     if not any(q.id == payload.question_id for q in qs):
         raise HTTPException(status_code=404, detail="no such open question for this goal")
-    w.answer(payload.question_id, answer)
     # Close the human-in-the-loop turn here. ``ask_user`` parks the goal as
     # 'blocked' with no result; once every question it filed has an answer,
     # the run picks back up on its own (the resumed brief carries the Q&A, see
     # orchestrator.qa_block) instead of sitting blocked until someone finds
     # the Resume button. A goal that is still running keeps running.
-    if g.status == "blocked" and not w.open_questions(goal_id=goal_id):
-        _requeue_goal(request, bg, goal_id)
+    _requeue_goal(request, bg, goal_id, answer_question=(payload.question_id, answer))
 
 
 @router.post(
@@ -1736,59 +1730,27 @@ async def upload_attachment(
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
 
-    from maverick.attachments import (
-        MAX_FILE_BYTES,
-        AttachmentRejected,
-        store,
-    )
+    from maverick.attachments import AttachmentRejected, generate_companions
 
-    data = await file.read(MAX_FILE_BYTES + 1)
-    if len(data) > MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail=(f"file too large: {len(data)} bytes (limit {MAX_FILE_BYTES})"),
-        )
+    from .attachment_submission import publish_batch, stage_uploads
 
-    mime = file.content_type or "application/octet-stream"
-    filename = file.filename or "upload"
-
-    existing = sum(a.size_bytes for a in w.list_attachments(goal_id))
-    try:
-        stored = store(
-            goal_id,
-            filename=filename,
-            mime=mime,
-            data=data,
-            existing_total=existing,
-        )
-    except AttachmentRejected as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-    aid = w.add_attachment(
-        goal_id=goal_id,
-        filename=stored.filename,
-        mime=stored.mime,
-        size_bytes=stored.size_bytes,
-        sha256=stored.sha256,
-        path=str(stored.path),
-    )
-    # Companion generation (transcripts / extracted text) off the request
-    # path; best-effort, never raises.
-    from maverick.attachments import generate_companions
-
+    async with stage_uploads([file]) as records:
+        if not records:
+            raise HTTPException(status_code=400, detail="empty attachment")
+        try:
+            ids = await run_in_threadpool(publish_batch, w, goal_id, records)
+        except AttachmentRejected as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        stored = records[0]
     bg.add_task(generate_companions, w, goal_id)
-    return AttachmentOut(
-        id=aid,
-        filename=stored.filename,
-        mime=stored.mime,
-        size_bytes=stored.size_bytes,
-        sha256=stored.sha256,
-    )
+    return AttachmentOut(id=ids[0], filename=stored.filename, mime=stored.mime,
+                         size_bytes=stored.size_bytes, sha256=stored.sha256)
+
 
 
 def _privacy_auth_genuinely_off() -> bool:
     """Strict auth-off decision for privacy credential and mutation boundaries."""
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    if _dashboard_token():
         return False
     try:
         from maverick.config import config_source_errors, load_config
@@ -1860,7 +1822,7 @@ def _request_identity(request: Request) -> str | None:
     principal = str(caller_principal(request) or "")
     if principal:
         return principal
-    expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN", "")
+    expected = _dashboard_token()
     if expected:
         authorization = request.headers.get("authorization", "")
         supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
@@ -1962,7 +1924,7 @@ async def attach_from_source(
     assert_goal_access(request, g)
 
     from maverick import doc_discovery
-    from maverick.attachments import AttachmentRejected, store
+    from maverick.attachments import AttachmentRejected, generate_companions
 
     principal = _document_source_principal(request)
     try:
@@ -1981,29 +1943,28 @@ async def attach_from_source(
 
     filename = body.name.strip() or f"{body.source}-{body.doc_id[:24]}"
     mime = doc_discovery.resolve_mime(filename, mime)
-    existing = sum(a.size_bytes for a in w.list_attachments(goal_id))
-    try:
-        stored = store(goal_id, filename=filename, mime=mime, data=data, existing_total=existing)
-    except AttachmentRejected as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    aid = w.add_attachment(
-        goal_id=goal_id,
-        filename=stored.filename,
-        mime=stored.mime,
-        size_bytes=stored.size_bytes,
-        sha256=stored.sha256,
-        path=str(stored.path),
-    )
-    from maverick.attachments import generate_companions
+    import io
 
+    from starlette.datastructures import Headers
+
+    from .attachment_submission import publish_batch, stage_uploads
+
+    upload = UploadFile(file=io.BytesIO(data), filename=filename, headers=Headers({"content-type": mime}))
+    try:
+        async with stage_uploads([upload]) as records:
+            if not records:
+                raise HTTPException(status_code=400, detail="empty attachment")
+            try:
+                ids = await run_in_threadpool(publish_batch, w, goal_id, records)
+            except AttachmentRejected as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            stored = records[0]
+    finally:
+        await upload.close()
     bg.add_task(generate_companions, w, goal_id)
-    return AttachmentOut(
-        id=aid,
-        filename=stored.filename,
-        mime=stored.mime,
-        size_bytes=stored.size_bytes,
-        sha256=stored.sha256,
-    )
+    return AttachmentOut(id=ids[0], filename=stored.filename, mime=stored.mime,
+                         size_bytes=stored.size_bytes, sha256=stored.sha256)
+
 
 
 # --------------------------------------------------------------------------- #
@@ -5202,14 +5163,33 @@ async def download_goal_attachment(
         if fetched is None:
             raise HTTPException(status_code=410, detail="attachment bytes not on this host")
         path = fetched
-    return FileResponse(
-        path,
-        media_type=match.mime or "application/octet-stream",
-        headers={
-            "Content-Disposition": _attachment_content_disposition(match.filename),
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
+    from maverick.attachments import is_sealed_file, read_bytes
+    headers = {
+        "Content-Disposition": _attachment_content_disposition(match.filename),
+        "X-Content-Type-Options": "nosniff",
+    }
+    media_type = match.mime or "application/octet-stream"
+    if not await run_in_threadpool(is_sealed_file, path):
+        return FileResponse(path, media_type=media_type, headers=headers)
+    from .decrypt_budget import BUDGET, DecryptBusy
+
+    def _open_within_budget() -> bytes:
+        # GCM authenticates the whole (size-capped) blob before any byte is
+        # released, so a sealed attachment is decrypted in full, never
+        # streamed; a shared budget bounds how many are held at once.
+        with BUDGET.reserve(2 * path.stat().st_size):
+            return read_bytes(path)
+
+    try:
+        content = await run_in_threadpool(_open_within_budget)
+    except DecryptBusy as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Several large files are being prepared right now. Try again in a minute.",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="attachment could not be opened here") from exc
+    return Response(content=content, media_type=media_type, headers=headers)
 
 
 @router.get("/facts", response_model=dict[str, str])
@@ -6369,7 +6349,7 @@ def list_flow_runs_endpoint(request: Request, flow_id: str = "", limit: int = 50
     from maverick.flow import store
 
     owner = goal_owner_filter(request)
-    runs = store.list_runs(flow_id=flow_id or None, owner=owner, limit=max(1, min(500, limit)))
+    runs = store.list_run_metadata(flow_id=flow_id or None, owner=owner, limit=max(1, min(500, limit)))
     return {"runs": [_run_out(r) for r in runs]}
 
 
@@ -6406,6 +6386,16 @@ def _run_out(run) -> dict:
     d.pop("release_id", None)
     d.pop("definition_version", None)
     d.pop("subflow_digests", None)
+    if run.metadata_only:
+        d["execution_data_status"] = "not_loaded"
+        if run.status == "paused_approval":
+            # A listing cannot attest current full-data/connector authority.
+            # Detail/preview/resume endpoints still hydrate and verify it.
+            d["human"] = {key: value for key, value in (d.get("human") or {}).items()
+                          if key != "approval_card"}
+            d["approval_binding_sha256"] = ""
+            d["approval_card_status"] = "detail_required"
+        return d
     if run.status == "paused_approval":
         from maverick.approval_cards import (
             ApprovalCardError,
@@ -6438,6 +6428,28 @@ def _run_out(run) -> dict:
             else:
                 d["approval_card_status"] = "current"
         d["human"] = human
+        if run.cursor == "teaching_review":
+            # The ordinary payload preview may truncate nested options. Expose
+            # an exact, validated teaching question only on owned run detail,
+            # after approval integrity checks; never bypass secret redaction.
+            from maverick.flow import recipe_flow, store
+
+            if d.get("approval_card_status") == "current":
+                try:
+                    pinned = store.load_flow_snapshot(run.definition_digest)
+                    if pinned.recipe_teaching is None:
+                        raise ValueError("not a teaching flow")
+                    d["teaching_review"] = {"status": "unavailable"}
+                    recipe_flow.validate_flow(pinned)
+                    question = recipe_flow.validate_teaching_question(pinned.learned_recipe, run.data)
+                    safe_question = redact(question)
+                    if safe_question != question:
+                        d["teaching_review"] = {"status": "redacted"}
+                    else:
+                        d["teaching_review"] = {"status": "current", "question": safe_question}
+                except Exception:
+                    # Do not surface raw observations or unverified options.
+                    pass
     return d
 
 
@@ -6446,11 +6458,9 @@ def _load_owned_run(request: Request, run_id: str):
     so a run's existence isn't leaked across owners)."""
     from maverick.flow import store
 
-    run = store.load_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="no such run")
     owner = goal_owner_filter(request)
-    if owner is not None and run.owner != owner:
+    run = store.load_run(run_id, owner=owner)
+    if run is None:
         raise HTTPException(status_code=404, detail="no such run")
     return run
 
@@ -6477,8 +6487,10 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
     _require_flows()
     _load_owned_run(request, run_id)  # 404 before holding a stream slot
     from maverick.flow import store as flow_store
+    from maverick.flow.payloads import FlowPayloadError
 
-    from maverick_dashboard._shared import _get_sse_semaphore
+    from ._event_stream import LeasedStreamingResponse, StreamCadence, StreamLease
+    from ._shared import _get_sse_semaphore
 
     sem = _get_sse_semaphore()
     if sem.locked():
@@ -6489,27 +6501,29 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
         )
     await sem.acquire()
 
+    lease = StreamLease(sem)
+    owner = goal_owner_filter(request)
     # completed/failed/rejected are final; a run parked on a human or an
     # external event won't change until someone acts -- close the stream and
     # let the page's actions (approve / resume) drive the next one.
     end_states = (
         "completed",
         "failed",
+        "budget_limited",
         "rejected",
         "indeterminate",
         "paused_approval",
         "paused_event",
     )
-    poll, max_poll, max_seconds, heartbeat_every = 0.5, 5.0, 300.0, 30.0
-
     async def generate():
-        started = _asyncio.get_running_loop().time()
+        clock = _asyncio.get_running_loop().time
+        cadence = StreamCadence(clock(), clock())
         last_stamp = None
-        interval, idle = poll, 0.0
-        yield "retry: 3000\n\n"
         try:
+            yield "retry: 3000\n\n"
+            cadence.sent(clock())
             while True:
-                if (_asyncio.get_running_loop().time() - started) >= max_seconds:
+                if cadence.expired(clock()):
                     yield 'event: timeout\ndata: {"detail": "stream lifetime exceeded"}\n\n'
                     return
                 # Stop re-reading the run file the moment the client goes away
@@ -6517,32 +6531,37 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
                 # timing -- matches the goal-events stream.
                 if await request.is_disconnected():
                     return
-                run = await run_in_threadpool(flow_store.load_run, run_id)
+                run = await run_in_threadpool(flow_store.load_run, run_id, owner=owner)
                 if run is None:
                     yield 'event: error\ndata: {"detail": "run vanished"}\n\n'
                     return
-                if run.updated != last_stamp:
+                changed = run.updated != last_stamp
+                if changed:
                     last_stamp = run.updated
                     payload = _run_out(run)
                     kind = "terminal" if run.status in end_states else "snapshot"
                     yield f"event: {kind}\ndata: {_json.dumps(payload, default=str)}\n\n"
+                    cadence.sent(clock())
                     if kind == "terminal":
                         return
-                    interval, idle = poll, 0.0
-                else:
-                    idle += interval
-                    if idle >= heartbeat_every:
-                        yield ": heartbeat\n\n"
-                        idle = 0.0
-                    interval = min(max_poll, interval * 1.5)
-                await _asyncio.sleep(interval)
+                elif cadence.heartbeat_due(clock()):
+                    yield ": heartbeat\n\n"
+                    cadence.sent(clock())
+                cadence.backoff(changed)
+                await _asyncio.sleep(cadence.delay(clock()))
+        except FlowPayloadError:
+            yield (
+                'event: error\ndata: {"detail": "complete workflow data is unavailable; '
+                'restore the checkpoint before resuming", "code": "flow_data_unavailable"}\n\n'
+            )
         except _asyncio.CancelledError:
             return
         finally:
-            sem.release()
+            lease.release()
 
-    return StreamingResponse(
+    return LeasedStreamingResponse(
         generate(),
+        lease=lease,
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -6660,7 +6679,8 @@ async def resume_flow_run_endpoint(request: Request, run_id: str, payload: FlowR
 
 @router.post("/flows/runs/{run_id}/retry")
 def retry_flow_run_endpoint(
-    request: Request, run_id: str, from_failure: bool = False
+    request: Request, run_id: str, from_failure: bool = False,
+    budget_limit_dollars: float | None = Query(None, gt=0, allow_inf_nan=False),
 ) -> dict:
     """Re-run a finished/failed run from scratch with its ORIGINAL trigger inputs
     (a fresh run, so any partial side effects aren't re-driven mid-flow). This is
@@ -6701,18 +6721,35 @@ def retry_flow_run_endpoint(
     from maverick_dashboard import automation_queue as aq
 
     if from_failure:
-        if run.status != "failed" or not run.cursor:
+        if run.status not in {"failed", "budget_limited"} or not run.cursor:
             raise HTTPException(
                 status_code=409,
                 detail="only a failed run with a recorded failure node can be "
                 "resumed from its failure; use a plain retry instead",
             )
+        ceiling = configured_max_dollars()
+        if budget_limit_dollars is not None and ceiling is not None and budget_limit_dollars > ceiling:
+            raise HTTPException(
+                status_code=409,
+                detail=f"The run allowance cannot exceed this deployment's per-run ceiling (${ceiling:g}).",
+            )
+        if run.status == "budget_limited":
+            if budget_limit_dollars is None or budget_limit_dollars <= max(
+                run.cost_dollars, run.budget_limit_dollars or 0.0,
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Set a larger total run allowance to continue saved work. Organization limits still apply.",
+                )
+        elif budget_limit_dollars is not None:
+            raise HTTPException(status_code=409, detail="Only a budget-held run can change its allowance.")
         try:
             aq.enqueue_flow_resume(
                 run.flow_id,
                 run_id,
                 owner=run.owner,
                 from_failure=True,
+                budget_limit_dollars=budget_limit_dollars,
             )
         except store.FlowSnapshotError as exc:
             raise HTTPException(
@@ -7116,6 +7153,41 @@ def get_flow_endpoint(request: Request, flow_id: str) -> dict:
     return {**f.to_dict(), **_flow_publication_fields(flow_id)}
 
 
+@router.get("/flows/{flow_id}/published")
+def get_published_flow_endpoint(request: Request, flow_id: str) -> dict:
+    """Review the exact published inputs and capture its publication epoch."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+
+    draft = store.load_flow(flow_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, draft)
+    try:
+        published = store.load_published_bundle(flow_id)
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="published flow release failed integrity checks",
+        ) from exc
+    if published is None:
+        raise HTTPException(
+            status_code=409,
+            detail="flow is not published; publish the reviewed draft before a live run",
+        )
+    flow, release = published
+    _assert_flow_access(request, flow)
+    return {
+        "flow": flow.to_dict(),
+        "release_id": str(release["release_id"]),
+        "published": True,
+        "published_version": int(release["definition_version"]),
+        "published_revision": str(release["release_id"]),
+        "published_at": release.get("published_at"),
+    }
+
+
 @router.delete("/flows/{flow_id}", status_code=204)
 def delete_flow_endpoint(request: Request, flow_id: str) -> None:
     require_permission(request, "operate")
@@ -7174,6 +7246,12 @@ def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dic
         )
     flow, release = published
     _assert_flow_access(request, flow)
+    expected_release_id = payload.expected_release_id or str(release["release_id"])
+    if expected_release_id != str(release["release_id"]):
+        raise HTTPException(
+            status_code=409,
+            detail="published flow release changed since preview; review it before running",
+        )
     owner = _supervisor(request)
     # Validate/coerce the payload against the flow's declared inputs (a no-op when
     # the flow declares none): reject a missing required input or a bad number/date
@@ -7196,7 +7274,7 @@ def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dic
             channel="api" if execution_user_id_from_request(request) else None,
             user_id=execution_user_id_from_request(request),
             allowed_suites=caller_suites(request),
-            expected_revision=str(release["release_id"]),
+            expected_revision=expected_release_id,
         )
     except store.FlowSnapshotError as exc:
         # Snapshot internals may include object paths/digests. The caller only
@@ -7500,14 +7578,16 @@ async def get_codec_telemetry() -> dict:
 
 
 def _require_skill_install_opt_in() -> None:
-    if os.environ.get("MAVERICK_ALLOW_SKILL_INSTALL", "").lower() not in {"1", "true", "yes"}:
+    from maverick.skills import url_install_allowed
+
+    if not url_install_allowed():
         raise HTTPException(
             status_code=403,
             detail=(
-                "Installing skills from the dashboard is disabled on this "
-                "server — an administrator can opt in (set "
-                "MAVERICK_ALLOW_SKILL_INSTALL=1, or run "
-                "`maverick skill install` on the host)."
+                "Installing skills from the dashboard is turned off. A global "
+                "administrator can turn on “Install skills from a typed web "
+                "address” in Settings > All settings (or set "
+                "MAVERICK_ALLOW_SKILL_INSTALL=1 on the server)."
             ),
         )
 
@@ -7640,14 +7720,32 @@ _VOICE_SUFFIXES = {
 _VOICE_MAX_BYTES = 25 * 1024 * 1024
 
 
-def _voice_transcribe_concurrency_limit() -> int:
+def _voice_setting(key: str) -> object:
+    """``[voice] <key>`` from the effective configuration (All settings page)."""
     try:
-        return max(1, int(os.environ.get("MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY", "2")))
-    except ValueError:
-        return 2
+        from maverick.voice_models import _voice_cfg
+        return _voice_cfg().get(key)
+    except Exception:  # pragma: no cover - config never blocks voice input
+        return None
 
 
-_voice_transcribe_sem_limit = _voice_transcribe_concurrency_limit()
+def _voice_transcribe_concurrency_limit(*, configured: bool = True) -> int:
+    """``MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY`` wins, else ``[voice]
+    transcribe_concurrency``, else 2. The semaphore below is re-sized when
+    this changes, so a saved value applies to the next transcription."""
+    raw = os.environ.get("MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return 2
+    value = _voice_setting("transcribe_concurrency") if configured else None
+    if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 16:
+        return value
+    return 2
+
+
+_voice_transcribe_sem_limit = _voice_transcribe_concurrency_limit(configured=False)
 _voice_transcribe_sem = asyncio.Semaphore(_voice_transcribe_sem_limit)
 
 
@@ -7704,6 +7802,10 @@ async def voice_transcribe(
     import tempfile as _tempfile
 
     max_bytes = _VOICE_MAX_BYTES
+    configured_bytes = _voice_setting("max_upload_bytes")
+    if (isinstance(configured_bytes, int) and not isinstance(configured_bytes, bool)
+            and configured_bytes > 0):
+        max_bytes = configured_bytes
     try:
         max_bytes = int(_os.environ.get("MAVERICK_VOICE_MAX_BYTES", max_bytes))
     except (TypeError, ValueError):
@@ -7716,6 +7818,14 @@ async def voice_transcribe(
             status_code=400,
             detail=f"audio too large: {len(data)} bytes (limit {max_bytes})",
         )
+
+    # [voice] biometric_unlock: a person who recorded their voice is heard
+    # only in that voice (a second check on top of signing in).
+    from .voice_unlock_api import check_spoken_request
+
+    refusal = await run_in_threadpool(check_spoken_request, request, data)
+    if refusal is not None:
+        raise HTTPException(status_code=403, detail=refusal)
 
     suffix = _VOICE_SUFFIXES.get(_os.path.splitext(file.filename or "")[1].lower(), ".webm")
     lang = (language or "").strip()[:8] or None
@@ -7778,6 +7888,15 @@ async def voice_speak(request: Request, payload: SpeakIn) -> Response:
         text, _redactions = redact_for_speech(text)
     except Exception:  # pragma: no cover -- redaction is fail-open by design
         pass
+    try:
+        # [voice] only_mode: replies are heard, not read, so code, tables and
+        # links are described instead of spelled out.
+        from maverick.voice_only import shape_for_speech, voice_only_enabled
+
+        if voice_only_enabled():
+            text = shape_for_speech(text) or text
+    except Exception:  # pragma: no cover -- shaping never blocks read-aloud
+        log.warning("voice-only shaping failed; reading the text as written")
 
     import os as _os
     import tempfile as _tempfile
@@ -9241,8 +9360,9 @@ def halt_clear(  # noqa: C901 - explicit fail-safe cross-authority transaction
 def cancel_goal(request: Request, goal_id: int) -> None:
     """Mark a goal as cancelled.
 
-    The agent loop checks status at each tool-call boundary; setting
-    'cancelled' here causes the next check to short-circuit the run.
+    The agent checks status at work boundaries and while awaiting model/tool
+    work. The next check requests cooperative cancellation and retains ownership
+    until cleanup finishes; it cannot undo an already committed external effect.
     Already-done goals are a no-op.
     """
     require_permission(request, "operate")
@@ -9726,6 +9846,7 @@ def _schedule_out(job) -> ScheduleOut:
         title=(str(p.get("title") or p.get("text") or ""))[:200],
         next_run=job.run_at,
         schedule_id=str(p.get("schedule_id") or ""),
+        zone=str(p.get("__tz__") or ""),
     )
 
 
@@ -9754,6 +9875,12 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     from maverick.scheduler import CronError, next_run, schedule_cron
 
     cron = (payload.cron or "").strip()
+    tz = (payload.tz or "").strip()
+    if tz:
+        from .schedule_ops_api import valid_zone
+
+        if not valid_zone(tz):
+            raise HTTPException(status_code=400, detail="unknown time zone")
     try:
         next_run(cron)  # validate up front; CronError -> 400
     except CronError as e:
@@ -9788,6 +9915,8 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
 
     schedule_id = uuid4().hex
     job_payload = {"text": text, "title": title, "__cron__": cron, "schedule_id": schedule_id}
+    if tz:
+        job_payload["__tz__"] = tz
     owner = caller_principal(request) or ""
     if owner:
         job_payload["owner"] = owner
@@ -9814,6 +9943,7 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
         title=title,
         next_run=run_at,
         schedule_id=schedule_id,
+        zone=tz,
     )
 
 
@@ -10248,13 +10378,9 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     when the feature is on."""
     require_permission(request, "operate")
     _require_event_triggers()
-    from maverick.paths import current_tenant_id
-
     from maverick_dashboard import event_poll
-    from maverick_dashboard.app import _run_trigger_goal_in_tenant
 
     principal = caller_principal(request) or ""
-    tenant = current_tenant_id() or ""
     triggers = _owned_event_triggers(request)
     if name:
         triggers = [t for t in triggers if t["name"] == name]
@@ -10269,19 +10395,8 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     ]
 
     def _fire(goal_id: int) -> None:
-        goal = _world().get_goal(goal_id)
-        if goal is None:
-            raise RuntimeError("event-created goal is unavailable")
-        owner, user_id, allowed_suites = stored_automation_identity(goal.owner)
-        bg.add_task(
-            _run_trigger_goal_in_tenant,
-            goal_id,
-            None,
-            None,
-            tenant=tenant,
-            owner=owner,
-            allowed_suites=allowed_suites,
-        )
+        from maverick_dashboard.automation_queue import enqueue_event_goal
+        enqueue_event_goal(goal_id)
 
     def _fire_flow(
         flow_id: str,
@@ -10290,6 +10405,7 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         idem_key: str = "",
         origin: str = "manual",
         expected_revision: str = "",
+        legacy_event: dict | None = None,
     ) -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
@@ -10308,11 +10424,13 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
             user_id=user_id,
             allowed_suites=allowed_suites,
             expected_revision=expected_revision,
+            legacy_event=legacy_event,
         )
 
     results = await run_in_threadpool(
         lambda: event_poll.poll_and_fire(
-            _world, triggers, principal=principal, fire=_fire, fire_flow=_fire_flow
+            _world, triggers, principal=principal, fire=_fire, fire_flow=_fire_flow,
+            fire_is_durable=True,
         )
     )
     return {"polled": len(results), "triggers": results}
@@ -10428,6 +10546,21 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
     # partial import doesn't read as a clean success.
     skipped = len(raws) - len(automations)
 
+    # Validate the complete requested batch before publishing a template,
+    # arming a schedule or writing a trigger. A graph requiring manual repair
+    # must not leave a runnable approximation behind after an HTTP error.
+    prepared_graphs = []
+    for automation in automations:
+        _, body = automation.render()
+        _ensure_import_body_size(body)
+        if payload.as_flows:
+            from maverick.automation_import.to_flow import to_flow_with_report
+
+            try:
+                prepared_graphs.append(to_flow_with_report(automation))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     # Resolve schedule activation: an explicit request field wins; when the UI
     # omits it (None), fall back to the [automation_import] create_schedules
     # config knob (previously a dead setting -- nothing read it). Off by default.
@@ -10458,9 +10591,7 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
     channel = "api" if user_id else None
 
     results: list[dict] = []
-    for a in automations:
-        _, body = a.render()
-        _ensure_import_body_size(body)
+    for automation_index, a in enumerate(automations):
         res = materialize(
             a,
             save=not payload.dry_run,
@@ -10522,10 +10653,9 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             # Lower to a real graph too: structure preserved where the source
             # exposes it, each step's disposition logged -- the migration is
             # never silently lossy.
-            from maverick.automation_import.to_flow import to_flow_with_report
             from maverick.flow import store as flow_store
 
-            flow_graph, fidelity = to_flow_with_report(a)
+            flow_graph, fidelity = prepared_graphs[automation_index]
             if owner:
                 flow_graph.owner = owner
             flow_id = flow_graph.id
@@ -10938,6 +11068,14 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Consent analytics",
         "requires": ("consent_preferences",),
     },
+    "consent_preferences.application_scanner": {
+        "label": "App tracking checks",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.bulk_jobs": {
+        "label": "Bulk consent changes",
+        "requires": ("consent_preferences",),
+    },
     "consent_preferences.delivery": {
         "label": "Consent delivery",
         "requires": ("consent_preferences",),
@@ -10968,6 +11106,18 @@ _MODULE_SWITCHES: dict[str, dict] = {
     },
     "consent_preferences.scanner": {
         "label": "Consent application scanning",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.publishing.web_settings": {
+        "label": "Website banner settings",
+        "requires": ("consent_preferences", "consent_preferences.publishing"),
+    },
+    "consent_preferences.profile_data.custom_index": {
+        "label": "Find people by preference",
+        "requires": ("consent_preferences", "consent_preferences.profile_data"),
+    },
+    "consent_preferences.global_opt_out": {
+        "label": "Global opt-out",
         "requires": ("consent_preferences",),
     },
     "consent_preferences.scanner.notice_proposals": {
@@ -11145,9 +11295,128 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "AI vendor risk",
         "requires": ("evidence_graph", "model_risk_assurance"),
     },
+    "codebase": {
+        "label": "Code projects",
+        "requires": (),
+    },
     "vendor_onboarding": {
         "label": "AI vendor onboarding",
         "requires": ("connections", "vendor_management", "evidence_graph", "model_risk_assurance", "ai_vendor_risk"),
+    },
+    # Each gate below is a boolean ``enable`` at this exact path, and each
+    # "requires" chain mirrors the kernel module's own enabled() check.
+    "control_plane": {  # config.get_control_plane
+        "label": "Agent control",
+        "requires": (),
+    },
+    "eu_conformity": {  # eu_conformity.enabled
+        "label": "EU AI Act conformity",
+        "requires": (),
+    },
+    "ai_literacy": {  # ai_literacy.enabled
+        "label": "AI literacy register",
+        "requires": (),
+    },
+    "policy_packs": {  # policy_packs.enabled
+        "label": "Policy packs",
+        "requires": (),
+    },
+    "evidence_gateway": {  # ai_evidence_gateway.enabled
+        "label": "AI evidence gateway",
+        "requires": (),
+    },
+    "drift_monitoring": {  # drift_monitoring.enabled -> model_risk_assurance.enabled
+        "label": "Model drift monitoring",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "ai_incident_reporting": {  # ai_incident_reporting.enabled -> model_risk_assurance
+        "label": "AI incident reporting",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "explainability": {  # explainability.enabled
+        "label": "Decision explanations",
+        "requires": (),
+    },
+    "content_provenance": {  # content_provenance.enabled
+        "label": "Content credentials",
+        "requires": (),
+    },
+    "breach_notification": {  # breach_notification.enabled
+        "label": "Breach notifications",
+        "requires": (),
+    },
+    "privacy_automation.drop_management": {  # privacy_drop_management.enabled
+        "label": "Data broker deletion requests",
+        "requires": ("privacy_automation", "privacy_automation.rights_orchestration"),
+    },
+    "ai_regulatory_feed": {  # ai_regulatory_feed.enabled -> finance_operations + evidence_gateway
+        "label": "AI regulation updates",
+        "requires": ("finance_operations", "evidence_gateway"),
+    },
+    "ai_business_intake": {  # ai_business_intake.enabled -> model_risk_assurance
+        "label": "AI project intake",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "ai_dynamic_risk": {  # ai_dynamic_risk.enabled
+        "label": "Changing AI risk scores",
+        "requires": (),
+    },
+    "ai_policy_management": {  # ai_policy_management.enabled
+        "label": "AI policy library",
+        "requires": (),
+    },
+    "ai_runtime_guardrails": {  # ai_runtime_guardrails.enabled
+        "label": "AI guardrails while running",
+        "requires": (),
+    },
+    "ai_explainability": {  # ai_explainability.enabled
+        "label": "AI explanation records",
+        "requires": (),
+    },
+    "ai_conformity_workflow": {  # ai_conformity_workflow.enabled -> model_risk_assurance
+        "label": "AI conformity reviews",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "ai_insurability": {  # ai_insurability.enabled
+        "label": "AI insurance readiness",
+        "requires": (),
+    },
+    "ai_regulated_verticals": {  # ai_regulated_verticals.enabled
+        "label": "AI rules for regulated industries",
+        "requires": (),
+    },
+    "ai_bank_mrm": {  # ai_bank_mrm.enabled
+        "label": "Bank model risk management",
+        "requires": (),
+    },
+    "ai_discovery_sensors": {  # ai_discovery_sensors.enabled
+        "label": "Find unlisted AI use",
+        "requires": (),
+    },
+    "portfolio_risk": {  # portfolio_risk.enabled -> model_risk_assurance
+        "label": "AI portfolio risk",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "ai_cost_roi": {  # ai_cost_roi.enabled
+        "label": "AI cost and return",
+        "requires": (),
+    },
+    "eu_ai_incidents": {  # eu_ai_incidents.enabled
+        "label": "EU AI incident reports",
+        "requires": (),
+    },
+    "grc_outbound_sync": {  # grc_outbound_sync.policy_from_config
+        "label": "Outbound assurance records",
+        "requires": (),
+    },
+    "incident_attachment_metadata": {  # incident_attachment_metadata.enabled
+        "label": "Incident attachments",
+        "requires": (),
+    },
+    # agent_topology.enabled -> entity_graph (on by default) + model_risk_assurance
+    "agent_topology": {
+        "label": "Agent dependency map",
+        "requires": ("evidence_graph", "model_risk_assurance"),
     },
 }
 
@@ -11624,6 +11893,9 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
     result = public_context(context_for_page(page), permissions)
     configured = bool(_any_provider_key_set())
     result["model_provider_configured"] = configured
+    from maverick.config import get_features
+
+    result["operations_enabled"] = get_features().get("copilot_operations") is True
     if not configured:
         result["provider_setup"] = _copilot_provider_setup(permissions)
     return result
@@ -12073,6 +12345,67 @@ async def list_channels(request: Request) -> dict:
     return {"channels": channels}
 
 
+@router.get("/channels/delivery-receipts")
+async def channel_delivery_receipts(request: Request, cursor: str = "", limit: int = 50,
+                                    receipt_id: str = "") -> dict:
+    """Tenant-scoped delivery status without inbound text, replies or credentials."""
+    import re
+
+    require_global_permission(request, "admin")
+    if not 1 <= limit <= 100 or len(cursor) > 256:
+        raise HTTPException(status_code=400, detail="invalid receipt window")
+    from maverick_channels.delivery import DeliveryJournal
+
+    def read():
+        journal = DeliveryJournal()
+        if receipt_id:
+            if not re.fullmatch(r"chd-[a-f0-9]{56}", receipt_id):
+                raise HTTPException(status_code=400, detail="invalid receipt identity")
+            row = journal.get(receipt_id)
+            rows, next_cursor = ([row] if row else []), cursor
+        else:
+            window = list(journal.store.iter_record_ids(start_after=cursor, limit=limit))
+            rows = [row for _, record_id in window if (row := journal.get(record_id))]
+            next_cursor = window[-1][0] if window else cursor
+        results = []
+        for row in rows:
+            item = {key: row.get(key) for key in ("id", "channel", "account_sha256", "execution_id", "execution",
+                                                 "delivery", "created_at", "updated_at", "compacted")}
+            chunks = row.get("chunks", {})
+            item["chunk_states"] = {state: sum(chunk["state"] == state for chunk in chunks.values())
+                                    for state in {chunk["state"] for chunk in chunks.values()}}
+            if receipt_id:
+                item["chunks"] = [{"key": key, "state": chunk["state"], "provider_id": chunk.get("provider_id", ""),
+                                   "idempotency_key": chunk.get("idempotency_key", "")}
+                                  for key, chunk in chunks.items()]
+            results.append(item)
+        return {"receipts": results, "next_cursor": next_cursor, "bounded_window": not bool(receipt_id)}
+
+    return await run_in_threadpool(read)
+
+
+@router.get("/channels/poll-checkpoints")
+async def channel_poll_checkpoints(request: Request, cursor: str = "", limit: int = 50) -> dict:
+    """Bounded tenant status; provider tokens and opaque cursors stay private."""
+    require_global_permission(request, "admin")
+    if not 1 <= limit <= 100 or len(cursor) > 256:
+        raise HTTPException(status_code=400, detail="invalid checkpoint window")
+    from maverick.governed_records import GovernedRecordStore
+
+    def read():
+        store = GovernedRecordStore("channel-poll-cursors", "chp", "channel_poll_cursor")
+        window = list(store.iter_record_ids(start_after=cursor, limit=limit))
+        rows = []
+        for _, record_id in window:
+            row = store.get(record_id)
+            if row:
+                rows.append({**{key: row.get(key) for key in ("id", "channel", "status", "updated_at")},
+                             "has_continuation": bool(row.get("cursor"))})
+        return {"checkpoints": rows, "next_cursor": window[-1][0] if window else cursor, "bounded_window": True}
+
+    return await run_in_threadpool(read)
+
+
 @router.get("/audit/tail")
 async def audit_tail(request: Request, n: int = 100, day: str | None = None) -> dict:
     """Tail the audit log (NDJSON at ~/.maverick/audit/YYYY-MM-DD.ndjson).
@@ -12094,7 +12427,14 @@ async def audit_tail(request: Request, n: int = 100, day: str | None = None) -> 
             status_code=400,
             detail="invalid audit day; expected a real date in YYYY-MM-DD format",
         )
-    return {"events": default_audit_log().tail(n, day=safe_day)}
+    from maverick.audit.segments import ReadReport
+
+    def read():
+        report = ReadReport()
+        events = default_audit_log().tail(n, day=safe_day, report=report)
+        return {"events": events, "read_report": report.as_dict()}
+
+    return await run_in_threadpool(read)
 
 
 @router.get("/audit/grep")
@@ -12114,6 +12454,7 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
     if len(pattern) > 200:
         raise HTTPException(status_code=400, detail="pattern too long")
     from maverick.audit import default_audit_log, iter_events
+    from maverick.audit.segments import ReadReport
 
     from maverick_dashboard.app import safe_audit_day
 
@@ -12128,10 +12469,11 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
     audit_dir = default_audit_log().audit_dir
 
     def _scan() -> dict:
+        report = ReadReport()
         matches: list[dict] = []
         scanned = 0
         total_matches = 0
-        for event in iter_events(day=effective_day, audit_dir=audit_dir):
+        for event in iter_events(day=effective_day, audit_dir=audit_dir, report=report):
             scanned += 1
             if needle in json.dumps(event, ensure_ascii=False, default=str).casefold():
                 total_matches += 1
@@ -12143,7 +12485,8 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
             "total_matches": total_matches,
             "returned": len(matches),
             "truncated": total_matches > len(matches),
-            "scan_complete": True,
+            "scan_complete": report.finished and report.failures == 0,
+            "read_report": report.as_dict(),
             "scope": {"day": effective_day},
         }
 
@@ -12627,6 +12970,16 @@ def _approval_api_row(approval) -> dict:
     }
 
 
+def _require_settings_decider(request: Request, world, approval_id: int, who: str, *,
+                              approving: bool) -> None:
+    """A protected-settings request (settings_quorum) is decided only by a
+    global administrator, and never approved by the person who asked."""
+    from . import settings_quorum
+
+    settings_quorum.require_decider(request, world.get_approval(approval_id), who,
+                                    approving=approving)
+
+
 def _require_current_decision_card(world, approval_id: int, request: Request) -> None:
     """Reject a stale page, expired card, or corrupted structured approval."""
     from maverick.approval_cards import (
@@ -12897,6 +13250,7 @@ def approve_approval(request: Request, approval_id: int) -> Response:
     )
     who = _supervisor(request)
     world = _world()
+    _require_settings_decider(request, world, approval_id, who, approving=True)
     _require_current_decision_card(world, approval_id, request)
     event = _record_vote_or_raise(world, approval_id, "approved", who)
     return _approval_decision_response(
@@ -12935,6 +13289,7 @@ def deny_approval(request: Request, approval_id: int) -> Response:
     )
     who = _supervisor(request)
     world = _world()
+    _require_settings_decider(request, world, approval_id, who, approving=False)
     event = _record_vote_or_raise(world, approval_id, "denied", who)
     return _approval_decision_response(
         world,
@@ -12982,6 +13337,7 @@ async def revise_approval(request: Request, approval_id: int) -> Response:
     except (ApprovalCardError, KeyError, TypeError, ValueError):
         pass
     who = _supervisor(request)
+    _require_settings_decider(request, world, approval_id, who, approving=False)
     event = _record_vote_or_raise(world, approval_id, "denied", who)
     delivered = _audit_approval_decision(world, event)
     if not delivered:
@@ -13280,11 +13636,8 @@ def run_fleet_agent(
         prof = available_domains().get(agent.domain)
         if prof is not None:
             cap = domain_capability(prof, cap, agent_principal)
-    max_dollars = (
-        min(payload.max_dollars, DEFAULT_MAX_DOLLARS)
-        if payload.max_dollars is not None
-        else DEFAULT_MAX_DOLLARS
-    )
+    spend_ceiling = configured_max_dollars()
+    max_dollars = clamp_task_limit(payload.max_dollars, spend_ceiling)
 
     w = _world()
     goal_id = w.create_goal(
@@ -13869,11 +14222,8 @@ def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks) -> G
     )
     from maverick.runner import run_goal_in_background_async
 
-    max_dollars = (
-        min(payload.budget_dollars, DEFAULT_MAX_DOLLARS)
-        if payload.budget_dollars is not None
-        else DEFAULT_MAX_DOLLARS
-    )
+    spend_ceiling = configured_max_dollars()
+    max_dollars = clamp_task_limit(payload.budget_dollars, spend_ceiling)
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
@@ -14354,27 +14704,19 @@ def resume_goal(
             detail=f"goal is {g.status!r}; only blocked/cancelled/failed goals can resume",
         )
     max_dollars = payload.max_dollars if payload is not None else None
-    if max_dollars is not None and max_dollars > DEFAULT_MAX_DOLLARS:
+    spend_ceiling = configured_max_dollars()
+    if max_dollars is not None and spend_ceiling is not None and max_dollars > spend_ceiling:
         raise HTTPException(
             status_code=400,
-            detail=f"The spending limit for this attempt cannot exceed ${DEFAULT_MAX_DOLLARS:g}.",
+            detail=(
+                "The spending limit for this attempt cannot exceed "
+                f"${spend_ceiling:,.2f}, this deployment's spend cap."
+            ),
         )
     _requeue_goal(request, bg, goal_id, max_dollars=max_dollars)
 
 
-def _requeue_goal(
-    request: Request,
-    bg: BackgroundTasks,
-    goal_id: int,
-    *,
-    max_dollars: float | None = None,
-) -> None:
-    """Flip a parked goal back to 'pending' and hand it to the runner.
-
-    Shared by the explicit Resume button and by answering the last open
-    question, so both paths pass the same admission gate and the same
-    execution identity / suite scoping into the run.
-    """
+def _require_goal_restart_admission(goal_id: int) -> None:
     from maverick.outcome_pilot_start_gate import (
         OutcomePilotAdmissionRequired,
         require_work_item_admission,
@@ -14396,12 +14738,42 @@ def _requeue_goal(
                 ),
             },
         ) from exc
-    _world().set_goal_status(goal_id, "pending", result=None)
+
+
+def _requeue_goal(
+    request: Request,
+    bg: BackgroundTasks,
+    goal_id: int,
+    *,
+    max_dollars: float | None = None,
+    answer_question: tuple[int, str] | None = None,
+) -> None:
+    """Reserve a restart before dispatch, preserving chat/clarification state."""
+    from maverick.attachment_submissions import SubmissionConflict
+    from maverick.chat_threads import ChatThreads
+
+    world = _world()
+    try:
+        if answer_question is None:
+            _require_goal_restart_admission(goal_id)
+            conversation_id = ChatThreads(world).resume(goal_id)
+        else:
+            outcome = ChatThreads(world).answer(
+                goal_id, *answer_question, require_admission=lambda: _require_goal_restart_admission(goal_id))
+            if not outcome.admitted:
+                return
+            conversation_id = outcome.conversation_id
+    except SubmissionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     from maverick.runner import run_goal_in_background_async
 
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     budget_options = {"max_dollars": max_dollars} if max_dollars is not None else {}
+    if conversation_id is not None:
+        budget_options["conversation_id"] = conversation_id
     if user_id:
         bg.add_task(
             run_goal_in_background_async,
@@ -14593,6 +14965,43 @@ def outcomes_api(request: Request, top: int = 0) -> dict:
     }
 
 
+def _learning_components(subsystems: list[dict], on_by_key: dict) -> list[dict]:
+    """One row per learning system for its own switch on the Learning page.
+
+    ``on`` is the live state; ``wanted`` what this installation's settings ask
+    for (it differs when a system waits on another one, ``waiting_on``);
+    ``managed`` means a deployment variable decides and the switch is locked.
+    """
+    from maverick.config import governed_learning_default, load_config
+
+    try:
+        cfg = load_config() or {}
+    except Exception:  # pragma: no cover -- the status view never 500s on config
+        cfg = {}
+    labels = {s["key"]: s["label"] for s in subsystems}
+    rows = []
+    for s in subsystems:
+        on = bool(on_by_key.get(s["key"], False))
+        managed = bool(s.get("env")) and s["env"] in os.environ
+        section = cfg.get(s["section"]) if isinstance(cfg.get(s["section"]), dict) else {}
+        raw = section.get(s["config_key"])
+        wanted = on if managed else (raw if isinstance(raw, bool) else governed_learning_default())
+        needs = s.get("needs")
+        waiting = bool(wanted and not on and needs and not on_by_key.get(needs, False))
+        rows.append({
+            "key": s["key"],
+            "label": s["label"],
+            "description": s.get("description", ""),
+            "section": s["section"],
+            "on": on,
+            "wanted": bool(wanted),
+            "managed": managed,
+            "waiting_on": labels.get(needs, "") if waiting else "",
+            "how": s["how"],
+        })
+    return rows
+
+
 def _learning_snapshot(request: Request) -> dict:
     """Learning-engine status + accumulated moat. Shared by the JSON endpoint
     and the /learning page so both render identical numbers."""
@@ -14658,15 +15067,7 @@ def _learning_snapshot(request: Request) -> dict:
         "reward_audit": reasoning_reward.audit_rewards_enabled(),
         "jit_rl": jit_rl.enabled(),
     }
-    components = [
-        {
-            "key": s["key"],
-            "label": s["label"],
-            "on": on_by_key.get(s["key"], False),
-            "how": s["how"],
-        }
-        for s in LEARNING_SUBSYSTEMS
-    ]
+    components = _learning_components(LEARNING_SUBSYSTEMS, on_by_key)
 
     w = _world()
     owner = goal_owner_filter(request)
@@ -14760,15 +15161,32 @@ def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> dict:
     same one [capabilities]/[features]/providers use, all admin-gated), which
     ``load_config`` merges for every tenant and worker -- not an owner-scoped
     action, so an operator must not flip it (e.g. force-enable trajectory
-    capture deployment-wide, or disable the whole learning loop)."""
+    capture deployment-wide, or disable the whole learning loop).
+
+    With ``subsystem`` set, only that learning system is switched (its own
+    switch on the Learning page); the blanket call still switches every one,
+    so it can always turn the whole loop off again."""
     require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
 
+    actor = caller_principal(request) or "local"
     try:
-        settings_store.set_learning(
-            payload.enabled,
-            actor=caller_principal(request) or "local",
-        )
+        if payload.subsystem is None:
+            settings_store.set_learning(payload.enabled, actor=actor)
+        else:
+            spec = next((s for s in settings_store.LEARNING_SUBSYSTEMS
+                         if s["key"] == payload.subsystem), None)
+            if spec is None:
+                raise HTTPException(status_code=400,
+                                    detail="That learning system is not available here.")
+            if spec.get("env") and spec["env"] in os.environ:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"“{spec['label']}” is set by your server's deployment "
+                           "settings, so it can't be changed here.",
+                )
+            settings_store.set_learning_subsystem(
+                payload.subsystem, payload.enabled, actor=actor)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     from maverick.config import reset_config_cache
@@ -14929,6 +15347,9 @@ from .ai_evidence_analysis_authority_api import (  # noqa: E402
     router as ai_evidence_analysis_authority_router,
 )
 from .ai_governance_loop_api import router as ai_governance_loop_router  # noqa: E402
+from .api_flow_action_episodes import router as flow_action_episodes_router  # noqa: E402
+from .api_flow_operator_review import router as flow_operator_review_router  # noqa: E402
+from .api_flow_recipe_lineage import router as flow_recipe_lineage_router  # noqa: E402
 from .assessment_evidence_autopopulation_api import (  # noqa: E402
     router as assessment_evidence_autopopulation_router,
 )
@@ -14952,6 +15373,9 @@ from .consent_global_opt_out_api import (  # noqa: E402
 from .consent_preferences_api import router as consent_preferences_router  # noqa: E402
 from .consent_profile_data_api import router as consent_profile_data_router  # noqa: E402
 from .consent_public_admin_api import router as consent_public_admin_router  # noqa: E402
+from .consent_publication_signing_api import (  # noqa: E402
+    router as consent_publication_signing_router,
+)
 from .consent_publishing_api import router as consent_publishing_router  # noqa: E402
 from .consent_scan_inventory_api import router as consent_scan_inventory_router  # noqa: E402
 from .consent_scan_notice_proposals_api import (  # noqa: E402
@@ -14963,6 +15387,7 @@ from .consent_web_publish_settings_api import (  # noqa: E402
 from .consumer_trust_center_authority_api import (  # noqa: E402
     router as consumer_trust_center_authority_router,
 )
+from .copilot_operations import router as copilot_operations_router  # noqa: E402
 from .data_use_governance_api import router as data_use_governance_router  # noqa: E402
 from .data_use_provider_api import router as data_use_provider_router  # noqa: E402
 from .data_use_provider_audit_api import (  # noqa: E402
@@ -15021,9 +15446,35 @@ from .trc_continuous_evidence_api import (  # noqa: E402
 from .trust_center_branding_api import router as trust_center_branding_router  # noqa: E402
 
 router.include_router(ai_governance_loop_router)
+router.include_router(flow_action_episodes_router)
+router.include_router(copilot_operations_router)
+router.include_router(flow_recipe_lineage_router)
+router.include_router(flow_operator_review_router)
 router.include_router(ai_cloud_agent_governance_router)
 router.include_router(ai_evidence_analysis_router)
 router.include_router(ai_evidence_analysis_authority_router)
+from .people_picker_api import router as people_picker_router  # noqa: E402
+
+router.include_router(people_picker_router)
+
+from .facts_api import router as facts_router  # noqa: E402
+
+router.include_router(facts_router)
+from .assessment_reviewers_api import router as assessment_reviewers_router  # noqa: E402
+
+router.include_router(assessment_reviewers_router)
+from .run_tree_actions_api import router as run_tree_actions_router  # noqa: E402
+
+router.include_router(run_tree_actions_router)
+from .queue_status_api import router as queue_status_router  # noqa: E402
+
+router.include_router(queue_status_router)
+from .knowledge_library_api import router as knowledge_library_router  # noqa: E402
+
+router.include_router(knowledge_library_router)
+from .agent_action_trace_api import router as agent_action_trace_router  # noqa: E402
+
+router.include_router(agent_action_trace_router)
 router.include_router(assessment_evidence_autopopulation_router)
 router.include_router(ai_entity_tasks_router)
 router.include_router(governance_agents_router)
@@ -15042,6 +15493,7 @@ router.include_router(consent_public_admin_router)
 router.include_router(consent_delivery_router)
 router.include_router(consent_delivery_destinations_router)
 router.include_router(consent_experiments_router)
+router.include_router(consent_publication_signing_router)
 router.include_router(consent_publishing_router)
 router.include_router(consent_scan_inventory_router)
 router.include_router(consent_scan_notice_proposals_router)

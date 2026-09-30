@@ -1,0 +1,38 @@
+{#- Workforce page: what each specialist can do and what stops it, a check of
+    every specialist's setup, and the specialist test suite. Filled by
+    lightwork-workforce-ops.js; download and setup check appear for
+    administrators only (the routes check again). -#}
+<div id="wo-root" class="wo">
+  <div class="section-head"><h2 id="wo-inv-h">What each specialist can do, and what stops it</h2></div>
+  <section class="panel" aria-labelledby="wo-inv-h">
+    <p class="muted">For each specialist: whether it can reach tools that change things, whether a person must sign
+      off its work, and the requests it refuses. Useful for an audit or a risk review.</p>
+    <div class="wo-row">
+      <label for="wo-inv-suite">Department</label>
+      <select id="wo-inv-suite" class="select"><option value="">Every department</option></select>
+      <button type="button" class="btn btn--ghost wo-admin" id="wo-inv-download" hidden>Download the full inventory</button>
+    </div>
+    <div id="wo-inv" role="status" aria-live="polite">Loading…</div>
+  </section>
+
+  <div class="section-head wo-admin" hidden><h2 id="wo-lint-h">Check every specialist's setup</h2></div>
+  <section class="panel wo-admin" aria-labelledby="wo-lint-h" hidden>
+    <p class="muted">Looks through every specialist for setup problems that weaken its safety limits, and for gaps
+      worth improving. Nothing is changed.</p>
+    <button type="button" class="btn btn--primary" id="wo-lint-run">Check specialist setups</button>
+    <p class="muted" id="wo-lint-status" role="status" aria-live="polite"></p>
+    <div id="wo-lint-out"></div>
+  </section>
+
+  <div class="section-head"><h2 id="wo-suite-h">Specialist test suite</h2></div>
+  <section class="panel" aria-labelledby="wo-suite-h">
+    <p class="muted">The fixed tasks used to check that specialists do their job, and whether each one is complete.</p>
+    <div id="wo-suite" role="status" aria-live="polite">Loading…</div>
+  </section>
+</div>
+<style>
+  .wo-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: .5rem 0 1rem; }
+  .wo table { width: 100%; }
+</style>
+<script src="/static/lightwork-ops-jobs.js" defer></script>
+<script src="/static/lightwork-workforce-ops.js" defer></script>

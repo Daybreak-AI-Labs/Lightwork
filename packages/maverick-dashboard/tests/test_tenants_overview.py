@@ -58,7 +58,7 @@ def test_overview_page_rollup(monkeypatch, tmp_path):
     assert "$1.25" in text
     assert "$100/day" in text
     # beta: suspended flag + no runs yet.
-    assert "suspended" in text and "no runs yet" in text
+    assert "Paused" in text and "No tasks yet" in text
 
 
 def test_overview_api_rollup(monkeypatch, tmp_path):

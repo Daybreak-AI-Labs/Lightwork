@@ -79,10 +79,17 @@ def public_url_for(request) -> str:
     so validating against it 403s every legitimate webhook.
 
     Prefer ``MAVERICK_PUBLIC_BASE_URL`` (e.g. ``https://bot.example.com``) when
-    set; otherwise rebuild from the ``X-Forwarded-Proto``/``X-Forwarded-Host``
+    set, else ``[channels] public_base_url`` (the dashboard's All settings
+    page); otherwise rebuild from the ``X-Forwarded-Proto``/``X-Forwarded-Host``
     headers the proxy adds (Caddy/nginx set both). Falls back to the raw
     request URL when neither is available (direct-bind deploys)."""
-    base = os.environ.get("MAVERICK_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    try:
+        from maverick.env_setting import env_or_config
+
+        base = env_or_config("MAVERICK_PUBLIC_BASE_URL", "channels", "public_base_url", "") or ""
+    except Exception:  # an unreadable setting keeps the proxy-header fallback
+        base = os.environ.get("MAVERICK_PUBLIC_BASE_URL", "")
+    base = base.strip().rstrip("/")
     if base:
         return base + request.url.path
 
@@ -99,7 +106,10 @@ def _max_inbound_chars() -> int:
     drive an uncapped-context, uncapped-cost agent run. Override with
     MAVERICK_MAX_INBOUND_CHARS; 0 disables the cap."""
     try:
-        return int(os.environ.get("MAVERICK_MAX_INBOUND_CHARS", "30000"))
+        from maverick.env_setting import env_or_config
+
+        return int(env_or_config("MAVERICK_MAX_INBOUND_CHARS", "chat", "max_inbound_chars",
+                                 "30000") or "30000")
     except ValueError:
         return 30000
 
@@ -123,12 +133,26 @@ def webhook_body_limit() -> int:
     """Max inbound webhook body in bytes. Webhook listeners read the body
     *before* the HMAC/signature check (they must, to compute it), so without a
     cap an unauthenticated POST to an exposed webhook port can buffer arbitrary
-    memory. Override with MAVERICK_WEBHOOK_BODY_LIMIT; 0 disables the cap.
-    Default 1 MiB -- comfortably above any real Slack/Twilio/Meta payload."""
+    memory. Override with MAVERICK_WEBHOOK_BODY_LIMIT (0 disables the cap), or,
+    when that is unset, ``[webhooks] body_limit`` (a positive byte count; the
+    All settings page cannot remove the cap). Default 1 MiB -- comfortably
+    above any real Slack/Twilio/Meta payload."""
+    default = 1 << 20
+    env = os.environ.get("MAVERICK_WEBHOOK_BODY_LIMIT")
+    if env is not None and env.strip():
+        try:
+            return int(env)
+        except ValueError:
+            return default
     try:
-        return int(os.environ.get("MAVERICK_WEBHOOK_BODY_LIMIT", str(1 << 20)))
-    except ValueError:
-        return 1 << 20
+        from maverick.config import load_config
+
+        value = ((load_config() or {}).get("webhooks") or {}).get("body_limit")
+    except Exception:  # pragma: no cover - config never blocks a listener
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return default
+    return value
 
 
 class BodySizeLimitMiddleware:
@@ -307,6 +331,30 @@ class Channel(ABC):
                 getattr(self, "name", "?"), len(reply.attachments),
             )
         return reply.text
+
+    async def admit_message(self, msg: IncomingMessage, **kwargs):
+        """Persist an authorized inbound message before acknowledging intake."""
+        from .delivery import admit_message
+
+        return await admit_message(msg, **kwargs)
+
+    async def process_message(self, msg: IncomingMessage, **kwargs):
+        """Execute once and deliver only the durable saved reply on retry."""
+        from .delivery import process_message
+
+        return await process_message(self, msg, **kwargs)
+
+    async def recover_messages(self, **kwargs):
+        """Recover a bounded fair window under adapter-owned current policy."""
+        from .delivery import recover_messages
+
+        return await recover_messages(self, **kwargs)
+
+    def recovery_worker(self, **kwargs):
+        """Own a periodic recovery task for the surrounding transport lifetime."""
+        from .delivery import recovery_worker
+
+        return recovery_worker(self, **kwargs)
 
     async def send_threaded(
         self, user_id: str, text: str, *, reply_to: str | None = None,

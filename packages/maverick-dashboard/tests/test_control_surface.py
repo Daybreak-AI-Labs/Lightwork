@@ -193,7 +193,7 @@ def test_audit_page_renders(monkeypatch, tmp_path: Path):
     client = _client()
     r = client.get("/audit")
     assert r.status_code == 200
-    assert "audit log" in r.text.lower()
+    assert "activity log" in r.text.lower()
 
 
 def test_plugins_page_renders(monkeypatch):
@@ -250,9 +250,8 @@ def test_channels_page_redacts_sensitive_values(monkeypatch):
     client = _client()
     r = client.get("/channels")
     assert r.status_code == 200
-    assert "workspace=ops" in r.text
-    assert "bot_token=[redacted]" in r.text
-    assert "app_token=[redacted]" in r.text
+    # The page no longer dumps raw configuration at all, and secrets never render.
+    assert "bot_token=" not in r.text and "workspace=ops" not in r.text
     assert "xoxb-real-secret" not in r.text
     assert "xapp-real-secret" not in r.text
 

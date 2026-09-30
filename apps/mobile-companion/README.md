@@ -14,9 +14,9 @@ From `packages/maverick-dashboard/maverick_dashboard/api.py`:
 
 | Screen      | Endpoint |
 |-------------|----------|
-| Runs list   | `GET /api/v1/goals?limit=50` |
+| Tasks       | `GET /api/v1/goals?limit=50` |
 | Run detail  | `GET /api/v1/goals/{id}/events?since=0&limit=200` |
-| Glance      | `GET /api/v1/oversight/active` + `GET /api/v1/spend` |
+| Overview    | `GET /api/v1/oversight/active` + `GET /api/v1/spend` |
 | Offline     | `GET /api/v1/offline/bundle` (optional; serves `maverick.offline_bundle.build_bundle`. Older dashboards without it still work — the offline cache just isn't refreshed) |
 
 Updates are plain polling (5–15s per screen) — dependency-light and
@@ -87,3 +87,5 @@ Coverage includes failed/legacy keychain writes, concurrent reads and saves,
 out-of-order responses, slow polling, unmounts, save feedback, and cached data
 isolation when the dashboard or token changes. Native iOS/Android layout and
 keychain acceptance still require a device build.
+
+See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

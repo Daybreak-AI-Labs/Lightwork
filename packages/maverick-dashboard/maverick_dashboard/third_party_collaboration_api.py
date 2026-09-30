@@ -3,7 +3,13 @@
 Internal routes derive tenant and principal from the authenticated dashboard.
 External routes accept only a deployment-owned public portal reference and an
 opaque invitation credential.  Neither surface accepts a tenant, lifecycle
-authority, scoring rule, approval, provider credential, or uploaded bytes.
+authority, scoring rule, approval, or provider credential.
+
+The one external route that receives file bytes (``/evidence``) authenticates
+the invitation and learns that invitation's own size bound before reading any
+of the body, then hands the bytes to the store, which measures them (SHA-256,
+size, type from the content) and keeps only the measurement.  Draft and final
+submissions are accepted only with manifests that match such a measurement.
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi import Path as ApiPath
@@ -27,6 +34,8 @@ _OP_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,191}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 _PORTAL_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{15,127}$"
 _TOKEN_RE = re.compile(r"tpc1\.[A-Za-z0-9_-]{43}\Z")
+_EXTENSION_RE = re.compile(r"[a-z0-9]{1,10}\Z")
+_EVIDENCE_EXTENSION_HEADER = "x-evidence-file-extension"
 
 OpaqueId = Annotated[
     str,
@@ -222,6 +231,16 @@ class _ExternalDraftOut(_StrictModel):
     idempotent_replay: bool
 
 
+class _ExternalEvidenceOut(_StrictModel):
+    tenant_id: OpaqueId
+    invitation_id: OpaqueId
+    artifact_id: OpaqueId
+    content_sha256: Digest
+    size_bytes: int = Field(ge=1, le=100 * 1024 * 1024)
+    media_type_ref: OpaqueId
+    idempotent_replay: bool
+
+
 class _ExternalFinalOut(_StrictModel):
     schema_name: Literal["lightwork.third-party-collaboration-receipt.v1"] = Field(
         alias="schema"
@@ -323,7 +342,7 @@ def _jsonable(value: Any) -> Any:
 def _external_safe(
     value: Any,
     *,
-    kind: Literal["contract", "draft", "final"],
+    kind: Literal["contract", "draft", "final", "evidence"],
     tenant_id: str,
 ) -> dict[str, Any]:
     """Validate the complete external response before removing tenant authority.
@@ -339,6 +358,7 @@ def _external_safe(
         "contract": _ExternalContractOut,
         "draft": _ExternalDraftOut,
         "final": _ExternalFinalOut,
+        "evidence": _ExternalEvidenceOut,
     }
     try:
         validated = models[kind].model_validate(_jsonable(value), strict=True)
@@ -410,6 +430,30 @@ async def _call(ops: Any, function: Callable[..., Any], *args: Any, **kwargs: An
             status_code=503,
             detail="third-party collaboration dependency unavailable",
         ) from exc
+
+
+def _sharing(request: Request, ops: Any) -> dict[str, Any]:
+    portal = None
+    resolver = getattr(request.app.state, "third_party_collaboration_current_portal_ref", None)
+    if callable(resolver):
+        try:
+            portal = f"/api/v1/external/third-party-collaboration/{resolver()}/portal"
+        except Exception:
+            portal = None
+    try:
+        policy = ops.load_policy()
+        limits = {
+            "invitation_seconds": int(policy.invitation_ttl_seconds),
+            "retention_seconds": int(policy.retention_seconds),
+            "max_artifacts": int(policy.max_artifacts),
+            "max_artifact_bytes": int(policy.max_artifact_bytes),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="third-party collaboration authority unavailable",
+        ) from exc
+    return {"portal_path": portal, "limits": limits}
 
 
 def create_third_party_collaboration_router(
@@ -494,6 +538,14 @@ def create_third_party_collaboration_router(
             "upload_bytes_implemented": False,
             "vendor_identity_independently_verified": False,
         }
+
+    @router.get("/sharing")
+    async def sharing(request: Request) -> dict[str, Any]:
+        """Where vendors answer, and the limits an invitation must fit in, so
+        the invite form offers only choices the portal will accept."""
+        require_permission(request, "admin")
+        ops, _tenant, _store = authority(request)
+        return _sharing(request, ops)
 
     @router.get("/invitations")
     async def list_invitations(
@@ -646,6 +698,67 @@ def _invitation_token(request: Request) -> str:
     return value
 
 
+def _evidence_measurer(store: Any) -> Callable[..., Any]:
+    measure = getattr(store, "measure_evidence", None)
+    if not callable(measure):
+        raise HTTPException(status_code=404, detail="invitation unavailable")
+    return measure
+
+
+def _matching_measurement(
+    result: dict[str, Any],
+    declared: int,
+    contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """The store must report exactly the bytes received, for this invitation."""
+
+    if result["size_bytes"] != declared or result["invitation_id"] != contract["invitation_id"]:
+        raise HTTPException(status_code=503, detail="invitation authority unavailable")
+    return result
+
+
+def _evidence_request(request: Request) -> tuple[str | None, int]:
+    """Check an evidence upload's headers before any of its body is read."""
+
+    origin = request.headers.get("origin")
+    if origin is not None and urlparse(origin).netloc != request.url.netloc:
+        raise HTTPException(status_code=403, detail="cross-site upload blocked")
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if media_type != "application/octet-stream":
+        raise HTTPException(status_code=415, detail="evidence must be sent as file bytes")
+    extension = request.headers.get(_EVIDENCE_EXTENSION_HEADER)
+    if extension is not None and not _EXTENSION_RE.fullmatch(extension):
+        raise HTTPException(status_code=422, detail="submission is invalid")
+    declared_header = request.headers.get("content-length")
+    if declared_header is None:
+        raise HTTPException(status_code=411, detail="file size is required")
+    try:
+        declared = int(declared_header)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="file size is invalid") from None
+    if declared < 1:
+        raise HTTPException(status_code=422, detail="submission is invalid")
+    return extension, declared
+
+
+async def _read_evidence(request: Request, declared: int, policy: Mapping[str, Any]) -> bytes:
+    """Stream at most the invitation's byte bound, and exactly the declared size."""
+
+    maximum = int(policy["maximum_total_bytes"])
+    if int(policy["maximum_artifacts"]) == 0 or maximum == 0:
+        raise HTTPException(status_code=403, detail="submission is outside the invitation")
+    if declared > maximum:
+        raise HTTPException(status_code=413, detail="file is larger than the invitation allows")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > declared:
+            raise HTTPException(status_code=413, detail="file is larger than the invitation allows")
+    if len(body) != declared:
+        raise HTTPException(status_code=400, detail="file was not received completely")
+    return bytes(body)
+
+
 def create_external_third_party_collaboration_router(
     dependencies: ThirdPartyCollaborationDependencies | None = None,
 ) -> APIRouter:
@@ -706,7 +819,7 @@ def create_external_third_party_collaboration_router(
         ops: Any,
         function: Callable[..., Any],
         *args: Any,
-        kind: Literal["contract", "draft", "final"],
+        kind: Literal["contract", "draft", "final", "evidence"],
         tenant_id: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
@@ -744,6 +857,40 @@ def create_external_third_party_collaboration_router(
         )
         _private(response)
         return result
+
+    @router.post("/{portal_ref}/evidence")
+    async def measure_evidence(
+        portal_ref: PortalPath,
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        """Measure one evidence file; its bytes are read only after the invitation
+        is authenticated, only up to that invitation's own bound, and are not kept."""
+
+        ops, material, token = authority(portal_ref, request, "evidence")
+        measure = _evidence_measurer(material.store)
+        extension, declared = _evidence_request(request)
+        contract = await external_call(
+            ops,
+            material.store.contract_for_token,
+            material.tenant_id,
+            token,
+            kind="contract",
+            tenant_id=material.tenant_id,
+        )
+        content = await _read_evidence(request, declared, contract["artifact_policy"])
+        result = await external_call(
+            ops,
+            measure,
+            material.tenant_id,
+            token,
+            content=content,
+            file_extension=extension,
+            kind="evidence",
+            tenant_id=material.tenant_id,
+        )
+        _private(response)
+        return _matching_measurement(result, declared, contract)
 
     @router.put("/{portal_ref}/draft")
     async def save_draft(

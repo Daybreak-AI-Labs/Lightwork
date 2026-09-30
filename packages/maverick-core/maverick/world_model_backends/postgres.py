@@ -30,7 +30,6 @@ import json
 import logging
 import math
 import os
-import re
 import secrets
 import threading
 import time
@@ -38,6 +37,10 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from urllib.parse import quote
+
+from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
+from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
 
 log = logging.getLogger(__name__)
 
@@ -236,6 +239,9 @@ _RLS_TABLES = (
     "fact_history",
     "erasure_receipts",
     "approval_audit_outbox",
+    "attachment_submissions",
+    "event_goal_admissions",
+    "event_trigger_batches",
 )
 _TENANT_MIGRATION: list[str] = [
     f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS tenant_id TEXT;" for t in _TENANT_TABLES
@@ -684,6 +690,22 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
         "CREATE INDEX IF NOT EXISTS idx_pg_goals_domain_completed "
         "ON goals(tenant_id, domain, completed_at)",
     ]),
+    (37, [
+        "CREATE INDEX IF NOT EXISTS idx_pg_goals_root_owner "
+        "ON goals(tenant_id, owner, id DESC) WHERE parent_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_pg_goals_root_shared_owner "
+        "ON goals(owner, id DESC) WHERE parent_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_pg_goals_root_id "
+        "ON goals(id DESC) WHERE parent_id IS NULL",
+    ]),
+    (38, [_ATTACHMENT_SUBMISSION_SCHEMA]),
+    (39, LEARNING_TENANT_MIGRATION),
+    (40, [_EVENT_ADMISSION_SCHEMA]),
+    (41, [
+        "ALTER TABLE event_goal_admissions ADD COLUMN IF NOT EXISTS request_digest TEXT",
+        "ALTER TABLE event_goal_admissions ADD COLUMN IF NOT EXISTS sealed_contract TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_pg_event_admission_goal ON event_goal_admissions(tenant_id,goal_id)",
+    ]),
 ]
 
 # Highest migration version = the reported schema version.
@@ -804,6 +826,17 @@ def _rls_explicitly_set() -> bool:
     has opted into the strict boundary knowingly, so we keep the existing
     fail-closed install path for them rather than blocking boot."""
     return _explicit_toggle("MAVERICK_PG_RLS", "rls") is not None
+
+
+def _configured_dsn() -> str:
+    """``[world_model] dsn`` (config.toml or the dashboard settings, where it is
+    kept sealed); ``MAVERICK_PG_DSN`` in the environment wins over it."""
+    try:
+        from ..config import load_config
+        value = ((load_config() or {}).get("world_model") or {}).get("dsn")
+    except Exception:  # pragma: no cover -- config never blocks construction
+        return ""
+    return str(value).strip() if isinstance(value, str) else ""
 
 
 def _pool_size() -> int:
@@ -1121,34 +1154,9 @@ def _dec_question_row(r):
 
 def _connection_kwargs(dsn: str) -> dict:
     """Preserve operator libpq options while bounding unattended transactions."""
-    from psycopg.conninfo import conninfo_to_dict
+    from ..db_timeouts import postgres_connection_kwargs
 
-    from ..db_timeouts import postgres_connect_timeout
-
-    parameters = conninfo_to_dict(dsn)
-    options = parameters.get("options", os.environ.get("PGOPTIONS", ""))
-    defaults = (
-        ("statement_timeout", "MAVERICK_PG_STATEMENT_TIMEOUT_MS", 30_000),
-        ("idle_in_transaction_session_timeout", "MAVERICK_PG_IDLE_TX_TIMEOUT_MS", 60_000),
-    )
-    additions = []
-    for setting, env_name, default in defaults:
-        # Parse only the options value, not credentials or database names that
-        # happen to contain a setting name. Accept -c foo=N, -cfoo=N and --foo=N.
-        if re.search(r"(?:^|\s)(?:-c\s*|--)?" + setting + r"\s*=", options):
-            continue
-        try:
-            timeout = int(os.environ.get(env_name, str(default)))
-        except ValueError:
-            timeout = default
-        if not 0 <= timeout <= 2_147_483_647:
-            timeout = default
-        additions.append(f"-c {setting}={timeout}")
-    return {
-        "autocommit": False,
-        "options": " ".join([options, *additions]).strip(),
-        "connect_timeout": postgres_connect_timeout(parameters.get("connect_timeout")),
-    }
+    return postgres_connection_kwargs(dsn)
 
 
 class PostgresWorldModel:
@@ -1172,8 +1180,9 @@ class PostgresWorldModel:
             raise ImportError(
                 "psycopg not installed. Run: python -m pip install -e './packages/maverick-core[postgres]'"
             ) from e
-        import psycopg
-        self._dsn = dsn or os.environ.get("MAVERICK_PG_DSN") or ""
+        from ..postgres_io import BoundedConnection, postgres_io_timeout_seconds
+
+        self._dsn = dsn or os.environ.get("MAVERICK_PG_DSN") or _configured_dsn()
         if not self._dsn:
             raise RuntimeError(
                 "Postgres world model requires MAVERICK_PG_DSN or "
@@ -1184,11 +1193,12 @@ class PostgresWorldModel:
         # mode hands each transaction its own connection from the pool, so the
         # backend scales across concurrent callers instead of serialising on one
         # shared connection. Default (pool_size 0) keeps the original
-        # single-connection + RLock model byte-for-byte.
+        # single-connection + RLock ownership model.
         self._pool = None
         size = _pool_size()
         # A statement timeout is rolled back by _tx; a terminated idle
         # transaction closes the connection. Retain these options on reconnect.
+        self._io_timeout_seconds = postgres_io_timeout_seconds()
         self._connect_kwargs = _connection_kwargs(self._dsn)
         if size > 0:
             try:
@@ -1200,11 +1210,14 @@ class PostgresWorldModel:
                 ) from e
             self._pool = ConnectionPool(
                 self._dsn, min_size=1, max_size=size, open=True,
-                kwargs=dict(self._connect_kwargs),
+                connection_class=BoundedConnection,
+                kwargs={**self._connect_kwargs, "io_timeout_seconds": self._io_timeout_seconds},
             )
             self.conn = None
         else:
-            self.conn = psycopg.connect(self._dsn, **self._connect_kwargs)
+            self.conn = BoundedConnection.connect(
+                self._dsn, io_timeout_seconds=self._io_timeout_seconds, **self._connect_kwargs,
+            )
         # One long-lived connection shared across this object (non-pooled mode).
         # psycopg connections are NOT safe for concurrent use by multiple
         # threads, and the kernel drives this from FastAPI's threadpool + the
@@ -1242,8 +1255,11 @@ class PostgresWorldModel:
         """
         if self.conn is not None and not self.conn.closed:
             return
-        import psycopg
-        self.conn = psycopg.connect(self._dsn, **self._connect_kwargs)
+        from ..postgres_io import BoundedConnection
+
+        self.conn = BoundedConnection.connect(
+            self._dsn, io_timeout_seconds=self._io_timeout_seconds, **self._connect_kwargs,
+        )
 
     @contextmanager
     def _tx(self) -> Iterator:
@@ -1349,15 +1365,15 @@ class PostgresWorldModel:
             log.warning("RLS preflight could not run (%s); proceeding to _apply_rls", e)
             return
         offenders = {
-            t: info["null_tenant_rows"]
+            t: info.get("null_tenant_rows", 0) + info.get("empty_tenant_rows", 0)
             for t, info in report.get("tables", {}).items()
-            if info.get("null_tenant_rows")
+            if info.get("null_tenant_rows") or info.get("empty_tenant_rows")
         }
         if offenders:
             detail = ", ".join(f"{t}={n}" for t, n in sorted(offenders.items()))
             raise RuntimeError(
                 "Enterprise mode auto-enabled Postgres RLS, but legacy rows with "
-                f"tenant_id IS NULL would be hidden and frozen ({detail}). Assign "
+                f"unscoped tenant IDs would be hidden and frozen ({detail}). Assign "
                 "them to a tenant first: `maverick tenant backfill <tenant_id>` "
                 "(preview with `maverick tenant rls-preflight`). To opt into RLS "
                 "knowingly without backfilling, set MAVERICK_PG_RLS=1 explicitly."
@@ -1562,6 +1578,39 @@ class PostgresWorldModel:
             # mutation, after tenant-scoped UPDATE proves this goal is ours.
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+
+    def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
+        """Refuse only an exact-tenant, non-terminal goal before dispatch."""
+        frag, fparams = _mutation_tenant_scope()
+        sql = (
+            "UPDATE goals SET status='blocked', completed_at=NULL, "
+            "updated_at=GREATEST(updated_at + 0.000001, %s), result=%s "
+            "WHERE id=%s AND status IN ('pending','active','running','blocked') AND " + frag
+        )
+        with self._tx() as cur:
+            cur.execute(sql, tuple([time.time(), _seal(result), int(goal_id), *fparams]))
+            changed = cur.rowcount == 1
+            if changed:
+                cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+            return changed
+
+    def set_goal_partial_result(self, goal_id: int, text: str) -> bool:
+        """Replace a running goal's result with the answer written so far;
+        matches the SQLite backend (non-terminal rows only, no sign-off effect)."""
+        now = time.time()
+        frag, fparams = _tenant_scope()
+        sql = (
+            "UPDATE goals SET result=%s, updated_at=GREATEST(updated_at + 0.000001, %s) "
+            "WHERE id=%s AND status NOT IN "
+            "('done','completed','failed','cancelled','blocked','error')"
+        )
+        params: list = [_seal(text), now, goal_id]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            return cur.rowcount == 1
 
     def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
         """Complete department totals, bound to this request's tenant."""
@@ -1831,7 +1880,7 @@ class PostgresWorldModel:
         p: list = list(params) if frag else []
         if frag:
             sql += " WHERE " + frag
-        sql += " ORDER BY requested_at DESC LIMIT %s"
+        sql += " ORDER BY requested_at DESC, id DESC LIMIT %s"
         p.append(max(1, int(limit)))
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
@@ -2456,6 +2505,51 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_goal_row(r) for r in rows]
 
+    def conversation_summaries(self, *, owner: str | None = None,
+                               limit: int = 25, before_id: int | None = None):
+        """Root creation order with owner/tenant filters before the limit."""
+        from ..goal_views import ConversationSummary
+        from ..world_model import _dec_fields
+
+        sql = "SELECT id,title,status,updated_at,owner FROM goals WHERE parent_id IS NULL"
+        params = []
+        if owner is not None:
+            sql += " AND owner=%s"
+            params.append(str(owner))
+        if before_id is not None:
+            sql += " AND id<%s"
+            params.append(int(before_id))
+        scope, scope_params = _tenant_scope()
+        if scope:
+            sql += " AND " + scope
+            params.extend(scope_params)
+        sql += " ORDER BY id DESC LIMIT %s"
+        params.append(max(1, min(100, int(limit))))
+        with self._tx() as cursor:
+            cursor.execute(sql, tuple(params))
+            rows = cursor.fetchall()
+        titles = _dec_fields([row[1] for row in rows])
+        return [ConversationSummary(row[0], title, row[2], row[3], str(row[4] or ""))
+                for row, title in zip(rows, titles, strict=True)]
+
+    def goal_stream_state(self, goal_id: int, *, include_result: bool = False):
+        from ..goal_views import GoalStreamState
+
+        columns = "id,status,owner,result" if include_result else "id,status,owner"
+        sql = f"SELECT {columns} FROM goals WHERE id=%s"
+        params = [goal_id]
+        scope, scope_params = _tenant_scope()
+        if scope:
+            sql += " AND " + scope
+            params.extend(scope_params)
+        with self._tx() as cursor:
+            cursor.execute(sql, tuple(params))
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return GoalStreamState(row[0], row[1], str(row[2] or ""),
+                               _unseal(row[3]) if include_result else "")
+
     def most_recent_goal(self) -> PGGoal | None:
         """Most-recently-updated goal regardless of status; mirrors SQLite."""
         frag, params = _tenant_scope()
@@ -2569,12 +2663,8 @@ class PostgresWorldModel:
         Positive windows continue to require the full stale interval.
         Returns the number of rows reclaimed.
         """
-        env_override = os.environ.get("MAVERICK_ORPHAN_RECLAIM_SECONDS")
-        if env_override is not None:
-            try:
-                max_age_seconds = max(0.0, float(env_override))
-            except ValueError:
-                pass
+        from ..world_model import reclaim_window_seconds
+        max_age_seconds = reclaim_window_seconds(default=max_age_seconds)
         cutoff = time.time() - max_age_seconds
         now = time.time()
         marker = " [process restarted mid-run]"
@@ -4558,6 +4648,11 @@ class PostgresWorldModel:
                     edge_sql += " AND " + gfrag
                     edge_params += gfparams
                 cur.execute(edge_sql, tuple(edge_params))
+                cur.execute(
+                    "UPDATE event_goal_admissions SET sealed_contract=NULL, "
+                    "delivery_state='federation_retired' WHERE admission_key LIKE 'federation:%%' "
+                    "AND goal_id = ANY(%s)", (gids,),
+                )
                 cur.execute("DELETE FROM goals WHERE id = ANY(%s)", (gids,))
 
             # Scrub the subject's explicitly user-scoped facts. Facts are global
@@ -4639,29 +4734,11 @@ class PostgresWorldModel:
         self, goal_id: int, filename: str, mime: str, size_bytes: int,
         sha256: str, path: str,
     ) -> int:
-        # Gate on the parent goal being in the active tenant (see start_episode).
-        frag, fparams = _tenant_scope()
-        with self._tx() as cur:
-            if frag:
-                cur.execute(
-                    "INSERT INTO attachments"
-                    "(goal_id, filename, mime, size_bytes, sha256, path, created_at) "
-                    "SELECT %s, %s, %s, %s, %s, %s, %s WHERE EXISTS "
-                    "(SELECT 1 FROM goals WHERE id=%s AND " + frag + ") RETURNING id",
-                    (goal_id, filename, mime, size_bytes, sha256, path, time.time(),
-                     goal_id, *fparams),
-                )
-            else:
-                cur.execute(
-                    "INSERT INTO attachments"
-                    "(goal_id, filename, mime, size_bytes, sha256, path, created_at) "
-                    "VALUES(%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                    (goal_id, filename, mime, size_bytes, sha256, path, time.time()),
-                )
-            row = cur.fetchone()
-        if row is None:
-            raise ValueError(f"unknown goal_id {goal_id!r} for the active tenant")
-        return int(row[0])
+        from ..attachment_submissions import AttachmentAdmission, SubmissionStore
+
+        return SubmissionStore(self).admit(
+            goal_id, [AttachmentAdmission(filename, mime, size_bytes, sha256, path)],
+        )[0]
 
     def list_attachments(self, goal_id: int) -> list:
         from ..world_model import Attachment

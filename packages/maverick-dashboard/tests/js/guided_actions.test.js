@@ -83,13 +83,13 @@ test("discriminated object choices use the existing variant and preserve its val
     {type:"object",required:["kind","second"],properties:{kind:{const:"second",type:"string"},second:{type:"integer"}}},
   ]}}};
   const ui=await fixture(schema,{selection:{kind:"second",second:0}});ui.submit();
-  assert.equal(ui.calls.length,1);assert.equal(ui.field("Selection").querySelector('select[aria-label="Detail format"]').value,"1");
+  assert.equal(ui.calls.length,1);assert.equal(ui.field("Selection").querySelector('select[aria-label="Choose an option"]').value,"1");
   assert.deepEqual(ui.calls[0].body,{selection:{kind:"second",second:0}});ui.dom.window.close();
 });
 
 test("explicit null can be selected in the guided form without substituting omission", async () => {
   const ui=await fixture({type:"object",properties:{note:{anyOf:[{type:"string"},{type:"null"}]}}},{note:"previous"});
-  const format=ui.field("Note").querySelector('select[aria-label="Detail format"]');format.value="1";ui.fire(format,"change");ui.submit();
+  const format=ui.field("Note").querySelector('select[aria-label="Choose an option"]');format.value="1";ui.fire(format,"change");ui.submit();
   assert.deepEqual(ui.calls[0].body,{note:null});ui.dom.window.close();
 });
 
@@ -117,32 +117,38 @@ test("primitive controls use their actual field names as accessible labels", asy
   ui.dom.window.close();
 });
 
-test("request-reference generation is explicit, secure, limited to idempotency_key and preserves exact retries", async () => {
-  const ui=await fixture({type:"object",properties:{idempotency_key:{type:"string",minLength:8,maxLength:128},operation_id:{type:"string"}}},{idempotency_key:"existing-reference",operation_id:"keep-operation"});
-  const raw=ui.d.getElementById("test-body");const buttons=[...ui.d.querySelectorAll("button")].filter(node=>node.textContent==="Generate reference");
-  assert.equal(buttons.length,1);assert.equal(ui.field("Request reference").contains(buttons[0]),true);
-  ui.submit();assert.equal(ui.calls[0].body.idempotency_key,"existing-reference");
-  let confirmed=true;raw.addEventListener("input",()=>{confirmed=false;});buttons[0].click();
-  const generated=JSON.parse(raw.value).idempotency_key;
+test("a request reference is filled in and hidden, and a supplied one is kept exactly for retries", async () => {
+  // Supplied with the request: kept byte-for-byte, even when other details change.
+  let ui=await fixture({type:"object",properties:{idempotency_key:{type:"string",minLength:8,maxLength:128},operation_id:{type:"string"}}},{idempotency_key:"existing-reference",operation_id:"keep-operation"});
+  assert.equal(ui.field("Request reference").hidden,true);
+  assert.equal([...ui.d.querySelectorAll("button")].some(node=>node.textContent==="Generate reference"),false);
+  const op=ui.field("Operation").querySelector("input:not([type=checkbox])");op.value="changed";ui.fire(op);
+  ui.submit();ui.submit();
+  assert.equal(ui.calls[0].body.idempotency_key,"existing-reference");assert.equal(ui.calls[1].body.idempotency_key,"existing-reference");
+  ui.dom.window.close();
+  // Not supplied: a secure reference is made, kept for retries, renewed when the request changes.
+  ui=await fixture({type:"object",properties:{idempotency_key:{type:"string",minLength:8,maxLength:128},operation_id:{type:"string"}}},{operation_id:"first"});
+  ui.submit();ui.submit();
+  const generated=ui.calls[0].body.idempotency_key;
   assert.match(generated,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
-  assert.equal(confirmed,false);assert.equal(JSON.parse(raw.value).operation_id,"keep-operation");
-  ui.submit();ui.submit();assert.equal(ui.calls[1].body.idempotency_key,generated);assert.equal(ui.calls[2].body.idempotency_key,generated);
+  assert.equal(ui.calls[1].body.idempotency_key,generated);
+  const again=ui.field("Operation").querySelector("input:not([type=checkbox])");again.value="second";ui.fire(again);ui.submit();
+  assert.notEqual(ui.calls[2].body.idempotency_key,generated);assert.equal(ui.calls[2].body.operation_id,"second");
   ui.dom.window.close();
 });
 
 test("reference generation is not offered for formats that cannot accept a UUID", async () => {
   for (const schema of [{type:"string",maxLength:16},{type:"string",pattern:"^fixed$"},{type:"integer"},{type:"string",format:"email"},{type:"string",enum:["existing-reference"]}]) {
     const ui=await fixture({type:"object",properties:{idempotency_key:schema}},{idempotency_key:"existing-reference"});
-    assert.equal([...ui.d.querySelectorAll("button")].some(node=>node.textContent==="Generate reference"),false);ui.dom.window.close();
+    assert.equal(ui.field("Request reference").hidden,false);ui.submit();
+    assert.equal(ui.calls[0].body.idempotency_key,"existing-reference");ui.dom.window.close();
   }
 });
 
-test("an incompatible generated reference does not replace the existing request identity", async () => {
-  const ui=await fixture({type:"object",properties:{idempotency_key:{type:"string",pattern:"^[0-9a-f-]{36}$"}}},{idempotency_key:"11111111-1111-4111-8111-111111111111"});
-  Object.defineProperty(ui.w.crypto,"randomUUID",{value:()=>"not-in-the-accepted-format"});
-  [...ui.d.querySelectorAll("button")].find(node=>node.textContent==="Generate reference").click();
-  assert.equal(JSON.parse(ui.d.getElementById("test-body").value).idempotency_key,"11111111-1111-4111-8111-111111111111");
-  assert.match(ui.field("Request reference").textContent,/requires a custom request reference/);ui.dom.window.close();
+test("an incompatible generated reference leaves the field for the person to fill", async () => {
+  const ui=await fixture({type:"object",properties:{idempotency_key:{type:"string",pattern:"^ref-[0-9]+$"}}},{});
+  assert.equal(ui.field("Request reference").hidden,false);ui.submit();
+  assert.equal(ui.calls[0].body.idempotency_key,undefined);ui.dom.window.close();
 });
 
 test("closed-schema Add detail controls appear only after an optional field is removed", async () => {
@@ -206,7 +212,7 @@ test("standalone variant edits preserve review evidence and explicit false value
 });
 
 async function publishingFixture(schemas,options={}) {
-  const html=fs.readFileSync(path.join(repo,"packages/maverick-dashboard/maverick_dashboard/templates/consent_publishing.html"),"utf8");
+  const html=fs.readFileSync(path.join(__dirname,"fixtures/guided_publishing_form.html"),"utf8");
   const dom=new JSDOM(html,{url:"https://lightwork.test",runScripts:"outside-only"}),w=dom.window,d=w.document,calls=[];
   d.querySelector(".feature-gated-workbench").disabled=false;
   const form=d.getElementById("cpp-resource"),kind=form.elements.kind,raw=form.elements.payload;
@@ -239,7 +245,7 @@ test("guided purpose and translation drafts submit through the original controll
   const saved={version:1,expected_current_version:0,idempotency_key:"purpose-retry",title_key:"purpose.title",required:false,default_choice:"denied"};
   assert.deepEqual(JSON.parse(ui.calls[0].request.body),saved);
   ui.choose("translations");assert.equal(ui.form.elements.locale.required,true);assert.equal(ui.d.getElementById("cpp-resource-locale").hidden,false);
-  assert.equal(JSON.parse(ui.raw.value).idempotency_key,undefined);ui.form.elements.locale.value="en-US";ui.set("idempotency_key","translation-retry");
+  assert.notEqual(JSON.parse(ui.raw.value).idempotency_key,"purpose-retry");ui.form.elements.locale.value="en-US";ui.set("idempotency_key","translation-retry");
   const messages=ui.field("messages"),add=messages.querySelector(".guided-add");add.querySelector('input[aria-label="New detail name"]').value="purpose.title";
   [...add.querySelectorAll("button")].find(node=>node.textContent==="Add named detail").click();
   ui.set("purpose.title","Your privacy choices");ui.submit();await tick();
@@ -253,7 +259,7 @@ test("schema arrival after a publishing kind change uses the current kind and re
   const ui=await publishingFixture({},{delayed:true});ui.choose("themes");ui.release();await tick();assert.ok(ui.field("themes"));assert.equal(ui.field("purposes"),null);
   ui.set("idempotency_key","theme-draft");ui.choose("translations");ui.form.reset();await new Promise(resolve=>ui.w.setTimeout(resolve,1));
   assert.equal(ui.kind.value,"purposes");assert.ok(ui.field("purposes"));assert.equal(ui.form.elements.locale.required,false);
-  ui.choose("themes");assert.equal(JSON.parse(ui.raw.value).idempotency_key,undefined);ui.dom.window.close();
+  ui.choose("themes");assert.notEqual(JSON.parse(ui.raw.value).idempotency_key,"theme-draft");ui.dom.window.close();
 });
 
 test("template action maps offer only supported named actions and preserve the selected text reference",async()=>{

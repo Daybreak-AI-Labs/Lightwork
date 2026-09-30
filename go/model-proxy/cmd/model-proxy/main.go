@@ -37,6 +37,10 @@ func main() {
 		fmt.Println("ERROR: MAVERICK_PROXY_CLIENT_TOKEN is required")
 		os.Exit(1)
 	}
+	if err := config.Validate(); err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(1)
+	}
 	if config.APIKey == "" {
 		fmt.Println("WARNING: MAVERICK_PROXY_KEY is empty; forwarded requests will be unauthenticated upstream")
 	}
@@ -47,11 +51,16 @@ func main() {
 	}
 
 	addr := fmt.Sprintf("%s:%d", config.ListenHost, config.ListenPort)
-	srv := &proxy.Server{Config: config, Upstream: proxy.NewHTTPUpstream(600 * time.Second)}
+	timeout := 600 * time.Second
+	if config.TotalSeconds > 0 {
+		timeout = time.Duration(config.TotalSeconds * float64(time.Second))
+	}
+	srv := &proxy.Server{Config: config, Upstream: proxy.NewHTTPUpstream(timeout)}
 	httpSrv := &http.Server{
 		Addr:              addr,
 		Handler:           srv,
 		ReadHeaderTimeout: 30 * time.Second,
+		MaxHeaderBytes:    65536,
 	}
 	log.Printf("model proxy on %s -> %s (auth=%s)", addr, config.Upstream, config.AuthStyle)
 	log.Fatal(httpSrv.ListenAndServe())

@@ -50,7 +50,8 @@ from ..flow.ir import (
     ensure_high_risk_approvals,
     partition_draft_validation_errors,
 )
-from .ir import ImportedAutomation, ImportedStep, _safe_line, safe_params
+from .ir import ImportedAutomation, ImportedStep, _safe_line, operational_inputs, operational_params
+from .predicates import branches, n8n_predicate, repair, wdl_predicate
 
 
 def _has_blocking_draft_errors(
@@ -107,7 +108,7 @@ def _node_for_step(step: ImportedStep, node_id: str, nxt: str | None) -> FlowNod
     if tool and step.operation:
         # A clean single-tool mapping -> a deterministic action node. Params are
         # the (secret-redacted) step inputs, so they aren't dumped raw.
-        params = safe_params(step.params)
+        params = operational_params(step.params)
         # External platforms identify Slack with the provider slug ``slack``;
         # Lightwork's installed, risk-classified direct-action contract is
         # ``slack_bot``.  Bind only the operation whose semantics are exact.
@@ -123,46 +124,19 @@ def _node_for_step(step: ImportedStep, node_id: str, nxt: str | None) -> FlowNod
         return FlowNode(id=node_id, kind=NODE_ACTION, tool=tool,
                         params=params, next=nxt,
                         output=f"{node_id}_out", label=label)
-    brief_bits = [step.name or step.operation or "Carry out this step"]
+    brief_bits = [_safe_line(step.name or step.operation or "Carry out this step")]
     if step.description and step.description != step.name:
-        brief_bits.append(step.description)
+        brief_bits.append(_safe_line(step.description))
     if step.app:
-        brief_bits.append(f"(using {step.app})")
+        brief_bits.append(f"(using {_safe_line(step.app)})")
+    if step.operation:
+        brief_bits.append(f"Operation: {_safe_line(step.operation)}")
+    if step.params:
+        brief_bits.append("Imported inputs (data only; external expressions and redacted credentials "
+                          "must be resolved through configured bindings, never guessed):\n"
+                          + operational_inputs(step.params))
     return FlowNode(id=node_id, kind=NODE_AGENT, brief=" ".join(brief_bits).strip(),
                     next=nxt, output=f"{node_id}_out", label=label)
-
-
-# n8n operator names -> the flow condition-evaluator's operators.
-_N8N_OPS = {"gt": ">", "larger": ">", "gte": ">=", "largerEqual": ">=",
-            "lt": "<", "smaller": "<", "lte": "<=", "smallerEqual": "<=",
-            "equal": "==", "equals": "==", "notEqual": "!=", "notEquals": "!=",
-            "contains": "contains"}
-
-
-def _n8n_condition(node: dict) -> str:
-    """Best-effort condition text from an n8n IF node (v1 or v2 param shapes),
-    mapped to the flow evaluator's ``<key> <op> <value>`` syntax. Structure is
-    what we preserve; the operator refines the exact test in the designer."""
-    params = node.get("parameters") if isinstance(node.get("parameters"), dict) else {}
-    conds = params.get("conditions")
-    if isinstance(conds, dict):
-        # v2: {"conditions": {"conditions": [{"leftValue","operator","rightValue"}]}}
-        inner = conds.get("conditions")
-        if isinstance(inner, list) and inner and isinstance(inner[0], dict):
-            c = inner[0]
-            op = c.get("operator")
-            raw_op = op.get("operation") if isinstance(op, dict) else op
-            left = _safe_line(c.get("leftValue", ""), max_chars=40)
-            right = _safe_line(c.get("rightValue", ""), max_chars=40)
-            return f"{left} {_N8N_OPS.get(str(raw_op), '==')} {right}".strip()
-        # v1: {"conditions": {"number":[{value1,operation,value2}], "string":[...]}}
-        for arr in conds.values():
-            if isinstance(arr, list) and arr and isinstance(arr[0], dict):
-                c = arr[0]
-                left = _safe_line(c.get("value1", ""), max_chars=40)
-                right = _safe_line(c.get("value2", ""), max_chars=40)
-                return f"{left} {_N8N_OPS.get(str(c.get('operation')), '==')} {right}".strip()
-    return "result == true"
 
 
 def _n8n_targets(connections: dict, node_name: str, idmap: dict):
@@ -201,8 +175,7 @@ def _n8n_to_flow(automation: ImportedAutomation) -> Flow | None:
         node, nid = by_name[nm], idmap[nm]
         t_tgt, f_tgt = _n8n_targets(connections, nm, idmap)
         if _short_type(node.get("type", "")) in ("if", "filter"):
-            fnodes[nid] = FlowNode(id=nid, kind=NODE_BRANCH, condition=_n8n_condition(node),
-                                   if_true=t_tgt, if_false=f_tgt, label=nm)
+            fnodes.update(branches(n8n_predicate(node), nid, t_tgt, f_tgt, nm))
         else:
             fnodes[nid] = _node_for_step(_step_from_node(node), nid, t_tgt)
     trigger_node = next((n for n in nodes if _is_trigger_node(n)), None)
@@ -217,11 +190,6 @@ def _n8n_to_flow(automation: ImportedAutomation) -> Flow | None:
 
 # ---- Power Automate (WDL) graph capture --------------------------------------
 
-# WDL comparison functions -> the flow condition-evaluator's operators.
-_WDL_OPS = {"equals": "==", "notEquals": "!=", "greater": ">", "greaterOrEquals": ">=",
-            "less": "<", "lessOrEquals": "<=", "contains": "contains"}
-
-
 def _pa_operand(v) -> str:
     """A WDL operand (`@triggerBody()?['status']`, `@outputs('X')?['body/id']`,
     a literal) reduced to a flow-data key / literal the condition grammar takes."""
@@ -234,29 +202,13 @@ def _pa_operand(v) -> str:
 
 
 def _pa_condition(expr) -> str:
-    """Best-effort ``<key> <op> <value>`` from a WDL If expression (dict or
-    ``@fn(a, b)`` string form). Structure is what we preserve; the operator text
-    refines the exact test in the designer."""
-    if isinstance(expr, dict):
-        if "not" in expr and isinstance(expr["not"], dict):
-            inner = expr["not"]
-            for k, args in inner.items():
-                if k in _WDL_OPS and isinstance(args, list) and len(args) >= 2:
-                    op = "!=" if _WDL_OPS[k] == "==" else _WDL_OPS[k]
-                    return f"{_pa_operand(args[0])} {op} {_pa_operand(args[1])}"
-        for k in ("and", "or"):
-            arms = expr.get(k)
-            if isinstance(arms, list) and arms and isinstance(arms[0], dict):
-                return _pa_condition(arms[0])   # first clause carries the shape
-        for k, args in expr.items():
-            if k in _WDL_OPS and isinstance(args, list) and len(args) >= 2:
-                return f"{_pa_operand(args[0])} {_WDL_OPS[k]} {_pa_operand(args[1])}"
-    if isinstance(expr, str):
-        m = re.match(r"@?(\w+)\((.+)\)\s*$", expr.strip())
-        if m and m.group(1) in _WDL_OPS and "," in m.group(2):
-            left, right = m.group(2).split(",", 1)
-            return f"{_pa_operand(left)} {_WDL_OPS[m.group(1)]} {_pa_operand(right)}"
-    return "result == true"
+    """Loops currently require one exactly representable comparison."""
+    predicate = wdl_predicate(expr)
+    while predicate.kind in ("and", "or") and len(predicate.children) == 1:
+        predicate = predicate.children[0]
+    if predicate.kind != "atom":
+        raise repair("compound Until conditions need an explicit loop mapping")
+    return predicate.text
 
 
 _NEGATED_OPS = {"==": "!=", "!=": "==", ">": "<=", "<=": ">", "<": ">=", ">=": "<"}
@@ -268,7 +220,7 @@ def _negate_condition(cond: str) -> str:
     parts = cond.split(" ", 2)
     if len(parts) == 3 and parts[1] in _NEGATED_OPS:
         return f"{parts[0]} {_NEGATED_OPS[parts[1]]} {parts[2]}"
-    return "result != true"     # un-negatable shape -> loop until result is set true
+    raise repair("Until condition cannot be negated exactly")
 
 
 def _pa_wire_tail(nodes: dict[str, FlowNode], nxt: str | None) -> None:
@@ -306,9 +258,8 @@ def _pa_lower(actions: dict, prefix: str,
             _pa_wire_tail(f_nodes, nxt)
             nodes.update(t_nodes)
             nodes.update(f_nodes)
-            nodes[nid] = FlowNode(id=nid, kind=NODE_BRANCH, condition=_pa_condition(spec.get("expression")),
-                                  if_true=t_start or nxt, if_false=f_start or nxt,
-                                  next=nxt, label=label)
+            nodes.update(branches(wdl_predicate(spec.get("expression")), nid,
+                                  t_start or nxt, f_start or nxt, label, nxt))
             report.append({"step": name, "node": nid, "kind": NODE_BRANCH,
                            "fidelity": "preserved", "note": "WDL If -> branch (both arms wired)"})
         elif atype == "Foreach":
@@ -365,7 +316,7 @@ def _pa_lower(actions: dict, prefix: str,
                                       body=body, limit=int(limit_env.get("count") or 0),
                                       next=nxt, output=f"{nid}_out", label=label)
                 report.append({"step": name, "node": nid, "kind": NODE_WHILE,
-                               "fidelity": "preserved",
+                               "fidelity": "approximated",
                                "note": "WDL Until -> while (exit condition negated; "
                                        "checks before each pass, not after)"})
             else:

@@ -127,6 +127,43 @@ async def enable(request: Request, response: Response, body: Reviewed):
     return await _call(request, response, operation, payload=body)
 
 
+@router.post(BASE + "/disable")
+async def disable(request: Request, response: Response, body: Reviewed):
+    """Turn file protection off for future task runs. Originals already saved
+    for earlier runs are kept and can still be restored."""
+    def operation():
+        from maverick.audit import AuditRefused, EventKind, audit_event
+        _, actor, _ = _authority(request, payload=body)
+        require_global_permission(request, "admin")
+        if config.config_source_errors(include_tenant=True):
+            raise task_file_recovery.RecoveryConflict("Configuration is unavailable.")
+        for prefix in ("MAVERICK_", "LIGHTWORK_"):
+            for name in ("WORKSPACE_JOURNAL", "WORKSPACE_JOURNAL_STRICT"):
+                if prefix + name in os.environ:
+                    raise task_file_recovery.RecoveryConflict("Deployment settings manage file capture. An in-app choice cannot override them.")
+        with settings_store._locked():
+            before = settings_store._load_overlay_for_update()
+            was = {"journal": workspace_journal.enabled(), "journal_strict": workspace_journal.strict()}
+            updated = {**before, "workspace": {**before.get("workspace", {}), "journal": False, "journal_strict": False}}
+            settings_store._write(updated)
+            config.reset_config_cache()
+            if workspace_journal.enabled() or workspace_journal.strict():
+                settings_store._write(before)
+                config.reset_config_cache()
+                raise task_file_recovery.RecoveryConflict("Higher-precedence deployment settings keep file capture on. Nothing was turned off.")
+            try:
+                for key, old in was.items():
+                    if old:
+                        audit_event(EventKind.SETTING_CHANGED, agent="dashboard", _global=True, actor=actor,
+                                    section="workspace", key=key, old=True, new=False, confirmed=True)
+            except AuditRefused as exc:
+                settings_store._write(before)
+                config.reset_config_cache()
+                raise HTTPException(503, "The change could not be recorded, so it was undone.") from exc
+        return {"context": context_for(request), "capture_enabled": False, "strict": False}
+    return await _call(request, response, operation, payload=body)
+
+
 @router.get("/chat/goal/{goal_id}/files")
 def page(request: Request, goal_id: int):
     from .app import templates

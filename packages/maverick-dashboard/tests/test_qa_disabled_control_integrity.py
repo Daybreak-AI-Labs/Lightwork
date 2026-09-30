@@ -42,6 +42,9 @@ class _ControlMarkup(HTMLParser):
 
 def _render(template_name: str, **context: Any) -> _ControlMarkup:
     templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    from maverick_dashboard.app import templates as app_templates
+
+    templates.env.filters.update(app_templates.env.filters)
     templates.env.globals.update(
         theme="dark",
         font="default",
@@ -170,8 +173,10 @@ def test_composition_workbenches_start_mutations_disabled_until_ready() -> None:
         proposals,
         "aep-create-controls",
         "aep-review-controls",
-        "aep-apply-controls",
     )
+    # Adding approved answers is a per-row button the script only creates
+    # once the service reports ready, so there is no static apply form.
+    assert "aep-apply-controls" not in proposals.by_id
 
     reports = _render(
         "third_party_executive_reports.html",
@@ -212,8 +217,10 @@ def test_disabled_composition_gates_stay_operable_outside_fieldsets() -> None:
         proposals,
         "aep-create-controls",
         "aep-review-controls",
-        "aep-apply-controls",
     )
+    # Adding approved answers is a per-row button the script only creates
+    # once the service reports ready, so there is no static apply form.
+    assert "aep-apply-controls" not in proposals.by_id
 
     reports = _render(
         "third_party_executive_reports.html",
@@ -243,7 +250,7 @@ def test_continuous_evidence_and_external_enrollment_fail_closed() -> None:
         trc_continuous_evidence_enabled=False,
     )
     _assert_disabled(evidence, "trc-refresh", "trc-run-cycle")
-    assert "trc-submit" not in evidence.by_id
+    assert "trc-root" not in evidence.by_id
     _assert_activation_outside_disabled_controls(evidence)
 
     evidence_unready = _render(
@@ -251,7 +258,7 @@ def test_continuous_evidence_and_external_enrollment_fail_closed() -> None:
         trc_continuous_evidence_enabled=True,
     )
     _assert_disabled(evidence_unready, "trc-run-cycle")
-    assert "disabled" not in evidence_unready.by_id["trc-submit"]
+    assert "disabled" not in evidence_unready.by_id["trc-refresh"]
 
     external = _render(
         "external_agents.html",
@@ -326,7 +333,7 @@ def test_readiness_clients_only_unlock_after_positive_runtime_proof() -> None:
         PACKAGE / "static" / "lightwork-third-party-executive-reports.js"
     ).read_text(encoding="utf-8")
     evidence_template = (
-        PACKAGE / "templates" / "trc_continuous_evidence.html"
+        PACKAGE / "static" / "lightwork-trc-continuous-evidence.js"
     ).read_text(encoding="utf-8")
 
     assert "setMutationReady(ready);" in assessment_source

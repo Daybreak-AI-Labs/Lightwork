@@ -1,284 +1,17 @@
 {% extends "base.html" %}
+{% from "_hero.html" import hero %}
 {% block title %}Contracts and Engagements - Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
-  .tpc-shell {
-    --tpc-glass: color-mix(in srgb, var(--panel) 72%, transparent);
-    --tpc-glass-soft: color-mix(in srgb, var(--panel) 54%, transparent);
-    --tpc-edge: color-mix(in srgb, var(--text) 15%, transparent);
-    --tpc-focus: color-mix(in srgb, var(--accent) 76%, white 24%);
-    position: relative;
-    isolation: isolate;
-    display: grid;
-    gap: var(--space-5);
-  }
-  .tpc-shell::before {
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    content: "";
-    pointer-events: none;
-    background:
-      radial-gradient(circle at 8% 10%, color-mix(in srgb, var(--accent) 19%, transparent), transparent 30rem),
-      radial-gradient(circle at 92% 20%, color-mix(in srgb, #06b6d4 15%, transparent), transparent 32rem),
-      radial-gradient(circle at 52% 96%, color-mix(in srgb, #8b5cf6 12%, transparent), transparent 28rem);
-  }
-  .tpc-hero,
-  .tpc-card,
-  .tpc-boundary,
-  .tpc-record {
-    border: 1px solid var(--tpc-edge);
-    background: var(--tpc-glass);
-    box-shadow: 0 18px 48px color-mix(in srgb, #000 20%, transparent),
-      inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent);
-    -webkit-backdrop-filter: blur(24px) saturate(145%);
-    backdrop-filter: blur(24px) saturate(145%);
-  }
-  .tpc-hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(16rem, 24rem);
-    gap: var(--space-5);
-    align-items: center;
-    padding: clamp(1.35rem, 3vw, 2.6rem);
-    border-radius: 1.55rem;
-    overflow: hidden;
-  }
-  .tpc-kicker {
-    margin: 0 0 .45rem;
-    color: var(--accent);
-    font-size: .75rem;
-    font-weight: 800;
-    letter-spacing: .12em;
-    text-transform: uppercase;
-  }
-  .tpc-title {
-    max-width: 17ch;
-    margin: 0;
-    font-size: clamp(2rem, 6vw, 4.4rem);
-    line-height: .98;
-    letter-spacing: -.045em;
-  }
-  .tpc-lede {
-    max-width: 70ch;
-    margin: 1rem 0 0;
-    color: var(--text-muted);
-    font-size: 1.04rem;
-    line-height: 1.65;
-  }
-  .tpc-runtime {
-    display: grid;
-    gap: .8rem;
-    min-width: 0;
-    padding: 1.15rem;
-    border: 1px solid var(--tpc-edge);
-    border-radius: 1.15rem;
-    background: var(--tpc-glass-soft);
-  }
-  .tpc-head,
-  .tpc-actions,
-  .tpc-runtime__row,
-  .tpc-record__head {
-    display: flex;
-    gap: .75rem;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
-  .tpc-status-mark,
-  .tpc-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: .4rem;
-    width: fit-content;
-    padding: .3rem .62rem;
-    border: 1px solid var(--tpc-edge);
-    border-radius: 999px;
-    background: var(--tpc-glass-soft);
-    font-size: .72rem;
-    font-weight: 800;
-    text-transform: uppercase;
-  }
-  .tpc-status-mark::before {
-    width: .55rem;
-    height: .55rem;
-    border-radius: 50%;
-    content: "";
-    background: currentColor;
-  }
-  .tpc-status-mark[data-state="ready"] { color: var(--success, #45c786); }
-  .tpc-status-mark[data-state="failed"] { color: var(--danger, #f06b75); }
-  .tpc-status-mark[data-state="checking"] { color: var(--warn); }
-  .tpc-boundary {
-    padding: clamp(1.1rem, 2vw, 1.65rem);
-    border-left: .3rem solid var(--accent);
-    border-radius: 1.15rem;
-  }
-  .tpc-boundary h2,
-  .tpc-card h2,
-  .tpc-card h3 { margin: 0 0 .65rem; }
-  .tpc-boundary ul {
-    display: grid;
-    gap: .45rem;
-    margin: .6rem 0 0;
-    padding-left: 1.2rem;
-    color: var(--text-muted);
-  }
-  .tpc-grid {
-    display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: var(--space-4);
-  }
-  .tpc-card {
-    grid-column: span 6;
-    min-width: 0;
-    padding: clamp(1rem, 2vw, 1.45rem);
-    border-radius: 1.2rem;
-  }
-  .tpc-card--wide { grid-column: 1 / -1; }
-  .tpc-card--third { grid-column: span 4; }
-  .tpc-form,
-  .tpc-form-grid,
-  .tpc-stack {
-    display: grid;
-    gap: .85rem;
-  }
-  .tpc-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tpc-form label,
-  .tpc-field-label {
-    display: grid;
-    gap: .38rem;
-    min-width: 0;
-    color: var(--text-muted);
-    font-size: .82rem;
-    font-weight: 700;
-  }
-  .tpc-form .input,
-  .tpc-form .select,
-  .tpc-form textarea {
-    width: 100%;
-    min-width: 0;
-    border-color: var(--tpc-edge);
-    background: color-mix(in srgb, var(--bg) 55%, transparent);
-  }
-  .tpc-form textarea {
-    min-height: 7.5rem;
-    resize: vertical;
-    font-family: var(--font-mono, ui-monospace, monospace);
-  }
-  .tpc-help,
-  .tpc-muted {
-    margin: .4rem 0;
-    color: var(--text-muted);
-    font-size: .86rem;
-    line-height: 1.55;
-  }
-  .tpc-fieldset,
-  .tpc-permission,
-  .tpc-kind-fields {
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
-  }
-  .tpc-fieldset[disabled],
-  .tpc-permission[disabled] { opacity: .62; }
-  .tpc-kind-fields {
-    display: grid;
-    gap: .85rem;
-    padding: 1rem;
-    border: 1px solid var(--tpc-edge);
-    border-radius: .9rem;
-    background: var(--tpc-glass-soft);
-  }
-  .tpc-check {
-    display: flex !important;
-    gap: .55rem !important;
-    align-items: flex-start;
-  }
-  .tpc-check input { margin-top: .18rem; }
-  .tpc-record-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
-    gap: .85rem;
-    margin-top: 1rem;
-  }
-  .tpc-record {
-    display: grid;
-    gap: .7rem;
-    min-width: 0;
-    padding: 1rem;
-    border-radius: 1rem;
-    background: var(--tpc-glass-soft);
-  }
-  .tpc-record h3 {
-    margin: 0;
-    overflow-wrap: anywhere;
-    font-size: 1rem;
-  }
-  .tpc-record dl {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: .3rem .7rem;
-    margin: 0;
-    font-size: .78rem;
-  }
-  .tpc-record dt { color: var(--text-muted); }
-  .tpc-record dd {
-    min-width: 0;
-    margin: 0;
-    overflow-wrap: anywhere;
-    font-family: var(--font-mono, ui-monospace, monospace);
-  }
-  .tpc-output {
-    max-height: 30rem;
-    overflow: auto;
-    margin: .8rem 0 0;
-    padding: 1rem;
-    border: 1px solid var(--tpc-edge);
-    border-radius: .85rem;
-    background: color-mix(in srgb, var(--bg) 74%, transparent);
-    color: var(--text);
-    font-size: .76rem;
-    line-height: 1.55;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  .tpc-empty {
-    padding: 1.1rem;
-    border: 1px dashed var(--tpc-edge);
-    border-radius: .85rem;
-    color: var(--text-muted);
-    text-align: center;
-  }
-  .tpc-shell :where(button, input, select, textarea, summary, [tabindex]):focus-visible {
-    outline: 3px solid var(--tpc-focus);
-    outline-offset: 3px;
-  }
-  .tpc-shell summary { cursor: pointer; font-weight: 700; }
-  @media (max-width: 940px) {
-    .tpc-hero { grid-template-columns: 1fr; }
-    .tpc-card,
-    .tpc-card--third { grid-column: 1 / -1; }
-  }
-  @media (max-width: 640px) {
-    .tpc-form-grid { grid-template-columns: 1fr; }
-    .tpc-actions > .btn { width: 100%; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .tpc-shell *, .tpc-shell *::before, .tpc-shell *::after {
-      scroll-behavior: auto !important;
-      transition-duration: .01ms !important;
-      animation-duration: .01ms !important;
-      animation-iteration-count: 1 !important;
-    }
-  }
-  @media (forced-colors: active) {
-    .tpc-hero, .tpc-card, .tpc-boundary, .tpc-record, .tpc-runtime {
-      border: 1px solid CanvasText;
-      background: Canvas;
-    }
-    .tpc-status-mark::before { forced-color-adjust: none; }
-  }
+  .tpc-grid { display:grid; gap:var(--space-3); grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr)); }
+  .tpc-grid label, .tpc-field { display:grid; gap:.3rem; }
+  .tpc-actions { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+  .tpc-row { border:1px solid var(--border); border-radius:var(--radius-sm); padding:var(--space-3); margin-bottom:var(--space-2); }
+  .tpc-fieldset { border:0; margin:0; padding:0; min-width:0; }
+  .tpc-checks { display:grid; gap:.25rem; }
+  .tpc-admin-actions { margin-top:var(--space-3); }
+  .tpc-checks label { display:flex; gap:.4rem; align-items:center; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 </style>
 {% endblock %}
 {% block content %}
@@ -288,225 +21,107 @@
                detail='Turns on Third-Party Management and contract records together.',
                can_activate=contracts_can_activate) }}
 {% endif %}
-<div class="tpc-shell" id="third-party-contracts-shell"
-     data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
-  <section class="tpc-hero" aria-labelledby="tpc-title">
-    <div>
-      <p class="tpc-kicker">Third-party risk operations</p>
-      <h1 class="tpc-title" id="tpc-title">Contracts and engagements</h1>
-      <p class="tpc-lede">Manage vendor agreements and working relationships as separate records. Track the reviewed vendor version, record changes, and retain a clear history.</p>
+<div id="third-party-contracts-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
+     data-can-operate="{{ 'true' if contracts_can_operate else 'false' }}"
+     data-can-audit="{{ 'true' if contracts_can_audit else 'false' }}"
+     data-can-admin="{{ 'true' if contracts_can_admin else 'false' }}">
+  {% call hero('Third-party management', 'Contracts and Engagements',
+               lede='Keep track of vendor agreements and the work each vendor does for you, with a clear history of every change.', title_id='tpc-title') %}
+    <div class="hero-statebox" aria-live="polite">
+      <div class="hero-statebox__label">Availability</div>
+      <div class="hero-statebox__row"><strong id="tpc-readiness">Checking…</strong><span class="badge idle" id="tpc-status-mark">Checking</span></div>
+      <p class="hero-statebox__copy" id="tpc-readiness-detail" role="status" aria-live="polite">Checking that contracts are available…</p>
+      <p><button class="btn btn--ghost" id="tpc-refresh-status" type="button">Refresh</button></p>
     </div>
-    <div class="tpc-runtime" aria-labelledby="tpc-runtime-title">
-      <p class="tpc-kicker" id="tpc-runtime-title">Availability</p>
-      <div class="tpc-runtime__row">
-        <strong id="tpc-readiness">Checking…</strong>
-        <span class="tpc-status-mark" id="tpc-status-mark" data-state="checking">Checking</span>
-      </div>
-      <p class="tpc-muted" id="tpc-readiness-detail" role="status" aria-live="polite">Reading the store-free status before enabling any lifecycle control.</p>
-      <button class="btn" id="tpc-refresh-status" type="button">Refresh status</button>
-    </div>
-  </section>
-
-  <aside class="tpc-boundary" aria-labelledby="tpc-boundary-title">
-    <p class="tpc-kicker">Authority and content boundary</p>
-    <h2 id="tpc-boundary-title">Vendor authority and sensitive content stay server-owned</h2>
-    <ul>
-      <li>Select the vendor and version you reviewed. Lightwork checks the current vendor details and your permissions before saving.</li>
-      <li>Use record references in these fields. Do not paste contract text, licensed templates, credentials, or storage locations.</li>
-      <li>Custom fields and formulas use supported types and options. Executable code is rejected.</li>
-      <li>Confidential and restricted custom values are redacted unless the caller has global audit authority and explicitly requests them.</li>
-    </ul>
-  </aside>
-
-  <section class="tpc-card tpc-card--wide" aria-labelledby="tpc-status-title">
-    <div class="tpc-head">
-      <div><p class="tpc-kicker">Readiness first</p><h2 id="tpc-status-title">Service availability</h2></div>
-    </div>
-    <details hidden><summary>Technical details</summary><pre hidden class="tpc-output" id="tpc-status-output" tabindex="0"></pre></details>
-  </section>
+  {% endcall %}
+  <p class="muted">Record the key facts here, not the full contract text.</p>
 
   <fieldset class="tpc-fieldset" id="tpc-operations" disabled>
-    <legend class="sr-only">Contract and Engagement operations</legend>
-    <div class="tpc-grid">
-      <section class="tpc-card tpc-card--wide" aria-labelledby="tpc-register-title">
-        <div class="tpc-head">
-          <div><p class="tpc-kicker">Tenant register</p><h2 id="tpc-register-title">Find contracts and engagements</h2></div>
-          <span class="tpc-pill" id="tpc-list-count">0 records</span>
+    <legend class="sr-only">Contracts and engagements</legend>
+    <div class="section-head"><h2>Your Contracts and Engagements</h2>
+      <button class="btn btn--primary" id="tpc-new" type="button"{% if not contracts_can_operate %} disabled{% endif %}>Add a contract or engagement</button></div>
+    <section class="panel" aria-label="Filters and records">
+      <form id="tpc-filter-form" autocomplete="off">
+        <div class="tpc-grid">
+          <label>Kind<select class="select" name="record_kind"><option value="">Both</option><option value="contract">Contracts</option><option value="engagement">Engagements</option></select></label>
+          <label>Vendor<select class="select" name="vendor_id"><option value="">All vendors</option></select></label>
+          <label>Status<select class="select" name="status"><option value="">Any status</option></select></label>
+          <label>Owner<select class="select" name="owner_ref"><option value="">Anyone</option></select></label>
+          {% if contracts_can_audit %}<label class="tpc-actions"><input name="include_sensitive_fields" type="checkbox"> Show confidential fields (auditors only)</label>{% endif %}
         </div>
-        <form class="tpc-form" id="tpc-filter-form" autocomplete="off" novalidate>
-          <div class="tpc-form-grid">
-            <label>Record kind<select class="select" name="record_kind"><option value="">Both</option><option value="contract">Contract</option><option value="engagement">Engagement</option></select></label>
-            <label>Vendor ID<input class="input" name="vendor_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"></label>
-            <label>Status<input class="input" name="status" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"></label>
-            <label>Owner reference<input class="input" name="owner_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"></label>
-            <label>Maximum results<input class="input" name="limit" type="number" min="1" max="1000" value="100" step="1" required></label>
-            <label class="tpc-check"><input name="include_sensitive_fields" type="checkbox"{% if not contracts_can_audit %} disabled{% endif %}><span>Include sensitive custom values (global audit only)</span></label>
+      </form>
+      <p class="muted" id="tpc-list-status" role="status" aria-live="polite">Loading…</p>
+      <div id="tpc-record-list"></div>
+      <div id="tpc-detail" hidden></div>
+    </section>
+
+    <section class="panel" id="tpc-editor" hidden aria-labelledby="tpc-editor-title">
+      <h2 id="tpc-editor-title">Add a Contract or Engagement</h2>
+      <form id="tpc-create-form" autocomplete="off">
+        <input type="hidden" name="record_id" value="">
+        <input type="hidden" name="expected_revision" value="">
+        <div class="tpc-grid">
+          <label>Kind<select class="select" name="record_kind"><option value="contract">Contract</option><option value="engagement">Engagement</option></select></label>
+          <label>Vendor<select class="select" name="vendor_id" required></select></label>
+          <label>Name<input class="input" name="title" maxlength="120" required placeholder="For example: Acme master agreement 2026"></label>
+          <label>Owner<select class="select" name="owner_ref" required></select></label>
+        </div>
+        <fieldset class="tpc-fieldset" id="tpc-contract-fields"><legend>Contract details</legend>
+          <div class="tpc-grid">
+            <label>Status<select class="select" name="contract_status"><option value="draft">Draft</option><option value="negotiation">In negotiation</option><option value="active">Active</option></select></label>
+            <label>Type<select class="select" name="agreement_type"><option value="master_services">Master services agreement</option><option value="statement_of_work">Statement of work</option><option value="data_processing">Data processing agreement</option><option value="license">License</option><option value="subscription">Subscription</option><option value="nda">Non-disclosure agreement</option><option value="other">Other</option></select></label>
+            <label>Signed document (name or where it's kept)<input class="input" name="agreement" maxlength="120" required placeholder="For example: Legal drive, Acme MSA signed"></label>
+            <label>Renewal<select class="select" name="renewal_mode"><option value="none">Doesn't renew</option><option value="manual">We renew it</option><option value="automatic">Renews automatically</option></select></label>
+            <label>Starts<input class="input" name="effective_at" type="date"></label>
+            <label>Ends<input class="input" name="expires_at" type="date"></label>
+            <label>Notice period (days)<input class="input" name="notice_period_days" type="number" min="0" max="3650" value="30"></label>
+            <label>Governing law<select class="select" name="governing_law"><option value="">Not set</option><option value="england-and-wales">England and Wales</option><option value="new-york">New York</option><option value="california">California</option><option value="delaware">Delaware</option><option value="ireland">Ireland</option><option value="germany">Germany</option><option value="france">France</option><option value="netherlands">Netherlands</option><option value="singapore">Singapore</option><option value="other">Other</option></select></label>
+            <label>Part of another contract<select class="select" name="parent_contract_id"><option value="">No</option></select></label>
           </div>
-          <div class="tpc-actions"><button class="btn btn--primary" type="submit">Apply filters</button><button class="btn" id="tpc-clear-filters" type="button">Clear filters</button></div>
-        </form>
-        <p class="tpc-muted" id="tpc-list-status" role="status" aria-live="polite">No register query has run.</p>
-        <div class="tpc-record-list" id="tpc-record-list" aria-live="polite"></div>
-      </section>
+        </fieldset>
+        <fieldset class="tpc-fieldset" id="tpc-engagement-fields" hidden disabled><legend>Engagement details</legend>
+          <div class="tpc-grid">
+            <label>Status<select class="select" name="engagement_status"><option value="planned">Planned</option><option value="active">Active</option></select></label>
+            <label>Type<select class="select" name="engagement_type"><option value="service">Service</option><option value="software">Software</option><option value="data_processing">Data processing</option><option value="consulting">Consulting</option><option value="outsourcing">Outsourcing</option><option value="other">Other</option></select></label>
+            <label>What they do for us<select class="select" name="service_category"><option value="cloud-hosting">Cloud hosting</option><option value="software">Software</option><option value="payments">Payments</option><option value="professional-services">Professional services</option><option value="data-processing">Data processing</option><option value="logistics">Logistics</option><option value="other">Other</option></select></label>
+            <label>Business owner<select class="select" name="business_owner_ref"></select></label>
+            <label>Starts<input class="input" name="start_at" type="date"></label>
+            <label>Ends<input class="input" name="end_at" type="date"></label>
+            <label>How critical<select class="select" name="operational_criticality"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label>
+            <label>Access to our data<select class="select" name="data_access"><option value="none">None</option><option value="metadata">Basic details only</option><option value="confidential">Confidential</option><option value="restricted">Restricted</option></select></label>
+            <label>Where it runs<select class="select" name="hosting_model"><option value="none">Not applicable</option><option value="vendor_cloud">The vendor's cloud</option><option value="customer_cloud">Our cloud</option><option value="on_premises">Our premises</option><option value="hybrid">A mix</option></select></label>
+          </div>
+          <fieldset class="tpc-checks"><legend>Related contracts</legend><div id="tpc-linked"></div></fieldset>
+        </fieldset>
+        <h3>Custom Fields</h3>
+        <div id="tpc-custom-fields"></div>
+        <p><button type="button" class="btn btn--ghost" id="tpc-add-field">Add a custom field</button>
+           <button type="button" class="btn btn--ghost" id="tpc-add-formula">Add a calculation</button></p>
+        <div id="tpc-formulas"></div>
+        <div class="tpc-actions">
+          <button class="btn btn--primary" type="submit" id="tpc-save">Save</button>
+          <button class="btn btn--ghost" type="button" id="tpc-cancel">Cancel</button>
+        </div>
+        <p class="muted" id="tpc-form-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
 
-      <section class="tpc-card" aria-labelledby="tpc-create-title">
-        <p class="tpc-kicker">Create · operator</p><h2 id="tpc-create-title">Create a first-class record</h2>
-        <p class="tpc-help">Vendor metadata displayed later is server-resolved; it is intentionally not an editable field.</p>
-        <form class="tpc-form" id="tpc-create-form" autocomplete="off" novalidate>
-          <fieldset class="tpc-permission" id="tpc-create-controls"{% if not contracts_can_operate %} disabled aria-disabled="true"{% endif %}>
-            <legend class="sr-only">Create Contract or Engagement</legend>
-            <div class="tpc-form-grid">
-              <label>Record kind<select class="select" name="record_kind" required><option value="contract">Contract</option><option value="engagement">Engagement</option></select></label>
-              <label>Optional record ID<input class="input" name="record_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}"></label>
-              <label>Vendor ID<input class="input" name="vendor_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required></label>
-              <label>Vendor version being reviewed<input class="input" name="vendor_revision" type="number" min="1" max="2147483647" step="1" required></label>
-              <label>Title reference<input class="input" name="title_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required></label>
-              <label>Owner reference<input class="input" name="owner_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}" required></label>
-            </div>
-
-            <fieldset class="tpc-kind-fields" id="tpc-contract-fields">
-              <legend>Contract lifecycle</legend>
-              <div class="tpc-form-grid">
-                <label>Status<select class="select" name="contract_status"><option value="draft">Draft</option><option value="active">Active</option></select></label>
-                <label>Agreement type<select class="select" name="agreement_type"><option value="master_services">Master services</option><option value="statement_of_work">Statement of work</option><option value="data_processing">Data processing</option><option value="license">License</option><option value="subscription">Subscription</option><option value="nda">NDA</option><option value="other">Other</option></select></label>
-                <label>Agreement reference<input class="input" name="agreement_ref" maxlength="128" required></label>
-                <label>Renewal mode<select class="select" name="renewal_mode"><option value="none">None</option><option value="manual">Manual</option><option value="automatic">Automatic</option></select></label>
-                <label>Effective time<input class="input" name="effective_at" type="datetime-local" step="1"></label>
-                <label>Expiry time<input class="input" name="expires_at" type="datetime-local" step="1"></label>
-                <label>Notice period days<input class="input" name="notice_period_days" type="number" min="0" max="3650" step="1" value="0"></label>
-                <label>Governing-law reference<input class="input" name="governing_law_ref" maxlength="128"></label>
-                <label>Parent Contract ID<input class="input" name="parent_contract_id" maxlength="128"></label>
-              </div>
-            </fieldset>
-
-            <fieldset class="tpc-kind-fields" id="tpc-engagement-fields" hidden disabled>
-              <legend>Engagement lifecycle</legend>
-              <div class="tpc-form-grid">
-                <label>Status<select class="select" name="engagement_status"><option value="planned">Planned</option><option value="active">Active</option></select></label>
-                <label>Engagement type<select class="select" name="engagement_type"><option value="service">Service</option><option value="software">Software</option><option value="data_processing">Data processing</option><option value="consulting">Consulting</option><option value="outsourcing">Outsourcing</option><option value="other">Other</option></select></label>
-                <label>Service category reference<input class="input" name="service_category_ref" maxlength="128"></label>
-                <label>Business owner reference<input class="input" name="business_owner_ref" maxlength="128"></label>
-                <label>Start time<input class="input" name="start_at" type="datetime-local" step="1"></label>
-                <label>End time<input class="input" name="end_at" type="datetime-local" step="1"></label>
-                <label>Operational criticality<select class="select" name="operational_criticality"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label>
-                <label>Data access<select class="select" name="data_access"><option value="none">None</option><option value="metadata">Metadata</option><option value="confidential">Confidential</option><option value="restricted">Restricted</option></select></label>
-                <label>Hosting model<select class="select" name="hosting_model"><option value="none">None</option><option value="vendor_cloud">Vendor cloud</option><option value="customer_cloud">Customer cloud</option><option value="on_premises">On premises</option><option value="hybrid">Hybrid</option></select></label>
-                <label>Linked Contract IDs <span class="tpc-muted">Comma-separated</span><input class="input" name="linked_contract_ids" maxlength="8255"></label>
-              </div>
-            </fieldset>
-
-            <label>Custom field schema JSON<textarea class="input" name="field_schema_json" maxlength="32768">[]</textarea></label>
-            <label>Custom field values JSON<textarea class="input" name="field_values_json" maxlength="32768">{}</textarea></label>
-            <label>Safe formula definitions JSON<textarea class="input" name="formulas_json" maxlength="32768">[]</textarea></label>
-            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,191}" required></label>
-            <button class="btn btn--primary" type="submit">Create record</button>
-          </fieldset>
-        </form>
-      </section>
-
-      <section class="tpc-card" aria-labelledby="tpc-update-title">
-        <p class="tpc-kicker">Update · operator</p><h2 id="tpc-update-title">Update selected lifecycle</h2>
-        <p class="tpc-help">Only checked fields are sent. Lifecycle, schema, values, and formulas must each be complete closed JSON objects when replaced.</p>
-        <form class="tpc-form" id="tpc-update-form" autocomplete="off" novalidate>
-          <fieldset class="tpc-permission" id="tpc-update-controls"{% if not contracts_can_operate %} disabled aria-disabled="true"{% endif %}>
-            <legend class="sr-only">Update Contract or Engagement</legend>
-            <div class="tpc-form-grid">
-              <label>Record ID<input class="input" name="record_id" maxlength="128" required></label>
-              <label>Record kind<select class="select" name="record_kind"><option value="contract">Contract</option><option value="engagement">Engagement</option></select></label>
-              <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1" required></label>
-              <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
-            </div>
-            <label class="tpc-check"><input name="include_title_ref" type="checkbox"><span>Replace title reference</span></label>
-            <input class="input" name="update_title_ref" maxlength="128" aria-label="Updated title reference">
-            <label class="tpc-check"><input name="include_owner_ref" type="checkbox"><span>Replace owner reference</span></label>
-            <input class="input" name="update_owner_ref" maxlength="128" aria-label="Updated owner reference">
-            <label class="tpc-check"><input name="include_status" type="checkbox"><span>Transition status</span></label>
-            <input class="input" name="update_status" maxlength="32" aria-label="Updated lifecycle status">
-            <label class="tpc-check"><input name="include_lifecycle" type="checkbox" aria-controls="tpc-update-lifecycle-json"><span id="tpc-update-lifecycle-json-label">Replace complete lifecycle JSON</span></label>
-            <textarea class="input" id="tpc-update-lifecycle-json" name="lifecycle_json" maxlength="32768" aria-labelledby="tpc-update-lifecycle-json-label">{}</textarea>
-            <label class="tpc-check"><input name="include_field_schema" type="checkbox" aria-controls="tpc-update-field-schema-json"><span id="tpc-update-field-schema-json-label">Replace custom field schema</span></label>
-            <textarea class="input" id="tpc-update-field-schema-json" name="update_field_schema_json" maxlength="32768" aria-labelledby="tpc-update-field-schema-json-label">[]</textarea>
-            <label class="tpc-check"><input name="include_field_values" type="checkbox" aria-controls="tpc-update-field-values-json"><span id="tpc-update-field-values-json-label">Replace custom field values</span></label>
-            <textarea class="input" id="tpc-update-field-values-json" name="update_field_values_json" maxlength="32768" aria-labelledby="tpc-update-field-values-json-label">{}</textarea>
-            <label class="tpc-check"><input name="include_formulas" type="checkbox" aria-controls="tpc-update-formulas-json"><span id="tpc-update-formulas-json-label">Replace safe formula definitions</span></label>
-            <textarea class="input" id="tpc-update-formulas-json" name="update_formulas_json" maxlength="32768" aria-labelledby="tpc-update-formulas-json-label">[]</textarea>
-            <button class="btn btn--primary" type="submit">Apply compare-and-swap update</button>
-          </fieldset>
-        </form>
-      </section>
-
-      <section class="tpc-card" aria-labelledby="tpc-inspect-title">
-        <p class="tpc-kicker">Evidence · viewer</p><h2 id="tpc-inspect-title">Inspect exact record</h2>
-        <form class="tpc-form" id="tpc-inspect-form" autocomplete="off" novalidate>
-          <label>Record ID<input class="input" name="record_id" maxlength="128" required></label>
-          <label class="tpc-check"><input name="include_sensitive_fields" type="checkbox"{% if not contracts_can_audit %} disabled{% endif %}><span>Include sensitive values</span></label>
-          <div class="tpc-actions"><button class="btn btn--primary" type="submit">Load record</button><button class="btn" id="tpc-load-history" type="button">Load history</button><button class="btn" id="tpc-load-tombstone" type="button"{% if not contracts_can_audit %} disabled{% endif %}>Load tombstone</button></div>
-        </form>
-      </section>
-
-      <section class="tpc-card" aria-labelledby="tpc-archive-title">
-        <p class="tpc-kicker">Archive · operator</p><h2 id="tpc-archive-title">Archive selected record</h2>
-        <form class="tpc-form" id="tpc-archive-form" autocomplete="off" novalidate>
-          <fieldset class="tpc-permission" id="tpc-archive-controls"{% if not contracts_can_operate %} disabled aria-disabled="true"{% endif %}>
-            <label>Record ID<input class="input" name="record_id" maxlength="128" required></label>
-            <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
-            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
-            <label class="tpc-check"><input name="confirmation" type="checkbox" required><span>I understand archived records become immutable and retention-eligible.</span></label>
-            <button class="btn" type="submit">Archive record</button>
-          </fieldset>
-        </form>
-      </section>
-
-      <section class="tpc-card" aria-labelledby="tpc-delete-title">
-        <p class="tpc-kicker">Delete · administrator</p><h2 id="tpc-delete-title">Create irreversible tombstone</h2>
-        <form class="tpc-form" id="tpc-delete-form" autocomplete="off" novalidate>
-          <fieldset class="tpc-permission" id="tpc-delete-controls"{% if not contracts_can_admin %} disabled aria-disabled="true"{% endif %}>
-            <label>Archived record ID<input class="input" name="record_id" maxlength="128" required></label>
-            <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
-            <label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" maxlength="192" required></label>
-            <label class="tpc-check"><input name="confirmation" type="checkbox" required><span>I understand deletion removes the record and history while preserving an immutable replay-prevention tombstone.</span></label>
-            <button class="btn btn--danger" type="submit">Delete archived record</button>
-          </fieldset>
-        </form>
-      </section>
-
-      <section class="tpc-card tpc-card--third" aria-labelledby="tpc-integrity-title">
-        <p class="tpc-kicker">Integrity · auditor</p><h2 id="tpc-integrity-title">Verify tenant ledger</h2>
-        <button class="btn" id="tpc-verify-integrity" type="button"{% if not contracts_can_audit %} disabled{% endif %}>Run integrity verification</button>
-      </section>
-
-      <section class="tpc-card tpc-card--third" aria-labelledby="tpc-retention-title">
-        <p class="tpc-kicker">Retention · auditor</p><h2 id="tpc-retention-title">List retention-due records</h2>
-        <label class="tpc-field-label">Maximum records<input class="input" id="tpc-retention-limit" type="number" min="1" max="1000" value="100"></label>
-        <button class="btn" id="tpc-retention-due" type="button"{% if not contracts_can_audit %} disabled{% endif %}>Load retention queue</button>
-      </section>
-
-      <section class="tpc-card tpc-card--third" aria-labelledby="tpc-recovery-title">
-        <p class="tpc-kicker">Recovery · administrator</p><h2 id="tpc-recovery-title">Recovery preflight</h2>
-        <p class="tpc-help">Verifies readiness and integrity. Backup destinations remain server-configured and are never accepted from the browser.</p>
-        <button class="btn" id="tpc-recovery-preflight" type="button"{% if not contracts_can_admin %} disabled{% endif %}>Run recovery preflight</button>
-      </section>
-
-      <section class="tpc-card" aria-labelledby="tpc-purge-title">
-        <p class="tpc-kicker">Retention · administrator</p><h2 id="tpc-purge-title">Purge expired archives</h2>
-        <form class="tpc-form" id="tpc-purge-form" autocomplete="off" novalidate>
-          <fieldset class="tpc-permission" id="tpc-purge-controls"{% if not contracts_can_admin %} disabled aria-disabled="true"{% endif %}>
-            <label>Maximum records<input class="input" name="limit" type="number" min="1" max="1000" value="100" required></label>
-            <label class="tpc-check"><input name="confirmation" type="checkbox" required><span>I understand only archived, retention-due records are purged and minimal tombstones remain.</span></label>
-            <button class="btn btn--danger" type="submit">Purge retention-due records</button>
-          </fieldset>
-        </form>
-      </section>
-
-      <section class="tpc-card tpc-card--wide" aria-labelledby="tpc-output-title">
-        <p class="tpc-kicker">Governed output</p><h2 id="tpc-output-title">Current operation</h2>
-        <p class="tpc-muted" id="tpc-operation-status" role="status" aria-live="polite">No operation has run.</p>
-        <pre class="tpc-output" id="tpc-operation-output" tabindex="0"></pre>
-      </section>
-    </div>
+    <details class="panel">
+      <summary><strong>Administrator tools</strong></summary>
+      <div class="tpc-actions tpc-admin-actions">
+        <button class="btn" id="tpc-verify-integrity" type="button"{% if not contracts_can_audit %} disabled{% endif %}>Check records haven't been changed</button>
+        <button class="btn" id="tpc-retention-due" type="button"{% if not contracts_can_audit %} disabled{% endif %}>Show contracts due for deletion</button>
+        <button class="btn" id="tpc-recovery-preflight" type="button"{% if not contracts_can_admin %} disabled{% endif %}>Check backup readiness</button>
+        <button class="btn btn--danger" id="tpc-purge" type="button"{% if not contracts_can_admin %} disabled{% endif %}>Delete expired contracts</button>
+      </div>
+      <p class="muted" id="tpc-operation-status" role="status" aria-live="polite"></p>
+      <div id="tpc-admin-list"></div>
+    </details>
   </fieldset>
-  <noscript><p class="tpc-boundary">Enable JavaScript to use these controls.</p></noscript>
+  <noscript><p class="panel">Turn on JavaScript to use this page.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}
+  <script src="/static/lightwork-record-workflows.js" defer></script>
   <script src="/static/lightwork-third-party-contracts.js" defer></script>
 {% endblock %}

@@ -337,13 +337,18 @@ def default_profile_for(name: str) -> AutonomyProfile:
 
 # -- config binding (impure; fail-open) ------------------------------------
 
-def levels_enabled() -> bool:
+def levels_enabled(override: bool | None = None) -> bool:
     """Whether the client has turned on per-agent autonomy levels.
 
     Off by default (kernel rule 1); ``MAVERICK_WORKFORCE_LEVELS`` overrides the
-    ``[workforce] levels`` config either way. Never raises."""
+    ``[workforce] levels`` config either way. ``override`` (a what-if analysis)
+    takes the environment override's place for this one call, with the same
+    fail-closed rules, and changes nothing global. Never raises."""
     import os
-    env = os.environ.get("MAVERICK_WORKFORCE_LEVELS", "").strip().lower()
+    if override is None:
+        env = os.environ.get("MAVERICK_WORKFORCE_LEVELS", "").strip().lower()
+    else:
+        env = "1" if override else "0"
     if env in {"0", "false", "no", "off"}:
         return False
     try:
@@ -524,7 +529,15 @@ def _coerce_approvals(history) -> list[dict]:
             out.append(r)
         elif hasattr(r, "__dict__"):
             out.append(vars(r))
-    return out
+    # Oversight canaries measure people, not agents: never learn from them.
+    try:
+        from .immune.oversight import canary_ids
+        canaries = canary_ids()
+    except Exception:
+        # Fail closed: unknown canaries could inflate an agent's record and
+        # graduate it; no evidence means no graduation.
+        return []
+    return [r for r in out if r.get("id") not in canaries]
 
 
 def auto_graduate_enabled() -> bool:

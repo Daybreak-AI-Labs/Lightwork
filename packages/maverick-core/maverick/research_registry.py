@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 from urllib.parse import urlsplit
 
 from .governed_records import GovernedRecordStore, configured_governed_records_backend
+from .knowledge_retrieval import source_selected
 from .paths import canonical_tenant_id, data_dir, tenant_scope
 from .privacy_ops import RecordConflict
 
@@ -1405,6 +1406,66 @@ class ResearchRegistry:
                 reverse=True,
             )
             return [self.inspect(canonical, self._reference(row)) for row in rows[:limit]]
+
+    def knowledge_candidate_page(
+        self,
+        tenant: str,
+        *,
+        source_selectors: Sequence[str] | None,
+        limit: int = 250,
+        after: tuple[float, str] | None = None,
+        snapshot: tuple[float, str] | None = None,
+    ) -> dict:
+        """Source-filtered immutable-key page, not a permission or content result.
+
+        The registry is bounded by its configured capacity. Filtering its metadata
+        before inspecting the selected page avoids projecting unrelated content.
+        Approval, purpose, consent and live source authority remain service checks.
+        ``snapshot`` excludes later additions; mutations are always freshly read.
+        """
+        canonical = canonical_tenant_id(tenant)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _MAX_LIST:
+            raise ValueError(f"limit must be between 1 and {_MAX_LIST}")
+        if source_selectors is not None and (
+            isinstance(source_selectors, str | bytes)
+            or not isinstance(source_selectors, Sequence)
+            or not 1 <= len(source_selectors) <= 64
+            or any(not isinstance(value, str) or not 1 <= len(value) <= 2048 for value in source_selectors)
+        ):
+            raise ValueError("knowledge source selectors must be a bounded list")
+
+        def position(row: Mapping) -> tuple[float, str]:
+            return float(row["created_at"]), str(row["id"])
+
+        with tenant_scope(tenant=canonical):
+            rows = []
+            for row in self.store.list(limit=_MAX_RECORDS):
+                if row.get("tenant") != canonical or row.get("kind") != "dataset":
+                    continue
+                manifest = row.get("manifest")
+                if not isinstance(manifest, Mapping):
+                    raise ResearchRegistryConflict("research registry manifest is malformed")
+                if source_selectors is not None and not source_selected(
+                    str(row.get("asset_id") or ""),
+                    str(manifest.get("source_ref") or ""),
+                    source_selectors,
+                ):
+                    continue
+                rows.append(row)
+            rows.sort(key=position, reverse=True)
+            ceiling = snapshot if snapshot is not None else position(rows[0]) if rows else None
+            selected = [
+                row for row in rows
+                if (ceiling is None or position(row) <= ceiling)
+                and (after is None or position(row) < after)
+            ]
+            page = selected[:limit]
+            return {
+                "items": [self.inspect(canonical, self._reference(row)) for row in page],
+                "snapshot": ceiling,
+                "last": position(page[-1]) if page else after,
+                "has_more": len(selected) > limit,
+            }
 
     def derivative_impact(self, tenant: str, reference: ResearchAssetRef) -> dict:
         """Return bounded transitive dependants without claiming weight unlearning."""

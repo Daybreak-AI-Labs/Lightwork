@@ -18,7 +18,7 @@ from maverick import regulatory_compiler as rc
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
-from .auth import require_permission
+from .auth import require_global_permission, require_permission
 
 STATUS_SCHEMA = "lightwork.regulatory-obligations-status.v1"
 CHECK_SCHEMA = "lightwork.regulatory-obligations-check.v1"
@@ -170,6 +170,47 @@ def create_regulatory_obligations_router() -> APIRouter:
     async def check(request: Request, body: CheckIn):
         require_permission(request, "view")
         return await _call(_check, body.action, body.profiles)
+
+    @router.post("/profiles/{key}/activate")
+    async def activate_profile(request: Request, key: ProfileKey):
+        """Turn one more regulation on (global admin). Turning one off stays
+        with the installer: this surface can only add enforcement."""
+
+        require_global_permission(request, "admin")
+        _known([key])
+        from . import settings_store
+        from .compliance_controls_api import SIGN_IN_FIRST, sign_in_configured
+
+        # A regulated posture makes the dashboard require sign-in; without a
+        # sign-in method configured that would lock every administrator out.
+        if not sign_in_configured():
+            raise HTTPException(status_code=409, detail=SIGN_IN_FIRST)
+
+        def activate() -> dict:
+            current = rc.active_keys()
+            if key in current:
+                return {"active": True, "message": "This regulation is already on."}
+            settings_store.set_compliance_settings(
+                {("compliance", "profiles"): [*current, key]}
+            )
+            now_on = key in rc.active_keys()
+            return {
+                "active": now_on,
+                "message": (
+                    "Turned on. Its checks apply to new work from now on."
+                    if now_on
+                    else "Saved. It takes effect after Lightwork restarts."
+                ),
+            }
+
+        try:
+            return await run_in_threadpool(activate)
+        except settings_store.SecuritySuiteConfigUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Settings could not be read.") from exc
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=503, detail="The regulation could not be turned on."
+            ) from exc
 
     @router.post("/gateway-constraints/preview")
     async def gateway_constraints_preview(

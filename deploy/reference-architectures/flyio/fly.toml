@@ -20,6 +20,7 @@ primary_region = "iad"
   # so without this they'd be lost on every restart/redeploy. Pin it to /state.
   MAVERICK_HOME = "/state"
   MAVERICK_CONFIG = "/state/config.toml"
+  MAVERICK_WORKDIR = "/state/workspace"
 
 [experimental]
   cmd = ["dashboard", "--host", "0.0.0.0", "--port", "8765"]

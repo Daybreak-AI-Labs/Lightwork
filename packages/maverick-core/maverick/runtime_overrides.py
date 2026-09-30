@@ -213,7 +213,9 @@ def _validate_loaded_state(state: object) -> dict:
             raise ValueError("models contains an invalid role or model id")
 
     budget = _require_table(state, "budget")
-    _reject_unknown_keys(budget, {"max_dollars"}, "budget")
+    _reject_unknown_keys(budget, {"max_dollars", "task_limits_enabled"}, "budget")
+    if "task_limits_enabled" in budget and type(budget["task_limits_enabled"]) is not bool:
+        raise ValueError("budget.task_limits_enabled must be true or false")
     if "max_dollars" in budget:
         value = budget["max_dollars"]
         if isinstance(value, bool):
@@ -607,7 +609,8 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
                  plugins: tuple[set[str], set[str]] | None = None,
                  allowed: set[str] | None = None,
                  mcp: dict[str, dict] | None = None,
-                 style: str | None = None) -> None:
+                 style: str | None = None,
+                 task_limits: bool | None = None) -> None:
     """Serialise the whole overlay: [security] denied_tools + optional [models]
     (default + per-role) + [budget] max_dollars + [plugins] enabled/disabled +
     [access] allowed_models + [mcp_servers.<name>] tables. One file holds every
@@ -632,8 +635,14 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
             + sorted(k for k in models if k != "default")
         for k in ordered:
             body += f"{k} = {_toml_string(models[k])}\n"
-    if budget is not None:
-        body += f"\n[budget]\nmax_dollars = {float(budget)}\n"
+    if task_limits is None:
+        task_limits = (_load().get("budget") or {}).get("task_limits_enabled")
+    if budget is not None or task_limits is not None:
+        body += "\n[budget]\n"
+        if budget is not None:
+            body += f"max_dollars = {float(budget)}\n"
+        if task_limits is not None:
+            body += f"task_limits_enabled = {str(task_limits).lower()}\n"
     on, off = plugin_overlay() if plugins is None else plugins
     if on or off:
         body += "\n[plugins]\n"
@@ -756,7 +765,7 @@ def set_budget(max_dollars: float) -> float:
         raise ValueError("budget must be a number") from exc
     if not math.isfinite(v) or v <= 0:
         raise ValueError("budget must be a positive number")
-    _write_state(denied_tools(), _models_overlay() or None, v)
+    _write_state(denied_tools(), _models_overlay() or None, v, task_limits=True)
     return v
 
 
@@ -764,6 +773,19 @@ def set_budget(max_dollars: float) -> float:
 def clear_budget() -> None:
     """Drop the dashboard spend cap, reverting to config.toml / defaults."""
     _write_state(denied_tools(), _models_overlay() or None, None)
+
+
+def task_limits_override() -> bool | None:
+    return (_load().get("budget") or {}).get("task_limits_enabled")
+
+
+@_serialized
+def set_task_limits(enabled: bool) -> None:
+    """Intentionally disable/reinstate configured task caps; never organization caps."""
+    if type(enabled) is not bool:
+        raise ValueError("task limits choice must be a boolean")
+    _write_state(denied_tools(), _models_overlay() or None, budget_override(),
+                 task_limits=enabled)
 
 
 def style_override() -> str | None:
@@ -858,7 +880,9 @@ def add_mcp_server(name: str, spec: dict) -> dict:
     subprocess-injection / url guards), stores the normalised dict, and returns
     it. Raises ValueError on a bad name or spec; config.toml is never touched."""
     n = (name or "").strip()
-    if not _VALID_SERVER_NAME.fullmatch(n):
+    if not _VALID_SERVER_NAME.fullmatch(n) or n.endswith("_") or "__" in n:
+        # The kernel refuses such a server's tools (``mcp_<server>__<tool>``
+        # must split one way), so refuse it here instead of saving it silently.
         raise ValueError("invalid MCP server name")
     if not isinstance(spec, dict) or ("command" not in spec and "url" not in spec):
         raise ValueError("MCP server needs a command (stdio) or url (http)")

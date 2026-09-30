@@ -39,49 +39,31 @@ def page_client() -> TestClient:
 
 
 def test_page_exposes_complete_governed_operator_contract(page_client: TestClient) -> None:
+    from test_support.plain_language import developer_terms
+
     response = page_client.get("/consent/profile-data")
     assert response.status_code == 200
     page = response.text
-    assert "Consent Profile Data" in page
-    assert "Tenant and actor are server-derived" in page
-    assert "Local authority only" in page
-    assert "No protected-trait inference" in page
-    assert "live-traffic operation" in page
-    assert "accessibility review" in page
-    assert "customer acceptance" in page
-    assert "production-scale acceptance" in page
-    assert "creator" in page and "cannot approve" in page
+    assert "Preference Questions" in page
+    assert "cannot approve it" in page
+    assert "About this page’s safeguards" in page
     assert "/api/v1/consent/profile-data" in page
-    for element in (
-        "cpd-load-status",
-        "cpd-operation",
-        "cpd-path-values",
-        "cpd-body",
-        "cpd-confirm",
-        "cpd-submit",
-        "cpd-example",
-        "cpd-output",
-    ):
+    # Question sets and asking plans load on open with a button per row.
+    for element in ("cpd-catalogs", "cpd-journeys", "cpd-catalog", "cpd-journey",
+                    "cpd-integrity", "cpd-purge"):
         assert f'id="{element}"' in page
-    for operation in (
-        "status",
-        "catalog-create",
-        "catalog-get",
-        "catalog-approve",
-        "journey-create",
-        "journey-get",
-        "journey-approve",
-        "journey-activate",
-        "journey-pause",
-        "journey-kill",
-        "journey-rollback",
-        "integrity",
-        "retention-purge",
-    ):
-        assert f'value="{operation}"' in page
-    assert "textContent" in page
+    assert 'request("/catalogs?limit=500")' in page and 'request("/journeys?limit=500")' in page
+    for label in ("Approve", "Start", "Pause", "Stop", "Roll back", "Create asking plan"):
+        assert f'label: "{label}"' in page
+    for action in ("approve", "activate", "pause", "kill", "rollback", "/contract?"):
+        assert action in page
+    # Published facts are looked up by the server, never typed or pasted.
+    for typed in ("Record references (JSON)", "Action details (JSON)", "Load bounded example",
+                  "cpd-operation", '"0".repeat(64)', "replace-catalog-create-key"):
+        assert typed not in page
+    assert page.count("CW.confirm(") >= 3
     assert "encodeURIComponent" in page
-    assert 'credentials:"same-origin"' in page
+    assert developer_terms(page) == []
 
 
 def test_page_fails_closed_and_uses_only_safe_dom(page_client: TestClient) -> None:
@@ -90,7 +72,7 @@ def test_page_fails_closed_and_uses_only_safe_dom(page_client: TestClient) -> No
     assert 'data-module-gate="consent_preferences.profile_data"' in disabled.text
     assert "Consent profile data is turned off." in disabled.text
     assert "[consent_preferences.profile_data] enable = true" not in disabled.text
-    assert 'id="cpd-submit"' not in disabled.text
+    assert "Turn this feature on to use it." in disabled.text
 
     template = (
         Path(__file__).resolve().parents[1]
@@ -168,4 +150,11 @@ def test_main_dashboard_mounts_profile_page_and_visibility(
         / "templates"
         / "consent_preferences.html"
     ).read_text(encoding="utf-8")
-    assert 'href="/consent/profile-data"' in consent_home
+    consent_nav = (
+        Path(__file__).resolve().parents[1]
+        / "maverick_dashboard"
+        / "templates"
+        / "_consent_nav.html"
+    ).read_text(encoding="utf-8")
+    assert '{% include "_consent_nav.html" %}' in consent_home
+    assert "('/consent/profile-data', 'Preference questions')" in consent_nav

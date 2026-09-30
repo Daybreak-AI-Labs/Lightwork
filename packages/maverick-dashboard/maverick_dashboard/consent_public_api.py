@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi import Path as ApiPath
 from fastapi.responses import FileResponse
+from maverick import consent_storage
 from maverick.file_lock import (
     cross_process_lock,
     ensure_private_directory,
@@ -52,6 +53,17 @@ _MAX_RESPONSE_BYTES = 256 * 1024
 _MAX_RIGHTS_PACKAGE_BYTES = 16 * 1024 * 1024
 _MAX_RATE_BUCKETS = 10_000
 _RATE_WINDOW_SECONDS = 60.0
+# Visitor sessions ([consent_preferences.public_api] token_ttl_seconds).
+_SESSION_TTL_BOUNDS = (60, 86_400)
+_SESSION_PREFIX = "lwcs_"
+_SESSION_HEADER = "x-lightwork-consent-session"
+_SESSION_REQUIRED_DETAIL = "consent session required"
+_SESSION_INVALID_DETAIL = "consent session expired or invalid"
+_SESSION_REPLACED_GRACE_SECONDS = 30.0
+_MAX_LIVE_SESSIONS = 200_000
+# One site key's share of the live sessions, so a single (public) key cannot
+# use up the installation-wide capacity for every other site.
+_MAX_LIVE_SESSIONS_PER_CLIENT = 50_000
 _MOBILE_PLATFORMS = frozenset({"android", "fireos", "ios", "roku", "tizen", "tvos", "webos"})
 _PUBLIC_EXPERIMENT_LAYOUTS = frozenset({"compact", "inline", "stacked"})
 _PUBLIC_EXPERIMENT_ACTIONS = frozenset({"accept_all", "reject_all", "save_preferences"})
@@ -349,24 +361,27 @@ class PublicConsentCredentialStore:
 
     @contextlib.contextmanager
     def _connect(self):
-        ensure_private_directory(self.path.parent)
-        if not self.path.exists():
-            try:
-                descriptor = os.open(
-                    self.path,
-                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
-                    0o600,
-                )
-            except FileExistsError:
-                pass
-            else:
-                os.close(descriptor)
-        ensure_private_file(self.path, 0o600)
-        connection = sqlite3.connect(
-            str(self.path),
-            isolation_level=None,
-            timeout=10.0,
-        )
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=10.0)
+        else:
+            ensure_private_directory(self.path.parent)
+            if not self.path.exists():
+                try:
+                    descriptor = os.open(
+                        self.path,
+                        os.O_CREAT | os.O_EXCL | os.O_RDWR,
+                        0o600,
+                    )
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(descriptor)
+            ensure_private_file(self.path, 0o600)
+            connection = sqlite3.connect(
+                str(self.path),
+                isolation_level=None,
+                timeout=10.0,
+            )
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA busy_timeout=10000")
@@ -386,6 +401,26 @@ class PublicConsentCredentialStore:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )
+            """,
+            # Short-lived visitor sessions: token digests only, never tokens.
+            """
+            CREATE TABLE IF NOT EXISTS public_consent_sessions (
+                token_sha256 TEXT PRIMARY KEY,
+                credential_sha256 TEXT NOT NULL,
+                client_record_sha256 TEXT NOT NULL,
+                audience TEXT NOT NULL,
+                issued_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                replaced_at REAL
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS public_consent_sessions_expiry
+            ON public_consent_sessions(expires_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS public_consent_sessions_client
+            ON public_consent_sessions(credential_sha256)
             """,
             """
             CREATE TABLE IF NOT EXISTS public_consent_clients (
@@ -1653,6 +1688,166 @@ class PublicConsentCredentialStore:
                     connection.execute("ROLLBACK")
                 raise
 
+    @staticmethod
+    def _session_ttl(value: object) -> int:
+        lower, upper = _SESSION_TTL_BOUNDS
+        if isinstance(value, bool) or not isinstance(value, int) or not lower <= value <= upper:
+            raise PublicConsentValidationError("session lifetime is outside its bounds")
+        return value
+
+    @staticmethod
+    def _session_audience(value: object) -> str:
+        if not isinstance(value, str) or not 1 <= len(value) <= 300:
+            raise PublicConsentValidationError("session audience is invalid")
+        return value
+
+    def _insert_session(
+        self,
+        connection: sqlite3.Connection,
+        client: PublicClientBinding,
+        audience: str,
+        ttl: int,
+        now: float,
+    ) -> tuple[str, float]:
+        connection.execute(
+            "DELETE FROM public_consent_sessions WHERE expires_at <= ?",
+            (now,),
+        )
+        live = connection.execute("SELECT COUNT(*) FROM public_consent_sessions").fetchone()[0]
+        if int(live) >= _MAX_LIVE_SESSIONS:
+            raise PublicConsentRateLimitExceeded("session capacity reached")
+        mine = connection.execute(
+            "SELECT COUNT(*) FROM public_consent_sessions WHERE credential_sha256 = ?",
+            (client.credential_sha256,),
+        ).fetchone()[0]
+        if int(mine) >= _MAX_LIVE_SESSIONS_PER_CLIENT:
+            raise PublicConsentRateLimitExceeded("session capacity reached for this site key")
+        raw = _SESSION_PREFIX + secrets.token_urlsafe(32)
+        expires_at = now + ttl
+        connection.execute(
+            "INSERT INTO public_consent_sessions(token_sha256, credential_sha256, "
+            "client_record_sha256, audience, issued_at, expires_at, replaced_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+            (
+                hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                client.credential_sha256,
+                client.record_sha256,
+                audience,
+                now,
+                expires_at,
+            ),
+        )
+        return raw, expires_at
+
+    def _live_session(
+        self,
+        connection: sqlite3.Connection,
+        token: str,
+        client: PublicClientBinding,
+        audience: str,
+        now: float,
+        *,
+        renewable: bool,
+    ) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT * FROM public_consent_sessions WHERE token_sha256 = ?",
+            (hashlib.sha256(_token(token, "session").encode("utf-8")).hexdigest(),),
+        ).fetchone()
+        if (
+            row is None
+            or float(row["expires_at"]) <= now
+            or (renewable and row["replaced_at"] is not None)
+            or not hmac.compare_digest(str(row["credential_sha256"]), client.credential_sha256)
+            or not hmac.compare_digest(
+                str(row["client_record_sha256"]), client.record_sha256
+            )
+            or not hmac.compare_digest(str(row["audience"]), audience)
+        ):
+            raise PublicConsentCredentialError(_AUTH_DETAIL)
+        return row
+
+    def issue_session(
+        self,
+        client: PublicClientBinding,
+        *,
+        audience: str,
+        ttl_seconds: int,
+    ) -> tuple[str, float]:
+        """Start a visitor session for an admitted client; only the digest is kept."""
+
+        ttl = self._session_ttl(ttl_seconds)
+        bound = self._session_audience(audience)
+        now = _timestamp(self._clock(), "clock")
+        assert now is not None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                result = self._insert_session(connection, client, bound, ttl, now)
+                connection.execute("COMMIT")
+                return result
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def renew_session(
+        self,
+        token: str,
+        client: PublicClientBinding,
+        *,
+        audience: str,
+        ttl_seconds: int,
+    ) -> tuple[str, float]:
+        """Replace a live session before it ends; an ended one is refused.
+
+        The replaced token keeps working for a few seconds (never past its own
+        end) so requests already on their way are not lost.
+        """
+
+        ttl = self._session_ttl(ttl_seconds)
+        bound = self._session_audience(audience)
+        now = _timestamp(self._clock(), "clock")
+        assert now is not None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._live_session(connection, token, client, bound, now, renewable=True)
+                connection.execute(
+                    "UPDATE public_consent_sessions SET replaced_at = ?, expires_at = ? "
+                    "WHERE token_sha256 = ? AND replaced_at IS NULL",
+                    (
+                        now,
+                        min(float(row["expires_at"]), now + _SESSION_REPLACED_GRACE_SECONDS),
+                        row["token_sha256"],
+                    ),
+                )
+                result = self._insert_session(connection, client, bound, ttl, now)
+                connection.execute("COMMIT")
+                return result
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def resolve_session(
+        self,
+        token: str,
+        client: PublicClientBinding,
+        *,
+        audience: str,
+    ) -> float:
+        """The end time of a live session bound to this client and site, or refuse."""
+
+        try:
+            bound = self._session_audience(audience)
+            now = _timestamp(self._clock(), "clock")
+            assert now is not None
+            with self._connect() as connection:
+                row = self._live_session(connection, token, client, bound, now, renewable=False)
+            return float(row["expires_at"])
+        except (OSError, PublicConsentError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise PublicConsentCredentialError(_AUTH_DETAIL) from exc
+
     def bootstrap_profile(
         self,
         client: PublicClientBinding,
@@ -1814,15 +2009,21 @@ class PublicConsentRateLimiter:
         *,
         requests_per_minute: int = 120,
         clock: Callable[[], float] = time.monotonic,
+        limit_source: Callable[[], int | None] | None = None,
     ) -> None:
         if not 1 <= requests_per_minute <= 100_000:
             raise ValueError("requests_per_minute is invalid")
         self.requests_per_minute = requests_per_minute
+        # The installation's limit when one is set, read on every request.
+        self._limit_source = limit_source
         self._clock = clock
         self._buckets: dict[tuple[str, str], deque[float]] = {}
         self._lock = threading.Lock()
 
     def __call__(self, credential_sha256: str, action: str) -> None:
+        limit = self.requests_per_minute
+        if self._limit_source is not None:
+            limit = self._limit_source() or limit
         now = self._clock()
         key = (credential_sha256, action)
         with self._lock:
@@ -1837,7 +2038,7 @@ class PublicConsentRateLimiter:
             values = self._buckets.setdefault(key, deque())
             while values and now - values[0] >= _RATE_WINDOW_SECONDS:
                 values.popleft()
-            if len(values) >= self.requests_per_minute:
+            if len(values) >= limit:
                 raise PublicConsentRateLimitExceeded("rate limit reached")
             values.append(now)
 
@@ -1866,6 +2067,11 @@ class PublicConsentDependencies:
     rights_package_delivery_adapter: Callable[..., Any] | None = None
     rights_intake_gate: Callable[[], bool] | None = None
     rights_intake_store_for: Callable[..., Any] | None = None
+    # Visitor session lifetime in seconds, or None for no sessions (the
+    # default reads [consent_preferences.public_api] token_ttl_seconds).
+    session_ttl: Callable[[], int | None] | None = None
+    # Publication signing policy (default: maverick.consent_publication_signing).
+    publication_signing: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -2014,7 +2220,7 @@ def default_public_consent_dependencies() -> PublicConsentDependencies:
             tenant=None,
         )
     )
-    limiter = PublicConsentRateLimiter()
+    limiter = PublicConsentRateLimiter(limit_source=configured_requests_per_minute)
     return PublicConsentDependencies(
         credential_store=registry,
         publishing_store_for=lambda tenant: ConsentPublishingStore(
@@ -2236,12 +2442,13 @@ async def _cache_limited_body(request: Request) -> None:
             raise HTTPException(status_code=400, detail="invalid Content-Length") from None
         if declared < 0:
             raise HTTPException(status_code=400, detail="invalid Content-Length")
-        if declared > _MAX_REQUEST_BYTES:
-            raise HTTPException(status_code=413, detail="request body too large")
+    limit = _request_byte_limit()
+    if declared_value and declared > limit:
+        raise HTTPException(status_code=413, detail="request body too large")
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > _MAX_REQUEST_BYTES:
+        if len(body) > limit:
             raise HTTPException(status_code=413, detail="request body too large")
     request._body = bytes(body)  # noqa: SLF001 - bounded cache for Pydantic parsing
 
@@ -2310,9 +2517,185 @@ def _set_private_response_headers(
             response.headers["Vary"] = "Origin"
 
 
+def _public_api_settings() -> Mapping[str, Any]:
+    """``[consent_preferences.public_api]`` (Settings > All settings), or {}."""
+    try:
+        from maverick.config import load_config
+
+        consent = (load_config() or {}).get("consent_preferences")
+    except Exception:  # an unreadable config keeps the built-in limits
+        return {}
+    section = consent.get("public_api") if isinstance(consent, Mapping) else None
+    return section if isinstance(section, Mapping) else {}
+
+
+def _configured_int(section: Mapping[str, Any], key: str, lower: int, upper: int,
+                    default: int) -> int:
+    value = section.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or not lower <= value <= upper:
+        return default
+    return value
+
+
+def configured_request_byte_limit() -> int | None:
+    """The installation's largest public request body, or None when unset."""
+    value = _public_api_settings().get("max_request_bytes")
+    if isinstance(value, bool) or not isinstance(value, int) or not 1_024 <= value <= 1_048_576:
+        return None
+    return value
+
+
+def _request_byte_limit() -> int:
+    """Largest public request body: the installation's, else 64 KiB."""
+    return configured_request_byte_limit() or _MAX_REQUEST_BYTES
+
+
+def _response_byte_limit() -> int:
+    """Largest public response: the installation's, else 256 KiB."""
+    return _configured_int(_public_api_settings(), "max_response_bytes", 1_024, 4_194_304,
+                           _MAX_RESPONSE_BYTES)
+
+
+def configured_requests_per_minute() -> int | None:
+    """Requests per minute for each public client, or None for the built-in 120."""
+    value = _public_api_settings().get("requests_per_minute")
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10_000:
+        return None
+    return value
+
+
+def configured_token_ttl_seconds() -> int | None:
+    """How long a visitor session lasts, or None when sessions are not used.
+
+    ``[consent_preferences.public_api] token_ttl_seconds`` (60 to 86400).
+    Unset -- or a value outside those bounds, which the configuration check
+    reports -- keeps today's behaviour: the site key alone on every request.
+    """
+    value = _public_api_settings().get("token_ttl_seconds")
+    lower, upper = _SESSION_TTL_BOUNDS
+    if isinstance(value, bool) or not isinstance(value, int) or not lower <= value <= upper:
+        return None
+    return value
+
+
+def _session_ttl(dependencies: PublicConsentDependencies) -> int | None:
+    # A failing source raises, and every caller turns that into a refusal.
+    value = (getattr(dependencies, "session_ttl", None) or configured_token_ttl_seconds)()
+    lower, upper = _SESSION_TTL_BOUNDS
+    if isinstance(value, bool) or not isinstance(value, int) or not lower <= value <= upper:
+        return None
+    return value
+
+
+def _session_audience(binding: PublicClientBinding) -> str:
+    """What a session is bound to: the enrolled site origin or service client."""
+    if binding.client_kind == "browser" and binding.browser_origin:
+        return binding.browser_origin
+    return f"service:{binding.service_client_id}"
+
+
+async def require_public_session(
+    request: Request,
+    dependencies: PublicConsentDependencies,
+    binding: PublicClientBinding,
+) -> None:
+    """Refuse a request without a live visitor session when sessions are on.
+
+    A no-op while ``token_ttl_seconds`` is unset. The session must belong to
+    the same client, enrolled record and site origin (or service client) the
+    request was admitted for. Tokens are never logged or echoed.
+    """
+    if _session_ttl(dependencies) is None:
+        return
+    raw = request.headers.get(_SESSION_HEADER)
+    if not raw:
+        raise HTTPException(status_code=401, detail=_SESSION_REQUIRED_DETAIL)
+    try:
+        await run_in_threadpool(
+            dependencies.credential_store.resolve_session,
+            raw,
+            binding,
+            audience=_session_audience(binding),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=_SESSION_INVALID_DETAIL) from exc
+
+
+def signed_configuration(
+    dependencies: PublicConsentDependencies,
+    binding: PublicClientBinding,
+    configuration: Mapping[str, Any],
+    policy_record: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """The served configuration's Ed25519 signature, or None.
+
+    None while ``require_signed_publications`` is off, when no signing key is
+    in custody, or when the publication has no publish-time signature from a
+    key this installation trusts -- a website that checks signatures then
+    refuses it, while other websites keep today's unsigned behaviour.
+    """
+    from maverick import consent_publication_signing as signing
+
+    try:
+        source = getattr(dependencies, "publication_signing", None)
+        policy = (source or signing.configured_policy)()
+        if not isinstance(policy, signing.SigningPolicy) or not policy.required:
+            return None
+        signer = policy.custody.signer_for(binding.tenant_id)
+        trusted = policy.custody.trusted_public_keys(binding.tenant_id)
+        publication = configuration["publication"]
+        record = dependencies.publishing_store_for(binding.tenant_id).publication_signature(
+            binding.tenant_id,
+            str(publication["publication_id"]),
+            trusted_public_keys=trusted,
+        )
+        if record is None:
+            return None
+        statement = signing.configuration_statement(
+            signer.key_id,
+            publication_key_id=str(record["key_id"]),
+            property_id=str(configuration["property"]["property_id"]),
+            publication_sha256=str(publication["publication_sha256"]),
+            configuration_sha256=str(configuration["configuration_sha256"]),
+            policy_id=str(policy_record["policy_id"]),
+            policy_version=int(policy_record["version"]),
+            policy_sha256=str(policy_record["policy_sha256"]),
+        )
+        return {
+            "schema": signing.CONFIGURATION_SIGNATURE_SCHEMA,
+            "algorithm": signing.ALGORITHM,
+            "key_id": signer.key_id,
+            "statement": statement,
+            "signature": signer.sign(signing.canonical(statement)),
+        }
+    except Exception:  # noqa: BLE001 -- unsigned: a site that checks signatures refuses it
+        return None
+
+
+def _sdk_cache_control() -> str:
+    """How long the consent script may be cached (``[consent_preferences.edge_cache]``).
+
+    Only the static consent script is ever cached: configuration, preference
+    and personal answers stay ``no-store``. Without the edge cache on, the
+    historical five-minute browser cache applies.
+    """
+    try:
+        from maverick.config import load_config
+
+        consent = (load_config() or {}).get("consent_preferences")
+    except Exception:
+        consent = None
+    section = consent.get("edge_cache") if isinstance(consent, Mapping) else None
+    if not isinstance(section, Mapping) or section.get("enable") is not True:
+        return "public, max-age=300"
+    max_age = _configured_int(section, "max_age_seconds", 0, 86_400, 300)
+    stale = _configured_int(section, "stale_if_error_seconds", 0, 604_800, 0)
+    return f"public, max-age={max_age}" + (f", stale-if-error={stale}" if stale else "")
+
+
 def _bounded_response(payload: Mapping[str, Any]) -> dict[str, Any]:
     try:
-        _canonical(payload, maximum=_MAX_RESPONSE_BYTES)
+        _canonical(payload, maximum=_response_byte_limit())
     except PublicConsentValidationError as exc:
         raise HTTPException(
             status_code=503,
@@ -2497,7 +2880,7 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             path,
             media_type="text/javascript; charset=utf-8",
             headers={
-                "Cache-Control": "public, max-age=300",
+                "Cache-Control": _sdk_cache_control(),
                 "X-Content-Type-Options": "nosniff",
                 "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
             },
@@ -2527,6 +2910,8 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             "rights-requests": {"POST"},
             "rights-deliveries/redeem": {"POST"},
             "privacy-signals": {"POST"},
+            "sessions": {"POST"},
+            "sessions/renew": {"POST"},
         }
         contracts.update(global_opt_out_preflight_contracts())
         if re.fullmatch(
@@ -2568,6 +2953,7 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
                 "content-type",
                 "dnt",
                 "sec-gpc",
+                _SESSION_HEADER,
                 "x-lightwork-profile-credential",
                 "x-lightwork-reauthentication-receipt",
             }
@@ -2602,7 +2988,7 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
         )
         return response
 
-    async def authenticate(request: Request) -> _Authority:
+    async def admit(request: Request, *, session_required: bool) -> _Authority:
         try:
             if not deps.gate():
                 raise HTTPException(status_code=404, detail="not found")
@@ -2638,6 +3024,8 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             if binding.client_kind == "browser":
                 request.state.public_consent_allowed_origin = binding.browser_origin
             deps.rate_limit(binding.credential_sha256, request.url.path)
+            if session_required:
+                await require_public_session(request, deps, binding)
             await _cache_limited_body(request)
             return _Authority(binding, binding.credential_sha256)
         except PublicConsentRateLimitExceeded as exc:
@@ -2650,6 +3038,75 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             raise
         except Exception as exc:
             raise HTTPException(status_code=401, detail=_AUTH_DETAIL) from exc
+
+    async def authenticate(request: Request) -> _Authority:
+        """Admit the site key, plus a live visitor session when sessions are on."""
+        return await admit(request, session_required=True)
+
+    async def authenticate_client(request: Request) -> _Authority:
+        """Admit the site key alone: only for starting or renewing a session."""
+        return await admit(request, session_required=False)
+
+    def session_response(response: Response, request: Request, binding: PublicClientBinding,
+                         token: str, expires_at: float, ttl: int) -> dict[str, Any]:
+        _set_private_response_headers(response, request=request, binding=binding)
+        return {"session_token": token, "expires_at": expires_at, "ttl_seconds": ttl}
+
+    @router.post("/sessions", status_code=201)
+    async def start_session(
+        request: Request,
+        response: Response,
+        authority: _Authority = Depends(authenticate_client),  # noqa: B008
+    ) -> dict[str, Any]:
+        """Exchange the site key for a short-lived visitor session."""
+        ttl = _session_ttl(deps)
+        if ttl is None:
+            raise HTTPException(status_code=404, detail="not found")
+        try:
+            token, expires_at = await run_in_threadpool(
+                deps.credential_store.issue_session,
+                authority.binding,
+                audience=_session_audience(authority.binding),
+                ttl_seconds=ttl,
+            )
+        except PublicConsentRateLimitExceeded as exc:
+            raise HTTPException(status_code=429, detail="rate limit reached",
+                                headers={"Retry-After": "60"}) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503,
+                                detail="consent session authority unavailable") from exc
+        return session_response(response, request, authority.binding, token, expires_at, ttl)
+
+    @router.post("/sessions/renew", status_code=201)
+    async def renew_session(
+        request: Request,
+        response: Response,
+        authority: _Authority = Depends(authenticate_client),  # noqa: B008
+    ) -> dict[str, Any]:
+        """Replace a live visitor session before it ends; an ended one is refused."""
+        ttl = _session_ttl(deps)
+        if ttl is None:
+            raise HTTPException(status_code=404, detail="not found")
+        raw = request.headers.get(_SESSION_HEADER)
+        if not raw:
+            raise HTTPException(status_code=401, detail=_SESSION_REQUIRED_DETAIL)
+        try:
+            token, expires_at = await run_in_threadpool(
+                deps.credential_store.renew_session,
+                raw,
+                authority.binding,
+                audience=_session_audience(authority.binding),
+                ttl_seconds=ttl,
+            )
+        except PublicConsentRateLimitExceeded as exc:
+            raise HTTPException(status_code=429, detail="rate limit reached",
+                                headers={"Retry-After": "60"}) from exc
+        except (PublicConsentCredentialError, PublicConsentValidationError) as exc:
+            raise HTTPException(status_code=401, detail=_SESSION_INVALID_DETAIL) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503,
+                                detail="consent session authority unavailable") from exc
+        return session_response(response, request, authority.binding, token, expires_at, ttl)
 
     async def profile_authority(
         request: Request,
@@ -3286,15 +3743,24 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
         authority: _Authority = Depends(authenticate),  # noqa: B008
     ) -> dict[str, Any]:
         contract = await active_contract(request, authority)
-        _set_private_response_headers(response, request=request, binding=authority.binding)
-        return _bounded_response(
-            {
-                **contract.public_configuration,
-                "policy_id": contract.policy["policy_id"],
-                "policy_version": contract.policy["version"],
-                "policy_sha256": contract.policy["policy_sha256"],
-            }
+        signature = await run_in_threadpool(
+            signed_configuration,
+            deps,
+            authority.binding,
+            contract.public_configuration,
+            contract.policy,
         )
+        _set_private_response_headers(response, request=request, binding=authority.binding)
+        payload = {
+            **contract.public_configuration,
+            "policy_id": contract.policy["policy_id"],
+            "policy_version": contract.policy["version"],
+            "policy_sha256": contract.policy["policy_sha256"],
+        }
+        if signature is not None:
+            # Only while require_signed_publications is on (unset: unchanged).
+            payload["signature"] = signature
+        return _bounded_response(payload)
 
     @router.post("/profiles/bootstrap", status_code=201)
     async def bootstrap_profile(
@@ -4804,6 +5270,7 @@ __all__ = [
     "PublicRightsIntakeMaterial",
     "PublicRightsRequestIn",
     "PublicSignalIn",
+    "configured_token_ttl_seconds",
     "create_consent_public_router",
     "default_public_consent_dependencies",
     "default_public_consent_gate",
@@ -4811,4 +5278,6 @@ __all__ = [
     "default_public_profile_data_gate",
     "default_public_request_context",
     "public_consent_error_origin",
+    "require_public_session",
+    "signed_configuration",
 ]

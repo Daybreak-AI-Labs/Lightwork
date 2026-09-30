@@ -18,21 +18,22 @@ Exposed as ``maverick audit seal``; runs only when at-rest encryption is enabled
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 from ..file_lock import (
     atomic_read_bytes,
     atomic_write_bytes,
+    atomic_write_bytes_chunks,
+    cross_process_lock,
     ensure_private_directory,
     ensure_private_file,
+    open_private_read,
 )
+from .segments import SegmentReadError, sealed_bytes
 
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
-class SegmentReadError(RuntimeError):
-    """An audit segment could not be read or decoded for verification."""
 
 
 def segment_text(path: Path, *, fail_soft: bool = True) -> str:
@@ -82,8 +83,7 @@ def encode_segment(text: str, *, sealed: bool) -> bytes:
     data = text.encode("utf-8")
     if not sealed:
         return data
-    from ..crypto_at_rest import seal
-    return seal(data)
+    return sealed_bytes(text)
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -113,6 +113,7 @@ def seal_closed_segments(audit_dir: Path | None = None, *,
     import datetime as _dt
 
     from ..crypto_at_rest import EncryptionUnavailable, at_rest_enabled, is_sealed, seal
+    from ..sealed_stream import encode_stream
     if not at_rest_enabled():
         raise EncryptionUnavailable(
             "at-rest encryption is not enabled; set [encryption] at_rest = true "
@@ -133,19 +134,32 @@ def seal_closed_segments(audit_dir: Path | None = None, *,
             report[p.name] = "skipped (current)"  # live append stays plaintext
             continue
         try:
-            ensure_private_file(p, 0o600)
-            raw = atomic_read_bytes(p)
+            with cross_process_lock(p, strict=True):
+                with os.fdopen(open_private_read(p), "rb") as source:
+                    already = is_sealed(source.read(8))
+                if already:
+                    report[p.name] = "already sealed"
+                    continue
+                if dry_run:
+                    report[p.name] = "would seal"
+                    continue
+
+                def chunks(path=p):
+                    # Close the source before atomic publication (Windows),
+                    # while retaining the stable rewrite lock through rename.
+                    with os.fdopen(open_private_read(path), "rb") as source:
+                        initial = os.fstat(source.fileno())
+                        yield from encode_stream(source, seal)
+                        final, visible = os.fstat(source.fileno()), path.lstat()
+                        if ((initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns)
+                                != (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns)
+                                or (visible.st_dev, visible.st_ino) != (initial.st_dev, initial.st_ino)):
+                            raise SegmentReadError("audit source changed before sealing publication")
+
+                atomic_write_bytes_chunks(p, chunks(), mode=0o600)
+                report[p.name] = "sealed"
         except OSError as e:
             report[p.name] = f"error ({e})"
-            continue
-        if is_sealed(raw):
-            report[p.name] = "already sealed"
-            continue
-        if dry_run:
-            report[p.name] = "would seal"
-            continue
-        _atomic_write_bytes(p, seal(raw))
-        report[p.name] = "sealed"
     return report
 
 

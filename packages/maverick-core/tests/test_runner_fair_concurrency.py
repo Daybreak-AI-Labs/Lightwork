@@ -11,6 +11,7 @@ import time
 
 import pytest
 from maverick import runner
+from maverick.budget import Budget
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +36,7 @@ def _stub_run(monkeypatch, *, gate: threading.Event, started: dict):
     class _Goal:
         def __init__(self, goal_id):
             self.id = goal_id
-            self.status = "done"
+            self.status = "pending"
             self.execution_principal = ""
 
     class _World:
@@ -69,12 +70,13 @@ def _stub_run(monkeypatch, *, gate: threading.Event, started: dict):
     monkeypatch.setattr("maverick.llm.LLM", lambda *a, **k: object())
     monkeypatch.setattr("maverick.sandbox.build_sandbox", lambda *a, **k: _Sandbox())
     monkeypatch.setattr("maverick.budget.budget_from_config",
-                        lambda *a, **k: object())
+                        lambda *a, **k: Budget())
     monkeypatch.setattr("maverick.trace_pin.pin_trace", lambda *a, **k: None)
 
     def _blocking_run(llm, world, budget, goal_id, **kw):
         started.setdefault(kw.get("user_id"), []).append(goal_id)
         gate.wait(timeout=5.0)
+        world.get_goal(goal_id).status = "done"
 
     monkeypatch.setattr("maverick.orchestrator.run_goal_sync", _blocking_run)
 

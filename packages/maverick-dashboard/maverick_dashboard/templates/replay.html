@@ -2,28 +2,38 @@
 {% block title %}Replay · Lightwork{% endblock %}
 {% block content %}
 {% if goal %}
-  <h1 class="page-title">Run replay · #{{ goal.id }}</h1>
+  <h1 class="page-title">Task replay</h1>
   <p class="page-subtitle">{{ goal.title }}</p>
 
   <div class="panel">
     {% set _cs = replay.chain.status %}
     <div class="grid">
       <div class="stat">
-        <span class="muted">Audit chain</span><br>
+        <span class="muted">Activity record</span><br>
         <span class="badge {{ 'active' if _cs == 'verified' else ('danger' if _cs == 'broken' else '') }}">
-          {%- if _cs == 'verified' %}Verified ✓
+          {%- if _cs == 'verified' %}Captured segment chains verified ✓
           {%- elif _cs == 'broken' %}Broken · {{ replay.chain.break_count }} break(s)
+          {%- elif _cs == 'incomplete' %}Incomplete audit read
           {%- elif _cs == 'unsigned' %}Unsigned (signing off)
           {%- else %}No signed log{% endif -%}
         </span>
       </div>
-      <div class="stat"><div class="num">{{ replay.summary.tool_calls }}</div><div class="label">tool calls</div></div>
+      <div class="stat"><div class="num">{{ replay.summary.tool_calls }}</div><div class="label">actions taken</div></div>
       <div class="stat"><div class="num">{{ replay.summary.approved }}/{{ replay.summary.approvals }}</div><div class="label">approvals granted</div></div>
       <div class="stat"><div class="num">{{ replay.summary.denied }}</div><div class="label">denied</div></div>
-      <div class="stat"><div class="num">{{ replay.summary.blocks }}</div><div class="label">governance blocks</div></div>
+      <div class="stat"><div class="num">{{ replay.summary.blocks }}</div><div class="label">stopped by your rules</div></div>
     </div>
+    <p class="muted">The timeline and segment checks use the same captured records.
+      The anchor ledger is checked separately against current files
+      ({% if not replay.chain.anchors %}not checked{% elif replay.chain.anchors.status == 'broken' %}breaks found{% else %}no breaks found{% endif %});
+      that check is not bound to this timeline. The days and ledger are not one
+      atomic point-in-time snapshot. Independent checkpoints are not checked.</p>
+    {% if replay.read_report and replay.read_report.failures %}
+    <p role="alert">Some audit records could not be read. This timeline and its
+      counts are incomplete; resolve the read failures before relying on the export.</p>
+    {% endif %}
     <p style="margin-top:1rem">
-      <a class="btn btn--primary" href="/api/v1/replay/{{ goal.id }}/evidence">⬇ Export evidence packet (JSON)</a>
+      <a class="btn btn--primary" href="/api/v1/replay/{{ goal.id }}/evidence">Download evidence for auditors</a>
     </p>
   </div>
 
@@ -35,40 +45,62 @@
         {% for e in replay.entries %}
         <tr>
           <td class="muted" style="white-space:nowrap">{{ e.time }}</td>
-          <td><span class="badge">{{ e.lane }}</span> {{ e.label }}</td>
+          <td><span class="badge">{{ e.lane|humanize }}</span> {{ e.label }}</td>
           <td>{{ e.summary }}</td>
           <td>
-            {% if e.risk %}<span class="badge {{ 'danger' if e.risk == 'high' else '' }}">{{ e.risk }}</span>{% endif %}
-            {% if e.decision %}<span class="badge {{ 'active' if e.decision == 'approve' else 'danger' }}">{{ e.decision }}</span>{% endif %}
+            {% if e.risk %}<span class="badge {{ 'danger' if e.risk == 'high' else '' }}">{{ e.risk|humanize }} risk</span>{% endif %}
+            {% if e.decision %}<span class="badge {{ 'active' if e.decision == 'approve' else 'danger' }}">{{ 'Approved' if e.decision == 'approve' else e.decision|humanize }}</span>{% endif %}
           </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     {% else %}
+    {% if replay.read_report and replay.read_report.failures %}
+    <p class="muted">No readable audit events are available for this run. The read is incomplete.</p>
+    {% else %}
     <p class="muted">No audit events recorded for this run yet.</p>
     {% endif %}
+    {% endif %}
   </div>
+
+  <section class="panel" aria-labelledby="io-steps-title">
+    <h2 id="io-steps-title">Recorded Steps</h2>
+    <p class="muted">When step-by-step recording is on, each run keeps a sealed recording of everything its
+      agents posted. Lightwork checks the seal before showing it.</p>
+    <div class="io-row">
+      <label class="io-field"><span>Show</span>
+        <select class="select" id="io-steps-kind" disabled><option value="">Every kind of step</option></select></label>
+      <button type="button" class="btn" id="io-steps-show" data-goal="{{ goal.id }}">Show recorded steps</button>
+    </div>
+    <p class="muted" id="io-steps-status" role="status" aria-live="polite"></p>
+    <div id="io-steps-out"></div>
+  </section>
+  <style>
+    .io-scroll { overflow-x: auto; }
+    .io-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+    .io-field { display: flex; flex-direction: column; gap: var(--space-1); }
+  </style>
+  <script src="/static/lightwork-insight-ops.js" defer></script>
 {% else %}
-  <h1 class="page-title">Run replay</h1>
-  <p class="page-subtitle">Reconstruct any run's action timeline from the signed audit log, confirm the record hasn't been tampered with, and export an evidence packet for auditors.</p>
+  <h1 class="page-title">Task replay</h1>
+  <p class="page-subtitle">See everything a task did, step by step, check that the record hasn't been altered, and download evidence for auditors.</p>
   <div class="panel">
     {% if goals %}
     <table>
-      <thead><tr><th scope="col">#</th><th scope="col">Title</th><th scope="col">Status</th><th scope="col"></th></tr></thead>
+      <thead><tr><th scope="col">Task</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Replay</span></th></tr></thead>
       <tbody>
         {% for g in goals %}
         <tr>
-          <td>{{ g.id }}</td>
           <td>{{ g.title }}</td>
-          <td><span class="badge">{{ g.status }}</span></td>
-          <td><a class="btn" href="/replay?goal={{ g.id }}">Replay →</a></td>
+          <td><span class="badge {{ g.status }}">{{ g.status|humanize }}</span></td>
+          <td><a class="btn" href="/replay?goal={{ g.id }}" aria-label="Replay {{ g.title }}">Replay</a></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     {% else %}
-    <p class="muted">No runs yet. Start a goal, then return here to replay it.</p>
+    <p class="muted">No tasks yet. Start a task, then come back here to replay it.</p>
     {% endif %}
   </div>
 {% endif %}

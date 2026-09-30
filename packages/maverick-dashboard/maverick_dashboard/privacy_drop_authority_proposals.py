@@ -501,6 +501,53 @@ class DROPAuthorityProposalStore:
             ).fetchall()
         return tuple(self._public(self._body(row)) for row in rows)
 
+    def list_open_summaries(
+        self, *, proposer_ref: str, limit: int = 100
+    ) -> tuple[Mapping[str, object], ...]:
+        """Proposals still waiting for a second administrator, with a short,
+        digest-free description of what each one would change."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 250:
+            raise DROPManagementValidationError("DROP proposal limit is invalid")
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM drop_authority_proposals WHERE tenant_id=? "
+                "AND state IN ('proposed','applying') "
+                "ORDER BY created_at DESC,proposal_id LIMIT ?",
+                (self.tenant_id, limit),
+            ).fetchall()
+        summaries: list[Mapping[str, object]] = []
+        for row in rows:
+            body = self._body(row)
+            payload = json.loads(str(body["payload_json"]))
+            summary = {
+                field: payload[field]
+                for field in (
+                    "drop_id",
+                    "broker_ref",
+                    "status",
+                    "request_type",
+                    "language",
+                    "valid_until",
+                    "key_revision",
+                )
+                if isinstance(payload, Mapping) and field in payload
+            }
+            summaries.append(
+                {
+                    "proposal_id": body["proposal_id"],
+                    "kind": body["kind"],
+                    "state": body["state"],
+                    "revision": body["revision"],
+                    "created_at": body["created_at"],
+                    "proposed_by_you": hmac.compare_digest(
+                        str(body["proposer_ref"]), str(proposer_ref)
+                    ),
+                    "summary": summary,
+                }
+            )
+        return tuple(summaries)
+
     def retained_key_revision_counts(self) -> Mapping[int, int]:
         now = self._now()
         with self._connect() as connection:

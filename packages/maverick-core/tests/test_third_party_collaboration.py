@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import sqlite3
 import threading
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from maverick import third_party_collaboration as collaboration_module
 from maverick.third_party_collaboration import (
     EMAIL_DELIVERY_IMPLEMENTED,
     MODEL_INFERENCE_IMPLEMENTED,
@@ -22,12 +25,14 @@ from maverick.third_party_collaboration import (
     ThirdPartyCollaborationStore,
     ThirdPartyCollaborationValidationError,
     enabled,
+    evidence_media_type,
 )
 from maverick.third_party_lifecycle import ThirdPartyLifecycleStore
 
 DAY = 24 * 60 * 60
 DIGEST_A = "a" * 64
 DIGEST_B = "b" * 64
+PDF_BYTES = b"%PDF-1.7\n" + b"evidence body " * 30
 
 
 def test_collaboration_gate_requires_exact_parent_lifecycle_and_portal() -> None:
@@ -222,11 +227,28 @@ def issue(
     return result.token, dict(result.invitation)
 
 
-def complete_answers() -> dict[str, dict[str, object]]:
+def complete_answers(artifact_id: str = "report-1") -> dict[str, dict[str, object]]:
     return {
-        "security_control": {"value": True, "artifact_ids": ["report-1"]},
+        "security_control": {"value": True, "artifact_ids": [artifact_id]},
         "privacy_scope": {"value": "high", "artifact_ids": []},
     }
+
+
+def measured(store: ThirdPartyCollaborationStore, token: str) -> list[dict[str, object]]:
+    """The one manifest shape a store accepts: exactly what the server measured."""
+
+    measurement = store.measure_evidence(
+        "tenant-a", token, content=PDF_BYTES, file_extension="pdf"
+    )
+    return [
+        {
+            "artifact_id": measurement.artifact_id,
+            "kind": "audit_report",
+            "content_sha256": measurement.content_sha256,
+            "size_bytes": measurement.size_bytes,
+            "media_type_ref": measurement.media_type_ref,
+        }
+    ]
 
 
 def manifests() -> list[dict[str, object]]:
@@ -576,6 +598,8 @@ def test_final_submission_is_attestation_only_and_lost_response_replays(
 ) -> None:
     store, lifecycle, clock, _ = authority
     token, _ = issue(store)
+    evidence = measured(store, token)
+    answers = complete_answers(str(evidence[0]["artifact_id"]))
     original = store._complete_finalization  # noqa: SLF001
 
     def lose_response(*args: object, **kwargs: object) -> object:
@@ -586,8 +610,8 @@ def test_final_submission_is_attestation_only_and_lost_response_replays(
         store.finalize_submission(
             "tenant-a",
             token,
-            answers=complete_answers(),
-            artifacts=manifests(),
+            answers=answers,
+            artifacts=evidence,
             attested=True,
             expected_draft_revision=0,
             idempotency_key="final-one",
@@ -599,8 +623,8 @@ def test_final_submission_is_attestation_only_and_lost_response_replays(
     receipt = store.finalize_submission(
         "tenant-a",
         token,
-        answers=complete_answers(),
-        artifacts=manifests(),
+        answers=answers,
+        artifacts=evidence,
         attested=True,
         expected_draft_revision=0,
         idempotency_key="final-one",
@@ -612,8 +636,8 @@ def test_final_submission_is_attestation_only_and_lost_response_replays(
     replay = store.finalize_submission(
         "tenant-a",
         token,
-        answers=complete_answers(),
-        artifacts=manifests(),
+        answers=answers,
+        artifacts=evidence,
         attested=True,
         expected_draft_revision=0,
         idempotency_key="final-one",
@@ -633,12 +657,14 @@ def test_final_rejects_authority_drift_and_explicit_attestation_is_mandatory(
 ) -> None:
     store, lifecycle, _, principal = authority
     token, _ = issue(store)
+    evidence = measured(store, token)
+    answers = complete_answers(str(evidence[0]["artifact_id"]))
     with pytest.raises(ThirdPartyCollaborationPermissionDenied, match="attestation"):
         store.finalize_submission(
             "tenant-a",
             token,
-            answers=complete_answers(),
-            artifacts=manifests(),
+            answers=answers,
+            artifacts=evidence,
             attested=False,
             expected_draft_revision=0,
             idempotency_key="unattested",
@@ -660,8 +686,8 @@ def test_final_rejects_authority_drift_and_explicit_attestation_is_mandatory(
         store.finalize_submission(
             "tenant-a",
             token,
-            answers=complete_answers(),
-            artifacts=manifests(),
+            answers=answers,
+            artifacts=evidence,
             attested=True,
             expected_draft_revision=0,
             idempotency_key="drifted-final",
@@ -674,11 +700,13 @@ def test_follow_up_requires_internal_transition_and_reopens_with_new_pins(
 ) -> None:
     store, _, _, _ = authority
     token, _ = issue(store)
+    evidence = measured(store, token)
+    answers = complete_answers(str(evidence[0]["artifact_id"]))
     store.finalize_submission(
         "tenant-a",
         token,
-        answers=complete_answers(),
-        artifacts=manifests(),
+        answers=answers,
+        artifacts=evidence,
         attested=True,
         expected_draft_revision=0,
         idempotency_key="final-follow-up",
@@ -712,14 +740,16 @@ def test_concurrent_revocation_and_finalization_fail_closed(
 ) -> None:
     store, _, _, _ = authority
     token, invitation = issue(store)
+    evidence = measured(store, token)
+    answers = complete_answers(str(evidence[0]["artifact_id"]))
 
     def finalize() -> str:
         try:
             store.finalize_submission(
                 "tenant-a",
                 token,
-                answers=complete_answers(),
-                artifacts=manifests(),
+                answers=answers,
+                artifacts=evidence,
                 attested=True,
                 expected_draft_revision=0,
                 idempotency_key="concurrent-final",
@@ -789,6 +819,229 @@ def test_retention_legal_hold_history_and_integrity_tamper_detection(
         )
     with pytest.raises(ThirdPartyCollaborationIntegrityError):
         store.verify_integrity("tenant-a")
+
+
+def test_evidence_is_measured_from_the_file_itself_and_its_bytes_are_not_kept(
+    authority: tuple[ThirdPartyCollaborationStore, ThirdPartyLifecycleStore, Clock, Principal],
+) -> None:
+    store, _, _, _ = authority
+    token, _ = issue(store)
+    first = store.measure_evidence("tenant-a", token, content=PDF_BYTES, file_extension="pdf")
+    assert first.invitation_id == "invite-1"
+    assert first.content_sha256 == hashlib.sha256(PDF_BYTES).hexdigest()
+    assert first.size_bytes == len(PDF_BYTES)
+    assert first.media_type_ref == "application.pdf"
+    assert first.idempotent_replay is False
+    again = store.measure_evidence("tenant-a", token, content=PDF_BYTES, file_extension="pdf")
+    assert again.artifact_id == first.artifact_id
+    assert again.idempotent_replay is True
+    picture = store.measure_evidence(
+        "tenant-a", token, content=b"\x89PNG\r\n\x1a\n" + bytes(40), file_extension="pdf"
+    )
+    assert picture.media_type_ref == "image.png"
+    for stored in store.path.parent.iterdir():
+        if stored.is_file():
+            assert b"evidence body" not in stored.read_bytes()
+    history = store.verify_integrity("tenant-a")
+    assert history.history_events >= 3
+
+
+def test_drafts_and_final_submissions_accept_only_server_measured_manifests(
+    authority: tuple[ThirdPartyCollaborationStore, ThirdPartyLifecycleStore, Clock, Principal],
+) -> None:
+    store, _, _, _ = authority
+    token, _ = issue(store)
+    with pytest.raises(ThirdPartyCollaborationValidationError, match="not measured"):
+        store.save_draft(
+            "tenant-a",
+            token,
+            answers={"security_control": {"value": True, "artifact_ids": ["report-1"]}},
+            artifacts=manifests(),
+            expected_revision=0,
+            idempotency_key="declared-only",
+        )
+    evidence = measured(store, token)
+    artifact_id = str(evidence[0]["artifact_id"])
+    answers = {"security_control": {"value": True, "artifact_ids": [artifact_id]}}
+    for field, forged in (
+        ("size_bytes", 1),
+        ("content_sha256", DIGEST_B),
+        ("media_type_ref", "image.png"),
+    ):
+        with pytest.raises(ThirdPartyCollaborationValidationError, match="does not match"):
+            store.save_draft(
+                "tenant-a",
+                token,
+                answers=answers,
+                artifacts=[{**evidence[0], field: forged}],
+                expected_revision=0,
+                idempotency_key=f"forged-draft-{field}",
+            )
+        with pytest.raises(ThirdPartyCollaborationValidationError, match="does not match"):
+            store.finalize_submission(
+                "tenant-a",
+                token,
+                answers=complete_answers(artifact_id),
+                artifacts=[{**evidence[0], field: forged}],
+                attested=True,
+                expected_draft_revision=0,
+                idempotency_key=f"forged-final-{field}",
+            )
+    receipt = store.save_draft(
+        "tenant-a",
+        token,
+        answers=answers,
+        artifacts=evidence,
+        expected_revision=0,
+        idempotency_key="measured-draft",
+    )
+    assert receipt.artifact_count == 1
+    assert store.contract_for_token("tenant-a", token)["draft_artifacts"] == evidence
+    other_token, _ = issue(store, "invite-2", "issue-invite-2")
+    with pytest.raises(ThirdPartyCollaborationValidationError, match="not measured"):
+        store.save_draft(
+            "tenant-a",
+            other_token,
+            answers=answers,
+            artifacts=evidence,
+            expected_revision=0,
+            idempotency_key="other-invitation",
+        )
+
+
+def test_evidence_measurement_enforces_the_invitation_policy_and_bounds(
+    authority: tuple[ThirdPartyCollaborationStore, ThirdPartyLifecycleStore, Clock, Principal],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, _, _, _ = authority
+    token, _ = issue(store)
+    with pytest.raises(ThirdPartyCollaborationValidationError, match="byte bound"):
+        store.measure_evidence("tenant-a", token, content=b"x" * 10_001)
+    with pytest.raises(ThirdPartyCollaborationValidationError, match="between 1"):
+        store.measure_evidence("tenant-a", token, content=b"")
+    with pytest.raises(ThirdPartyCollaborationValidationError, match="extension"):
+        store.measure_evidence("tenant-a", token, content=PDF_BYTES, file_extension="../pdf")
+    with pytest.raises(ThirdPartyCollaborationValidationError, match="must be bytes"):
+        store.measure_evidence("tenant-a", token, content="not bytes")  # type: ignore[arg-type]
+    with pytest.raises(ThirdPartyCollaborationAuthError):
+        store.measure_evidence("tenant-a", "tpc1." + "Z" * 43, content=PDF_BYTES)
+    with pytest.raises(ThirdPartyCollaborationAuthError):
+        store.measure_evidence("tenant-b", token, content=PDF_BYTES)
+    no_files = store.issue_invitation(
+        "tenant-a",
+        "no-files",
+        assessment_id="assessment-1",
+        respondent_ref="vendor-respondent",
+        allowed_question_ids=["security_control"],
+        notice_ref="notice.vendor-assessment.v1",
+        notice_sha256=DIGEST_A,
+        artifact_policy={"allowed_kinds": [], "maximum_artifacts": 0, "maximum_total_bytes": 0},
+        expires_in_seconds=DAY,
+        retention_seconds=DAY * 2,
+        idempotency_key="issue-no-files",
+    )
+    assert no_files.token is not None
+    with pytest.raises(ThirdPartyCollaborationPermissionDenied, match="does not accept"):
+        store.measure_evidence("tenant-a", no_files.token, content=PDF_BYTES)
+    monkeypatch.setattr(collaboration_module, "_MAX_EVIDENCE_MEASUREMENTS", 2)
+    store.measure_evidence("tenant-a", token, content=PDF_BYTES)
+    store.measure_evidence("tenant-a", token, content=PDF_BYTES + b"2")
+    with pytest.raises(ThirdPartyCollaborationValidationError, match="too many"):
+        store.measure_evidence("tenant-a", token, content=PDF_BYTES + b"3")
+    assert store.measure_evidence("tenant-a", token, content=PDF_BYTES).idempotent_replay is True
+
+
+def test_evidence_measurements_are_integrity_checked_and_purged_with_the_invitation(
+    authority: tuple[ThirdPartyCollaborationStore, ThirdPartyLifecycleStore, Clock, Principal],
+) -> None:
+    store, _, clock, _ = authority
+    token, _ = issue(store)
+    evidence = measured(store, token)
+    before = store.verify_integrity("tenant-a").verified_records
+    measured(store, token)
+    assert store.verify_integrity("tenant-a").verified_records == before
+    clock.advance(DAY * 3)
+    assert store.purge_expired("tenant-a", before=clock(), idempotency_key="purge-all") == {
+        "invitations": 1,
+        "drafts": 0,
+    }
+    with sqlite3.connect(store.path) as connection:
+        remaining = connection.execute("SELECT COUNT(*) FROM evidence_measurements").fetchone()
+    assert remaining[0] == 0
+    assert evidence
+
+
+def test_tampered_evidence_measurement_fails_closed(
+    authority: tuple[ThirdPartyCollaborationStore, ThirdPartyLifecycleStore, Clock, Principal],
+) -> None:
+    store, _, _, _ = authority
+    token, _ = issue(store)
+    evidence = measured(store, token)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "UPDATE evidence_measurements SET payload_json="
+            "replace(payload_json, '\"size_bytes\":', '\"size_bytes\":9')"
+        )
+    with pytest.raises(ThirdPartyCollaborationIntegrityError):
+        store.verify_integrity("tenant-a")
+    with pytest.raises(ThirdPartyCollaborationIntegrityError):
+        store.save_draft(
+            "tenant-a",
+            token,
+            answers={
+                "security_control": {
+                    "value": True,
+                    "artifact_ids": [str(evidence[0]["artifact_id"])],
+                }
+            },
+            artifacts=evidence,
+            expected_revision=0,
+            idempotency_key="tampered-measurement",
+        )
+
+
+def _zip(entries: list[tuple[str, bytes]]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+        for name, data in entries:
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+def test_evidence_type_comes_from_the_content_and_the_name_only_refines_it() -> None:
+    png = b"\x89PNG\r\n\x1a\n" + bytes(16)
+    ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + bytes(64)
+    docx = _zip([("[Content_Types].xml", b"<Types/>"), ("word/document.xml", b"<w/>")])
+    xlsx = _zip([("[Content_Types].xml", b"<Types/>"), ("xl/workbook.xml", b"<x/>")])
+    plain_zip = _zip([("notes.txt", b"hello")])
+    ods = _zip(
+        [
+            ("mimetype", b"application/vnd.oasis.opendocument.spreadsheet"),
+            ("content.xml", b"<office/>"),
+        ]
+    )
+    assert evidence_media_type(PDF_BYTES) == "application.pdf"
+    assert evidence_media_type(png, "pdf") == "image.png"
+    assert evidence_media_type(b"\xff\xd8\xff\xe0" + bytes(8)) == "image.jpeg"
+    assert evidence_media_type(docx, "zip") == (
+        "application.vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert evidence_media_type(xlsx) == (
+        "application.vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert evidence_media_type(plain_zip) == "application.zip"
+    assert evidence_media_type(plain_zip, "xlsx") == (
+        "application.vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert evidence_media_type(ods) == "application.vnd.oasis.opendocument.spreadsheet"
+    assert evidence_media_type(ole, "xls") == "application.vnd.ms-excel"
+    assert evidence_media_type(ole) == "application.x-ole-storage"
+    assert evidence_media_type(b"name,amount\nacme,3\n", "csv") == "text.csv"
+    assert evidence_media_type(b"name,amount\nacme,3\n") == "text.plain"
+    assert evidence_media_type(b"\x00\x01binary") == "application.octet-stream"
+    assert evidence_media_type(b"\xff\xfe\xfa not utf-8") == "application.octet-stream"
+    split_character = b"a" * 65_535 + "\u00e9".encode()
+    assert evidence_media_type(split_character, "txt") == "text.plain"
 
 
 def test_capability_boundaries_are_explicitly_false() -> None:

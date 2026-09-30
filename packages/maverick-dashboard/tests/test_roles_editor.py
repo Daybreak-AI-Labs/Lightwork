@@ -43,7 +43,7 @@ class TestRosterAndView:
         html = client.get("/roles?role=coder").text
         assert 'id="f-model"' in html and 'name="model"' in html
         assert 'id="f-effort"' in html and 'name="effort"' in html
-        assert "(inherit" in html   # the "no override" effort option
+        assert "Use the standard level" in html   # the "no override" effort option
 
     def test_unknown_role_404(self):
         assert client.get("/api/v1/roles/not_a_role").status_code == 404

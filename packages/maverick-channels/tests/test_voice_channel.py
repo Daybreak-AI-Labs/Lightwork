@@ -73,7 +73,7 @@ def test_voice_webhook_requires_bearer_token(monkeypatch):
     monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
     chan = VoiceChannel(handler=_noop, api_key="vapi-test-key")
     client = TestClient(chan._app)
-    payload = {"message": {"type": "transcript", "role": "user", "transcript": "hi"}}
+    payload = {"message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1", "call": {"id": "call1"}}}
     resp = client.post("/webhook/voice", json=payload)
     assert resp.status_code == 401
 
@@ -89,7 +89,7 @@ def test_voice_webhook_accepts_valid_bearer_token(monkeypatch):
     monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
     chan = VoiceChannel(handler=_noop, api_key="vapi-test-key")
     client = TestClient(chan._app)
-    payload = {"message": {"type": "transcript", "role": "user", "transcript": "hi"}}
+    payload = {"message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1", "call": {"id": "call1"}}}
     resp = client.post(
         "/webhook/voice",
         json=payload,
@@ -149,7 +149,10 @@ def test_unsupported_provider_send_is_soft_noop():
     with pytest.raises(ValueError, match="unsupported voice provider"):
         chan._outbound_request("+1", "hi")
     import asyncio
-    asyncio.run(chan.send("+14150000000", "hi"))  # no exception = pass
+
+    from maverick_channels.delivery import DeliveryNotSent
+    with pytest.raises(DeliveryNotSent, match="unsupported"):
+        asyncio.run(chan.send("+14150000000", "hi"))
 
 
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
@@ -163,6 +166,8 @@ def test_send_posts_to_provider_endpoint(monkeypatch):
     class _Resp:
         status_code = 200
         text = ""
+        def json(self):
+            return {"call_id": "accepted-provider-call"}
 
     class _FakeClient:
         def __init__(self, *a, **k):

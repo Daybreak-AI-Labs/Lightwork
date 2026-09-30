@@ -638,6 +638,37 @@ def report(record, *, resolve):
               "Recorded runtime prices are not provider invoices. Reported total cost must include review, rework, and failed attempts."]}
 
 
+def review_queue(actor, *, limit=200):
+    """Protected pilots in the current workspace that this person may review.
+
+    The store is already workspace-scoped. A reviewer never sees their own
+    pilots, only frozen plans, and only the fields needed to pick one.
+    """
+    if not isinstance(actor, str) or not actor.startswith("user:"):
+        return []
+    items = []
+    for _cursor, record_id in STORE.iter_record_ids(limit=LIMIT):
+        record = STORE.get(record_id)
+        if (
+            record is None
+            or record.get("learning_mode") != "exclude_local_learning"
+            or record.get("state") != "frozen"
+            or record.get("actor") == actor
+        ):
+            continue
+        review = record.get("independent_review") or {}
+        items.append({
+            "id": record["id"],
+            "title": record["title"],
+            "frozen_at": record.get("frozen_at"),
+            "decision": review.get("decision") if isinstance(review, dict) else None,
+        })
+        if len(items) >= limit:
+            break
+    items.sort(key=lambda item: (item["decision"] is not None, -(item["frozen_at"] or 0)))
+    return items
+
+
 def independent_review(pilot_id, body, *, actor, resolve):
     if body.get("confirm") is not True:
         raise ValueError("Explicitly confirm the exact learning-policy evidence you reviewed.")

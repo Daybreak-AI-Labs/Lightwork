@@ -8,13 +8,10 @@
   .vo-card {padding:1.2rem; border:1px solid var(--border); border-radius:12px; background:var(--panel); margin-bottom:1rem}
   .vo-card label {display:block; margin-top:.7rem}
   .vo-card input,.vo-card select,.vo-card textarea {display:block; width:100%; margin:.3rem 0 .7rem}
-  .vo-card input,.vo-card select,.vo-card textarea,.vo-card button {font:inherit; color:inherit; border:1px solid var(--border); border-radius:8px; background:var(--panel); padding:.6rem .8rem; box-sizing:border-box}
   .vo-card textarea {min-height:5rem; resize:vertical}
-  .vo-card button {cursor:pointer; line-height:1.4}
-  .vo-card button:hover:not(:disabled),.vo-card :focus-visible {border-color:var(--accent); outline:2px solid var(--accent); outline-offset:2px}
-  .vo-card button:disabled {opacity:.45; cursor:default}
+  .vo-card :focus-visible {outline:2px solid var(--accent); outline-offset:2px}
   .vo-actions {display:flex; flex-wrap:wrap; gap:.6rem; margin-top:1rem}
-  .vo-card pre {white-space:pre-wrap; overflow-wrap:anywhere; max-height:28rem; overflow:auto}
+  .vo-card pre, #vo-operation, #vo-outcome, #vo-history {white-space:pre-wrap; overflow-wrap:anywhere; max-height:28rem; overflow:auto}
   .vo-question {padding:1rem 0; border-bottom:1px solid var(--border)}
   .vo-question blockquote {margin:.5rem 0; padding:.6rem; border-left:3px solid var(--accent)}
   .vo-question small {display:block; color:var(--muted)}
@@ -24,7 +21,7 @@
   #vo-message {position:sticky; top:calc(var(--shell-topbar-h,56px) + .5rem); z-index:20; padding:.75rem; border:1px solid var(--border); border-radius:8px; background:var(--panel)}
   #vo-message:empty {display:none}
   #vo-message[role="alert"] {color:var(--err); border-color:currentColor}
-  #vo-cases button {display:block; width:100%; text-align:left; margin:.4rem 0}
+  #vo-cases button {display:block; width:100%; text-align:left; margin:.4rem 0; white-space:normal; height:auto}
   #vo-cases button[aria-current="true"] {border-color:var(--accent); background:var(--surface-2)}
   .vo-queue-controls {display:grid; grid-template-columns:1fr auto; gap:.6rem; align-items:end}
   .vo-queue-controls label {margin:0}
@@ -36,7 +33,7 @@
   #vo-upload-review pre {max-height:24rem;min-width:0}
   .vo-card .vo-upload-confirm-label {display:flex;align-items:flex-start;gap:.6rem}
   .vo-card #vo-upload-confirm {width:auto;flex:0 0 auto}
-  .vo-card #vo-cancellation-confirm,.vo-card #vo-export-confirm,.vo-card #vs-confirm {width:auto;flex:0 0 auto;margin:.2rem 0 0;padding:0}
+  .vo-card #vo-cancellation-confirm,.vo-card #vo-export-confirm,.vo-card #vs-confirm,.vo-card #vs-off-confirm {width:auto;flex:0 0 auto;margin:.2rem 0 0;padding:0}
   #vo-cancellation-status {white-space:pre-line;overflow-wrap:anywhere}
   #vo-export-status,#vo-acceptance-evidence-check {white-space:pre-line;overflow-wrap:anywhere}
   #vo-export-manifest li {overflow-wrap:anywhere}
@@ -47,7 +44,7 @@
 {% endblock %}
 {% block content %}
 <section id="vendor-onboarding" aria-labelledby="vo-title" data-api-base="/api/v1/vendor-onboarding" data-workspace-context="{{ connection_workspace_context }}">
-  <h1 id="vo-title" class="page-title">AI vendor onboarding</h1>
+  <h1 id="vo-title" class="page-title">AI Vendor Onboarding</h1>
   {% if offline_demo %}<p role="note"><strong>Offline simulation.</strong> All vendor evidence, reviewer identities and tickets in this demonstration are synthetic.</p>{% endif %}
   <p>Bring in evidence, review the assessment, and approve a verified Jira task. Renewals retain the previous evidence and decisions.</p>
   <p id="vo-message" role="status" aria-live="polite"></p>
@@ -58,19 +55,24 @@
     <ul id="vs-next-actions"><li>Ask an administrator to choose a vendor review owner, connect Jira, and save the workspace setup below.</li></ul>
     <p id="vs-deployment">{{ deployment.message }}{% if not deployment.supported %} {{ deployment.next_action }}{% endif %}</p>
     <p id="vs-status" role="status" aria-live="polite">Loading setup…</p>
-    <p>Choose credentials in <a href="/connections">Connections</a>. This saves the workspace's vendor review owner and delivery connection. Provider access is checked by the existing evidence and delivery actions.</p>
-    <p>Google Drive is optional when you upload evidence. Uploads support text, PDF, Word and Excel files; review the extracted text before using it. A verified ticket still needs an explicit customer acceptance decision.</p>
-    <details><summary>Storage and recovery support</summary><p>This workflow uses one persistent Lightwork installation. Its workers share the same local records and coordination locks. Workspace recovery covers supported local records; it does not undo changes in Drive or Jira. Review <a href="/workspace/recovery">workspace recovery</a> before changing installations.</p></details>
+    <p>Connect Jira (and optionally Google Drive) in <a href="/connections">Connections</a>, then choose them here.</p>
+    <details><summary>Backups</summary><p>Lightwork's <a href="/workspace/recovery">workspace recovery</a> restores these requests, but not changes already made in Drive or Jira.</p></details>
     <p id="vs-owner"></p>
     <form id="vs-form">
-      <label for="vs-resource-owner">Vendor review owner</label><select id="vs-resource-owner" required disabled aria-describedby="vs-owner-help"></select>
-      <p id="vs-owner-help">For initial setup, choose an active workspace member who can manage vendor reviews. Manage workspace membership in <a href="/users">Users</a>. Existing ownership stays fixed. Choosing an owner grants no permissions or connection access.</p>
-      <label for="vs-ticket">Jira connection</label><select id="vs-ticket" required disabled></select>
-      <label for="vs-document">Google Drive connection (optional for uploaded evidence)</label><select id="vs-document" disabled></select>
+      <label for="vs-resource-owner">Vendor review owner</label><select id="vs-resource-owner" class="select" required disabled aria-describedby="vs-owner-help"></select>
+      <p id="vs-owner-help" class="muted">The person responsible for vendor reviews in this workspace. Add people in <a href="/users">Users</a>.</p>
+      <label for="vs-ticket">Jira connection</label><select id="vs-ticket" class="select" required disabled></select>
+      <label for="vs-document">Google Drive connection (optional for uploaded evidence)</label><select id="vs-document" class="select" disabled></select>
       <label class="vo-upload-confirm-label"><input type="checkbox" id="vs-confirm" disabled> <span>I reviewed the owner, connection choices and this setup change.</span></label>
-      <div class="vo-actions"><button id="vs-save" type="submit" disabled>Save workspace setup</button><button id="vs-enable" type="button" disabled>Enable vendor workflow</button><button id="vs-refresh" type="button">Refresh setup</button></div>
+      <div class="vo-actions"><button id="vs-save" class="btn btn--primary" type="submit" disabled>Save workspace setup</button><button id="vs-enable" class="btn" type="button" disabled>Turn on vendor onboarding</button><button id="vs-refresh" class="btn btn--ghost" type="button">Refresh setup</button></div>
     </form>
-    <p>Enable vendor workflow turns on Connections, vendor management, AI vendor risk, model assurance and evidence records for this installation. It grants no colleague access, starts no provider request, and approves no action.</p>
+    <p class="muted">Turning on vendor onboarding also turns on the vendor, risk and evidence features it uses. It doesn't give anyone new access.</p>
+    <details id="vs-off" hidden>
+      <summary>Turn off vendor onboarding</summary>
+      <p>Vendor onboarding stops for every workspace: nobody can start or continue a vendor request until it is turned back on. Saved requests, this workspace setup and your connections are kept, so turning it back on carries on where you left off. The vendor, risk and evidence features it turned on stay on; each can be turned off in <a href="/settings/all">All settings</a>.</p>
+      <label class="vo-upload-confirm-label"><input type="checkbox" id="vs-off-confirm"> <span>I understand that vendor requests stop until this is turned back on.</span></label>
+      <div class="vo-actions"><button id="vs-disable" class="btn btn--danger" type="button" disabled>Turn off vendor onboarding</button></div>
+    </details>
   </details>
   {% endif %}
   <div class="vo-layout">
@@ -79,42 +81,43 @@
         <h2 id="vo-list-title">Vendor requests</h2>
         <div class="vo-queue-controls">
           <label for="vo-case-filter">Show
-            <select id="vo-case-filter">
+            <select id="vo-case-filter" class="select">
               <option value="all">All requests</option>
               <option value="active">Active requests</option>
-              <option value="unresolved">Needs reconciliation</option>
+              <option value="unresolved">Ticket result needs checking</option>
               <option value="renewal">Renewals and reevaluations</option>
               <option value="closed">Finished requests</option>
             </select>
           </label>
-          <button id="vo-refresh" type="button">Refresh requests</button>
+          <button id="vo-refresh" class="btn btn--ghost" type="button">Refresh requests</button>
         </div>
         <div id="vo-cases" aria-live="polite"></div>
         <p id="vo-attention-summary" role="status" aria-live="polite">Loading request attention…</p>
         <p id="vo-page-status" role="status">Loading requests…</p>
         <div class="vo-page-actions" aria-label="Vendor request pages">
-          <button id="vo-page-previous" type="button" disabled>Previous page</button>
-          <button id="vo-page-next" type="button" disabled>Next page</button>
+          <button id="vo-page-previous" class="btn btn--ghost" type="button" disabled>Previous page</button>
+          <button id="vo-page-next" class="btn btn--ghost" type="button" disabled>Next page</button>
         </div>
       </section>
       <section class="vo-card" aria-labelledby="vo-intake-title">
         <h2 id="vo-intake-title">New request</h2>
         <form id="vo-intake">
-          <label for="vo-vendor">Vendor name</label><input id="vo-vendor" required maxlength="200">
-          <label for="vo-document-search">Find a Drive document by name</label><input id="vo-document-search" maxlength="200">
-          <label for="vo-document-target">Add search results to</label><select id="vo-document-target"><option value="new">New request</option><option value="selected">Selected request</option></select>
-          <button id="vo-search-documents" type="button">Search Drive</button>
+          <label for="vo-vendor">Vendor name</label><input id="vo-vendor" class="input" required maxlength="200">
+          <label for="vo-document-search">Find a Drive document by name</label><input id="vo-document-search" class="input" maxlength="200">
+          <label for="vo-document-target">Add search results to</label><select id="vo-document-target" class="select"><option value="new">New request</option><option value="selected">Selected request</option></select>
+          <button id="vo-search-documents" class="btn" type="button">Search Drive</button>
           <div id="vo-document-results" aria-live="polite"></div>
           <div id="vo-new-documents" aria-live="polite">No Drive documents selected for the new request.</div>
-          <details><summary>Advanced: selected Drive file IDs</summary><label for="vo-document">Google Drive file IDs (one per line, optional)</label><textarea id="vo-document" maxlength="2056" rows="3"></textarea></details>
-          <label for="vo-project">Jira project key</label><input id="vo-project" required maxlength="32">
-          <label for="vo-purpose">Intended use</label><textarea id="vo-purpose" required maxlength="2000"></textarea>
-          <label for="vo-freshness">Evidence validity in days</label><input id="vo-freshness" type="number" value="365" min="1" max="730" required>
-          <label for="vo-due">Requested completion date</label><input id="vo-due" type="date" required>
-          <label for="vo-renewal">Previous request ID (renewal or reevaluation)</label><input id="vo-renewal" maxlength="128">
-          <button type="submit">Create request</button>
+          <div hidden><label for="vo-document">Chosen Drive documents</label><textarea id="vo-document" maxlength="2056" rows="3"></textarea></div>
+          <label for="vo-project">Jira project (short name shown in ticket numbers, like VEND)</label><input id="vo-project" class="input" required maxlength="32">
+          <label for="vo-purpose">What you plan to use this vendor for</label><textarea id="vo-purpose" class="input" required maxlength="2000"></textarea>
+          <label for="vo-freshness">How long evidence stays valid</label><select id="vo-freshness" class="select" required><option value="182">6 months</option><option value="365" selected>1 year</option><option value="730">2 years</option></select>
+          <label for="vo-due">Needed by</label><input id="vo-due" class="input" type="date" required>
+          <div hidden><label for="vo-renewal">Earlier request being renewed</label><input id="vo-renewal" maxlength="128"></div>
+          <p id="vo-renewal-note" class="muted" hidden></p>
+          <button class="btn btn--primary" type="submit">Create request</button>
         </form>
-        <p>Select up to eight Google Docs, UTF-8 text files, or supported digital PDFs. You can also create a request first and upload evidence below.</p>
+        <p class="muted">Choose up to eight documents. You can also create the request first and upload files below.</p>
       </section>
     </aside>
     <div>
@@ -126,102 +129,103 @@
         <p id="vo-scope">Select a request to see its promised result and support boundary.</p>
         <details>
           <summary>Edit request details</summary>
-          <p>Saving a changed intended use or evidence-validity period restarts evidence review. Changing the Jira project requires a new action review. Changing only the requested completion date keeps completed technical work.</p>
-          <label for="vo-case-project">Jira project key</label><input id="vo-case-project" maxlength="32" disabled>
-          <label for="vo-case-purpose">Intended use</label><textarea id="vo-case-purpose" maxlength="2000" disabled></textarea>
-          <label for="vo-case-freshness">Evidence validity in days</label><input id="vo-case-freshness" type="number" min="1" max="730" disabled>
-          <label for="vo-case-due">Requested completion date</label><input id="vo-case-due" type="date" disabled>
-          <button id="vo-save-draft" type="button" disabled>Save request details</button>
+          <p class="muted">Changing the use or how long evidence stays valid restarts the evidence review. Changing the Jira project means approving the ticket again. Changing only the date keeps the work done so far.</p>
+          <label for="vo-case-project">Jira project</label><input id="vo-case-project" class="input" maxlength="32" disabled>
+          <label for="vo-case-purpose">What you plan to use this vendor for</label><textarea id="vo-case-purpose" class="input" maxlength="2000" disabled></textarea>
+          <label for="vo-case-freshness">How long evidence stays valid</label><select id="vo-case-freshness" class="select" disabled><option value="182">6 months</option><option value="365">1 year</option><option value="730">2 years</option></select>
+          <label for="vo-case-due">Needed by</label><input id="vo-case-due" class="input" type="date" disabled>
+          <button id="vo-save-draft" class="btn" type="button" disabled>Save request details</button>
         </details>
         <div class="vo-actions">
-          <button id="vo-collect" type="button" disabled>Obtain current evidence</button>
-          <button id="vo-assess" type="button" disabled>Build assessment</button>
-          <button id="vo-renew" type="button" disabled>Start renewal or reevaluation</button>
+          <button id="vo-collect" class="btn btn--primary" type="button" disabled>Obtain current evidence</button>
+          <button id="vo-assess" class="btn" type="button" disabled>Build assessment</button>
+          <button id="vo-renew" class="btn" type="button" disabled>Start renewal or reevaluation</button>
         </div>
-        <h3>Evidence and source</h3><pre id="vo-evidence">No request selected.</pre>
+        <h3>Evidence</h3><div id="vo-evidence">No request selected.</div>
         <div id="vo-evidence-controls">
           <p>Use Search Drive and choose “Selected request” to add another document.</p>
           <div id="vo-selected-documents"></div>
-          <details><summary>Advanced: selected Drive file IDs</summary><label for="vo-case-documents">Selected Drive file IDs (one per line)</label><textarea id="vo-case-documents" maxlength="2056" rows="3" disabled></textarea>
-          <button id="vo-save-documents" type="button" disabled>Update selected documents</button></details>
+          <div hidden><label for="vo-case-documents">Chosen Drive documents</label><textarea id="vo-case-documents" maxlength="2056" rows="3" disabled></textarea>
+          <button id="vo-save-documents" type="button" disabled>Update selected documents</button></div>
           <div id="vo-uploaded-documents"></div>
-          <label for="vo-upload">Choose an evidence file</label><input id="vo-upload" type="file" accept=".txt,.pdf,.docx,.xlsx" disabled>
-          <label for="vo-document-date">Document date (your assertion, not verified by Drive)</label><input id="vo-document-date" type="date" disabled>
-          <button id="vo-upload-submit" type="button" disabled>Preview evidence text</button>
-          <p>Add one file at a time: text up to 1 MiB, Word or Excel up to 8 MiB, PDF up to 16 MiB; 8 documents and 32 MiB per request. Review up to 120,000 characters against your original before adding evidence. Word body paragraphs and tables, and visible Excel cells are supported. Images, charts and document layout are not interpreted. Files with macros, external links or unsafe content are refused.</p>
+          <label for="vo-upload">Choose an evidence file</label><input id="vo-upload" class="input" type="file" accept=".txt,.pdf,.docx,.xlsx" disabled>
+          <label for="vo-document-date">Date on the document</label><input id="vo-document-date" class="input" type="date" disabled>
+          <button id="vo-upload-submit" class="btn" type="button" disabled>Preview evidence text</button>
+          <p class="muted">One file at a time: PDF up to 16 MB, Word or Excel up to 8 MB, text up to 1 MB; up to 8 files per request. Only text and table cells are read, not images or charts. Files with macros or outside links are refused.</p>
           <section id="vo-upload-review" hidden aria-labelledby="vo-upload-review-title" data-draft-recovery="off">
             <h4 id="vo-upload-review-title">Review text before adding evidence</h4>
             <p id="vo-upload-summary" role="status"></p>
             <ul id="vo-upload-limits"></ul>
             <pre id="vo-upload-text" tabindex="0" aria-label="Text to compare against the original file"></pre>
-            <details><summary>Source and extraction details</summary><pre id="vo-upload-fingerprints"></pre></details>
+            <details><summary>Technical details</summary><pre id="vo-upload-fingerprints"></pre></details>
             <div id="vo-upload-fallback" hidden>
-              <p>Lightwork could not read this PDF using its local text reader. No OCR was performed. You can select a supported text or Word copy, or transcribe the relevant content below while comparing it with your original PDF. Clearly note any omitted or unreadable sections. The resulting evidence will be labeled user-supplied transcription, with no verified PDF page locations.</p>
-              <label for="vo-upload-transcription">Your transcription and any omissions</label><textarea id="vo-upload-transcription" rows="8" maxlength="120000" data-draft-recovery="off"></textarea>
-              <button id="vo-upload-transcribe" type="button">Preview my transcription</button>
+              <p>Lightwork couldn't read the text in this PDF (it may be a scan). Choose a Word or text copy instead, or type the relevant parts below while looking at the original, and note anything you left out. It will be marked as typed in by you.</p>
+              <label for="vo-upload-transcription">The text, and anything you left out</label><textarea id="vo-upload-transcription" class="input" rows="8" maxlength="120000" data-draft-recovery="off"></textarea>
+              <button id="vo-upload-transcribe" class="btn" type="button">Preview what I typed</button>
             </div>
             <label class="vo-upload-confirm-label"><input id="vo-upload-confirm" type="checkbox"> <span>I compared this text with the original, reviewed the stated limits and any omissions, and want to add it as evidence.</span></label>
-            <button id="vo-upload-accept" type="button" disabled>Add reviewed evidence</button>
+            <button id="vo-upload-accept" class="btn btn--primary" type="button" disabled>Add reviewed evidence</button>
           </section>
-          <p>Extraction and transcription are not independent verification. Upload bytes and full text are processed temporarily; retained evidence contains source fingerprints, extraction limits and short redacted quotations. Replacing evidence clears the assessment and any pending action approval.</p>
+          <p class="muted">Lightwork keeps only short quotes from each file, not the file itself. Replacing evidence clears the assessment and any ticket approval.</p>
         </div>
         <h3>Changes since previous evidence</h3><div id="vo-evidence-changes">Collect evidence to compare retained versions.</div>
         <h3>Acceptance evidence check</h3><div id="vo-acceptance-evidence-check" role="status">Evidence is checked again before acceptance.</div>
-        <h3>Assessment, source references and gaps</h3><div id="vo-assessment"></div>
+        <h3>Assessment, quotes and gaps</h3><div id="vo-assessment"></div>
         <section aria-labelledby="vo-export-title">
           <h3 id="vo-export-title">Export reviewed evidence</h3>
-          <p>Create a safe JSON export containing bounded redacted quotations and stable evidence references. Source files and full extracted text are never included. If current source access is unavailable, the export records an opaque withheld dependency.</p>
-          <button id="vo-export-preview" type="button" disabled>Preview export contents</button>
+          <p class="muted">Download the reviewed answers with short quotes from each document, for your records system. Full documents are never included; any document Lightwork can't reach right now is listed as left out.</p>
+          <button id="vo-export-preview" class="btn" type="button" disabled>Preview what's included</button>
           <p id="vo-export-status" role="status" aria-live="polite">Review a case assessment before preparing an export.</p>
-          <ul id="vo-export-manifest" aria-label="Evidence export manifest"></ul>
+          <ul id="vo-export-manifest" aria-label="Documents in the download"></ul>
           <label class="vo-upload-confirm-label"><input id="vo-export-confirm" type="checkbox" disabled> <span>I reviewed which evidence will be included or withheld.</span></label>
-          <button id="vo-export-download" type="button" disabled>Download reviewed JSON export</button>
+          <button id="vo-export-download" class="btn" type="button" disabled>Download reviewed evidence</button>
         </section>
       </section>
       <section class="vo-card" aria-labelledby="vo-review-title">
         <h2 id="vo-review-title">Human review</h2>
         <p>Inspect the cited evidence above. Correct answers and add notes here before making your review decision.</p>
         <div id="vo-corrections"></div>
-        <label for="vo-rationale">Review rationale or exception reason</label><textarea id="vo-rationale" required maxlength="4000"></textarea>
+        <label for="vo-rationale">Why you're approving or rejecting</label><textarea id="vo-rationale" class="input" required maxlength="4000"></textarea>
         <div class="vo-actions">
-          <button id="vo-review-approve" type="button" disabled>Approve assessment with corrections</button>
-          <button id="vo-review-reject" type="button" disabled>Reject assessment</button>
-          <button id="vo-prepare" type="button" disabled>Prepare Jira task for approval</button>
+          <button id="vo-review-approve" class="btn btn--primary" type="button" disabled>Approve assessment with corrections</button>
+          <button id="vo-review-reject" class="btn btn--danger" type="button" disabled>Reject assessment</button>
+          <button id="vo-prepare" class="btn" type="button" disabled>Prepare Jira task for approval</button>
         </div>
       </section>
       <section class="vo-card" aria-labelledby="vo-action-title">
-        <h2 id="vo-action-title">External action</h2>
-        <p>Review the Jira task details below. Your approval applies only to this version of this task.</p>
-        <pre id="vo-operation">No action prepared.</pre>
-        <details hidden><summary>Technical details: approval record</summary><pre id="vo-operation-record"></pre></details>
+        <h2 id="vo-action-title">Jira Ticket</h2>
+        <p>Review the ticket below. Your approval applies only to this exact ticket.</p>
+        <div id="vo-operation">No ticket prepared.</div>
+        <details hidden><summary>Technical details</summary><pre id="vo-operation-record"></pre></details>
         <div class="vo-actions">
-          <button id="vo-approve" type="button" disabled>Approve this exact Jira task</button>
-          <button id="vo-execute" type="button" disabled>Create and verify ticket</button>
-          <button id="vo-reconcile" type="button" disabled>Check uncertain ticket result</button>
+          <button id="vo-approve" class="btn btn--primary" type="button" disabled>Approve this exact Jira task</button>
+          <button id="vo-execute" class="btn btn--primary" type="button" disabled>Create and verify ticket</button>
+          <button id="vo-reconcile" class="btn" type="button" disabled>Check uncertain ticket result</button>
         </div>
       </section>
       <section class="vo-card" aria-labelledby="vo-outcome-title">
         <h2 id="vo-outcome-title">Customer acceptance and renewal</h2>
-        <label for="vo-acceptance-reason">Acceptance or rejection reason</label><textarea id="vo-acceptance-reason" required maxlength="4000"></textarea>
+        <label for="vo-acceptance-reason">Why you're accepting or rejecting</label><textarea id="vo-acceptance-reason" class="input" required maxlength="4000"></textarea>
         <div class="vo-actions">
-          <button id="vo-accept" type="button" disabled>Accept deliverable</button>
-          <button id="vo-reject" type="button" disabled>Reject deliverable</button>
+          <button id="vo-accept" class="btn btn--primary" type="button" disabled>Accept deliverable</button>
+          <button id="vo-reject" class="btn btn--danger" type="button" disabled>Reject deliverable</button>
         </div>
-        <pre id="vo-outcome"></pre>
-        <button id="vo-check-renewal" type="button" disabled>Check renewal readiness</button>
+        <div id="vo-outcome"></div>
+        <button id="vo-check-renewal" class="btn" type="button" disabled>Check renewal readiness</button>
         <p id="vo-renewal-status" role="status">Check whether the evidence and ticket are still current. Renewals that need judgment remain with a human reviewer.</p>
-        <h3>Corrections and exceptions</h3><pre id="vo-history"></pre>
+        <h3>History</h3><div id="vo-history"></div>
       </section>
       <section class="vo-card" aria-labelledby="vo-cancellation-title">
         <h2 id="vo-cancellation-title">Cancel this request</h2>
         <p id="vo-cancellation-status" role="status" aria-live="polite">Select a request to review cancellation and any existing ticket result.</p>
-        <label for="vo-cancellation-reason">Cancellation reason</label><textarea id="vo-cancellation-reason" maxlength="4000" disabled></textarea>
+        <label for="vo-cancellation-reason">Why you're cancelling</label><textarea id="vo-cancellation-reason" class="input" maxlength="4000" disabled></textarea>
           <label class="vo-upload-confirm-label"><input id="vo-cancellation-confirm" type="checkbox" disabled> <span>I want to stop local work on this request. I understand that any Jira ticket already created remains, and an uncertain result still needs checking.</span></label>
-        <button id="vo-cancel" type="button" disabled>Cancel local work</button>
+        <button id="vo-cancel" class="btn btn--danger" type="button" disabled>Cancel local work</button>
       </section>
     </div>
   </div>
 </section>
+<script src="/static/lightwork-access-state.js" defer></script>
 <script src="/static/lightwork-vendor-onboarding.js" defer></script>
 {% if not offline_demo %}<script src="/static/lightwork-vendor-setup.js" defer></script>{% endif %}
 {% endblock %}

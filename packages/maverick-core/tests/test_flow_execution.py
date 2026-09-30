@@ -147,7 +147,7 @@ class TestExecution:
             return ("ok", 1.0)
         run = execution.execute(f, agent_runner=agent, action_runner=lambda t, p, d: ("", None))
         assert ran == ["1", "2"]                       # the 3rd never spawned a goal
-        assert "budget exhausted" in str(run.data["r3"])
+        assert run.status == "budget_limited" and "r3" not in run.data
 
     def test_flow_max_dollars_zero_is_unlimited(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
@@ -177,7 +177,7 @@ class TestExecution:
         resumed = execution.execute(f, agent_runner=agent, action_runner=lambda t, p, d: ("", None),
                                     resume_run_id=paused.run_id, now=lambda: 101.0)
         assert ran == ["before"]
-        assert "budget exhausted" in str(resumed.data["r2"])
+        assert resumed.status == "budget_limited" and "r2" not in resumed.data
         assert resumed.cost_dollars == 5.0
 
     def test_execute_records_node_outcomes(self, tmp_path, monkeypatch):

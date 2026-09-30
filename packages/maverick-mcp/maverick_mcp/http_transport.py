@@ -42,13 +42,16 @@ import hmac
 import ipaddress
 import json
 import logging
-import os
 import secrets
 import threading
 import time
 from collections import OrderedDict, deque
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 from urllib.parse import urlparse
+
+from .settings import mcp_setting
 
 log = logging.getLogger(__name__)
 
@@ -105,17 +108,14 @@ except ImportError:
 # large payload in memory before dispatch. Override via MAVERICK_MCP_MAX_BODY.
 def _max_body_bytes() -> int:
     try:
-        return max(1024, int(os.environ.get("MAVERICK_MCP_MAX_BODY", str(2 * 1024 * 1024))))
+        return max(1024, int(mcp_setting("max_body_bytes", str(2 * 1024 * 1024))))
     except ValueError:
         return 2 * 1024 * 1024
 
 
 def _max_resource_sessions() -> int:
     try:
-        configured = os.environ.get(
-            "MAVERICK_MCP_MAX_RESOURCE_SESSIONS",
-            str(_DEFAULT_MAX_RESOURCE_SESSIONS),
-        )
+        configured = mcp_setting("max_resource_sessions", str(_DEFAULT_MAX_RESOURCE_SESSIONS))
         return max(1, int(configured))
     except ValueError:
         return _DEFAULT_MAX_RESOURCE_SESSIONS
@@ -185,7 +185,7 @@ def _allowed_origins() -> set[str]:
     browser clients. The request Host header is intentionally not trusted:
     DNS rebinding makes Host attacker-controlled for this defense.
     """
-    raw = os.environ.get("MAVERICK_MCP_ALLOWED_ORIGINS", "")
+    raw = mcp_setting("allowed_origins", "") or ""
     return {
         normalized
         for origin in raw.split(",")
@@ -237,7 +237,7 @@ def _http_tasks_enabled() -> bool:
     tasks/result, and tasks/cancel only operate on the caller's own tasks.
     Set MAVERICK_MCP_HTTP_TASKS=1 to enable.
     """
-    return os.environ.get("MAVERICK_MCP_HTTP_TASKS", "").strip().lower() in (
+    return (mcp_setting("http_tasks", "") or "").strip().lower() in (
         "1", "true", "yes", "on")
 
 
@@ -279,7 +279,7 @@ def _rate_limit_per_min() -> int:
     """Requests/minute allowed per caller. Default 600; 0 disables. An authed
     caller can otherwise spam goal-spawning RPCs with unbounded concurrency."""
     try:
-        return max(0, int(os.environ.get("MAVERICK_MCP_RATE_LIMIT", "600")))
+        return max(0, int(mcp_setting("rate_limit", "600")))
     except ValueError:
         return 600
 
@@ -335,7 +335,7 @@ def _authorization_for_bearer(
     entry — so engaging the plane default-denies MCP instead of leaving it open
     on the shared bearer. No-op (auth only) when disengaged.
     """
-    expected = os.environ.get("MAVERICK_MCP_TOKEN")
+    expected = mcp_setting("token")
     given = ""
     if authorization and authorization.startswith("Bearer "):
         given = authorization[len("Bearer "):].strip()
@@ -417,6 +417,7 @@ def _result_envelope(request_id, result: dict) -> dict:
 
 
 def _error_envelope(request_id, exc: Exception) -> dict:
+    from .execution import ExecutionCancelled, RequestAdmissionError
     from .server import _ProtocolError
     from .tasks import TaskError
     # Both _ProtocolError and TaskError carry an explicit JSON-RPC (code,
@@ -424,6 +425,10 @@ def _error_envelope(request_id, exc: Exception) -> dict:
     # reaches the HTTP client with the same wire code the stdio path produces.
     if isinstance(exc, (_ProtocolError, TaskError)):
         code, message = exc.code, exc.message
+    elif isinstance(exc, ExecutionCancelled):
+        code, message = -32800, "request cancelled; prior effects may be unknown"
+    elif isinstance(exc, RequestAdmissionError):
+        code, message = -32602, str(exc)
     else:
         # Scrub the message before it reaches the HTTP client: a raw exception's
         # args can carry secrets (DSNs, tokens, credentialed URLs). The stdio
@@ -448,7 +453,7 @@ def _heartbeat_seconds() -> float:
     """Progress-heartbeat cadence for SSE streams. Override via
     MAVERICK_MCP_SSE_HEARTBEAT (seconds)."""
     try:
-        return max(0.01, float(os.environ.get("MAVERICK_MCP_SSE_HEARTBEAT", "15")))
+        return max(0.01, float(mcp_setting("sse_heartbeat", "15")))
     except ValueError:
         return 15.0
 
@@ -456,10 +461,8 @@ def _heartbeat_seconds() -> float:
 def _max_progress_events() -> int:
     """Maximum number of progress events sent on one SSE response."""
     try:
-        return max(0, int(os.environ.get(
-            "MAVERICK_MCP_SSE_MAX_PROGRESS_EVENTS",
-            str(_DEFAULT_MAX_PROGRESS_EVENTS),
-        )))
+        return max(0, int(mcp_setting("sse_max_progress_events",
+                                      str(_DEFAULT_MAX_PROGRESS_EVENTS))))
     except ValueError:
         return _DEFAULT_MAX_PROGRESS_EVENTS
 
@@ -509,6 +512,8 @@ def _sse_stream(
     caller_trust_principal: str | None = None,
     caller_credential_kind: str | None = None,
     caller_credential_fingerprint: str | None = None,
+    execution_owner: str = "stdio",
+    execution_quota_owner: str | None = None,
 ):
     """Async SSE generator: progress heartbeats, then the final JSON-RPC result.
 
@@ -518,7 +523,7 @@ def _sse_stream(
     progress_token = _progress_token(params, HTTPException)
     max_progress_events = _max_progress_events()
 
-    def _dispatch_with_updates():
+    async def _dispatch_with_updates():
         with server.resource_update_scope(subscriptions):
             kwargs = {
                 "task_owner": task_owner,
@@ -534,48 +539,45 @@ def _sse_stream(
                     "caller_credential_kind": caller_credential_kind,
                     "caller_credential_fingerprint": caller_credential_fingerprint,
                 })
-            result = _dispatch(server, method, params, **kwargs)
+            result = await _dispatch_async(server, method, params, execution_owner=execution_owner, request_id=request_id, execution_quota_owner=execution_quota_owner, **kwargs)
             updates = server.drain_resource_updates()
             return result, updates
 
     async def _stream():
-        task = asyncio.create_task(asyncio.to_thread(_dispatch_with_updates))
+        task = asyncio.create_task(_dispatch_with_updates())
         interval = _heartbeat_seconds()
         progress = 0
-        while not task.done():
-            done, _pending = await asyncio.wait({task}, timeout=interval)
-            if task in done:
-                break
-            # Progress notifications are only valid when the client
-            # supplied a token to correlate them (per spec).
-            if progress_token is not None and progress < max_progress_events:
-                progress += 1
-                yield _sse({
-                    "jsonrpc": "2.0",
-                    "method": "notifications/progress",
-                    "params": {
-                        "progressToken": progress_token,
-                        "progress": progress,
-                        "message": "working",
-                    },
-                })
         try:
-            result, updates = task.result()
-        except Exception as e:
-            yield _sse(_error_envelope(request_id, e))
-        else:
-            if should_persist_session and sid is not None:
-                store_session(sid, subscriptions)
-            yield _sse(_result_envelope(request_id, result))
-            # HTTP analog of stdio's _flush_resource_updates: push any
-            # resources/updated the tool dirtied that this client
-            # subscribed to, on the same SSE stream, after the result.
-            for uri in updates:
-                yield _sse({
-                    "jsonrpc": "2.0",
-                    "method": "notifications/resources/updated",
-                    "params": {"uri": uri},
-                })
+            while not task.done():
+                done, _pending = await asyncio.wait({task}, timeout=interval)
+                if task in done:
+                    break
+                if progress_token is not None and progress < max_progress_events:
+                    progress += 1
+                    yield _sse({
+                        "jsonrpc": "2.0", "method": "notifications/progress",
+                        "params": {"progressToken": progress_token, "progress": progress, "message": "working"},
+                    })
+            try:
+                result, updates = task.result()
+            except Exception as e:
+                yield _sse(_error_envelope(request_id, e))
+            else:
+                if should_persist_session and sid is not None:
+                    store_session(sid, subscriptions)
+                yield _sse(_result_envelope(request_id, result))
+                for uri in updates:
+                    yield _sse({
+                        "jsonrpc": "2.0", "method": "notifications/resources/updated",
+                        "params": {"uri": uri},
+                    })
+        finally:
+            # Cancels the owning async wrapper, which requests cooperative stop
+            # but retains the real worker slot until it exits. Detached MCP
+            # tasks have their own handles and survive this connection closing.
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     return _stream()
 
@@ -721,6 +723,14 @@ def _attach_session(response, sid: str | None, request):
     return response
 
 
+@asynccontextmanager
+async def _app_lifespan(server, _app):
+    try:
+        yield
+    finally:
+        server.shutdown()
+
+
 def build_app(server) -> FastAPI:
     """Wrap an MCPServer instance in a Streamable HTTP transport.
 
@@ -740,6 +750,7 @@ def build_app(server) -> FastAPI:
             "request; receive a JSON-RPC response or an SSE stream."
         ),
         version="0.2.0",
+        lifespan=partial(_app_lifespan, server),
     )
 
     from maverick import a2a
@@ -803,6 +814,7 @@ def build_app(server) -> FastAPI:
             raise HTTPException(status_code=400, detail="params must be a JSON object")
         accepts_sse = "text/event-stream" in (request.headers.get("accept") or "")
         supplied_sid = _supplied_session_id(request, caller_scope)
+        execution_owner = f"{caller_scope}:{supplied_sid or '<without-session>'}"
         resource_sid = _resource_session_id(
             supplied_sid,
             resource_sessions,
@@ -863,18 +875,20 @@ def build_app(server) -> FastAPI:
                     caller.trust_principal if needs_policy_principal else None
                 ),
                 caller_credential_kind=(
-                    caller.credential_kind if is_task_request else None
+                    caller.credential_kind if needs_policy_principal else None
                 ),
                 caller_credential_fingerprint=(
-                    caller.credential_fingerprint if is_task_request else None
+                    caller.credential_fingerprint if needs_policy_principal else None
                 ),
+                execution_owner=execution_owner,
+                execution_quota_owner=quota_scope,
             )
             response = StreamingResponse(stream, media_type="text/event-stream")
             return _attach_session(response, response_sid, request)
 
         # Blocking JSON path (default). Dispatch runs in a worker thread
         # for the same asyncio.run reason as above.
-        def _dispatch_for_session():
+        async def _dispatch_for_session():
             with server.resource_update_scope(subscriptions):
                 kwargs = {
                     "task_owner": task_owner,
@@ -883,22 +897,19 @@ def build_app(server) -> FastAPI:
                 if caller.capability is not None:
                     kwargs["caller_capability"] = caller.capability
                 if needs_policy_principal:
-                    kwargs["caller_trust_principal"] = caller.trust_principal
+                    kwargs.update({
+                        "caller_trust_principal": caller.trust_principal,
+                        "caller_credential_kind": caller.credential_kind,
+                        "caller_credential_fingerprint": caller.credential_fingerprint,
+                    })
                 if is_task_create:
                     kwargs.update({
                         "task_quota_owner": quota_scope,
                     })
-                if is_task_request:
-                    kwargs.update({
-                        "caller_credential_kind": caller.credential_kind,
-                        "caller_credential_fingerprint": (
-                            caller.credential_fingerprint
-                        ),
-                    })
-                return _dispatch(server, method, params, **kwargs)
+                return await _dispatch_async(server, method, params, execution_owner=execution_owner, request_id=request_id, execution_quota_owner=quota_scope, **kwargs)
 
         try:
-            result = await asyncio.to_thread(_dispatch_for_session)
+            result = await _wait_json_dispatch(request, _dispatch_for_session())
         except Exception as e:
             if is_notification:
                 # 204 must carry no body; JSONResponse({}) writes "{}" which
@@ -936,6 +947,74 @@ def build_app(server) -> FastAPI:
         return {"status": "ok", "transport": "http"}
 
     return app
+
+
+async def _wait_json_dispatch(request, coroutine):
+    """Observe disconnect after body consumption; retain underlying ownership."""
+    work = asyncio.create_task(coroutine)
+
+    async def disconnected():
+        while True:
+            message = await request.receive()
+            if message["type"] == "http.disconnect":
+                return
+            await asyncio.sleep(0)
+
+    closed = asyncio.create_task(disconnected())
+    try:
+        done, _ = await asyncio.wait({work, closed}, return_when=asyncio.FIRST_COMPLETED)
+        if closed in done and not work.done():
+            work.cancel()
+            raise asyncio.CancelledError
+        return await work
+    finally:
+        closed.cancel()
+        if not work.done():
+            work.cancel()
+        await asyncio.gather(work, closed, return_exceptions=True)
+
+
+def _dispatch_owned(server, method, params, kwargs):
+    if kwargs.get("caller_credential_kind") is not None:
+        context = server._task_execution_context(
+            caller_identity=kwargs.get("caller_identity"),
+            trust_principal=kwargs.get("caller_trust_principal"),
+            credential_kind=kwargs.get("caller_credential_kind"),
+            credential_fingerprint=kwargs.get("caller_credential_fingerprint"),
+            capability=kwargs.get("caller_capability"),
+        )
+        kwargs = dict(kwargs, caller_capability=server._refresh_task_capability(context))
+    return _dispatch(server, method, params, **kwargs)
+
+
+async def _dispatch_async(server, method, params, *, execution_owner, request_id, execution_quota_owner=None, **kwargs):
+    """Wait without reserving a thread; isolate effectful request workers."""
+    if method == "notifications/cancelled":
+        server._requests.cancel(execution_owner, params.get("requestId"))
+        return {}
+    if method == "tasks/result":
+        from maverick.fleet_memory import bind_caller
+
+        result_kwargs = {"task_owner": kwargs.get("task_owner")}
+        if kwargs.get("caller_capability") is not None or kwargs.get("caller_trust_principal") is not None:
+            result_kwargs.update({
+                "caller_identity": kwargs.get("caller_identity"),
+                "caller_trust_principal": kwargs.get("caller_trust_principal"),
+                "caller_credential_kind": kwargs.get("caller_credential_kind"),
+                "caller_credential_fingerprint": kwargs.get("caller_credential_fingerprint"),
+                "capability": kwargs.get("caller_capability"),
+            })
+
+        async def result():
+            with bind_caller(kwargs.get("caller_identity")):
+                return await server.handle_tasks_result_async(params, **result_kwargs)
+
+        return await server._requests.run_async(execution_owner, request_id, result, quota_owner=execution_quota_owner)
+    if method == "tools/call":
+        return await server._requests.run(execution_owner, request_id, lambda: _dispatch_owned(server, method, params, kwargs), quota_owner=execution_quota_owner)
+    # Control requests never queue behind the bounded tool workers or a result
+    # waiter. Their short synchronous authority checks retain the existing path.
+    return await asyncio.to_thread(_dispatch, server, method, params, **kwargs)
 
 
 _METHOD_MAP = {

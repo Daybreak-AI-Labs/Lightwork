@@ -135,10 +135,10 @@ def test_savings_page_renders_inputs_and_report():
     html = resp.text
     assert 'id="sv-assumptions"' in html
     assert "finance_ap" in html
-    assert "Human hourly rate" in html
+    assert "Cost of an hour of a person's work" in html
 
 
 def test_savings_page_empty_state():
     resp = client.get("/savings")
     assert resp.status_code == 200
-    assert "No completed work in this window yet" in resp.text
+    assert "No finished work in this period yet" in resp.text

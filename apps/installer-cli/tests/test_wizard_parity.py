@@ -187,12 +187,13 @@ def test_write_config_emits_knowledge(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(
         tmp_path, monkeypatch,
         knowledge={"enable": True, "embedder": "hosted", "store": "pgvector",
-                   "dsn": "postgresql://x"},
+                   "dsn": "postgresql://x", "revision": "operator-recorded-202609"},
     )
     assert parsed["knowledge"]["enable"] is True
     assert parsed["knowledge"]["embedder"] == "hosted"
     assert parsed["knowledge"]["store"] == "pgvector"
     assert parsed["knowledge"]["dsn"] == "postgresql://x"
+    assert parsed["knowledge"]["revision"] == "operator-recorded-202609"
 
 
 def test_write_config_omits_knowledge_by_default(tmp_path: Path, monkeypatch):
@@ -453,6 +454,10 @@ def test_write_config_roundtrips_backslash_paths_and_allowlist(tmp_path: Path, m
     and a channel allowed_user_ids must emit as an ARRAY. Regression: the raw
     f'{k} = "{v}"' emit turned C:\\Users... into an invalid \\U escape (config
     unreadable on Windows) and rendered a list as a quoted string."""
+    # This test isolates TOML escaping from the separately tested workspace
+    # provisioning, and must never create the synthetic user's home directory.
+    import maverick_installer.wizard as wizard
+    monkeypatch.setattr(wizard, '_prepare_wizard_workspace', dict)
     parsed = _write_full_config(
         tmp_path, monkeypatch,
         sandbox={"backend": "local", "workdir": r"C:\Users\me\maverick ws", "timeout": 60},
@@ -1252,3 +1257,78 @@ def test_write_config_emits_adapter_rung(tmp_path: Path, monkeypatch):
 def test_write_config_omits_adapter_rung_when_off(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
     assert "adapter_rung" not in parsed
+
+
+def test_write_config_emits_chat_and_limit_knobs(tmp_path: Path, monkeypatch):
+    # Knobs added with chat streaming and bounded connectors/SQL: the wizard is
+    # what makes them reachable (rule 6); defaults are omitted, changes written.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "stream_answers": False, "verify_chat_answers": True,
+        "risk_proportional_verify": True,
+        "query_timeout_seconds": 60, "connector_max_attempts": 2})
+    assert parsed["chat"]["stream_answers"] is False
+    assert parsed["verification"] == {"risk_proportional": True, "verify_chat_answers": True}
+    assert parsed["query_limits"]["timeout_seconds"] == 60
+    assert parsed["connector_limits"]["max_attempts"] == 2
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "stream_answers": True, "query_timeout_seconds": 30, "connector_max_attempts": 3})
+    assert not {"chat", "query_limits", "connector_limits"} & parsed.keys()
+
+
+def test_write_config_emits_immune_canaries_when_enabled(tmp_path: Path, monkeypatch):
+    # [immune] canaries is a kernel knob (maverick.config.get_immune); the
+    # wizard step is what makes it reachable (rule 6). Off by default.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"immune_canaries": True})
+    assert parsed["immune"]["canaries"] is True
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"fleet_memory": True})
+    assert "immune" not in parsed
+
+
+def test_write_config_emits_swarm_scale_when_raised(tmp_path: Path, monkeypatch):
+    # [swarm] is a kernel knob (maverick.config.get_swarm); the wizard step
+    # is what makes raising the 64-agent default reachable (rule 6).
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "swarm_max_total_spawns": 300, "swarm_max_concurrent_model_calls": 12})
+    assert parsed["swarm"] == {"max_total_spawns": 300, "max_concurrent_model_calls": 12}
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
+    assert "swarm" not in parsed
+
+
+def test_write_config_emits_twin_record_alongside_canaries(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"immune_twin_record": True})
+    assert parsed["immune"] == {"twin_record": True}
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "immune_canaries": True, "immune_twin_record": True})
+    assert parsed["immune"] == {"canaries": True, "twin_record": True}
+
+
+def test_write_config_emits_ifc_mode_only_when_changed(tmp_path: Path, monkeypatch):
+    # [ifc] is a kernel knob (maverick.config.get_ifc); audit is the default.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"ifc_mode": "block"})
+    assert parsed["ifc"] == {"mode": "block"}
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
+    assert "ifc" not in parsed
+
+
+def test_write_config_emits_codebase_when_enabled(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "codebase_enable": True, "codebase_protect": "approve"})
+    assert parsed["codebase"] == {"enable": True, "default_protect": "approve"}
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
+    assert "codebase" not in parsed
+
+
+def test_pick_notifications_writes_the_keys_the_kernel_reads(monkeypatch):
+    from maverick_installer import wizard
+
+    answers = iter(["ntfy      - free, no signup, push to phone via ntfy.sh"])
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **_k: True)
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_k: next(answers))
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_k: "my-alerts")
+    cfg, _ = wizard.pick_notifications()
+    assert cfg == {"backend": "ntfy", "ntfy_topic": "my-alerts"}
+    for choice, key in (("slack     - incoming webhook", "slack_webhook"),
+                        ("discord   - webhook URL", "discord_webhook")):
+        monkeypatch.setattr(wizard, "_q_select", lambda *_a, choice=choice, **_k: choice)
+        cfg, _ = wizard.pick_notifications()
+        assert key in cfg and "webhook_url" not in cfg

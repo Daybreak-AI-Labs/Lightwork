@@ -73,11 +73,11 @@ def test_tools_catalog_is_searched_and_paginated_before_render(monkeypatch, tmp_
     default = client.get("/tools")
     assert default.status_code == 200
     assert default.text.count('class="tool-row"') == 50
-    assert "2505 tool(s) available" in default.text
-    assert "Showing 1–50 of 2505 matching tools" in _compact(default.text)
+    assert "2505 tools available" in default.text
+    assert "Showing 1–50 of 2505 tools" in _compact(default.text)
     assert "Page 1 of 51" in default.text
-    assert "alpha-tool-0049" in default.text
-    assert "alpha-tool-0050" not in default.text
+    assert "Alpha tool 0049" in default.text
+    assert "Alpha tool 0050" not in default.text
 
     searched = client.get(
         "/tools",
@@ -87,8 +87,8 @@ def test_tools_catalog_is_searched_and_paginated_before_render(monkeypatch, tmp_
     assert searched.text.count('class="tool-row"') == 25
     assert "Showing 26–50 of 1200 matching tools" in _compact(searched.text)
     assert "Page 2 of 48" in searched.text
-    assert "alpha-tool-0025" in searched.text
-    assert "alpha-tool-0000" not in searched.text
+    assert "Alpha tool 0025" in searched.text
+    assert "Alpha tool 0000" not in searched.text
     assert (
         'href="/tools?q=needle&amp;per_page=25&amp;page=1"'
         in searched.text
@@ -101,7 +101,7 @@ def test_tools_catalog_is_searched_and_paginated_before_render(monkeypatch, tmp_
     exact = client.get("/tools", params={"q": "omega-tool-2499"})
     assert exact.status_code == 200
     assert exact.text.count('class="tool-row"') == 1
-    assert "omega-tool-2499" in exact.text
+    assert "Omega tool 2499" in exact.text
     assert "Showing 1–1 of 1 matching tools" in _compact(exact.text)
 
 
@@ -142,6 +142,6 @@ def test_tools_registry_failure_keeps_explicit_unavailable_state(monkeypatch, tm
 
     assert response.status_code == 200
     assert "Tool list unavailable" in response.text
-    assert "Could not build the tool list" in response.text
+    assert "The tool list couldn&#39;t be built" in response.text or "The tool list couldn't be built" in response.text
     assert "synthetic registry unavailable" in response.text
     assert "No tools registered" not in response.text

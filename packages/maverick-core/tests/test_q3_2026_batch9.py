@@ -277,27 +277,31 @@ def test_ocr_extract_validates_path():
 
 
 def test_ocr_missing_tesseract(tmp_path, monkeypatch):
+    from test_support.document_jobs import install_backend
+
+    backend, state = install_backend(monkeypatch, tmp_path, mode="missing_engine")
     img = tmp_path / "x.png"
     img.write_bytes(b"\x89PNG\r\n\x1a\n")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("shutil.which", lambda b: None)
     from maverick.tools.ocr import ocr
-    out = ocr().fn({"op": "extract", "path": str(img)})
-    assert "tesseract not on PATH" in out
+    out = ocr(backend).fn({"op": "extract", "path": str(img)})
+    assert "engine not installed in selected backend" in out
+    assert state["requests"][0]["operation"] == "image_ocr"
 
 
 def test_ocr_extract_runs_tesseract(tmp_path, monkeypatch):
+    from test_support.document_jobs import install_backend
+
+    backend, state = install_backend(monkeypatch, tmp_path)
     img = tmp_path / "x.png"
     img.write_bytes(b"\x89PNG\r\n\x1a\n")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("shutil.which", lambda b: "/usr/bin/tesseract")
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *a, **k: MagicMock(returncode=0, stdout="Hello world\n", stderr=""),
-    )
     from maverick.tools.ocr import ocr
-    out = ocr().fn({"op": "extract", "path": str(img)})
-    assert "Hello world" in out
+    out = ocr(backend).fn({"op": "extract", "path": str(img), "lang": "eng+deu"})
+    assert out == "OCR text 120000"
+    assert state["requests"][0]["operation"] == "image_ocr"
+    assert state["requests"][0]["language"] == "eng+deu"
+    assert len(state["calls"]) == 1
 
 
 def test_ocr_hf_backend_requires_token(tmp_path, monkeypatch):

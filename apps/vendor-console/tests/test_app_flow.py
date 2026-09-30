@@ -40,7 +40,7 @@ def test_full_setup_totp_login_flow(client, app):
     client.post("/login", data={"email": "boss@daybreak.co",
                                 "password": "supersecret1"})  # pragma: allowlist secret
     bad = client.post("/totp", data={"code": "000001"})
-    assert "Wrong or expired code" in bad.text
+    assert "That code didn&#39;t work" in bad.text
 
 
 def _create_customer(admin, app, name="Cedar Valley Bank") -> tuple[int, str]:

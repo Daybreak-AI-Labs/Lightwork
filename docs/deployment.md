@@ -23,9 +23,13 @@ Do not install the Lightwork distribution names from public PyPI until the
 project has reserved and protected every namespace. The desktop bootstrap
 scripts also require a lowercase, full commit SHA and fail closed.
 
-Runs as your user. Stores everything under `~/.maverick/`. The sandbox
-`workdir` defaults to `~/maverick-workspace/`. Nothing listens on a
-network port unless you enable a channel that needs one (WhatsApp/SMS).
+Runs as your user. Application state defaults to `~/.maverick/`; customer task
+files use the selected sandbox workspace. Guided setup proposes
+`~/Documents/Maverick`, while advanced setup proposes `~/maverick-workspace`;
+`MAVERICK_WORKDIR` supplies a deployment default and an explicit saved
+`[sandbox] workdir` takes precedence. Local setup provisions the selected path
+before reporting success. The dashboard and enabled server/channel adapters
+listen on their configured ports when started.
 
 **Artifact status:** reviewed source is the dependable installation route
 today. A successful tagged release is configured to publish three single-file
@@ -48,6 +52,7 @@ Isolated, reproducible, easy to nuke.
 docker run -it --rm \
   -v ~/maverick-workspace:/workspace \
   -v ~/.maverick/config.toml:/home/maverick/.maverick/config.toml:ro \
+  -e MAVERICK_WORKDIR=/workspace \
   -e ANTHROPIC_API_KEY=... \
   ghcr.io/daybreak-ai-labs/lightwork:latest \
   start "..."
@@ -59,6 +64,14 @@ container can read mounted files and process environment variables.
 Mount only the workspace and a read-only `config.toml`; keep API keys
 scoped to this container run.
 
+This one-shot example persists task files at `/workspace`; application state
+outside those mounts is disposable. A saved `[sandbox] workdir` must also point
+inside the workspace mount. The standard persistent-state image default is
+`/home/maverick/.maverick/workspace`; Compose explicitly uses `/workspace`.
+On upgrades, relocate files from an older workdir before replacing its container
+and verify persistence after replacement. A saved path is not rewritten just
+because the deployment default changed.
+
 ## VPS
 
 Always-on, accessible from anywhere via channel adapters.
@@ -68,6 +81,10 @@ The `vps` deployment target generates:
 - A `systemd` unit at `/etc/systemd/system/maverick.service`
 - A Caddy reverse proxy config (if you need HTTPS for WhatsApp/SMS webhooks)
 - Config under `/etc/maverick/config.toml` (`MAVERICK_CONFIG` env)
+
+The generated service uses the configured sandbox workdir and validates that
+the service account can use it. It does not assume that every setup selected
+`~/maverick-workspace`.
 
 ```bash
 LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>

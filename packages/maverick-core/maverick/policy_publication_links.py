@@ -1466,6 +1466,86 @@ class PolicyPublicationStore:
                 "idempotent_replay": False,
             }
 
+    def list_artifacts(self, tenant_id: str, *, limit: int = 200) -> dict[str, Any]:
+        """Newest-first policy versions with their approval readiness (read-only)."""
+
+        self._require_enabled()
+        tenant = self._tenant(tenant_id)
+        bound = _positive_int(limit, "limit", maximum=_MAX_LIST_LIMIT)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM policy_publication_artifacts WHERE tenant=? "
+                "ORDER BY created_at DESC, policy_id, version DESC LIMIT ?",
+                (tenant, bound + 1),
+            ).fetchall()
+            items = []
+            for row in rows[:bound]:
+                artifact = self._artifact_row(
+                    connection, tenant, str(row["policy_id"]), int(row["version"])
+                )
+                items.append(
+                    {
+                        "policy_id": str(artifact["policy_id"]),
+                        "version": int(artifact["version"]),
+                        "title": str(artifact["title"]),
+                        "author_id": str(artifact["author_id"]),
+                        "created_at": float(artifact["created_at"]),
+                        **self._approval_summary(connection, artifact),
+                    }
+                )
+        return {"items": items, "truncated": len(rows) > bound}
+
+    def list_links(self, tenant_id: str, *, limit: int = 200) -> dict[str, Any]:
+        """Safe metadata of every link, newest first; no credential digest."""
+
+        self._require_enabled()
+        tenant = self._tenant(tenant_id)
+        bound = _positive_int(limit, "limit", maximum=_MAX_LIST_LIMIT)
+        now = self._now()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM policy_publication_links WHERE tenant=? "
+                "ORDER BY created_at DESC, link_id LIMIT ?",
+                (tenant, bound + 1),
+            ).fetchall()
+        items = []
+        for row in rows[:bound]:
+            self._verify_link_row(row)
+            items.append(self._safe_link(row, now=now))
+        return {"items": items, "truncated": len(rows) > bound}
+
+    def list_jobs(self, tenant_id: str, *, limit: int = 200) -> dict[str, Any]:
+        """Scheduled publication work, newest first; never lease material."""
+
+        self._require_enabled()
+        tenant = self._tenant(tenant_id)
+        bound = _positive_int(limit, "limit", maximum=_MAX_LIST_LIMIT)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM policy_publication_jobs WHERE tenant=? "
+                "ORDER BY scheduled_for DESC, job_id LIMIT ?",
+                (tenant, bound + 1),
+            ).fetchall()
+        items = []
+        for row in rows[:bound]:
+            self._verify_job_row(row)
+            items.append(
+                {
+                    "job_id": str(row["job_id"]),
+                    "action": str(row["action"]),
+                    "link_id": str(row["link_id"]),
+                    "target_version": row["target_version"],
+                    "scheduled_for": float(row["scheduled_for"]),
+                    "expires_at": row["expires_at"],
+                    "state": str(row["state"]),
+                    "attempts": int(row["attempts"]),
+                    "max_attempts": int(row["max_attempts"]),
+                    "last_error_code": row["last_error_code"],
+                    "applied_at": row["applied_at"],
+                }
+            )
+        return {"items": items, "truncated": len(rows) > bound}
+
     def get_link(self, tenant_id: str, *, link_id: str) -> dict[str, Any]:
         """Return safe link metadata without any credential digest."""
 

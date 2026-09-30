@@ -11,17 +11,10 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-import threading
 import time
 
+from .db import transaction
 from .models import AuditEvent
-
-# Serializes the read-tail → compute → insert sequence. Sync route handlers run
-# in Starlette's threadpool sharing ONE connection, so without this two
-# overlapping records read the same tail hash and fork the chain (a false, and
-# unrecoverable, "BROKEN"). One process, one lock — correct for this deployment;
-# a multi-process server would additionally need a DB-level guard.
-_WRITE_LOCK = threading.Lock()
 
 
 def _canon(obj: dict) -> str:
@@ -37,19 +30,28 @@ def _ts_field(ts: float) -> float:
 def record(conn: sqlite3.Connection, *, actor: str, action: str, target: str = "",
            detail: dict | None = None, at: float | None = None) -> AuditEvent:
     """Append one event, chaining it onto the current tail (atomically)."""
+    with transaction(conn) as owned:
+        return record_in_transaction(owned, actor=actor, action=action,
+                                     target=target, detail=detail, at=at)
+
+
+def record_in_transaction(conn: sqlite3.Connection, *, actor: str, action: str,
+                          target: str = "", detail: dict | None = None,
+                          at: float | None = None) -> AuditEvent:
+    """Append under a caller-owned immediate transaction; never commit here."""
+    if not conn.in_transaction:
+        raise ValueError("audit append requires an owned transaction")
     ts = at if at is not None else time.time()
     detail = detail or {}
-    with _WRITE_LOCK:
-        row = conn.execute("SELECT hash FROM audit ORDER BY id DESC LIMIT 1").fetchone()
-        prev = row["hash"] if row else ""
-        body = {"ts": _ts_field(ts), "actor": actor, "action": action,
-                "target": target, "detail": detail, "prev": prev}
-        digest = hashlib.sha256((prev + _canon(body)).encode("utf-8")).hexdigest()
-        cur = conn.execute(
-            "INSERT INTO audit(ts, actor, action, target, detail_json, prev_hash, hash) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (ts, actor, action, target, _canon(detail), prev, digest))
-        conn.commit()
+    row = conn.execute("SELECT hash FROM audit ORDER BY id DESC LIMIT 1").fetchone()
+    prev = row["hash"] if row else ""
+    body = {"ts": _ts_field(ts), "actor": actor, "action": action,
+            "target": target, "detail": detail, "prev": prev}
+    digest = hashlib.sha256((prev + _canon(body)).encode("utf-8")).hexdigest()
+    cur = conn.execute(
+        "INSERT INTO audit(ts, actor, action, target, detail_json, prev_hash, hash) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (ts, actor, action, target, _canon(detail), prev, digest))
     return AuditEvent(id=cur.lastrowid, ts=ts, actor=actor, action=action,
                       target=target, detail=detail, prev_hash=prev, hash=digest)
 

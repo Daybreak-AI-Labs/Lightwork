@@ -369,3 +369,20 @@ def test_openapi_contract_has_only_operator_metadata_lifecycle_routes(environmen
     assert f"{API}/retention/purge" in paths
     assert f"{API}/integrity" in paths
     assert not any("redeem" in path or "claim" in path for path in paths)
+
+
+def test_evidence_record_uses_the_deployment_key_and_current_link_version(environment) -> None:
+    client, _database, state = environment
+    assert _mint(client).status_code == 200
+    record = client.post(
+        f"{API}/deliveries/delivery:one/evidence-record",
+        json={"idempotency_key": "evidence-1"},
+    )
+    assert record.status_code == 200, record.text
+    assert record.json()["signing_key_ref"] == api.DEFAULT_EVIDENCE_SIGNING_KEY_REF
+    assert CAPABILITY not in record.text
+    assert ("tenant", "operate") in state["permission_calls"]
+    assert client.post(
+        f"{API}/deliveries/delivery:missing/evidence-record",
+        json={"idempotency_key": "evidence-2"},
+    ).status_code == 404

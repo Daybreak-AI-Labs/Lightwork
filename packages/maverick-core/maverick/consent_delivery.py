@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from . import consent_storage
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -219,6 +220,45 @@ def _digest(value: object, label: str) -> str:
             f"{label} must be a lowercase SHA-256 digest"
         )
     return value
+
+
+def delivery_retry_settings(
+    config: Mapping[str, Any] | None = None,
+) -> tuple[int, int, float, float]:
+    """``(default tries, most tries, base wait, longest wait)`` for new destinations.
+
+    ``[consent_preferences.delivery] max_attempts`` is the default number of
+    tries and a cap: a destination can ask for fewer, never more, and existing
+    destinations are held to it when messages are retried. The two waits are
+    only defaults for destinations that do not choose their own. Unset keeps
+    the historical 6 tries (up to 20 on request), 5 seconds and 1 hour.
+    """
+    if config is None:
+        from .config import load_config
+
+        config = load_config() or {}
+    consent = config.get("consent_preferences") if isinstance(config, Mapping) else None
+    section = consent.get("delivery") if isinstance(consent, Mapping) else None
+    section = section if isinstance(section, Mapping) else {}
+    default_attempts, most_attempts = 6, 20
+    base, longest = 5.0, 3600.0
+    try:
+        if "max_attempts" in section:
+            default_attempts = most_attempts = _positive_int(
+                section["max_attempts"], "delivery max_attempts", maximum=20
+            )
+        if "retry_base_seconds" in section:
+            base = _positive_float(
+                section["retry_base_seconds"], "delivery retry_base_seconds", maximum=3_600.0
+            )
+        if "retry_max_seconds" in section:
+            longest = _positive_float(
+                section["retry_max_seconds"], "delivery retry_max_seconds",
+                maximum=_MAX_RETRY_AFTER_SECONDS,
+            )
+    except ConsentDeliveryValidationError as exc:
+        raise ConsentDeliveryConfigError(str(exc)) from exc
+    return default_attempts, most_attempts, base, max(base, longest)
 
 
 def _positive_int(value: object, label: str, *, maximum: int = 2**31 - 1) -> int:
@@ -778,24 +818,27 @@ class ConsentDeliveryStore:
 
     @contextlib.contextmanager
     def _connect(self):
-        ensure_private_directory(self.path.parent)
-        if not self.path.exists():
-            try:
-                descriptor = os.open(
-                    self.path,
-                    os.O_RDWR | os.O_CREAT | os.O_EXCL,
-                    0o600,
-                )
-            except FileExistsError:
-                pass
-            else:
-                os.close(descriptor)
-        ensure_private_file(self.path, 0o600)
-        connection = sqlite3.connect(
-            str(self.path),
-            timeout=10.0,
-            isolation_level=None,
-        )
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=10.0)
+        else:
+            ensure_private_directory(self.path.parent)
+            if not self.path.exists():
+                try:
+                    descriptor = os.open(
+                        self.path,
+                        os.O_RDWR | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                    )
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(descriptor)
+            ensure_private_file(self.path, 0o600)
+            connection = sqlite3.connect(
+                str(self.path),
+                timeout=10.0,
+                isolation_level=None,
+            )
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA busy_timeout=10000")
@@ -1054,12 +1097,17 @@ class ConsentDeliveryStore:
         origin: str,
         signing_key_id: str,
         idempotency_key: str,
-        max_attempts: int = 6,
-        base_backoff_seconds: float = 5.0,
-        max_backoff_seconds: float = 3600.0,
+        max_attempts: int | None = None,
+        base_backoff_seconds: float | None = None,
+        max_backoff_seconds: float | None = None,
         default_retention_seconds: int = 30 * 24 * 3600,
     ) -> dict[str, Any]:
-        """Explicitly enroll one public HTTPS origin and external key ID."""
+        """Explicitly enroll one public HTTPS origin and external key ID.
+
+        Omitted retry values take the installation defaults
+        (:func:`delivery_retry_settings`); a requested number of tries above
+        the installation's most tries is lowered to it.
+        """
 
         self._require_enabled()
         tenant = self._tenant(tenant_id)
@@ -1067,7 +1115,18 @@ class ConsentDeliveryStore:
         normalized_origin = _normalize_origin(origin)
         key_id = _opaque(signing_key_id, "signing_key_id")
         _, key_sha256 = self._idempotency(idempotency_key)
-        attempts = _positive_int(max_attempts, "max_attempts", maximum=20)
+        default_attempts, most_attempts, default_base, default_longest = (
+            delivery_retry_settings()
+        )
+        if max_attempts is None:
+            max_attempts = default_attempts
+        if base_backoff_seconds is None:
+            base_backoff_seconds = default_base
+        if max_backoff_seconds is None:
+            max_backoff_seconds = max(default_longest, float(base_backoff_seconds))
+        attempts = min(
+            _positive_int(max_attempts, "max_attempts", maximum=20), most_attempts
+        )
         base_backoff = _positive_float(
             base_backoff_seconds,
             "base_backoff_seconds",
@@ -1726,6 +1785,7 @@ class ConsentDeliveryStore:
         now: float,
         limit: int = 1000,
     ) -> int:
+        most_attempts = delivery_retry_settings()[1]
         rows = connection.execute(
             "SELECT m.*,d.status AS destination_status,d.max_attempts "
             "FROM delivery_messages m JOIN delivery_destinations d "
@@ -1740,7 +1800,7 @@ class ConsentDeliveryStore:
             ) <= now:
                 state = "cancelled"
                 error_code = "lease_expired_cancelled"
-            elif int(row["attempts"]) >= int(row["max_attempts"]):
+            elif int(row["attempts"]) >= min(int(row["max_attempts"]), most_attempts):
                 state = "dead_letter"
                 error_code = "lease_expired_max_attempts"
             else:
@@ -2163,12 +2223,15 @@ class ConsentDeliveryStore:
                 raise ConsentDeliveryValidationError("retry_after_seconds is invalid")
             retry_after = float(retry_after_seconds)
         now = self._now()
+        most_attempts = delivery_retry_settings()[1]
         with self._connect() as connection:
             try:
                 self._begin(connection)
                 row, destination = self._claim_row(connection, claim, now=now)
                 attempts = int(row["attempts"])
-                dead_letter = permanent or attempts >= int(destination["max_attempts"])
+                dead_letter = permanent or attempts >= min(
+                    int(destination["max_attempts"]), most_attempts
+                )
                 if dead_letter:
                     state = "dead_letter"
                     next_attempt_at = float(row["next_attempt_at"])
@@ -2447,6 +2510,29 @@ class ConsentDeliveryStore:
                 "revoked_at": row["revoked_at"],
                 "keys": [dict(key) for key in keys],
             }
+
+    def list_destinations(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """List one tenant's destinations and key-ID metadata, newest first."""
+
+        self._require_enabled()
+        tenant = self._tenant(tenant_id)
+        bounded = _positive_int(limit, "limit", maximum=_MAX_AUDIT_LIMIT)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT destination_id FROM delivery_destinations WHERE tenant=? "
+                "ORDER BY created_at DESC,destination_id LIMIT ?",
+                (tenant, bounded + 1),
+            ).fetchall()
+        items = [
+            self.destination(tenant, str(row["destination_id"]))
+            for row in rows[:bounded]
+        ]
+        return {"items": items, "truncated": len(rows) > bounded}
 
     def message(self, tenant_id: str, message_id: str) -> dict[str, Any]:
         """Read safe queue metadata without returning the consent payload."""

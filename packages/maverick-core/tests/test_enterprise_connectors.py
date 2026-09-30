@@ -5,8 +5,10 @@ routing, and that every spec'd connector registers.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from unittest.mock import MagicMock
+
+import httpx
 
 
 def _fake_httpx(monkeypatch, **methods):
@@ -20,6 +22,20 @@ def _fake_httpx(monkeypatch, **methods):
         setattr(client, name, value)
 
     @contextmanager
+    def stream(method, url, **kwargs):
+        if "request" in methods:
+            response = methods["request"](method, url, **kwargs)
+        else:
+            kwargs.pop("params", None)
+            response = methods[method.lower()](url, **kwargs)
+        # Real streaming HTTPX response; retain the buffered fixture for repeat
+        # calls while each connector invocation owns/closes a fresh byte stream.
+        with closing(httpx.Response(response.status_code, headers=response.headers,
+                                    stream=httpx.ByteStream(response.content))) as streamed:
+            yield streamed
+    client.stream = stream
+
+    @contextmanager
     def _fake_safe_client(url, **kwargs):
         yield client
 
@@ -29,11 +45,7 @@ def _fake_httpx(monkeypatch, **methods):
 
 
 def _resp(status, body):
-    r = MagicMock()
-    r.status_code = status
-    r.json = MagicMock(return_value=body)
-    r.text = str(body)
-    return r
+    return httpx.Response(status, json=body)
 
 
 def _tool(**kw):
@@ -330,11 +342,14 @@ def test_graphql_runtime_error_never_returns_secret_detail(monkeypatch):
     monkeypatch.setenv("ACMEGQL_URL", "https://gql.example.com")
     monkeypatch.setenv("ACMEGQL_TOKEN", "tok")
     secret = "opaque-low-entropy-value"  # pragma: allowlist secret
-    _fake_httpx(monkeypatch, post=MagicMock(side_effect=RuntimeError(secret)))
+    post = MagicMock(side_effect=RuntimeError(secret))
+    _fake_httpx(monkeypatch, post=post)
 
     out = _gql().fn({"op": "query", "query": "query { x }"})
 
-    assert out == "ERROR: connector configuration or request failed (RuntimeError)"
+    assert out.startswith("INDETERMINATE: connector request may have executed")
+    assert out.attempt.outcome_unknown
+    post.assert_called_once()
     assert secret not in out
 
 

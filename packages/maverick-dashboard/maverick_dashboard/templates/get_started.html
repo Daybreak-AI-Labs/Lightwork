@@ -31,7 +31,9 @@
   .gs__check--blocked .gs__check-state { color: var(--danger); }
   .gs__check--attention .gs__check-state { color: var(--warn); }
   .gs__check--ready .gs__check-state { color: var(--success); }
-  .gs__command { display: block; margin-top: var(--space-1); overflow-wrap: anywhere; }
+  .gs__tech summary { font-size: var(--text-xs); cursor: pointer; }
+  .gs__tech p { overflow-wrap: anywhere; font-size: var(--text-xs); margin: var(--space-1) 0; }
+  .gs__links { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: calc(-1 * var(--space-3)) 0 var(--space-5); }
   .gs__demo { margin-top: var(--space-5); border-left: 4px solid var(--warn); }
   .gs__demo-label { display: inline-block; color: var(--warn); font-size: var(--text-xs); font-weight: var(--font-semibold); letter-spacing: .06em; }
   @media (max-width: 560px) {
@@ -57,20 +59,20 @@
   {% if guided %}
   <section class="panel" aria-labelledby="guided-outcome-title" style="margin-bottom:var(--space-5)">
     <h2 id="guided-outcome-title">Choose your first outcome</h2>
-    <p class="muted">Your current access: {{ guided.role_label|replace('_', ' ') }}. Choosing a path does not change your permissions.</p>
+    <p class="muted">Your current access: {{ guided.role_label|role_label }}. Choosing a path does not change your permissions.</p>
     <form method="get" action="/start" style="display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:end;">
       <label>What would you like to complete?<select class="input" name="use_case">
         {% for key, plan in guided.plans.items() %}<option value="{{ key }}" {% if key == guided.selected_plan %}selected{% endif %}>{{ plan.label }}</option>{% endfor %}
       </select></label><button class="btn" type="submit">Use this path</button>
     </form>
     <ol>
-      <li><p>{{ guided.plan.prepare }}</p>{% if can_operate %}<a href="{{ guided.plan.prepare_href }}">{{ guided.plan.prepare_label }}</a>{% else %}<p>An operator can prepare this workflow.</p>{% endif %}</li>
-      <li><p>{{ guided.plan.work }}</p>{% if can_operate %}<a href="{{ guided.plan.work_href }}">{{ guided.plan.work_label }}</a>{% else %}<p>An operator can carry out this work.</p>{% endif %}</li>
-      <li><p>{{ guided.plan.review }}</p>{% if can_operate %}<a href="{{ guided.plan.review_href }}">{{ guided.plan.review_label }}</a>{% else %}<p>An operator can record the review.</p>{% endif %}</li>
+      <li><p>{{ guided.plan.prepare }}</p>{% if can_operate %}<a href="{{ guided.plan.prepare_href }}">{{ guided.plan.prepare_label }}</a>{% else %}<p class="muted">Ask someone who can run work to do this step.</p>{% endif %}</li>
+      <li><p>{{ guided.plan.work }}</p>{% if can_operate %}<a href="{{ guided.plan.work_href }}">{{ guided.plan.work_label }}</a>{% else %}<p class="muted">Ask someone who can run work to do this step.</p>{% endif %}</li>
+      <li><p>{{ guided.plan.review }}</p>{% if can_operate %}<a href="{{ guided.plan.review_href }}">{{ guided.plan.review_label }}</a>{% else %}<p class="muted">Ask someone who can run work to record the review.</p>{% endif %}</li>
     </ol>
     <p role="status"><strong>{{ 'Reviewed outcome recorded' if guided.outcome.complete else 'Awaiting a reviewed outcome' }}.</strong> {{ guided.outcome.detail }}</p>
     {% if guided.outcome.complete %}<p><a href="{{ guided.outcome.href }}">Open {{ guided.outcome.title }}</a></p>{% endif %}
-    <p class="muted">A recorded approval is specific to this result. It does not establish general accuracy, customer value, or provider acceptance for other tasks.</p>
+    <p class="muted">An approval covers this result only, not future tasks.</p>
   </section>
   {% endif %}
 
@@ -78,11 +80,11 @@
   <div class="mv-empty" style="margin-bottom: var(--space-5);">
     <p class="mv-empty__title">Your setup checklist is complete</p>
     <p class="mv-empty__body">Your saved settings pass the installation checks.
-      Live connections and assurance setup still need their own checks.
+      {% if can_configure %}<a class="btn btn--ghost" href="/settings#settings-integrations">Test connections</a>{% endif %}
       {% if can_operate %} Manage your work from
       <a href="/workflows">Workflows</a> and
-      <a href="/automations">Automations</a>.{% else %} An operator can manage
-      workflows and automations; your access remains read-only.{% endif %}</p>
+      <a href="/automations">Automations</a>.{% else %} Someone who can run work manages
+      workflows and automations; you can view them.{% endif %}</p>
   </div>
   {% endif %}
 
@@ -96,7 +98,11 @@
   {% if needs_initial_settings %}
   <section class="panel" aria-labelledby="initial-settings-title" style="margin-bottom:var(--space-5)">
     <h2 id="initial-settings-title">Set up Lightwork</h2>
-    <p>Initial defaults are a $1 limit and a 10-minute limit per task, strict safety checks, and computer control and file-changing tools turned off. Existing administrator policies and choices saved in Settings remain in effect. {% if can_configure %}Review <a href="/permissions">Permissions</a> and <a href="/settings">Settings</a> before starting work.{% else %}Your administrator reviews permissions before work starts.{% endif %}</p>
+    <ul>
+      <li>Strict safety checks are on, and controlling the computer or changing files is off.</li>
+      <li>There is no spending or time limit for each task yet, but all use is counted. Workspace limits still apply.</li>
+      <li>{% if can_configure %}Review <a href="/permissions">Permissions</a> and set optional limits in <a href="/settings">Settings</a> before starting work.{% else %}Your administrator reviews permissions before work starts.{% endif %}</li>
+    </ul>
     {% if can_configure %}
     <form id="setup-initialize">
       <label><input type="checkbox" id="setup-confirm" required> I reviewed these initial settings.</label>
@@ -123,96 +129,72 @@
     {% endfor %}
   </ol>
 
-  <section class="panel gs__preflight" aria-labelledby="install-preflight-title">
+  {% macro check_list(report, title_id, title, intro) %}
+  <section class="panel gs__preflight" aria-labelledby="{{ title_id }}">
     <div class="gs__preflight-head">
-      <h2 id="install-preflight-title">Installation checks</h2>
-      <span class="gs__status gs__status--{{ 'ready' if preflight.ready else 'blocked' }}">
-        {{ "Setup complete" if preflight.ready else "Needs attention" }}
+      <h2 id="{{ title_id }}">{{ title }}</h2>
+      <span class="gs__status gs__status--{{ 'ready' if report.ready else 'blocked' }}">
+        {{ "Setup complete" if report.ready else "Needs attention" }}
       </span>
     </div>
-    <p class="muted">These checks review saved settings without contacting external services.
-      Test your live connections before starting work. If setup needs attention,
-      open the matching settings below.</p>
-    <p>{% if can_configure %}<a class="btn btn--ghost" href="/settings">Connection settings</a>
-      <a class="btn btn--ghost" href="/permissions">Permissions and work environment</a>
-      {% endif %}
-      <a class="btn btn--ghost" href="/start">Run checks again</a>
-      {% if can_configure %}<button class="btn btn--ghost" id="setup-download" type="button">Download setup report</button>{% endif %}</p>
-    <p id="setup-report-message" role="status"></p>
-    <details>
-      <summary>Setup details for administrators · {{ preflight.checks|length }} checks</summary>
-    {% if not preflight.ready %}
-      <p role="alert"><strong>Next fix:</strong>
-        <code>{{ preflight.next_action }}</code>
-      </p>
-    {% else %}
-      <p role="status"><strong>Next action:</strong>
-        <code>{{ preflight.next_action }}</code>
-      </p>
+    <p class="muted">{{ intro }}</p>
+    {% if report.next_fix and can_configure %}
+    <p role="{{ 'alert' if report.next_fix.status == 'blocked' else 'status' }}"><strong>Fix next:</strong> {{ report.next_fix.title }}.
+      {% if report.next_fix.module %}
+      <span data-module-gate="{{ report.next_fix.module }}"><button type="button" class="btn btn--primary mg-on">Turn on {{ report.next_fix.title | lower }}</button>
+        <span class="mg-err" role="alert"></span></span>
+      {% elif report.next_fix.fix_href %}<a class="btn btn--primary" href="{{ report.next_fix.fix_href }}">{{ report.next_fix.fix_label }}</a>{% endif %}
+    </p>
+    {% elif report.next_fix %}
+    <p role="status">Some setup is still needed. Ask your administrator to finish it.</p>
     {% endif %}
-    <p><code>maverick preflight --json</code>
-      <span class="muted">— copyable output for deployment automation</span></p>
+    <details>
+      <summary>All {{ report.checks|length }} checks</summary>
       <ul class="gs__checks">
-        {% for check in preflight.checks %}
+        {% for check in report.checks %}
         <li class="gs__check gs__check--{{ check.status }}">
-          <span class="gs__check-state">{{ check.status }}</span>
-          <strong>{{ check.label }}</strong> — {{ check.detail }}
-          {% if check.remediation %}
-            <code class="gs__command">{{ check.remediation }}</code>
+          <span class="gs__check-state">{{ check.state_label }}</span>
+          <strong>{{ check.title }}</strong> — {{ check.summary }}
+          {% if can_configure and check.module %}
+          <span data-module-gate="{{ check.module }}"><button type="button" class="btn mg-on" aria-label="Turn on {{ check.title }}">Turn on</button><span class="mg-err" role="alert"></span></span>
+          {% elif can_configure and check.fix_href %}
+          <a class="btn btn--ghost" href="{{ check.fix_href }}" aria-label="{{ check.fix_label }} ({{ check.title }})">{{ check.fix_label }}</a>
+          {% endif %}
+          {% if can_configure and (check.detail or check.remediation) %}
+          <details class="gs__tech"><summary>Technical details</summary>
+            <p class="muted">{{ check.detail }}</p>{% if check.remediation %}<p class="muted">{{ check.remediation }}</p>{% endif %}
+          </details>
           {% endif %}
         </li>
         {% endfor %}
       </ul>
     </details>
   </section>
+  {% endmacro %}
 
-  <section class="panel gs__preflight"
-           aria-labelledby="assurance-preflight-title">
-    <div class="gs__preflight-head">
-      <h2 id="assurance-preflight-title">Assurance setup</h2>
-      <span class="gs__status gs__status--{{ 'ready' if assurance_preflight.ready else 'blocked' }}">
-        {{ "Setup complete" if assurance_preflight.ready else "Needs attention" }}
-      </span>
-    </div>
-    <p class="muted">Assurance reviews and evidence features need additional setup.
-      Connecting an AI service alone does not complete these checks.</p>
-    <details>
-      <summary>Assurance setup details for administrators · {{ assurance_preflight.checks|length }} checks</summary>
-    {% if not assurance_preflight.ready %}
-      <p role="alert"><strong>Next assurance fix:</strong>
-        <code>{{ assurance_preflight.next_action }}</code>
-      </p>
-    {% else %}
-      <p role="status"><strong>Next assurance action:</strong>
-        <code>{{ assurance_preflight.next_action }}</code>
-      </p>
+  {{ check_list(preflight, 'install-preflight-title', 'Installation checks',
+       'These checks look at your saved settings without contacting other services.') }}
+  <p class="gs__links">{% if can_configure %}<a class="btn" href="/settings#settings-integrations">Test connections</a>
+    <a class="btn btn--ghost" href="/permissions">Permissions and work environment</a>
+    <a class="btn btn--ghost" href="/start/setup">Full setup guide</a>
     {% endif %}
-    <p><code>maverick preflight --profile cockpit --json</code></p>
-      <ul class="gs__checks">
-        {% for check in assurance_preflight.checks %}
-        <li class="gs__check gs__check--{{ check.status }}">
-          <span class="gs__check-state">{{ check.status }}</span>
-          <strong>{{ check.label }}</strong> — {{ check.detail }}
-          {% if check.remediation %}
-            <code class="gs__command">{{ check.remediation }}</code>
-          {% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-    </details>
-  </section>
+    <a class="btn btn--ghost" href="/start">Run checks again</a>
+    {% if can_configure %}<button class="btn btn--ghost" id="setup-download" type="button">Download setup report (for your IT team)</button>{% endif %}</p>
+  <p id="setup-report-message" role="status"></p>
+
+  {{ check_list(assurance_preflight, 'assurance-preflight-title', 'Assurance setup',
+       'Reviews, evidence and assurance features need extra setup. Connecting an AI service alone does not finish it.') }}
 
   <section class="panel gs__demo" aria-labelledby="synthetic-demo-title">
-    <span class="gs__demo-label">SYNTHETIC DEMO DATA</span>
+    <span class="gs__demo-label">Sample data</span>
     <h2 id="synthetic-demo-title">Try a sample assurance review</h2>
-    <p>This demo runs without external connections. Use an empty or dedicated
-      demo workspace. Every generated record stays labeled synthetic and does not
-      count as production assurance evidence.</p>
+    <p>The sample works without connecting anything. Use an empty or practice
+      workspace. Everything it makes is marked as sample data and never counts as real evidence.</p>
     {% if can_operate %}
-    <a class="btn btn--ghost" href="/security/assurance">Open Assurance Cockpit</a>
+    <a class="btn btn--ghost" href="/security/assurance">Open the assurance workspace</a>
     {% else %}
-    <p class="muted" role="note">An operator can open the Assurance Cockpit;
-      you currently have read-only access.</p>
+    <p class="muted" role="note">Someone who can run work can open the assurance workspace.
+      You can view results.</p>
     {% endif %}
   </section>
 </div>

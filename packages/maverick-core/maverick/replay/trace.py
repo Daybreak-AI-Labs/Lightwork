@@ -417,6 +417,43 @@ def read_trace(path: str | Path, *, allow_legacy: bool = False) -> list[dict]:
     return list(_scan_trace(p, allow_legacy=allow_legacy).events)
 
 
+def trace_dir() -> Path | None:
+    """The folder run traces are recorded in, or ``None`` when recording is off.
+
+    ``MAVERICK_TRACE_DIR`` always wins. Otherwise ``[replay] record = true``
+    (Settings > All settings) turns recording on, into ``[replay] trace_dir``
+    or, when that is empty, Lightwork's own ``traces`` folder. With neither
+    set nothing is recorded, as before.
+    """
+    base = os.environ.get("MAVERICK_TRACE_DIR")
+    if base:
+        return Path(base)
+    try:
+        from ..config import load_config
+
+        section = (load_config() or {}).get("replay") or {}
+    except Exception:  # an unreadable configuration never turns recording on
+        return None
+    if not isinstance(section, dict) or section.get("record") is not True:
+        return None
+    folder = str(section.get("trace_dir") or "").strip()
+    if folder:
+        return Path(folder).expanduser()
+    from ..paths import data_dir
+
+    return Path(data_dir("traces"))
+
+
+def goal_trace_path(goal_id: int) -> Path | None:
+    """Where a run of ``goal_id`` records its trace --
+    ``<trace folder>/goal-<id>.jsonl`` -- or ``None`` when tracing is off.
+    The one naming rule the orchestrator writes by and readers find it by."""
+    base = trace_dir()
+    if base is None:
+        return None
+    return base / f"goal-{int(goal_id)}.jsonl"
+
+
 def replay(path: str | Path, handlers: dict[str, Callable[[dict], Any]]) -> int:
     """Verify and dispatch committed events in their recorded sequence."""
     events = read_trace(path)
@@ -431,6 +468,7 @@ def replay(path: str | Path, handlers: dict[str, Callable[[dict], Any]]) -> int:
 
 __all__ = [
     "TraceWriter",
+    "goal_trace_path",
     "read_trace",
     "replay",
     "TraceError",

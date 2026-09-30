@@ -28,7 +28,9 @@ def test_pick_budget_defaults_to_strict_pricing(monkeypatch):
     budget = wizard.pick_budget()
 
     assert budget["strict_pricing"] is True
+    assert not {"max_dollars", "max_wall_seconds", "max_tool_calls"} & budget.keys()
     assert prompts == [
+        ("  Add spending, time or tool-count limits to each task?", False),
         (
             "  Strict pricing? Fail closed if a model has no verified price "
             "(recommended; choose No only for estimate-only custom gateways)",

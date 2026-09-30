@@ -18,7 +18,7 @@ import secrets
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi import Path as ApiPath
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
@@ -426,6 +426,104 @@ async def create_experiment(request: Request, body: CreateExperimentIn) -> dict[
         created_by=_actor_identity(request),
         idempotency_key=body.idempotency_key,
     )
+
+
+@router.get("")
+async def list_experiments(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    """Read-only list of the active workspace's experiments for the page."""
+
+    require_permission(request, "operate")
+    ops = _ops()
+    tenant = _tenant_id()
+    lister = getattr(_authority(request, ops, tenant), "list_experiments", None)
+    if not callable(lister):
+        raise HTTPException(status_code=503, detail="experiment listing is unavailable")
+    return await _call(ops, lister, tenant, limit=limit)
+
+
+_VARIANT_LAYOUTS = ("stacked", "inline", "compact")
+_VARIANT_ACTIONS = ("accept_all", "reject_all", "save_preferences")
+
+
+def _variant_contents(bundle: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Certified layout variants of one exact banner, one per rule language.
+
+    The fingerprint is computed exactly as the public experiment endpoint
+    verifies it, so a person picks a layout instead of typing a digest.
+    """
+    from .consent_public_api import _sha256 as public_sha256
+
+    index = {
+        (item["resource_kind"], item["resource_id"], item["locale"], int(item["version"])): item
+        for item in bundle.get("resources", [])
+    }
+    items: list[dict[str, Any]] = []
+    for rule in bundle["rule_group"]["payload"]["rules"]:
+        template = index.get(
+            ("template", rule["template"]["id"], "", int(rule["template"]["version"]))
+        )
+        if template is None or not set(_VARIANT_ACTIONS) <= set(template["payload"]["actions"]):
+            continue
+        for locale in rule["locales"]:
+            version = rule["translation_versions"].get(locale)
+            translation = index.get(
+                ("translation", rule["translation_catalog_id"], locale, int(version or 0))
+            )
+            if translation is None:
+                continue
+            messages = translation["payload"]["messages"]
+            payload = template["payload"]
+            text = {
+                "title": messages[payload["title_key"]],
+                "body": messages[payload["body_key"]],
+                "actions": {
+                    action: messages[payload["actions"][action]] for action in _VARIANT_ACTIONS
+                },
+            }
+            for layout in _VARIANT_LAYOUTS:
+                render = {"language": locale, "layout": layout, "template": text}
+                items.append(
+                    {
+                        "rule_id": rule["rule_id"],
+                        "locale": locale,
+                        "layout": layout,
+                        "content_ref": f"public-layout:{layout}",
+                        "content_sha256": public_sha256(render),
+                        "title": text["title"],
+                        "body": text["body"],
+                        "actions": text["actions"],
+                    }
+                )
+    return items
+
+
+@router.get("/variant-content")
+async def variant_content(
+    request: Request,
+    property_id: Annotated[str, Query(pattern=_ID_PATTERN, max_length=128)],
+    rule_group_id: Annotated[str, Query(pattern=_ID_PATTERN, max_length=128)],
+    rule_group_version: Annotated[int, Query(ge=1, le=2**31 - 1)],
+) -> dict[str, Any]:
+    """Read-only: the banner layouts an experiment may compare, with fingerprints."""
+
+    require_permission(request, "operate")
+    _ops()
+    from .consent_publishing_api import _authority as publishing_authority
+    from .consent_publishing_api import _call as publishing_call
+
+    publishing, tenant, store = publishing_authority()
+    preview = await publishing_call(
+        publishing,
+        store.preview,
+        tenant,
+        property_id,
+        rule_group_id,
+        rule_group_version,
+    )
+    return {"items": _variant_contents(preview["bundle"])}
 
 
 @router.post("/retention/purge")

@@ -11,13 +11,56 @@ import hashlib
 from dataclasses import asdict, is_dataclass
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from .auth import require_global_permission, require_permission
 
-router = APIRouter(prefix="/consent", tags=["consent-preferences"])
+
+def _limits() -> dict[str, int]:
+    """``[consent_preferences.limits]`` values that are set and in bounds."""
+    try:
+        from maverick.config import load_config
+
+        consent = (load_config() or {}).get("consent_preferences")
+    except Exception:  # an unreadable config keeps the built-in limits
+        return {}
+    section = consent.get("limits") if isinstance(consent, dict) else None
+    selected: dict[str, int] = {}
+    for key, (lower, upper) in (("profile_page_size", (1, 500)),
+                                ("receipt_page_size", (1, 500)),
+                                ("request_body_bytes", (1_024, 1_048_576))):
+        value = section.get(key) if isinstance(section, dict) else None
+        if isinstance(value, int) and not isinstance(value, bool) and lower <= value <= upper:
+            selected[key] = value
+    return selected
+
+
+def _page(requested: int | None, key: str, default: int) -> int:
+    """A page size: the installation's size is the default and the most allowed."""
+    configured = _limits().get(key)
+    if requested is None:
+        return configured or default
+    return min(requested, configured) if configured else requested
+
+
+async def _bounded_body(request: Request) -> None:
+    """Refuse bodies above the installation's limit, when one is set."""
+    if request.method not in {"POST", "PUT", "PATCH"}:
+        return
+    limit = _limits().get("request_body_bytes")
+    if limit is None:
+        return
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail="request body too large")
+    if len(await request.body()) > limit:
+        raise HTTPException(status_code=413, detail="request body too large")
+
+
+router = APIRouter(prefix="/consent", tags=["consent-preferences"],
+                   dependencies=[Depends(_bounded_body)])
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
@@ -166,7 +209,9 @@ class AnalyticsSnapshotIn(_StrictModel):
             "day",
         ]
     ] = Field(..., min_length=1, max_length=4)
-    min_cohort_size: int = Field(10, ge=2, le=100_000)
+    # None uses the installation default; a value below the installation's
+    # smallest cohort is raised to it ([consent_preferences.analytics]).
+    min_cohort_size: int | None = Field(None, ge=2, le=100_000)
     max_receipts: int = Field(10_000, ge=1, le=100_000)
     max_rows: int = Field(1_000, ge=1, le=10_000)
 
@@ -313,11 +358,12 @@ async def publish_policy(request: Request, body: PublishPolicyIn) -> dict:
 @router.get("/profiles")
 async def list_profiles(
     request: Request,
-    limit: int = Query(100, ge=1, le=500),
+    limit: int | None = Query(None, ge=1, le=500),
 ) -> dict:
     require_permission(request, "operate")
     ops = _ops()
     tenant_id = _tenant_id()
+    limit = _page(limit, "profile_page_size", 100)
     return _jsonable(
         await _call(ops, _store(tenant_id).list_profiles, tenant_id, limit=limit)
     )
@@ -482,11 +528,12 @@ async def export_profile(
     request: Request,
     profile_id: str,
     access_purpose: str = Query(..., min_length=1, max_length=160),
-    receipt_limit: int = Query(500, ge=1, le=500),
+    receipt_limit: int | None = Query(None, ge=1, le=500),
 ) -> dict:
     require_permission(request, "operate")
     ops = _ops()
     tenant_id = _tenant_id()
+    receipt_limit = _page(receipt_limit, "receipt_page_size", 500)
     return _jsonable(
         await _call(
             ops,

@@ -9,10 +9,15 @@ are reported alongside the answer so the estimate is auditable, not a black box.
 ops:
   - estimate({tokens | gpu_seconds}, [wh_per_ktok], [gpu_watts], [grid_g_co2_per_kwh])
 
-Defaults (overridable):
+Defaults (overridable per call):
   - 0.3 Wh per 1,000 tokens          (wh_per_ktok)
   - 700 W average GPU draw           (gpu_watts, used with gpu_seconds)
   - 400 g CO2e per kWh grid average  (grid_g_co2_per_kwh)
+
+The token and grid defaults are the deployment's own figures when set:
+``[energy] wh_per_1k_tokens`` / ``grid_co2_g_per_kwh`` (Settings > All
+settings; ``MAVERICK_ENERGY_*`` still wins), read through
+:mod:`maverick.energy_accounting` so the tool and the kernel agree.
 """
 from __future__ import annotations
 
@@ -25,11 +30,22 @@ _DEFAULT_GPU_WATTS = 700.0
 _DEFAULT_GRID = 400.0  # gCO2e / kWh
 
 
-def _estimate(args: dict[str, Any]) -> str:
+def _configured_defaults() -> tuple[float, float]:
+    """(Wh per 1k tokens, grid g CO2e/kWh): the deployment's figures, else built-ins."""
     try:
-        wh_per_ktok = float(args.get("wh_per_ktok", _DEFAULT_WH_PER_KTOK))
+        from ..energy_accounting import grid_co2_g_per_kwh, wh_per_1k_tokens
+
+        return wh_per_1k_tokens(), grid_co2_g_per_kwh()
+    except Exception:  # pragma: no cover -- config never breaks an estimate
+        return _DEFAULT_WH_PER_KTOK, _DEFAULT_GRID
+
+
+def _estimate(args: dict[str, Any]) -> str:
+    wh_default, grid_default = _configured_defaults()
+    try:
+        wh_per_ktok = float(args.get("wh_per_ktok", wh_default))
         gpu_watts = float(args.get("gpu_watts", _DEFAULT_GPU_WATTS))
-        grid = float(args.get("grid_g_co2_per_kwh", _DEFAULT_GRID))
+        grid = float(args.get("grid_g_co2_per_kwh", grid_default))
     except (TypeError, ValueError):
         return "ERROR: factors must be numbers"
     if grid < 0 or wh_per_ktok < 0 or gpu_watts < 0:
@@ -77,9 +93,9 @@ _SCHEMA: dict[str, Any] = {
         "op": {"type": "string", "enum": ["estimate"]},
         "tokens": {"type": "number", "description": "Tokens processed (use this OR gpu_seconds)"},
         "gpu_seconds": {"type": "number", "description": "GPU-seconds (use this OR tokens)"},
-        "wh_per_ktok": {"type": "number", "description": "Wh per 1k tokens (default 0.3)"},
+        "wh_per_ktok": {"type": "number", "description": "Wh per 1k tokens (default: this deployment's figure, 0.3 unless set)"},
         "gpu_watts": {"type": "number", "description": "Avg GPU watts for gpu_seconds (default 700)"},
-        "grid_g_co2_per_kwh": {"type": "number", "description": "Grid intensity gCO2e/kWh (default 400)"},
+        "grid_g_co2_per_kwh": {"type": "number", "description": "Grid intensity gCO2e/kWh (default: this deployment's figure, 400 unless set)"},
     },
 }
 

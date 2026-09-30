@@ -73,6 +73,7 @@ _MAGIC_V2 = b"MVKAR2\n"       # v2: keyring header -- MAGIC || keyid(8) || nonce
 # test asserts this); duplicated here so is_sealed() stays cheap and we avoid a
 # crypto_at_rest <-> tenant_kms import cycle (tenant_kms imports from this module).
 _TENANT_MAGIC = b"MVKTEN1\n"
+_STREAM_MAGIC = b"MVKASF1\n"  # bounded authenticated audit frames
 _NONCE_BYTES = 12
 _KEY_BYTES = 32              # AES-256
 _KEYID_BYTES = 8             # short key fingerprint embedded in v2 blobs
@@ -367,7 +368,7 @@ def deployment_at_rest_enabled(
 
 
 def per_tenant_at_rest() -> bool:
-    """Opt-in per-tenant envelope encryption (default off).
+    """Per-tenant envelope encryption (default: on in enterprise mode, else off).
 
     When on **and** at-rest is enabled, new seals use the *current tenant's* own
     data key (:mod:`maverick.tenant.kms`) instead of the single process-wide key,
@@ -801,6 +802,7 @@ def is_sealed(blob: bytes) -> bool:
         blob[: len(_MAGIC)] == _MAGIC
         or blob[: len(_MAGIC_V2)] == _MAGIC_V2
         or blob[: len(_TENANT_MAGIC)] == _TENANT_MAGIC
+        or blob[: len(_STREAM_MAGIC)] == _STREAM_MAGIC
     )
 
 
@@ -853,6 +855,13 @@ def _unseal_with_key_cache(
     unchanged — plaintext written before encryption was enabled (transparent
     migration). Raises :class:`EncryptionUnavailable` only when a genuinely
     sealed blob can't be opened."""
+    if blob.startswith(_STREAM_MAGIC):
+        from .sealed_stream import SealedStreamError, decode_stream
+
+        try:
+            return decode_stream(blob, lambda frame: _unseal_with_key_cache(frame, key_cache))
+        except SealedStreamError as exc:
+            raise EncryptionUnavailable("authenticated audit frames are invalid") from exc
     # A per-tenant envelope is opened with the tenant's data key regardless of
     # whether per-tenant mode is currently on (so reads keep working after the
     # mode is toggled). The current tenant must match the one it was sealed under
@@ -935,9 +944,122 @@ def _unseal_with_key_cache(
         ) from e
 
 
+_BOUND_MAGIC = b"MVKBND1\n"   # context-bound: MAGIC || kind(1) || keyid(8) || nonce || ct
+
+
+def _bound_aad(tenant: str | None, context: str) -> bytes:
+    """Additional authenticated data: the tenant and the caller's context
+    (e.g. ``attachment/<goal>/<name>``), length-prefixed so no two distinct
+    pairs share an encoding."""
+    # "t:" + the canonical (NFC) tenant id, or "n:" for no tenant, so a tenant
+    # literally named "__default__" and the unbound deployment never share an AAD.
+    if tenant:
+        from .paths import canonical_tenant_id
+        who = b"t:" + canonical_tenant_id(tenant).encode("utf-8")
+    else:
+        who = b"n:"
+    parts = [who, context.encode("utf-8")]
+    return b"maverick-bound/v1\x00" + b"".join(
+        str(len(p)).encode("ascii") + b":" + p for p in parts)
+
+
+def seal_bound(plaintext: bytes, context: str, *, portable: bool = False) -> bytes:
+    """Seal bound to the current tenant AND ``context``.
+
+    A blob copied to another tenant, another record or another field fails GCM
+    authentication instead of decrypting there. Per-tenant mode seals under the
+    tenant's own data key; otherwise the deployment (or active keyring) key, with
+    its key id embedded so rotation keeps working. ``portable`` always uses the
+    deployment/keyring key: per-tenant data keys live on one host, so anything
+    read on another replica (the attachment S3 mirror) must not use them. The
+    tenant binding is kept either way through the authenticated data."""
+    if not _have_crypto():
+        raise EncryptionUnavailable("at-rest encryption needs 'cryptography'")
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    from .paths import current_tenant_id
+    tenant = current_tenant_id()
+    if per_tenant_at_rest() and not portable:
+        from .tenant.kms import tenant_dek
+        kind, keyid, key = b"T", bytes(_KEYID_BYTES), tenant_dek(tenant)
+    else:
+        active = _active_keyring_key()
+        if active is not None:
+            key, keyid = active
+        else:
+            key = _load_or_create_key()
+            keyid = _key_fingerprint(key)
+        kind = b"K"
+    nonce = secrets.token_bytes(_NONCE_BYTES)
+    ct = AESGCM(key).encrypt(nonce, plaintext, _bound_aad(tenant, context))
+    return _BOUND_MAGIC + kind + keyid + nonce + ct
+
+
+def is_bound(blob: bytes) -> bool:
+    return blob[: len(_BOUND_MAGIC)] == _BOUND_MAGIC
+
+
+def unseal_bound(blob: bytes, context: str) -> bytes:
+    """Inverse of :func:`seal_bound`; raises :class:`EncryptionUnavailable` when
+    the tenant, context, key or bytes do not match."""
+    if not is_bound(blob):
+        raise EncryptionUnavailable("not a context-bound blob")
+    if not _have_crypto():
+        raise EncryptionUnavailable("found encrypted data but 'cryptography' is not installed")
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    from .paths import current_tenant_id
+    body = blob[len(_BOUND_MAGIC):]
+    if len(body) < 1 + _KEYID_BYTES + _NONCE_BYTES + 16:
+        raise EncryptionUnavailable("bound blob is truncated")
+    kind, keyid = body[:1], body[1:1 + _KEYID_BYTES]
+    nonce = body[1 + _KEYID_BYTES:1 + _KEYID_BYTES + _NONCE_BYTES]
+    tenant = current_tenant_id()
+    if kind == b"T":
+        from .tenant.kms import tenant_dek
+        key = tenant_dek(tenant)
+    elif kind == b"K":
+        key = _resolve_key_by_id(keyid)
+    else:
+        raise EncryptionUnavailable("bound blob has an unknown key kind")
+    try:
+        return AESGCM(key).decrypt(nonce, body[1 + _KEYID_BYTES + _NONCE_BYTES:],
+                                   _bound_aad(tenant, context))
+    except InvalidTag as e:
+        raise EncryptionUnavailable(
+            "cannot open bound data: different tenant or context, wrong key, "
+            "or altered bytes (GCM authentication failed)") from e
+
+
 def unseal(blob: bytes) -> bytes:
     """Decrypt one sealed blob with a request-local key cache."""
     return _unseal_with_key_cache(blob, {})
+
+
+def reseal(original: bytes, plaintext: bytes) -> bytes:
+    """Authenticate a record and replace its content under the same envelope.
+
+    This supports updating retained encrypted records after an encryption-mode
+    toggle. It does not turn plaintext into ciphertext or migrate key identity.
+    Authentication and deployment-key scope restrictions are the same as reads.
+    """
+    if not original.startswith((_MAGIC, _MAGIC_V2, _TENANT_MAGIC)):
+        raise EncryptionUnavailable("record uses an unsupported encryption envelope")
+    key_cache: dict[tuple[str, bytes], object] = {}
+    _unseal_with_key_cache(original, key_cache)
+    if original.startswith(_TENANT_MAGIC):
+        from .paths import current_tenant_id
+        from .tenant.kms import seal_for_tenant
+
+        return seal_for_tenant(current_tenant_id(), plaintext)
+    if original.startswith(_MAGIC_V2):
+        keyid = original[len(_MAGIC_V2):len(_MAGIC_V2) + _KEYID_BYTES]
+        header, cipher = _MAGIC_V2 + keyid, key_cache[("v2", keyid)]
+    else:
+        header, cipher = _MAGIC, key_cache[("v1", b"")]
+    nonce = secrets.token_bytes(_NONCE_BYTES)
+    return header + nonce + cipher.encrypt(nonce, plaintext, None)
 
 
 def seal_text(text: str) -> bytes:

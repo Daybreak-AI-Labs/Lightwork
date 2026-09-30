@@ -52,7 +52,6 @@ def test_pick_assessments_can_enable_consent_preferences(monkeypatch):
         "enable": True,
         "publishing": {
             "enable": True,
-            "require_signed_publications": True,
             "web_settings": {
                 "enable": True,
                 "retention_seconds": 31_536_000,
@@ -346,3 +345,19 @@ def test_config_writer_keeps_legacy_boolean_consent_choice_compatible():
     parsed = tomllib.loads("\n".join(rendered))
 
     assert parsed == {"consent_preferences": {"enable": True}}
+
+
+def test_shared_consent_storage_is_an_explicit_wizard_choice(monkeypatch):
+    def confirm(prompt, *, default=False, **_kwargs):
+        if prompt.startswith(("Enable consumer Consent & Preferences", "Keep consent records")):
+            return True
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: "")
+    selected = wizard.pick_assessments()
+    assert selected["consent_preferences"]["storage"] == {
+        "backend": "postgres", "dsn_secret_ref": "$MAVERICK_CONSENT_PG_DSN"}
+    parsed = tomllib.loads("\n".join(wizard._cfg_assessments(selected)))
+    assert parsed["consent_preferences"]["storage"]["backend"] == "postgres"
+    assert lint_config(parsed) == []

@@ -68,6 +68,18 @@ class _Runtime:
     def activate_framework_pack(self, **kwargs):
         return self._result("activate_framework_pack", **kwargs)
 
+    def list_policies(self):
+        return self._result("list_policies")
+
+    def list_evaluations(self):
+        return self._result("list_evaluations")
+
+    def list_intents(self):
+        return self._result("list_intents")
+
+    def list_framework(self):
+        return self._result("list_framework")
+
 
 @pytest.fixture()
 def environment(monkeypatch: pytest.MonkeyPatch):
@@ -494,3 +506,44 @@ def test_concrete_status_does_not_mask_provider_binding_integrity_failure() -> N
     )
     with pytest.raises(cloud.CloudAgentIntegrityError, match="integrity"):
         runtime.status()
+
+
+@pytest.mark.parametrize(
+    ("path", "operation"),
+    [
+        ("/policies", "list_policies"),
+        ("/policy-evaluations", "list_evaluations"),
+        ("/enforcement-intents", "list_intents"),
+        ("/databricks/framework", "list_framework"),
+    ],
+)
+def test_register_lists_are_view_scoped_tenant_bound_and_read_only(
+    environment, path: str, operation: str
+) -> None:
+    client, state, _app = environment
+    response = client.get(f"{BASE}{path}")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.json()["operation"] == operation
+    assert state["permissions"] == ["view"]
+    (tenant_id, _principal, _request) = state["factory_calls"][0]
+    assert tenant_id == TENANT
+    runtime = state["runtimes"][0]
+    assert [call[0] for call in runtime.calls] == [operation]
+    # A caller cannot steer the register to another workspace.
+    assert client.get(f"{BASE}{path}?tenant_id=other").status_code == 422
+    state["enabled"] = False
+    assert client.get(f"{BASE}{path}").status_code == 403
+
+
+def test_register_list_fails_closed_when_the_runtime_cannot_list(environment) -> None:
+    client, _state, app = environment
+
+    class _NoLists(_Runtime):
+        list_intents = None
+
+    app.state.ai_cloud_agent_governance_runtime_factory = (
+        lambda tenant, principal, _request: _NoLists(tenant, principal)
+    )
+    response = client.get(f"{BASE}/enforcement-intents")
+    assert response.status_code == 503

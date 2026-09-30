@@ -9,9 +9,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import inspect
+import itertools
 import json
 import logging
 import os
+import re
 import secrets as _secrets
 import time
 import uuid
@@ -22,8 +25,11 @@ from urllib.parse import urlsplit
 
 from . import killswitch
 from ._envparse import env_float, env_int
+from .audit.errors import AuditRefused
 from .budget import BudgetExceeded, UnpricedModelError, UsageAccountingError
+from .env_setting import env_or_config as _env_or_config
 from .llm import model_for_role
+from .run_outcome import GoalCancelled, cancellation_message, owned_task, task_stop
 from .swarm import SwarmContext
 from .tools import ToolRegistry, base_registry
 from .tools.agent_bus_tool import delegate_to_agent, recv_from_agent, send_to_agent
@@ -252,9 +258,29 @@ _SPEND_MIRROR_INTERVAL = env_float("MAVERICK_SPEND_MIRROR_INTERVAL", 5.0)
 # track a per-(tool,args) consecutive-failure streak and, once it hits the
 # threshold, append a one-line nudge to the tool result so the model breaks the
 # loop (change args, switch tools, rethink). Pure advice -- it never blocks a
-# call. Default on; MAVERICK_LOOP_GUARD=0 disables it.
-_LOOP_GUARD_ENABLED = os.environ.get("MAVERICK_LOOP_GUARD", "1").strip().lower() not in {"0", "false", "no", "off"}
-_LOOP_GUARD_THRESHOLD = max(2, env_int("MAVERICK_LOOP_GUARD_THRESHOLD", 3))
+# call. Default on; MAVERICK_LOOP_GUARD=0 disables it. Each knob is also a
+# setting ([agent] loop_guard / loop_guard_threshold / loop_guard_block /
+# step_budget_warning) read once here at startup; the environment still wins.
+def _loop_guard_settings() -> tuple[bool, int, int]:
+    """(enabled, nudge threshold, suppression threshold) as read at startup."""
+    from .env_setting import env_or_config_int
+
+    enabled = (_env_or_config("MAVERICK_LOOP_GUARD", "agent", "loop_guard", "1")
+               or "1").strip().lower() not in {"0", "false", "no", "off"}
+    threshold = max(2, env_or_config_int(
+        "MAVERICK_LOOP_GUARD_THRESHOLD", "agent", "loop_guard_threshold", 3))
+    block = env_or_config_int("MAVERICK_LOOP_GUARD_BLOCK", "agent", "loop_guard_block", 6)
+    return enabled, threshold, (max(block, threshold + 1) if block > 0 else 0)
+
+
+def _step_budget_warning_setting() -> int:
+    from .env_setting import env_or_config_int
+
+    return max(0, env_or_config_int(
+        "MAVERICK_STEP_BUDGET_WARNING", "agent", "step_budget_warning", 3))
+
+
+_LOOP_GUARD_ENABLED, _LOOP_GUARD_THRESHOLD, _LOOP_GUARD_BLOCK = _loop_guard_settings()
 # Suppression tier above the nudge: once the SAME call has produced the
 # byte-identical result this many times in a row — success or failure — the
 # next identical attempt is refused WITHOUT executing. Identical output N
@@ -265,16 +291,17 @@ _LOOP_GUARD_THRESHOLD = max(2, env_int("MAVERICK_LOOP_GUARD_THRESHOLD", 3))
 # immediately, so a legitimate poll loop that varies anything keeps working.
 # Clamped above the nudge threshold so advice always precedes enforcement,
 # whatever the two env knobs say. 0 disables suppression (nudges continue).
-# MAVERICK_LOOP_GUARD=0 disables the whole guard as before.
-_LOOP_GUARD_BLOCK = env_int("MAVERICK_LOOP_GUARD_BLOCK", 6)
-_LOOP_GUARD_BLOCK = (max(_LOOP_GUARD_BLOCK, _LOOP_GUARD_THRESHOLD + 1)
-                     if _LOOP_GUARD_BLOCK > 0 else 0)
+# MAVERICK_LOOP_GUARD=0 disables the whole guard as before. (Read above, in
+# _loop_guard_settings.)
 
 # Step-budget awareness: when only this many tool-using turns remain before
 # max_steps force-stops the run, the loop nudges the agent to synthesize a
 # FINAL now -- otherwise a long run can get cut off mid-work with no answer.
 # 0 disables the nudge. Tune via MAVERICK_STEP_BUDGET_WARNING.
-_STEP_BUDGET_WARNING = max(0, env_int("MAVERICK_STEP_BUDGET_WARNING", 3))
+_STEP_BUDGET_WARNING = _step_budget_warning_setting()
+
+# How many of an agent's recent tool calls speculative reads predict from.
+_SPECULATION_HISTORY = 20
 
 # W1-44: how many blackboard entries posted by OTHER agents since this agent's
 # last tool-running turn are appended to that turn's tool_results message, so
@@ -346,6 +373,8 @@ def _rule(
 
 _FILE_TOOL_POLICIES: dict[str, _FileToolPolicy] = {
     "read_file": _FileToolPolicy((_rule("path"),)),
+    "spreadsheet_read": _FileToolPolicy((_rule("path"),)),
+    "sql_query_read": _FileToolPolicy((_rule("database"),)),
     "write_file": _FileToolPolicy((_rule("path", mutates=True),)),
     "list_dir": _FileToolPolicy((_rule("path", default="."),)),
     "str_replace_editor": _FileToolPolicy(
@@ -1012,6 +1041,16 @@ def _tool_call_failed(output: str) -> bool:
     return tool_result_failed(output)
 
 
+def _cascade_draft(role: str, model: str) -> str | None:
+    """The cascade's cheap first model for ``role`` (None when off)."""
+    try:
+        from .routing import cascade_draft_model
+
+        return cascade_draft_model(role, model)
+    except Exception:  # pragma: no cover -- routing never breaks agent setup
+        return None
+
+
 def _budget_error_label(e: BudgetExceeded) -> str:
     """W1-30: distinguish a genuinely unpriced model from a real cap trip.
 
@@ -1024,11 +1063,19 @@ def _budget_error_label(e: BudgetExceeded) -> str:
     class -- poisoning the self-tuning budget learner with a failure that
     had nothing to do with spend.
     """
+    from .tenant.provider_admission import OrganizationBudgetExceeded
+
+    if isinstance(e, OrganizationBudgetExceeded):
+        return "organization spending limit"
     return "unpriced model" if isinstance(e, UnpricedModelError) else "budget exceeded"
 
 
 def _budget_stop_kind(e: BudgetExceeded) -> str:
     """The :attr:`AgentResult.stop_kind` for a cap trip / unpriced model."""
+    from .tenant.provider_admission import OrganizationBudgetExceeded
+
+    if isinstance(e, OrganizationBudgetExceeded):
+        return "organization_budget"
     return "unpriced_model" if isinstance(e, UnpricedModelError) else "budget"
 
 
@@ -1142,13 +1189,20 @@ def _finding_excerpt(final: str) -> str:
     A finding is re-rendered into every later worker's first turn via
     ``bb.render(40)`` — the O(K^2) swarm re-send — so post an excerpt, not the
     whole answer. The full FINAL still reaches the parent via the spawn return
-    and is persisted in the world record. Tune via
-    MAVERICK_FINDING_POST_MAX_CHARS (min 200). NB: this bounds what is
+    and is persisted in the world record. Tune via ``[swarm]
+    finding_post_max_chars`` or MAVERICK_FINDING_POST_MAX_CHARS, which wins
+    (min 200). NB: this bounds what is
     STORED; Blackboard.render applies its own (smaller) per-entry cap at
     injection, so raising this alone does not widen worker briefs — raise
     MAVERICK_BB_RENDER_ENTRY_CHARS with it."""
     from .compaction import excerpt
-    cap = max(200, env_int("MAVERICK_FINDING_POST_MAX_CHARS", 1500))
+    try:
+        from .config import get_swarm
+
+        configured = get_swarm()["finding_post_max_chars"]
+    except Exception:  # an unreadable config never blocks posting a finding
+        configured = 1500
+    cap = max(200, env_int("MAVERICK_FINDING_POST_MAX_CHARS", configured))
     return excerpt(final or "", cap,
                    "finding truncated; full answer in the run record")
 
@@ -1275,6 +1329,7 @@ class AgentResult:
     # carries the machine-readable specifics (e.g. "tool_calls=100").
     stop_kind: str | None = None
     stop_detail: str = ""
+    tool_execution_unknown: bool = False
 
 
 def _final_uncertainty_reasons(
@@ -1354,7 +1409,9 @@ def _risk_proportional_verify_enabled() -> bool:
         return False
 
 
-def _final_is_low_risk(final: str | None, *, coding: bool, tool_calls: int) -> bool:
+def _final_is_low_risk(
+    final: str | None, *, coding: bool, tool_calls: int, max_chars: int = 800,
+) -> bool:
     """Cheap, conservative test: safe to skip LLM verification on this answer?
 
     Low-risk means a short, prose-only answer the agent reached without
@@ -1362,15 +1419,215 @@ def _final_is_low_risk(final: str | None, *, coding: bool, tool_calls: int) -> b
     use, an embedded code block / diff / edit, or a long multi-part answer
     all fall through to full verification. Intentionally narrow: it gates
     a quality check, so it only fires when skipping is clearly safe.
+    ``max_chars`` is the length past which an answer counts as long-form.
     """
     if coding or not final:
         return False
     if tool_calls > 0:
         return False
     text = final.strip()
-    if len(text) > 800:
+    if len(text) > max_chars:
         return False
     return not any(marker in text for marker in _HIGH_RISK_FINAL_MARKERS)
+
+
+# A chat reply is read by the person who asked; the length cap that marks a
+# standalone goal's answer as long-form deliverable is far too tight for prose.
+_CHAT_LOW_RISK_MAX_CHARS = 12_000
+
+
+def _verify_chat_answers_enabled() -> bool:
+    """Whether a conversational run still waits on the self-verifier for a
+    plain prose answer. Off by default: a chat reply reached with no tool use,
+    no code, and no edit block only gained a second model round trip before
+    the person could read it. ``MAVERICK_VERIFY_CHAT_ANSWERS=1`` or
+    ``[verification] verify_chat_answers = true`` turns it back on. Tool use,
+    code, edit blocks, and long-form answers are always verified."""
+    raw = os.environ.get("MAVERICK_VERIFY_CHAT_ANSWERS", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    try:
+        from .config import load_config
+        cfg = (load_config() or {}).get("verification") or {}
+        return bool(cfg.get("verify_chat_answers"))
+    except Exception:
+        return False
+
+
+def _answer_streaming_enabled() -> bool:
+    """``[chat] stream_answers`` / ``MAVERICK_STREAM_ANSWERS``: on by default."""
+    raw = os.environ.get("MAVERICK_STREAM_ANSWERS", "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    try:
+        from .config import load_config
+        value = ((load_config() or {}).get("chat") or {}).get("stream_answers")
+        return True if value is None else bool(value)
+    except Exception:
+        return True
+
+
+def _accepts_keyword(fn: Any, name: str) -> bool:
+    """True when ``fn`` takes ``name`` (or ``**kwargs``); a scripted stand-in
+    model without the parameter simply gets the buffered call."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
+def _strip_final_marker(text: str) -> str:
+    """The answer after the last ``FINAL:`` marker, or the whole text before
+    one has arrived."""
+    try:
+        from .coding_mode import find_final_marker_end
+        end = find_final_marker_end(text)
+    except Exception:  # pragma: no cover -- preview only, never the turn
+        end = None
+    return text[end:].lstrip() if end is not None else text
+
+
+def _token_boundary(text: str, limit: int) -> int:
+    """The end of the last complete token before ``limit``: a whitespace
+    position, or just after a CJK / full-width character (those scripts do not
+    separate words with spaces, and a credential is never written in them).
+    0 when there is none."""
+    for i in range(min(limit, len(text)) - 1, -1, -1):
+        c = text[i]
+        if c in " \n\t":
+            return i
+        if ord(c) >= 0x2E80:
+            return i + 1
+    return 0
+
+
+class _ReplayedDecision(Exception):
+    """A production twin's answer to a human approval gate (no human asked)."""
+
+    def __init__(self, granted: bool) -> None:
+        super().__init__("replayed approval decision")
+        self.granted = granted
+
+
+# ``NAME=`` / ``NAME:`` of a named secret (mirrors secret_detector's env_secret)
+# followed by an opening quote.
+_OPEN_SECRET_QUOTE = re.compile(
+    r"[^\S\n]*(?:export\s+)?[A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|PASS|CREDENTIAL)"
+    r"[A-Z0-9_]*\s*[:=]\s*(?P<q>[\"'])")
+
+
+class _PartialAnswerStream:
+    """Mirror the root agent's answer into the goal's result column while the
+    model is still writing it, so the chat page shows text within a second
+    instead of after the whole turn (and its verification) completes.
+
+    Writes at most once per ``MIN_INTERVAL`` seconds and stops growing at
+    ``MAX_CHARS``. Each flush redacts the *whole* text received so far, then
+    shows only complete whitespace-delimited tokens that end at least
+    ``HOLDBACK`` characters before the tail: a credential is one token, so a
+    half-written one is never displayed, and a complete one is redacted whole.
+    A named secret whose quoted value is still open (``API_TOKEN="several words``)
+    is held back from the start of its line until the quote closes. The last
+    flush drops the holdback only when the model finished normally: a stream cut
+    at the token limit or at ``MAX_CHARS`` may end mid-credential.
+    Every flush also passes the Shield output scan; a block withdraws the
+    preview for the rest of the turn. The orchestrator's final write replaces
+    the preview. Fails closed: a redaction, scan or write error ends the
+    preview, never the turn.
+    """
+
+    MIN_INTERVAL = 0.35
+    HOLDBACK = 96
+    MAX_CHARS = 60_000
+
+    def __init__(self, world: Any, goal_id: int, shield: Any = None) -> None:
+        self._world = world
+        self._goal_id = goal_id
+        self._shield = shield
+        self._text = ""
+        self._shown = ""
+        self._last_flush = float("-inf")  # the first flush is never throttled
+        self._failed = False
+        self.writes = 0
+
+    def __call__(self, delta: Any) -> None:
+        if self._failed or not isinstance(delta, str) or not delta:
+            return
+        room = self.MAX_CHARS - len(self._text)
+        if room > 0:
+            self._text += delta[:room]
+        now = time.monotonic()
+        if now - self._last_flush >= self.MIN_INTERVAL:
+            self._flush(now, holdback=self.HOLDBACK)
+
+    def reset(self) -> None:
+        """A new model attempt (provider failover) starts a fresh answer; the
+        next flush replaces what the page shows."""
+        self._text = ""
+
+    def finish(self, *, complete: bool = True) -> None:
+        """Flush once the turn has ended: everything received when the model
+        finished normally, else still without the (possibly cut) tail."""
+        whole = complete and len(self._text) < self.MAX_CHARS
+        self._flush(time.monotonic(), holdback=0 if whole else self.HOLDBACK)
+
+    def _flush(self, now: float, *, holdback: int) -> None:
+        if self._failed:
+            return
+        try:
+            from .safety.secret_detector import redact
+            text = _strip_final_marker(self._text)
+            if holdback:
+                # A named secret's quoted value still open on the last line
+                # would be redacted only up to its first space: hold the line.
+                last = text.rfind("\n") + 1
+                m = _OPEN_SECRET_QUOTE.match(text, last)
+                if m and m.group("q") not in text[m.end():]:
+                    text = text[:last]
+            visible, _ = redact(text)
+        except Exception:
+            self._failed = True  # never show an unredacted preview
+            return
+        if holdback:
+            # Only whole tokens that ended before the held-back tail.
+            visible = visible[:_token_boundary(visible, len(visible) - holdback)]
+        # A marker cut mid-word ("FI", "FINAL") is not an answer yet.
+        if not visible.strip() or visible == self._shown or "FINAL:".startswith(visible.strip()):
+            return
+        if self._shield is not None:
+            try:
+                blocked = not self._shield.scan_output(visible).allowed
+            except Exception:
+                blocked = True
+            if blocked:
+                self._failed = True
+                self._withdraw()
+                return
+        try:
+            self._world.set_goal_partial_result(self._goal_id, visible)
+        except Exception:
+            self._failed = True
+            log.debug("answer preview write failed for goal #%s", self._goal_id, exc_info=True)
+            return
+        self._shown = visible
+        self._last_flush = now
+        self.writes += 1
+
+    def _withdraw(self) -> None:
+        """Remove an already-shown preview (a later flush was blocked)."""
+        if self._shown:
+            try:
+                self._world.set_goal_partial_result(self._goal_id, "")
+            except Exception:
+                log.debug("answer preview withdraw failed for goal #%s",
+                          self._goal_id, exc_info=True)
 
 
 class Agent:
@@ -1382,7 +1639,7 @@ class Agent:
         model_override: str | None = None,
         depth: int = 0,
         parent: Agent | None = None,
-        max_steps: int = 25,
+        max_steps: int | None = None,
         capability=None,
         domain: str | None = None,
         persona: str | None = None,
@@ -1412,7 +1669,8 @@ class Agent:
         # with silent auto-approval disabled, so crossing an interval requires
         # an explicit operator decision to continue.
         self._review_checkpoint = None
-        if role == "orchestrator" or self._is_goal_root:
+        from .immune import twin as _twin_mod
+        if (role == "orchestrator" or self._is_goal_root) and not _twin_mod.active():
             try:
                 from .review_checkpoint import consent_review, from_config
                 _cp = from_config(
@@ -1463,13 +1721,20 @@ class Agent:
         # shows "most successful solutions resolve in ~25 rounds; long-
         # tail iteration past that has diminishing returns." Allow ops
         # to override globally via MAVERICK_MAX_STEPS, default 25.
-        self.max_steps = env_int("MAVERICK_MAX_STEPS", max_steps)
+        from .env_setting import env_or_config
+        raw_steps = env_or_config("MAVERICK_MAX_STEPS", "agent", "max_steps")
+        self.max_steps = int(raw_steps) if raw_steps and raw_steps.strip() else max_steps
+        if self.max_steps is not None and (type(self.max_steps) is not int or self.max_steps < 1):
+            raise ValueError("MAVERICK_MAX_STEPS / max_steps must be a positive integer")
         self.name = f"{role}-{depth}-{uuid.uuid4().hex[:6]}"
         # Register before tool construction: bus tool closures enforce the
         # SwarmContext roster on every send/receive/delegation. If an unusual
         # test/adapter context lacks the hook, legacy tool behavior is retained;
         # a real SwarmContext registration error fails the bus closed while the
         # rest of the agent can still run.
+        # Information flow: a child's brief comes from its parent's context.
+        if parent is not None and (tracker := getattr(self.ctx, "ifc", None)) is not None:
+            tracker.inherit(self.name, parent.name)
         _register_bus_agent = getattr(self.ctx, "register_bus_agent", None)
         if callable(_register_bus_agent):
             try:
@@ -1484,6 +1749,11 @@ class Agent:
         # addendum's except swallows it, and the learned guidance is silently
         # dropped from every prompt -- the feature becomes a no-op.
         self.model = model_override or model_for_role(role)
+        # Cascaded routing ([models] cascade): a role with no model of its own
+        # starts its turns on a cheaper model and moves to self.model on the
+        # kernel's low-confidence signals (see _cascade_turn_model).
+        self._cascade_draft = None if model_override else _cascade_draft(role, self.model)
+        self._cascade_escalated = False
         self.tools = self._build_tools()
         self.system = self._build_system()
         # Per-role reasoning effort (opt-in; None unless configured). Resolved
@@ -2502,6 +2772,156 @@ class Agent:
             "findings) or get human approval via ask_user before retrying."
         )
 
+    async def _ifc_denial(self, name: str, args: dict) -> str | None:
+        """Information-flow gate (maverick.ifc): labelled data leaving through an
+        external sink is recorded, needs a human's approval, or is blocked,
+        per the run's mode. ``None`` = proceed."""
+        tracker = getattr(self.ctx, "ifc", None)
+        if tracker is None:
+            return None
+        from . import ifc
+        decision = tracker.decide(self.name, name, args,
+                                  sandbox=getattr(self.ctx, "sandbox", None))
+        if decision is None:
+            return None
+        goal_id = getattr(self.ctx, "goal_id", None)
+        if tracker.granted(decision):
+            ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="allowed_by_grant",
+                       tracker=tracker)
+            return None
+        labels = ", ".join(sorted(decision.labels))
+        if decision.mode == "audit":
+            ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="recorded",
+                       tracker=tracker)
+            return None
+        if decision.mode == "approve":
+            from .immune import twin
+            replayed = twin.human_gate(name, args)  # a twin never pings a human
+            granted = False
+            if not decision.explicit:
+                copied = ""
+            elif decision.witnessed:
+                copied = " The data appears literally in the call."
+            else:
+                copied = " The call is too large to rule out that it carries the data literally."
+            to = decision.shown
+            try:
+                if replayed is not None:
+                    raise _ReplayedDecision(replayed)
+                from .safety.consent import require_consent
+                verdict = await asyncio.to_thread(
+                    require_consent, name, risk="high", provenance="ifc",
+                    scope=(f"{name} -> {to}" if to else name)[:512],
+                    detail=(f"Agent {self.name} holds data from {labels} and wants to send "
+                            f"through '{name}'" + (f" to {to}" if to else "")
+                            + ", which leaves the tenant boundary." + copied),
+                    allow_auto_approve=False, consult_ledger=False)
+                granted = bool(verdict.granted)
+            except _ReplayedDecision as replay_decision:
+                granted = replay_decision.granted
+            except Exception:  # consent unavailable -> fail closed
+                granted = False
+            if replayed is None:  # a twin's replayed answer is no human's decision
+                ifc.record(decision, agent=self.name, goal_id=goal_id,
+                           outcome="approved" if granted else "denied")
+                twin.record_gate(self.ctx.goal_id, name, args, granted=granted)
+            if granted:
+                tracker.grant(decision)
+                return None
+            return (f"⚠ '{name}' requires human approval: this agent holds data from "
+                    f"{labels}, and '{name}' sends outside the tenant boundary. Not granted. "
+                    "Finish without sending it, or ask a human to share it.")
+        ifc.record(decision, agent=self.name, goal_id=goal_id, outcome="blocked", tracker=tracker)
+        self.ctx.blackboard.post(self.name, "error",
+                                 f"tool={name} BLOCKED by information-flow control")
+        return (f"⚠ BLOCKED by information-flow control: this agent holds data from {labels}, "
+                f"and '{name}' sends outside the tenant boundary. Do not retry through "
+                "another external tool; finish with what can stay inside.")
+
+    async def _human_decision(self, name: str, args: dict, ask) -> tuple[bool, bool]:
+        """A human approval gate's answer: ``(granted, replayed)``. In a production
+        twin nobody is asked -- the recording answers -- and otherwise the answer
+        is recorded for later twins. ``ask`` runs off the event loop and any
+        failure of it is a refusal (fail closed)."""
+        from .immune import twin as _twin
+        answer = _twin.human_gate(name, args)
+        if answer is not None:
+            return answer, True
+        try:
+            granted = bool(await asyncio.to_thread(ask))
+        except Exception:  # consent unavailable -> fail closed
+            granted = False
+        _twin.record_gate(self.ctx.goal_id, name, args, granted=granted)
+        return granted, False
+
+    def _approval_granted(self, name: str, reason: str, *, fresh: bool) -> bool:
+        """One human decision for a REQUIRE_HUMAN verdict (EU AI Act Art 14).
+
+        ``allow_auto_approve=False``: a silent auto-approve mode counts as a
+        denial. A finance action under ``[finance.approvals] timeout =
+        "fail_closed"`` is decided by a person (``require_person``): never the
+        automatic consent mode or an earlier "remember this" grant, and a
+        request nobody answers in time is refused and withdrawn.
+        """
+        from .safety.consent import require_consent, require_person
+        from .safety.tool_risk import tool_risk
+        try:
+            from .finance.profile import approval_fail_closed
+
+            fail_closed = approval_fail_closed(name)
+        except Exception:
+            log.warning("finance: approval posture unavailable for %r; asking a "
+                        "person, fail closed", name, exc_info=True)
+            fail_closed = True
+        if fail_closed:
+            return bool(require_person(name, risk=tool_risk(name), detail=reason,
+                                       provenance="governance").granted)
+        return bool(require_consent(
+            name, risk=tool_risk(name), detail=reason, provenance="governance",
+            allow_auto_approve=False, consult_ledger=not fresh,
+        ).granted)
+
+    def _finance_sod_verdict(self, name: str, cap, gov, profile_keys):
+        """Compose the action-time finance separation-of-duties check.
+
+        ``enforce`` (or any conflict on a hard-floored action) denies; ``warn``
+        records a compensating-control finding and requires a human. The
+        finding is the compensating control's evidence, so a finding that could
+        not be written denies. A check that cannot run fails closed.
+        """
+        from .governance import Decision, Verdict
+        principal = getattr(cap, "principal", None) if cap is not None else None
+        try:
+            from .finance import profile as fin
+
+            check = fin.check_action_sod(
+                name,
+                allow_tools=getattr(cap, "allow_tools", None) if cap is not None else None,
+                deny_tools=getattr(cap, "deny_tools", None) if cap is not None else None,
+                compartment=self.domain,
+            )
+            if check is None:
+                return gov
+            recorded = fin.record_sod_finding(
+                check, agent=self.name, goal_id=self.ctx.goal_id, principal=principal,
+                outcome="blocked" if check.blocks else "human_review",
+            )
+        except Exception:
+            log.warning("finance: separation-of-duties check failed for %r; "
+                        "failing closed", name, exc_info=True)
+            return Verdict(Decision.DENY,
+                           "separation-of-duties check unavailable (failed closed)",
+                           "finance_sod:error", compliance_profiles=profile_keys)
+        if check.blocks or not recorded:
+            reason = check.reason if recorded else (
+                f"{check.reason}; the finding could not be recorded (failed closed)")
+            return Verdict(Decision.DENY, reason, check.rule,
+                           compliance_profiles=profile_keys)
+        if gov is not None and gov.decision is Decision.DENY:
+            return gov
+        return Verdict(Decision.REQUIRE_HUMAN, check.reason, check.rule,
+                       compliance_profiles=profile_keys)
+
     async def _governance_denial(
         self,
         name: str,
@@ -2664,6 +3084,10 @@ class Agent:
                 name,
                 exc_info=True,
             )
+        # Finance separation of duties at action time ([finance.sod] mode):
+        # composes strictest-wins; a no-op unless the finance layer is on and
+        # the tool carries a duty.
+        _gov = self._finance_sod_verdict(name, cap, _gov, _profile_keys)
         if _gov is None or _gov.decision is _GovDecision.ALLOW:
             return None, _profile_keys
         _principal = getattr(cap, "principal", None) if cap is not None else None
@@ -2692,34 +3116,31 @@ class Agent:
         # REQUIRE_HUMAN: the action runs only with a real human's approval
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
         # counts as a denial -- no human in the loop, no run.
-        import asyncio as _asyncio
-        granted = False
-        try:
-            from .safety.consent import require_consent
-            from .safety.tool_risk import tool_risk
-            decision = await _asyncio.to_thread(
-                require_consent, name,
-                risk=tool_risk(name), detail=_gov.reason,
-                provenance="governance",
-                allow_auto_approve=False,
+        def _ask() -> bool:
+            return self._approval_granted(
+                name, _gov.reason,
                 # When the operator opts into per-action oversight, a prior
                 # persistent ledger grant must NOT silently satisfy the
                 # Art-14 gate -- demand a fresh human decision each time. The
                 # autonomy dial can drive REQUIRE_HUMAN with no [governance]
                 # policy set (_gov_policy None), so guard the attribute read.
-                consult_ledger=not (
-                    _gov_policy.require_fresh_human_approval if _gov_policy else False
-                ),
+                fresh=bool(getattr(_gov_policy, "require_fresh_human_approval", False)),
             )
-            granted = bool(decision.granted)
-        except Exception:  # pragma: no cover -- consent unavailable -> fail closed
-            granted = False
+        granted, replayed = await self._human_decision(name, args, _ask)
         if granted:
             return None, _gov.compliance_profiles
         self.ctx.blackboard.post(
             self.name, "error",
             f"tool={name} BLOCKED: governance requires human approval",
         )
+        if replayed:
+            # A production twin: no human decided, so nothing is audited as a
+            # human denial or learned as an operator's "no".
+            return (
+                f"⚠ {name!r} requires human approval (EU AI Act Art 14): "
+                f"{_gov.reason}. Not granted, so the tool was not executed.",
+                _gov.compliance_profiles,
+            )
         from .audit import EventKind, audit_event
         from .regulatory_compiler import audit_tags as _obligation_tags
         audit_event(EventKind.GOVERNANCE_DENIED, agent=self.name,
@@ -2764,6 +3185,37 @@ class Agent:
             agent=self.name,
             goal_id=self.ctx.goal_id,
             **payload,
+        )
+
+    def _retain_large_result(self, output: str, *, limit: int, tool: str) -> str:
+        """Cap an over-limit screened result for the model, retaining the
+        complete value as a private artifact the agent can page through.
+
+        The tool DID run; if retention fails (e.g. the tenant's artifact quota
+        is full) the screened preview is delivered with a plain statement of
+        what is missing, never turned into an unknown outcome.
+        """
+        from .tool_result_artifacts import ToolArtifactError, publish
+
+        try:
+            ref = publish(output, goal_id=self.ctx.goal_id,
+                          principal=self.tools._principal, tool=tool)
+        except ToolArtifactError as exc:
+            return _cap_tool_output(output, limit=limit) + (
+                f"\n[Complete result NOT retained ({exc}). Only this preview is "
+                "available: do not treat the omitted part as known, and do not "
+                "repeat the original action to recover it.]"
+            )
+        # Keep the existing preview/error-prefix contract. The reference binds
+        # immutable full data; a preview is never executable data.
+        reader_allowed = self.tools._acl_allows("read_tool_result")
+        return _cap_tool_output(output, limit=limit) + (
+            "\n[Complete screened result retained: artifact_id="
+            f"{ref['artifact_id']}; bytes={ref['bytes']}; "
+            f"expires_at={ref['expires_at']}. "
+            + ("Read with read_tool_result using offset/next_offset."
+               if reader_allowed else "Artifact reading is denied by the current tool ACL.")
+            + " Do not repeat the original action to recover omitted data.]"
         )
 
     async def _run_dispatched_tool(
@@ -2825,6 +3277,7 @@ class Agent:
 
         effect_completed = False
         execution_status = "error"
+        execution_unknown = False
         try:
             # W1-31: enforce the wall-clock cap and killswitch DURING
             # dispatch, not only at turn boundaries -- a tool with no timeout
@@ -2832,15 +3285,20 @@ class Agent:
             # browser/file-watcher wait) could otherwise hold the goal
             # 'active' past max_wall_seconds and ignore `maverick halt`
             # until it happened to return.
-            output = await self._await_wall_clock_guarded(
-                lambda: self.tools.run(name, args),
-                in_flight_note="mid-tool-execution")
+            from .connector_attempts import bind_tool_budget
+            from .immune import twin
+            with bind_tool_budget(self.ctx.budget):
+                output = await self._await_wall_clock_guarded(
+                    lambda: twin.dispatch(self.ctx.goal_id, name, args,
+                                           lambda: self.tools.run(name, args)),
+                    in_flight_note="mid-tool-execution")
             # From this point onward the connector returned normally and may
             # already have committed an external mutation.  Keep that fact
             # separate from failures in hooks, screening, framing, or other
             # post-effect processing so none of those failures can recast the
             # completed call as replay-safe.
             effect_completed = True
+            execution_unknown = getattr(output, "tool_execution_unknown", False)
             execution_status = _tool_status(output)
             await _dispatch_hooks(HookContext(
                 event=HookEvent.POST_TOOL_USE,
@@ -2853,20 +3311,17 @@ class Agent:
             if shield is not None:
                 try:
                     out_verdict = shield.scan_output(output)
-                except Exception as exc:  # scanner bugs are observable fail-open
+                except Exception as exc:  # configured screening must finish before release
                     log.warning(
-                        "shield.scan_output raised on tool=%s output "
-                        "(fail-open): %s: %s",
-                        name,
+                        "shield output screening failed (%s); content withheld",
                         type(exc).__name__,
-                        exc,
                     )
                     self.ctx.blackboard.post(
-                        self.name,
-                        "warning",
-                        f"tool={name} shield output-scan errored (fail-open): "
-                        f"{type(exc).__name__}",
+                        self.name, "error",
+                        "tool output-scan errored; content withheld "
+                        f"({type(exc).__name__}); reconcile without replay",
                     )
+                    raise
                 else:
                     if not out_verdict.allowed:
                         reason = "; ".join(out_verdict.reasons)
@@ -2894,15 +3349,24 @@ class Agent:
                             f"({out_verdict.severity}): {reason}. Result withheld; "
                             "do not retry solely to recover the output."
                         )
-            try:
-                from .safety.secret_detector import redact as _redact_secrets
-                output, _redacted = _redact_secrets(output)
-            except Exception:  # pragma: no cover - detector errors are fail-open
-                pass
-            output = _cap_tool_output(output, limit=_tool_result_limit(self.model))
+            from .safety.secret_detector import redact as _redact_secrets
+            from .tool_result_stream import needs_complete_output, result_bytes
+
+            # Scan/redact the complete bounded value, including secrets split
+            # across producer chunks. No listener receives producer content.
+            result_bytes(output)
+            output, _redacted = _redact_secrets(output)
+            result_bytes(output)
+            safe_name, _ = _redact_secrets(str(name)[:128])
+            complete_output = output
+            if (tracker := getattr(self.ctx, "ifc", None)) is not None:
+                tracker.observe_output(self.name, name, complete_output)
+            limit = _tool_result_limit(self.model)
+            if not needs_complete_output() and len(output) > limit:
+                output = self._retain_large_result(output, limit=limit, tool=safe_name)
             nonce = _secrets.token_hex(8)
             framed = (
-                f"<tool_output tool={name!r} id={nonce}>\n"
+                f"<tool_output tool={safe_name!r} id={nonce}>\n"
                 f"{output}\n"
                 f"</tool_output {nonce}>"
             )
@@ -2914,6 +3378,7 @@ class Agent:
             if not record_terminal(
                 status=execution_status,
                 disposition=(
+                    "execution_unknown" if execution_unknown else
                     "completed" if execution_status == "ok" else "tool_error"
                 ),
                 output_summary=_audit_summary(output),
@@ -2922,6 +3387,14 @@ class Agent:
                     "INDETERMINATE: the tool ran, but its terminal audit evidence "
                     "could not be written; reconcile state and do not retry"
                 )
+            # Observation is optional for compatible run-only registries, and
+            # cannot change an already completed, screened and audited effect.
+            try:
+                deliver = getattr(self.tools, "deliver_screened", None)
+                if callable(deliver):
+                    deliver(safe_name, complete_output)
+            except Exception as exc:
+                log.warning("tool output observer failed (%s)", type(exc).__name__)
             return framed + guard_note
         except BaseException as exc:
             if not terminal_attempted:
@@ -2938,7 +3411,10 @@ class Agent:
                         "BudgetExceeded": "budget_exceeded",
                         "Halted": "halted",
                         "CancelledError": "cancelled",
+                        "GoalCancelled": "cancelled",
                     }.get(type(exc).__name__, "exception")
+                    if getattr(exc, "tool_execution_unknown", False):
+                        disposition = "execution_unknown"
                     record_terminal(
                         status="error",
                         disposition=disposition,
@@ -2952,6 +3428,7 @@ class Agent:
                 if type(exc).__name__ in {
                     "BudgetExceeded",
                     "CancelledError",
+                    "GoalCancelled",
                     "Halted",
                     "KeyboardInterrupt",
                     "SystemExit",
@@ -3034,7 +3511,7 @@ class Agent:
         if (d := self._read_only_path_denial(name, args)) is not None:
             return d
         # Operating-Twin pre-execution gates (governed rehearsal defaults on;
-        # both fail open on internal errors):
+        # both fail open on incidental errors, never an audit-policy refusal):
         # rehearsal holds an elevated-risk tool the world-model can't vouch for;
         # a learned guardrail holds an action the data engine has causally shown
         # lowers outcomes (self-correcting -- dropped when the harm is gone).
@@ -3062,6 +3539,8 @@ class Agent:
         )
         if _governance_refusal is not None:
             return _governance_refusal
+        if (d := await self._ifc_denial(name, args)) is not None:
+            return d
 
         # PreToolUse hooks: any registered hook can BLOCK the call by
         # returning a non-zero exit code (shell hook) or a falsy value
@@ -3116,6 +3595,11 @@ class Agent:
                 "evidence could not be written"
             )
 
+        _recent = getattr(self, "_recent_tool_calls", None)
+        if _recent is None:
+            _recent = self._recent_tool_calls = []
+        _recent.append((name, dict(args) if isinstance(args, dict) else {}))
+        del _recent[:-_SPECULATION_HISTORY]
         return await self._run_dispatched_tool(
             name,
             args,
@@ -3125,6 +3609,50 @@ class Agent:
             call_commitment=call_commitment,
             principal=principal,
         )
+
+    def _maybe_speculate_reads(self) -> None:
+        """Warm the tool-output cache with this agent's predictable repeat reads.
+
+        Opt-in ([tools] speculative / MAVERICK_SPECULATIVE_TOOLS) and only with
+        the tool-output cache on. Runs in the background; the budget is checked
+        before each read and a stopped budget stops speculation. Never raises.
+        """
+        try:
+            from . import speculative_tools
+            from .cache import tool as tool_cache
+
+            if not (speculative_tools.enabled() and tool_cache.enabled()):
+                return
+            predictions = speculative_tools.predict_from_history(
+                list(getattr(self, "_recent_tool_calls", None) or ()))
+            speculate = getattr(self.tools, "speculate_reads", None)
+            if not predictions or speculate is None:
+                return
+            budget = self.ctx.budget
+
+            def _budget_open() -> bool:
+                try:
+                    budget.check()
+                    return True
+                except Exception:
+                    return False
+
+            import contextvars
+
+            # Copy the context so the worker sees this run's tenant and scope,
+            # exactly as asyncio.to_thread would -- without waiting for it.
+            call_context = contextvars.copy_context()
+            loop = asyncio.get_running_loop()
+            future = loop.run_in_executor(
+                None, call_context.run,
+                lambda: speculate(predictions, budget_guard=_budget_open))
+            pending = getattr(self, "_speculation_futures", None)
+            if pending is None:
+                pending = self._speculation_futures = set()
+            pending.add(future)
+            future.add_done_callback(pending.discard)
+        except Exception:  # pragma: no cover -- speculation never breaks a turn
+            log.debug("speculative reads skipped", exc_info=True)
 
     @staticmethod
     def _tool_call_key(name: str, args: dict) -> str:
@@ -3329,9 +3857,32 @@ class Agent:
             from .speculative_exec import draft_model_for_turn
             acts = getattr(self, "_actions", None)
             last = acts[-1] if acts else ""
-            return draft_model_for_turn(self.domain, self.role, last) or self.model
+            return (draft_model_for_turn(self.domain, self.role, last)
+                    or self._cascade_turn_model())
         except Exception:  # pragma: no cover -- never break the loop
             return self.model
+
+    def _cascade_turn_model(self) -> str:
+        """The cascade's model for this turn: the cheap draft until the
+        verifier rejects an answer under the confidence threshold or this
+        agent's tool chain passes the depth threshold, then ``self.model`` for
+        the rest of the run. ``self.model`` when the cascade is off."""
+        draft = getattr(self, "_cascade_draft", None)
+        if not draft or getattr(self, "_cascade_escalated", False):
+            return self.model
+        from .routing import RouteSignal, should_escalate
+
+        rejected = bool(getattr(self, "_verifier_revision_used", False))
+        signal = RouteSignal(
+            role=self.role,
+            verifier_confidence=(getattr(self.ctx, "last_verifier_confidence", None)
+                                 if rejected else None),
+            tool_call_depth=len(getattr(self, "_actions", None) or ()),
+        )
+        if should_escalate(signal):
+            self._cascade_escalated = True
+            return self.model
+        return draft
 
     def _twin_denial(self, name: str) -> str | None:
         """The Operating-Twin pre-execution gates, first hold wins: rehearsal
@@ -3342,7 +3893,8 @@ class Agent:
         """Hold an elevated-risk tool the rehearsal twin can't vouch for.
 
         No-op unless ``[rehearsal]`` is enabled; only ``high``-risk tools are
-        gated; any error fails open (the tool runs). A confident-good rehearsal
+        gated; incidental errors fail open. Audit-policy refusals stop dispatch.
+        A confident-good rehearsal
         proceeds; a confident-poor (BLOCK) or unvouchable (ESCALATE) one returns a
         non-leaky refusal the model can react to.
         """
@@ -3368,6 +3920,8 @@ class Agent:
                         action=name, risk="high",
                         goal_id=int(self.ctx.goal_id or 0),
                         episode_id=int(getattr(self.ctx, "episode_id", 0) or 0))
+                except AuditRefused:
+                    raise
                 except Exception:  # pragma: no cover -- never breaks the loop
                     pass
                 return None
@@ -3379,14 +3933,17 @@ class Agent:
                 f"⚠ Held by pre-execution rehearsal ({v.decision}): {v.reason}. "
                 "The tool was not executed; choose another approach or seek approval."
             )
-        except Exception:  # pragma: no cover -- rehearsal must never break the loop
+        except AuditRefused:
+            raise
+        except Exception:  # pragma: no cover -- incidental rehearsal failure
             return None
 
     def _guardrail_denial(self, name: str) -> str | None:
         """Hold an action a learned guardrail flags as causally harmful.
 
         No-op unless ``[data_engine]`` is enabled (guardrails are its output);
-        consults the registry the flywheel writes; any error fails open. Unlike a
+        consults the registry the flywheel writes; incidental errors fail open,
+        but audit-policy refusals stop dispatch. Unlike a
         hand-written deny-list, the guardrail carries the causal effect that
         justifies it and is auto-dropped when the harm is gone.
         """
@@ -3407,7 +3964,9 @@ class Agent:
                 "choose another approach (this rule was learned from real outcomes and "
                 "is dropped automatically once the harm is gone)."
             )
-        except Exception:  # pragma: no cover -- guardrails must never break the loop
+        except AuditRefused:
+            raise
+        except Exception:  # pragma: no cover -- incidental guardrail failure
             return None
 
     def _capture_trajectory_step(self, step_index, tool_name, tool_succeeded,
@@ -3481,10 +4040,11 @@ class Agent:
         /budget.check() calls beside it, so no throttling here. Fails open
         (a transient world-read error must not itself stop the run).
         """
-        if self.ctx.goal_id is None:
+        goal_id = getattr(self.ctx, "goal_id", None)
+        if goal_id is None:
             return False
         try:
-            goal = self.ctx.world.get_goal(self.ctx.goal_id)
+            goal = self.ctx.world.get_goal(goal_id)
         except Exception as e:  # pragma: no cover -- a stop check must not crash the run
             log.debug("goal-cancelled check skipped: %s", e)
             return False
@@ -3496,11 +4056,11 @@ class Agent:
 
     async def _await_wall_clock_guarded(self, make_coro, *, in_flight_note: str):
         """Await ``make_coro()``, but ABORT it when the wall-clock budget is
-        exhausted or the killswitch trips — instead of letting it run to
-        completion and blow the SLA or ignore a HALT (the cap/halt were
-        otherwise only checked at turn boundaries). Raises
-        :class:`BudgetExceeded` (wall) or :class:`killswitch.Halted`, both
-        already handled by every caller the same way. ``in_flight_note``
+        exhausted, the goal is cancelled, or the killswitch trips. Raises
+        :class:`BudgetExceeded` (wall), :class:`GoalCancelled`, or
+        :class:`killswitch.Halted`. The owned coroutine is cancelled and drained
+        before this guard exits; cancellation cannot reverse a remote effect.
+        ``in_flight_note``
         names what was in flight (e.g. "mid-generation",
         "mid-tool-execution") for the wall-cap message.
 
@@ -3516,17 +4076,21 @@ class Agent:
         ``max_wall_seconds`` and ignore ``maverick halt`` until it returned.
         """
         budget = self.ctx.budget
+        if Agent._goal_cancelled(self):
+            raise GoalCancelled("cancelled by the goal owner before dispatch")
         remaining = budget.remaining_wall()
         if remaining <= 0:
             raise BudgetExceeded(
                 f"wall time {budget.elapsed():.0f}s > {budget.max_wall_seconds:.0f}s")
-        task = asyncio.ensure_future(make_coro())
+        task = owned_task(make_coro())
         loop = asyncio.get_running_loop()
         deadline = loop.time() + remaining
         try:
             while True:
                 slice_s = min(self._HALT_POLL_SECONDS, deadline - loop.time())
                 done, _ = await asyncio.wait({task}, timeout=max(0.0, slice_s))
+                if Agent._goal_cancelled(self):
+                    raise GoalCancelled("cancelled by the goal owner during execution")
                 if task in done:
                     return task.result()  # re-raises any error from the call
                 if loop.time() >= deadline:
@@ -3534,15 +4098,74 @@ class Agent:
                         f"wall-clock cap {budget.max_wall_seconds:.0f}s reached "
                         f"{in_flight_note}")
                 killswitch.check()  # raises killswitch.Halted if tripped
-        except BaseException:
+        except BaseException as caught:
             # Wall cap, halt, or an upstream cancellation: cancel the in-flight
             # call (aborts the provider HTTP request / tool coroutine) before
             # propagating.
+            stop_signal = task_stop(task, caught)
+            if isinstance(stop_signal, GoalCancelled) and in_flight_note == "mid-tool-execution":
+                # The tool coroutine was admitted. Cancellation cannot prove an
+                # external operation did not commit, even if its coroutine
+                # cooperates or returns normally while draining cancellation.
+                stop_signal.tool_execution_unknown = True
             if not task.done():
                 task.cancel()
-                with contextlib.suppress(BaseException):
+                try:
                     await task
-            raise
+                except BaseException as cancelled:
+                    if getattr(task_stop(task, cancelled), "tool_execution_unknown", False):
+                        stop_signal.tool_execution_unknown = True
+            elif stop_signal is caught:
+                # Retrieve a racing terminal exception so cancelling the goal
+                # cannot orphan an unobserved exception from the owned task.
+                try:
+                    task.result()
+                except BaseException as cancelled:
+                    if getattr(task_stop(task, cancelled), "tool_execution_unknown", False):
+                        stop_signal.tool_execution_unknown = True
+            if stop_signal is caught:
+                raise
+            raise stop_signal from None
+
+    def _answer_stream_for_turn(self) -> _PartialAnswerStream | None:
+        """A live answer preview for this turn, or None when the turn must not
+        stream: only the root agent of a conversational run streams, only to a
+        model client that can stream, and never while the evidence gateway is
+        withholding model-derived text until the result is receipted."""
+        if self.depth != 0 or not _answer_streaming_enabled():
+            return None
+        ctx = self.ctx
+        world = getattr(ctx, "world", None)
+        goal_id = getattr(ctx, "goal_id", None)
+        if (
+            world is None or goal_id is None
+            or getattr(ctx, "conversation_id", None) is None
+            or not hasattr(world, "set_goal_partial_result")
+            or not _accepts_keyword(getattr(ctx.llm, "complete_async", None), "on_delta")
+        ):
+            return None
+        try:
+            from . import ai_evidence_gateway
+            if ai_evidence_gateway.enabled():
+                return None
+        except Exception:
+            return None
+        return _PartialAnswerStream(world, goal_id, getattr(ctx, "shield", None))
+
+    def _conversational_answer_skips_verification(
+        self, final: str | None, *, coding: bool, tool_calls: int,
+    ) -> bool:
+        """A root chat answer reached with no tools, no code, and no edit block
+        is handed to the person without the self-verifier round trip (see
+        ``_verify_chat_answers_enabled``)."""
+        if self.depth != 0 or getattr(self.ctx, "conversation_id", None) is None:
+            return False
+        if _verify_chat_answers_enabled():
+            return False
+        return _final_is_low_risk(
+            final, coding=coding, tool_calls=tool_calls,
+            max_chars=_CHAT_LOW_RISK_MAX_CHARS,
+        )
 
     async def _complete_guarded(self, **kw):
         """Await an LLM completion, but ABORT the in-flight call when the
@@ -3551,11 +4174,28 @@ class Agent:
         ignore a HALT (the cap/halt were otherwise only checked at turn
         boundaries). Raises :class:`BudgetExceeded` (wall) or
         :class:`killswitch.Halted`, both already handled by the caller."""
+        async def _call():
+            # Waiting for a swarm model slot counts against the wall clock too.
+            slot = getattr(self.ctx, "model_slot", None)
+            async with slot() if slot else contextlib.nullcontext():
+                return await self.ctx.llm.complete_async(**kw)
         return await self._await_wall_clock_guarded(
-            lambda: self.ctx.llm.complete_async(**kw),
-            in_flight_note="mid-generation")
+            _call, in_flight_note="mid-generation")
 
     async def run(self) -> AgentResult:
+        try:
+            return await self._run_traced()
+        except GoalCancelled as exc:
+            # Keep Agent.run's structured-result contract for parents and
+            # standalone callers. The root orchestrator preserves this stop
+            # separately from success, budget refusal, and ordinary failures.
+            return AgentResult(
+                error=cancellation_message(exc), role=self.role, name=self.name,
+                stop_kind="cancelled", stop_detail=str(exc),
+                tool_execution_unknown=bool(getattr(exc, "tool_execution_unknown", False)),
+            )
+
+    async def _run_traced(self) -> AgentResult:
         # OTel GenAI semconv: every agent execution is an ``invoke_agent``
         # span (gen_ai.agent.name/id), the third semconv leg alongside the
         # LLM (chat) and tool (execute_tool) spans. No-op when tracing is off.
@@ -3686,6 +4326,8 @@ class Agent:
         )
         # Everything up to here is in the brief; later posts reach this agent
         # as per-turn deltas (see the tool_results assembly below).
+        if (tracker := getattr(self.ctx, "ifc", None)) is not None:
+            tracker.read_blackboard(self.name, bb.posters_since(0))
         self._bb_cursor = bb.cursor()
         first_content: list[dict] | str
         if image_blocks:
@@ -3700,7 +4342,10 @@ class Agent:
         ep_id = getattr(self.ctx, "episode_id", 0) or 0
         ckpt, start_step, messages = self._resume_from_checkpoint(messages, bb, ep_id)
 
-        for step in range(start_step, self.max_steps):
+        truncated_responses = 0
+        steps = (range(start_step, self.max_steps) if self.max_steps is not None
+                 else itertools.count(start_step))
+        for step in steps:
             # Durable checkpoint at the turn boundary: commit the resumable loop
             # state BEFORE the next LLM call, so a crash mid-step loses at most
             # one step's work. Extracted to _save_checkpoint; fail-open.
@@ -3764,7 +4409,8 @@ class Agent:
             # paying in full for nothing.
             if self.depth > 0 and _SYNTHESIS_RESERVE > 0:
                 _b = self.ctx.budget
-                if _b.dollars >= _b.max_dollars * (1.0 - _SYNTHESIS_RESERVE):
+                if (_b.max_dollars is not None
+                        and _b.dollars >= _b.max_dollars * (1.0 - _SYNTHESIS_RESERVE)):
                     bb.post(
                         self.name, "note",
                         f"stopping at ${_b.dollars:.2f}/${_b.max_dollars:.2f} to "
@@ -3803,26 +4449,34 @@ class Agent:
                 messages.append({"role": "user", "content": _prm_note})
                 self._last_prm_nudge_step = step
 
-            from .compaction.plugins import compact_with
-            # Some opt-in strategies make provider calls, so apply the same
-            # pre-spend gate and budget object to compaction as the main turn.
-            self.ctx.budget.check()
-            messages = compact_with(
-                messages, llm=self.ctx.llm,
-                conversation_id=str(getattr(self.ctx, "goal_id", "") or ""),
-                budget=self.ctx.budget,
-                scope=self.domain,
-            )
-
+            from .compaction.plugins import compact_with_async
             try:
+                # Optional strategy I/O shares the same wall/halt guard and
+                # caller budget as the primary completion. No detached calls.
+                self.ctx.budget.check()
+                messages = await self._await_wall_clock_guarded(
+                    lambda messages=messages: compact_with_async(
+                        messages, llm=self.ctx.llm,
+                        conversation_id=str(getattr(self.ctx, "goal_id", "") or ""),
+                        budget=self.ctx.budget, scope=self.domain,
+                    ),
+                    in_flight_note="compacting context",
+                )
+                # Check even when compaction finished in the same poll as a
+                # halt: a completed optional request cannot authorize another.
+                killswitch.check()
                 # Stop BEFORE spending another call when the cap is already
                 # hit. record_tokens() only checks AFTER the response lands,
                 # so a goal at 99% of budget would otherwise still fire one
                 # more (potentially expensive) call.
                 self.ctx.budget.check()
                 # Pass effort only when configured (None by default) so the call
-                # signature is unchanged when the feature is off.
-                _effort_kw = {"effort": self.effort} if self.effort else {}
+                # signature is unchanged when the feature is off. Likewise the
+                # answer preview: the chat's root turn streams, nothing else does.
+                _turn_kw = {"effort": self.effort} if self.effort else {}
+                _preview = self._answer_stream_for_turn()
+                if _preview is not None:
+                    _turn_kw["on_delta"] = _preview
                 resp = await self._complete_guarded(
                     system=self.system,
                     messages=messages,
@@ -3831,8 +4485,14 @@ class Agent:
                     max_tokens=self._turn_max_tokens(),
                     thinking_budget=self._thinking_budget(),
                     model=self._speculative_turn_model(),
-                    **_effort_kw,
+                    **_turn_kw,
                 )
+                if _preview is not None:
+                    # Only a normal completion shows its tail: any other stop
+                    # (token or context limit, refusal, unknown) may cut mid-secret.
+                    _preview.finish(complete=getattr(resp, "stop_reason", None)
+                                    in {"end_turn", "stop_sequence", "tool_use", "stop",
+                                        "eos_token"})
             except BudgetExceeded as e:
                 label = _budget_error_label(e)
                 bb.post(self.name, "error", f"{label}: {e}")
@@ -3853,6 +4513,32 @@ class Agent:
                 bb.post(self.name, "error", f"halted: {e}")
                 return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
                                    stop_kind="killswitch", stop_detail=str(e))
+
+            # A provider token cutoff is not a completed answer, even if its
+            # partial text already contains FINAL. Incomplete tool arguments
+            # cannot be dispatched or installed as orphan tool-use history.
+            if resp.stop_reason in {"max_tokens", "length"}:
+                truncated_responses += 1
+                if truncated_responses >= 3:
+                    return AgentResult(
+                        error="model response remained incomplete after token cutoffs",
+                        role=self.role, name=self.name, stop_kind="incomplete",
+                        stop_detail="provider output token limit",
+                        verifier_confidence=0.0,
+                    )
+                if resp.text:
+                    messages.append({"role": "assistant", "content": resp.text})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your previous response was cut off by the provider's output limit. "
+                        "No tool calls from that response ran. Produce a complete, concise "
+                        "answer using FINAL: <answer>, or issue complete tool calls."
+                    ),
+                })
+                continue
+
+            truncated_responses = 0
 
             # May 26 smoke fix: when the response contains BOTH a FINAL:
             # marker AND tool_use blocks, the model is confused. If
@@ -4130,6 +4816,7 @@ class Agent:
                     # orchestrator deems the FINAL low-risk and skips the LLM
                     # verifier. Distinct from "attempted but did not complete".
                     verification_skipped = False
+                    _skip_reason = ""
                     # Only the orchestrator's FINAL is verified. Sub-agents
                     # answer to their parent; the parent is their verifier.
                     if (
@@ -4351,19 +5038,30 @@ class Agent:
                                 messages.append({"role": "user", "content": critique})
                                 continue
 
+                        _coding_on = bool(coding_cfg and coding_cfg.enabled)
+                        _tool_calls = self.ctx.budget.tool_calls
                         if (
                             _risk_proportional_verify_enabled()
                             and _final_is_low_risk(
-                                final,
-                                coding=bool(coding_cfg and coding_cfg.enabled),
-                                tool_calls=self.ctx.budget.tool_calls,
+                                final, coding=_coding_on, tool_calls=_tool_calls,
                             )
                         ):
                             verification_skipped = True
+                            _skip_reason = "risk-proportional: low-risk answer"
                             bb.post(
                                 self.name, "verify",
                                 "verification skipped (risk-proportional: "
                                 "low-risk answer, no tools/code)",
+                            )
+                        elif self._conversational_answer_skips_verification(
+                            final, coding=_coding_on, tool_calls=_tool_calls,
+                        ):
+                            verification_skipped = True
+                            _skip_reason = "conversational answer, no tools or code"
+                            bb.post(
+                                self.name, "verify",
+                                "verification skipped (conversational answer: "
+                                "no tools, no code)",
                             )
                         else:
                             try:
@@ -4478,7 +5176,9 @@ class Agent:
                     self._score_step(step_index=step, is_final=True)
                     if verification_skipped:
                         _vconf, _vcrit = 0.9, (
-                            "verification skipped (risk-proportional: low-risk answer)"
+                            "verification skipped ("
+                            + (_skip_reason or "risk-proportional: low-risk answer")
+                            + ")"
                         )
                     elif verdict is not None:
                         _vconf, _vcrit = verdict.confidence, verdict.critique
@@ -4584,7 +5284,7 @@ class Agent:
             # MAVERICK_PARALLEL_TOOLS=0.
             run_parallel = (
                 len(resp.tool_calls) > 1
-                and os.environ.get("MAVERICK_PARALLEL_TOOLS", "1") != "0"
+                and _env_or_config("MAVERICK_PARALLEL_TOOLS", "agent", "parallel_tools", "1") != "0"
                 and all(self._is_parallel_safe(tc.name) for tc in resp.tool_calls)
             )
 
@@ -4656,20 +5356,38 @@ class Agent:
                 from . import killswitch as _ks
                 from .budget import BudgetExceeded as _BE
                 _norm: list[str] = []
+                _tool_stop: Exception | None = None
                 for o in outputs:
-                    if isinstance(o, (_BE, _ks.Halted)):
-                        # #612: re-raise as a stop, but first answer every
-                        # tool_use this turn emitted so the history isn't left
-                        # with orphan tool_use blocks for a resume/parent.
-                        _answer_pending_tool_uses(
-                            f"ERROR: tool not executed ({type(o).__name__})"
+                    if isinstance(o, (_BE, _ks.Halted, AuditRefused)):
+                        # Keep budget/halt precedence, but finish normalizing:
+                        # every sibling already ran under gather, and a stop
+                        # may have occurred after its own dispatch began.
+                        if _tool_stop is None or (
+                            isinstance(_tool_stop, AuditRefused)
+                            and not isinstance(o, AuditRefused)
+                        ):
+                            _tool_stop = o
+                        _stop_reason = "audit refused" if isinstance(o, AuditRefused) else type(o).__name__
+                        _norm.append(
+                            f"ERROR: tool interrupted ({_stop_reason}); "
+                            "reconcile state before retrying"
                         )
-                        raise o
+                        continue
                     _norm.append(
                         o if isinstance(o, str)
                         else f"ERROR: tool raised {type(o).__name__}: {o}"
                     )
                 outputs = _norm
+                if _tool_stop is not None:
+                    # Concurrent siblings may already have completed. Preserve
+                    # their actual results, answer every tool_use, and stop
+                    # before another model turn; never label them unexecuted.
+                    tool_results.extend(
+                        self._make_tool_result(tc.id, output)
+                        for tc, output in zip(resp.tool_calls, outputs, strict=False)
+                    )
+                    messages.append({"role": "user", "content": tool_results})
+                    raise _tool_stop
                 # Preserve original call order in the results (matched by
                 # tool_use_id, but ordering keeps traces readable).
                 for tc, output in zip(resp.tool_calls, outputs, strict=False):
@@ -4725,9 +5443,11 @@ class Agent:
                     # so the stop still halts the run cleanly.
                     try:
                         output = await self._run_tool(tc.name, tc.input)
-                    except (BudgetExceeded, killswitch.Halted):
+                    except (AuditRefused, BudgetExceeded, killswitch.Halted) as exc:
+                        _stop_reason = "audit refused" if isinstance(exc, AuditRefused) else type(exc).__name__
                         _answer_pending_tool_uses(
-                            "ERROR: tool not executed (run stopped)"
+                            f"ERROR: tool interrupted ({_stop_reason}); "
+                            "reconcile state before retrying"
                         )
                         raise
                     if tc.name == "ask_user":
@@ -4789,6 +5509,9 @@ class Agent:
             # render problem break the turn.
             if tool_results and _BB_TURN_DELTA_ENTRIES:
                 try:
+                    if (tracker := getattr(self.ctx, "ifc", None)) is not None:
+                        tracker.read_blackboard(
+                            self.name, bb.posters_since(getattr(self, "_bb_cursor", 0)))
                     _bb_delta, self._bb_cursor = bb.render_since(
                         getattr(self, "_bb_cursor", 0), exclude_agent=self.name,
                         max_entries=_BB_TURN_DELTA_ENTRIES,
@@ -4804,7 +5527,7 @@ class Agent:
                             + _bb_delta
                         ),
                     })
-            remaining = self.max_steps - 1 - step
+            remaining = self.max_steps - 1 - step if self.max_steps is not None else 0
             if tool_results and _STEP_BUDGET_WARNING and 0 < remaining <= _STEP_BUDGET_WARNING:
                 tool_results.append({
                     "type": "text",
@@ -4816,6 +5539,10 @@ class Agent:
                     ),
                 })
             messages.append({"role": "user", "content": tool_results})
+            # Speculative tool execution (opt-in via [tools] speculative):
+            # while the model reads these results, re-run the side-effect-free
+            # reads this agent keeps repeating so the next ask is a cache hit.
+            self._maybe_speculate_reads()
 
             if blocked:
                 return AgentResult(blocked_on_user=True, role=self.role, name=self.name)

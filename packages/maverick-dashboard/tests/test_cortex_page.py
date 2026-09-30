@@ -110,10 +110,11 @@ def test_what_it_holds_has_one_card_per_source_with_counts_and_posture(monkeypat
     assert 'data-count="skills">12<' in body and 'data-count="verified">3<' in body
     assert 'data-count="models">2<' in body and 'data-count="lines">9<' in body
     assert 'data-count="entries">40<' in body and 'data-count="approvals">10<' in body
-    assert "finance · policies" in body
+    assert "Finance · Policies" in body
     assert 'data-at-rest="true"' in body and 'data-per-tenant="false"' in body
     assert 'data-tenant-floored="true"' in body and 'data-pooled="false"' in body
-    assert "floored to the active tenant" in body
+    assert "floored to the active tenant" not in body
+    assert "only looks at this workspace’s own information" in body
     assert "4 of 5 sources answering" in body
 
 
@@ -121,8 +122,10 @@ def test_recall_form_is_labelled_and_bounded(monkeypatch) -> None:
     body = _app(monkeypatch).get(page.PAGE_PATH).text
     assert 'id="ctx-recall-form"' in body
     assert 'for="ctx-query"' in body and 'id="ctx-query"' in body and 'maxlength="2000"' in body
-    assert 'for="ctx-domain"' in body and 'id="ctx-domain"' in body
-    assert 'for="ctx-k"' in body and 'id="ctx-k"' in body and 'max="50"' in body
+    assert 'for="ctx-domain"' in body and '<select class="select" id="ctx-domain"' in body
+    assert '<option value="">All areas</option>' in body
+    assert 'for="ctx-k"' in body and 'id="ctx-k"' in body and 'data-max="50"' in body
+    assert '<option value="50">Up to 50</option>' in body
     for source in ("knowledge", "skills", "lessons", "record", "fleet"):
         assert f'name="sources" value="{source}"' in body
     assert 'id="ctx-recall-state"' in body and 'role="status"' in body
@@ -134,12 +137,12 @@ def test_recent_reads_and_writes_come_from_the_audit_tail_newest_first(monkeypat
     assert "read_file" not in body
     first = body.index('data-kind="cortex_deposit"')
     assert first < body.rindex('data-kind="cortex_recall"')
-    assert "user:jo" in body and "agent:copilot" in body
+    assert 'title="user:jo">jo<' in body and 'title="agent:copilot">copilot<' in body
     assert "2026-01-01 00:00:00 UTC" in body
-    assert "knowledge 2" in body and "skills 1" in body
-    assert "fleet memory answers enrolled external agents" in body
-    assert "agent not on the roster" in body
-    assert "3 hits" in body and "12 ms" in body
+    assert "Documents: 2" in body and "Skills: 1" in body
+    assert "<strong>Outside assistants&#39; notes</strong>: fleet memory answers enrolled external agents" in body
+    assert "Agent not on the roster" in body
+    assert "3 results" in body and " ms" not in body
 
 
 def test_recent_reads_need_the_audit_permission(monkeypatch) -> None:
@@ -167,7 +170,8 @@ def test_a_broken_status_degrades_instead_of_failing_the_page(monkeypatch) -> No
     monkeypatch.setattr(page, "_status", _boom)
     response = client.get(page.PAGE_PATH)
     assert response.status_code == 200
-    assert "world model unavailable" in response.text
+    assert "world model unavailable" not in response.text
+    assert "could not check its knowledge sources" in response.text
     assert "0 of 5 sources answering" in response.text
 
 
@@ -266,3 +270,35 @@ def test_cortex_script_is_served_same_origin(monkeypatch) -> None:
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/javascript")
     assert b"cortex-lattice" in r.content
+
+
+def test_page_speaks_plainly_and_offers_to_turn_sources_on(monkeypatch) -> None:
+    from test_support.plain_language import developer_terms
+
+    monkeypatch.setattr(page, "_departments", lambda: [{"value": "finance", "label": "Finance"}])
+    body = _app(monkeypatch).get(page.PAGE_PATH).text
+    assert developer_terms(body) == []
+    for label in ("Documents", "Skills", "Lessons", "Decision history"):
+        assert f"> {label}</label>" in body
+    assert '<option value="finance">Finance</option>' in body
+    # fleet is off: an administrator gets a confirmed turn-on button that uses
+    # the existing admin-only feature switch
+    assert 'data-cortex-switch="fleet_memory"' in body
+    assert 'data-cortex-switch="self_harness"' not in body  # lessons already on
+    status = dict(_STATUS, sources=dict(_STATUS["sources"], knowledge={"available": False}))
+    body = _app(monkeypatch, status=status).get(page.PAGE_PATH).text
+    assert 'href="/knowledge-access">Add or connect documents' in body
+
+
+def test_turn_on_buttons_are_hidden_without_global_admin(monkeypatch) -> None:
+    monkeypatch.setattr(page, "has_global_permission", lambda request, perm: False)
+    body = _app(monkeypatch).get(page.PAGE_PATH).text
+    assert "data-cortex-switch=" not in body
+    assert "Ask an administrator to turn this on." in body
+
+
+def test_a_source_error_is_plain(monkeypatch) -> None:
+    status = dict(_STATUS, sources=dict(_STATUS["sources"], skills={"error": "OperationalError: no such table"}))
+    body = _app(monkeypatch, status=status).get(page.PAGE_PATH).text
+    assert "OperationalError" not in body
+    assert "This source could not be reached right now." in body

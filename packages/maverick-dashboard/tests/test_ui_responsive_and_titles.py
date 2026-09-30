@@ -68,7 +68,7 @@ def test_mobile_topbar_cannot_widen_the_document(monkeypatch, tmp_path):
     ("/spend", "Spend · Lightwork"),
     ("/plugins", "Plugins · Lightwork"),
     ("/channels", "Channels · Lightwork"),
-    ("/audit", "Audit log · Lightwork"),
+    ("/audit", "Activity log · Lightwork"),
     ("/mcp", "Tool servers · Lightwork"),
 ])
 def test_page_titles_carry_app_name(monkeypatch, tmp_path, path, fragment):

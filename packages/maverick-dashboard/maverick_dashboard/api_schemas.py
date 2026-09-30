@@ -161,14 +161,17 @@ class GoalIn(BaseModel):
     # REST caller is a cost / DB-bloat amplification vector. 16k chars is ample
     # for a goal brief; oversized payloads get a 422 rather than silent bloat.
     description: str = Field("", max_length=GOAL_DESCRIPTION_MAX_LENGTH)
-    max_dollars: float = Field(5.0, ge=0.0, le=100.0)
-    max_wall_seconds: float = Field(3600.0, ge=1.0, le=86400.0)
+    max_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
+    max_wall_seconds: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     max_depth: int = Field(3, ge=1, le=5)
     template: str | None = None
     params: dict[str, str] | None = None
     # Run the goal AS a specialist pack: the orchestrator inherits a domain
     # stamped on the goal row (persona + capability envelope + compartment).
     domain: str | None = Field(None, max_length=120)
+    # Director mode: an autonomy level from [director] profiles. It can only
+    # tighten consent and review checkpoints and lower the spending cap.
+    director_profile: str | None = Field(None, max_length=40)
 
 
 class GoalOut(BaseModel):
@@ -177,6 +180,10 @@ class GoalOut(BaseModel):
     title: str
     description: str | None = None
     result: str | None = None
+    # How risky the task's wording looks ("medium"/"high"; absent when low),
+    # and why in plain words. A reading of the words, not of the actions.
+    risk_tier: str | None = None
+    risk_reasons: str | None = None
 
 
 class ScheduleIn(BaseModel):
@@ -188,6 +195,8 @@ class ScheduleIn(BaseModel):
     params: dict[str, str] | None = None
     text: str | None = None
     title: str | None = Field(None, max_length=200)
+    # IANA time zone the cron's hours are read in (empty = UTC).
+    tz: str | None = Field(None, max_length=64)
 
 
 class ScheduleOut(BaseModel):
@@ -199,6 +208,8 @@ class ScheduleOut(BaseModel):
     # Stable across cron re-arms (the job id changes each occurrence); used to
     # group a schedule's run history. Empty for schedules armed before v15.
     schedule_id: str = ""
+    # IANA time zone of the timetable; empty means UTC.
+    zone: str = ""
 
 
 class ImportRunIn(BaseModel):
@@ -303,8 +314,10 @@ class EventTriggerOut(BaseModel):
 
 class LearningToggleIn(BaseModel):
     """Turn the whole self-learning loop on/off from the dashboard (writes the
-    learning knobs to the config overlay)."""
+    learning knobs to the config overlay), or only the one learning system
+    named by ``subsystem`` (a key of ``LEARNING_SUBSYSTEMS``)."""
     enabled: bool
+    subsystem: str | None = Field(default=None, max_length=64)
 
 
 class DgmToggleIn(BaseModel):
@@ -508,6 +521,11 @@ class FlowRunIn(BaseModel):
     # Optional caller-supplied dedup key: a repeat POST with the same key returns
     # the existing run instead of starting a second one (double-click / retry safe).
     idempotency_key: str = Field(default="", max_length=200)
+    # Bind input review to one publication epoch, including same-content
+    # republishes. Empty/omitted retains the legacy current-release behavior.
+    expected_release_id: str = Field(
+        default="", strict=True, max_length=64, pattern=r"^(?:[0-9a-f]{64})?$",
+    )
 
 
 class FlowApprovalPreviewIn(BaseModel):
@@ -625,7 +643,7 @@ class HaltIn(BaseModel):
 class FleetRunIn(BaseModel):
     agent: str = Field(..., max_length=64)
     prompt: str = Field(..., max_length=8000)
-    max_dollars: float | None = Field(None, ge=0.0, le=100.0)
+    max_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
 
 
 class FleetAgentIn(BaseModel):
@@ -664,7 +682,7 @@ class ChildIn(BaseModel):
 class ComposeIn(BaseModel):
     title: str = Field(..., max_length=200)
     steps: list[str] = Field(default_factory=list)
-    budget_dollars: float | None = Field(None, ge=0.0, le=100.0)
+    budget_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     channel: str | None = Field(None, max_length=64)
     priority: str | None = Field(None, max_length=16)
 
@@ -694,8 +712,8 @@ class WorkflowSaveIn(BaseModel):
     title: str = Field(..., max_length=200)
     body: str = Field(..., max_length=20000)
     params: list[str] = Field(default_factory=list)
-    budget_dollars: float = Field(5.0, ge=0.0, le=100.0)
-    budget_wall_seconds: float = Field(3600.0, ge=1.0, le=86400.0)
+    budget_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
+    budget_wall_seconds: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     overwrite: bool = False
     expected_generation: int | None = Field(None, ge=0)
 
@@ -721,14 +739,15 @@ class ActiveTenantIn(BaseModel):
 
 
 class TenantCreateIn(BaseModel):
-    """Provision a new tenant (admin only)."""
-    id: str = Field(..., max_length=128)
+    """Provision a new tenant (admin only). Leave ``id`` empty to derive a
+    unique one from ``display_name`` (the dashboard asks only for a name)."""
+    id: str = Field("", max_length=128)
     plan: str = Field("free", pattern="^(free|pro|enterprise)$")
     display_name: str = Field("", max_length=200)
     max_daily_dollars: float = Field(
         DEFAULT_TENANT_DAILY_DOLLARS,
         ge=0.0,
-        description="Daily USD spend cap; 0 explicitly selects unlimited.",
+        description="Daily USD spend cap; 0 (the default) means no cap.",
     )
 
 

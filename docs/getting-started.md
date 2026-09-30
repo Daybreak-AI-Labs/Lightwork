@@ -97,6 +97,11 @@ maverick doctor
 
 The wizard takes ~2 minutes. It writes `~/.maverick/config.toml` and `~/.maverick/.env`.
 
+New setup leaves ordinary task limits unset unless you choose one. Existing
+numeric settings are preserved; **Settings → Task limits** can disable saved
+task defaults reversibly. Usage remains metered, and organization allowances
+remain independent. See [task limits and spend accounting](task-limits.md).
+
 Then:
 
 ```bash
@@ -147,7 +152,12 @@ maverick answer 3 "May 15-29"
 maverick resume
 ```
 
-Goals survive restarts. You can shut your laptop and come back tomorrow.
+Goal records survive restarts. Restoring an ordinary agent's saved execution
+state requires `[durable] enabled = true` or `MAVERICK_DURABLE=1`; without it,
+retained goal context is not an execution checkpoint. An uncertain external
+action or provider charge needs reconciliation before retry. Durable workflow
+frames preserve supported continuation boundaries, not arbitrary external
+effects. See [workflow progress and retry](task-limits.md#workflow-progress-and-retry).
 
 ## Undoing a run's file edits
 
@@ -199,11 +209,13 @@ The same agent-factory flow runs when you build a pack conversationally:
 maverick onboard
 ```
 
-On approval, `onboard` now provisions the pack — it installs the catalog skills
-its workflow needs and synthesizes any declared tools that aren't built in, so a
-freshly approved specialist is equipped to do its job from the first run. (This
-step honors the `[self_learning]` / `provision_packs` config and never widens the
-pack's clamped envelope.)
+On approval, `onboard` can provision catalog skills and synthesize declared tools
+when `[self_learning]` / `provision_packs` permits it. This does not provision
+third-party credentials or establish that an external adapter is available.
+Deployment checks the assembled tool registry, including custom adapters, and
+refuses a workflow whose required tools are missing. Complete the reported
+adapter, enablement or approved-export prerequisites before running the pack.
+Provisioning never widens its capability envelope.
 
 ## Voice input (built-in, offline)
 

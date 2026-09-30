@@ -2722,6 +2722,47 @@ def test_retry_from_failure_resumes_at_failed_node(monkeypatch, tmp_path):
     assert c.post("/api/v1/flows/runs/ry/retry?from_failure=1").status_code == 409
 
 
+def test_budget_held_run_requires_explicit_larger_allowance_and_retains_work(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import execution
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    calls = []
+
+    def factory(_world, **_kwargs):
+        def run(brief, _data):
+            calls.append(brief)
+            return brief, 1.0
+        return run
+
+    monkeypatch.setattr(execution, "default_agent_runner", factory)
+    monkeypatch.setattr(execution, "default_action_runner", lambda *_a, **_k: lambda *_: ("", 1))
+    c = _client()
+    flow = {"id": "allowance", "name": "allowance", "start": "a", "max_dollars": 5, "nodes": [
+        {"id": "a", "kind": "agent", "brief": "first", "next": "b", "output": "first"},
+        {"id": "b", "kind": "agent", "brief": "second", "output": "second"},
+    ]}
+    assert c.post("/api/v1/flows", json={"flow": flow}).status_code == 201
+    _publish(c, "allowance")
+    rid = c.post("/api/v1/flows/allowance/run", json={"data": {}}).json()["run_id"]
+    _drain(aq)
+    run = c.get(f"/api/v1/flows/runs/{rid}").json()
+    assert run["status"] == "budget_limited" and calls == ["first"]
+    with c.stream("GET", f"/api/v1/flows/runs/{rid}/events") as stream:
+        frames = "".join(stream.iter_text())
+    assert "event: terminal" in frames and '"budget_limited"' in frames
+    url = f"/api/v1/flows/runs/{rid}/retry?from_failure=1"
+    assert c.post(url).status_code == 409
+    assert c.post(url + "&budget_limit_dollars=5").status_code == 409
+    assert c.post(url + "&budget_limit_dollars=nan").status_code == 422
+    assert c.post(url + "&budget_limit_dollars=10").status_code == 200
+    _drain(aq)
+    run = c.get(f"/api/v1/flows/runs/{rid}").json()
+    assert run["status"] == "completed" and calls == ["first", "second"]
+    assert run["cost_dollars"] == 10 and run["budget_limit_dollars"] == 10
+
+
 def test_run_events_stream_ends_with_terminal_snapshot(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import store
@@ -2765,7 +2806,7 @@ def test_run_viewer_page_renders(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/flows/demo/runs/abc123")
     assert r.status_code == 200
-    assert 'id="fr-steps"' in r.text and "open in designer" in r.text
+    assert 'id="fr-steps"' in r.text and "Open the flow" in r.text
 
 
 def test_designer_page_has_copilot_and_toolbar(monkeypatch, tmp_path):
@@ -2973,3 +3014,18 @@ def test_flow_crud_admin_keeps_unscoped_access(monkeypatch, tmp_path):
     saved = c.get("/api/v1/flows/demo").json()
     assert saved["name"] == "Admin edit"
     assert saved["owner"] == "user:alice"
+
+
+def test_run_viewer_and_results_pages_read_plainly(monkeypatch, tmp_path):
+    from test_support.plain_language import developer_terms
+
+    _isolate(monkeypatch, tmp_path)
+    run_page = _client().get("/flows/demo/runs/abc123").text
+    results = _client().get("/flows/analytics").text
+    for text in (run_page, results):
+        assert developer_terms(text) == []
+    for phrase in ("Approve exact operation", "Target commitment", "Credential revision",
+                   "JSON.stringify(card.budget", "No such run (or not yours)"):
+        assert phrase not in run_page
+    assert "Information in this run" in run_page and "Technical details" in run_page
+    assert "Typical time" in results and ">p50<" not in results

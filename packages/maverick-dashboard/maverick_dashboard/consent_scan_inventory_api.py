@@ -10,6 +10,8 @@ an explicit administrator action.
 from __future__ import annotations
 
 import hashlib
+import time
+import uuid
 from collections.abc import Mapping
 from typing import Annotated, Any
 
@@ -65,16 +67,20 @@ class PropertyIn(_StrictModel):
 
 
 class ScanLimitsIn(_StrictModel):
-    max_pages: int = Field(default=100, ge=1, le=10_000)
-    max_depth: int = Field(default=4, ge=0, le=20)
-    page_timeout_seconds: int = Field(default=30, ge=1, le=300)
-    max_network_events: int = Field(default=5_000, ge=1, le=100_000)
+    # Omitted limits take the installation's scan limits (Settings > All
+    # settings), and every limit is lowered to the installation's cap.
+    max_pages: int | None = Field(default=None, ge=1, le=10_000)
+    max_depth: int | None = Field(default=None, ge=0, le=20)
+    page_timeout_seconds: int | None = Field(default=None, ge=1, le=300)
+    max_network_events: int | None = Field(default=None, ge=1, le=100_000)
     settle_milliseconds: int = Field(default=1_000, ge=0, le=30_000)
 
 
 class ScheduleIn(_StrictModel):
     property_id: OpaqueId
-    interval_seconds: int = Field(ge=300, le=2_592_000)
+    # Required unless the installation sets a scan interval; a shorter one is
+    # raised to the installation's shortest interval.
+    interval_seconds: int | None = Field(default=None, ge=300, le=2_592_000)
     next_due_at: float = Field(gt=0, lt=100_000_000_000.0)
     expected_revision: int = Field(ge=0, le=2**31 - 1)
     idempotency_key: IdempotencyKey
@@ -132,6 +138,33 @@ class ReviewIn(_StrictModel):
     vendor_id: OpaqueId | None = None
     purpose_ids: list[OpaqueId] = Field(default_factory=list, max_length=128)
     authority_expected_revision: int = Field(default=0, ge=0, le=2**31 - 1)
+
+
+class ReviewRequestIn(_StrictModel):
+    """A registry-changing review waiting for a different person's approval."""
+
+    classification: Annotated[
+        str,
+        StringConstraints(
+            strict=True,
+            pattern=r"^(essential|functional|analytics|advertising|other)$",
+        ),
+    ]
+    registry_action: Annotated[
+        str,
+        StringConstraints(strict=True, pattern=r"^(approved|blocked|retired)$"),
+    ]
+    report_id: OpaqueId
+    valid_until: float = Field(gt=0, lt=100_000_000_000.0)
+    expected_version: int = Field(ge=0, le=2**31 - 1)
+    tracker_id: OpaqueId
+    vendor_id: OpaqueId
+    purpose_ids: list[OpaqueId] = Field(default_factory=list, max_length=128)
+    authority_expected_revision: int = Field(default=0, ge=0, le=2**31 - 1)
+
+
+class RunDueIn(_StrictModel):
+    limit: int = Field(default=5, ge=1, le=20)
 
 
 class BridgeIn(_StrictModel):
@@ -353,8 +386,15 @@ async def put_schedule(
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
     ops, tenant, inventory = _authority()
-    from maverick.consent_scanner import ScanLimits
+    from dataclasses import asdict
 
+    from maverick.consent_scanner import ConsentScannerConfigError, ScanLimits, default_scan_limits
+
+    try:
+        defaults = asdict(default_scan_limits())
+    except ConsentScannerConfigError as exc:
+        raise HTTPException(status_code=503, detail="scanner settings are invalid") from exc
+    explicit = {k: v for k, v in body.limits.model_dump().items() if v is not None}
     payload = body.model_dump(exclude={"property_id", "limits"})
     return await _call(
         ops,
@@ -362,7 +402,7 @@ async def put_schedule(
         tenant,
         schedule_id,
         body.property_id,
-        limits=ScanLimits(**body.limits.model_dump()),
+        limits=ScanLimits(**{**defaults, **explicit}),
         **payload,
     )
 
@@ -596,18 +636,12 @@ async def discoveries(
     return {**result, "unknowns_auto_enforced": False}
 
 
-@router.post("/properties/{property_id}/discoveries/{tracker_key}/review")
-async def review_discovery(
-    request: Request,
-    property_id: ObjectPath,
-    tracker_key: DigestPath,
-    body: ReviewIn,
-) -> dict[str, Any]:
-    """Record a review using server-derived primary reviewer and finding evidence."""
+async def _finding_evidence(
+    ops, tenant: str, inventory, property_id: str, tracker_key: str, report_id: str
+) -> str:
+    """The finding's evidence fingerprint, taken from the stored report only."""
 
-    require_global_permission(request, "admin")
-    ops, tenant, inventory = _authority()
-    report = await _call(ops, inventory.get_report, tenant, body.report_id)
+    report = await _call(ops, inventory.get_report, tenant, report_id)
     if report.get("property_id") != property_id:
         raise HTTPException(status_code=422, detail="review report property does not match")
     scanner_report = report.get("scanner_report")
@@ -622,6 +656,23 @@ async def review_discovery(
     )
     if not isinstance(finding, Mapping) or not isinstance(finding.get("evidence_sha256"), str):
         raise HTTPException(status_code=422, detail="review evidence is unavailable")
+    return str(finding["evidence_sha256"])
+
+
+@router.post("/properties/{property_id}/discoveries/{tracker_key}/review")
+async def review_discovery(
+    request: Request,
+    property_id: ObjectPath,
+    tracker_key: DigestPath,
+    body: ReviewIn,
+) -> dict[str, Any]:
+    """Record a review using server-derived primary reviewer and finding evidence."""
+
+    require_global_permission(request, "admin")
+    ops, tenant, inventory = _authority()
+    evidence = await _finding_evidence(
+        ops, tenant, inventory, property_id, tracker_key, body.report_id
+    )
     payload = body.model_dump(exclude={"report_id"})
     result = await _call(
         ops,
@@ -630,7 +681,7 @@ async def review_discovery(
         property_id,
         tracker_key,
         reviewer_sha256=_reviewer_sha256(request, tenant),
-        evidence_sha256=finding["evidence_sha256"],
+        evidence_sha256=evidence,
         report_id=body.report_id,
         **payload,
     )
@@ -750,6 +801,243 @@ async def status(request: Request) -> dict[str, Any]:
             "stop_requested": scheduler_status.get("stop_requested") is True,
             "tenant_bound_metrics_exposed": False,
         },
+    }
+
+
+def _review_requests(tenant_id: str):
+    from maverick.paths import data_dir
+
+    from .consent_scan_review_requests import ScanReviewRequestStore
+
+    return ScanReviewRequestStore(
+        data_dir(
+            "consent_preferences",
+            "consent-scan-review-requests.sqlite3",
+            tenant=tenant_id,
+        )
+    )
+
+
+async def _request_call(function, *args, **kwargs) -> Any:
+    from .consent_scan_review_requests import (
+        ScanReviewRequestConflict,
+        ScanReviewRequestError,
+        ScanReviewRequestNotFound,
+    )
+
+    try:
+        return await run_in_threadpool(function, *args, **kwargs)
+    except ScanReviewRequestNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ScanReviewRequestConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ScanReviewRequestError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/properties/{property_id}/discoveries/{tracker_key}/review-requests", status_code=201)
+async def request_two_person_review(
+    request: Request,
+    property_id: ObjectPath,
+    tracker_key: DigestPath,
+    body: ReviewRequestIn,
+) -> dict[str, Any]:
+    """File a registry-changing review for a different administrator to approve.
+
+    Replaces typing a second reviewer's fingerprint: the second reviewer is
+    whoever approves, authenticated by their own session.
+    """
+
+    require_global_permission(request, "admin")
+    ops, tenant, inventory = _authority()
+    await _finding_evidence(ops, tenant, inventory, property_id, tracker_key, body.report_id)
+    store = await run_in_threadpool(_review_requests, tenant)
+    created = await _request_call(
+        store.create,
+        tenant,
+        property_id=property_id,
+        tracker_key=tracker_key,
+        payload=body.model_dump(),
+        proposer_sha256=_reviewer_sha256(request, tenant),
+    )
+    return _public_review_request(created, request, tenant)
+
+
+def _public_review_request(item: Mapping[str, Any], request: Request, tenant: str) -> dict:
+    public = {key: value for key, value in item.items() if key != "proposer_sha256"}
+    public["requested_by_me"] = item.get("proposer_sha256") == _reviewer_sha256(request, tenant)
+    return public
+
+
+@router.get("/review-requests")
+async def list_review_requests(
+    request: Request,
+    limit: int = Query(default=200, ge=1, le=500),
+) -> dict[str, Any]:
+    require_global_permission(request, "audit")
+    _ops_module, tenant, _inventory = _authority()
+    store = await run_in_threadpool(_review_requests, tenant)
+    items = await _request_call(store.list, tenant, limit=limit)
+    return {"items": [_public_review_request(item, request, tenant) for item in items]}
+
+
+@router.post("/review-requests/{request_id}/approve")
+async def approve_review_request(request: Request, request_id: ObjectPath) -> dict[str, Any]:
+    """Second person approves: records the review with both server-derived reviewers."""
+
+    require_global_permission(request, "admin")
+    ops, tenant, inventory = _authority()
+    store = await run_in_threadpool(_review_requests, tenant)
+    pending = await _request_call(store.get, tenant, request_id)
+    if pending["status"] != "pending":
+        raise HTTPException(status_code=409, detail="review request is no longer pending")
+    approver = _reviewer_sha256(request, tenant)
+    if approver == pending["proposer_sha256"]:
+        raise HTTPException(
+            status_code=409,
+            detail="a different person must approve this review",
+        )
+    payload = dict(pending["payload"])
+    report_id = str(payload.pop("report_id"))
+    evidence = await _finding_evidence(
+        ops, tenant, inventory, pending["property_id"], pending["tracker_key"], report_id
+    )
+    result = await _call(
+        ops,
+        inventory.review_tracker,
+        tenant,
+        pending["property_id"],
+        pending["tracker_key"],
+        reviewer_sha256=pending["proposer_sha256"],
+        second_reviewer_sha256=approver,
+        evidence_sha256=evidence,
+        report_id=report_id,
+        idempotency_key=f"review-request-{request_id}",
+        **payload,
+    )
+    await _request_call(store.decide, tenant, request_id, "approved")
+    return {
+        **result,
+        "primary_reviewer_bound_to_request_principal": True,
+        "second_reviewer_independently_authenticated_by_api": True,
+    }
+
+
+@router.post("/review-requests/{request_id}/withdraw")
+async def withdraw_review_request(request: Request, request_id: ObjectPath) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _ops_module, tenant, _inventory = _authority()
+    store = await run_in_threadpool(_review_requests, tenant)
+    decided = await _request_call(store.decide, tenant, request_id, "withdrawn")
+    return _public_review_request(decided, request, tenant)
+
+
+async def _run_claimed(request: Request, ops, tenant: str, inventory, limit: int) -> list[dict]:
+    """Claim due jobs with the server-owned worker identity and run each one.
+
+    The one-time lease token never leaves the server: this is the worker
+    protocol run behind a single button.
+    """
+
+    worker = _worker_id(request, tenant)
+    claimed = await _call(ops, inventory.claim_due, tenant, worker, limit=limit)
+    outcomes: list[dict[str, Any]] = []
+    for item in claimed.get("items", []):
+        result = await _call(
+            ops,
+            inventory.run_claim,
+            tenant,
+            item["job_id"],
+            worker,
+            item["lease_token"],
+        )
+        report = result.get("report") if isinstance(result, Mapping) else None
+        outcomes.append(
+            {
+                "job_id": item["job_id"],
+                "property_id": item.get("property_id"),
+                "succeeded": bool(result.get("succeeded")) if isinstance(result, Mapping) else False,
+                "report_id": report.get("report_id") if isinstance(report, Mapping) else None,
+                "coverage": (
+                    _coverage(report)
+                    if isinstance(report, Mapping)
+                    else {
+                        "coverage_complete": False,
+                        "truncated": False,
+                        "errors_present": True,
+                        "absence_is_proven": False,
+                    }
+                ),
+            }
+        )
+    return outcomes
+
+
+@router.post("/jobs/run-due")
+async def run_due_scans(request: Request, body: RunDueIn) -> dict[str, Any]:
+    """Queue every due schedule, then run up to ``limit`` due scans now."""
+
+    require_global_permission(request, "admin")
+    ops, tenant, inventory = _authority()
+    await _call(ops, inventory.enqueue_due, tenant, limit=100)
+    outcomes = await _run_claimed(request, ops, tenant, inventory, body.limit)
+    return {"outcomes": outcomes, "external_side_effect": bool(outcomes), "live_acceptance": False}
+
+
+@router.post("/properties/{property_id}/scan-now")
+async def scan_property_now(request: Request, property_id: ObjectPath) -> dict[str, Any]:
+    """Make this website's schedule due now and run the due scans.
+
+    The schedule keeps every setting; only its next due time moves to now,
+    so later scans follow the interval from this scan.
+    """
+
+    require_global_permission(request, "admin")
+    ops, tenant, inventory = _authority()
+    listed = await _call(ops, inventory.list_schedules, tenant, limit=500)
+    schedule = next(
+        (
+            item
+            for item in listed.get("items", [])
+            if item.get("property_id") == property_id and item.get("enabled") is True
+        ),
+        None,
+    )
+    if schedule is None:
+        raise HTTPException(
+            status_code=409,
+            detail="this website has no active scan schedule",
+        )
+    from maverick.consent_scanner import ScanLimits
+
+    clock = getattr(inventory, "_now", None)
+    now = float(clock()) if callable(clock) else time.time()
+    await _call(
+        ops,
+        inventory.put_schedule,
+        tenant,
+        schedule["schedule_id"],
+        property_id,
+        interval_seconds=schedule["interval_seconds"],
+        next_due_at=now,
+        expected_revision=schedule["revision"],
+        idempotency_key=f"scan-now-{uuid.uuid4().hex}",
+        limits=ScanLimits(**schedule["limits"]),
+        auth_secret_ref=schedule.get("auth_secret_ref"),
+        authenticated_scan_consent=bool(schedule.get("authenticated_scan_consent")),
+        max_attempts=schedule["max_attempts"],
+        retry_base_seconds=schedule["retry_base_seconds"],
+        retry_max_seconds=schedule["retry_max_seconds"],
+        lease_seconds=schedule["lease_seconds"],
+        enabled=True,
+    )
+    await _call(ops, inventory.enqueue_due, tenant, limit=100)
+    outcomes = await _run_claimed(request, ops, tenant, inventory, 10)
+    return {
+        "outcomes": outcomes,
+        "property_scanned": any(item["property_id"] == property_id for item in outcomes),
+        "external_side_effect": bool(outcomes),
+        "live_acceptance": False,
     }
 
 

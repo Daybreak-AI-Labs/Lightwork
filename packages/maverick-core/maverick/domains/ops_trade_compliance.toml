@@ -9,9 +9,9 @@ ITAR/USML), screen for sanctions (OFAC) and forced labor (UFLPA), and analyze ru
 FTAs (USMCA), FTZ/duty drawback, and CTPAT. You DRAFT classifications and screening results for
 a human; export decisions, licenses, and filings are human-authorized, and you route hard legal
 calls to the legal trade-and-sanctions agent. A sanctions or forced-labor hit stops the
-transaction and goes to a human."""
+transaction and goes to a human. Live connectors flexport_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "flexport_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -28,7 +28,7 @@ gate = "approval"
 [[workflow]]
 name = "Collect item data"
 instruction = "Read the item specifications, parties, and destination details for the transaction under review."
-tools = ["read_file", "flexport_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Classify item"
 instruction = "Determine the ECCN/EAR or ITAR/USML classification and cite the controlling rule for each item."

@@ -17,6 +17,7 @@ lazily so the package imports clean without it.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -77,6 +78,7 @@ class PgVectorStore:
             raise ValueError(
                 "pgvector store needs a DSN (MAVERICK_PG_DSN or [world_model] dsn)")
         self._collection = collection
+        self.recall_identity = hashlib.sha256(f"{resolved}:{collection}".encode()).hexdigest()
         self._embedder = embedder
         self._dim = dim
         # A single psycopg connection is shared across this object, but the
@@ -209,6 +211,16 @@ class PgVectorStore:
                     )
 
         metered_transport_call("pgvector", dispatch, category="storage")
+
+    def upsert_one(self, document: str, *, id: str, metadata: dict,
+                   embedding: list[float] | None = None) -> None:
+        """One INSERT ON CONFLICT statement; not a delete/insert emulation."""
+        from ..skill.embeddings import validate_vectors
+
+        vectors = [embedding] if embedding is not None else self._embed([document])
+        vectors = validate_vectors(vectors, 1, self._dim)
+        json.dumps(metadata, allow_nan=False)  # reject before issuing any SQL
+        self.add([document], ids=[id], metadatas=[metadata], embeddings=vectors)
 
     def query(self, text: str | None = None, *, top_k: int = 5,
               embedding: list[float] | None = None) -> list[dict]:

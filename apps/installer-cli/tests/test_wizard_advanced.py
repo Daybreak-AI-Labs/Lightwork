@@ -66,6 +66,21 @@ def test_document_engine_choices_reach_runtime_configuration(tmp_path, monkeypat
     assert not any(defaults[key] for key in ("macro_cell_edits", "native_recalculation", "pdf_ocr"))
 
 
+def test_governed_postgres_pool_toggle_writes_one_shared_table(tmp_path, monkeypatch):
+    from maverick_installer import wizard
+    for security_suite in (None, {}, {"vendor_onboarding": True}):
+        written = tomllib.loads(_write(tmp_path, monkeypatch, {
+            "governed_pg_pool": True,
+        }, security_suite=security_suite))
+        assert written["governed_records"] == {
+            "backend": "auto", "pool_size": 1, "pool_timeout_seconds": 5,
+        }
+        if security_suite is None:
+            assert "security_ops" not in written
+    defaults = tomllib.loads("\n".join(wizard._cfg_security_suite({})))
+    assert defaults["governed_records"]["pool_size"] == 0
+
+
 def test_advanced_all_off_persists_default_on_learning_opt_out(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, dict.fromkeys(
         ["cost_aware", "verify_ensemble", "tree_of_thought",
@@ -1192,7 +1207,7 @@ def test_dashboard_compress_decline_is_written_and_accept_is_the_default(tmp_pat
     off = _write(tmp_path, monkeypatch, {"dashboard_compress": False})
     assert tomllib.loads(off)["dashboard"]["compress"] is False
     on = _write(tmp_path, monkeypatch, {"dashboard_compress": True})
-    assert "compress" not in on
+    assert "compress" not in tomllib.loads(on).get("dashboard", {})
 
 
 def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
@@ -1201,7 +1216,7 @@ def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, 
     off = _write(tmp_path, monkeypatch, {"model_discovery": False})
     assert tomllib.loads(off)["models"]["discovery"] is False
     on = _write(tmp_path, monkeypatch, {"model_discovery": True})
-    assert "discovery" not in on
+    assert "discovery" not in tomllib.loads(on).get("models", {})
     from maverick_installer.wizard import _cfg_role_models
     both = "\n".join(_cfg_role_models({"coder": "openai:gpt-5.4"}, discovery=False))
     parsed = tomllib.loads(both)["models"]

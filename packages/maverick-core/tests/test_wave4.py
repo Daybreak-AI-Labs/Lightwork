@@ -234,6 +234,28 @@ def test_mcp_tool_name_validation_rejects_unsafe_names():
     assert names == {"mcp_srv__good_tool"}
 
 
+def test_mcp_registered_names_split_one_way_only():
+    """A server "a_" with tool "b" and a server "a" with tool "_b" would both
+    register as mcp_a___b; one would silently shadow the other."""
+    from types import SimpleNamespace
+
+    from maverick.mcp_tools import tools_from_mcp
+
+    def client(server, *tools):
+        return SimpleNamespace(
+            spec=SimpleNamespace(name=server), call_tool=None,
+            tools=[{"name": n, "description": "ok", "inputSchema": {}} for n in tools],
+        )
+
+    assert [t.name for t in tools_from_mcp(client("a", "_b", "b"))] == ["mcp_a__b"]
+    assert tools_from_mcp(client("a_", "b")) == []
+    assert tools_from_mcp(client("a__b", "c")) == []
+    from maverick.runtime_overrides import add_mcp_server
+    for bad in ("a_", "a__b"):
+        with pytest.raises(ValueError):
+            add_mcp_server(bad, {"url": "https://example.com/mcp"})
+
+
 # ---------- Retry-After clamp ----------
 
 def test_retry_after_negative_is_clamped(monkeypatch):
@@ -358,3 +380,19 @@ def test_env_float_rejects_non_numeric(monkeypatch):
 
 # /healthz exception-text sanitization is exercised in the dashboard
 # tests (test_api.py) since it requires importing maverick_dashboard.
+
+
+def test_mcp_tools_the_model_api_would_refuse_are_not_registered():
+    """A registered name is sent to the model as-is: a dotted or over-long one
+    would fail every model call that lists this server's tools."""
+    from types import SimpleNamespace
+
+    from maverick.mcp_tools import tools_from_mcp
+    client = SimpleNamespace(
+        spec=SimpleNamespace(name="srv"),
+        tools=[{"name": "good_tool", "description": "ok", "inputSchema": {}},
+               {"name": "dotted.name", "description": "x", "inputSchema": {}},
+               {"name": "y" * 60, "description": "x", "inputSchema": {}}],
+        call_tool=None,
+    )
+    assert {t.name for t in tools_from_mcp(client)} == {"mcp_srv__good_tool"}

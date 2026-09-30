@@ -6,15 +6,18 @@
   .cmp-stat { flex: 1 1 10rem; min-width: 9rem; padding: var(--space-3) var(--space-4);
               border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
   .cmp-stat__n { display: block; font-size: var(--text-xl); font-weight: var(--font-bold); }
-  .cmp-stat__label { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase;
-                     letter-spacing: 0.04em; }
+  .cmp-stat__label { color: var(--muted); font-size: var(--text-sm); }
   .cmp-stat--warn { border-color: var(--warn); background: var(--warn-subtle); }
   .cmp-stat--warn .cmp-stat__n { color: var(--warn); }
-  .cmp-todo { overflow-x: auto; }
+  .cmp-table { overflow-x: auto; }
+  .cmp-row { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; }
+  .cmp-row label { display: flex; flex-direction: column; gap: .25rem; }
+  .cmp-links { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
+  .cmp-grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); }
+  .cmp-list { margin: .5rem 0 0; padding-left: 1.2rem; }
+  .cmp-list li { margin: .2rem 0; }
 </style>
 
-  {# Prioritized worklist: every control the report marked action_needed,
-     computed from the same rows the reference tables below render. #}
   {% set attention = [] %}
   {% for fw, group in groups.items() %}
     {% for c in group.rows if c.status == 'action_needed' %}
@@ -22,47 +25,72 @@
     {% endfor %}
   {% endfor %}
 
+  {% macro action_button(c, g) -%}
+    {%- set a = g.action -%}
+    {%- if not a -%}
+      <span class="muted">Nothing to do</span>
+    {%- elif a.kind == 'switch' -%}
+      {%- if can_global_admin -%}
+      <button type="button" class="btn btn--primary" data-cmp-switch="{{ a.key }}"
+              data-cmp-confirm="{{ a.confirm }}">{{ a.label }}</button>
+      {%- else -%}
+      <span class="muted">An administrator can turn this on.</span>
+      {%- endif -%}
+    {%- elif a.kind == 'halt' -%}
+      <button type="button" class="btn btn--danger" data-cmp-halt>{{ a.label }}</button>
+    {%- elif a.kind == 'people' -%}
+      <a class="btn btn--ghost" href="#cmp-people">{{ a.label }}</a>
+    {%- elif a.kind == 'retention' -%}
+      <a class="btn btn--ghost" href="#cmp-retention">{{ a.label }}</a>
+    {%- elif a.kind == 'link' -%}
+      <a class="btn btn--ghost" href="{{ a.href }}">{{ a.label }}</a>
+    {%- endif -%}
+  {%- endmacro %}
+
   {% from "_hero.html" import hero, state %}
   {% call hero('Governance', 'Compliance',
-               subtitle='Control coverage, ready for action',
-               lede='Control-coverage for this deployment, mapped to GDPR +
-                     the EU AI Act + US frameworks (NIST AI RMF, Colorado AI
-                     Act, NYC Local Law 144, CCPA/CPRA). Control coverage only
-                     — not a legal attestation. Hand the export to an auditor
-                     as the evidence trail.
-                      <a href="/compliance/policy-links">Policy publication links →</a>
-                      <a href="/compliance/scoping">Compliance scoping →</a>
-                      <a href="/compliance/scope-actions">Scope actions →</a>
-                      <a href="/compliance/continuous-evidence">Continuous evidence →</a>') %}
+               subtitle='What is covered and what still needs doing',
+               lede='How your workspace measures up against privacy and AI rules: the EU
+                     General Data Protection Regulation (GDPR), the EU AI Act, the US NIST AI
+                     Risk Management Framework, the Colorado AI Act, New York City&rsquo;s
+                     hiring-tools law and the California privacy laws. This shows which
+                     protections are switched on. It is not legal advice.') %}
     {% if summary %}
     {{ state('Current state',
-             summary.get('total', 0) ~ ' controls tracked',
-             badge=(summary.get('action_needed', 0) ~ ' need action') if summary.get('action_needed', 0) else 'all covered',
+             summary.get('total', 0) ~ ' protections checked',
+             badge=(summary.get('action_needed', 0) ~ ' need action') if summary.get('action_needed', 0) else 'All covered',
              badge_class='warn' if summary.get('action_needed', 0) else 'ok',
-             copy='active: ' ~ summary.get('active', 0) ~ ' · needing action: '
-                  ~ summary.get('action_needed', 0) ~ ' — everything below is
-                  measured from this deployment, not a questionnaire.') }}
+             copy='On: ' ~ summary.get('active', 0) ~ ' · Needs action: '
+                  ~ summary.get('action_needed', 0) ~ '. Checked live from your workspace, not from a questionnaire.') }}
     {% else %}
-    {{ state('Current state', 'No report available',
-             badge='no data', badge_class='idle',
-             copy='Compliance reporting returned nothing for this deployment
-                   or filter.') }}
+    {{ state('Current state', 'Nothing to show yet',
+             badge='No data', badge_class='idle',
+             copy='The compliance check did not return any results.') }}
     {% endif %}
+    <div class="cmp-links">
+      <a class="btn btn--ghost" href="/compliance/scoping">Find which controls apply</a>
+      <a class="btn btn--ghost" href="/compliance/scope-actions">Turn scope into tasks</a>
+      <a class="btn btn--ghost" href="/compliance/continuous-evidence">Continuous evidence</a>
+      <a class="btn btn--ghost" href="/compliance/policy-links">Policy links</a>
+      <a class="btn btn--ghost" href="/compliance/obligations">Regulations and rules</a>
+    </div>
   {% endcall %}
+
+  <div id="cmp-status" class="muted" role="status" aria-live="polite"></div>
 
   {% if summary %}
   <div class="cmp-stats">
     <div class="cmp-stat{% if summary.get('action_needed', 0) %} cmp-stat--warn{% endif %}">
       <span class="cmp-stat__n">{{ summary.get('action_needed', 0) }}</span>
-      <span class="cmp-stat__label">need action</span>
+      <span class="cmp-stat__label">Need action</span>
     </div>
     <div class="cmp-stat">
       <span class="cmp-stat__n">{{ summary.get('active', 0) }}</span>
-      <span class="cmp-stat__label">active</span>
+      <span class="cmp-stat__label">Switched on</span>
     </div>
     <div class="cmp-stat">
       <span class="cmp-stat__n">{{ summary.get('total', 0) }}</span>
-      <span class="cmp-stat__label">controls tracked</span>
+      <span class="cmp-stat__label">Protections checked</span>
     </div>
   </div>
   {% endif %}
@@ -71,92 +99,79 @@
   <div class="section-head"><h2>Needs attention</h2></div>
   <div class="panel">
     {% if attention %}
-    <p class="muted" style="margin-top: 0;">
-      What to do next — each row is a control the platform measured as not yet
-      covered, with the fix in the detail column.
-    </p>
-    <div class="cmp-todo">
+    <p class="muted" style="margin-top: 0;">Each row is a protection that is not switched on yet. Use the button to fix it.</p>
+    <div class="cmp-table">
       <table>
         <thead>
           <tr>
-            <th scope="col">status</th>
-            <th scope="col">control</th>
-            <th scope="col">regulation</th>
-            <th scope="col">what to do</th>
+            <th scope="col">Protection</th>
+            <th scope="col">Rule</th>
+            <th scope="col">What it means</th>
+            <th scope="col">What to do</th>
           </tr>
         </thead>
         <tbody>
         {% for label, c in attention %}
+          {% set g = guide_for(c) %}
           <tr>
-            <td><span class="badge blocked">action needed</span></td>
-            <td>{{ c.control }} <span class="muted" style="font-size: var(--text-xs);">· {{ label }}</span></td>
-            <td><code>{{ c.regulation }}</code></td>
-            <td>{{ c.detail }}</td>
+            <td>{{ c.control }} <span class="muted">· {{ label }}</span></td>
+            <td>{{ c.regulation }}</td>
+            <td>{{ g.about }}</td>
+            <td>{{ action_button(c, g) }}</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
     {% else %}
-    <p class="muted" style="margin: 0;">
-      Nothing needs action — every measured control in this view is active or
-      available on demand.
-    </p>
+    <p class="muted" style="margin: 0;">Nothing needs action. Every protection shown here is switched on or ready when you need it.</p>
     {% endif %}
   </div>
   {% endif %}
 
-  <div class="section-head"><h2>Filter &amp; export</h2></div>
+  <div class="section-head"><h2>Filter and download</h2></div>
   <div class="panel">
-    <form method="get" action="/compliance" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
-      <label>
-        <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">framework</div>
-        <select name="framework"
-                style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
-          <option value="all" {% if framework == 'all' %}selected{% endif %}>all</option>
-          <option value="eu" {% if framework == 'eu' %}selected{% endif %}>EU (EU AI Act / GDPR)</option>
-          <option value="us" {% if framework == 'us' %}selected{% endif %}>US (NIST RMF + state/sector)</option>
+    <form method="get" action="/compliance" class="cmp-row" id="cmp-filter">
+      <label for="cmp-framework">Regulation
+        <select id="cmp-framework" name="framework" class="select">
+          <option value="all" {% if framework == 'all' %}selected{% endif %}>All regulations</option>
+          <option value="eu" {% if framework == 'eu' %}selected{% endif %}>European Union (AI Act and GDPR)</option>
+          <option value="us" {% if framework == 'us' %}selected{% endif %}>United States (federal and state)</option>
         </select>
       </label>
-      <button type="submit"
-              style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
-        filter
-      </button>
-      <span style="margin-left: auto; display: flex; gap: 0.75rem; align-items: center;">
-        <a href="/api/v1/compliance/report.md?framework={{ framework }}">export .md</a>
-        <a href="/api/v1/compliance/report.csv?framework={{ framework }}">export .csv</a>
-      </span>
+      <button type="submit" class="btn btn--ghost">Show</button>
+      <a class="btn btn--ghost" href="/api/v1/compliance/report.md?framework={{ framework }}" download>Download report</a>
+      <a class="btn btn--ghost" href="/api/v1/compliance/report.csv?framework={{ framework }}" download>Download spreadsheet</a>
     </form>
   </div>
 
   {% if groups %}
     {% for fw, group in groups.items() %}
     <div class="section-head"><h2>{{ group.label }}</h2></div>
-    <div class="panel">
+    <div class="panel cmp-table">
       <table>
         <thead>
           <tr>
-            <th scope="col">status</th>
-            <th scope="col">control</th>
-            <th scope="col">regulation</th>
-            <th scope="col">detail</th>
+            <th scope="col">Status</th>
+            <th scope="col">Protection</th>
+            <th scope="col">Rule</th>
+            <th scope="col">What it means</th>
+            <th scope="col">Action</th>
           </tr>
         </thead>
         <tbody>
         {% for c in group.rows %}
+          {% set g = guide_for(c) %}
           <tr>
             <td>
-              {% if c.status == 'active' %}
-                <span class="badge active">active</span>
-              {% elif c.status == 'action_needed' %}
-                <span class="badge blocked">action needed</span>
-              {% else %}
-                <span class="badge pending">on-demand</span>
-              {% endif %}
+              {% if c.status == 'active' %}<span class="badge active">{{ g.status_text }}</span>
+              {% elif c.status == 'action_needed' %}<span class="badge blocked">{{ g.status_text }}</span>
+              {% else %}<span class="badge pending">{{ g.status_text }}</span>{% endif %}
             </td>
             <td>{{ c.control }}</td>
-            <td><code>{{ c.regulation }}</code></td>
-            <td class="muted">{{ c.detail }}</td>
+            <td>{{ c.regulation }}</td>
+            <td class="muted">{{ g.about }}</td>
+            <td>{{ action_button(c, g) }}</td>
           </tr>
         {% endfor %}
         </tbody>
@@ -165,17 +180,96 @@
     {% endfor %}
   {% else %}
     <div class="panel">
-      <p class="muted">
-        No compliance controls to report — compliance reporting is
-        unavailable or returned nothing for this filter. Once the platform
-        is doing governed work, control coverage appears here automatically.
-      </p>
+      <p class="muted">Nothing to report for this filter. Choose &ldquo;All regulations&rdquo; above, or come back once Lightwork has done some work.</p>
+      <a class="btn btn--ghost" href="/compliance">Show all regulations</a>
     </div>
   {% endif %}
 
+  <div class="section-head"><h2 id="cmp-people">A person&rsquo;s data</h2></div>
+  <div class="panel">
+    <p class="muted" style="margin-top: 0;">Give someone a copy of everything Lightwork holds about them, or delete it all when they ask.</p>
+    {% if can_admin %}
+    <div class="cmp-row">
+      <label for="cmp-person">Person
+        <select id="cmp-person" class="select"><option value="">Loading people…</option></select>
+      </label>
+      <button type="button" class="btn btn--ghost" id="cmp-export">Download their data</button>
+      <button type="button" class="btn btn--danger" id="cmp-erase">Erase their data</button>
+    </div>
+    <p id="cmp-people-result" class="muted" role="status" aria-live="polite"></p>
+    {% include "_ops_person_documents.html" %}
+    {% else %}
+    <p class="muted">Only an administrator can export or erase a person&rsquo;s data.</p>
+    {% endif %}
+  </div>
+
+  <div class="section-head"><h2 id="cmp-retention">How long data is kept</h2></div>
+  <div class="panel">
+    <p class="muted" style="margin-top: 0;">Older records are deleted automatically. Choose a period for each kind of record.</p>
+    <form id="cmp-retention-form" class="cmp-grid">
+      {% for key, label in retention_fields %}
+      <label for="cmp-ret-{{ key }}">{{ label }}
+        <select id="cmp-ret-{{ key }}" name="{{ key }}" class="select" {% if not can_global_admin %}disabled{% endif %}>
+          <option value="">Keep until I choose</option>
+        </select>
+      </label>
+      {% endfor %}
+    </form>
+    <div class="cmp-links">
+      {% if can_global_admin %}
+      <button type="button" class="btn btn--primary" id="cmp-retention-save">Save periods</button>
+      <button type="button" class="btn btn--ghost" id="cmp-retention-apply">Delete old records now</button>
+      {% else %}
+      <span class="muted">Only an administrator can change these periods.</span>
+      {% endif %}
+    </div>
+    <p id="cmp-retention-result" class="muted" role="status" aria-live="polite"></p>
+  </div>
+
+  <div class="section-head"><h2>Reports for auditors</h2></div>
+  <div class="panel">
+    <div class="cmp-links" style="margin-top: 0;">
+      {% if can_admin %}
+      <a class="btn btn--ghost" href="/api/v1/compliance/downloads/soc2" download>Download SOC 2 snapshot</a>
+      <a class="btn btn--ghost" href="/api/v1/compliance/downloads/ai-bom" download>Download AI inventory list</a>
+      {% endif %}
+    </div>
+    {% if can_operate %}
+    <div class="cmp-row" style="margin-top: .75rem;">
+      <label for="cmp-assessment">Assessment
+        <select id="cmp-assessment" class="select"><option value="">Loading assessments…</option></select>
+      </label>
+      <button type="button" class="btn btn--ghost" id="cmp-oscal">Download results (OSCAL)</button>
+      <button type="button" class="btn btn--ghost" id="cmp-soa">Download Statement of Applicability</button>
+    </div>
+    <p id="cmp-assessment-result" class="muted" role="status" aria-live="polite"></p>
+    {% endif %}
+    {% if not can_admin and not can_operate %}<p class="muted">Ask an administrator for these reports.</p>{% endif %}
+  </div>
+
+  <div class="section-head"><h2>EU AI Act self-check</h2></div>
+  <div class="panel">
+    <p class="muted" style="margin-top: 0;">See which EU AI Act risk level usually applies to you and what each level requires.</p>
+    <button type="button" class="btn btn--ghost" id="cmp-ai-act">Run the self-check</button>
+    <div id="cmp-ai-act-result" role="status" aria-live="polite"></div>
+  </div>
+
+  <div class="section-head"><h2>Find the right control</h2></div>
+  <div class="panel">
+    <form id="cmp-finder" class="cmp-row">
+      <label for="cmp-finder-q">Describe the risk
+        <input id="cmp-finder-q" name="q" class="input" maxlength="300"
+               placeholder="For example: vendor has no data agreement">
+      </label>
+      <button type="submit" class="btn btn--ghost">Search</button>
+    </form>
+    <div id="cmp-finder-result" role="status" aria-live="polite"></div>
+  </div>
+
   {% if disclaimer %}
   <div class="panel">
-    <p class="muted" style="margin: 0;">{{ disclaimer }}</p>
+    <p class="muted" style="margin: 0;">This report shows which protections are switched on. It is not legal advice or a certificate of compliance. Full compliance also needs your own contracts, records and legal review.</p>
   </div>
   {% endif %}
+  <script src="/static/lightwork-compliance.js" defer></script>
 {% endblock %}

@@ -124,6 +124,7 @@ def open_fulfillment(request_id: str, *, actor: str) -> dict[str, Any]:
         "schema": SCHEMA,
         "request_id": request,
         "subject_id": str(dsar.get("subject_id") or ""),
+        "subject_channel": str(dsar.get("channel") or ""),
         "identity": {"status": "unverified"},
         "sources": [],
         "response": None,
@@ -338,6 +339,20 @@ def response_for_token(token: str) -> dict[str, Any] | None:
         if max_reads is not None and reads_used >= int(max_reads):
             return None
 
+        from . import dsar as dsar_export
+
+        subject = str(row.get("subject_id") or "")
+        request = _dsar_record_or_raise(str(row["request_id"]))
+        if subject != str(request.get("subject_id") or ""):
+            raise DsarFulfillmentError("Fulfillment subject no longer matches the verified request")
+        channel = row.get("subject_channel", str(request.get("channel") or ""))
+        if channel != str(request.get("channel") or ""):
+            raise DsarFulfillmentError("Fulfillment channel no longer matches the verified request")
+        # A failed/ambiguous export must not consume a read or claim delivery.
+        # The subsequent CAS still prevents concurrent or revoked link use.
+        bundle = dsar_export.export_subject_data(subject, channel=channel or None, strict=True)
+        scrubbed = _redact_bundle(bundle, subject)
+
         def mark(value: dict[str, Any]) -> None:
             inner = dict(value.get("response") or {})
             if inner.get("delivered_at") is None:
@@ -359,11 +374,6 @@ def response_for_token(token: str) -> dict[str, Any] | None:
             return None
         if saved is None:
             return None
-        from . import dsar as dsar_export
-
-        subject = str(row.get("subject_id") or "")
-        bundle = dsar_export.export_subject_data(subject)
-        scrubbed = _redact_bundle(bundle, subject)
         return {
             "request_id": row.get("request_id"),
             "subject_id": subject,
@@ -437,7 +447,8 @@ def collect_graph_sources(
     through :func:`record_collection_source`. Message bodies and file
     bytes never transit; a fuller export stays the operator's export
     pipeline. The token comes from ``$MAVERICK_GRAPH_TOKEN`` (the
-    platform's Graph convention); tests inject ``fetcher``.
+    platform's Graph convention), else the sealed ``[data_map] graph_token``
+    saved on the All settings page; tests inject ``fetcher``.
     """
 
     _require_enabled()
@@ -449,12 +460,13 @@ def collect_graph_sources(
             "the DSAR subject is not a Microsoft 365 userPrincipalName; "
             "collect this subject's data through the export pipeline instead")
     if fetcher is None:
-        import os
+        from .data_map import graph_token
 
-        token = os.environ.get("MAVERICK_GRAPH_TOKEN", "")
+        token = graph_token()
         if not token:
             raise DsarFulfillmentConfigError(
-                "Graph collection needs a token in $MAVERICK_GRAPH_TOKEN "
+                "Graph collection needs a token in $MAVERICK_GRAPH_TOKEN or the "
+                "Microsoft 365 access key in All settings "
                 "(Mail.ReadBasic.All + Files.Read.All)")
 
         def fetcher(target: str) -> dict[str, Any]:

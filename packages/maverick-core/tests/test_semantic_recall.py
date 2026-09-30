@@ -44,6 +44,9 @@ class FakeStore:
             emb = embeddings[i] if embeddings is not None else None
             self.docs[ids[i]] = (doc, (metadatas or [{}])[i], emb)
 
+    def upsert_one(self, document, *, id, metadata, embedding=None):
+        self.docs[id] = (document, metadata, embedding)
+
     def delete(self, ids):
         for i in ids:
             self.docs.pop(i, None)
@@ -243,7 +246,7 @@ class TestTenantCollectionIsolation:
         assert captured["collection"].endswith("__goals")
         sr.build_store("qdrant")
         assert captured["collection"].startswith("t_acme_1_")
-        assert captured["collection"].endswith("__goals")
+        assert captured["collection"].endswith("__goals_v2")
         sr.build_store("weaviate")  # class names must start uppercase
         assert captured["collection"].startswith("T_acme_1_")
         assert captured["collection"].endswith("__Goals")
@@ -269,8 +272,8 @@ class TestTenantCollectionIsolation:
         sr.build_store("qdrant")
         b = captured["collection"]
         assert a != b
-        assert a.startswith("t_tenant_a_") and a.endswith("__goals")
-        assert b.startswith("t_tenant_b_") and b.endswith("__goals")
+        assert a.startswith("t_tenant_a_") and a.endswith("__goals_v2")
+        assert b.startswith("t_tenant_b_") and b.endswith("__goals_v2")
 
     @pytest.mark.parametrize(("tenant_a", "tenant_b"), [
         ("acme-1", "acme_1"),
@@ -377,8 +380,10 @@ class TestAtRestSealing:
             assert sr.index_goal(_Goal(1, "revised report"), store=store) is False
             assert store.docs == previous
 
-        hits = sr.search("prior reviewed report", store=store)
-        assert hits and hits[0][1]["goal_id"] == 1
+        # Prior bytes survive, but the failed refresh is incomplete. Force the
+        # orchestrator's lexical path until this exact goal is retried.
+        assert sr.index_status(store=store) == "rebuild_required"
+        assert sr.search("prior reviewed report", store=store) is None
         assert sr.index_goal(_Goal(1, "revised report"), store=store)
         assert store.count() == 1
         assert store.docs != previous

@@ -5,6 +5,12 @@
 > This is a proposal for discussion, not an accepted design. It deliberately
 > stops at the interface + phasing; implementation waits on sign-off.
 
+> Historical May 2026 proposal: the problem statement below describes that
+> snapshot. Current ordinary agents support opt-in checkpoints and no generated
+> 25-step limit; workflow continuation and uncertain-effect boundaries are
+> documented in [task limits and retry](../task-limits.md). This proposal does
+> not establish an all-workflow or exactly-once recovery guarantee.
+
 ## 1. Problem
 
 Lightwork's headline promise is *"runs for hours, pause overnight, resume."* The

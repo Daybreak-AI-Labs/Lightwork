@@ -226,6 +226,50 @@ def open_session(goal_id: int | None = None, *, principal: str = "") -> str:
     return session_id
 
 
+def session_info(session_id: str) -> dict:
+    """Who a session belongs to and where it stands: ``{session, goal_id,
+    principal, statements, closed, created}``. Raises :class:`ReplError` for
+    an unknown session. Lets a caller check ownership before acting."""
+    meta = _read_meta(_session_dir(session_id))
+    return {key: meta.get(key) for key in
+            ("session", "goal_id", "principal", "statements", "closed", "created")}
+
+
+def sessions_for(goal_id: int | None, principal: str, *, limit: int = 20) -> list[dict]:
+    """The sessions ``principal`` opened for ``goal_id``, newest first, as
+    :func:`session_info` rows. Bounded: scans at most 5000 session
+    directories and returns at most ``limit`` rows."""
+    root = _root()
+    if not root.exists():
+        return []
+    rows: list[dict] = []
+    for scanned, entry in enumerate(root.iterdir()):
+        if scanned >= 5000:
+            break
+        if not _SESSION_RE.match(entry.name) or not (entry / _META_NAME).exists():
+            continue
+        try:
+            info = session_info(entry.name)
+        except (ReplError, OSError, ValueError):
+            continue
+        if info.get("goal_id") == goal_id and info.get("principal") == principal:
+            rows.append(info)
+    rows.sort(key=lambda r: float(r.get("created") or 0), reverse=True)
+    return rows[:max(1, int(limit))]
+
+
+def runs_on_host() -> bool:
+    """Whether statements would run directly on this computer rather than in
+    an isolated sandbox (the configured backend shares the host filesystem, or
+    no sandbox can be built -- the conservative answer)."""
+    from .sandbox import fs_is_host_visible
+    try:
+        sandbox = _sandbox_for(_root())
+    except ReplError:
+        return True
+    return fs_is_host_visible(sandbox)
+
+
 def transcript(session_id: str) -> list[dict]:
     """The session's append-only statement ledger, oldest first."""
     from .file_lock import atomic_read_text

@@ -1536,6 +1536,17 @@ class AICostROIService:
                 )
 
         assumptions = _bounded(self._assumptions, "AI ROI assumption namespace")
+        matching_scenarios = {
+            assumption.get("scenario") for assumption in assumptions
+            if assumption.get("tenant_ref") == tenant
+            and assumption.get("status") == "active"
+            and assumption.get("scope_kind") == kind
+            and assumption.get("scope_id") == identity
+            and assumption.get("period_start") == start
+            and assumption.get("period_end") == end
+        }
+        if not scenario_name and len(matching_scenarios) > 1:
+            raise ValueError("Multiple ROI scenarios match; select a scenario before comparing benefits and costs")
         for assumption in assumptions:
             if assumption.get("tenant_ref") != tenant:
                 raise AICostStateError("ROI assumption tenant binding is inconsistent")
@@ -1571,6 +1582,7 @@ class AICostROIService:
             bucket["assumption_bindings"].append(
                 {
                     "assumption_id": assumption["id"],
+                    "scenario": assumption["scenario"],
                     "revision": assumption["revision"],
                     "payload_sha256": assumption["payload_sha256"],
                     "evidence_class": "operator_assumption",

@@ -3,9 +3,9 @@ name = "hr_candidate_engagement"
 compartment = "hr_recruiting"
 description = "Candidate engagement and scheduling."
 
-persona = """You are the Candidate Engagement specialist: handle candidate comms and interview scheduling; disclose you are an AI assistant. You screen, draft, and recommend; a human makes every consequential employment decision (hire, fire, promote, pay, discipline) with a documented, bias-audited rationale; you never use protected-class data or its proxies in a decision; and you refuse prohibited monitoring such as workplace emotion inference."""
+persona = """You are the Candidate Engagement specialist: handle candidate comms and interview scheduling; disclose you are an AI assistant. You screen, draft, and recommend; a human makes every consequential employment decision (hire, fire, promote, pay, discipline) with a documented, bias-audited rationale; you never use protected-class data or its proxies in a decision; and you refuse prohibited monitoring such as workplace emotion inference. Live connectors greenhouse_read, workable_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "greenhouse_read", "workable_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -25,7 +25,7 @@ gate = "review"
 [[workflow]]
 name = "Read pipeline"
 instruction = "Read the candidate's stage, availability, and prior correspondence from the ATS."
-tools = ["greenhouse_read", "workable_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Confirm slots"
 instruction = "Confirm interviewer availability and required panel against the role's interview plan."

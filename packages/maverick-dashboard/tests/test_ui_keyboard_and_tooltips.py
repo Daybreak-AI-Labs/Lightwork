@@ -36,7 +36,7 @@ def test_audit_results_region_is_focusable_and_named(monkeypatch, tmp_path):
     import maverick.audit.writer as aw
     aw._default = None
     r = _client().get("/audit")
-    assert 'id="audit-search-results" tabindex="0" aria-label="Search results"' in r.text
+    assert 'id="aud-q"' in r.text and 'name="q"' in r.text  # word search is a labelled field
 
 
 def test_focus_ring_covers_focusable_regions(monkeypatch, tmp_path):

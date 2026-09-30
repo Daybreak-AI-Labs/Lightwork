@@ -383,7 +383,44 @@ def provision_profile(
     return plan, result
 
 
+
+class BudgetedLLM:
+    """Route every ``complete`` call of ``llm`` through ``budget``.
+
+    Tool synthesis calls the model without a budget of its own; wrapping the
+    model checks the caps before each call and hands the budget to the model
+    call, so its spend is reserved, recorded and refused like any other run."""
+
+    def __init__(self, llm: Any, budget: Any) -> None:
+        self._llm = llm
+        self.budget = budget
+
+    def complete(self, *args: Any, **kwargs: Any) -> Any:
+        self.budget.check()
+        kwargs["budget"] = self.budget
+        return self._llm.complete(*args, **kwargs)
+
+
+def apply_approved_plan(profile, plan, *, llm: Any = None, budget: Any = None) -> ProvisionResult:
+    """Equip an approved onboarding pack: install catalog skills and generate
+    declared tools through the governed paths (a no-op unless self-learning is
+    on), then record the gaps as factory-learning signals (a no-op unless that
+    is on). With ``budget``, every model call goes through it (see
+    :class:`BudgetedLLM`). Shared by ``maverick onboard`` and the dashboard's
+    business setup."""
+    if llm is not None and budget is not None:
+        llm = BudgetedLLM(llm, budget)
+    result = apply_plan(plan, approved=True, llm=llm)
+    try:
+        from . import factory_learning
+        factory_learning.record_provisioning(profile, plan, result)
+    except Exception:  # pragma: no cover -- learning must never break onboarding
+        pass
+    return result
+
+
 __all__ = [
+    "apply_approved_plan", "BudgetedLLM",
     "CapabilityGap", "ProvisioningPlan", "ProvisionResult",
     "analyze_profile", "apply_plan", "provision_profile",
 ]

@@ -537,15 +537,20 @@ def enabled_domains(cfg: dict | None = None) -> dict[str, DomainProfile]:
 _GOVERNED_ACTION_BUNDLE = frozenset({"email", "notify", "calendar"})
 
 
-def data_grounding_enabled() -> bool:
+def data_grounding_enabled(override: bool | None = None) -> bool:
     """Whether packs are granted their suite's primary-source data connectors.
 
     ON by default (these are GET-only, LOW-risk public/government data readers,
     deferred so they cost no context until ``find_tools`` surfaces them, and
     inert without their env key). ``MAVERICK_WORKFORCE_DATA_GROUNDING`` overrides
-    the ``[workforce] data_grounding`` config either way. Never raises."""
+    the ``[workforce] data_grounding`` config either way. ``override`` (a what-if
+    analysis) takes the environment override's place for this one call, with
+    the same fail-closed rules, and changes nothing global. Never raises."""
     import os
-    env = os.environ.get("MAVERICK_WORKFORCE_DATA_GROUNDING", "").strip().lower()
+    if override is None:
+        env = os.environ.get("MAVERICK_WORKFORCE_DATA_GROUNDING", "").strip().lower()
+    else:
+        env = "1" if override else "0"
     if env in {"0", "false", "no", "off"}:
         return False
     try:
@@ -566,7 +571,8 @@ def data_grounding_enabled() -> bool:
         return False
 
 
-def domain_capability(profile: DomainProfile, parent_cap, principal: str):
+def domain_capability(profile: DomainProfile, parent_cap, principal: str, *,
+                      levels: bool | None = None, grounding: bool | None = None):
     """The Capability a domain agent runs under.
 
     With a parent grant present, attenuate it by the profile's scopes (never
@@ -578,13 +584,17 @@ def domain_capability(profile: DomainProfile, parent_cap, principal: str):
     levels``), a non-empty allowlist is expanded with the governed action bundle
     so the hire can execute its job's output -- gated by its autonomy rung. Off
     by default (kernel rule 1): no grant, the pack stays exactly read-only.
+
+    ``levels`` / ``grounding`` override those two dials for this one call (an
+    analysis of "what if levels were on"); ``None`` reads the deployment's
+    setting. Nothing global changes either way.
     """
     allow = set(profile.allow_tools)
     max_risk = profile.max_risk
     if allow:  # only a real allowlist is expanded (empty == inherit, untouched)
         try:
             from .agent_autonomy import levels_enabled
-            if levels_enabled():
+            if levels_enabled() if levels is None else levels_enabled(levels):
                 # The governed action bundle is high-risk, so packs with a
                 # low/medium ceiling need a high runtime ceiling for those
                 # actions to pass through to the autonomy gate. Keep that lift
@@ -608,7 +618,8 @@ def domain_capability(profile: DomainProfile, parent_cap, principal: str):
         # widened -- a host-restricted pack stays restricted (the connector
         # returns a graceful egress error) until an operator opts the host in.
         try:
-            if data_grounding_enabled():
+            if (data_grounding_enabled() if grounding is None
+                    else data_grounding_enabled(grounding)):
                 from .tools.enterprise_connectors import data_connectors_for_suite
                 allow = allow | set(data_connectors_for_suite(suite_for(profile.name)))
         except Exception:  # pragma: no cover -- never block capability build
@@ -801,7 +812,38 @@ def lint_profile(profile: DomainProfile) -> tuple[list[str], list[str]]:
                 f"workflow step's gate {final_gate!r}: runtime enforces "
                 f"{final_gate!r}, but raise output.gate so the deliverable "
                 "contract matches its playbook")
+    errors.extend(tool_compatibility_errors(profile))
     return errors, warnings
+
+
+def tool_compatibility_errors(
+    profile: DomainProfile, available_tools: set[str] | None = None,
+    *, risk_overrides: dict[str, str] | None = None,
+) -> list[str]:
+    """Check declared operations before deployment without expanding authority.
+
+    Registry-aware callers can also check names. Parent grants and runtime
+    policies may narrow access further; this checks the pack's own contract.
+    """
+    from fnmatch import fnmatchcase
+
+    errors: list[str] = []
+    declared = set(profile.allow_tools) | {t for step in profile.workflow for t in step.tools}
+    for name in sorted(declared):
+        if available_tools is not None and name not in available_tools:
+            errors.append(f"declared tool {name!r} is not available in the installed registry")
+        if any(fnmatchcase(name, deny) for deny in profile.deny_tools):
+            errors.append(f"declared tool {name!r} is denied by this pack")
+        if profile.max_risk in _VALID_RISKS:
+            risk = tool_risk(name, overrides=risk_overrides)
+            if risk_rank(risk) > risk_rank(profile.max_risk):
+                errors.append(f"declared tool {name!r} ({risk}) exceeds max_risk={profile.max_risk!r}; "
+                              "use a scoped read tool or provide an approved export")
+    for step in profile.workflow:
+        for name in step.tools:
+            if profile.allow_tools and name not in profile.allow_tools:
+                errors.append(f"workflow tool {name!r} is not in allow_tools")
+    return errors
 
 
 def _department_memory(profile: DomainProfile, task: str, *,
@@ -870,6 +912,10 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
     from .agent_autonomy import default_profile_for, render_autonomy_prompt
     from .domain_discipline import augment_persona
     from .domain_refusals import render_refusals
+    compatibility = tool_compatibility_errors(profile)
+    if compatibility:
+        raise ValueError(f"Domain {profile.name!r} has incompatible tool requirements: "
+                         + "; ".join(compatibility))
     principal = principal or f"agent:{profile.name}-{depth}"
     if parent is not None and hasattr(parent, "_effective_capability"):
         parent_cap = parent._effective_capability("spawn_specialist")
@@ -882,7 +928,7 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
         user_id=getattr(ctx, "user_id", None),
         shield=getattr(ctx, "shield", None),
     )
-    return Agent(
+    agent = Agent(
         ctx=ctx, role=profile.name, brief=task + ("\n" + memory if memory else ""),
         depth=depth, parent=parent,
         domain=profile.compartment,
@@ -901,3 +947,17 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
         # kernel mechanics keyed on "am I this goal's root", not the persona.
         is_goal_root=(depth == 0 and parent is None),
     )
+    # Validate the *assembled* instance, including operator plugins and MCP
+    # bindings. The plain base catalog cannot establish deployment readiness.
+    names = {tool.name for tool in agent.tools.all()}
+    missing = sorted({name for step in profile.workflow for name in step.tools} - names)
+    if missing:
+        raise ValueError(
+            f"Domain {profile.name!r} cannot deploy: required workflow tools unavailable: "
+            + ", ".join(missing)
+            + ". Configure/enable the named adapter or MCP connection, or revise the "
+            "workflow to read an operator-approved workspace export with read_file. "
+            "No model work has started."
+        )
+    agent.deployment_prerequisites = sorted(set(profile.allow_tools) - names)
+    return agent

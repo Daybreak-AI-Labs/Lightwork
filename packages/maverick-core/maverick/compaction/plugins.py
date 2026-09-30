@@ -7,7 +7,9 @@ structured one, a domain-specific summarizer, a learned model — and select it
 by name, without forking the kernel.
 
 A strategy is any object with a ``name`` and a ``compact(messages, **kw) ->
-list[dict]``. The built-in heuristic registers itself as ``"heuristic"`` (the
+list[dict]``. Async agent dispatch additionally requires ``compact_async``;
+sync-only plugins take the local heuristic path there. The built-in heuristic
+registers itself as ``"heuristic"`` (the
 default), so unchanged deployments behave exactly as before; ``compact_with``
 dispatches to the configured strategy (``[context] compaction_strategy`` / env
 ``MAVERICK_COMPACTION_STRATEGY``) and **fails safe** to the built-in when the
@@ -34,6 +36,8 @@ import logging
 import os
 from typing import Protocol, runtime_checkable
 
+from .requests import STOP_ERRORS
+
 log = logging.getLogger(__name__)
 
 
@@ -55,6 +59,10 @@ class _HeuristicStrategy:
                    for k in ("keep_recent", "max_tool_bytes", "max_total_bytes")
                    if k in kwargs}
         return compact_messages(messages, **allowed)
+
+
+    async def compact_async(self, messages: list[dict], **kwargs) -> list[dict]:
+        return self.compact(messages, **kwargs)
 
 
 _REGISTRY: dict[str, CompactionStrategy] = {}
@@ -168,6 +176,8 @@ def _hybrid_compact(messages: list[dict], **kwargs) -> list[dict] | None:
         before = hybrid.extract_features(messages)["total_chars"]
         try:
             out = strat.compact(messages, **kwargs)
+        except STOP_ERRORS:
+            raise
         except Exception:
             # A strategy that raises is a real outcome — record the failure
             # before falling open to the default path.
@@ -178,6 +188,8 @@ def _hybrid_compact(messages: list[dict], **kwargs) -> list[dict] | None:
             picker.record(messages, abstract, success=after < before)
         log.debug("compaction hybrid: %s -> %s (%s)", abstract, live, reason)
         return out
+    except STOP_ERRORS:
+        raise
     except Exception as e:
         log.warning("compaction hybrid failed open to the default strategy: %s", e)
         return None
@@ -206,6 +218,53 @@ def compact_with(messages: list[dict], *, strategy: str | None = None,
     return strat.compact(messages, **kwargs)
 
 
+async def _invoke_async(strat, messages, kwargs):
+    method = getattr(strat, "compact_async", None)
+    if not callable(method):
+        # A legacy plugin may do arbitrary synchronous I/O. It must explicitly
+        # implement the async contract before running on the agent event loop.
+        log.warning("compaction plugin %r has no compact_async; using heuristic", strat.name)
+        return _HeuristicStrategy().compact(messages, **kwargs)
+    return await method(messages, **kwargs)
+
+
+async def compact_with_async(messages: list[dict], *, strategy: str | None = None,
+                             **kwargs) -> list[dict]:
+    """Native async dispatch with the same explicit/config/hybrid precedence."""
+    name = strategy
+    if not name:
+        name = _configured_name()
+        if name:
+            _warn_hybrid_shadowed_once(name)
+    if not name:
+        try:
+            from . import hybrid
+            if hybrid.enabled():
+                picker = _hybrid_picker()
+                abstract, reason = picker.pick(messages)
+                live = _ABSTRACT_TO_LIVE.get(abstract, _DEFAULT)
+                strat = _REGISTRY.get(live) or _REGISTRY[_DEFAULT]
+                before = hybrid.extract_features(messages)["total_chars"]
+                try:
+                    out = await _invoke_async(strat, messages, kwargs)
+                except STOP_ERRORS:
+                    raise
+                except Exception:
+                    picker.record(messages, abstract, success=False)
+                    raise
+                if before >= _HYBRID_RECORD_MIN_CHARS:
+                    after = hybrid.extract_features(out)["total_chars"]
+                    picker.record(messages, abstract, success=after < before)
+                log.debug("compaction hybrid: %s -> %s (%s)", abstract, live, reason)
+                return out
+        except STOP_ERRORS:
+            raise
+        except Exception as exc:
+            log.warning("compaction hybrid failed open to the default strategy: %s", exc)
+        name = _DEFAULT
+    return await _invoke_async(_REGISTRY.get(name) or _REGISTRY[_DEFAULT], messages, kwargs)
+
+
 class _StrategyAdapter:
     """Adapt one of the v3/v5/v7/v8 strategies (compaction_strategies) to the
     plug-in ``CompactionStrategy`` protocol, so both selection paths share one
@@ -223,6 +282,14 @@ class _StrategyAdapter:
         return compact_with_strategy(messages, strategy=self.name, **allowed)
 
 
+    async def compact_async(self, messages: list[dict], **kwargs) -> list[dict]:
+        from .strategies import compact_with_strategy_async
+        allowed = {k: kwargs[k] for k in
+                   ("llm", "conversation_id", "keep_recent", "max_tool_bytes",
+                    "budget", "scope") if k in kwargs}
+        return await compact_with_strategy_async(messages, strategy=self.name, **allowed)
+
+
 # Register the built-in as the default at import, plus the named strategies
 # from compaction_strategies so `[context] compaction_strategy` selects any of
 # them through this one dispatcher (still fail-safe to heuristic on a typo).
@@ -231,4 +298,4 @@ for _name in ("learned", "multimodal", "streaming", "graph"):
     register(_StrategyAdapter(_name))
 
 
-__all__ = ["CompactionStrategy", "register", "get", "available", "compact_with"]
+__all__ = ["CompactionStrategy", "register", "get", "available", "compact_with", "compact_with_async"]

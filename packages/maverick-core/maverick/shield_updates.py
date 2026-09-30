@@ -193,6 +193,7 @@ def apply_update(
     if pubkey_hex is None:
         pubkey_hex = get_update_config()["update_pubkey"]
     version, rules = verify_bundle(bundle, pubkey_hex)
+    _bounded_rules(rules)  # refuse a bundle the live shield would not use
 
     p = Path(path) if path is not None else rules_path()
     new_ids = {_rule_id(r) for r in rules}
@@ -305,14 +306,84 @@ def check_and_apply(*, fetcher: Fetcher | None = None) -> UpdateResult:
     return apply_update(bundle, pubkey_hex=cfg["update_pubkey"])
 
 
+# Bounds on what a verified bundle may add to the live shield. A signed bundle
+# is trusted to ADD checks, never to make the shield slow: too many rules or a
+# very long pattern is refused as a whole.
+MAX_RULES = 500
+MAX_PATTERN_CHARS = 2_000
+_RULE_KEYS = {"id", "name", "pattern", "phrases", "severity"}
+
+
+def _bounded_rules(rules: list) -> list[dict]:
+    if len(rules) > MAX_RULES:
+        raise UpdateRefused(f"bundle has {len(rules)} rules; at most {MAX_RULES} are used")
+    out: list[dict] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        pattern = rule.get("pattern")
+        phrases = rule.get("phrases")
+        size = len(pattern) if isinstance(pattern, str) else 0
+        if isinstance(phrases, list):
+            size += sum(len(str(p)) for p in phrases)
+        if size > MAX_PATTERN_CHARS:
+            raise UpdateRefused(f"rule {_rule_id(rule)} is longer than {MAX_PATTERN_CHARS} characters")
+        clean = {k: v for k, v in rule.items() if k in _RULE_KEYS}
+        clean.setdefault("name", _rule_id(rule))
+        out.append(clean)
+    return out
+
+
+_loaded_cache: dict[tuple, list[dict]] = {}
+
+
+def load_verified_rules(path: Path | None = None) -> list[dict]:
+    """The staged rules the live shield adds to its own checks.
+
+    Empty unless ``[shield] federated_updates`` is on. The staged file is
+    re-verified against the configured publisher key every time it changes
+    (a file edited on disk, or a key that no longer matches, adds nothing),
+    and the bounds above apply. Rules are only ever ADDED to the operator's
+    own ``[safety] constitution``; nothing here can remove or relax a check.
+    Never raises: a problem is logged and adds nothing.
+    """
+    cfg = get_update_config()
+    if not cfg["federated_updates"]:
+        return []
+    p = Path(path) if path is not None else rules_path()
+    try:
+        st = p.stat()
+    except OSError:
+        return []
+    key = (str(p), st.st_mtime_ns, st.st_size, cfg["update_pubkey"])
+    cached = _loaded_cache.get(key)
+    if cached is not None:
+        return list(cached)
+    try:
+        if st.st_size > MAX_BUNDLE_BYTES:
+            raise UpdateRefused("staged rules file is too large")
+        staged = json.loads(p.read_text(encoding="utf-8"))
+        _version, rules = verify_bundle(staged, cfg["update_pubkey"])
+        rules = _bounded_rules(rules)
+    except (OSError, ValueError) as exc:
+        log.warning("shared threat rules not used: %s", exc)
+        rules = []
+    _loaded_cache.clear()
+    _loaded_cache[key] = rules
+    return list(rules)
+
+
 __all__ = [
     "MAX_BUNDLE_BYTES",
+    "MAX_PATTERN_CHARS",
+    "MAX_RULES",
     "RULES_FILENAME",
     "UpdateRefused",
     "UpdateResult",
     "apply_update",
     "check_and_apply",
     "current_version",
+    "load_verified_rules",
     "get_update_config",
     "rules_path",
     "sign_bundle",

@@ -45,7 +45,8 @@ def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_
     assert learning.status_code == 200
     assert permissions.status_code == 200
     assert 'data-can-halt="false"' in learning.text
-    assert "changing deployment-wide learning controls requires a global administrator" in learning.text
+    assert "only an administrator can change learning settings" in learning.text
+    assert "Run learning now" not in learning.text
     assert "disabled" in _button(learning.text, "lrn-enable")
     assert "disabled" in _button(learning.text, "lrn-auto-evolve")
     assert "only a global administrator can change where work runs" in permissions.text
@@ -66,22 +67,26 @@ def test_destructive_clients_confirm_exact_targets_and_recover_single_flight():
     assert "Another operation is already running" in bulk
     assert "operationInFlight = false" in bulk
     assert "delete shell.dataset.operationInFlight" in bulk
-    assert "Run the next executable batch for consent bulk job “" in bulk
-    assert "Grant exactly " in bulk
-    assert "Permanently purge up to " in bulk
+    assert "Run the next part of this job now?" in bulk
+    assert "Allow \" + answers.amount + \" more bulk jobs" in bulk
+    assert "Permanently delete \" + count + \" finished jobs" in bulk
 
     assert "var destructiveInFlight = false" in reports
-    assert "Another report mutation is already running" in reports
+    assert "Another report change is already running" in reports
     assert "destructiveInFlight = false" in reports
     assert "delete root.dataset.destructiveInFlight" in reports
-    assert "Revoke executive report “" in reports
+    assert "Withdraw the report “" in reports
     assert "Permanently purge up to " in reports
 
     # The focused opener must remain enabled until the shared confirmation
     # dialog captures it; disable only after the operator confirms.
-    assert "function handle(handler, options)" in bulk
-    assert "return handler(event, disableControls)" in bulk
-    assert bulk.count("{ deferDisable: true }") == 7
+    assert "function handle(button, work)" in bulk
+    assert "return work(disableControls)" in bulk
+    # Every destructive handler confirms before it disables its opener.
+    assert bulk.count("disableControls();") == 7
+    for confirm_then_disable in bulk.split("await CW.confirm(")[1:]:
+        head = confirm_then_disable.split("\n", 2)
+        assert "disableControls();" in "\n".join(head[:2]) or "return;" not in head[0]
     report_destructive = reports[
         reports.index("async function runDestructive") :
         reports.index("function setMutationReady")
@@ -106,7 +111,8 @@ def test_async_drafts_and_assessment_failures_stay_with_visible_context():
 
     assert 'id="as-page-msg"' in assessments
     assert "document.getElementById('as-detail-msg') || pageMsg" in assessments
-    assert "Could not load the assessment register (HTTP " in assessments
+    assert "Could not load the assessment register. Reload to try again." in assessments
+    assert "(HTTP " not in assessments and "Request failed (" not in assessments
     assert "The assessment register is temporarily unavailable" in assessments
 
     assert workflow.count("if (shouldScroll !== false)") == 2

@@ -2,9 +2,9 @@ name = "ps_engagement_setup"
 compartment = "ps_engagement_setup"
 description = "Engagement Setup Agent: Stand up new engagements: codes, staffing, budgets, and compliance checks complete."
 
-persona = """You are the Engagement Setup Agent for this business -- a professional services specialist. Stand up new engagements: codes, staffing, budgets, and compliance checks complete. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Client confidentiality is absolute across engagements; billing and scope changes are drafted for partner approval."""
+persona = """You are the Engagement Setup Agent for this business -- a professional services specialist. Stand up new engagements: codes, staffing, budgets, and compliance checks complete. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Client confidentiality is absolute across engagements; billing and scope changes are drafted for partner approval. Use spreadsheet_read only for existing workbook rows/metadata. Rebuild, refresh, calculate, or update means draft the proposed table and calculations in your response; do not claim the workbook was edited or recalculated. A human applies the approved draft. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "knowledge_search", "sql_query", "spreadsheet"]
+allow_tools = ["read_file", "knowledge_search", "sql_query_read", "spreadsheet_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "web_search", "browser"]
 max_risk = "low"
 
@@ -26,11 +26,11 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Compliance checks"
 instruction = "Verify conflicts clearance, client onboarding, and required approvals are complete and cite the supporting records."
-tools = ["knowledge_search", "sql_query"]
+tools = ["knowledge_search", "sql_query_read"]
 [[workflow]]
 name = "Draft codes"
 instruction = "Draft the engagement code, staffing plan, and budget consistent with the fee arrangement and scope."
-tools = ["spreadsheet", "sql_query"]
+tools = ["spreadsheet_read", "sql_query_read"]
 [[workflow]]
 name = "Flag blockers"
 instruction = "Surface any missing clearance, unstaffed role, or budget gap that must be resolved before the engagement can open."

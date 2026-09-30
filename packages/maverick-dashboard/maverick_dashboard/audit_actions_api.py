@@ -1,0 +1,395 @@
+"""Plain labels and buttons for the Activity log (/audit).
+
+The labels turn raw activity-log rows into words a person reads (event names,
+field names, people). The routes are the ``maverick audit`` / ``maverick
+attest`` commands that were CLI-only: check the log is intact, download it,
+send it to the configured security system, encrypt older days, copy them to
+write-once storage, make a new signing key and download a signed proof bundle.
+
+Reading and checking need the ``audit`` permission (like the page). Anything
+that changes files, sends data out or signs needs ``admin``; a new signing key
+is deployment-wide, so it needs a global administrator.
+"""
+from __future__ import annotations
+
+import csv
+import datetime as _dt
+import io
+import re
+import tempfile
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any, Literal
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
+
+from .auth import caller_principal, require_global_permission, require_permission
+from .identity_format import humanize, humanize_principal
+
+router = APIRouter(tags=["audit-actions"])
+
+KIND_LABELS: dict[str, str] = {
+    "goal_start": "Task started", "goal_end": "Task finished",
+    "episode_start": "Step started", "episode_end": "Step finished",
+    "tool_call": "Used a tool", "tool_result": "Tool answered",
+    "shield_block": "Stopped by the safety filter", "ifc_flow": "Sensitive data check",
+    "capability_denied": "Tool not allowed", "sandbox_denied": "Blocked by the safe workspace",
+    "token_exchange": "Sign-in passed to a service", "governance_denied": "Held by a company rule",
+    "finance_sod_finding": "Finance duties not separated",
+    "autonomy_escalated": "Asked for more freedom", "autonomy_gated": "Waited for permission",
+    "egress_blocked": "Data not allowed to leave", "consent_prompt": "Asked for consent",
+    "consent_result": "Consent answered", "secret_redacted": "Hid a secret", "erase": "Data erased",  # pragma: allowlist secret
+    "trust_receipt_prepared": "Receipt prepared", "trust_receipt_issued": "Receipt issued",
+    "retention_purge": "Old records deleted by policy", "halt": "Emergency stop",
+    "config_remediated": "Setting fixed automatically", "tenant_plan_changed": "Workspace plan changed",
+    "tenant_quota_changed": "Workspace limits changed",
+    "spending_limits_changed": "Spending limits changed", "tenant_created": "Workspace created",
+    "workspace_selected": "Workspace chosen", "access_grant_changed": "Access changed",
+    "federation_delegate": "Access passed to a partner", "agent_trust_denied": "Outside assistant not trusted",
+    "control_plane_action": "Administrator action", "learning_update": "Learning changed",
+    "codebase_action": "Code project action", "immune_action": "Safety monitoring action",
+    "approval_decision": "Approval decided", "approval_requested": "Approval requested",
+}
+FIELD_LABELS: dict[str, str] = {
+    "goal_id": "Task", "tool": "Tool", "name": "Name", "reason": "Reason", "detail": "Details",
+    "principal": "Person", "actor": "Done by", "user": "Person", "requested_by": "Requested by",
+    "decision": "Decision", "action": "Action", "stage": "Stage", "provider": "Service",
+    "rule": "Company rule", "input_summary": "Input", "output_summary": "Result",
+    "status": "Status", "risk": "Risk", "cost_dollars": "Cost", "model_id": "Model",
+    "obligation_id": "Rule reference", "regulation": "Regulation", "article": "Article",
+    "obligations_checked": "Rules checked", "source": "Source", "tenant": "Workspace",
+    "tenant_id": "Workspace", "labels": "Kinds of data", "outcome": "Outcome", "line": "Lesson",
+    "phase": "Step", "repo": "Code project", "proposal": "Change",
+}
+_HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id"}
+_PERSON_KEYS = ("principal", "actor", "user", "requested_by", "decided_by", "owner")
+_SLUG_KEYS = {"name", "tool", "action", "stage", "provider", "rule", "outcome", "status",
+              "decision", "risk", "source", "phase", "labels", "agent"}
+_SLUG = re.compile(r"[a-z][a-z0-9]*(?:[_.:-][a-z0-9]+)*")
+
+
+def kind_label(kind: object) -> str:
+    return KIND_LABELS.get(str(kind or ""), humanize(kind) or "Activity")
+
+
+def field_label(key: object) -> str:
+    return FIELD_LABELS.get(str(key), humanize(key))
+
+
+def value_text(key: str, value: Any) -> str:
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if key in _PERSON_KEYS and isinstance(value, str):
+        return humanize_principal(value).name
+    if key in _SLUG_KEYS and isinstance(value, str) and _SLUG.fullmatch(value):
+        return humanize(value)
+    if isinstance(value, float):
+        return f"{value:.2f}" if key == "cost_dollars" else f"{value:g}"
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(value_text(key, v) for v in list(value)[:20]) or "—"
+    if isinstance(value, dict):
+        parts = [f"{field_label(k)}: {value_text(str(k), v)}" for k, v in list(value.items())[:12]]
+        return "; ".join(parts) or "—"
+    return str(value)
+
+
+def event_person(event: dict) -> str:
+    for key in _PERSON_KEYS:
+        value = event.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def event_details(event: dict) -> list[tuple[str, str, str]]:
+    """``[(raw key, label, text)]`` for the visible detail fields of an event."""
+    return [(str(k), field_label(k), value_text(str(k), v))
+            for k, v in event.items() if k not in _HIDDEN]
+
+
+def event_who(event: dict) -> str:
+    person = event_person(event)
+    if person:
+        return humanize_principal(person).name
+    agent = event.get("agent")
+    return humanize(agent) if agent else "Lightwork"
+
+
+def page_helpers() -> dict:
+    return {"kind_label": kind_label, "event_details": event_details, "event_who": event_who}
+
+
+def _day(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = _dt.datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Choose a date from the calendar.") from None
+    return parsed.strftime("%Y-%m-%d")
+
+
+def _audit_event(request: Request, action: str, **payload: Any) -> None:
+    from maverick.audit import AuditRefused, audit_event
+    try:
+        audit_event("control_plane_action", agent="dashboard", action=action,
+                    actor=caller_principal(request) or "local", **payload)
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail="The activity log refused this change.") from exc
+
+
+def _siem_dest() -> str:
+    import os
+    dest = os.environ.get("MAVERICK_SIEM_DEST") or ""
+    if not dest:
+        try:
+            from maverick.config import load_config
+            dest = str(((load_config() or {}).get("audit") or {}).get("siem_dest") or "")
+        except Exception:  # noqa: BLE001
+            dest = ""
+    return dest.strip()
+
+
+def _export_allowed() -> bool:
+    try:
+        from maverick.billing import feature_allowed
+        return bool(feature_allowed("audit_export"))
+    except Exception:  # noqa: BLE001 -- the export route re-checks
+        return False
+
+
+class CheckIn(BaseModel):
+    since: str | None = None
+    until: str | None = None
+
+
+class PreviewIn(BaseModel):
+    preview: bool = True
+
+
+class ForwardIn(BaseModel):
+    since: str | None = None
+    until: str | None = None
+
+
+@router.get("/audit/actions")
+async def actions_state(request: Request) -> dict:
+    require_permission(request, "audit")
+
+    def _read() -> dict:
+        try:
+            from maverick.audit.signing import _have_crypto
+            crypto = bool(_have_crypto())
+        except Exception:  # noqa: BLE001
+            crypto = False
+        try:
+            from maverick.crypto_at_rest import at_rest_enabled
+            at_rest = bool(at_rest_enabled())
+        except Exception:  # noqa: BLE001
+            at_rest = False
+        return {"security_system_connected": bool(_siem_dest()), "download_allowed": _export_allowed(),
+                "signing_available": crypto, "encryption_on": at_rest}
+    return await run_in_threadpool(_read)
+
+
+@router.post("/audit/check")
+async def check_log(request: Request, body: CheckIn) -> dict:
+    """Walk the signed chain of the chosen days plus the cross-day ledger."""
+    require_permission(request, "audit")
+    since, until = _day(body.since), _day(body.until)
+
+    def _run() -> dict:
+        from maverick.audit import verify_anchors, verify_chain
+        from maverick.audit.signing import retention_purged_days
+        from maverick.paths import data_dir
+        audit_dir = data_dir("audit")
+        paths = [p for p in sorted(audit_dir.glob("*.ndjson")) if p.name != "anchors.ndjson"] \
+            if audit_dir.exists() else []
+        paths = [p for p in paths if (not since or p.stem >= since) and (not until or p.stem <= until)]
+        problems: list[str] = []
+        unsigned = 0
+        for path in paths[-400:]:
+            breaks = verify_chain(path, max_breaks=20)
+            if breaks and all(b.reason == "unsigned" for b in breaks):
+                unsigned += 1
+            elif breaks:
+                problems.append(f"{path.stem}: {len(breaks)} "
+                                + ("entry was" if len(breaks) == 1 else "entries were")
+                                + " changed or could not be confirmed.")
+        anchor_breaks = verify_anchors(audit_dir) if audit_dir.exists() else []
+        if anchor_breaks:
+            problems.append("The record that links the days together shows a day was removed or changed.")
+        retired = retention_purged_days(audit_dir) if audit_dir.exists() else []
+        return {"days_checked": len(paths[-400:]), "intact": not problems and not unsigned,
+                "problems": problems[:50], "unsigned_days": unsigned,
+                "removed_by_policy": len(retired)}
+    return await run_in_threadpool(_run)
+
+
+def csv_safe(value: object) -> object:
+    """A spreadsheet cell that is never run as a formula (names and details
+    come from chat users and connected systems)."""
+    from maverick.tools.spreadsheet import _neutralize_formula
+
+    return _neutralize_formula(value)
+
+
+def _rows(since: str | None, until: str | None, fmt: str) -> Iterator[str]:
+    from maverick.audit.export import iter_audit_events, to_cef, to_jsonl
+    events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events(all_days=True)
+    if fmt == "csv":
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["Time (UTC)", "Event", "Who", "Task", "Details"])
+        yield buf.getvalue()
+        for ev in events:
+            buf.seek(0)
+            buf.truncate()
+            ts = ev.get("ts")
+            when = (_dt.datetime.fromtimestamp(float(ts), _dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                    if isinstance(ts, (int, float)) else "")
+            details = "; ".join(f"{label}: {text}" for _k, label, text in event_details(ev))
+            writer.writerow([when, csv_safe(kind_label(ev.get("kind"))), csv_safe(event_who(ev)),
+                             ev.get("goal_id") if ev.get("goal_id") is not None else "",
+                             csv_safe(details)])
+            yield buf.getvalue()
+        return
+    render = to_cef if fmt == "cef" else to_jsonl
+    for ev in events:
+        yield render(ev) + "\n"
+
+
+@router.get("/audit/download")
+async def download(request: Request, fmt: Literal["csv", "json", "cef"] = Query("csv", alias="format"),
+                   since: str | None = None, until: str | None = None) -> StreamingResponse:
+    require_permission(request, "audit")
+    since, until = _day(since), _day(until)
+    if fmt != "csv" and not await run_in_threadpool(_export_allowed):
+        raise HTTPException(status_code=403, detail="Your plan does not include downloads for security tools.")
+    _audit_event(request, "audit_download", format=fmt, since=since, until=until)
+    ext = {"csv": "csv", "json": "jsonl", "cef": "cef"}[fmt]
+    name = f"activity-{since or 'start'}-to-{until or 'today'}.{ext}"
+    media = {"csv": "text/csv", "json": "application/x-ndjson", "cef": "text/plain"}[fmt]
+    return StreamingResponse(_rows(since, until, fmt), media_type=media + "; charset=utf-8",
+                             headers={"Content-Disposition": f'attachment; filename="{name}"',
+                                      "Cache-Control": "no-store"})
+
+
+@router.post("/audit/forward")
+async def forward(request: Request, body: ForwardIn) -> dict:
+    require_permission(request, "admin")
+    since, until = _day(body.since), _day(body.until)
+    dest = await run_in_threadpool(_siem_dest)
+    if not dest:
+        raise HTTPException(status_code=409, detail="No security monitoring system is connected yet.")
+    if not await run_in_threadpool(_export_allowed):
+        raise HTTPException(status_code=403, detail="Your plan does not include sending to security tools.")
+
+    def _run() -> int:
+        from maverick.audit import forwarder
+        from maverick.audit.export import iter_audit_events, to_jsonl
+        forwarder.parse_dest(dest)
+        events = iter_audit_events(since=since, until=until) if (since or until) else iter_audit_events(all_days=True)
+        return forwarder.forward((to_jsonl(ev) for ev in events), dest)
+    try:
+        sent = await run_in_threadpool(_run)
+    except Exception as exc:  # noqa: BLE001 -- a transport failure is reported plainly
+        raise HTTPException(status_code=502, detail=(
+            "Lightwork could not reach your security monitoring system. Nothing was lost; try again later.")) from exc
+    _audit_event(request, "audit_forward", sent=sent)
+    return {"sent": sent}
+
+
+@router.post("/audit/seal")
+async def seal(request: Request, body: PreviewIn) -> dict:
+    require_permission(request, "admin")
+    from maverick.audit.sealing import seal_closed_segments
+    from maverick.crypto_at_rest import EncryptionUnavailable
+    try:
+        report = await run_in_threadpool(lambda: seal_closed_segments(dry_run=body.preview))
+    except EncryptionUnavailable as exc:
+        raise HTTPException(status_code=409, detail=(
+            "Turn on encryption for stored data first (on the Compliance page).")) from exc
+    done = sum(1 for s in report.values() if s in ("sealed", "would seal"))
+    if not body.preview:
+        _audit_event(request, "audit_seal", days=done)
+    return {"preview": body.preview, "days": done}
+
+
+@router.post("/audit/rotate-key")
+async def rotate_key(request: Request) -> dict:
+    require_global_permission(request, "admin")
+    from maverick.audit.signing import _have_crypto, rotate_audit_keypair
+    if not _have_crypto():
+        raise HTTPException(status_code=503, detail="Signing is not available on this installation.")
+    await run_in_threadpool(rotate_audit_keypair)
+    _audit_event(request, "audit_rotate_key")
+    return {"rotated": True}
+
+
+@router.post("/audit/write-once/push")
+async def worm_push(request: Request, body: PreviewIn) -> dict:
+    require_global_permission(request, "admin")
+    from maverick.audit.worm import WormUnavailable, push_closed_dayfiles
+    try:
+        report = await run_in_threadpool(lambda: push_closed_dayfiles(dry_run=body.preview))
+    except WormUnavailable as exc:
+        raise HTTPException(status_code=409, detail=(
+            "Write-once storage is not set up for this installation.")) from exc
+    failed = [n for n, s in report.items() if s.startswith(("error", "refused"))]
+    shipped = sum(1 for s in report.values() if s.startswith(("pushed", "re-pushed", "would")))
+    if not body.preview:
+        _audit_event(request, "audit_write_once_push", days=shipped, failed=len(failed))
+    return {"preview": body.preview, "days": shipped, "failed": len(failed)}
+
+
+@router.get("/audit/write-once/check")
+async def worm_check(request: Request) -> dict:
+    require_permission(request, "audit")
+    from maverick.audit.worm import WormUnavailable, verify
+    try:
+        report = await run_in_threadpool(verify)
+    except WormUnavailable as exc:
+        raise HTTPException(status_code=409, detail=(
+            "Write-once storage is not set up for this installation.")) from exc
+    missing = sorted(n.split(".")[0] for n, s in report.items() if s != "ok")
+    return {"days": len(report), "copied": len(report) - len(missing), "not_copied": missing[:100]}
+
+
+@router.get("/audit/proof-key")
+async def proof_key(request: Request) -> dict:
+    require_permission(request, "audit")
+    from maverick.attestation import publisher_key
+    try:
+        key_id, pub = await run_in_threadpool(publisher_key)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail="Signing is not available on this installation.") from exc
+    return {"key_name": key_id, "key": pub}
+
+
+@router.post("/audit/proof-bundle")
+async def proof_bundle(request: Request) -> StreamingResponse:
+    require_permission(request, "admin")
+    from maverick.attestation import export
+
+    def _build() -> bytes:
+        with tempfile.TemporaryDirectory(prefix="lw-attest-") as tmp:
+            path = export(Path(tmp) / "proof.json")
+            return path.read_bytes()
+    try:
+        data = await run_in_threadpool(_build)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=(
+            "A proof bundle needs signing turned on for the activity log.")) from exc
+    return StreamingResponse(iter([data]), media_type="application/json",
+                             headers={"Content-Disposition": 'attachment; filename="lightwork-proof.json"',
+                                      "Cache-Control": "no-store"})
+
+
+__all__ = ["KIND_LABELS", "event_details", "event_person", "event_who", "kind_label",
+           "page_helpers", "router"]

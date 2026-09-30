@@ -104,9 +104,10 @@ def _prepare(
     case_id: str,
     phase: str,
     requested_right: str,
+    source=None,
 ):
     store, actor, clock = estate
-    source = store.enroll_source(
+    source = source or store.enroll_source(
         "tenant-a",
         "crm",
         adapter_ref="salesforce-contact-v1",
@@ -362,6 +363,75 @@ def test_ambiguous_delete_is_read_only_reconciled_without_optimistic_replay(
         assert completed.evidence_id is not None
     else:
         assert store.get_task("tenant-a", task.task_id).state == "planned"
+        # A persisted unknown result must honor its retry time across workers.
+        again = _runtime(estate, Adapter(), source, case).reconcile_once(
+            "tenant-a", worker_ref="source-worker", run_id="before-retry",
+            retry_delay_seconds=10,
+        )
+        assert again.inspected == 0
+        assert calls == {"mutations": 1, "probes": 1}
+        _clock.advance(10)
+        due = runtime.reconcile_once(
+            "tenant-a", worker_ref="source-worker", run_id="retry-due",
+            retry_delay_seconds=10,
+        )
+        assert due.inspected == 1
+        assert calls == {"mutations": 1, "probes": 2}
+
+
+def test_failing_reconciliation_defers_durably_and_next_case_progresses(estate):
+    source, first, _ = _prepare(
+        estate, case_id="case-failing", phase="delete", requested_right="erasure",
+    )
+    _prepare(estate, case_id="case-ready", phase="delete", requested_right="erasure", source=source)
+    calls = []
+    mutation_calls = []
+
+    class Adapter:
+        fail_case = None
+
+        def prepare_mutation(self, **_kwargs):
+            return _prepared()
+
+        def execute_prepared(self, **kwargs):
+            mutation_calls.append(kwargs["case_id"])
+            raise RuntimeError("connection closed after send")
+
+        def reconcile_mutation(self, **kwargs):
+            calls.append(kwargs["case_id"])
+            if kwargs["case_id"] == self.fail_case:
+                raise worker.ProviderRetryableError
+            return worker.ProviderReconciliationOutcome(
+                disposition="applied", provider_evidence_sha256=_digest("probe-applied"),
+                provider_evidence_ref="provider:probe:applied", record_count=0,
+                provider_retention_state="purged",
+            )
+
+    adapter = Adapter()
+    runtime = _runtime(estate, adapter, source, first)
+    assert runtime.run_once("tenant-a", worker_ref="source-worker", run_id="mutate").ambiguous == 2
+    store, _, clock = estate
+    pending = store.due_reconciliation_callbacks("tenant-a", source_ids=("crm",), limit=2)
+    adapter.fail_case = pending[0].case_id
+    assert store.due_reconciliation_callbacks("tenant-a", source_ids=("other",), limit=1) == ()
+    failed = runtime.reconcile_once(
+        "tenant-a", worker_ref="source-worker", run_id="failed-read", limit=1, retry_delay_seconds=30,
+    )
+    assert failed.errors == 1
+    replacement = _runtime(estate, adapter, source, first)
+    progressed = replacement.reconcile_once(
+        "tenant-a", worker_ref="source-worker", run_id="next-read", limit=1, retry_delay_seconds=30,
+    )
+    assert progressed.resolved == 1
+    assert calls == [pending[0].case_id, pending[1].case_id]
+    assert replacement.reconcile_once(
+        "tenant-a", worker_ref="source-worker", run_id="too-soon", limit=1,
+    ).inspected == 0
+    clock.advance(30)
+    assert replacement.reconcile_once(
+        "tenant-a", worker_ref="source-worker", run_id="due-again", limit=1,
+    ).errors == 1
+    assert len(mutation_calls) == 2  # reconciliation never replays a provider mutation
 
 
 @pytest.mark.parametrize("unavailable", ["subject", "credential"])

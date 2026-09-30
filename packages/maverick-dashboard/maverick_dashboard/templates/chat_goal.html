@@ -235,6 +235,25 @@
       </svg>
 {%- endmacro %}
 <div class="convo">
+  {% if latest_chat_goal_id and latest_chat_goal_id != goal.id %}
+  <p class="muted" id="newer-chat-turn">You are viewing an earlier message.
+    <a href="/chat/goal/{{ latest_chat_goal_id }}">Open the latest message in this chat</a>.</p>
+  {% endif %}
+  {% if submission and (goal.status == 'draft' or submission.detail.coverage) %}
+  <section class="panel" id="submission-status" role="status">
+    {% if goal.status == 'draft' %}<h2>Submission saved as a draft</h2>{% endif %}
+    <p>{{ submission.detail.message }}</p>
+    {% if submission.detail.coverage %}
+    <ul>{% for item in submission.detail.coverage %}<li>{{ item.filename }}: {% if item.status in ('ready', 'admitted', 'complete', 'ok') %}readable text ready{% elif item.status in ('pending', 'queued') %}still being read{% else %}could not be read ({{ item.status | humanize | lower }}){% endif %}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if goal.status == 'draft' %}
+    <p>AI work has not started. If all your files uploaded, try preparing the task again from this saved draft.</p>
+    <form method="post" action="/chat/goal/{{ goal.id }}/recover-submission">
+      <button class="btn" type="submit">Retry preparation</button>
+    </form>
+    {% endif %}
+  </section>
+  {% endif %}
   {% set status_labels = {'pending': 'queued', 'running': 'working', 'done': 'done', 'blocked': 'paused', 'failed': 'failed', 'cancelled': 'cancelled'} %}
   <span id="status" class="badge {{ goal.status }}" data-status="{{ goal.status }}" hidden>{{ status_labels.get(goal.status, goal.status) }}</span>
 
@@ -269,7 +288,7 @@
     <ul id="attachments-list" style="list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1);"></ul>
     <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2);">
       <button type="button" id="attach-add-btn" class="btn btn--ghost">+ Add file</button>
-      <input type="file" id="attach-add" multiple aria-label="Add files to this goal"
+      <input type="file" id="attach-add" multiple aria-label="Add files to this task"
              tabindex="-1"
              style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
       <span id="attach-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-xs);"></span>
@@ -285,7 +304,7 @@
       Lightwork
     </div>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
-    <details class="activity" id="work-activity">
+    <details class="activity" id="work-activity"{% if goal.status == 'draft' %} hidden{% endif %}>
       <summary class="activity__bar" aria-label="Agent activity — expand to show the full work log">
         <span class="spinner" id="work-spin" aria-hidden="true"></span>
         <span class="activity__now is-live" id="work-now">Working…</span>
@@ -317,15 +336,15 @@
         <div class="signoff">
           {% if signoff %}
             <div class="signoff__head">
-              <span class="badge {{ 'success' if signoff.decision == 'approved' else 'failure' }}">{{ signoff.decision }}</span>
-              <span class="muted">by {{ signoff.decided_by or 'operator' }} · <span data-when="{{ signoff.created_at }}"></span></span>
+              <span class="badge {{ 'success' if signoff.decision == 'approved' else 'failure' }}">{{ signoff.decision | humanize }}</span>
+              <span class="muted">by {{ (signoff.decided_by | identity).name if signoff.decided_by else 'a reviewer' }} · <span data-when="{{ signoff.created_at }}"></span></span>
             </div>
             {% if signoff.note %}<p class="signoff__note muted">{{ signoff.note }}</p>{% endif %}
             {% if signoff.decision == 'approved' and rendered.table %}
               <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">Download for hand-off (CSV)</a>
             {% endif %}
           {% elif goal.status == 'done' %}
-            <p class="signoff__prompt">Needs <strong>{{ deliverable.gate }}</strong> sign-off before it's acted on.</p>
+            <p class="signoff__prompt">Needs <strong>{{ "a manager's approval" if deliverable.gate == 'approval' else "a reviewer's sign-off" }}</strong> before it's acted on.</p>
             <textarea id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
             <div class="signoff__actions">
               <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">Approve</button>
@@ -333,7 +352,7 @@
             </div>
             <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
           {% else %}
-            <p class="signoff__prompt muted">Sign-off ({{ deliverable.gate }}) opens when the deliverable is finished.</p>
+            <p class="signoff__prompt muted">{{ "Approval" if deliverable.gate == 'approval' else "Sign-off" }} opens when the result is finished.</p>
           {% endif %}
         </div>
       {% endif %}
@@ -349,6 +368,7 @@
                   data-rating="down" aria-label="No, not useful">👎</button>
           <button id="copy-result" class="btn btn--ghost" type="button" aria-label="Copy the answer">⧉ Copy</button>
           <button id="read-aloud" class="btn btn--ghost" type="button"
+                  data-voice-only="{{ '1' if voice_only else '0' }}"
                   aria-label="Read the result aloud" aria-pressed="false">🔊 Read aloud</button>
           <button id="edit-toggle" class="btn btn--ghost" type="button">✎ Edit &amp; save</button>
           <span id="feedback-msg" role="status" aria-live="polite" class="muted"
@@ -372,8 +392,8 @@
         <div class="artifact">
           <div class="artifact__head">
             <span class="artifact__title">{{ a.title or 'Untitled' }}</span>
-            <span class="badge">{{ a.kind }}</span>
-            <span class="muted artifact__ver">v{{ a.version }}{% if a.versions > 1 %} · {{ a.versions }} versions{% endif %}</span>
+            <span class="badge">{{ {'markdown': 'Document', 'table': 'Table', 'text': 'Text', 'code': 'Code', 'json': 'Data', 'csv': 'Table'}.get(a.kind, a.kind | humanize) }}</span>
+            <span class="muted artifact__ver">Version {{ a.version }}{% if a.versions > 1 %} of {{ a.versions }}{% endif %}</span>
           </div>
           {% if a.table %}
             <div class="deliverable__table-wrap">
@@ -385,7 +405,7 @@
               </table>
             </div>
           {% else %}
-            <pre class="artifact__body" tabindex="0">{{ a.prose }}</pre>
+            <div class="artifact__body prose" tabindex="0" data-markdown>{{ a.prose }}</div>
           {% endif %}
           {% if a.versions > 1 %}
             <details class="artifact__history" data-goal="{{ goal.id }}" data-title="{{ a.title }}">
@@ -397,6 +417,21 @@
       {% endfor %}
     </div>
     {% endif %}
+    <details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
+      <summary>Show planning steps</summary>
+      <p class="muted">See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the
+        result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI,
+        counts toward your spending limits and costs at most $2.00.</p>
+      <label for="ps-passes">How many review rounds</label>
+      <select id="ps-passes" class="select">
+        <option value="1">One round</option>
+        <option value="2" selected>Up to two rounds</option>
+        <option value="3">Up to three rounds</option>
+      </select>
+      <button type="button" class="btn btn--primary" id="ps-run">Show planning steps</button>
+      <p id="ps-status" role="status" aria-live="polite" tabindex="-1"></p>
+      <div id="ps-result" hidden></div>
+    </details>
     <details class="more">
       <summary>More</summary>
     {% if projects %}
@@ -413,17 +448,32 @@
     {% endif %}
     <div class="goal-share" data-goal="{{ goal.id }}">
       {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">Review task files</a>{% endif %}
+      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">Download or share full history</a>
       <button type="button" id="share-create" class="btn btn--ghost">Create share link</button>
       <input type="text" id="share-url" class="input" readonly aria-label="Share link"
              style="display: none; max-width: 28rem;" onclick="this.select()">
       <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
       <ul id="share-list" class="share-list">
         {% for s in share_links %}
-          <li data-id="{{ s.id }}">Link #{{ s.id }} (read-only)
+          <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
             <button type="button" class="btn btn--ghost share-revoke" data-id="{{ s.id }}">Revoke</button></li>
         {% endfor %}
       </ul>
     </div>
+    <div class="task-ops">
+      <h3 class="task-ops__title">Task Health</h3>
+      <p class="muted task-ops__note">A score out of 100 from how the task went: whether it finished, tool errors, and how much AI it used.</p>
+      <button type="button" class="btn btn--ghost" id="task-health-check" data-goal="{{ goal.id }}">Check this task's health</button>
+      <p id="task-health-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="task-health-out"></div>
+    </div>
+    </details>
+    <details class="more" id="code-sandbox" data-goal="{{ goal.id }}">
+      <summary>Run code for this task</summary>
+      <p class="muted task-ops__note">Run small pieces of Python for this task in Lightwork's sandbox, step by step.
+        Values carry over between steps. Every step is checked, recorded and counted against the task's limits.</p>
+      <p id="code-sandbox-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="code-sandbox-body"></div>
     </details>
     <div id="halt-card" class="halt-card" style="display: none;">
       {% set pilot_prepared = goal.result == 'Prepared for a workflow pilot. Start this task after the pilot plan is frozen.' %}
@@ -441,8 +491,8 @@
           <summary>Set a spending limit for this attempt</summary>
           <div class="field">
             <label for="halt-resume-budget">Spending limit (USD, optional)</label>
-            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01" placeholder="Use the deployment’s default limit" aria-describedby="halt-resume-budget-hint">
-            <p id="halt-resume-budget-hint" class="muted">This limits the next attempt. Your organization’s spending and safety limits still apply.</p>
+            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling is not none %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling is not none %}Up to ${{ spend_ceiling_text }}{% else %}Optional task limit{% endif %}" aria-describedby="halt-resume-budget-hint">
+            <p id="halt-resume-budget-hint" class="muted">This limits the next attempt.{% if spend_ceiling %} Leave it empty to use your workspace’s spending limit of ${{ spend_ceiling_text }}.{% endif %} Your organization’s spending and safety limits still apply.</p>
           </div>
         </details>
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
@@ -463,6 +513,7 @@
       <p id="question-text" class="ask__text"></p>
     </div>
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
+      <input type="hidden" name="submission_key" value="{{ submission_key }}" />
       <textarea id="answer-input" name="message" rows="1" required
                 placeholder="{{ 'Lightwork is working… you can type while you wait' if run_open|default(true) else 'Message Lightwork…' }}"
                 aria-label="Your answer to the agent's question, or your next message"
@@ -487,6 +538,25 @@
   </div>
 {% endblock %}
 {% block scripts_extra %}
+  <style>
+    .task-ops { margin-top: var(--space-3); }
+    .task-ops__title { font-size: var(--text-base); margin: var(--space-2) 0 var(--space-1); }
+    .task-ops__note { font-size: var(--text-sm); margin: 0 0 var(--space-2); }
+    .io-scroll { overflow-x: auto; }
+    .cs-output { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow-y: auto; font-family: var(--font-mono, monospace); font-size: var(--text-sm); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-2); margin: var(--space-1) 0; }
+    .cs-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-2) 0; }
+    .cs-step { border-top: 1px solid var(--border); padding-top: var(--space-2); margin-top: var(--space-2); }
+    .cs-field { display: flex; flex-direction: column; gap: var(--space-1); }
+  </style>
+  <script src="/static/lightwork-insight-ops.js" defer></script>
+  <script src="/static/lightwork-code-sandbox.js" defer></script>
+  <script src="/static/lightwork-planning-steps.js" defer></script>
+  <script>
+    // Plain-language failure text for this page (no status codes or server text).
+    function cgErr(failure, what) {
+      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    }
+  </script>
   <script>
     (function() {
       const goalId = {{ goal.id }};
@@ -532,7 +602,7 @@
         error: 'M8 4v5M8 11.5v.5M8 2.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11z', verify: 'M4 8.5l3 3 5-7', artifact: 'M4 3h5l3 3v7H4z',
         withheld: 'M8 2.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zM5.5 8h5',
       };
-      const STATUS_LABELS = { pending: 'queued', running: 'working', done: 'done', blocked: 'paused', failed: 'failed', cancelled: 'cancelled' };
+      const STATUS_LABELS = { pending: 'Queued', running: 'Working', done: 'Done', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped' };
       // The kernel replaces model-derived events with one fixed sentence when
       // the evidence gateway is on; the page folds those into a single line.
       const WITHHELD = new Set({{ (withheld_markers or [])|tojson }});
@@ -641,7 +711,7 @@
         if (WITHHELD.has(content.trim())) {
           const n = Number(eventsEl.dataset.withheld || 0) + 1;
           eventsEl.dataset.withheld = String(n);
-          const text = (n === 1 ? '1 step' : n + ' steps') + ' completed. Step details are withheld by the evidence gateway until the result is ready.';
+          const text = (n === 1 ? '1 step' : n + ' steps') + ' completed. Step details will appear when the answer is ready.';
           if (!withheldRow) withheldRow = stepRow('withheld', KIND_LABELS.withheld, text, '');
           else withheldRow.querySelector('.step__text').textContent = text;
           eventsEl.appendChild(withheldRow);  // stays the latest line
@@ -717,6 +787,24 @@
       const composerHint = document.getElementById('composer-hint');
       const replyFiles = document.getElementById('reply-files');
       const replyAttach = document.getElementById('reply-attach');
+      let submitting = false;
+
+      function submissionError(detail, fallback) {
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+          return detail.map(function (error) {
+            return error && typeof error.msg === 'string' ? error.msg : '';
+          }).filter(Boolean).join('; ') || fallback;
+        }
+        if (detail && typeof detail.message === 'string') return detail.message;
+        return fallback;
+      }
+      // A refused follow-up keeps the server's own plain sentence ("Shorten
+      // the message to ...") and falls back to the page's plain wording.
+      function replyFailureText(response, body) {
+        const plain = window.mvPlainDetail ? window.mvPlainDetail(submissionError(body && body.detail, '')) : '';
+        return plain || cgErr(response, 'send your message');
+      }
 
       function composerMessage(text, danger) {
         if (!composerHint) return;
@@ -762,11 +850,13 @@
 
       answerForm.addEventListener('submit', async function(ev) {
         ev.preventDefault();
+        if (submitting) return;
         const text = answerInput.value.trim();
         if (!text) return;
         if (currentQuestionId != null) {
           const qid = currentQuestionId;
           const ans = text;
+          submitting = true;
           answerInput.disabled = true;
           actionMsg.textContent = '';
           try {
@@ -784,9 +874,13 @@
             } else {
               const j = await r.json().catch(function() { return {}; });
               actionMsg.style.color = 'var(--danger)';
-              actionMsg.textContent = j.detail || ('Submit failed: ' + r.status);
+              actionMsg.textContent = cgErr(r, 'send your answer');
             }
+          } catch (e) {
+            actionMsg.style.color = 'var(--danger)';
+            actionMsg.textContent = 'Could not send — check your connection and try again.';
           } finally {
+            submitting = false;
             answerInput.disabled = false;
           }
           return;
@@ -797,24 +891,28 @@
         }
         // The next message of this chat: a follow-up goal, run with the
         // earlier turns as context. The server answers with the new page.
+        // Disabled controls are excluded from native form serialization.
+        const formData = new FormData(answerForm);
+        submitting = true;
         if (sendBtn) sendBtn.disabled = true;
         answerInput.disabled = true;
         composerMessage('Sending…');
         try {
-          const r = await fetch(answerForm.action, { method: 'POST', body: new FormData(answerForm) });
+          const r = await fetch(answerForm.action, { method: 'POST', body: formData });
           if (r.redirected) { window.location.href = r.url; return; }
           const j = await r.json().catch(function () { return {}; });
-          composerMessage(j.detail || ('Could not send (' + r.status + ').'), true);
+          composerMessage(replyFailureText(r, j), true);
         } catch (e) {
           composerMessage('Could not send — check your connection and try again.', true);
         } finally {
+          submitting = false;
           if (sendBtn) sendBtn.disabled = false;
           answerInput.disabled = false;
         }
       });
 
       cancelBtn.addEventListener('click', async function() {
-        if (!(await mvConfirm('Cancel this goal? The agent stops at its next tool-call boundary.', { okText: 'Cancel goal' }))) return;
+        if (!(await mvConfirm('Stop this task? Lightwork will stop after the step it is on.', { okText: 'Stop task' }))) return;
         cancelBtn.disabled = true;
         actionMsg.textContent = '';
         let accepted = false;
@@ -823,10 +921,10 @@
           if (r.ok || r.status === 204) { accepted = true; return; }
           const j = await r.json().catch(function () { return {}; });
           actionMsg.style.color = 'var(--danger)';
-          actionMsg.textContent = j.detail || ('Cancel failed: ' + r.status);
+          actionMsg.textContent = cgErr(r, 'stop the task');
         } catch (e) {
           actionMsg.style.color = 'var(--danger)';
-          actionMsg.textContent = 'Cancel failed — check your connection and try again.';
+          actionMsg.textContent = 'Could not stop the task. Check your connection and try again.';
         } finally {
           if (!accepted) cancelBtn.disabled = false;
         }
@@ -865,7 +963,9 @@
           const changed = d.result !== lastResult;
           lastResult = d.result;
           // A clean finish shows its result; a 'blocked' result is a terse
-          // stop-reason that the halt card renders instead.
+          // stop-reason that the halt card renders instead. While the run is
+          // still open the result is the answer being written, streamed by
+          // the server as the model produces it.
           if (d.status !== 'blocked') {
             resultSection.style.display = 'block';
             if (STRUCTURED) {
@@ -873,9 +973,17 @@
               // deliverable changed after this page loaded.
               if (changed && deliverableStaleEl) deliverableStaleEl.style.display = 'block';
             } else if (resultEl) {
-              renderResult(d.result);
+              if (changed) renderResult(d.result);
+              if (d.terminal === true) resultEl.removeAttribute('aria-busy');
+              else resultEl.setAttribute('aria-busy', 'true');
             }
           }
+        } else if (d.result === '' && lastResult) {
+          // The answer preview was withdrawn (Shield blocked a later part of
+          // it): take the text already shown off the page.
+          lastResult = '';
+          if (resultEl && !STRUCTURED) resultEl.textContent = '';
+          resultSection.style.display = 'none';
         }
         if (d.status === 'blocked') {
           pollQuestions();
@@ -981,7 +1089,7 @@
           .then(function (r) {
             if (r.ok || r.status === 204) { location.reload(); return null; }
             return r.json().catch(function () { return {}; }).then(function (j) {
-              msg.textContent = j && typeof j.detail === 'string' ? j.detail : ('Could not resume (' + r.status + '). Check the spending limit and try again.');
+              msg.textContent = cgErr(r, 'continue the task') + ' Check the spending limit too.';
               btn.disabled = false;
             });
           })
@@ -1025,12 +1133,12 @@
           if (r.ok) { location.reload(); return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
-            msg.textContent = j.detail || ('Sign-off failed: ' + r.status);
+            msg.textContent = cgErr(r, 'record the sign-off');
             btns.forEach(function (b) { if (b) b.disabled = false; });
           });
         }).catch(function (e) {
           msg.style.color = 'var(--danger)';
-          msg.textContent = String(e);
+          msg.textContent = cgErr(e, 'record the sign-off');
           btns.forEach(function (b) { if (b) b.disabled = false; });
         });
       }
@@ -1071,12 +1179,12 @@
           if (r.ok) { show(rating); msg.textContent = 'Thanks — this trains your workforce.'; return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
-            msg.textContent = j.detail || ('Feedback failed: ' + r.status);
+            msg.textContent = cgErr(r, 'save your feedback');
           });
         }).catch(function (e) {
           [up, down].forEach(function (b) { if (b) b.disabled = false; });
           msg.style.color = 'var(--danger)';
-          msg.textContent = String(e);
+          msg.textContent = cgErr(e, 'save your feedback');
         });
       }
       if (up) up.addEventListener('click', function () { submit('up'); });
@@ -1109,7 +1217,7 @@
       var spin = document.getElementById('work-spin');
       if (!activity || !events || !nowEl) return;
       var TERMINAL = { done: 1, cancelled: 1, failed: 1, blocked: 1 };
-      var SETTLED = { done: 'complete', blocked: 'paused' };
+      var SETTLED = { done: 'Complete', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped' };
 
       function stepTotal() { return Number(events.dataset && events.dataset.steps || 0) || events.children.length; }
       function steps(n) { return n + (n === 1 ? ' step' : ' steps'); }
@@ -1136,7 +1244,7 @@
         if (nowEl.classList) nowEl.classList.remove('is-live');
         if (spin) spin.style.display = 'none';
         nowEl.textContent = 'Work log: ' + steps(stepTotal());
-        metaEl.textContent = SETTLED[st] || st;
+        metaEl.textContent = SETTLED[st] || (window.mvHuman ? window.mvHuman(st) : st);
         return true;
       }
 
@@ -1181,9 +1289,9 @@
           if (r.ok) { editMsg.textContent = 'Saved — thanks, this trains your workforce.';
                       setTimeout(function () { location.reload(); }, 900); return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
-            editMsg.style.color = 'var(--danger)'; editMsg.textContent = j.detail || ('Save failed: ' + r.status);
+            editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(r, 'save your edit');
           });
-        }).catch(function (e) { saveBtn.disabled = false; editMsg.style.color = 'var(--danger)'; editMsg.textContent = String(e); });
+        }).catch(function (e) { saveBtn.disabled = false; editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(e, 'save your edit'); });
       });
     })();
   </script>
@@ -1208,7 +1316,7 @@
         fetch(url).then(function (r) {
           if (!r.ok) {
             return r.json().catch(function () { return {}; }).then(function (j) {
-              throw new Error(j.detail || ('History unavailable (HTTP ' + r.status + ')'));
+              throw new Error(cgErr(r, 'load earlier versions'));
             });
           }
           return r.json();
@@ -1281,9 +1389,9 @@
             msg.textContent = 'Copy this link now — it is shown only once.';
             if (j.id) addRow(j.id);
           } else {
-            msg.textContent = j.detail || ('Could not create link (' + r.status + ').');
+            msg.textContent = cgErr(r, 'create the link');
           }
-        } catch (e) { msg.textContent = String(e); }
+        } catch (e) { msg.textContent = cgErr(e, 'create the link'); }
         finally { createBtn.disabled = false; }
       });
 
@@ -1313,11 +1421,11 @@
             if (li) li.remove();
           } else {
             const detail = await r.json().catch(function () { return {}; });
-            msg.textContent = detail.detail || ('Could not revoke link (' + r.status + ').');
+            msg.textContent = cgErr(r, 'turn off the link');
             btn.disabled = false;
           }
         } catch (e) {
-          msg.textContent = 'Could not revoke link — check your connection and try again.';
+          msg.textContent = 'Could not turn off the link. Check your connection and try again.';
           btn.disabled = false;
         }
       });
@@ -1375,7 +1483,7 @@
           .then(function (r) {
             if (r.ok) return r.json();
             return r.json().catch(function () { return {}; }).then(function (body) {
-              throw new Error(body.detail || ('Could not load attachments (' + r.status + ').'));
+              throw new Error(cgErr(r, 'load the attached files'));
             });
           })
           .then(render)
@@ -1403,14 +1511,12 @@
               fd.append('file', f, f.name);
               return fetch('/api/v1/goals/' + goalId + '/attachments', { method: 'POST', body: fd })
                 .then(function (r) {
-                  if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) {
-                    throw new Error(j.detail || (f.name + ' upload failed'));
-                  });
+                  if (!r.ok) throw new Error(cgErr(r, 'upload ' + f.name));
                 });
             });
           });
           chain.then(function () { msg.textContent = ''; refresh(); })
-               .catch(function (e) { msg.textContent = String(e.message || e); refresh(); });
+               .catch(function (e) { msg.textContent = e && /^Could not/.test(e.message || '') ? e.message : cgErr(e, 'upload the file'); refresh(); });
         });
       }
       refresh();
@@ -1462,7 +1568,9 @@
             onFallback: fallback,
             onResult: fill,
           })
-            .catch(function () {})
+            .catch(function () {
+              if (window.mvToast) window.mvToast('We couldn\u2019t turn your recording into text. Try again, or type your answer.', { error: true });
+            })
             .finally(function () { busy = false; });
         }
         mic.addEventListener('click', function () {
@@ -1516,6 +1624,9 @@
           player.play();
         }).catch(function () {}).finally(function () { speakBtn.disabled = false; });
       });
+      // Voice-only mode: read the finished result aloud as soon as it is
+      // shown (the browser may still ask for a click before playing sound).
+      if (speakBtn.getAttribute('data-voice-only') === '1') speakBtn.click();
     })();
   </script>
 {% endblock %}

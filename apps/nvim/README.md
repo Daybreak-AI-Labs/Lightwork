@@ -32,3 +32,5 @@ lazy.nvim:
 
 Classic Vim (non-Neovim) users: the CLI works in any `:terminal` —
 `maverick monitor` is the same TUI.
+
+See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

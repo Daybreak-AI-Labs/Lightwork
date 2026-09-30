@@ -413,24 +413,41 @@ def _rank_embed(need: str, entries: list, max_n: int) -> list[Candidate] | None:
     empty if nothing clears ``_EMBED_MIN_SCORE``).
     """
     try:
-        from .skill.embeddings import _cosine, _have_fastembed, embed
+        from .skill.embeddings import (
+            _cosine,
+            _have_fastembed,
+            cached_corpus_vectors,
+            embed,
+            embedding_identity,
+            validate_vectors,
+        )
 
-        if not _have_fastembed() or not entries:
+        if not _have_fastembed() or not entries or len(need) > 8192:
             return None
-        vecs = embed([need] + [_entry_text(e) for _, e in entries])
-        if not vecs or len(vecs) != len(entries) + 1:
+        identity = embedding_identity()
+        qv = validate_vectors(embed([need]), 1)[0]
+        keys = [hashlib.sha256(json.dumps(
+            [kind, e.name, e.source, getattr(e, "version", ""), getattr(e, "sha256", "")],
+            separators=(",", ":"), ensure_ascii=True,
+        ).encode()).hexdigest() for kind, e in entries]
+        if len(set(keys)) != len(keys):
             return None
-        qv = vecs[0]
+        cache = cached_corpus_vectors(
+            {key: _entry_text(e) for key, (_, e) in zip(keys, entries, strict=True)},
+            namespace="capabilities", dimension=len(qv), identity=identity,
+        )
+        if cache is None or len(cache) != len(entries) or embedding_identity() != identity:
+            return None
         scored: list[Candidate] = []
-        for (kind, e), v in zip(entries, vecs[1:], strict=False):
-            score = _cosine(qv, v)
+        for key, (kind, e) in zip(keys, entries, strict=True):
+            score = _cosine(qv, cache[key].vector)
             if score < _EMBED_MIN_SCORE:
                 continue
             scored.append(Candidate(
                 kind=kind, name=e.name, summary=e.summary, source=e.source,
                 score=score,
             ))
-        scored.sort(key=lambda c: -c.score)
+        scored.sort(key=lambda c: (-c.score, c.kind, c.name, c.source))
         return scored[: max(1, max_n)]
     except Exception as e:  # pragma: no cover -- defensive optional path
         log.debug("self_learning: embedding rank failed: %s", e)
@@ -1959,7 +1976,11 @@ async def preflight(
     for need in needs:
         if len(acquired) >= max(1, max_acquisitions):
             break
-        cands = [c for c in search_capabilities(need, kinds=("skills",)) if c.score >= 0.2]
+        # The catalog host is never on a run's critical path: serve the cached
+        # index (any age) and refresh it in the background.
+        from . import catalog as _catalog
+        with _catalog.cached_first():
+            cands = [c for c in search_capabilities(need, kinds=("skills",)) if c.score >= 0.2]
         if not cands or cands[0].name in have:
             continue
         try:

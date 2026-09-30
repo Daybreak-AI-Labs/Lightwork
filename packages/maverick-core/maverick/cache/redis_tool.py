@@ -31,11 +31,11 @@ Default OFF and never auto-imported by ``tool_cache`` — the caller wires it::
 ``enabled()`` answers "did the operator pick the redis backend?";
 ``from_config()`` builds the configured instance (or ``None``).
 
-Status: EXPERIMENTAL — this backend is implemented and unit-tested but **not yet
-wired into the live tool cache** (``maverick.cache.tool`` consults no backend
-selection, and nothing calls :func:`enabled` / :func:`from_config` in a
-production path). Setting ``[tools] output_cache_backend = "redis"`` therefore
-has no effect today; a caller must be added to ``cache.tool`` first.
+Wiring: ``maverick.cache.tool`` consults :func:`from_config` on a local miss
+and after each local store, so with the local cache on (``[tools]
+output_cache``) and ``output_cache_backend = "redis"`` a result one worker
+stored is reused by the others. Keys carry the local cache's per-person and
+per-workspace scope, so a shared Redis never crosses that boundary.
 """
 from __future__ import annotations
 
@@ -78,13 +78,15 @@ class RedisToolCache:
             self._cli = redis.Redis.from_url(self.url, decode_responses=True)
         return self._cli
 
-    def _redis_key(self, tool_name: str, args: dict) -> str:
-        return f"{self.namespace}:{_key(tool_name, args)}"
+    def _redis_key(self, tool_name: str, args: dict, scope: str = "") -> str:
+        # ``scope`` is the local cache's per-person/workspace namespace, so a
+        # shared Redis never hands one caller another caller's result.
+        return f"{self.namespace}:{_key(tool_name, args, namespace=scope)}"
 
-    def get(self, tool_name: str, args: dict) -> tuple[bool, str | None]:
+    def get(self, tool_name: str, args: dict, *, scope: str = "") -> tuple[bool, str | None]:
         """Return ``(hit, value)``; any redis trouble is a miss, never a raise."""
         try:
-            value = self._client().get(self._redis_key(tool_name, args))
+            value = self._client().get(self._redis_key(tool_name, args, scope))
         except Exception as exc:
             log.debug("redis tool cache: get failed, treating as miss (%s)", exc)
             self._misses += 1
@@ -97,7 +99,7 @@ class RedisToolCache:
         self._hits += 1
         return (True, value)
 
-    def store(self, tool_name: str, args: dict, value: str) -> None:
+    def store(self, tool_name: str, args: dict, value: str, *, scope: str = "") -> None:
         """Store a successful result; errors and non-strings are never cached.
 
         ``SETEX`` when a TTL is configured, plain ``SET`` otherwise. Any redis
@@ -106,7 +108,7 @@ class RedisToolCache:
         if not isinstance(value, str) or value.startswith("ERROR:"):
             return  # mirror tool_cache: never pin a failure
         try:
-            key = self._redis_key(tool_name, args)
+            key = self._redis_key(tool_name, args, scope)
             if self.ttl_s:
                 self._client().setex(key, max(1, int(self.ttl_s)), value)
             else:

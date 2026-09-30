@@ -252,3 +252,96 @@ def test_same_person_approval_fails_closed_and_replay_is_stable(
     assert replay.json() == first.json()
     denied = _approve(client, first.json(), reviewer="operator-a")
     assert denied.status_code == 409
+
+
+def test_overview_lists_requests_brokers_and_waiting_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client(tmp_path, monkeypatch)
+    monkeypatch.setattr(authority_api, "has_global_permission", lambda *_args: True)
+    monkeypatch.setattr(authority_api, "has_permission", lambda *_args: True)
+    broker = client.post(
+        "/api/v1/privacy/drop/authority/brokers/proposals",
+        json={
+            "action": "enroll_broker",
+            "broker_ref": "broker-ca-001",
+            "registration_sha256": _digest("registration"),
+            "evidence_sha256": _digest("broker-evidence"),
+            "valid_until": NOW + 3_600,
+            "expected_version": 0,
+            "idempotency_key": "propose-broker",
+        },
+    )
+    waiting = client.get("/api/v1/privacy/drop/authority/overview").json()["waiting"]
+    assert waiting[0]["kind"] == "enroll_broker"
+    assert waiting[0]["proposed_by_you"] is True
+    assert waiting[0]["summary"] == {"broker_ref": "broker-ca-001", "valid_until": NOW + 3_600}
+    other = client.get(
+        "/api/v1/privacy/drop/authority/overview", headers={"X-Test-Principal": "reviewer-b"}
+    ).json()["waiting"]
+    assert other[0]["proposed_by_you"] is False
+    assert _approve(client, broker.json()).status_code == 200
+    record = client.post(
+        "/api/v1/privacy/drop/authority/records/proposals",
+        json={
+            "action": "import_record",
+            "drop_id": 41_002,
+            "broker_ref": "broker-ca-001",
+            "broker_registration_sha256": _digest("registration"),
+            "subject_binding_sha256": _digest("subject-binding"),
+            "request_type": "OptOut",
+            "template_id": TEMPLATE,
+            "language": "es",
+            "record_revision": 1,
+            "valid_until": NOW + 1_800,
+            "evidence_sha256": _digest("record-evidence"),
+            "expected_version": 0,
+            "idempotency_key": "propose-record",
+        },
+    )
+    assert _approve(client, record.json()).status_code == 200
+
+    listed = client.get("/api/v1/privacy/drop/authority/overview")
+    assert listed.status_code == 200, listed.text
+    body = listed.json()
+    assert body["waiting"] == []
+    assert body["brokers"][0]["broker_ref"] == "broker-ca-001"
+    assert body["brokers"][0]["registration_sha256"] == _digest("registration")
+    row = body["requests"][0]
+    assert row["drop_id"] == 41_002
+    assert row["request_type"] == "OptOut"
+    assert row["template_id"] == TEMPLATE
+    assert row["language"] == "es"
+    assert row["usable"] is True
+    assert row["request"] is None
+    assert row["outcomes"] == []
+    assert _digest("subject-binding") not in listed.text
+
+    created = client.post(
+        "/api/v1/privacy/drop/41002/request",
+        json={
+            "request_type": "OptOut",
+            "template_id": TEMPLATE,
+            "language": "es",
+            "expected_revision": 0,
+            "idempotency_key": "create-request",
+        },
+    )
+    assert created.status_code == 201, created.text
+    row = client.get("/api/v1/privacy/drop/authority/overview").json()["requests"][0]
+    assert row["request"]["status"] == "PENDING"
+    assert row["request"]["revision"] == 1
+
+
+def test_overview_hides_setup_from_operators_and_refuses_viewers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client(tmp_path, monkeypatch)
+    monkeypatch.setattr(authority_api, "has_global_permission", lambda *_args: False)
+    monkeypatch.setattr(authority_api, "has_permission", lambda *_args: True)
+    body = client.get("/api/v1/privacy/drop/authority/overview").json()
+    assert body["brokers"] == [] and body["waiting"] == []
+    monkeypatch.setattr(authority_api, "has_permission", lambda *_args: False)
+    assert client.get("/api/v1/privacy/drop/authority/overview").status_code == 403

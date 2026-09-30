@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
-# Tenant-local governed record stores whose restored rows do not yet have a
-# store-specific, authenticated reconciliation protocol.  These rows can feed
+# Tenant-local governed record stores whose restored rows require a hold or
+# store-specific authenticated reconciliation.  These rows can feed
 # approvals, external delivery, regulated status, trust, or execution gates.
 # Keeping the mapping closed and exported lets an acceptance test compare it
 # with every literal GovernedRecordStore/_RecordStore declaration in source.
 GLOBAL_START_JSON_AUTHORITY_POLICIES = {
+    "a2a-task-authority-v1": "a2a_task_execution_authority",
     "ai_bank_mrm_packages": "bank_mrm_package_authority",
     "ai_benchmark_cohort_reports": "benchmark_cohort_authority",
     "ai_benchmark_contributions": "benchmark_contribution_authority",
@@ -38,6 +39,9 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "ai_roi_assumptions": "roi_assumption_authority",
     "ai_serious_incidents": "serious_incident_authority",
     "assessment_evidence_proposals": "assessment_evidence_authority",
+    "channel-deliveries": "channel_execution_delivery_authority",
+    "channel-delivery-cursors": "channel_delivery_recovery_cursor_authority",
+    "channel-poll-cursors": "channel_provider_poll_cursor_authority",
     "data_map": "privacy_data_map_record_authority",
     "dpa_reviews": "dpa_review_authority",
     "dsar_requests": "dsar_request_authority",
@@ -54,6 +58,13 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "eu_registrations": "eu_registration_authority",
     "finance_anomaly_cases": "finance_anomaly_case_authority",
     "finance_screening_cases": "finance_screening_case_authority",
+    # Retained action evidence, operator answers and recipe admissions carry
+    # withdrawal and signed-lineage state; a restored older copy could revive
+    # withdrawn evidence or a revoked admission.
+    "flow_action_episodes": "flow_action_episode_authority",
+    "flow_operator_reviews": "flow_operator_review_authority",
+    "flow_recipe_lineage": "flow_recipe_lineage_authority",
+    "imessage-intake-cursors": "imessage_intake_cursor_authority",
     "model_risk_portfolio_snapshots": "model_risk_portfolio_authority",
     "outcome_value_evidence": "outcome_value_evidence_authority",
     "paper_reviews": "paper_review_authority",
@@ -120,6 +131,11 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
     if not is_sqlite and name.endswith(".lock"):
         return None
 
+    if _contains(parts, "a2a", "tasks.authority.sealed"):
+        # This is a database-generation/anti-downgrade receipt, not a credential
+        # or a cache. Restoring it requires current shared authority readback;
+        # discarding it would allow an already consumed task to execute locally.
+        return "a2a_shared_authority_binding"
     if (
         _contains(parts, "connections", "connections.sealed")
         or _contains(parts, "connections", "oauth-setup.sealed")
@@ -251,6 +267,19 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         return "llm_team_budget"
     if _contains(parts, "mcp_sidecar", "call_budget.json"):
         return "mcp_call_budget"
+    # Frozen external billing receipts and provider admission history cannot
+    # roll back independently of the provider or cumulative usage ledger.
+    if _contains(parts, "billing", "stripe-collections"):
+        return "stripe_collection_authority"
+    if "usage" in parts[:-1]:
+        provider_policies = {
+            "provider_holds.json": "organization_provider_holds",
+            "provider_holds.required": "organization_provider_holds_required",
+            "provider_history.sqlite3": "organization_provider_history",
+            "provider_history.required": "organization_provider_history_required",
+        }
+        if name in provider_policies:
+            return provider_policies[name]
     if _contains(parts, "browser", "state.json"):
         return "browser_session"
     if _contains(parts, "keys", "plugin_ca", "revocations.json"):
@@ -491,10 +520,13 @@ DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES = {
 
 
 # These stores carry replay, revocation, identity, trust, scheduler, delivery,
-# or executable-instruction state.  Bootstrap currently has no store-specific
-# readback protocol for them, so every restored copy must remain a visible
-# global-start blocker until an administrator records a disposition.
+# or executable-instruction state.  Copies without a supported and authenticated
+# store-specific reconciliation must remain visible global-start blockers.
+# Malformed channel records also block globally; valid records instead enter
+# the channel reconciliation protocol while retaining their exact receipts.
 GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
+    "a2a/tasks.authority.sealed": "a2a_shared_authority_binding",
+    "tenants/tenant-a/a2a/tasks.authority.sealed": "a2a_shared_authority_binding",
     "config.toml": "tenant_configuration_authority",
     "runtime-overrides.toml": "runtime_override_authority",
     "roles.toml": "role_instruction_authority",
@@ -504,6 +536,16 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "dashboard-config.toml": "dashboard_configuration_authority",
     "dashboard-event-triggers.toml": "event_trigger_scheduler_authority",
     "dashboard-triggers.toml": "webhook_trigger_authority",
+    "billing/stripe-collections/period.json": "stripe_collection_authority",
+    "usage/provider_holds.json": "organization_provider_holds",
+    "usage/provider_holds.required": "organization_provider_holds_required",
+    "usage/provider_history.sqlite3": "organization_provider_history",
+    "usage/provider_history.required": "organization_provider_history_required",
+    "tenants/tenant-a/billing/stripe-collections/period.json": "stripe_collection_authority",
+    "tenants/tenant-a/usage/provider_holds.json": "organization_provider_holds",
+    "tenants/tenant-a/usage/provider_holds.required": "organization_provider_holds_required",
+    "tenants/tenant-a/usage/provider_history.sqlite3": "organization_provider_history",
+    "tenants/tenant-a/usage/provider_history.required": "organization_provider_history_required",
     "model_improvement/training_receipts.ndjson": "training_approval_authority",
     "keys/consent-experiments.key": "consent_experiment_key_authority",
     "generated_tools/recovered.py": "generated_tool_authority",

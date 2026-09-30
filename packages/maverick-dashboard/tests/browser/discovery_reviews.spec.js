@@ -18,35 +18,31 @@ test('discovery uses sealed connection references and explicitly rebinds a rotat
   await fits(page);await page.getByRole('button',{name:'Save connection',exact:true}).click();
   await expect(page.locator('#cx-list')).toContainText('browser-managed');await expect(page.locator('#cx-token')).toHaveValue('');
   expect(credentialDrafts).toBe(0);await page.goto('/privacy/data-discovery');
-  await page.locator('#pdd-load-setup').click();await expect(page.locator('#pdd-status')).toContainText('Setup choices loaded');
-  const key=page.locator('#pdd-key-form');await key.locator('[name="name"]').fill('browser-inventory');
-  await key.getByRole('button',{name:'Create or rotate evidence key'}).click();
-  await expect(page.locator('#pdd-status')).toContainText('Evidence key saved securely');
-  const source=page.locator('#pdd-source');await source.locator('[name="source_id"]').fill('browser-cmdb');
-  await source.locator('[name="provider"]').selectOption('servicenow_cmdb');
-  const reference=await page.locator('#pdd-connection option').filter({hasText:'browser-managed'}).getAttribute('value');
-  await page.locator('#pdd-connection').selectOption(reference);
-  await expect(source.locator('[name="origin"]')).toHaveValue('https://data.example.com');
-  await source.locator('[name="resource_ref"]').fill('cmdb_ci');await page.locator('#pdd-evidence-key').selectOption({index:1});
-  await source.getByRole('button',{name:'Save source settings'}).click();
-  await expect(source.locator('[name="expected_revision"]')).toHaveValue('1');
+  const confirm=async()=>{await expect(page.locator('#mv-confirm')).toBeVisible();await page.locator('#mv-confirm-ok').click();};
+  const saveSource=async()=>{
+    await page.locator('#pdd-new-source').click();await expect(page.locator('#pdd-source-panel')).toBeVisible();
+    await page.locator('#pdd-name').fill('browser-cmdb');await page.locator('#pdd-provider').selectOption('servicenow_cmdb');
+    const reference=await page.locator('#pdd-connection option').filter({hasText:'browser-managed'}).getAttribute('value');
+    await page.locator('#pdd-connection').selectOption(reference);await page.locator('#pdd-resource').fill('cmdb_ci');
+    await page.getByRole('button',{name:'Save source',exact:true}).click();
+    await expect(page.locator('#pdd-status')).toContainText('Data source saved');
+  };
+  await saveSource();
   const before=await (await request.get('/api/v1/privacy/data-discovery/sources/browser-cmdb')).json();
+  expect(before.revision).toBe(1);expect(before.credential_env).not.toContain('synthetic-browser-only-credential');
+  const row=page.locator('#pdd-sources tr').filter({hasText:/browser.cmdb/i});
   const response=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/v1/privacy/data-discovery/sources/browser-cmdb/test-access');
-  await page.locator('#pdd-test-source').click();expect((await response).status()).toBe(200);
-  // Assert the exact payload consumed by the app. Chromium can discard its
-  // inspector-side response body even after the bounded reader renders it.
-  await expect(page.locator('#pdd-status')).toContainText('Saved source access checked');
-  const access=JSON.parse(await page.locator('#pdd-result').textContent());
-  expect(access.access).toBe('readable');expect(access.raw_data_returned).toBe(false);expect(access.report_created).toBe(false);
-  expect(JSON.stringify(access)).not.toContain('never-return-this-value');
-  await page.locator('#pdd-key-picker').selectOption({index:1});await key.getByRole('button',{name:'Create or rotate evidence key'}).click();
-  await expect(page.locator('#pdd-status')).toContainText('existing sources were not changed');
+  await row.getByRole('button',{name:'Test access'}).click();await confirm();expect((await response).status()).toBe(200);
+  await expect(page.locator('#pdd-status')).toContainText('can read this source');
+  await expect(page.locator('#pdd-root')).not.toContainText('never-return-this-value');
+  await page.locator('#pdd-rotate-key').click();await confirm();
+  await expect(page.locator('#pdd-status')).toContainText('Existing sources were not changed');
   const unchanged=await (await request.get('/api/v1/privacy/data-discovery/sources/browser-cmdb')).json();
   expect(unchanged.evidence_key_env).toBe(before.evidence_key_env);expect(unchanged.revision).toBe(1);
-  await page.locator('#pdd-evidence-key').selectOption({index:1});await source.getByRole('button',{name:'Save source settings'}).click();
-  await expect(source.locator('[name="expected_revision"]')).toHaveValue('2');
-  const rebound=await (await request.get('/api/v1/privacy/data-discovery/sources/browser-cmdb')).json();expect(rebound.evidence_key_env).not.toBe(before.evidence_key_env);
-  await source.scrollIntoViewIfNeeded();await info.attach('connected-source',{body:await page.screenshot(),contentType:'image/png'});
+  await saveSource();
+  const rebound=await (await request.get('/api/v1/privacy/data-discovery/sources/browser-cmdb')).json();
+  expect(rebound.revision).toBe(2);expect(rebound.evidence_key_env).not.toBe(before.evidence_key_env);
+  await page.locator('#pdd-sources').scrollIntoViewIfNeeded();await info.attach('connected-source',{body:await page.screenshot(),contentType:'image/png'});
   await fits(page);
 });
 
@@ -55,15 +51,18 @@ test('owner shares an exact captured result and assigned colleague reviews it wi
   await page.goto('/project-reviews#project='+fixture.project_id);
   await expect(page.locator('#pr-setup')).toBeVisible();
   await page.locator('#pr-member').selectOption('user:browser-colleague');await page.locator('#pr-grant').click();
-  await expect(page.locator('#pr-members')).toContainText('user:browser-colleague');
+  await expect(page.locator('#pr-members')).toContainText('browser-colleague');
   await page.locator('#pr-goal').selectOption(String(fixture.review_goal));await page.locator('#pr-preview').click();
   await expect(page.locator('#pr-preview-text')).toContainText('Evidence limitations remain explicit');
   await page.locator('#pr-reviewer').selectOption('user:browser-colleague');
   await page.locator('#pr-due').fill(new Date(Date.now()+86400000).toISOString().slice(0,16));
   await page.locator('#pr-note').fill('Review the captured evidence and limitations before responding.');
   const sent=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/packets'));
-  await page.locator('#pr-send-button').click();const packet=await (await sent).json();
-  await expect(page.locator('#pr-status')).toContainText('Review packet sent');
+  await page.locator('#pr-send-button').click();
+  // Sharing asks for an in-page confirmation that names the reviewer.
+  const share=page.getByRole('dialog',{name:'Share exactly the captured result shown above with browser-colleague?'});
+  await share.getByRole('button',{name:'Share for review',exact:true}).click();const packet=await (await sent).json();
+  await expect(page.locator('#pr-status')).toContainText('Sent for review. No task was run or signed off.');
   const reviewer=await browser.newContext({baseURL,viewport:{width:320,height:800},extraHTTPHeaders:{Origin:baseURL,'X-Browser-Principal':'browser-colleague'}});
   try {
     const review=await reviewer.newPage();review.on('dialog',dialog=>dialog.accept());
@@ -79,7 +78,9 @@ test('owner shares an exact captured result and assigned colleague reviews it wi
     await page.locator('#pr-response-note').fill('Owner added a clarification while the colleague was reviewing.');await page.locator('#pr-response-button').click();await expect(page.locator('#pr-status')).toContainText('Review response saved');
     await review.locator('#pr-refresh').click();await expect(review.locator('#pr-status')).toContainText('Your unfinished comment is kept');await expect(review.locator('#pr-response-note')).toHaveValue('Synthetic colleague reviewed the captured result and limitations.');await expect(review.locator('#pr-action')).toHaveValue('comment');
     await review.locator('#pr-action').selectOption('approve');
-    await review.locator('#pr-response-button').click();await expect(review.locator('#pr-status')).toContainText('Review response saved');
+    await review.locator('#pr-response-button').click();
+    await review.getByRole('dialog',{name:/Save this approve decision/}).getByRole('button',{name:'Save decision',exact:true}).click();
+    await expect(review.locator('#pr-status')).toContainText('Review response saved');
     await expect(review.locator('#pr-packet-summary')).toContainText('approved');await fits(review);
     const reviewImage=info.outputPath('assigned-colleague-review-320.png');await review.screenshot({path:reviewImage});await info.attach('assigned-colleague-review',{path:reviewImage,contentType:'image/png'});
     await review.route('**/api/v1/project-reviews**',route=>route.fulfill({status:401,contentType:'text/html',body:'<h1>Synthetic session expired</h1>'}));

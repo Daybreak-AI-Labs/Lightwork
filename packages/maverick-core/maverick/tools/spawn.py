@@ -16,14 +16,21 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from .._envparse import env_float, env_int
+from .._envparse import env_float
 from . import Tool
 
 if TYPE_CHECKING:
     from ..agent import Agent
 
 
-MAX_SWARM_FANOUT = env_int("MAVERICK_MAX_SWARM_FANOUT", 8)
+def _max_fanout_setting() -> int:
+    """``[swarm] max_fanout`` read at startup (env ``MAVERICK_MAX_SWARM_FANOUT`` wins)."""
+    from ..env_setting import env_or_config_int
+
+    return env_or_config_int("MAVERICK_MAX_SWARM_FANOUT", "swarm", "max_fanout", 8)
+
+
+MAX_SWARM_FANOUT = _max_fanout_setting()
 
 # #611: budget reserved for the top-level goal's synthesis/write step. Once
 # cumulative spend crosses (1 - this) of the cap, spawn_swarm refuses new
@@ -32,6 +39,15 @@ MAX_SWARM_FANOUT = env_int("MAVERICK_MAX_SWARM_FANOUT", 8)
 SYNTHESIS_RESERVE = env_float("MAVERICK_SYNTHESIS_RESERVE", 0.25)
 
 _RESERVED_CHILD_ROLES = {"orchestrator"}
+
+
+def _absorb_child_labels(parent: Agent, children: list) -> None:
+    """Information flow (maverick.ifc): a child's answer returns to its parent,
+    and with it whatever labelled data the child saw."""
+    tracker = getattr(parent.ctx, "ifc", None)
+    if tracker is not None:
+        for child in children:
+            tracker.absorb(parent.name, tracker.labels(child.name))
 
 
 def _reserved_role_error(role: object) -> str | None:
@@ -72,7 +88,7 @@ def _synthesis_reserve_block(parent: Agent) -> str | None:
     if SYNTHESIS_RESERVE <= 0:
         return None
     b = parent.ctx.budget
-    if b.dollars < b.max_dollars * (1.0 - SYNTHESIS_RESERVE):
+    if b.max_dollars is None or b.dollars < b.max_dollars * (1.0 - SYNTHESIS_RESERVE):
         return None
     parent.ctx.blackboard.post(
         parent.name, "plan",
@@ -187,6 +203,7 @@ async def _run_child_and_report(parent, child) -> str:
     except BaseException:
         parent.ctx.release_spawns(1)
         raise
+    _absorb_child_labels(parent, [child])
     # Containment Rung 1: a sealed child's final is attacker-influenced, so it
     # must never surface -- not even inside a SUBAGENT_STOP hook payload (hook
     # consumers log/route it). Compute the withhold notice BEFORE emitting and
@@ -387,7 +404,8 @@ async def _swarm_credit_assignment(parent: Agent, children: list, results: list)
         }
         _cs = _credit._settings()
         b = parent.ctx.budget
-        headroom_ok = b.dollars < b.max_dollars * (1.0 - _cs["min_budget_headroom"])
+        headroom_ok = (b.max_dollars is None
+                       or b.dollars < b.max_dollars * (1.0 - _cs["min_budget_headroom"]))
         try:
             from ..calibration import learning_frozen as _frozen
             frozen = _frozen()
@@ -474,8 +492,11 @@ def _format_swarm_results(parent: Agent, children: list, results: list,
     every sub-task ran.
     """
     from ..compaction import excerpt
-    child_cap = max(200, env_int("MAVERICK_SWARM_CHILD_RESULT_CHARS", 4000))
-    total_cap = max(child_cap, env_int("MAVERICK_SWARM_RESULTS_TOTAL_CHARS", 24_000))
+    from ..env_setting import env_or_config_int
+    child_cap = max(200, env_or_config_int(
+        "MAVERICK_SWARM_CHILD_RESULT_CHARS", "swarm", "child_result_chars", 4000))
+    total_cap = max(child_cap, env_or_config_int(
+        "MAVERICK_SWARM_RESULTS_TOTAL_CHARS", "swarm", "results_total_chars", 24_000))
     parts: list[str] = []
     used = 0
     if dropped_specs:
@@ -592,6 +613,7 @@ async def _run_swarm(parent: Agent, args: dict) -> str:
     )
 
     results = await asyncio.gather(*(c.run() for c in children), return_exceptions=True)
+    _absorb_child_labels(parent, children)
 
     # #612: every child that RAISED never consumed its slot productively;
     # return those slots so a swarm with transient child failures doesn't

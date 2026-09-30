@@ -290,6 +290,34 @@ def test_questionnaire_refuses_a_template_wider_than_the_form_store():
             )
 
 
+def test_questionnaire_lookup_rechecks_width_and_rejects_duplicate_associations(monkeypatch):
+    from maverick import form_store
+    from maverick.governed_record_lookup import RecordLookupUnavailable
+
+    record = _register()
+    saved = vm.request_questionnaire(record["id"], assessment_type="vendor_risk", actor="ops",
+                                     expected_revision=record["revision"])
+    token = saved["form_path"].removeprefix("/form/")
+    with monkeypatch.context() as patch:
+        patch.setattr(form_store, "_MAX_FIELDS", 3)
+        with pytest.raises(RecordLookupUnavailable, match="field bound"):
+            vm.questionnaire_for_token(token)
+    vm._VENDORS.update(record["id"], lambda row: row["questionnaires"].append(dict(row["questionnaires"][0])),
+                       expected_revision=saved["revision"], action="fixture_duplicate", actor="ops")
+    with pytest.raises(RecordLookupUnavailable, match="ambiguous"):
+        vm.questionnaire_for_token(token)
+
+
+def test_questionnaire_index_cli_uses_bounded_batches():
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    _register()
+    result = CliRunner().invoke(main, ["vendor", "questionnaire-index", "--rebuild", "--batches", "2"])
+    assert result.exit_code == 0, result.output
+    assert "ready=true" in result.output
+
+
 def test_scoring_mirrors_the_assessment_answer_vocabulary():
     # "na" clears a question; "unknown" raises an unverified finding at
     # the question's severity -- the same contract as assessment.evaluate.

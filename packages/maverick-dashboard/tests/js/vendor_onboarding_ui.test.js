@@ -180,6 +180,8 @@ function fixture(records = [], intercept = null, search = "", returning = null, 
   const calls = [];
   const byId = id => document.getElementById(`vo-${id}`);
   const fetch = async (url, options) => {
+    // The workspace member list only supplies display names.
+    if (url === "/api/v1/choices/people") return response({people: [{value: "user:procurement", label: "Pat Procurement"}, {value: "user:reviewer", label: "Riley Reviewer"}]});
     const call = { url, ...options, body: options.body === undefined ? undefined : JSON.parse(options.body) };
     calls.push(call);
     if (intercept) {
@@ -198,9 +200,10 @@ function fixture(records = [], intercept = null, search = "", returning = null, 
     navigations.push(target);
     location.search = new URL(target, "https://lightwork.test").search;
   }};
-  vm.runInNewContext(fs.readFileSync(
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-access-state.js'), 'utf8') + "\n" + fs.readFileSync(
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-vendor-onboarding.js"), "utf8",
-  ), { document, fetch, Blob, window: {location, history, localStorage, sessionStorage, URL:urlApi}, URL, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
+  ), { document, fetch, Blob, window: {location, history, localStorage, sessionStorage, URL:urlApi,
+    mvErrorText: (failure, action) => "Could not " + action + ". " + ({404: "That item no longer exists.", 503: "This is temporarily unavailable."}[failure.status] || "Please try again.")}, URL, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
   async function settle() {
     for (let turn = 0; turn < 20; turn += 1) {
       await new Promise(resolve => setImmediate(resolve));
@@ -225,7 +228,8 @@ test("initial and refreshed lists describe reads accurately and expose selection
   assert.match(ui.byId("message").textContent, /^Requests loaded/);
   assert.equal(ui.byId("rationale").disabled, true);
   assert.equal(ui.byId("acceptance-reason").disabled, true);
-  assert.match(ui.caseButton("one").textContent, /Owner user:procurement/);
+  assert.match(ui.caseButton("one").textContent, /Owner Pat Procurement/);
+  assert.doesNotMatch(ui.caseButton("one").textContent, /user:|assessment_ready/);
   assert.match(ui.caseButton("one").textContent, /Last progress/);
   await ui.load("one");
   assert.match(ui.byId("message").textContent, /^Request loaded/);
@@ -242,6 +246,35 @@ test("initial and refreshed lists describe reads accurately and expose selection
   assert.equal(ui.calls.every(call => call.method === "GET"), true);
 });
 
+for (const format of ["json", "html"]) test(`${format} vendor session loss clears all private views and cannot re-enable stale actions`, async () => {
+  let deny = false;
+  const ui = fixture([record("one")], call => deny ? {status:401, ok:false,
+    json:async()=> { if(format==="html")throw new Error("not JSON");return {detail:"Sign in"}; }} : undefined);
+  await ui.settle(); await ui.load("one");
+  ui.byId("purpose").value="private unsent draft";deny=true;
+  await ui.click("refresh");
+  assert.equal(ui.byId("case-title").textContent,"");assert.equal(ui.byId("cases").children.length,0);
+  assert.equal(ui.byId("purpose").value,"");assert.equal(ui.byId("create").disabled,true);
+  const count=ui.calls.length;await ui.click("refresh");assert.equal(ui.calls.length,count);
+});
+
+test("vendor context change rejects a delayed successful response and locks the old page", async () => {
+  let resolve;
+  const ui=fixture([record("one")],call=>call.url.endsWith('/cases/one')?new Promise(done=>{resolve=done;}):undefined);
+  await ui.settle();ui.caseButton("one").listeners.click();await new Promise(setImmediate);
+  ui.root.dataset.workspaceContext="b".repeat(64);resolve(response(record("one")));await ui.settle();
+  assert.equal(ui.byId("case-title").textContent,"");assert.equal(ui.byId("refresh").disabled,true);
+});
+
+test("vendor action denial preserves readable case and drafts but disables the denied action", async () => {
+  const ui=fixture([record("one")],call=>call.method==="POST"?response({detail:{code:"permission_denied",message:"Collection unavailable"}},403):undefined);
+  await ui.settle();await ui.load("one");ui.byId("purpose").value="keep this draft";
+  await ui.click("collect");
+  assert.match(ui.byId("case-title").textContent,/one/);assert.equal(ui.byId("purpose").value,"keep this draft");
+  assert.equal(ui.byId("collect").disabled,true);assert.equal(ui.byId("refresh").disabled,false);
+  const count=ui.calls.length;await ui.click("collect");assert.equal(ui.calls.length,count);
+});
+
 test("prepared action shows exact authority effects assumptions and full payload", async () => {
   const prepared = record("reviewed", {
     stage: "action_prepared",
@@ -256,14 +289,14 @@ test("prepared action shows exact authority effects assumptions and full payload
   await ui.settle();
   await ui.load("reviewed");
   const text = ui.byId("operation").textContent;
-  assert.match(text, /RECOMMENDATION ONLY/);
-  assert.match(text, /prediction does not grant authority/);
-  assert.match(text, /Actor: user:reviewer/);
-  assert.match(text, /Workspace: tenant-a/);
-  assert.match(text, /Role: operator/);
-  assert.match(text, /IRREVERSIBLE OR EXTERNALLY PERSISTENT KNOWN EFFECTS/);
+  assert.match(text, /Create the reviewed Jira task in VEND project/);
+  assert.match(text, /nothing happens until you approve it/);
+  assert.match(text, /approving as Riley Reviewer/);
+  assert.match(text, /can't be undone automatically/);
+  assert.match(text, /Creates one externally persistent Jira task/);
   assert.match(text, /Jira automation may notify project members/);
-  assert.match(text, /FULL REVIEWED JIRA CONTENT/);
+  assert.match(text, /THE TICKET/);
+  assert.doesNotMatch(text, /tenant-a|user:reviewer|2{64}|3{64}|digest/);
   assert.match(text, /Use the exact reviewed evidence and scope/);
   assert.equal(ui.byId("approve").disabled, false);
 });
@@ -333,7 +366,9 @@ test("a server authority denial stays visible and never retries approval", async
   assert.equal(ui.calls.filter(call => call.url.endsWith("/approve-action")).length, 1);
   assert.match(ui.byId("message").textContent, /role cannot approve/i);
   assert.match(ui.byId("message").textContent, /workspace administrator/i);
-  assert.equal(ui.byId("approve").disabled, false);
+  assert.equal(ui.byId("approve").disabled, true);
+  await ui.click("approve");
+  assert.equal(ui.calls.filter(call => call.url.endsWith("/approve-action")).length, 1);
 });
 
 test("bounded queue controls navigate three pages and reset the cursor for a stable filter", async () => {
@@ -378,7 +413,7 @@ test("malformed pagination metadata fails closed without enabling navigation", a
     has_more: true, next_cursor: "private cursor with spaces",
   }) : undefined);
   await ui.settle();
-  assert.match(ui.byId("message").textContent, /pagination is unavailable/i);
+  assert.match(ui.byId("message").textContent, /next page of requests is unavailable/i);
   assert.equal(ui.byId("page-next").disabled, true);
   assert.equal(ui.byId("page-previous").disabled, true);
 });
@@ -410,7 +445,8 @@ test("a lost intake response reuses one retained submission key before opening t
   const second = ui.calls.filter(call => call.method === "POST").at(-1).body;
   assert.equal(second.submission_key, first.submission_key);
   assert.equal(ui.byId("case-title").textContent, "Vendor stable");
-  assert.match(ui.byId("case-reference").textContent, /stable/);
+  assert.match(ui.byId("case-reference").textContent, /Link to this request/);
+  assert.match(ui.byId("case-reference").children.at(-1).href, /case=stable/);
   assert.equal(ui.storage.has(`lightwork:vendor-intake:v1:${"f".repeat(64)}`), false);
 });
 
@@ -470,8 +506,9 @@ test("a stale edit loads and displays the bounded current record without retryin
   ui.byId("rationale").value = "Different tab change";
   await ui.click("review-approve");
   assert.equal(mutations, 1);
-  assert.match(ui.byId("message").textContent, /Current version 2.*now open/);
-  assert.match(ui.byId("status").textContent, /Version: 2/);
+  assert.match(ui.byId("message").textContent, /^Someone else updated this request.*latest version.*now open/);
+  assert.doesNotMatch(ui.byId("message").textContent, /revision changed/);
+  assert.doesNotMatch(ui.byId("status").textContent, /Version/);
   assert.equal(ui.byId("rationale").value, "");
 });
 
@@ -502,7 +539,7 @@ test("request details are editable in app and carry the selected revision", asyn
     freshness_days: 180,
     due_at: Date.parse("2027-03-06T12:00:00Z") / 1000,
   });
-  assert.match(ui.byId("status").textContent, /Version: 2/);
+  assert.doesNotMatch(ui.byId("status").textContent, /Version/);
   assert.equal(ui.byId("case-purpose").value, "Review a changed use");
 });
 
@@ -515,8 +552,8 @@ test("a malformed current-record conflict is rejected without replacing the sele
   await ui.settle(); await ui.load("one");
   ui.byId("rationale").value = "Attempted edit";
   await ui.click("review-approve");
-  assert.match(ui.byId("message").textContent, /conflict response was incomplete/i);
-  assert.match(ui.byId("status").textContent, /Version: 1/);
+  assert.match(ui.byId("message").textContent, /Someone else changed this request and it couldn.t be reloaded/i);
+  assert.doesNotMatch(ui.byId("status").textContent, /Version/);
   assert.equal(ui.calls.filter(call => call.method === "POST").length, 1);
 });
 
@@ -532,7 +569,7 @@ test("a linked vendor request reads the exact authorized case without mutating i
 test("a linked request that is no longer accessible reports failure without selecting another", async () => {
   const ui = fixture([record("another")], null, "?case=missing");
   await ui.settle();
-  assert.match(ui.byId("message").textContent, /Not found/);
+  assert.match(ui.byId("message").textContent, /no longer exists/);
   assert.equal(ui.byId("review-approve").disabled, true);
   assert.ok(ui.calls.every(call => call.method === "GET"));
 });
@@ -549,7 +586,7 @@ test("switching cases clears decision drafts and updates current-request context
   assert.equal(ui.byId("acceptance-reason").value, "");
   assert.equal(ui.byId("answer-training").value, "unknown");
   assert.equal(ui.byId("note-training").value, "");
-  assert.match(ui.byId("case-reference").textContent, /Initial request · two/);
+  assert.match(ui.byId("case-reference").children.at(-1).href, /case=two/);
   assert.equal(ui.caseButton("two").getAttribute("aria-current"), "true");
   assert.equal(ui.caseButton("one").getAttribute("aria-current"), "false");
 });
@@ -573,7 +610,7 @@ test("the selected case explains the promised outcome and support boundary", asy
   assert.match(ui.byId("scope").textContent, /one Jira Task matches the exact approved payload/);
   assert.match(ui.byId("scope").textContent, /authorized person accepts or rejects/);
   assert.match(ui.byId("scope").textContent, /procurement approval or payment/);
-  assert.match(ui.byId("scope").textContent, /single persistent application replica/);
+  assert.doesNotMatch(ui.byId("scope").textContent, /Supported deployment|single persistent/i);
 });
 
 test("cancellation requires an explicit local-only confirmation and preserves uncertain delivery", async () => {
@@ -613,7 +650,7 @@ test("verified cancellation reports retained ticket and offers only current read
   await ui.settle(); await ui.load("one");
   assert.match(ui.byId("cancellation-status").textContent, /VEND-1.*remains/);
   assert.match(ui.byId("outcome").textContent, /Cancelled.*no acceptance decision/);
-  assert.match(ui.byId("status").textContent, /Attention: cancelled/);
+  assert.match(ui.byId("status").textContent, /Attention: Cancelled/);
   assert.equal(ui.byId("reconcile").disabled, false);
   for (const id of ["cancel", "execute", "accept", "reject", "collect", "prepare"])
     assert.equal(ui.byId(id).disabled, true, id);
@@ -761,7 +798,7 @@ test("acceptance evidence invalidation opens the named changed source without re
   await ui.click("accept");
   assert.equal(attempts,1);
   assert.match(ui.byId("message").textContent,/verified ticket remains.*prior review cannot be reused/i);
-  assert.match(ui.byId("acceptance-evidence-check").textContent,/security-paper: changed.*v1.*v2/i);
+  assert.match(ui.byId("acceptance-evidence-check").textContent,/changed since it was reviewed/i);
   assert.equal(ui.byId("accept").disabled,true);
   assert.equal(ui.byId("reject").disabled,false);
   assert.equal(ui.byId("acceptance-reason").disabled,false);
@@ -792,7 +829,7 @@ test("approval evidence invalidation names the source and offers only reevaluati
   });
   await ui.settle(); await ui.load("one"); await ui.click("approve");
   assert.match(ui.byId("message").textContent,/stale prepared action was invalidated.*prior review cannot be reused/i);
-  assert.match(ui.byId("acceptance-evidence-check").textContent,/security-paper: changed.*v1.*v2/i);
+  assert.match(ui.byId("acceptance-evidence-check").textContent,/changed since it was reviewed/i);
   for (const id of ["collect","assess","review-approve","review-reject","prepare","approve","execute"])
     assert.equal(ui.byId(id).disabled,true,id);
   assert.equal(ui.byId("renew").disabled,false);
@@ -810,8 +847,9 @@ test("reviewed evidence export previews its manifest and downloads the exact con
   assert.equal(ui.byId("export-preview").disabled,false);
   assert.equal(ui.byId("export-download").disabled,true);
   await ui.click("export-preview");
-  assert.match(ui.byId("export-status").textContent,/1 reviewed claim.*1 evidence source included.*0 withheld/i);
-  assert.match(ui.byId("export-manifest").textContent,/EVR-1{32}.*Included connected document.*v1/i);
+  assert.match(ui.byId("export-status").textContent,/1 reviewed claim.*1 evidence source included.*0 left out/i);
+  assert.match(ui.byId("export-manifest").textContent,/Document 1: included \(Google Drive document, still valid\)/i);
+  assert.doesNotMatch(ui.byId("export-manifest").textContent,/EVR-/);
   assert.equal(ui.byId("export-confirm").disabled,false);
   ui.byId("export-confirm").checked = true; ui.byId("export-confirm").listeners.change();
   assert.equal(ui.byId("export-download").disabled,false);
@@ -838,8 +876,8 @@ test("a withheld export source is rendered only as an opaque dependency", async 
   const ui = fixture([record("one",{review_history:[{}]})], call =>
     call.url.endsWith("/evidence-export-preview") ? response(bundle) : undefined);
   await ui.settle(); await ui.load("one"); await ui.click("export-preview");
-  assert.match(ui.byId("export-status").textContent,/0 evidence sources included.*1 withheld/i);
-  assert.match(ui.byId("export-manifest").textContent,/EVR-2{32}.*Withheld external evidence.*access unavailable/i);
+  assert.match(ui.byId("export-status").textContent,/0 evidence sources included.*1 left out/i);
+  assert.match(ui.byId("export-manifest").textContent,/Document 1: left out because Lightwork can.t reach it right now/i);
   assert.doesNotMatch(ui.byId("export-manifest").textContent,/private-source|credential|secret/i);
   assert.equal(ui.byId("export-confirm").disabled,false);
 });
@@ -919,7 +957,8 @@ test("a failed refresh leaves review drafts intact and reports the error", async
   assert.equal(ui.byId("answer-training").value, "no");
   assert.equal(ui.byId("note-training").value, "Unsaved note");
   assert.equal(ui.byId("rationale").value, "Unsaved reason");
-  assert.match(ui.byId("message").textContent, /Case refresh temporarily unavailable/);
+  assert.match(ui.byId("message").textContent, /Could not finish that\. This is temporarily unavailable\./);
+  assert.doesNotMatch(ui.byId("message").textContent, /Case refresh/);
   assert.equal(ui.byId("message").getAttribute("role"), "alert");
   assert.equal(ui.byId("refresh").disabled, false);
 });
@@ -981,10 +1020,10 @@ test("reconciliation explains ambiguity, observations, ownership and the separat
   })]);
   await ui.settle(); await ui.load("uncertain");
   const text = ui.byId("operation").textContent;
-  assert.match(text,/UNCERTAIN PROVIDER RESULT/);
+  assert.match(text,/NOT SURE WHETHER THE JIRA TICKET WAS CREATED/);
   assert.match(text,/at least 3 matches/);
-  assert.match(text,/read-only check and cannot create another Jira task/);
-  assert.match(text,/Responsible operator: user:reviewer/);
+  assert.match(text,/only looks the ticket up; it cannot create another Jira ticket/);
+  assert.match(text,/Person responsible: Riley Reviewer/);
   assert.match(text,/separate reviewed action/);
   assert.equal(ui.byId("reconcile").disabled,false);
   for (const id of ["prepare","approve","execute","accept","reject"])
@@ -1080,9 +1119,9 @@ test("renewal queue exposes persisted due state and page-level attention", async
   await ui.settle();
   await ui.filter("renewal");
   assert.match(ui.byId("page-status").textContent, /renewal view/);
-  assert.match(ui.caseButton("expired").textContent, /overdue/);
+  assert.match(ui.caseButton("expired").textContent, /Overdue/);
   assert.equal(ui.caseButton("expired").dataset.attention, "true");
-  assert.match(ui.byId("attention-summary").textContent, /1 admitted request.*1 accepted.*1 overdue renewal/);
+  assert.match(ui.byId("attention-summary").textContent, /1 request.*1 accepted.*1 overdue renewal/);
   await ui.load("expired");
   assert.match(ui.byId("renewal-status").textContent, /Renewal status: overdue/);
   assert.match(ui.byId("renewal-status").textContent, /linked request.*fresh review and approval/);
@@ -1101,15 +1140,14 @@ test("business rejection stays admitted and shows rationale apart from verified 
   });
   const ui = fixture([rejected]);
   await ui.settle();
-  assert.match(ui.byId("attention-summary").textContent, /1 admitted request.*1 rejected/);
+  assert.match(ui.byId("attention-summary").textContent, /1 request.*1 rejected/);
   await ui.load("rejected");
   const outcome = ui.byId("outcome").textContent;
-  assert.match(outcome, /Technical effect: verified/);
-  assert.match(outcome, /Verified Jira result: VEND-91/);
+  assert.match(outcome, /Jira ticket: VEND-91/);
   assert.match(outcome, /Customer decision: Rejected/);
-  assert.match(outcome, /Decision reviewer: user:procurement/);
+  assert.match(outcome, /Decided by: Pat Procurement/);
   assert.match(outcome, /Reason: Does not meet the business need/);
-  assert.match(ui.byId("history").textContent, /Business rejected.*Technical effect retained as verified/s);
+  assert.match(ui.byId("history").textContent, /Rejected.*The Jira ticket stays created/s);
 });
 
 test("mismatched admitted page counts fail closed", async () => {
@@ -1118,17 +1156,17 @@ test("mismatched admitted page counts fail closed", async () => {
       has_more:false,next_cursor:null,page_counts:{admitted:0,accepted:0,rejected:0,
         needs_reconciliation:0,renewal_attention:0}}) : undefined);
   await ui.settle();
-  assert.match(ui.byId("message").textContent, /counts did not match the admitted cases/);
+  assert.match(ui.byId("message").textContent, /request totals didn.t add up/);
   assert.equal(ui.byId("message").getAttribute("role"), "alert");
 });
 
 test("missing cost remains unmeasured while an explicit zero remains zero", async () => {
   const ui = fixture([record("missing"), record("zero", { metrics: { execution_cost_usd: 0 } })]);
   await ui.settle(); await ui.load("missing");
-  assert.match(ui.byId("outcome").textContent, /Execution cost: unmeasured/);
-  assert.doesNotMatch(ui.byId("outcome").textContent, /Execution cost: \$0/);
+  assert.match(ui.byId("outcome").textContent, /Cost: not measured/);
+  assert.doesNotMatch(ui.byId("outcome").textContent, /Cost: \$0/);
   await ui.load("zero");
-  assert.match(ui.byId("outcome").textContent, /Execution cost: \$0/);
+  assert.match(ui.byId("outcome").textContent, /Cost: \$0/);
 });
 
 test("invalid server response shapes surface actionable errors and leave actions unavailable", async () => {
@@ -1136,7 +1174,7 @@ test("invalid server response shapes surface actionable errors and leave actions
     const ui = fixture([], () => response(body, status));
     await ui.settle();
     assert.equal(ui.byId("message").getAttribute("role"), "alert");
-    assert.match(ui.byId("message").textContent, /Server response unavailable/);
+    assert.match(ui.byId("message").textContent, /Lightwork didn.t answer/);
     assert.equal(ui.byId("execute").disabled, true);
     assert.equal(ui.byId("refresh").disabled, false);
   }
@@ -1145,7 +1183,7 @@ test("invalid server response shapes surface actionable errors and leave actions
 test("incomplete case responses cannot select a new case or enable its actions", async () => {
   const ui = fixture([record("broken")], call => call.url.endsWith("/cases/broken") ? response({ id: "broken" }) : undefined);
   await ui.settle(); await ui.load("broken");
-  assert.match(ui.byId("message").textContent, /Case response is incomplete/);
+  assert.match(ui.byId("message").textContent, /couldn.t be shown in full/);
   assert.equal(ui.byId("collect").disabled, true);
   assert.equal(ui.caseButton("broken").getAttribute("aria-current"), "false");
 });
@@ -1166,3 +1204,4 @@ test("review mutations carry the selected revision and the actual corrected answ
   assert.equal(submitted.decision, "approved");
   assert.deepEqual(submitted.corrections, { training: { answer: "no", note: "Vendor terms reviewed" } });
 });
+

@@ -5,6 +5,7 @@
 # Machine-readable proof artifacts are byte-hashed in handoff records. Keep
 # repository bytes stable across Windows and POSIX checkouts.
 /proof/*.json text eol=lf
+/deploy/docker/entrypoint.sh text eol=lf
 /scripts/acceptance/fixtures/*.json text eol=lf
 /scripts/acceptance/fixtures/vendor-documents/*.pdf binary
 

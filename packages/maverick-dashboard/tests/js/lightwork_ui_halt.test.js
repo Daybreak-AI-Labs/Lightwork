@@ -252,3 +252,18 @@ test("a stalled status read times out and invalidates known state", async () => 
   assert.equal(ui.pill.getAttribute("aria-disabled"), "true");
   assert.equal(ui.pill.getAttribute("aria-pressed"), "mixed");
 });
+
+test("a refused stop change reads as a plain sentence, never a code or server text", async () => {
+  const ui = fixture(async (_url, options = {}) => {
+    if (options.method) {
+      return { ok: false, status: 403, json: async () => ({ detail: "halt requires principal with admin scope" }) };
+    }
+    return response({ active: false, scope: "local" });
+  });
+  await turn();
+  await ui.pill.listeners.click(clickEvent());
+  await turn();
+  const message = ui.toasts.at(-1).message;
+  assert.match(message, /Emergency stop change failed|Could not change the emergency stop/);
+  assert.doesNotMatch(message, /\b403\b|error \d|principal|admin scope/);
+});

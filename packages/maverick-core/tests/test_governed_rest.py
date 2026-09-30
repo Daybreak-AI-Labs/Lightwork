@@ -13,9 +13,10 @@ without touching the network. The key behaviors under test:
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from maverick.governed_actions import ActionError, GovernedActions
 from maverick.governed_connectors import register_connector
@@ -33,6 +34,15 @@ def _fake_safe_client(monkeypatch, **methods):
         setattr(client, name, value)
 
     @contextmanager
+    def stream(method, url, **kwargs):
+        response = methods["request"](method, url, **kwargs)
+        with closing(httpx.Response(response.status_code, headers=response.headers,
+                                    stream=httpx.ByteStream(response.content))) as streamed:
+            yield streamed
+
+    client.stream = stream
+
+    @contextmanager
     def _ctx(url, **kwargs):
         yield client
 
@@ -42,11 +52,7 @@ def _fake_safe_client(monkeypatch, **methods):
 
 
 def _resp(status, body):
-    r = MagicMock()
-    r.status_code = status
-    r.json = MagicMock(return_value=body)
-    r.text = str(body)
-    return r
+    return httpx.Response(status, json=body)
 
 
 def _conn():

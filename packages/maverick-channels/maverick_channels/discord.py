@@ -12,10 +12,12 @@ Requires::
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
 from .base import Channel, IncomingMessage, is_allowed, normalize_allowlist
+from .delivery import DeliveryNotSent, DeliveryUnknown, delivery_active, send_chunk
 
 log = logging.getLogger(__name__)
 
@@ -41,21 +43,13 @@ def _no_mentions():
     return discord.AllowedMentions.none() if _HAVE_DISCORD else None
 
 
-async def _handle_discord_message(message, *, bot_user, allowed_user_ids, dispatch_text):
-    """Gate, dispatch, and reply to one inbound Discord message.
-
-    Pulled OUT of the ``discord.Client`` subclass so the agent path is
-    unit-testable without the discord.py dependency -- and, critically, so
-    ``dispatch_text`` (a :class:`Channel` method) is passed in explicitly. The
-    old ``on_message`` called ``self.dispatch_text``, but the client subclasses
-    ``discord.Client`` (not ``Channel``), so EVERY message raised
-    ``AttributeError`` and replied with an error -- the agent was never invoked.
-    """
+async def _handle_discord_message(message, *, bot_user, channel):
+    """Gate and durably dispatch through the Channel, never the SDK Client."""
     if message.author == bot_user:
         return
     # Gate on the AUTHOR id, not the channel id (which is what we reply to).
     author_id = str(getattr(message.author, "id", ""))
-    if not is_allowed(author_id, allowed_user_ids):
+    if not is_allowed(author_id, channel.allowed_user_ids):
         log.warning("unauthorized discord access: author_id=%s", author_id)
         return
     msg = IncomingMessage(
@@ -64,23 +58,16 @@ async def _handle_discord_message(message, *, bot_user, allowed_user_ids, dispat
         channel="discord",
         raw=message,
         sender_id=author_id,
+        message_id=str(message.id),
     )
-    try:
-        reply = await dispatch_text(msg)
-    except Exception:
-        # Don't leak internals (exception text / class names) to the chat.
-        log.exception("discord handler error")
-        reply = "⚠ error handling your message"
-    # An empty reply (action-only goal, or a Reply whose text dispatch dropped)
-    # must not be sent: split_for_discord("") returns [""], and channel.send("")
-    # is rejected by Discord with a 400 "Cannot send an empty message", which
-    # propagates out of on_message as an unhandled task error. Guard with
-    # `if reply:` like the other channels.
-    if not reply:
-        return
-    from .formatting import split_for_discord
-    for chunk in split_for_discord(reply):
-        await message.channel.send(chunk, allowed_mentions=_no_mentions())
+    account = str(bot_user.id)
+
+    async def send(reply):
+        if reply.text:
+            return await channel._send_chunks(message.channel, reply.text)
+
+    return await channel.process_message(msg, external_id=msg.message_id, account=account,
+        authorize=lambda: channel._authorized(msg, account), send=send)
 
 
 class DiscordChannel(Channel):
@@ -109,24 +96,61 @@ class DiscordChannel(Channel):
         # Belt-and-suspenders: a client-wide default so ANY send (the two here
         # and any future/library-internal one) can never ping @everyone/roles.
         self._client = _MaverickDiscordClient(
-            dispatch_text=self.dispatch_text,
-            allowed_user_ids=self.allowed_user_ids, intents=intents,
+            channel=self, intents=intents,
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
     async def start(self) -> None:
         log.info("Discord channel starting")
-        await self._client.start(self.token)
+        recovery = asyncio.create_task(self._recover(), name="discord-recovery-owner")
+        try:
+            await self._client.start(self.token)
+        finally:
+            recovery.cancel()
+            await asyncio.gather(recovery, return_exceptions=True)
+
+    def _authorized(self, msg, account):
+        return (str(getattr(self._client.user, "id", "")) == account
+                and msg.principal_id != account and is_allowed(msg.principal_id, self.allowed_user_ids))
+
+    async def _send_saved(self, msg, reply, route):
+        if reply.text:
+            return await self.send(msg.user_id, reply.text)
+
+    async def _recover(self):
+        await self._client.wait_until_ready()
+        account = str(self._client.user.id)
+        async with self.recovery_worker(account=account,
+                authorize=lambda msg: self._authorized(msg, account), send=self._send_saved):
+            await asyncio.Future()
+
+    @staticmethod
+    async def _send_chunks(channel, text):
+        from .formatting import split_for_discord
+        receipt = None
+        for index, chunk in enumerate(split_for_discord(text)):
+            async def post(chunk=chunk):
+                try:
+                    result = await channel.send(chunk, allowed_mentions=_no_mentions())
+                except Exception as exc:
+                    if (_HAVE_DISCORD and isinstance(exc, discord.HTTPException)
+                            and 400 <= exc.status < 500 and exc.status != 408):
+                        raise DeliveryNotSent("Discord rejected the reply") from exc
+                    raise
+                provider_id = getattr(result, "id", None)
+                if delivery_active() and not isinstance(provider_id, int):
+                    raise DeliveryUnknown("Discord reply acknowledgement has no message id")
+                return str(provider_id) if isinstance(provider_id, int) else None
+            receipt = await send_chunk("text-" + str(index),
+                {"channel": str(channel.id), "text": chunk, "mentions": "none"}, post)
+        return receipt
 
     async def send(self, user_id: str, text: str) -> None:
         await self._client.wait_until_ready()
         channel = self._client.get_channel(int(user_id))
         if channel is None:
-            log.warning("Discord channel %s not found", user_id)
-            return
-        from .formatting import split_for_discord
-        for chunk in split_for_discord(text):
-            await channel.send(chunk, allowed_mentions=_no_mentions())
+            raise DeliveryNotSent("Discord reply channel is unavailable")
+        return await self._send_chunks(channel, text)
 
     async def stop(self) -> None:
         await self._client.close()
@@ -134,10 +158,9 @@ class DiscordChannel(Channel):
 
 if _HAVE_DISCORD:
     class _MaverickDiscordClient(discord.Client):  # type: ignore[misc]
-        def __init__(self, dispatch_text, allowed_user_ids=None, *args, **kwargs):
+        def __init__(self, channel, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self._dispatch_text = dispatch_text  # bound Channel.dispatch_text
-            self.allowed_user_ids = allowed_user_ids or set()
+            self._channel = channel
 
         async def on_ready(self):  # type: ignore[override]
             log.info("Discord ready as %s", self.user)
@@ -145,8 +168,7 @@ if _HAVE_DISCORD:
         async def on_message(self, message):  # type: ignore[override]
             await _handle_discord_message(
                 message, bot_user=self.user,
-                allowed_user_ids=self.allowed_user_ids,
-                dispatch_text=self._dispatch_text,
+                channel=self._channel,
             )
 else:
     _MaverickDiscordClient = None  # type: ignore

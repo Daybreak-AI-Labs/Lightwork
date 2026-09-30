@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}All settings · Lightwork{% endblock %}
+{% block content %}
+  {% from "_hero.html" import hero, state %}
+  {% from "_settings_all_row.html" import setting_row, part_block %}
+  <link rel="stylesheet" href="/static/lightwork-settings-all.css">
+  {% call hero('Settings', 'All settings',
+               subtitle='Every product setting in one place',
+               lede='Change how Lightwork works without editing files or running the installer.
+                     Each setting shows its current value and where that value comes from.') %}
+    {{ state('Changed on this page',
+             changed_count ~ ' of ' ~ setting_count ~ ' settings',
+             badge='Using your installer and default values' if changed_count == 0 else 'Changed here',
+             badge_class='idle' if changed_count == 0 else 'ok',
+             copy='Reset puts a setting back to its default. Settings marked as affecting safety ask you to confirm first.') }}
+  {% endcall %}
+
+  <p><a class="btn btn--ghost" href="/settings">Back to Settings</a></p>
+
+  <section class="settings-all-index panel" aria-labelledby="settings-all-find">
+    <h2 id="settings-all-find">Find a setting</h2>
+    <form class="settings-all-filters" id="settings-all-filter-form" method="get" action="/settings/all">
+      <label class="settings-all-field" for="settings-all-search">Search by name or description
+        <input class="input" id="settings-all-search" name="q" type="search" maxlength="100" value="{{ query }}"
+               placeholder="Safety, retention, alerts…" aria-controls="settings-all-groups">
+      </label>
+      <label class="settings-all-field" for="settings-all-group">Show
+        <select class="select" id="settings-all-group" name="group" aria-controls="settings-all-groups">
+          <option value="">All groups</option>
+          {% for g in groups %}<option value="{{ g.slug }}" {% if g.slug == group %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
+          <option value="modules">Modules</option>
+        </select>
+      </label>
+      <label class="settings-all-check" for="settings-all-changed">
+        <input type="checkbox" id="settings-all-changed" name="changed" value="1" {% if only_changed %}checked{% endif %}> Only settings changed here
+      </label>
+      <button class="btn btn--ghost" type="submit">Find</button>
+    </form>
+    <p class="muted" id="settings-all-filter-status" role="status" aria-live="polite"></p>
+  </section>
+
+  <details class="panel settings-all-about">
+    <summary>What can't be changed here</summary>
+    <p class="muted">
+      A setting marked &ldquo;Set by your server's deployment settings&rdquo; is fixed by whoever
+      runs your server, so it can only be changed there. So are the main encryption key and the
+      folder Lightwork keeps its files in: they protect or start Lightwork itself.
+    </p>
+    <p class="muted">
+      Sign-in, administrator and key settings are checked before they are saved. A change that
+      would lock you out, or leave saved records unreadable, is refused until its test passes,
+      and you are asked to confirm before you are signed out.
+    </p>
+    <p class="muted">
+      AI service keys, models, the spending cap per task, features, abilities, connections, plugins
+      and the sign-in details of the six chat apps on the Channels page have their own sections on
+      the <a href="/settings">Settings</a> page and their own pages. The security suite's on and off
+      switches are on the Security page.
+    </p>
+  </details>
+
+  <div class="panel" role="status" aria-live="polite" id="settings-all-status" hidden></div>
+
+  <div id="settings-all-groups" data-rows-url="/settings/all/rows"
+       {% if focus_id %}data-focus="{{ focus_id }}"{% endif %} {% if served %}data-served="1"{% endif %}>
+  {% for g in groups %}
+  <section class="settings-all-group" data-group="{{ g.slug }}" data-loaded="{{ '1' if g.loaded else '0' }}"
+           aria-labelledby="group-{{ g.slug }}">
+    <div class="section-head"><h2 id="group-{{ g.slug }}">{{ g.name }}</h2></div>
+    <div class="panel">
+      <p class="muted settings-all-lead">{{ g.intro }}</p>
+      <p class="settings-all-load" data-group-load {% if g.loaded %}hidden{% endif %}>
+        <a class="btn btn--ghost" href="/settings/all?group={{ g.slug }}#group-{{ g.slug }}"
+           data-load-group="{{ g.slug }}">Show the {{ g.count }} settings in {{ g.name }}</a>
+        {% if g.changed %}<span class="muted">{{ g.changed }} changed here</span>{% endif %}
+      </p>
+      {% if g.subgroups | length > 1 %}
+      <p class="settings-all-part-pick">
+        <label for="part-{{ g.slug }}">Show
+          <select class="select" id="part-{{ g.slug }}" data-subgroup-pick>
+            <option value="">Everything in {{ g.name }}</option>
+            {% for sub in g.subgroups %}<option value="{{ sub.slug }}">{{ sub.name }}</option>{% endfor %}
+          </select>
+        </label>
+      </p>
+      {% endif %}
+      <div data-group-rows>
+        <div data-rows="">{% for s in g.settings if not s.subgroup %}{{ setting_row(s, g) }}{% endfor %}</div>
+        {% for sub in g.subgroups %}
+        {% set part = g.settings | selectattr('subgroup_slug', 'equalto', sub.slug) | list %}
+        {% if part %}{{ part_block(g, sub, sub.order, part) }}{% endif %}
+        {% endfor %}
+      </div>
+      <p class="settings-all-group-actions">
+        <button class="btn btn--primary" type="button" data-save-group="{{ g.slug }}">Save changes in {{ g.name }}</button>
+        <button class="btn btn--ghost" type="button" data-reset-group="{{ g.slug }}">Reset all in {{ g.name }}</button>
+      </p>
+    </div>
+  </section>
+  {% endfor %}
+
+  <section class="settings-all-group" data-group="modules" aria-labelledby="group-modules">
+    <div class="section-head"><h2 id="group-modules">Modules</h2></div>
+    <div class="panel">
+      <p class="muted settings-all-lead">Turn whole parts of Lightwork on or off. Turning one on also turns on the parts it needs.</p>
+      {% if not modules %}
+      <p class="muted">No modules can be switched from here.</p>
+      {% endif %}
+      {% for m in modules %}
+      <div class="settings-all-row" data-module="{{ m.section }}"
+           data-search="{{ (m.label ~ ' module ' ~ m.needs | join(' ')) | lower }}" data-source="{{ 'here' }}">
+        <div class="settings-all-about-row">
+          <span class="settings-all-label" id="mod-{{ loop.index }}-label">{{ m.label }}</span>
+          {% if m.needs %}<p class="muted settings-all-help" id="mod-{{ loop.index }}-help">Also turns on: {{ m.needs | join(', ') }}</p>{% endif %}
+          <p class="settings-all-meta">
+            <span>Now: <strong data-value-text>{% if m.enabled is none %}Unknown{% elif m.enabled %}On{% else %}Off{% endif %}</strong></span>
+          </p>
+        </div>
+        <div class="settings-all-control">
+          <label class="settings-all-switch" for="mod-{{ loop.index }}">
+            <input type="checkbox" role="switch" id="mod-{{ loop.index }}" data-module-toggle
+                   aria-labelledby="mod-{{ loop.index }}-label"
+                   {% if m.needs %}aria-describedby="mod-{{ loop.index }}-help"{% endif %}
+                   {% if m.enabled %}checked{% endif %} {% if m.enabled is none %}disabled{% endif %}>
+            <span>On</span>
+          </label>
+          <p class="muted settings-all-row-status" role="status" aria-live="polite" data-row-status></p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  </div>
+
+  <p class="muted" id="settings-all-empty" hidden>No settings match. Clear the search to see every setting.</p>
+  <script src="/static/lightwork-settings-all.js" defer></script>
+{% endblock %}

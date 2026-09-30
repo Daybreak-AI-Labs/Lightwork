@@ -30,7 +30,7 @@ def test_members_section_offers_every_active_workspace_without_switching(monkeyp
     tr.suspend_tenant("beta")
     text = c.get("/users").text
     assert 'id="wm-tenant"' in text
-    assert '<option value="acme" selected>Acme Inc (acme)</option>' in text
+    assert '<option value="acme" selected>Acme Inc</option>' in text
     assert 'value="beta"' not in text  # suspended workspaces are not offered
     assert 'data-tenant="acme"' in text
     assert "before managing its members" not in text
@@ -40,7 +40,7 @@ def test_members_section_points_at_the_workspaces_page_when_none_exist(monkeypat
     c = _client(monkeypatch, tmp_path)
     text = c.get("/users").text
     assert 'id="wm-tenant"' not in text
-    assert 'href="/tenants"' in text and "No active workspace yet" in text
+    assert 'href="/tenants"' in text and "No workspace yet" in text and "Create a workspace" in text
 
 
 def test_people_who_accepted_an_invite_are_shown_by_email(monkeypatch, tmp_path):
@@ -57,10 +57,14 @@ def test_people_who_accepted_an_invite_are_shown_by_email(monkeypatch, tmp_path)
     rbac.set_role(sub, "admin")
     rbac.set_role("user:plain@example.com", "viewer")
     text = c.get("/users").text
-    # Roster row: email first, provider identity as the detail.
-    assert "dab@example.com <span" in text and "336026" in text
+    # Roster row: the email, never the raw sign-in identity.
+    assert "dab@example.com" in text
+    visible = text.split('<main id="content"', 1)[1]
+    import re
+    visible = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", visible, flags=re.DOTALL))
+    assert "336026" not in visible and "google-oauth2" not in visible
     # Labels reach the member script (data attribute) and the colleague picker.
-    assert 'data-labels=\'{"user:google-oauth2|105693517179064336026": "dab@example.com"}\'' in text
+    assert '"user:google-oauth2|105693517179064336026": "dab@example.com"' in text
     assert '<option value="user:google-oauth2|105693517179064336026">dab@example.com</option>' in text
     # Someone with no accepted invite renders exactly as before.
     assert "plain@example.com" in text

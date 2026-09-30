@@ -38,14 +38,15 @@ class OpenAICompatibleClient(OpenAIClient):
     DEFAULT_MODEL = "openai-compatible"
     PRICE_MODEL_PREFIX = "openai_compatible:"  # keep provider context for pricing
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, *, environment=None):
+        env = os.environ if environment is None else environment
         from ..config import get_provider_config
 
-        cfg = get_provider_config("openai_compatible")
+        cfg = get_provider_config("openai_compatible") if environment is None else {}
         url = (
             base_url
             or cfg.get("base_url")
-            or os.environ.get("OPENAI_COMPATIBLE_BASE_URL")
+            or env.get("OPENAI_COMPATIBLE_BASE_URL")
         )
         if not url:
             raise ValueError(
@@ -57,7 +58,7 @@ class OpenAICompatibleClient(OpenAIClient):
         key = (
             api_key
             or cfg.get("api_key")
-            or os.environ.get("OPENAI_COMPATIBLE_API_KEY")
+            or env.get("OPENAI_COMPATIBLE_API_KEY")
         )
         if not key:
             from ..enterprise import _is_local_endpoint
@@ -72,4 +73,5 @@ class OpenAICompatibleClient(OpenAIClient):
             api_key=key,
             base_url=url,
             allow_openai_env_fallback=False,
+            environment=environment,
         )

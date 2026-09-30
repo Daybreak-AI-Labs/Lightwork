@@ -44,7 +44,7 @@ function response(body, { status = 200, invalid = false } = {}) {
 function toolFixture(result, action = "enable") {
   const button = new Element("button");
   button.dataset = { name: "shell", action };
-  button.textContent = action === "enable" ? "Clear dashboard block" : "Add dashboard block";
+  button.textContent = action === "enable" ? "Allow" : "Block";
   const badges = new Map([".perm-base-acl", ".perm-override", ".perm-overall"].map((key) => [key, new Element()]));
   const row = { dataset: { baseAclState: "ready", toolUsable: "false" }, querySelector(key) { return badges.get(key); } };
   button.closest = () => row;
@@ -67,7 +67,7 @@ for (const result of [response({}, { invalid: true }), response({}), response(nu
     await ui.button.click();
     assert.match(ui.message.textContent, /Could not confirm/);
     assert.equal(ui.button.dataset.action, "enable");
-    assert.equal(ui.button.textContent, "Clear dashboard block");
+    assert.equal(ui.button.textContent, "Allow");
     assert.equal(ui.button.disabled, false);
     assert.equal(ui.row.dataset.toolUsable, "false");
     assert.equal(ui.badges.get(".perm-override").textContent, "");
@@ -78,7 +78,7 @@ test("a confirmed clear preserves unknown readiness and offers only the admitted
   const ui = toolFixture(response({ tool }));
   await ui.button.click();
   assert.equal(ui.button.dataset.action, "disable");
-  assert.equal(ui.badges.get(".perm-overall").textContent, "readiness unknown");
+  assert.equal(ui.badges.get(".perm-overall").textContent, "Not checked yet");
   assert.equal(ui.row.dataset.toolUsable, "false");
 });
 
@@ -86,8 +86,8 @@ test("the documented no-content disable response still adds a block", async () =
   const ui = toolFixture(response(null, { status: 204 }), "disable");
   await ui.button.click();
   assert.equal(ui.button.dataset.action, "enable");
-  assert.equal(ui.badges.get(".perm-override").textContent, "blocked");
-  assert.match(ui.message.textContent, /Dashboard block added/);
+  assert.equal(ui.badges.get(".perm-override").textContent, "Blocked");
+  assert.match(ui.message.textContent, /is now blocked/);
 });
 
 test("a repeated tool action while pending sends one mutation", async () => {

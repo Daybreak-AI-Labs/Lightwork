@@ -507,3 +507,53 @@ def test_source_has_no_network_or_dynamic_execution_primitives() -> None:
         "exec(",
     ):
         assert primitive not in source
+
+
+def test_catalog_and_journey_lists_are_read_only_tenant_scoped_operate_views(environment) -> None:
+    client, state, _clock, _database = environment
+    _create_and_approve_catalog(client)
+    _ok(client.post(f"{API}/journeys", json=_journey()), 201)
+    state["permission_calls"].clear()
+    catalogs = _ok(client.get(f"{API}/catalogs"))
+    journeys = _ok(client.get(f"{API}/journeys"))
+    assert [(c["catalog_id"], c["version"], c["state"]) for c in catalogs["items"]] == [
+        ("consumer-profile-v1", 1, "published")
+    ]
+    assert [(j["journey_id"], j["state"]) for j in journeys["items"]] == [
+        ("progressive-profile-v1", "draft")
+    ]
+    assert state["permission_calls"] == [("tenant", "operate"), ("tenant", "operate")]
+    state["tenant"] = "tenant-b"
+    assert _ok(client.get(f"{API}/catalogs"))["items"] == []
+    assert _ok(client.get(f"{API}/journeys"))["items"] == []
+    state["tenant"] = "tenant-a"
+    state["enabled"] = False
+    assert client.get(f"{API}/catalogs").status_code == 403
+
+
+def test_contract_lookup_needs_operate_and_hides_resolution_failures(
+    environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from maverick_dashboard import consent_public_admin_api
+
+    client, state, _clock, _database = environment
+    monkeypatch.setattr(consent_public_admin_api, "_require_enabled", lambda: None)
+    seen: list[tuple] = []
+
+    def contract(tenant, credential_id, **kwargs):
+        seen.append((tenant, credential_id, kwargs))
+        if credential_id == "gone":
+            raise LookupError("no")
+        if credential_id == "stale":
+            raise ValueError("stale")
+        return {"catalog_id": "profile-catalog-x", "questions": []}
+
+    monkeypatch.setattr(api, "published_contract_for_key", contract)
+    state["permission_calls"].clear()
+    found = _ok(client.get(f"{API}/contract?credential_id=key-1&jurisdiction=eu&country_code=FR&locale=fr-FR"))
+    assert found["catalog_id"] == "profile-catalog-x"
+    assert seen[0] == ("tenant-a", "key-1", {"jurisdiction": "eu", "country_code": "FR", "locale": "fr-FR"})
+    assert state["permission_calls"] == [("tenant", "operate")]
+    assert client.get(f"{API}/contract?credential_id=gone").status_code == 404
+    assert client.get(f"{API}/contract?credential_id=stale").status_code == 409
+    assert client.get(f"{API}/contract?credential_id=bad%20id").status_code == 422

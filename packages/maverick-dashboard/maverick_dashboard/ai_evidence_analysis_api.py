@@ -844,6 +844,22 @@ def create_ai_evidence_analysis_router(  # noqa: C901 - route-local trust bounda
         _secure(response)
         return _safe_record(record)
 
+    @router.get("/analyses")
+    async def list_analyses(
+        request: Request,
+        response: Response,
+        status: Literal["pending_review", "review_approved", "review_rejected", "revoked"]
+        | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=500),
+    ):
+        """This workspace's analyses (current versions), for the page list."""
+        require_permission(request, "view")
+        evidence, tenant, _actor, store = authority(request)
+        records = await call(evidence, store.list_analyses, tenant, status=status, limit=limit)
+        items = [_safe_record(item) for item in records]
+        _secure(response)
+        return {"items": items, "count": len(items)}
+
     @router.get("/analyses/{analysis_id}")
     async def get_analysis(request: Request, response: Response, analysis_id: AnalysisPath):
         require_permission(request, "view")

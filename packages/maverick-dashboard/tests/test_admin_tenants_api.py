@@ -38,7 +38,7 @@ def test_create_list_get_roundtrip():
     assert body["id"] == "acme"
     assert body["plan"] == "enterprise"
     assert body["status"] == "active"
-    assert body["max_daily_dollars"] == 5.0
+    assert body["max_daily_dollars"] == 0.0  # no cap unless one is chosen
     # The response tells the operator where to drop acme's own config.toml.
     assert body["config_path"].endswith("/config.toml")
     assert "tenants/acme/" in body["config_path"].replace("\\", "/")
@@ -92,17 +92,17 @@ def test_audit_refusal_rolls_back_tenant_publication(monkeypatch):
     assert client.get("/api/v1/admin/tenants/unlogged").status_code == 404
 
 
-def test_unlimited_tenant_quota_requires_explicit_zero():
-    bounded = client.post("/api/v1/admin/tenants", json={"id": "bounded"})
-    unlimited = client.post(
+def test_tenant_has_no_cap_unless_one_is_chosen():
+    default = client.post("/api/v1/admin/tenants", json={"id": "default-cap"})
+    bounded = client.post(
         "/api/v1/admin/tenants",
-        json={"id": "explicit-unlimited", "max_daily_dollars": 0},
+        json={"id": "bounded", "max_daily_dollars": 5},
     )
 
+    assert default.status_code == 201
+    assert default.json()["max_daily_dollars"] == 0.0
     assert bounded.status_code == 201
     assert bounded.json()["max_daily_dollars"] == 5.0
-    assert unlimited.status_code == 201
-    assert unlimited.json()["max_daily_dollars"] == 0.0
 
 
 def test_duplicate_is_409():

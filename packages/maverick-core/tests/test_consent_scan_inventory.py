@@ -1180,3 +1180,51 @@ def test_report_integrity_rejects_non_unknown_or_tampered_scanner_results(
     )
     assert second["succeeded"] is False
     assert second["job"]["last_error_code"] == "ConsentScanIntegrityError"
+
+
+def _scanner_settings(monkeypatch: pytest.MonkeyPatch, **values: int) -> None:
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda: {"consent_preferences": {"enable": True,
+                                         "scanner": {"enable": True, **values}}},
+    )
+
+
+def test_installation_scan_limits_default_and_cap_every_schedule(
+    environment: Environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from maverick.consent_scanner import capped_scan_limits, default_scan_limits
+
+    inventory = environment.inventory
+    inventory.upsert_property("tenant-a", "property-shop", [ORIGIN], [START_URL],
+                              expected_revision=0, idempotency_key="property-create")
+    with pytest.raises(ConsentScanValidationError, match="interval_seconds is required"):
+        inventory.put_schedule("tenant-a", "no-interval", "property-shop",
+                               interval_seconds=None, next_due_at=NOW,
+                               expected_revision=0, idempotency_key="schedule-none")
+    _scanner_settings(monkeypatch, max_pages=50, max_depth=2, interval_seconds=3_600)
+    assert default_scan_limits().max_pages == 50
+    assert capped_scan_limits(ScanLimits(max_pages=10)).max_pages == 10
+    defaulted = inventory.put_schedule("tenant-a", "defaulted", "property-shop",
+                                       interval_seconds=None, next_due_at=NOW,
+                                       expected_revision=0, idempotency_key="schedule-default")
+    assert defaulted["interval_seconds"] == 3_600
+    assert defaulted["limits"]["max_pages"] == 50 and defaulted["limits"]["max_depth"] == 2
+    asked_more = inventory.put_schedule("tenant-a", "asked-more", "property-shop",
+                                        interval_seconds=300, next_due_at=NOW,
+                                        expected_revision=0, idempotency_key="schedule-more",
+                                        limits=ScanLimits(max_pages=5_000, max_depth=9))
+    assert asked_more["interval_seconds"] == 3_600
+    assert asked_more["limits"]["max_pages"] == 50 and asked_more["limits"]["max_depth"] == 2
+
+
+def test_installation_shortest_interval_holds_schedules_saved_before_it(
+    environment: Environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _prop, schedule = _seed(environment)  # a 300-second schedule due now
+    _scanner_settings(monkeypatch, interval_seconds=7_200)
+    queued = environment.inventory.enqueue_due("tenant-a")
+    assert len(queued["items"]) == 1
+    after = environment.inventory.get_schedule("tenant-a", "schedule-daily")
+    assert after["next_due_at"] == schedule["next_due_at"] + 7_200

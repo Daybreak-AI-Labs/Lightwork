@@ -53,15 +53,18 @@ async function settle() {
 async function fixture(handler) {
   const dom = new JSDOM(html(), {url:'https://lightwork.test/research', runScripts:'outside-only'});
   const calls = [];
-  dom.window.confirm = () => true;
+  const prompts = [];
+  dom.window.confirm = () => { throw new Error('native confirm must not be used'); };
+  dom.window.mvConfirm = async (prompt, options) => { prompts.push({prompt, options}); return true; };
   dom.window.fetch = async (url, options = {}) => {
     calls.push({url, options});
     const value = await handler(url, options, calls);
+    if (value && value.__status) return {ok:false, status:value.__status, json:async () => value.body};
     return {ok:true, status:200, json:async () => value};
   };
   dom.window.eval(source);
   await settle();
-  return {dom, window:dom.window, document:dom.window.document, calls};
+  return {dom, window:dom.window, document:dom.window.document, calls, prompts};
 }
 
 test('renders unavailable installation as a readable blocked state', async () => {
@@ -174,5 +177,22 @@ test('staging requires the visible confirmation and never accepts browser author
   assert.equal(Object.hasOwn(submitted, 'tenant'), false);
   assert.equal(Object.hasOwn(submitted, 'principal'), false);
   assert.equal(Object.hasOwn(submitted, 'authority'), false);
+  ui.dom.window.close();
+});
+
+test('actions confirm in the page dialog and failures read as plain sentences', async () => {
+  const ui = await fixture(async (url, options) => {
+    if (options.method === 'POST') return {__status:409, body:{detail:'expected_revision mismatch for candidate row'}};
+    return overview({items:[candidate({state:'authorized', revision:2})]});
+  });
+  ui.window.mvErrorText = (failure, action) => 'Could not ' + action + '. This was changed since you opened it.';
+  [...ui.document.querySelectorAll('#research-promotions-list button')]
+    .find(button => button.textContent === 'Stage candidate').click();
+  await settle();
+  assert.equal(ui.prompts.length, 1);
+  assert.equal(ui.prompts[0].options.okText, 'Continue');
+  const shown = ui.document.getElementById('research-promotions').textContent;
+  assert.match(shown, /Could not update this candidate\. This was changed since you opened it/);
+  assert.doesNotMatch(shown, /expected_revision|mismatch/);
   ui.dom.window.close();
 });

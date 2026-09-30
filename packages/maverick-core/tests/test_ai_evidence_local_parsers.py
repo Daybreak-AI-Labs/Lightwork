@@ -122,6 +122,40 @@ def test_real_worker_extracts_safe_biff8_and_rejects_formula(tmp_path: Path) -> 
         adapter._legacy_xls_text(_xls(_FORMULA_XLS))  # noqa: SLF001
 
 
+def test_workers_launch_through_a_linked_interpreter_and_refuse_a_repointed_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A virtual environment's python is a symlink to the base interpreter;
+    # launching the resolved file would leave the environment's packages.
+    pytest.importorskip("xlrd")
+    pytest.importorskip("olefile")
+    real = Path(sys.executable).resolve()
+    link = tmp_path / "venv-python"
+    link.symlink_to(real)
+    monkeypatch.setattr(local.sys, "executable", str(link))
+    launched: list[str] = []
+
+    def runner(command, **kwargs):
+        launched.append(command[0])
+        return _mock_sandbox_probe(command, **kwargs)
+
+    adapter = local.GovernedLocalExtractionAdapter(
+        maximum_bytes=4_096,
+        sandbox=_sandbox(tmp_path),
+        legacy_xls=_xls_config(),
+        _runner=runner,
+    )
+    assert str(link) in launched and str(real) not in launched
+    adapter._verify_static_identity()  # noqa: SLF001
+
+    other = tmp_path / "other-python"
+    other.write_bytes(b"not the attested interpreter")
+    link.unlink()
+    link.symlink_to(other)
+    with pytest.raises(local.LocalParserAttestationError, match="changed"):
+        adapter._verify_static_identity()  # noqa: SLF001
+
+
 def test_biff8_scanner_rejects_unknown_active_and_oversized_records() -> None:
     limits = local._XLSLimits(  # noqa: SLF001
         max_workbook_stream_bytes=4_096,

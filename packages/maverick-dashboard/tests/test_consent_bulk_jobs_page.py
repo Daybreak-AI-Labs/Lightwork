@@ -73,53 +73,39 @@ def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) 
         "style-src 'self'",
     ):
         assert directive in csp
-    assert "Manage bulk consent changes" in response.text
+    from test_support.plain_language import developer_terms
+
+    assert "Bulk Consent Changes" in response.text
     assert 'id="cbj-operations" disabled' in response.text
-    assert "Checking availability before enabling bulk actions" in response.text
-    assert "Checking status does not replenish job credits" in response.text
+    assert "Checking whether bulk changes are available" in response.text
+    assert "Checking status never adds to the allowance" in response.text
     assert 'data-api-base="/api/v1/consent/bulk-jobs"' in response.text
     assert 'data-copilot-page="/consent/bulk-jobs"' in response.text
     assert 'src="/static/lightwork-copilot.js' in response.text
     assert 'src="/static/lightwork-consent-bulk-jobs.js"' in response.text
+    assert 'src="/static/lightwork-consent-workbench.js"' in response.text
+    # No page-local style block is left; the CSP nonce is only for themes.
     parser = _Markup()
     parser.feed(response.text)
-    nonces = [attrs.get("nonce") for tag, attrs in parser.tags if tag == "style"]
-    assert len(nonces) == 1
-    assert nonces[0]
-    assert f"'nonce-{nonces[0]}'" in csp
+    assert [attrs for tag, attrs in parser.tags if tag == "style"] == []
+    assert "'nonce-" in csp
+    assert developer_terms(response.text) == []
 
 
-def test_download_starts_as_an_explained_disabled_button(client: TestClient) -> None:
+def test_jobs_are_rows_with_buttons_and_the_export_downloads_from_its_row(
+    client: TestClient,
+) -> None:
     response = client.get(ROUTE)
-    parser = _Markup()
-    parser.feed(response.text)
-    matches = [
-        (tag, attrs)
-        for tag, attrs in parser.tags
-        if attrs.get("id") == "cbj-download"
-    ]
-
-    assert matches == [
-        (
-            "button",
-            {
-                "class": "btn",
-                "id": "cbj-download",
-                "type": "button",
-                "disabled": None,
-                "aria-describedby": "cbj-download-hint",
-            },
-        )
-    ]
-    assert 'id="cbj-download-hint" role="status"' in response.text
-    assert "Select a job to make its export available." in response.text
-
+    assert 'id="cbj-job-list"' in response.text
     source = (
         PACKAGE / "static" / "lightwork-consent-bulk-jobs.js"
     ).read_text(encoding="utf-8")
-    assert 'var downloadUrl = ""' in source
-    assert "download.disabled = !canAudit" in source
-    assert "global.location.assign(downloadUrl)" in source
+    for label in ('label: "Details"', 'label: "Download"', 'label: "Run now"', 'label: "Cancel"'):
+        assert label in source
+    assert 'global.location.assign(apiBase + "/" + encodeURIComponent(j.job_id) + "/download")' in source
+    # Versions come from the chosen row, never from a typed field.
+    assert "expected_revision: job.revision" in source
+    assert "expected_revision: state.credit.revision" in source
     assert "download.href" not in source
 
 
@@ -154,14 +140,7 @@ def test_page_renders_exact_global_permission_controls(
     shell = by_id["consent-bulk-jobs-shell"]
     assert (shell["data-can-audit"] == "true") is audit
     assert (shell["data-can-admin"] == "true") is admin
-    for control in (
-        "cbj-export-controls",
-        "cbj-action-controls",
-        "cbj-job-admin-controls",
-        "cbj-credit-controls",
-    ):
-        assert ("disabled" not in by_id[control]) is admin
-    for button in ("cbj-run-next", "cbj-recover", "cbj-purge"):
+    for button in ("cbj-new", "cbj-add-credits", "cbj-run-next", "cbj-recover", "cbj-purge"):
         assert ("disabled" not in by_id[button]) is admin
 
 
@@ -177,17 +156,19 @@ def test_forms_collect_only_closed_opaque_bulk_job_fields(client: TestClient) ->
     }
     assert forms and all("action" not in form for form in forms)
     for required in (
-        "state",
-        "limit",
-        "items_json",
         "operation",
+        "receipt_limit",
+        "policy_key",
+        "purpose_id",
+        "reason_code",
+        "identity_kind",
         "scheduled_for",
         "idempotency_key",
-        "job_id",
-        "expected_revision",
-        "amount",
     ):
         assert required in names
+    # Nothing a person cannot know is typed: no JSON items, job IDs or versions.
+    for typed in ("items_json", "job_id", "expected_revision", "amount", "limit"):
+        assert typed not in names
     for forbidden in (
         "tenant_id",
         "actor_sha256",
@@ -241,8 +222,7 @@ def test_custom_theme_uses_same_csp_nonce(monkeypatch: pytest.MonkeyPatch) -> No
     parser = _Markup()
     parser.feed(response.text)
     nonces = [attrs.get("nonce") for tag, attrs in parser.tags if tag == "style"]
-    assert len(nonces) == 2
-    assert len(set(nonces)) == 1
+    assert len(nonces) == 1
     assert nonces[0]
     assert f"'nonce-{nonces[0]}'" in response.headers["content-security-policy"]
 
@@ -255,13 +235,9 @@ def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
         PACKAGE / "static" / "lightwork-consent-bulk-jobs.js"
     ).read_text(encoding="utf-8")
     for required in (
-        "backdrop-filter: blur(26px)",
-        "color-mix(",
-        ":focus-visible",
-        "prefers-reduced-motion",
-        "forced-colors",
         'aria-live="polite"',
         "data-copilot-page",
+        "About this page’s safeguards",
     ):
         assert required in template
     for required in (
@@ -275,12 +251,12 @@ def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
         'cache: "no-store"',
         'redirect: "error"',
         'referrerPolicy: "no-referrer"',
-        "element.textContent" if False else "operationOutput.textContent",
         "operations.disabled = true",
-        'request("/worker/run-next"',
-        'request("/operations/integrity")',
-        'request("/operations/recover"',
-        'request("/operations/retention/purge"',
+        'api("/worker/run-next"',
+        'api("/operations/integrity")',
+        'api("/operations/recover"',
+        'api("/operations/retention/purge"',
+        "CW.confirm(",
         "parseItems",
         "exactShape",
     ):
@@ -295,6 +271,8 @@ def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
         "document.cookie",
         "eval(",
         "new Function",
+        "global.confirm(",
+        "JSON.stringify(value, null, 2)",
     ):
         assert forbidden not in source
 

@@ -43,15 +43,26 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     assert "'unsafe-inline'" not in response.headers["content-security-policy"]
     assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
     body = response.text
-    assert "Governance inventory" in body
+    assert "Governance Inventory" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert page.ASSET_PATH in body
-    assert "backdrop-filter:blur(26px)" in body
     assert 'data-can-operate="true"' in body
     assert 'data-can-audit="true"' in body
     assert 'data-can-admin="false"' in body
-    assert 'id="sgi-reconcile-form"' in body
+    assert 'id="sgi-reconcile" type="button" disabled' in body
     assert 'id="sgi-checkpoint" type="button" disabled' in body
+    assert 'id="sgi-integrity" type="button">' in body
+    # Filters are dropdowns and records load into tables; nothing is typed.
+    for control in ("sgi-version", "sgi-source", "sgi-kind", "sgi-relation"):
+        assert f'<select class="select" id="{control}"' in body
+    for typed in ("Snapshot ID", "Operation ID", "integrity digest", "Expected active revision", "Limit"):
+        assert typed not in body
+    assert 'id="sgi-entity-rows"' in body and 'id="sgi-link-rows"' in body
+    # The strict style policy blocks style attributes; the page styles live in its nonce stylesheet.
+    assert " style=" not in body.split('id="sgi-root"')[1]
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(body) == []
 
 
 def test_page_rejects_unknown_query_parameters(monkeypatch) -> None:

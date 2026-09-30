@@ -65,6 +65,7 @@ def create_consent_global_opt_out_page_router(
                 "api_base": "/api/v1/consent/global-opt-out",
                 "global_opt_out_can_admin": has_global_permission(request, "admin"),
                 "global_opt_out_can_audit": has_global_permission(request, "audit"),
+                "module_off": _module_off('consent_preferences.global_opt_out'),
             },
         )
         for name, value in _HEADERS.items():
@@ -75,3 +76,15 @@ def create_consent_global_opt_out_page_router(
 
 
 __all__ = ["create_consent_global_opt_out_page_router"]
+
+
+def _module_off(section: str) -> bool:
+    """Whether this feature's on/off switch chain is off, so the page shows
+    the standard turned-off banner (with Turn on for administrators)."""
+    try:
+        from maverick.config import load_config
+
+        from .api import _module_switch_enabled
+        return not _module_switch_enabled(load_config() or {}, section)
+    except Exception:  # noqa: BLE001 -- the page's own status line still reports
+        return False

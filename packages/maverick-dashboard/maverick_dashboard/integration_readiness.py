@@ -477,6 +477,7 @@ _CHANNEL_REQUIRED_FIELDS = {
         "smtp_user",
         "smtp_password",
     ),
+    "mattermost": ("url",),
 }
 
 _CHANNEL_MODULES = {
@@ -486,6 +487,7 @@ _CHANNEL_MODULES = {
     "whatsapp_cloud": "maverick_channels.whatsapp_cloud",
     "sms": "maverick_channels.sms",
     "email": "maverick_channels.email",
+    "mattermost": "maverick_channels.mattermost",
 }
 
 

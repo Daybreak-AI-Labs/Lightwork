@@ -37,8 +37,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Workspaces page edits the daily spend limit** — each workspace row now
   carries its limit as an editable field (0 for no daily limit) saved through
   the existing `POST /api/v1/admin/tenants/{id}/quota`, instead of a value that
-  could only be set at creation. The row also explains that every run reserves
-  its own budget against the day's allowance when it starts.
+  could only be set at creation. The row explains that physical provider
+  attempts reserve projected spend against the current allowance.
 - **Users page assigns members to any workspace** — the Members section gets a
   workspace picker (every active workspace for a global administrator, the
   member's own workspaces otherwise), so assigning someone to a workspace no
@@ -58,6 +58,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `discovery_ttl_minutes` sets freshness.
 
 ### Changed
+- **Ordinary tasks have optional limits** — omitted dollar, time, token,
+  tool-call and step limits remain unset across customer entrypoints. Existing
+  numeric settings stay intact; Settings can reversibly disable saved task
+  defaults. Explicit invocation limits and organization controls still apply.
+  Metered workflow agents retain actual usage and result text; an allowance
+  refusal keeps unfinished work available for an authorized retry. Durable
+  workflow frames do not enable ordinary-agent checkpoints or promise replay
+  of uncertain external effects. See [task limits](docs/task-limits.md).
+- **Organization admission follows physical provider attempts** — concurrent
+  retries and hedges retain durable projected holds, known costs settle against
+  cumulative usage receipts, and unknown charges never expire automatically.
+  Late receipt corrections preserve prior nonreceipt spending; absorbed child
+  scopes avoid duplicate charges. Released scopes move to indexed history
+  while pending scopes remain bounded and fail closed on unreadable state.
+- **Pack tool contracts match their declared capabilities** — read-only SQL
+  and spreadsheet tools expose only read operations, and deployment refuses
+  unavailable required workflow tools after custom adapters are assembled.
+  Built-in skill instructions use real tool contracts. Risk ceilings and
+  denylists are preserved; 255 reviewed packs still require named adapters or
+  explicit approved-export preparation before deployment.
 - **Governance workbenches lose their plumbing** — across 32 governance,
   consent, privacy, data-use, AI-oversight and third-party pages the request
   references and idempotency keys are generated automatically and no longer
@@ -103,6 +123,39 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/tools`, instead of one multi-megabyte page.
 
 ### Fixed
+- **Client and consent state stays attached to the current action** — stale
+  assessment and demo responses no longer overwrite a newer selection; failed
+  saves remain visible. Consent edits carry their version and failed bulk
+  preference updates preserve the intended choices for retry. Polling clients
+  handle terminal failures, deadlines and changed identities; Unicode titles
+  truncate safely. The Bedrock external-agent example uses the server's current
+  object and operation contracts. These changes do not imply native installed
+  client or live external-provider acceptance.
+- **Setup and deployment retain the selected workspace** — local setup checks
+  the workdir, VPS services use the configured path, container defaults align
+  with persistent mounts, and SSH keeps its remote workdir explicit. Config
+  publication uses private atomic replacements with ordinary-failure rollback;
+  the config/secret pair is not a crash-atomic transaction. Deployment recipes
+  include required dashboard credentials and bounded readiness/relay checks
+  without treating a demo response as production acceptance.
+- **A goal is no longer withheld because the evidence policy was never
+  created.** With the AI evidence gateway enabled, every goal in a tenant that
+  had not published a `default` policy stopped with "AI evidence gateway
+  withheld the generated output. Operator action is required: AI evidence
+  policy 'default' does not exist", and a per-user isolation tenant or a
+  session-selected workspace had no way to create one through the static
+  dashboard token (every policy call answered 503). The gateway now provisions
+  the tenant's `default` policy from its built-in defaults on the first
+  delivery, as an audited `policy_created` mutation, so the answer is receipted
+  and disclosed instead of blocked; an explicit non-default policy id must
+  still exist.
+- **"Try again" and goal creation honour the deployment's spend cap.** The
+  former fixed fallback could refuse a requested limit below the actual
+  Settings cap. Resume, REST goal creation, compose, signed webhooks, cost
+  projection and halt guidance now resolve the active optional task policy.
+  An omitted limit stays unset; a configured limit is shown in the refusal
+  message. The task-limits switch controls saved defaults without disabling
+  explicit invocation or organization limits.
 - **Rust MCP client example moves off a vulnerable `rmcp`.** The example
   pinned `rmcp 1.7.0`, which OSV now flags for GHSA-33f5-2c5q-wgwj
   (CVE-2026-63127, OAuth protected-resource metadata not validated) and

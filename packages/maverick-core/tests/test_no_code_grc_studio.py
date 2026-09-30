@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -596,6 +597,17 @@ def test_rejected_retention_recovery_and_concurrent_draft_cas(tmp_path: Path) ->
     assert store.verify_integrity("tenant-a")["counts"]["tombstones"] == 1
     backup = store.create_recovery_backup("tenant-a")
     assert store.verify_recovery_backup("tenant-a", backup["backup_id"])["verified"] is True
+    listed = store.list_recovery_backups("tenant-a")
+    assert [row["backup_id"] for row in listed] == [backup["backup_id"]]
+    assert set(listed[0]) == {"backup_id", "created_at"}
+    foreign = {
+        "schema": studio.RECOVERY_SCHEMA,
+        "backup_id": "grc-1-foreign",
+        "tenant_scope_sha256": "0" * 64,
+        "created_at": 1,
+    }
+    (tmp_path / "recovery" / "grc-1-foreign.json").write_text(json.dumps(foreign))
+    assert len(store.list_recovery_backups("tenant-a")) == 1
 
     actor["value"] = "author"
     current = store.create_version(

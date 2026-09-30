@@ -530,6 +530,32 @@
       box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 40%, transparent); }
     .btn--ghost { background: transparent; }
     .btn--danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
+    /* Class names some pages used that never existed; they render as the
+       real primary button instead of an unstyled one. */
+    .btn-primary, .btn.primary { background: var(--brand); border-color: transparent; color: var(--brand-fg);
+      box-shadow: 0 2px 10px color-mix(in srgb, var(--brand) 32%, transparent); }
+    .btn-primary:hover, .btn.primary:hover { background: var(--brand-hi); border-color: transparent; }
+    .btn-danger, .btn.danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
+    /* A plain <button> in page content gets the standard button look rather
+       than the browser default. */
+    #content button:not([class]) {
+      display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+      padding: 0.5rem 0.95rem; border-radius: var(--radius-md); cursor: pointer;
+      font: inherit; font-weight: var(--font-medium); line-height: 1.2;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    }
+    #content button:not([class]):hover { border-color: var(--border-strong); }
+    #content button:not([class]):disabled { opacity: 0.55; cursor: not-allowed; }
+    /* Bare form fields in page content match .input. */
+    #content input:not([type]):not([class]), #content input[type="text"]:not([class]),
+    #content input[type="number"]:not([class]), #content input[type="email"]:not([class]),
+    #content input[type="url"]:not([class]), #content input[type="date"]:not([class]),
+    #content input[type="datetime-local"]:not([class]), #content input[type="search"]:not([class]),
+    #content select:not([class]), #content textarea:not([class]) {
+      background: var(--surface-sunken); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--radius-md);
+      padding: 0.5rem 0.65rem; font: inherit; max-width: 100%;
+    }
     .btn:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
     .input, .select, .textarea {
       background: var(--surface-sunken); color: var(--text);
@@ -1109,6 +1135,17 @@
 .mv-copilot__row .input { flex: 1; min-width: 0; }
 .mv-copilot__note { color: var(--muted); font-size: var(--text-xs);
   margin: .4rem 0 0; min-height: 1em; }
+.mv-copilot__operations { margin: var(--space-3) 0; padding: var(--space-3) 0;
+  border-block: 1px solid var(--border); }
+.mv-copilot__operations > h2 { margin: 0; font-size: var(--text-base); }
+.mv-copilot__operations > p { color: var(--muted); font-size: var(--text-sm); }
+.mv-copilot__operation-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.mv-copilot__operation-buttons .btn { white-space: normal; }
+.mv-copilot__operations .fr__example { margin: var(--space-3) 0 0; padding: var(--space-3); }
+.mv-copilot__operations .fr__example h2 { font-size: var(--text-base); }
+.mv-copilot__operations .fr__example .btn { width: 100%; }
+.mv-copilot__operations .fr__example p { overflow-wrap: anywhere; }
+.mv-copilot__operations .fr__example textarea { min-height: 5rem; }
 /* The Copilot is fixed outside <main>, so it needs its own explicit material
    fallbacks rather than relying on the page-surface selectors above. */
 body.theme-hicontrast .mv-copilot,
@@ -1333,6 +1370,9 @@ body.theme-hicontrast :where(
   margin: 0 0 var(--space-4);
 }
 .mg-banner .mg-copy { color: var(--muted); flex: 1 1 24rem; min-width: 0; overflow-wrap: anywhere; }
+/* Who may turn a module on: the shell marks the viewer (base.html). */
+body:not([data-global-admin="1"]) .mg-banner .mg-admin-only { display: none; }
+body[data-global-admin="1"] .mg-banner .mg-nonadmin-note { display: none; }
 .mg-banner .mg-err:not(:empty) {
   flex-basis: 100%;
   color: var(--danger);

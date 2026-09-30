@@ -52,7 +52,7 @@ def test_parse_workflow_normalizes():
     assert d["title"] == "Weekly {{topic}} report"
     assert d["params"] == ["topic"]                # non-identifier + dup dropped
     assert d["steps"] == ["a", "b"]                # blank dropped
-    assert d["budget_dollars"] == 20.0             # clamped to the max
+    assert d["budget_dollars"] == 99.0             # explicit allowance retained
     assert "1. a" in d["body"] and "2. b" in d["body"]
 
 
@@ -60,6 +60,19 @@ def test_parse_workflow_strips_code_fence():
     from maverick_dashboard.workflow_ai import parse_workflow
     d = parse_workflow('```json\n{"name":"x","title":"X","steps":["do it"]}\n```')
     assert d["name"] == "x" and d["steps"] == ["do it"]
+    assert d["budget_dollars"] is None
+
+
+def test_save_workflow_without_caps_round_trips_none(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.templates import load_template
+
+    response = _client().post("/api/v1/workflows", json={
+        "name": "no-generated-cap", "title": "Workflow", "body": "Do the agreed work.",
+    })
+    assert response.status_code in {200, 201}, response.text
+    saved = load_template("no-generated-cap")
+    assert saved.budget_dollars is None and saved.budget_wall_seconds is None
 
 
 def test_parse_workflow_rejects_unusable():
@@ -507,8 +520,8 @@ def test_save_endpoint_conflicts_without_overwrite(monkeypatch, tmp_path):
     assert load_template("dup").title == "Second"
 
 
-def test_save_user_template_clamps_budget_and_folds_placeholders(monkeypatch, tmp_path):
-    # Budgets clamp into the schema range; every {{placeholder}} used in the
+def test_save_user_template_preserves_explicit_budget_and_folds_placeholders(monkeypatch, tmp_path):
+    # Explicit budgets are retained; every {{placeholder}} used in the
     # title/body becomes a fillable param so none renders as a literal.
     _isolate(monkeypatch, tmp_path)
     from maverick.templates import load_template, save_user_template
@@ -518,8 +531,8 @@ def test_save_user_template_clamps_budget_and_folds_placeholders(monkeypatch, tm
         params=["topic"], budget_dollars=999.0, budget_wall_seconds=0.0,
     )
     t = load_template("clamp")
-    assert t.budget_dollars == 100.0        # clamped down from 999
-    assert t.budget_wall_seconds == 1.0     # clamped up from 0
+    assert t.budget_dollars == 999.0
+    assert t.budget_wall_seconds == 0.0     # explicit zero remains a refusal
     assert set(t.params) == {"topic", "recipient"}
 
 
@@ -621,7 +634,7 @@ def test_save_playbook_via_agent_override_round_trips(monkeypatch, tmp_path):
     r = _client().post("/api/v1/agents/ap-bot/override", json={
         "description": "AP clerk", "persona": "You are a careful AP clerk.",
         "allow_tools": ["ocr_read", "send_payment"], "deny_tools": ["shell"],
-        "max_risk": "medium",
+        "max_risk": "high",
         "workflow": [
             {"name": "Read", "instruction": "ocr", "tools": ["ocr_read"], "gate": None},
             {"name": "Pay", "instruction": "pay", "tools": ["send_payment"], "gate": "approval"},
@@ -821,8 +834,8 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     assert "pb-flow__start" in r.text and 'id="pb-flow-end"' in r.text
     # Schedule panel: arm a saved template on a cron (feature defaults on).
     assert 'id="wf-sched"' in r.text and "/api/v1/schedules" in r.text
-    # Schedules fire in UTC: the time field labels it + a local-time hint exists.
-    assert "Time (UTC)" in r.text and 'id="sched-local-hint"' in r.text
+    # Times are chosen in the viewer's own time zone and stored as UTC.
+    assert "At (your time)" in r.text and "function toUtc(" in r.text
     # Webhook-trigger panel: bind a saved template to an inbound webhook.
     assert 'id="wf-trig"' in r.text and "/api/v1/triggers" in r.text
     # Decluttered: the automate panels are collapsible <details>, not always-open.
@@ -841,8 +854,11 @@ def test_p1_builder_refinements(monkeypatch, tmp_path):
     # Design-council P1: advanced cron, signed-curl, governance gate color.
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/workflow-builder").text
-    assert 'value="hourly"' in t and 'value="custom"' in t and 'id="sched-cron"' in t
-    assert 'id="trig-curl"' in t and "openssl dgst -sha256 -hmac" in t and "Copy curl" in t
+    # No raw timetable box or shell snippet: days, a day of the month and a
+    # copyable address are offered instead.
+    assert 'value="hourly"' in t and 'value="days"' in t and 'value="monthly"' in t
+    assert 'id="sched-cron"' not in t and "Cron expression" not in t
+    assert 'id="trig-curl"' not in t and "openssl" not in t and "Copy address" in t
     assert ".pb-gatebadge.gov" in t and "'gov'" in t   # approval = brand, not amber
     assert "mvCopy(" in t                                # shared copy primitive
 
@@ -852,7 +868,7 @@ def test_p0_council_fixes_builder(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/workflow-builder").text
     assert 'role="heading" aria-level="3"' in t      # <summary> regained heading semantics
-    assert "shifts with daylight saving" in t          # UTC->local hint is DST-honest
+    assert "function cronWords(" in t                  # stored timetables read in local words
     assert "label.htmlFor" in t                        # param inputs associate their label
 
 
@@ -929,3 +945,14 @@ def test_builder_prefill_deeplink_jumps_to_automate(monkeypatch, tmp_path):
     # an unknown template (and no query) yields no prefill; the page still renders
     assert "WF_PREFILL = null" in _client().get("/workflow-builder?template=nope").text
     assert "WF_PREFILL = null" in _client().get("/workflow-builder").text
+
+
+def test_workflow_builder_reads_plainly(monkeypatch, tmp_path):
+    from test_support.plain_language import developer_terms
+
+    _isolate(monkeypatch, tmp_path)
+    t = _client().get("/workflow-builder").text
+    assert developer_terms(t) == []
+    for phrase in ("a name (id)", "no gate", "Trigger from a webhook", "POSTing", "Failed: '", "Save failed: '"):
+        assert phrase not in t
+    assert "Someone must approve" in t and "Start it from another app" in t

@@ -40,7 +40,7 @@ final class GlanceModel: ObservableObject {
             error = nil
         } catch {
             guard current == generation else { return }
-            self.error = error.localizedDescription
+            self.error = plainMessage(for: error)
         }
     }
 }

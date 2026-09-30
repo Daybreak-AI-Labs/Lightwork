@@ -381,10 +381,9 @@ def _resolve_signing_key(
       1. An explicitly injected ``signing_key`` (a PEM/obj key, or a
          ``PyJWKClient``-like object exposing ``get_signing_key_from_jwt``) is
          used directly — this is the test seam, so no network is touched.
-      2. Otherwise a :class:`jwt.PyJWKClient` is built from ``jwks_uri`` and the
-         key is fetched by the token's header ``kid``. A ``kid`` not present in
-         the JWKS raises (PyJWKClient raises ``PyJWKClientError``), which we
-         convert to :class:`OIDCError`.
+      2. Otherwise a bounded policy-keyed resolver supplies a currently fresh
+         public key, refreshing once on cold/expired or unknown-kid access.
+         Resolution failure becomes :class:`OIDCError`.
     """
     if signing_key is not None:
         # A resolver/JWK-client was injected: let it pick by kid.
@@ -400,13 +399,9 @@ def _resolve_signing_key(
     if not config.jwks_uri:
         raise OIDCError("OIDC jwks_uri is not configured")
     try:
-        # timeout so an unreachable/slow IdP can't hang the auth request thread
-        # indefinitely (matches the discovery fetch's bounded timeout).
-        try:
-            client = jwt_mod.PyJWKClient(config.jwks_uri, timeout=5)
-        except TypeError:  # very old PyJWT without the timeout kwarg
-            client = jwt_mod.PyJWKClient(config.jwks_uri)
-        return client.get_signing_key_from_jwt(token).key
+        from ._oidc_jwks import resolve
+
+        return resolve(jwt_mod, token, config)
     except Exception as e:  # network error, unknown kid, malformed JWKS
         raise OIDCError(f"could not fetch JWKS signing key: {e}") from e
 

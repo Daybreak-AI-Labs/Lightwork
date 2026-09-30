@@ -406,7 +406,8 @@ class PaperReview:
         out = []
         for c in self.gaps:
             out.append(ClauseEdit(find=c.their_language, replace=c.proposed,
-                                  note=c.requirement, clause_key=c.clause_key))
+                                  note=c.requirement, clause_key=c.clause_key,
+                                  scope="paragraph"))
         return out
 
     def to_dict(self) -> dict:
@@ -765,7 +766,7 @@ def analysis_memo(review: PaperReview, *, version: int = 1,
     if redline_result is not None:
         r = redline_result.to_dict()
         lines.append(
-            f"{r['applied']} clause(s) marked up in place, "
+            f"{r['applied']} full paragraph(s) marked up in place, "
             f"{r['inserted']} clause(s) proposed as additions.")
         if r["synthesized"]:
             lines.append(
@@ -775,8 +776,23 @@ def analysis_memo(review: PaperReview, *, version: int = 1,
         if r["unmatched"]:
             lines.append(
                 f"{len(r['unmatched'])} required change(s) could NOT be "
-                "anchored to a paragraph and must be applied by hand:")
+                "safely applied to a full paragraph and require manual review:")
             lines += [f"   - {u}" for u in r["unmatched"]]
+            explanations = {
+                "scope_mismatch": "The anchor covers only part of a paragraph or a different paragraph. Supply the complete paragraph and replacement.",
+                "ambiguous_match": "The same text appears in multiple paragraphs. Select an exact location in the original source.",
+                "unsupported_inline_structure": "The target contains formatting, links, bookmarks, fields or revisions this editor cannot safely preserve.",
+                "stale_source": "The selected location belongs to a different source version.",
+                "invalid_location": "The selected source location is invalid.",
+                "conflicting_edit": "Another proposed change already targets this paragraph.",
+                "unsupported_scope": "Only complete paragraph replacements are supported.",
+                "not_found": "The full paragraph was not found in this source.",
+                "empty_edit": "The proposal contains no replacement or insertion.",
+            }
+            for outcome in r.get("edit_results", []):
+                if outcome.get("status") == "needs_review":
+                    reason = explanations.get(outcome.get("reason"), "Manual review required.")
+                    lines.append(f"   Edit {outcome['edit_index'] + 1}: {reason}")
     lines += [
         "",
         "HOW TO READ THIS",

@@ -31,6 +31,66 @@
   });
   let pendingLogLines: string[] = [];
   let logFlushTimer: ReturnType<typeof setTimeout> | undefined;
+  // Plain progress: the bootstrap's own step lines move this forward. Log
+  // events are best-effort, so the step list is a guide, never the result.
+  let phase = 0;
+  let copyFeedback = '';
+
+  const STEPS = [
+    'Getting this computer ready',
+    'Downloading Lightwork',
+    'Installing Lightwork',
+  ];
+
+  function phaseFor(line: string): number {
+    if (/Installing the complete Lightwork package/i.test(line)) return 3;
+    if (/Downloading a fresh Lightwork/i.test(line)) return 2;
+    if (/Installing (git|Python|pipx|Git\.Git|Python\.Python)|Ensuring pipx|Using Python/i.test(line)) return 1;
+    return 0;
+  }
+
+  // A plain reason and next step for a failed install. The raw output stays
+  // in "Details for support".
+  function failureAdvice(): string {
+    const text = lines.join('\n') + '\n' + errorMsg;
+    if (/Authentication failed|Repository not found|could not read Username|Permission denied \(publickey\)/i.test(text)) {
+      return 'Lightwork could not be downloaded because this computer is not signed in to a GitHub account that has access to Lightwork. Sign in with the GitHub account Daybreak AI Labs gave access to, then select Try again.';
+    }
+    if (/Could not resolve host|Failed to connect|unable to access|timed out|network is unreachable/i.test(text)) {
+      return 'Lightwork could not be downloaded. Check that this computer is connected to the internet, then select Try again.';
+    }
+    if (/No supported package manager|winget/i.test(text) && /not found|not recognized|No supported/i.test(text)) {
+      return 'Setup could not add the helper programs Lightwork needs on this computer. Ask your IT contact to allow app installs, then select Try again.';
+    }
+    return 'Something stopped the installation. Select Try again. If it fails again, copy the details for support below and send them to your support contact.';
+  }
+
+  function supportText(): string {
+    return [errorMsg, startupDetails, ...lines]
+      .filter((part) => part)
+      .join('\n');
+  }
+
+  async function copyDetails() {
+    const text = supportText() || 'No details were recorded.';
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(text);
+      copyFeedback = 'Copied.';
+    } catch {
+      copyFeedback = "Couldn't copy. Use Save instead.";
+    }
+  }
+
+  function saveDetails() {
+    const url = URL.createObjectURL(new Blob([supportText() || 'No details were recorded.'], { type: 'text/plain' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'Lightwork-setup-details.txt';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    copyFeedback = 'Saved.';
+  }
 
   const unlisteners: UnlistenFn[] = [];
 
@@ -55,10 +115,12 @@
       first -= 1;
     }
     lines = first === 0 ? next : next.slice(first);
-    queueMicrotask(() => logEl?.scrollTo(0, logEl.scrollHeight));
+    queueMicrotask(() => { if (logEl && typeof logEl.scrollTo === "function") logEl.scrollTo(0, logEl.scrollHeight); });
   }
 
   function queueLog(line: string) {
+    const next = phaseFor(line);
+    if (next > phase) phase = next;
     pendingLogLines.push(line);
     if (pendingLogLines.length >= 50) {
       flushLogs();
@@ -123,6 +185,8 @@
   async function startInstall() {
     if (!(await listenerReadiness)) return;
     status = 'installing';
+    phase = 0;
+    copyFeedback = '';
     lines = [];
     pendingLogLines = [];
     if (logFlushTimer !== undefined) {
@@ -184,7 +248,7 @@
       return;
     }
     if (!window.confirm(
-      'Installation is still running. Stop the installation and its background tasks, then close Lightwork?'
+      'Lightwork is still being installed. Stop the installation and close this window?'
     )) {
       return;
     }
@@ -195,7 +259,7 @@
 
   async function confirmForceExit() {
     if (!window.confirm(
-      'Some installation tasks may still be running. Starting another install is blocked. Force the installer app to close now?'
+      'Some setup tasks may still be running in the background. Close the installer anyway?'
     )) {
       return;
     }
@@ -215,7 +279,7 @@
       if (!destroyed) lightworkOpened = true;
     } catch (error) {
       if (!destroyed) {
-        launchError = 'Lightwork could not open yet. Review startup details, then try again.';
+        launchError = 'Lightwork did not open yet. Wait a moment, then select Open Lightwork again. If it still does not open, copy the details for support below and send them to your support contact.';
         startupDetails = String(error);
       }
     } finally {
@@ -233,6 +297,23 @@
   }
 </script>
 
+{#snippet supportDetails(extra = false)}
+  <details class="support"><summary>Details for support</summary>
+    <p class="hint">These are the technical messages from setup. Your support contact may ask for them. They can include folder names and your computer user name.</p>
+    {#if extra}
+      <button class="secondary" onclick={refreshStartupDetails}>Show startup messages</button>
+    {/if}
+    {#if errorMsg}<p class="error">{errorMsg}</p>{/if}
+    {#if startupDetails}<pre class="log">{startupDetails}</pre>{/if}
+    <pre bind:this={logEl} class="log">{lines.join('\n') || 'No setup messages yet.'}</pre>
+    <div class="row">
+      <button class="secondary" onclick={copyDetails}>Copy</button>
+      <button class="secondary" onclick={saveDetails}>Save</button>
+      <span class="feedback" role="status">{copyFeedback}</span>
+    </div>
+  </details>
+{/snippet}
+
 <main>
   <p class="sr-only" aria-live="polite">
     {status === 'installing' ? (cancellationRequested ? 'Cancelling installation' : 'Installing Lightwork') : ''}
@@ -244,15 +325,16 @@
 
   {#if status === 'idle'}
     <section>
-      <p>This setup app downloads and installs Lightwork's source code.</p>
-      <p>
-        You need an internet connection and
-        authorized access to the private Lightwork repository on GitHub.
-        Python will be installed if needed.
-      </p>
+      <p>This app installs Lightwork on this computer, then opens it so you can finish setting it up. It takes a few minutes and you can cancel at any time.</p>
+      <h2>Before you start, you need</h2>
+      <ul>
+        <li>An internet connection.</li>
+        <li>A GitHub account that Daybreak AI Labs has given access to Lightwork. If a GitHub sign-in window appears during setup, sign in with that account. If you don't have access yet, ask the person who sent you this installer.</li>
+        <li>Permission to install apps on this computer. Setup may add helper programs Lightwork needs and may ask for your computer password.</li>
+      </ul>
       <details><summary>What will be installed?</summary>
-        <p>This setup app installs a pinned version of Lightwork.
-          Its Python source code remains readable on this computer.</p>
+        <p>A fixed, checked version of Lightwork, plus the helper programs it needs to run (such as Python and Git) if this computer doesn't have them yet.
+          Lightwork's program files are kept on this computer in a readable form.</p>
       </details>
       <button disabled={!listenersRegistered} onclick={startInstall}>
         {listenersRegistered ? 'Install Lightwork' : 'Preparing installer…'}
@@ -261,116 +343,128 @@
   {:else if status === 'installing'}
     <section>
       <h2>Installing…</h2>
-      <p class="sub">Hang tight — this can take a minute or two.</p>
+      <p class="sub">This usually takes a few minutes. Keep this window open.</p>
+      <ol class="steps" aria-label="Installation progress">
+        {#each STEPS as step, index}
+          <li class={index + 1 < phase ? 'done' : index + 1 === phase || (phase === 0 && index === 0) ? 'current' : ''}
+            aria-current={index + 1 === phase || (phase === 0 && index === 0) ? 'step' : undefined}>{step}</li>
+        {/each}
+      </ol>
       {#if errorMsg}<p class="error" role="alert">Installation could not be stopped safely. It is still running. You can try cancelling again.</p>{/if}
-      <details><summary>Installation details</summary>
-        {#if errorMsg}<p class="error">{errorMsg}</p>{/if}
-        <pre bind:this={logEl} class="log">{lines.join('\n')}</pre>
-      </details>
+      {@render supportDetails()}
       <button class="cancel" disabled={cancellationRequested} onclick={cancelInstall}>
         {cancellationRequested ? 'Cancelling…' : 'Cancel installation'}
       </button>
     </section>
   {:else if status === 'done'}
     <section class="done">
-      <h2>Lightwork is installed. 🎉</h2>
+      <h2>Lightwork is installed</h2>
       <p>Open Lightwork to connect your AI service and finish setup in the app.</p>
       <button disabled={openingLightwork} onclick={openLightwork}>
         {openingLightwork ? 'Opening Lightwork…' : lightworkOpened ? 'Return to Lightwork' : 'Open Lightwork'}
       </button>
       {#if lightworkOpened}<p role="status">Lightwork opened in its own app window.</p>{/if}
       {#if launchError}<p class="error" role="alert">{launchError}</p>{/if}
-      <details><summary>Startup details</summary>
-        <button onclick={refreshStartupDetails}>Refresh startup details</button>
-        <pre class="log">{startupDetails || 'No startup details loaded yet.'}</pre>
-      </details>
-      <details><summary>Installation details</summary><pre class="log">{lines.join('\n')}</pre></details>
+      {@render supportDetails(true)}
     </section>
   {:else if status === 'failed'}
     <section class="failed">
-      <h2>Install failed</h2>
+      <h2>Lightwork couldn't be installed</h2>
       <p class="error" role="alert">{cleanupBlocked
-        ? 'Some installation tasks may still be running. Starting another install is blocked.'
+        ? 'Setup stopped, but some of its tasks may still be running in the background, so you cannot start again yet.'
         : listenerRegistrationFailed ? 'The installer could not start. Reload it and try again.'
-        : 'Installation could not finish. Review the details, then try again.'}</p>
-      <details><summary>Installation details</summary>
-        <p class="error">{errorMsg}</p><pre class="log">{lines.join('\n')}</pre>
-      </details>
+        : failureAdvice()}</p>
       {#if cleanupBlocked}
         <p>
-          Review the installation details before closing the app. Force closing
-          the installer does not confirm that its background tasks have stopped.
+          Closing the installer does not stop those tasks. After it closes,
+          restart your computer before you open the installer again.
         </p>
-        <button class="cancel" onclick={confirmForceExit}>Force close installer</button>
+        <button class="cancel" onclick={confirmForceExit}>Close the installer</button>
       {:else if listenerRegistrationFailed}
         <button onclick={() => window.location.reload()}>Reload installer</button>
       {:else}
         <button onclick={startInstall}>Try again</button>
       {/if}
+      {@render supportDetails()}
     </section>
   {:else}
     <section class="cancelled">
       <h2>Installation cancelled</h2>
-      <p>You can start again when you're ready.</p>
-      <details><summary>Installation details</summary>
-        <p>{errorMsg}</p><pre class="log">{lines.join('\n')}</pre>
-      </details>
+      <p>Nothing else will be installed. You can start again when you're ready.</p>
       <button onclick={startInstall}>Start again</button>
+      {@render supportDetails()}
     </section>
   {/if}
 </main>
 
 <style>
+  /* Same colours and buttons as the Lightwork dashboard (dark theme). */
   :global(body) {
     margin: 0;
-    font-family: -apple-system, system-ui, sans-serif;
-    background: #0d1117;
-    color: #f0f6fc;
+    font-family: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #04050a;
+    color: #eef1f7;
   }
-  main { padding: 2rem; max-width: 720px; margin: 0 auto; }
-  header { margin-bottom: 2rem; }
-  h1 { font-size: 2rem; margin: 0; }
-  .sub { color: #8b949e; }
+  main { padding: 2rem 1rem; max-width: 720px; margin: 0 auto; }
+  header { margin-bottom: 1.5rem; }
+  h1 { font-size: 2rem; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+  .sub, .hint { color: #8e97ac; }
+  .hint { font-size: 0.88rem; }
+  p, li { line-height: 1.6; }
+  ul { padding-left: 1.25rem; color: #c3c9d6; }
   details { margin: 1rem 0; }
-  summary { cursor: pointer; color: #c9d1d9; }
-  summary:focus-visible { outline: 2px solid #58a6ff; outline-offset: 4px; }
-  section { background: #161b22; padding: 1.5rem; border-radius: 8px; }
-  h2 { margin-top: 0; font-size: 1.25rem; }
+  details.support { border-top: 1px solid #1b2130; padding-top: 0.75rem; }
+  summary { cursor: pointer; color: #eef1f7; }
+  summary:focus-visible, button:focus-visible { outline: 2px solid #3d8bff; outline-offset: 3px; }
+  section {
+    position: relative; overflow: hidden;
+    background: #0b0e15; border: 1px solid #1b2130; padding: 1.5rem; border-radius: 14px;
+  }
+  section::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+    background: linear-gradient(90deg, #2f7cff 0%, #8b5cf6 52%, #ff8a2b 100%);
+  }
+  h2 { margin-top: 0; font-size: 1.2rem; font-weight: 600; }
+  section > h2:not(:first-child) { margin-top: 1.25rem; font-size: 1rem; }
   button {
-    background: #238636; color: #fff; border: none; padding: 0.7rem 1.2rem;
-    border-radius: 6px; cursor: pointer; font-size: 1rem;
+    background: #eef1f7; color: #04050a; border: 1px solid transparent; padding: 0.7rem 1.2rem;
+    border-radius: 8px; cursor: pointer; font: inherit; font-size: 1rem; font-weight: 600;
   }
-  button:hover { background: #2ea043; }
-  button:disabled {
-    background: #30363d;
-    cursor: wait;
-    opacity: 0.75;
+  button:hover { background: #d6dae3; }
+  button:disabled { background: #2a3246; color: #8e97ac; cursor: wait; }
+  button.secondary {
+    background: #070910; color: #eef1f7; border-color: #2a3246; font-size: 0.9rem; padding: 0.5rem 0.9rem;
   }
+  button.secondary:hover { background: #121726; }
+  .row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-top: 0.75rem; }
+  .feedback { color: #3ddc97; font-size: 0.88rem; }
   .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
   }
-  button.cancel {
-    margin-top: 1rem;
-    background: #8b1a1a;
+  button.cancel { margin-top: 1rem; background: #070910; color: #ff6b6b; border-color: #ff6b6b; }
+  button.cancel:hover { background: #1a0d10; }
+  .steps { list-style: none; padding: 0; margin: 1rem 0; }
+  .steps li { padding: 0.35rem 0 0.35rem 1.9rem; position: relative; color: #8e97ac; }
+  .steps li::before {
+    content: ""; position: absolute; left: 0.25rem; top: 0.72rem; width: 0.8rem; height: 0.8rem;
+    border-radius: 50%; border: 2px solid #2a3246; box-sizing: border-box;
   }
-  button.cancel:hover { background: #a52727; }
+  .steps li.current { color: #eef1f7; font-weight: 600; }
+  .steps li.current::before { border-color: #3d8bff; border-top-color: transparent; animation: spin 1s linear infinite; }
+  .steps li.done { color: #c3c9d6; }
+  .steps li.done::before { background: #3ddc97; border-color: #3ddc97; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .steps li.current::before { animation: none; border-top-color: #3d8bff; } }
   .log {
-    margin-top: 1rem; max-height: 320px; overflow: auto;
-    background: #010409; border: 1px solid #30363d; border-radius: 6px;
-    padding: 0.75rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin-top: 0.75rem; max-height: 320px; overflow: auto;
+    background: #070910; border: 1px solid #1b2130; border-radius: 8px;
+    padding: 0.75rem; font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.8rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word;
-    color: #c9d1d9;
+    color: #8e97ac;
   }
-  .done h2 { color: #2ea043; }
-  .failed h2 { color: #f85149; }
-  .cancelled h2 { color: #d29922; }
-  .error { color: #f85149; }
+  .done h2 { color: #3ddc97; }
+  .failed h2 { color: #ff6b6b; }
+  .cancelled h2 { color: #ffb547; }
+  .error { color: #ff6b6b; }
 </style>

@@ -18,7 +18,7 @@
 
   {% if showing_mine %}
     <p class="muted" style="margin-top: calc(-1 * var(--space-2)); margin-bottom: var(--space-4);">
-      Showing deliverables for your role{{ 's' if mine|length > 1 else '' }}: <strong>{{ mine|join(', ') }}</strong>.
+      Showing deliverables for your role{{ 's' if mine|length > 1 else '' }}: <strong>{{ mine|map('humanize')|join(', ') }}</strong>.
     </p>
   {% endif %}
 
@@ -30,24 +30,22 @@
       <a href="/deliverables?role=all" class="dlv-chip{% if not showing_mine and not role %} dlv-chip--on{% endif %}">All</a>
       {# Only roles with live work get a chip — not the whole catalogue. #}
       {% for r in active_roles %}
-        <a href="/deliverables?role={{ r }}" class="dlv-chip{% if role == r %} dlv-chip--on{% endif %}{% if r in mine %} dlv-chip--mine{% endif %}">{{ r }}</a>
+        <a href="/deliverables?role={{ r }}" class="dlv-chip{% if role == r %} dlv-chip--on{% endif %}{% if r in mine %} dlv-chip--mine{% endif %}">{{ r|humanize }}</a>
       {% endfor %}
       {# A hand-picked role that has no work yet still needs its own chip. #}
       {% if role and role not in active_roles %}
-        <a href="/deliverables?role={{ role }}" class="dlv-chip dlv-chip--on">{{ role }}</a>
+        <a href="/deliverables?role={{ role }}" class="dlv-chip dlv-chip--on">{{ role|humanize }}</a>
       {% endif %}
     </div>
     {# The full role set is searchable rather than a wall of chips. #}
     {% if roles|length > active_roles|length %}
       <form class="dlv-jump" method="get" action="/deliverables" role="search">
-        <input list="dlv-roles" name="role" class="input dlv-jump__in"
-               placeholder="Search {{ roles|length }} roles…" autocomplete="off"
-               aria-label="Jump to a role"
-               value="{{ role if role and role not in active_roles else '' }}">
-        <datalist id="dlv-roles">
-          {% for r in roles %}<option value="{{ r }}"></option>{% endfor %}
-        </datalist>
-        <button class="btn" type="submit">Go</button>
+        <label for="dlv-role-pick" class="sr-only">Show results for another role</label>
+        <select id="dlv-role-pick" name="role" class="input dlv-jump__in">
+          <option value="">Pick one of {{ roles|length }} roles…</option>
+          {% for r in roles %}<option value="{{ r }}"{% if r == role and role not in active_roles %} selected{% endif %}>{{ r|humanize }}</option>{% endfor %}
+        </select>
+        <button class="btn" type="submit">Show</button>
       </form>
     {% endif %}
   {% endif %}
@@ -63,7 +61,7 @@
           <div class="mv-row__main">
             <div class="mv-row__title">{{ r.deliverable }}</div>
             <div class="mv-row__sub muted">
-              {{ r.title }} · <span data-when="{{ r.updated_at }}"></span> · {{ r.gate }} gate
+              {{ r.title }} · <span data-when="{{ r.updated_at }}"></span> · needs {{ r.gate|humanize|lower }}
             </div>
           </div>
           <div class="mv-row__actions">
@@ -81,16 +79,16 @@
         <div class="card">
           <div class="dlv-card__head">
             <span class="dlv-card__label">{{ it.deliverable }}</span>
-            {% if it.gate %}<span class="badge" title="Needs {{ it.gate }} before it is acted on">{{ it.gate }} gate</span>{% endif %}
+            {% if it.gate %}<span class="badge" title="Needs {{ it.gate|humanize|lower }} before it is acted on">Needs {{ it.gate|humanize|lower }}</span>{% endif %}
           </div>
           <p class="muted dlv-card__meta">
-            {%- if it.consumers %}For {{ it.consumers|join(', ') }}{% else %}No consumers named{% endif -%}
-            {%- if it.cadence %} · {{ it.cadence }}{% endif -%}
-            {%- if it.shape %} · {{ it.shape }}{% endif -%}
+            {%- if it.consumers %}For {{ it.consumers|map('humanize')|join(', ') }}{% else %}Not assigned to anyone yet{% endif -%}
+            {%- if it.cadence %} · {{ it.cadence|humanize }}{% endif -%}
+            {%- if it.shape %} · {{ it.shape|humanize }}{% endif -%}
           </p>
           {% if it.latest %}
             <a class="dlv-run" href="/chat/goal/{{ it.latest.id }}">
-              <span class="badge {{ it.latest.status }}">{{ it.latest.status }}</span>
+              <span class="badge {{ it.latest.status }}">{{ it.latest.status|humanize }}</span>
               <span class="dlv-run__title">{{ it.latest.title }}</span>
               <span class="muted" data-when="{{ it.latest.updated_at }}"></span>
             </a>
@@ -98,7 +96,7 @@
               <p class="muted dlv-card__await">{{ it.awaiting_count }} awaiting your sign-off</p>
             {% endif %}
           {% else %}
-            <p class="muted dlv-card__meta">No runs yet — this deliverable hasn't been produced.</p>
+            <p class="muted dlv-card__meta">Not produced yet.</p>
           {% endif %}
         </div>
       {% endfor %}
@@ -106,13 +104,13 @@
   {% else %}
     <div class="mv-empty">
       <p class="mv-empty__title">
-        {%- if role %}No deliverables for {{ role }}
+        {%- if role %}No results for {{ role|humanize }}
         {%- elif showing_mine %}Nothing for your role{{ 's' if mine|length > 1 else '' }} yet
         {%- else %}No deliverables declared yet{% endif %}
       </p>
       <p class="mv-empty__body">
         {% if showing_mine %}
-          No deliverables are routed to <strong>{{ mine|join(', ') }}</strong> yet —
+          No deliverables are routed to <strong>{{ mine|map('humanize')|join(', ') }}</strong> yet —
           <a href="/deliverables?role=all">see all deliverables</a>.
         {% else %}
           Deliverables appear here as soon as your teams start producing

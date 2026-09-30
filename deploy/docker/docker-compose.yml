@@ -30,5 +30,6 @@ services:
         required: false
     environment:
       MAVERICK_CONFIG: /home/maverick/.maverick/config.toml
+      MAVERICK_WORKDIR: /workspace
     stdin_open: true
     tty: true

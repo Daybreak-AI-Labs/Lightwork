@@ -501,14 +501,11 @@ def attach_third_party_intelligence_provider_composition(
 
     @asynccontextmanager
     async def lifespan(target: Any):
-        from starlette.concurrency import run_in_threadpool
+        from ._lifecycle import supervised_runtime
 
         async with previous(target):
-            await run_in_threadpool(selected.start)
-            try:
+            async with supervised_runtime(target, "third_party_feed", selected, scheduler=selected.scheduler):
                 yield
-            finally:
-                await run_in_threadpool(selected.stop)
 
     app.router.lifespan_context = lifespan
     state.third_party_intelligence_provider_runtime = selected

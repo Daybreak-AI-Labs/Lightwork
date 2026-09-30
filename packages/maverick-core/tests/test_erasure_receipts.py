@@ -33,8 +33,14 @@ from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 
 def _seed_complete_graph(world: WorldModel, attachment_path: Path) -> dict:
+    from maverick.attachment_submissions import SubmissionStore
+
     conv = world.get_or_create_conversation("telegram", "alice")
-    root = world.create_goal("root subject goal")
+    root = SubmissionStore(world).create(
+        token="private-submission-key", fingerprint="private-request-fingerprint",
+        owner="alice", title="root subject goal", description="private request",
+        manifest=[],
+    )["goal_id"]
     child = world.create_goal("child subject goal", parent_id=root)
     grandchild = world.create_goal("grandchild subject goal", parent_id=child)
     world.append_turn(conv.id, "user", "private request", goal_id=root)
@@ -157,6 +163,13 @@ def test_manifest_cannot_shorten_the_governed_retention_period():
     ).isoformat().replace("+00:00", "Z")
 
     with pytest.raises(ErasureReceiptError, match="retention period"):
+        validate_manifest(manifest)
+
+
+def test_receipt_missing_new_submission_scope_cannot_claim_complete_erasure():
+    manifest = build_manifest(tenant_id="shared", conversation_ids=[1], goal_ids=[1])
+    manifest["expected_stores"].remove("attachment_submissions")
+    with pytest.raises(ErasureReceiptError, match="complete store scope"):
         validate_manifest(manifest)
 
 

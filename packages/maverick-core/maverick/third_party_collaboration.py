@@ -6,14 +6,22 @@ module adds only an invitation-scoped collaboration plane: exact authority
 pins, digest-only artifact manifests, recoverable drafts, attested final batch
 submission, and internal follow-up/reopen controls.
 
+Evidence manifests are server-measured: ``measure_evidence`` receives one
+file's bytes, computes its SHA-256, size and content-derived media type, keeps
+only that measurement bound to the invitation, and discards the bytes.  Drafts
+and final submissions accept a manifest only when it matches such a
+measurement exactly, so respondent-declared sizes and digests are never
+trusted.
+
 It deliberately implements no network or email transport, identity proofing,
-model inference, document upload bytes, malware scanning, commercial content,
+model inference, document byte storage, malware scanning, commercial content,
 provider write, risk conclusion, or vendor approval.
 """
 
 from __future__ import annotations
 
 import base64
+import codecs
 import hashlib
 import hmac
 import json
@@ -37,10 +45,12 @@ DRAFT_SCHEMA = "lightwork.third-party-collaboration-draft.v1"
 HISTORY_SCHEMA = "lightwork.third-party-collaboration-history.v1"
 CONTRACT_SCHEMA = "lightwork.third-party-collaboration-contract.v1"
 RECEIPT_SCHEMA = "lightwork.third-party-collaboration-receipt.v1"
+EVIDENCE_MEASUREMENT_SCHEMA = "lightwork.third-party-collaboration-evidence-measurement.v1"
 
 NETWORK_TRANSPORT_IMPLEMENTED = False
 EMAIL_DELIVERY_IMPLEMENTED = False
 MODEL_INFERENCE_IMPLEMENTED = False
+# Evidence bytes are measured in memory by measure_evidence and never stored.
 UPLOAD_BYTES_IMPLEMENTED = False
 VENDOR_ATTESTATIONS_INDEPENDENTLY_VERIFIED = False
 
@@ -57,6 +67,12 @@ _MIN_EXPIRY_SECONDS = 5 * 60
 _MAX_EXPIRY_SECONDS = 90 * 24 * 60 * 60
 _MIN_RETENTION_SECONDS = 60 * 60
 _MAX_RETENTION_SECONDS = 10 * 365 * 24 * 60 * 60
+# One invitation may have its files checked this many times in total (repeat
+# checks of the same file reuse one record), which bounds what a respondent can
+# make the server store.
+_MAX_EVIDENCE_MEASUREMENTS = 250
+_EVIDENCE_SNIFF_BYTES = 65_536
+_EXTENSION_RE = re.compile(r"[a-z0-9]{1,10}\Z")
 
 INVITATION_STATES = frozenset(
     {
@@ -270,6 +286,17 @@ class FinalSubmissionReceipt:
     question_ids: tuple[str, ...]
     attestation_sha256: str
     evidence_status: str
+    idempotent_replay: bool
+
+
+@dataclass(frozen=True)
+class EvidenceMeasurement:
+    tenant_id: str
+    invitation_id: str
+    artifact_id: str
+    content_sha256: str
+    size_bytes: int
+    media_type_ref: str
     idempotent_replay: bool
 
 
@@ -498,6 +525,84 @@ def _artifact_manifests(
     return tuple(artifacts)
 
 
+_OOXML_MEDIA = (
+    (b"word/", "application.vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    (b"xl/", "application.vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    (b"ppt/", "application.vnd.openxmlformats-officedocument.presentationml.presentation"),
+)
+_ZIP_EXTENSION_MEDIA = {
+    "docx": "application.vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application.vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pptx": "application.vnd.openxmlformats-officedocument.presentationml.presentation",
+    "odt": "application.vnd.oasis.opendocument.text",
+    "ods": "application.vnd.oasis.opendocument.spreadsheet",
+    "odp": "application.vnd.oasis.opendocument.presentation",
+}
+_ODF_MEDIA = (
+    (b"application/vnd.oasis.opendocument.text", "application.vnd.oasis.opendocument.text"),
+    (
+        b"application/vnd.oasis.opendocument.spreadsheet",
+        "application.vnd.oasis.opendocument.spreadsheet",
+    ),
+    (
+        b"application/vnd.oasis.opendocument.presentation",
+        "application.vnd.oasis.opendocument.presentation",
+    ),
+)
+_OLE_EXTENSION_MEDIA = {
+    "doc": "application.msword",
+    "xls": "application.vnd.ms-excel",
+    "ppt": "application.vnd.ms-powerpoint",
+    "msg": "application.vnd.ms-outlook",
+}
+
+
+def evidence_media_type(content: bytes, file_extension: str | None = None) -> str:
+    """Name a file's type from its own bytes; the extension only refines a family.
+
+    The respondent's file name never overrides what the content is: a ``.pdf``
+    name on PNG bytes is recorded as a PNG image.  The extension only chooses
+    between members of a family the bytes cannot tell apart cheaply (a ZIP
+    container, an OLE compound file, plain text versus CSV).
+    """
+
+    head = bytes(content[:_EVIDENCE_SNIFF_BYTES])
+    extension = file_extension or ""
+    if head.startswith(b"%PDF-"):
+        return "application.pdf"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image.png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image.jpeg"
+    if head.startswith((b"GIF87a", b"GIF89a")):
+        return "image.gif"
+    if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image.webp"
+    if head.startswith((b"II*\x00", b"MM\x00*")):
+        return "image.tiff"
+    if head.startswith(b"{\\rtf"):
+        return "application.rtf"
+    if head.startswith(b"PK\x03\x04"):
+        if head[30:38] == b"mimetype":
+            for marker, media in _ODF_MEDIA:
+                if head[38:38 + len(marker)] == marker:
+                    return media
+        for marker, media in _OOXML_MEDIA:
+            if b"[Content_Types].xml" in head and marker in head:
+                return media
+        return _ZIP_EXTENSION_MEDIA.get(extension, "application.zip")
+    if head.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        return _OLE_EXTENSION_MEDIA.get(extension, "application.x-ole-storage")
+    if b"\x00" not in head:
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        try:
+            decoder.decode(head, final=len(content) <= len(head))
+        except UnicodeDecodeError:
+            return "application.octet-stream"
+        return "text.csv" if extension in {"csv", "tsv"} else "text.plain"
+    return "application.octet-stream"
+
+
 def _new_token(token_factory: Callable[[int], bytes]) -> tuple[str, str]:
     raw = token_factory(32)
     if not isinstance(raw, bytes) or len(raw) != 32:
@@ -614,6 +719,12 @@ class ThirdPartyCollaborationStore:
                     tenant_id TEXT NOT NULL,sequence INTEGER NOT NULL,
                     payload_json TEXT NOT NULL,integrity_sha256 TEXT NOT NULL,
                     PRIMARY KEY(tenant_id,sequence)
+                );
+                CREATE TABLE IF NOT EXISTS evidence_measurements(
+                    tenant_id TEXT NOT NULL,invitation_id TEXT NOT NULL,
+                    artifact_id TEXT NOT NULL,payload_json TEXT NOT NULL,
+                    integrity_sha256 TEXT NOT NULL,
+                    PRIMARY KEY(tenant_id,invitation_id,artifact_id)
                 );
                 INSERT OR IGNORE INTO metadata(key,value) VALUES('schema_version','1');
                 COMMIT;
@@ -1372,6 +1483,175 @@ class ThirdPartyCollaborationStore:
                 ],
             }
 
+    def measure_evidence(
+        self,
+        tenant_id: str,
+        token: str,
+        *,
+        content: bytes,
+        file_extension: str | None = None,
+    ) -> EvidenceMeasurement:
+        """Measure one evidence file server-side and keep only the measurement.
+
+        The fingerprint, size and media type come from ``content`` itself; the
+        bytes are never written anywhere.  Only an active invitation whose
+        artifact policy accepts files may be measured, a single file may not
+        exceed the invitation's byte bound, and the number of distinct
+        measurements per invitation is capped.  Checking the same file again
+        returns the existing measurement.
+        """
+
+        tenant = _tenant(tenant_id)
+        if not isinstance(content, (bytes, bytearray, memoryview)):
+            raise ThirdPartyCollaborationValidationError("evidence content must be bytes")
+        data = bytes(content)
+        size_bytes = len(data)
+        if not 1 <= size_bytes <= _MAX_ARTIFACT_BYTES:
+            raise ThirdPartyCollaborationValidationError(
+                "evidence file must contain between 1 and the maximum number of bytes"
+            )
+        if file_extension is not None and (
+            not isinstance(file_extension, str) or not _EXTENSION_RE.fullmatch(file_extension)
+        ):
+            raise ThirdPartyCollaborationValidationError("evidence file extension is invalid")
+        content_sha256 = hashlib.sha256(data).hexdigest()
+        media_type_ref = evidence_media_type(data, file_extension)
+        now = _timestamp(self._clock(), "current time")
+        with cross_process_lock(self.path, strict=True), self._connect() as connection:
+            self._begin(connection)
+            invitation = self._token_invitation(connection, tenant, token)
+            invitation_id = str(invitation["invitation_id"])
+            policy = invitation["artifact_policy"]
+            if not isinstance(policy, Mapping):
+                raise ThirdPartyCollaborationIntegrityError("persisted artifact policy is invalid")
+            if int(policy["maximum_artifacts"]) == 0:
+                raise ThirdPartyCollaborationPermissionDenied(
+                    "this invitation does not accept evidence files"
+                )
+            if size_bytes > int(policy["maximum_total_bytes"]):
+                raise ThirdPartyCollaborationValidationError(
+                    "evidence file exceeds the invitation byte bound"
+                )
+            artifact_id = "evidence-" + hashlib.sha256(
+                f"{invitation_id}\x00{content_sha256}\x00{media_type_ref}".encode()
+            ).hexdigest()[:32]
+            existing = connection.execute(
+                "SELECT payload_json,integrity_sha256 FROM evidence_measurements "
+                "WHERE tenant_id=? AND invitation_id=? AND artifact_id=?",
+                (tenant, invitation_id, artifact_id),
+            ).fetchone()
+            if existing is not None:
+                payload = self._measurement(existing, tenant, invitation_id, artifact_id)
+                return EvidenceMeasurement(
+                    tenant_id=tenant,
+                    invitation_id=invitation_id,
+                    artifact_id=artifact_id,
+                    content_sha256=str(payload["content_sha256"]),
+                    size_bytes=int(payload["size_bytes"]),
+                    media_type_ref=str(payload["media_type_ref"]),
+                    idempotent_replay=True,
+                )
+            count = connection.execute(
+                "SELECT COUNT(*) FROM evidence_measurements WHERE tenant_id=? AND invitation_id=?",
+                (tenant, invitation_id),
+            ).fetchone()[0]
+            if int(count) >= _MAX_EVIDENCE_MEASUREMENTS:
+                raise ThirdPartyCollaborationValidationError(
+                    "too many evidence files were checked for this invitation"
+                )
+            payload = {
+                "schema": EVIDENCE_MEASUREMENT_SCHEMA,
+                "tenant_id": tenant,
+                "invitation_id": invitation_id,
+                "artifact_id": artifact_id,
+                "content_sha256": content_sha256,
+                "size_bytes": size_bytes,
+                "media_type_ref": media_type_ref,
+                "token_generation": invitation["token_generation"],
+                "measured_at": now,
+            }
+            connection.execute(
+                "INSERT INTO evidence_measurements VALUES(?,?,?,?,?)",
+                (
+                    tenant,
+                    invitation_id,
+                    artifact_id,
+                    _canonical(payload).decode("ascii"),
+                    _sha256(payload),
+                ),
+            )
+            self._history(
+                connection,
+                tenant,
+                "evidence_measured",
+                invitation_id,
+                str(invitation["respondent_ref"]),
+                {
+                    "artifact_id": artifact_id,
+                    "content_sha256": content_sha256,
+                    "size_bytes": size_bytes,
+                    "media_type_ref": media_type_ref,
+                },
+                now,
+            )
+            return EvidenceMeasurement(
+                tenant_id=tenant,
+                invitation_id=invitation_id,
+                artifact_id=artifact_id,
+                content_sha256=content_sha256,
+                size_bytes=size_bytes,
+                media_type_ref=media_type_ref,
+                idempotent_replay=False,
+            )
+
+    def _measurement(
+        self,
+        row: sqlite3.Row,
+        tenant_id: str,
+        invitation_id: str,
+        artifact_id: str,
+    ) -> dict[str, object]:
+        payload = self._payload(row, "evidence measurement")
+        if (
+            payload.get("schema") != EVIDENCE_MEASUREMENT_SCHEMA
+            or payload.get("tenant_id") != tenant_id
+            or payload.get("invitation_id") != invitation_id
+            or payload.get("artifact_id") != artifact_id
+        ):
+            raise ThirdPartyCollaborationIntegrityError(
+                "persisted evidence measurement binding is inconsistent"
+            )
+        return payload
+
+    def _require_measured(
+        self,
+        connection: sqlite3.Connection,
+        tenant_id: str,
+        invitation_id: str,
+        manifests: Sequence[Mapping[str, object]],
+    ) -> None:
+        """Accept a manifest only if it is exactly what the server measured."""
+
+        for manifest in manifests:
+            artifact_id = str(manifest["artifact_id"])
+            row = connection.execute(
+                "SELECT payload_json,integrity_sha256 FROM evidence_measurements "
+                "WHERE tenant_id=? AND invitation_id=? AND artifact_id=?",
+                (tenant_id, invitation_id, artifact_id),
+            ).fetchone()
+            if row is None:
+                raise ThirdPartyCollaborationValidationError(
+                    "artifact manifest was not measured by the server"
+                )
+            measured = self._measurement(row, tenant_id, invitation_id, artifact_id)
+            if any(
+                measured.get(key) != manifest[key]
+                for key in ("content_sha256", "size_bytes", "media_type_ref")
+            ):
+                raise ThirdPartyCollaborationValidationError(
+                    "artifact manifest does not match the server measurement"
+                )
+
     def _normalize_submission(
         self,
         invitation: Mapping[str, object],
@@ -1505,6 +1785,9 @@ class ThirdPartyCollaborationStore:
                 answers,
                 artifacts,
                 require_complete=False,
+            )
+            self._require_measured(
+                connection, tenant, str(invitation["invitation_id"]), manifests
             )
             request = {
                 "action": "save_draft",
@@ -1805,6 +2088,7 @@ class ThirdPartyCollaborationStore:
                         artifacts,
                         require_complete=True,
                     )
+                    self._require_measured(connection, tenant, invitation_id, manifests)
                     draft = self._get_draft(connection, tenant, invitation_id)
                     current_revision = 0 if draft is None else int(draft["revision"])
                     if current_revision != expected:
@@ -2412,6 +2696,10 @@ class ThirdPartyCollaborationStore:
                     (tenant, invitation_id),
                 ).rowcount
                 connection.execute(
+                    "DELETE FROM evidence_measurements WHERE tenant_id=? AND invitation_id=?",
+                    (tenant, invitation_id),
+                )
+                connection.execute(
                     "DELETE FROM invitations WHERE tenant_id=? AND invitation_id=?",
                     (tenant, invitation_id),
                 )
@@ -2480,6 +2768,30 @@ class ThirdPartyCollaborationStore:
                 if invitation is None:
                     raise ThirdPartyCollaborationIntegrityError(
                         "persisted draft has no invitation authority"
+                    )
+                verified += 1
+            measurement_rows = connection.execute(
+                "SELECT * FROM evidence_measurements WHERE tenant_id=? "
+                "ORDER BY invitation_id,artifact_id",
+                (tenant,),
+            ).fetchall()
+            for row in measurement_rows:
+                measured = self._measurement(
+                    row,
+                    tenant,
+                    str(row["invitation_id"]),
+                    str(row["artifact_id"]),
+                )
+                if (
+                    not _DIGEST_RE.fullmatch(str(measured.get("content_sha256", "")))
+                    or connection.execute(
+                        "SELECT 1 FROM invitations WHERE tenant_id=? AND invitation_id=?",
+                        (tenant, row["invitation_id"]),
+                    ).fetchone()
+                    is None
+                ):
+                    raise ThirdPartyCollaborationIntegrityError(
+                        "persisted evidence measurement has no invitation authority"
                     )
                 verified += 1
             operations = connection.execute(

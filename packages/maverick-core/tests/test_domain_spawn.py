@@ -221,13 +221,29 @@ def _one_pack_per_suite():
     return [v for v in sample.values()]
 
 
-def test_every_suite_spawns_with_workflow_and_envelope(tmp_path):
+def test_every_suite_spawns_with_workflow_and_envelope(tmp_path, monkeypatch):
     # Smoke test: a pack from each suite spawns to a live Agent whose system
     # prompt carries its persona and rendered playbook, under an enforced
     # envelope. Catches a pack whose appended [[workflow]] breaks the spawn path.
     ctx = _ctx(tmp_path)
     sample = _one_pack_per_suite()
     assert len(sample) >= 25, f"only {len(sample)} suites sampled"
+    # This test covers persona/envelope construction in a provisioned deployment.
+    # Abstract customer adapters are explicit fixtures; the separate pack contract
+    # tests prove missing adapters refuse deployment before model work starts.
+    from maverick.agent import Agent
+    from maverick.tools import Tool
+    build_tools = Agent._build_tools
+    required = {tool for _, profile in sample for step in profile.workflow for tool in step.tools}
+
+    def provisioned_tools(agent):
+        registry = build_tools(agent)
+        for name in required - {tool.name for tool in registry.all()}:
+            registry.register(Tool(name=name, description="Offline customer adapter fixture",
+                                   input_schema={"type": "object"}, fn=lambda args: "fixture"))
+        return registry
+
+    monkeypatch.setattr(Agent, '_build_tools', provisioned_tools)
     for name, profile in sample:
         agent = agent_from_profile(profile, ctx, "Do your job for the period.")
         assert agent.role == name

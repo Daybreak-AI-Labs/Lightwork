@@ -37,7 +37,6 @@ enforcement -- a token minted from no grant has nothing to scope.
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import threading
 import time
@@ -141,7 +140,11 @@ def tool_tokens_enabled() -> bool:
 
 def _ttl_seconds() -> float:
     try:
-        return max(1.0, float(os.environ.get("MAVERICK_TOOL_TOKEN_TTL", _DEFAULT_TTL_SECONDS)))
+        from .env_setting import env_or_config
+
+        return max(1.0, float(env_or_config(
+            "MAVERICK_TOOL_TOKEN_TTL", "capabilities", "per_call_token_ttl",
+            str(_DEFAULT_TTL_SECONDS)) or _DEFAULT_TTL_SECONDS))
     except (TypeError, ValueError):
         return _DEFAULT_TTL_SECONDS
 

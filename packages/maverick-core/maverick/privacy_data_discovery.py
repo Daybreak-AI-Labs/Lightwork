@@ -2382,6 +2382,41 @@ class PrivacyDataDiscoveryStore:
             for row in rows
         )
 
+    def list_all_reviews(
+        self,
+        tenant_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 200,
+    ) -> tuple[ReviewProposal, ...]:
+        """Read-only, newest-first review proposals across every finding,
+        optionally only one status (for the approval queue)."""
+
+        tenant = _tenant_id(tenant_id)
+        count = _positive_int(limit, "limit", _MAX_LIST)
+        # The status filter runs in SQL, before the newest-first limit, so an
+        # older review still waiting for approval never drops out of the
+        # queue behind newer decided ones. The payload is integrity-checked
+        # below and the status re-checked on the verified value.
+        if status is None:
+            query = "SELECT * FROM reviews WHERE tenant_id=? ORDER BY rowid DESC LIMIT ?"
+            params: tuple[object, ...] = (tenant, count)
+        else:
+            query = (
+                "SELECT * FROM reviews WHERE tenant_id=? "
+                "AND json_extract(payload_json, '$.status')=? ORDER BY rowid DESC LIMIT ?"
+            )
+            params = (tenant, str(status), count)
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        reviews = [
+            self._review_from(self._row_payload(row, "review"), row["integrity_sha256"])
+            for row in rows
+        ]
+        if status is not None:
+            reviews = [review for review in reviews if review.status == status]
+        return tuple(reviews[:count])
+
     def approve_review(
         self,
         tenant_id: str,

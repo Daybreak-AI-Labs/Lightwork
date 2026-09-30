@@ -1,69 +1,51 @@
 "use strict";
 
+/* Find people by preference: searchable questions load as rows with buttons,
+   the question and its answers are chosen from the published question sets,
+   and every reference or version is carried from the chosen row. */
 (function consentCustomIndexWorkbench() {
   const REQUEST_LIMIT = 64 * 1024;
   const RESPONSE_LIMIT = 512 * 1024;
   const opaquePattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
   const shell = document.getElementById("custom-index-shell");
   if (!shell) return;
+  const CW = window.LightworkConsentWorkbench;
 
   const apiBase = shell.dataset.apiBase || "";
+  const canAdmin = shell.dataset.canAdmin === "true";
+  const canAudit = shell.dataset.canAudit === "true";
   const operations = document.getElementById("custom-index-operations");
   const runtimeStatus = document.getElementById("custom-index-runtime-status");
-  const statusOutput = document.getElementById("custom-index-status-output");
   const operationStatus = document.getElementById("custom-index-operation-status");
-  const operationOutput = document.getElementById("custom-index-operation-output");
+  const state = { indexes: [], next: null, questions: {}, selected: null, results: [] };
+  const STATES = { pending: ["Not built yet", "warn"], ready: ["Ready to search", "ok"], stale: ["Needs rebuilding", "warn"], revoked: ["Removed", "idle"] };
+  const ACTIONS = { index_created: "Made searchable", index_built: "Built", index_revoked: "Removed" };
 
-  function setStatus(element, message, failed) {
-    element.textContent = message;
-    element.dataset.state = failed ? "failed" : "ready";
+  function $(id) { return document.getElementById(id); }
+  function say(element, message, failed) { CW.say(element, message, failed); }
+  function explain(element, error, action) {
+    if (error && error.local) return say(element, error.message, true);
+    if (error && error.status === 409) return say(element, "The answers changed since this question was built. Rebuild it, then search again.", true);
+    return say(element, CW.errorText(error, action), true);
   }
-
-  function render(element, payload) {
-    element.textContent = JSON.stringify(payload, null, 2);
-  }
-
-  function field(id) {
-    return document.getElementById(id).value.trim();
-  }
-
-  function positiveInteger(id) {
-    const selected = Number(field(id));
-    if (!Number.isSafeInteger(selected) || selected < 1) {
-      throw new Error(`${id} must be a positive integer.`);
-    }
-    return selected;
-  }
-
-  function opaque(value, label) {
-    if (!opaquePattern.test(value)) {
-      throw new Error(`${label} must be a bounded opaque identifier.`);
-    }
+  function localError(message) { const error = new Error(message); error.local = true; return error; }
+  function opaque(value) {
+    if (!opaquePattern.test(value)) throw localError("Choose a question from the list.");
     return value;
   }
-
-  function selectedIndex() {
-    return encodeURIComponent(opaque(field("custom-index-selected-id"), "Index reference"));
-  }
+  function selectedIndex() { return encodeURIComponent(opaque($("custom-index-selected-id").value)); }
 
   function boundedBody(payload) {
     const body = JSON.stringify(payload);
-    if (new TextEncoder().encode(body).byteLength > REQUEST_LIMIT) {
-      throw new Error("The JSON request exceeds 64 KiB.");
-    }
+    if (new TextEncoder().encode(body).byteLength > REQUEST_LIMIT) throw localError("That search is too large. Choose fewer answers.");
     return body;
   }
-
   async function boundedResponse(response) {
     const declared = Number(response.headers.get("content-length"));
-    if (Number.isFinite(declared) && declared > RESPONSE_LIMIT) {
-      throw new Error("The server response exceeds the workbench display bound.");
-    }
+    if (Number.isFinite(declared) && declared > RESPONSE_LIMIT) throw new Error("oversized");
     if (!response.body || typeof response.body.getReader !== "function") {
       const text = await response.text();
-      if (new TextEncoder().encode(text).byteLength > RESPONSE_LIMIT) {
-        throw new Error("The server response exceeds the workbench display bound.");
-      }
+      if (new TextEncoder().encode(text).byteLength > RESPONSE_LIMIT) throw new Error("oversized");
       return JSON.parse(text);
     }
     const reader = response.body.getReader();
@@ -74,16 +56,12 @@
       const chunk = await reader.read();
       if (chunk.done) break;
       received += chunk.value.byteLength;
-      if (received > RESPONSE_LIMIT) {
-        await reader.cancel();
-        throw new Error("The server response exceeds the workbench display bound.");
-      }
+      if (received > RESPONSE_LIMIT) { await reader.cancel(); throw new Error("oversized"); }
       text += decoder.decode(chunk.value, { stream: true });
     }
     text += decoder.decode();
     return JSON.parse(text);
   }
-
   async function request(path, options) {
     const response = await fetch(`${apiBase}${path}`, {
       cache: "no-store",
@@ -91,199 +69,196 @@
       redirect: "error",
       referrerPolicy: "no-referrer",
       ...(options || {}),
-      headers: {
-        Accept: "application/json",
-        ...((options && options.headers) || {}),
-      },
+      headers: { Accept: "application/json", ...((options && options.headers) || {}) },
     });
     let payload;
-    try {
-      payload = await boundedResponse(response);
-    } catch (_error) {
-      const invalid = new Error("The server returned invalid or oversized JSON.");
-      invalid.status = response.status;
-      throw invalid;
-    }
-    if (!response.ok) {
-      const failed = new Error(
-        payload && typeof payload.detail === "string" ?
-          payload.detail : "The operation failed."
-      );
-      failed.status = response.status;
-      throw failed;
-    }
+    try { payload = await boundedResponse(response); }
+    catch (_error) { const invalid = new Error("invalid response"); invalid.status = response.ok ? 0 : response.status; throw invalid; }
+    if (!response.ok) { const failed = new Error("request failed"); failed.status = response.status; throw failed; }
     return payload;
   }
-
   function post(path, payload) {
-    return request(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: boundedBody(payload),
+    return request(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: boundedBody(payload) });
+  }
+
+  // Question sets from the profile-data page describe each question's answers.
+  async function loadQuestions() {
+    try {
+      const data = await CW.client("/api/v1/consent/profile-data")("/catalogs?limit=500");
+      (data.items || []).filter((c) => c.state === "published").forEach((catalog) => {
+        (catalog.definitions || []).forEach((d) => {
+          state.questions[d.preference_id] = { value_type: d.value_type, options: (d.options || []).map((o) => o.value_id) };
+        });
+      });
+    } catch (_error) { /* answers fall back to what each index already knows */ }
+  }
+
+  async function loadIndexes(more) {
+    try {
+      const page = await request(`?limit=100${more && state.next ? "&cursor=" + encodeURIComponent(state.next) : ""}`);
+      state.indexes = (more ? state.indexes : []).concat(page.items || []);
+      state.next = page.next_cursor || null;
+    } catch (error) { $("custom-index-table").replaceChildren(); explain(runtimeStatus, error, "load searchable questions"); return; }
+    $("custom-index-more").hidden = !state.next;
+    CW.table($("custom-index-table"), state.indexes, {
+      label: "Searchable questions", name: (x) => CW.human(x.element_name),
+      columns: [
+        { label: "Question", value: (x) => CW.human(x.element_name) },
+        { label: "Status", value: (x) => { const s = STATES[x.state] || [CW.human(x.state), "idle"]; return CW.badge(s[0], s[1]); } },
+        { label: "Answers included", value: (x) => x.state === "pending" ? "" : x.entry_count },
+        { label: "Last built", value: (x) => CW.when(x.built_at) },
+      ],
+      actions: [
+        { label: "Search", when: (x) => canAdmin && x.state === "ready", run: (x) => openSearch(x) },
+        { label: (x) => x.state === "pending" ? "Build now" : "Rebuild", when: (x) => canAdmin && x.state !== "revoked", run: (x, b) => build(x, b) },
+        { label: "Remove", kind: "danger", when: (x) => canAdmin && x.state !== "revoked", run: (x, b) => revoke(x, b) },
+      ],
+      empty: { title: "No searchable questions yet.", body: "Make a published preference question searchable to find the people who gave an answer.", action: canAdmin ? { label: "Make a question searchable", run: openCreate } : null },
     });
   }
 
-  function hydrateIndex(payload) {
-    if (!payload || typeof payload !== "object") return;
-    if (typeof payload.index_id === "string") {
-      document.getElementById("custom-index-selected-id").value = payload.index_id;
-    }
-    if (Number.isSafeInteger(payload.revision) && payload.revision > 0) {
-      document.getElementById("custom-index-build-revision").value = payload.revision;
-      document.getElementById("custom-index-revoke-revision").value = payload.revision;
-    }
+  function build(index, button) {
+    return CW.busy(button, async () => {
+      try {
+        await post(`/${encodeURIComponent(opaque(index.index_id))}/build`, { expected_revision: index.revision, idempotency_key: CW.reference() });
+        await loadIndexes(false); say(operationStatus, "“" + CW.human(index.element_name) + "” is ready to search.", false);
+      } catch (error) { explain(operationStatus, error, "build the question"); }
+    });
+  }
+  function revoke(index, button) {
+    return CW.busy(button, async () => {
+      if (!(await CW.confirm("Stop searching “" + CW.human(index.element_name) + "”? Its search data is deleted. People's answers are kept.", "Remove"))) return;
+      try {
+        await post(`/${encodeURIComponent(opaque(index.index_id))}/revoke`, { expected_revision: index.revision, idempotency_key: CW.reference() });
+        await loadIndexes(false); say(operationStatus, "Removed.", false);
+      } catch (error) { explain(operationStatus, error, "remove the question"); }
+    });
   }
 
-  async function run(label, operation) {
-    setStatus(operationStatus, `${label}…`, false);
-    operationOutput.textContent = "";
+  // Make a question searchable
+  const createForm = $("custom-index-create-form");
+  function openCreate() {
+    const taken = new Set(state.indexes.filter((x) => x.state !== "revoked").map((x) => x.element_name));
+    const names = Object.keys(state.questions).filter((name) => !taken.has(name)).sort();
+    CW.fill($("custom-index-element-name"), names.map((name) => ({ value: name, label: CW.human(name) })),
+      names.length ? "" : "No more published questions. Add them on the Preference questions page.");
+    CW.open(createForm, "#custom-index-element-name");
+  }
+  $("custom-index-new").addEventListener("click", openCreate);
+  $("custom-index-create-cancel").addEventListener("click", () => { createForm.hidden = true; });
+  createForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
     try {
-      const payload = await operation();
-      render(operationOutput, payload);
-      hydrateIndex(payload);
-      setStatus(operationStatus, `${label} completed.`, false);
-      return payload;
-    } catch (error) {
-      const suffix = Number.isInteger(error.status) ? ` (${error.status})` : "";
-      setStatus(operationStatus, `${label} failed${suffix}: ${error.message}`, true);
-      throw error;
+      const element = opaque($("custom-index-element-name").value);
+      $("custom-index-create-id").value = CW.slug("search-" + element, "search");
+      await post("", { index_id: $("custom-index-create-id").value, element_name: element,
+        idempotency_key: $("custom-index-create-operation").value || CW.reference() });
+      createForm.hidden = true; await loadIndexes(false);
+      say(operationStatus, "Now use “Build now” on its row so it can be searched.", false);
+    } catch (error) { explain(operationStatus, error, "make the question searchable"); }
+  });
+
+  // Search
+  const searchPanel = $("custom-index-search-panel");
+  function answerControls(question) {
+    const host = $("custom-index-search-value"); host.replaceChildren();
+    const type = question ? question.value_type : "boolean";
+    $("custom-index-value-type").value = type;
+    if (type === "boolean") {
+      const set = CW.el("fieldset"); set.appendChild(CW.el("legend", "", "Their answer"));
+      const box = CW.el("div", "cw-checks");
+      [["true", "Yes"], ["false", "No"]].forEach(([value, label], i) => {
+        const l = CW.el("label"), input = document.createElement("input");
+        input.type = "radio"; input.name = "value"; input.value = value; input.checked = i === 0; l.append(input, " " + label); box.appendChild(l);
+      });
+      set.appendChild(box); host.appendChild(set);
+    } else if (type === "single_select") {
+      const l = CW.el("label", "", "Their answer"), select = CW.fill(CW.el("select", "select"), question.options.map((o) => ({ value: o, label: CW.human(o) })));
+      select.name = "value"; l.appendChild(select); host.appendChild(l);
+    } else {
+      const set = CW.el("fieldset"); set.appendChild(CW.el("legend", "", "They chose exactly these answers"));
+      const box = CW.el("div", "cw-checks");
+      question.options.forEach((o) => { const l = CW.el("label"), input = document.createElement("input"); input.type = "checkbox"; input.name = "value"; input.value = o; l.append(input, " " + CW.human(o)); box.appendChild(l); });
+      set.appendChild(box); host.appendChild(set);
     }
   }
+  function openSearch(index) {
+    state.selected = index; state.results = [];
+    $("custom-index-selected-id").value = index.index_id; $("custom-index-search-cursor").value = "";
+    $("custom-index-search-title").textContent = "Search “" + CW.human(index.element_name) + "”";
+    answerControls(state.questions[index.element_name]);
+    $("custom-index-results").replaceChildren(); $("custom-index-results-more").hidden = true;
+    CW.open(searchPanel);
+  }
+  $("custom-index-search-close").addEventListener("click", () => { searchPanel.hidden = true; });
+  function searchValue() {
+    const type = $("custom-index-value-type").value;
+    const inputs = [...$("custom-index-search-value").querySelectorAll('[name="value"]')];
+    if (type === "boolean") return (inputs.find((i) => i.checked) || { value: "true" }).value === "true";
+    if (type === "single_select") return opaque(inputs[0].value);
+    const chosen = inputs.filter((i) => i.checked).map((i) => i.value);
+    if (!chosen.length) throw localError("Tick at least one answer.");
+    return chosen;
+  }
+  async function runSearch(more) {
+    const out = $("custom-index-results");
+    try {
+      const payload = { value: searchValue(), limit: 100 };
+      if (more && $("custom-index-search-cursor").value) payload.cursor = $("custom-index-search-cursor").value;
+      const page = await post(`/${selectedIndex()}/search`, payload);
+      state.results = (more ? state.results : []).concat(page.profile_ids || []);
+      $("custom-index-search-cursor").value = page.next_cursor || "";
+      $("custom-index-results-more").hidden = !page.next_cursor;
+      out.replaceChildren(CW.el("p", "", state.results.length ? state.results.length + " " + (state.results.length === 1 ? "person" : "people") + " found" + (page.next_cursor ? " so far." : ".") : "No one gave that answer."));
+      if (state.results.length) {
+        const host = CW.el("div"); out.appendChild(host);
+        CW.table(host, state.results.map((id) => ({ id })), { label: "People found", columns: [{ label: "Person", value: (r) => r.id }] });
+      }
+    } catch (error) { out.replaceChildren(); explain(out, error, "search"); }
+  }
+  $("custom-index-search-form").addEventListener("submit", (event) => { event.preventDefault(); runSearch(false); });
+  $("custom-index-results-more").addEventListener("click", () => runSearch(true));
+  $("custom-index-more").addEventListener("click", () => loadIndexes(true));
+
+  // History
+  $("custom-index-history").addEventListener("click", (event) => CW.busy(event.currentTarget, async () => {
+    try {
+      const page = await request("/operations/history?limit=100");
+      CW.table($("custom-index-history-table"), page.items || [], {
+        label: "History",
+        columns: [
+          { label: "When", value: (e) => CW.when(e.occurred_at) },
+          { label: "What happened", value: (e) => ACTIONS[e.action] || CW.human(e.action) },
+          { label: "Question", value: (e) => { const x = state.indexes.find((i) => i.index_id === e.index_id); return x ? CW.human(x.element_name) : ""; } },
+        ],
+        empty: { title: "Nothing has happened yet." },
+      });
+    } catch (error) { explain(operationStatus, error, "load the history"); }
+  }));
+  $("custom-index-integrity").addEventListener("click", (event) => CW.busy(event.currentTarget, async () => {
+    try {
+      const result = await request("/operations/integrity");
+      say(operationStatus, result.ok ? "Checked " + (result.index_count || 0) + " searchable questions. Everything is intact." : "Some search records failed their check. Contact support.", !result.ok);
+    } catch (error) { explain(operationStatus, error, "check the records"); }
+  }));
 
   async function refreshStatus() {
     operations.disabled = true;
-    statusOutput.textContent = "";
-    setStatus(runtimeStatus, "Checking server-owned custody and source readiness…", false);
     try {
       const payload = await request("/status");
-      render(statusOutput, payload);
       if (payload.ready === true) {
         operations.disabled = false;
-        setStatus(runtimeStatus, "Custom-index custody and source storage are ready.", false);
+        say(runtimeStatus, "", false);
+        await loadQuestions();
+        if (canAdmin) await loadIndexes(false);
+        else $("custom-index-table").replaceChildren(CW.el("p", "muted", "Only an administrator can see searchable questions."));
       } else if (payload.enabled === true) {
-        setStatus(runtimeStatus, "Custom indexes are enabled, but custody or source storage is not ready.", true);
+        say(runtimeStatus, "Searching is turned on but not ready yet. Ask an administrator to finish setting it up.", true);
       } else {
-        setStatus(runtimeStatus, "Custom indexes are disabled for this workspace.", true);
+        say(runtimeStatus, "Searching by preference is not turned on for this workspace. Ask an administrator to turn it on.", true);
       }
-    } catch (error) {
-      setStatus(runtimeStatus, `Status unavailable: ${error.message}`, true);
-    }
+    } catch (error) { explain(runtimeStatus, error, "check availability"); }
   }
-
-  document.getElementById("custom-index-refresh-status").addEventListener("click", refreshStatus);
-
-  document.getElementById("custom-index-create-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      await run("Creating custom index", () => post("", {
-        index_id: opaque(field("custom-index-create-id"), "Index reference"),
-        element_name: opaque(field("custom-index-element-name"), "Element name"),
-        idempotency_key: opaque(field("custom-index-create-operation"), "Idempotency key"),
-      }));
-    } catch (_error) {
-      // The shared status region already contains the bounded error.
-    }
-  });
-
-  document.getElementById("custom-index-load-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      await run("Loading custom index", () => request(`/${selectedIndex()}`));
-    } catch (_error) {
-      // Status already rendered.
-    }
-  });
-
-  document.getElementById("custom-index-list").addEventListener("click", async () => {
-    try {
-      const params = new URLSearchParams();
-      params.set("limit", String(positiveInteger("custom-index-list-limit")));
-      const cursor = field("custom-index-list-cursor");
-      if (cursor) params.set("cursor", opaque(cursor, "List cursor"));
-      await run("Listing custom indexes", () => request(`?${params.toString()}`));
-    } catch (_error) {
-      // Status already rendered.
-    }
-  });
-
-  document.getElementById("custom-index-build-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      await run("Building custom index", () => post(`/${selectedIndex()}/build`, {
-        expected_revision: positiveInteger("custom-index-build-revision"),
-        idempotency_key: opaque(field("custom-index-build-operation"), "Idempotency key"),
-      }));
-    } catch (_error) {
-      // Status already rendered.
-    }
-  });
-
-  document.getElementById("custom-index-revoke-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const confirmation = document.getElementById("custom-index-revoke-confirmation");
-    if (!confirmation.checked) {
-      setStatus(operationStatus, "Confirm revocation before continuing.", true);
-      return;
-    }
-    try {
-      await run("Revoking custom index", () => post(`/${selectedIndex()}/revoke`, {
-        expected_revision: positiveInteger("custom-index-revoke-revision"),
-        idempotency_key: opaque(field("custom-index-revoke-operation"), "Idempotency key"),
-      }));
-      confirmation.checked = false;
-    } catch (_error) {
-      // Status already rendered.
-    }
-  });
-
-  function searchValue() {
-    const mode = field("custom-index-value-type");
-    const selected = field("custom-index-search-value");
-    if (mode === "boolean") {
-      if (selected !== "true" && selected !== "false") {
-        throw new Error("Boolean search must be exactly true or false.");
-      }
-      return selected === "true";
-    }
-    if (mode === "list") {
-      const values = selected.split(",").map((item) => opaque(item.trim(), "List value"));
-      if (values.length < 1 || values.length > 64 || new Set(values).size !== values.length) {
-        throw new Error("List search requires 1 to 64 unique opaque value IDs.");
-      }
-      return values;
-    }
-    return opaque(selected, "Search value");
-  }
-
-  document.getElementById("custom-index-search-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      const cursor = field("custom-index-search-cursor");
-      await run("Searching custom index", () => post(`/${selectedIndex()}/search`, {
-        value: searchValue(),
-        limit: positiveInteger("custom-index-search-limit"),
-        cursor: cursor ? opaque(cursor, "Search cursor") : null,
-      }));
-    } catch (_error) {
-      // Status already rendered.
-    }
-  });
-
-  document.getElementById("custom-index-history").addEventListener("click", async () => {
-    try {
-      await run("Loading custom-index audit history", () => request("/operations/history"));
-    } catch (_error) {
-      // Status already rendered.
-    }
-  });
-
-  document.getElementById("custom-index-integrity").addEventListener("click", async () => {
-    try {
-      await run("Verifying custom-index integrity", () => request("/operations/integrity"));
-    } catch (_error) {
-      // Status already rendered.
-    }
-  });
-
+  if (!CW) { runtimeStatus.textContent = "This page could not finish loading. Reload the page."; return; }
   if (apiBase) refreshStatus();
-}());
+})();

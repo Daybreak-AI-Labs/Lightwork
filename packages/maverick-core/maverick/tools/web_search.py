@@ -307,7 +307,10 @@ def _run_search(args: dict[str, Any]) -> str:
     site = args.get("site")
     full_query = _augment_query(query, site)
 
-    forced = os.environ.get("MAVERICK_SEARCH_BACKEND", "").strip().lower()
+    from ..env_setting import env_or_config
+
+    forced = (env_or_config("MAVERICK_SEARCH_BACKEND", "tools", "search_backend")
+              or "").strip().lower()
     if forced and forced in _BACKENDS:
         backends = [(forced, _BACKENDS[forced])]
     else:

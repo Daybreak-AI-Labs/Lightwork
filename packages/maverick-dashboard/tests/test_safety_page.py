@@ -34,7 +34,7 @@ def test_safety_page_empty(monkeypatch, tmp_path):
     _tmp_audit(monkeypatch, tmp_path)
     r = _client().get("/safety")
     assert r.status_code == 200
-    assert "No shield blocks" in r.text
+    assert "Nothing was stopped on this day" in r.text
 
 
 def test_safety_page_aggregates_blocks(monkeypatch, tmp_path):
@@ -48,8 +48,10 @@ def test_safety_page_aggregates_blocks(monkeypatch, tmp_path):
     body = r.text
     assert "prompt injection" in body
     assert "secret exfiltration" in body
-    assert "0.95" in body                       # score formatted
-    assert "input" in body and "output" in body  # stage breakdown
+    assert "95%" in body                        # score shown as a percentage
+    assert "What agents read" in body and "What agents said" in body  # stage breakdown
+    from test_support.plain_language import developer_terms
+    assert developer_terms(body) == []
 
 
 def test_safety_page_ignores_non_shield_events(monkeypatch, tmp_path):

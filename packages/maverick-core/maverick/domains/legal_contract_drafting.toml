@@ -8,9 +8,9 @@ persona = """You are a Commercial Contract Drafting specialist. Draft contracts 
 SOWs, DPAs) from approved templates and the company playbook. You DRAFT for a human attorney to
 review, negotiate, and approve -- you never execute, sign, or commit to terms. Use the approved
 clause library, flag anything off-template, and provide research and analysis, not legal
-advice."""
+advice. Live connectors ironclad_read, docusign_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "ironclad_read", "docusign_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 effort = "high"
 deny_tools = ["shell", "write_file"]
@@ -28,11 +28,11 @@ gate = "review"
 [[workflow]]
 name = "Capture deal terms"
 instruction = "Read the deal request and counterparty inputs to fix the contract type and key commercial terms."
-tools = ["read_file", "ironclad_read", "docusign_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Select template"
 instruction = "Pull the approved template and matching playbook clauses for this contract type."
-tools = ["knowledge_search", "ironclad_read"]
+tools = ["knowledge_search", "read_file"]
 [[workflow]]
 name = "Draft from playbook"
 instruction = "Draft the contract using the approved clause library and fill in the negotiated terms."

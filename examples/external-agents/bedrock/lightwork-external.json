@@ -473,6 +473,16 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "binding_sha256",
+            "in": "query",
+            "required": false,
+            "description": "Binding returned by /screen; a stale binding is rejected.",
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
           }
         ],
         "responses": {
@@ -491,6 +501,27 @@
                     },
                     "risk": {
                       "type": "string"
+                    },
+                    "action": {
+                      "type": "string"
+                    },
+                    "approval_binding_sha256": {
+                      "type": "string"
+                    },
+                    "target_sha256": {
+                      "type": "string"
+                    },
+                    "parameters_sha256": {
+                      "type": "string"
+                    },
+                    "inputs": {
+                      "type": "object"
+                    },
+                    "credentials": {
+                      "type": "object"
+                    },
+                    "expires_at": {
+                      "type": "number"
                     }
                   }
                 }
@@ -547,6 +578,25 @@
                   "goal_id": {
                     "type": "integer",
                     "description": "Bind the effect to one of this agent's live runs."
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$",
+                    "description": "Stable logical-operation key; an exact write-park replay returns the original execution."
+                  },
+                  "runtime_asset_id": {
+                    "type": "string",
+                    "pattern": "^MAA-[0-9a-f]{32}$",
+                    "description": "Required when the runtime guardrail plane is enabled."
+                  },
+                  "runtime_asset_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "runtime_asset_version_digest": {
+                    "type": "string",
+                    "pattern": "^(?:sha256:)?[0-9a-f]{64}$"
                   }
                 }
               }
@@ -584,6 +634,9 @@
                     },
                     "execution_id": {
                       "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
                     },
                     "expires_at": {
                       "type": "number"
@@ -697,6 +750,27 @@
                   },
                   "body": {
                     "type": "object"
+                  },
+                  "detail": {
+                    "type": "string",
+                    "description": "Exact transient action detail used when the write was parked."
+                  },
+                  "goal_id": {
+                    "type": "integer",
+                    "description": "Exact live-run binding used when the write was parked."
+                  },
+                  "runtime_asset_id": {
+                    "type": "string",
+                    "pattern": "^MAA-[0-9a-f]{32}$",
+                    "description": "Required when runtime guardrails are enabled."
+                  },
+                  "runtime_asset_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "runtime_asset_version_digest": {
+                    "type": "string",
+                    "pattern": "^(?:sha256:)?[0-9a-f]{64}$"
                   }
                 }
               }
@@ -730,6 +804,230 @@
                       "type": "string"
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/external/runtime/evaluate": {
+      "post": {
+        "operationId": "evaluateRuntimeContent",
+        "summary": "Evaluate transient prompt, output, or action content against current governed policy and local guardrails",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "stage",
+                  "asset_id",
+                  "asset_revision",
+                  "asset_version_digest"
+                ],
+                "properties": {
+                  "stage": {
+                    "type": "string",
+                    "enum": [
+                      "prompt",
+                      "output",
+                      "action"
+                    ]
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 65536
+                  },
+                  "asset_id": {
+                    "type": "string",
+                    "pattern": "^MAA-[0-9a-f]{32}$"
+                  },
+                  "asset_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "asset_version_digest": {
+                    "type": "string",
+                    "pattern": "^(?:sha256:)?[0-9a-f]{64}$"
+                  },
+                  "action_name": {
+                    "type": "string"
+                  },
+                  "action_arguments": {
+                    "type": "object"
+                  },
+                  "known_prompt": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Guardrail decision and digest-only receipts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/external/red-team/{campaign_id}/cases": {
+      "get": {
+        "operationId": "pullRedTeamCases",
+        "summary": "Atomically lease synthetic assurance probes to one enrolled-agent runner",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runner_instance_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12,
+              "default": 1
+            }
+          },
+          {
+            "name": "lease_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 900,
+              "default": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending probes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/external/red-team/{campaign_id}/results": {
+      "post": {
+        "operationId": "submitRedTeamResult",
+        "summary": "Submit transient target output; Lightwork keeps only a keyed commitment and bounded detector metrics",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "case_id",
+                  "target_artifact_sha256",
+                  "runner_instance_id",
+                  "lease_token"
+                ],
+                "properties": {
+                  "case_id": {
+                    "type": "string"
+                  },
+                  "target_artifact_sha256": {
+                    "type": "string",
+                    "pattern": "^(?:sha256:)?[0-9a-f]{64}$"
+                  },
+                  "runner_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$"
+                  },
+                  "lease_token": {
+                    "type": "string",
+                    "pattern": "^rtl1\\.[0-9a-f]{64}$"
+                  },
+                  "response": {
+                    "type": "string"
+                  },
+                  "tool_calls": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object"
+                        }
+                      ]
+                    }
+                  },
+                  "tool_trace_status": {
+                    "type": "string",
+                    "enum": [
+                      "complete",
+                      "unavailable"
+                    ],
+                    "default": "unavailable"
+                  },
+                  "transport_status": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "timeout",
+                      "error",
+                      "cancelled"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Committed result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
                 }
               }
             }

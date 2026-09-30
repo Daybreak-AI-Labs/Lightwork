@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import os
 import time
+from types import SimpleNamespace
 
 import pytest
 
 _DSN = os.environ.get("MAVERICK_PG_DSN")
-pytestmark = pytest.mark.skipif(
+pytestmark = [pytest.mark.usefixtures("postgres_test_dsn"), pytest.mark.skipif(
     not _DSN, reason="MAVERICK_PG_DSN not set (no Postgres service)"
-)
+)]
 
 
 @pytest.fixture
@@ -95,7 +96,7 @@ def test_delete_window_survives_clock_rollback(
     w = temporal_world
     k = w._kp + "rollback-delete"
     times = iter((1_000.0, 999.0))
-    monkeypatch.setattr(postgres.time, "time", lambda: next(times))
+    monkeypatch.setattr(postgres, "time", SimpleNamespace(time=lambda: next(times)))
 
     w.upsert_fact(k, "here")
     assert w.delete_fact(k) == 1

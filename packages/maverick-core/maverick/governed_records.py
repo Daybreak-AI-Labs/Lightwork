@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from . import runtime_metrics
+from .governed_record_lookup import LocalRecordLookup, RecordLookupSpec, RecordLookupUnavailable
+from .postgres_transactions import PostgresTransactions, validate_pool_settings
 from .privacy_ops import (
     AuditOutboxError,
     PrivacyStateError,
@@ -208,6 +210,7 @@ class LocalGovernedRecordBackend:
         prefix: str,
         *,
         authority_scope: str = "tenant",
+        lookup_spec: RecordLookupSpec | None = None,
     ) -> None:
         scope = str(authority_scope or "").strip().lower()
         if scope not in _AUTHORITY_SCOPES:
@@ -219,6 +222,8 @@ class LocalGovernedRecordBackend:
         else:
             self._store = _RecordStore(namespace, prefix)
         self.authority_scope = scope
+        self.lookup_spec = lookup_spec
+        self._lookup = LocalRecordLookup(self._store, lookup_spec) if lookup_spec else None
 
     def new_id(self) -> str:
         return self._store.new_id()
@@ -228,6 +233,17 @@ class LocalGovernedRecordBackend:
         return time.time()
 
     def save(
+        self, record, *, expected_revision=None, fence=None, max_records=None,
+    ):
+        def operation():
+            return self._save(record, expected_revision=expected_revision, fence=fence, max_records=max_records)
+        if self._lookup is None:
+            return operation()
+        record_id = _valid_record_id(record.get("id"), self._store.prefix)
+        self.lookup_spec.keys(record)
+        return self._lookup.mutate(record_id, operation)
+
+    def _save(
         self,
         record: dict[str, Any],
         *,
@@ -294,6 +310,25 @@ class LocalGovernedRecordBackend:
         )
 
     def update(
+        self, record_id, mutate, *, expected_revision=None, metadata_only=False, fence=None,
+    ):
+        def operation():
+            return self._update(record_id, mutate, expected_revision=expected_revision,
+                                metadata_only=metadata_only, fence=fence)
+        if self._lookup is None:
+            return operation()
+        try:
+            _valid_record_id(record_id, self._store.prefix)
+        except ValueError:
+            return None
+        def validated_mutation(value):
+            mutate(value)
+            self.lookup_spec.keys(value)
+        return self._lookup.mutate(record_id, lambda: self._update(
+            record_id, validated_mutation, expected_revision=expected_revision,
+            metadata_only=metadata_only, fence=fence))
+
+    def _update(
         self,
         record_id: str,
         mutate: Callable[[dict[str, Any]], None],
@@ -314,6 +349,25 @@ class LocalGovernedRecordBackend:
         )
 
     def delete(self, record_id: str, *, expected_revision: int) -> bool:
+        if self._lookup is None:
+            return self._delete(record_id, expected_revision=expected_revision)
+        try:
+            _valid_record_id(record_id, self._store.prefix)
+        except ValueError:
+            return False
+        return self._lookup.mutate(record_id, lambda: self._delete(record_id, expected_revision=expected_revision))
+
+    def lookup(self, digest):
+        if self._lookup is None:
+            raise RecordLookupUnavailable("record lookup is not configured")
+        return self._lookup.lookup(digest)
+
+    def maintain_lookup(self, *, limit=100, rebuild=False):
+        if self._lookup is None:
+            raise RecordLookupUnavailable("record lookup is not configured")
+        return self._lookup.maintain(limit=limit, rebuild=rebuild)
+
+    def _delete(self, record_id: str, *, expected_revision: int) -> bool:
         """Physically remove one fully delivered retained record under CAS."""
 
         from .file_lock import cross_process_lock
@@ -568,9 +622,9 @@ def _row_record(
 class PostgresGovernedRecordBackend:
     """Transactionally shared Postgres implementation of the record seam.
 
-    A fresh connection is used per operation so concurrent request threads and
-    replicas never share psycopg transaction state.  ``connect`` is injectable
-    for deterministic unit tests and private deployment adapters.
+    Each operation owns a transaction. Connections are fresh by default; an
+    explicit bounded pool can reuse them after rollback/reset. ``connect`` is
+    injectable for deterministic tests and caller-owned unpooled adapters.
     """
 
     kind = "postgres"
@@ -587,6 +641,9 @@ class PostgresGovernedRecordBackend:
         require_encryption: bool = False,
         require_shared_key_identity: bool = False,
         authority_scope: str = "tenant",
+        pool_size: int = 0,
+        pool_timeout_seconds: float = 5,
+        lookup_spec: RecordLookupSpec | None = None,
     ) -> None:
         # Postgres is the shared, potentially multi-tenant authority.  Keep
         # the argument for source compatibility with injected/test adapters,
@@ -614,17 +671,21 @@ class PostgresGovernedRecordBackend:
         self.authority_scope = scope
         self._schema_ready = False
         self._schema_lock = threading.Lock()
+        self._transactions = PostgresTransactions(
+            self._dsn, connect=connect, pool_size=pool_size,
+            pool_timeout_seconds=pool_timeout_seconds,
+        )
+        from .governed_record_lookup_pg import PostgresRecordLookup
+        self.lookup_spec = lookup_spec
+        self._lookup = PostgresRecordLookup(self, lookup_spec) if lookup_spec else None
 
     def _connect(self):
-        if self._connect_override is not None:
-            return self._connect_override(self._dsn, autocommit=False)
         try:
-            import psycopg
+            return self._transactions.connect()
         except ImportError as exc:
             raise GovernedRecordBackendError(
                 "shared governed records require maverick-core[postgres]"
             ) from exc
-        return psycopg.connect(self._dsn, autocommit=False)
 
     def authoritative_time(self) -> float:
         """Return database wall time for cross-replica lease decisions."""
@@ -651,28 +712,13 @@ class PostgresGovernedRecordBackend:
 
     @contextlib.contextmanager
     def _raw_transaction(self):
-        conn = self._connect()
-        cursor = None
         try:
-            cursor = conn.cursor()
-            yield cursor
-            conn.commit()
-        except BaseException:
-            try:
-                conn.rollback()
-            except Exception:  # pragma: no cover - original failure is authoritative
-                pass
-            raise
-        finally:
-            if cursor is not None:
-                try:
-                    cursor.close()
-                except Exception:  # pragma: no cover - best-effort resource close
-                    pass
-            try:
-                conn.close()
-            except Exception:  # pragma: no cover - best-effort resource close
-                pass
+            with self._transactions.transaction() as cursor:
+                yield cursor
+        except ImportError as exc:
+            raise GovernedRecordBackendError(
+                "shared governed records require maverick-core[postgres]"
+            ) from exc
 
     @contextlib.contextmanager
     def _operation(self, action: str):
@@ -1016,6 +1062,8 @@ class PostgresGovernedRecordBackend:
                 "SELECT set_config('maverick.tenant', %s, true)",
                 (tenant,),
             )
+            if self._lookup is not None:
+                self._lookup.prepare(cur, tenant)
             yield cur
 
     def new_id(self) -> str:
@@ -1235,6 +1283,8 @@ class PostgresGovernedRecordBackend:
                     )
                     if cur.rowcount != 1:
                         raise RecordConflict("governed record changed during save")
+                if self._lookup is not None:
+                    self._lookup.replace(cur, tenant, record_id, saved)
                 return saved
 
     def load(self, record_id: str) -> dict[str, Any] | None:
@@ -1377,6 +1427,8 @@ class PostgresGovernedRecordBackend:
                 )
                 if cur.rowcount != 1:
                     raise RecordConflict("governed record changed during update")
+                if self._lookup is not None:
+                    self._lookup.replace(cur, tenant, validated, saved)
                 return saved
 
     def delete(self, record_id: str, *, expected_revision: int) -> bool:
@@ -1418,7 +1470,25 @@ class PostgresGovernedRecordBackend:
                 )
                 if cur.rowcount != 1:
                     raise RecordConflict("governed record changed during delete")
+                if self._lookup is not None:
+                    self._lookup.replace(cur, tenant, validated, None)
                 return True
+
+    def lookup(self, digest):
+        if self._lookup is None:
+            raise RecordLookupUnavailable("record lookup is not configured")
+        with self._operation("lookup"), self._transaction(self._tenant_key()) as cur:
+            result = self._lookup.lookup(cur, self._tenant_key(), digest)
+        # Commit bounded migration progress before reporting not-ready.
+        if isinstance(result, RecordLookupUnavailable):
+            raise result
+        return result
+
+    def maintain_lookup(self, *, limit=100, rebuild=False):
+        if self._lookup is None:
+            raise RecordLookupUnavailable("record lookup is not configured")
+        with self._operation("maintain lookup"), self._transaction(self._tenant_key()) as cur:
+            return self._lookup.advance(cur, self._tenant_key(), limit=limit, rebuild=rebuild)
 
 
 @dataclass(frozen=True)
@@ -1426,6 +1496,8 @@ class _BackendSelection:
     kind: str
     dsn: str
     shared_required: bool
+    pool_size: int = 0
+    pool_timeout_seconds: float = 5
 
 
 @dataclass(frozen=True)
@@ -1435,6 +1507,8 @@ class _BackendAuthorityToken:
     kind: str
     dsn_sha256: str
     shared_required: bool
+    pool_size: int = 0
+    pool_timeout_seconds: float = 5
 
 
 def _backend_authority_token(selection: _BackendSelection) -> _BackendAuthorityToken:
@@ -1447,6 +1521,8 @@ def _backend_authority_token(selection: _BackendSelection) -> _BackendAuthorityT
         kind=selection.kind,
         dsn_sha256=digest,
         shared_required=selection.shared_required,
+        pool_size=selection.pool_size,
+        pool_timeout_seconds=selection.pool_timeout_seconds,
     )
 
 
@@ -1458,6 +1534,8 @@ def _backend_authority_matches(
         expected.kind == current.kind
         and hmac.compare_digest(expected.dsn_sha256, current.dsn_sha256)
         and expected.shared_required is current.shared_required
+        and expected.pool_size == current.pool_size
+        and expected.pool_timeout_seconds == current.pool_timeout_seconds
     )
 
 
@@ -1565,7 +1643,13 @@ def _selection() -> _BackendSelection:
             raise GovernedRecordBackendError(
                 "Postgres governed records require a configured DSN"
             )
-        return _BackendSelection("postgres", dsn, shared_required)
+        try:
+            size, timeout = validate_pool_settings(
+                section.get("pool_size", 0), section.get("pool_timeout_seconds", 5),
+            )
+        except ValueError as exc:
+            raise GovernedRecordBackendError(str(exc)) from None
+        return _BackendSelection("postgres", dsn, shared_required, size, timeout)
     if shared_required:
         raise GovernedRecordBackendError(
             "enterprise and multi-replica governed records require Postgres"
@@ -1617,6 +1701,7 @@ class GovernedRecordStore:
         backend: GovernedRecordBackend | None = None,
         required_backend: str | None = None,
         authority_scope: str = "tenant",
+        lookup_spec: RecordLookupSpec | None = None,
     ) -> None:
         self.namespace = _required(namespace, "namespace", 128)
         self.prefix = _required(prefix, "prefix", 16)
@@ -1628,10 +1713,12 @@ class GovernedRecordStore:
                 "authority_scope must be tenant or deployment_global"
             )
         self.authority_scope = scope
+        self.lookup_spec = lookup_spec
         self._local_backend = LocalGovernedRecordBackend(
             self.namespace,
             self.prefix,
             authority_scope=self.authority_scope,
+            lookup_spec=lookup_spec,
         )
         self._backend_override = backend
         required = (
@@ -1792,6 +1879,9 @@ class GovernedRecordStore:
                     require_encryption=True,
                     require_shared_key_identity=True,
                     authority_scope=self.authority_scope,
+                    pool_size=selection.pool_size,
+                    pool_timeout_seconds=selection.pool_timeout_seconds,
+                    lookup_spec=self.lookup_spec,
                 )
                 self._postgres_key = key
             selected = self._postgres_backend
@@ -1806,6 +1896,21 @@ class GovernedRecordStore:
                 "before selecting the shared backend"
             )
         return selected
+
+    def lookup(self, digest: str) -> dict[str, Any] | None:
+        backend = self._lookup_backend()
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("record lookup digest is invalid")
+        return backend.lookup(digest)
+
+    def maintain_lookup(self, *, limit: int = 100, rebuild: bool = False):
+        return self._lookup_backend().maintain_lookup(limit=limit, rebuild=rebuild)
+
+    def _lookup_backend(self):
+        backend = self._backend()
+        if self.lookup_spec is None or getattr(backend, "lookup_spec", None) != self.lookup_spec:
+            raise RecordLookupUnavailable("record lookup backend contract is unavailable")
+        return backend
 
     @property
     def backend_kind(self) -> str:
@@ -1889,7 +1994,9 @@ class GovernedRecordStore:
                         ),
                         record_sha256=str(pending.get("record_sha256") or ""),
                     )
-                    if not ok:
+                    # Only the writer's explicit acknowledgement confirms
+                    # delivery; malformed truthy results must retain the outbox.
+                    if ok is not True:
                         raise RuntimeError("audit writer refused governed event")
                 except Exception as exc:  # noqa: BLE001 - receipt stays durable
                     log.error(

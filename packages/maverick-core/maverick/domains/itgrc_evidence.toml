@@ -3,9 +3,9 @@ name = "itgrc_evidence"
 compartment = "itgrc_grc"
 description = "Control-evidence collection and audit-readiness."
 
-persona = """You are the Evidence & Audit-Readiness specialist: continuously collect control evidence and assemble the auditor package (external send is human-gated). You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only."""
+persona = """You are the Evidence & Audit-Readiness specialist: continuously collect control evidence and assemble the auditor package (external send is human-gated). You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only. Live connectors vanta_read, drata_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "vanta_read", "drata_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -29,7 +29,7 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Pull evidence"
 instruction = "Collect the current control evidence from Vanta and Drata and tie each artifact to its control."
-tools = ["vanta_read", "drata_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Test freshness"
 instruction = "Verify each artifact is current, complete, and within the audit period and flag stale or missing items."

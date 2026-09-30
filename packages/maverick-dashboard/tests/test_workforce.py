@@ -97,7 +97,7 @@ def test_workforce_connector_search_is_race_safe():
     assert "if (seq !== connSearchSeq) return;" in html
     # Failed request renders an error item instead of leaving stale results.
     assert ".catch(" in html
-    assert "Could not search connectors right now." in html
+    assert "Could not search apps right now." in html
     # In-flight state is announced on the results list and cleared afterward.
     assert 'results.setAttribute("aria-busy", "true")' in html
     assert 'results.removeAttribute("aria-busy")' in html
@@ -132,7 +132,7 @@ def test_workforce_distinguishes_catalog_from_deployment(monkeypatch):
 
     assert r.status_code == 200
     assert "1 specialists deployed" in r.text
-    assert "2 have a saved configuration" in r.text
+    assert "2 are set up" in r.text
     assert "specialists on staff" not in r.text
     assert "connectors wired" not in r.text
     assert "catalog specialists available" in r.text
@@ -156,7 +156,7 @@ def test_workforce_explains_missing_department_charter_without_overclaiming(monk
 
     assert r.status_code == 200
     assert (
-        "Catalog charter not provided. Review the available specialist roster before deployment."
+        "No description yet. View the team to see its specialists before you deploy it."
         in r.text
     )
     assert "1 catalog specialists available" in r.text

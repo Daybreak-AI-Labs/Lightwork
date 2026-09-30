@@ -92,6 +92,36 @@ def test_questionnaire_covers_every_required_ai_vendor_domain():
         "aiv_retention",
         "aiv_human_oversight",
     }
+
+
+@pytest.mark.parametrize("qid,text", [
+    ("aiv_provenance", "Model provenance is not documented."),
+    ("aiv_training_data", "Training-data sources are not documented or licensed."),
+    ("aiv_subprocessors", "The subprocessor list is not published."),
+    ("aiv_evaluation", "The vendor does not provide evaluation reports."),
+    ("aiv_incidents", "We have not experienced an AI incident."),
+    ("aiv_eu_role", "Under the EU AI Act we are not identified as the provider."),
+    ("aiv_retention", "Customer data is not retained for 30 days."),
+    ("aiv_human_oversight", "Human oversight is not implemented."),
+    ("aiv_provenance", "Model provenance is planned to be documented."),
+    ("aiv_provenance", "Model provenance is documented but is not documented for old models."),
+    ("aiv_incidents", "It is not true that no AI incidents have occurred."),
+    ("aiv_incidents", "AI incident history is not clear."),
+])
+def test_document_negation_and_uncertainty_cannot_create_affirmative_control(qid, text):
+    with tenant_scope(tenant="acme"):
+        extracted = avr.extract_answers_from_document(text.encode(), "text/plain")
+    answer = extracted["answers"].get(qid)
+    assert answer is None or answer["answer"] == "unknown"
+    if answer is not None:
+        assert answer["confidence"] == 0
+    assert extracted["review_required"]
+
+
+def test_document_matching_does_not_cross_sentence_boundaries():
+    with tenant_scope(tenant="acme"):
+        extracted = avr.extract_answers_from_document(b"Model provenance requires review. Something unrelated is documented.", "text/plain")
+    assert "aiv_provenance" not in extracted["answers"]
     assert avr.AI_VENDOR_TEMPLATE.type == "ai_vendor_risk"
 
 

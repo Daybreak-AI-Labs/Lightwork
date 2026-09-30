@@ -132,3 +132,34 @@ test('guided recovery keeps raw request references and separate resource drafts 
   raw.value='{}';adapter.restore(saved);assert.equal(raw.value,'{"expected_revision":2,"idempotency_key":"second-request"}');
   select.value='first';select.dispatchEvent(new w.Event('change',{bubbles:true}));assert.equal(JSON.parse(raw.value).idempotency_key,'exact-request');assert.equal(submits,0);dom.window.close();
 });
+
+test('the comparison is a readable field-by-field table, not raw data',async()=>{
+  const ui=await fixture({remote:{brief:'unfinished',format:1,variants:{a:1}},revision:1,initial:'current'});
+  ui.d.getElementById('brief').setAttribute('aria-label','Task brief');
+  ui.edit('current draft');await tick();
+  const details=ui.recovery.panel.querySelector('details');
+  Object.defineProperty(details,'open',{value:true});details.dispatchEvent(new ui.w.Event('toggle'));
+  assert.equal(details.querySelector('pre'),null);
+  const text=details.textContent;
+  assert.match(text,/1 field differs/);
+  assert.equal(details.querySelector('tbody th').textContent,'Task brief');
+  const cells=[...details.querySelectorAll('tbody td')].map(cell=>cell.textContent);
+  assert.deepEqual(cells,['unfinished','current draft']);
+  assert.doesNotMatch(text,/[{}"]|variants|format/);
+  ui.dom.window.close();
+});
+
+test('request failures show plain sentences, never server text or browser errors',async()=>{
+  const ui=await fixture({fail:'before'});
+  ui.edit('new work');await new Promise(resolve=>setTimeout(resolve,700));await tick();
+  assert.match(ui.recovery.panel.textContent,/Lightwork is not responding/);
+  assert.doesNotMatch(ui.recovery.panel.textContent,/offline/);
+  ui.dom.window.close();
+  const other=await fixture();
+  other.w.fetch=async()=>({ok:false,status:500,json:async()=>({detail:'sqlite3.OperationalError: database is locked'})});
+  other.w.mvErrorText=(failure,action)=>'Could not '+action+'. Something went wrong on our side.';
+  other.edit('more work');await new Promise(resolve=>setTimeout(resolve,700));await tick();
+  assert.match(other.recovery.panel.textContent,/Could not save the recovery copy\. Something went wrong on our side/);
+  assert.doesNotMatch(other.recovery.panel.textContent,/sqlite|OperationalError/);
+  other.dom.window.close();
+});

@@ -41,7 +41,7 @@ def test_sections_hidden_when_features_off(monkeypatch, tmp_path):
     assert r.status_code == 200
     assert 'id="auto-sched-list"' not in r.text
     assert 'id="auto-trig-list"' not in r.text
-    assert "Automations are disabled" in r.text
+    assert "Automations are turned off" in r.text
 
 
 def test_one_section_when_only_scheduling_on(monkeypatch, tmp_path):
@@ -194,3 +194,16 @@ def test_nav_has_automations_link(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     # The primary nav renders on every page, so the page links to itself.
     assert 'href="/automations"' in _client().get("/automations").text
+
+
+def test_automations_page_reads_plainly(monkeypatch, tmp_path):
+    from test_support.plain_language import developer_terms
+
+    _isolate(monkeypatch, tmp_path)
+    t = _client().get("/automations").text
+    assert developer_terms(t) == []
+    for phrase in ("Source settings (JSON)", "Exported definitions (JSON)",
+                   "Authorization code", "Approve exact operation", "credential_inventory_sha256"):
+        assert phrase not in t
+    # Schedules are described in words, not timetable codes.
+    assert "function cronText" in t and "Weekdays" in t and "On a custom timetable" in t

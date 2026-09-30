@@ -10,6 +10,7 @@ from maverick.paths import tenant_scope
 from maverick_knowledge import provider_accounting
 from maverick_knowledge.base import KnowledgeBase
 from maverick_knowledge.embed import DeterministicEmbedder, HostedEmbedder
+from maverick_knowledge.store import SqliteVectorStore
 
 
 @pytest.fixture
@@ -22,12 +23,8 @@ def ledger(tmp_path, monkeypatch):
     return path
 
 
-class _Store:
-    def add(self, _collection, _items):
-        return None
-
-    def search(self, _collection, _vector, _k):
-        return []
+class _Store(SqliteVectorStore):
+    """Use the actual identity-capable store under transport-only fixtures."""
 
 
 def _httpx(monkeypatch, *, error: BaseException | None = None):

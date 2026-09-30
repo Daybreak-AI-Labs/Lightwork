@@ -205,6 +205,43 @@ async def readiness(request: Request, response: Response) -> dict[str, Any]:
     return dict(result)
 
 
+@router.get("/applications")
+async def list_applications(request: Request, response: Response) -> dict[str, Any]:
+    """Registered applications for this workspace, for the page's record list."""
+
+    require_global_permission(request, "audit")
+    tenant, principal = _admin_authority(request)
+    result = await _call(
+        _dependency(request, "consent_native_admin_applications"),
+        request=request,
+        tenant_id=tenant,
+        principal_ref=principal,
+    )
+    _private(response)
+    return dict(result)
+
+
+@router.get("/applications/{application_ref}/devices")
+async def list_devices(
+    application_ref: ApplicationRef,
+    request: Request,
+    response: Response,
+) -> dict[str, Any]:
+    """Enrolled devices of one application; no keys or install subjects."""
+
+    require_global_permission(request, "audit")
+    tenant, principal = _admin_authority(request)
+    result = await _call(
+        _dependency(request, "consent_native_admin_devices"),
+        request=request,
+        tenant_id=tenant,
+        principal_ref=principal,
+        application_ref=application_ref,
+    )
+    _private(response)
+    return dict(result)
+
+
 @router.post("/applications", status_code=201)
 async def register_application(
     body: NativeApplicationRegisterIn,

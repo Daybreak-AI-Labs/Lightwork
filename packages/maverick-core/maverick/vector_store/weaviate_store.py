@@ -12,6 +12,10 @@ cluster when configured:
   - ``MAVERICK_WEAVIATE_GRPC_PORT`` -> optional gRPC port (defaults to 50051,
     or 443 for a standard HTTPS endpoint)
 
+Each is also a ``[memory]`` setting (``weaviate_url``, ``weaviate_api_key``,
+``weaviate_grpc_host``, ``weaviate_grpc_port``, ``weaviate_vectorizer``) that
+Settings > All settings writes; the environment variable still wins.
+
 Vectorization is delegated to Weaviate's configured vectorizer module, so the
 collection embeds text server-side — the same "no extra wiring" stance as the
 Qdrant adapter's fastembed integration. The module is set on the collection at
@@ -27,7 +31,6 @@ fast; set ``vectorizer="none"`` only if you supply your own vectors (then
 from __future__ import annotations
 
 import logging
-import os
 import uuid as _uuid
 from typing import Any
 from urllib.parse import urlparse
@@ -81,14 +84,17 @@ class WeaviateStore:
             ) from e
         import weaviate
 
-        url = url or os.environ.get("MAVERICK_WEAVIATE_URL")
-        api_key = api_key or os.environ.get("MAVERICK_WEAVIATE_API_KEY")
+        from ..env_setting import env_or_config
+
+        url = url or env_or_config("MAVERICK_WEAVIATE_URL", "memory", "weaviate_url")
+        api_key = api_key or env_or_config(
+            "MAVERICK_WEAVIATE_API_KEY", "memory", "weaviate_api_key")
         self._remote = bool(url)
         # Server-side embedding module (see module docstring). Default to
         # text2vec-transformers; "none" means the caller supplies vectors.
         self._vectorizer = (
             vectorizer
-            or os.environ.get("MAVERICK_WEAVIATE_VECTORIZER")
+            or env_or_config("MAVERICK_WEAVIATE_VECTORIZER", "memory", "weaviate_vectorizer")
             or "text2vec-transformers"
         )
 
@@ -127,10 +133,14 @@ class WeaviateStore:
         except ValueError as e:
             raise ValueError("MAVERICK_WEAVIATE_URL contains an invalid port") from e
 
-        grpc_host = os.environ.get("MAVERICK_WEAVIATE_GRPC_HOST", "").strip()
+        from ..env_setting import env_or_config
+
+        grpc_host = (env_or_config("MAVERICK_WEAVIATE_GRPC_HOST", "memory",
+                                   "weaviate_grpc_host") or "").strip()
         grpc_host = grpc_host or parsed.hostname
         default_grpc_port = 443 if http_port == 443 else 50051
-        raw_grpc_port = os.environ.get("MAVERICK_WEAVIATE_GRPC_PORT", "").strip()
+        raw_grpc_port = (env_or_config("MAVERICK_WEAVIATE_GRPC_PORT", "memory",
+                                       "weaviate_grpc_port") or "").strip()
         try:
             grpc_port = int(raw_grpc_port) if raw_grpc_port else default_grpc_port
         except ValueError as e:

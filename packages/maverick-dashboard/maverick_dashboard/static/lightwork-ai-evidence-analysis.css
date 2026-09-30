@@ -210,3 +210,8 @@
     border: 1px solid CanvasText;
   }
 }
+
+.evidence-workbench .evidence-form { display: grid; gap: var(--space-2); max-width: 44rem; }
+.evidence-workbench .evidence-table { overflow: auto; }
+.evidence-workbench .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.evidence-workbench .section-head .select { max-width: 14rem; }

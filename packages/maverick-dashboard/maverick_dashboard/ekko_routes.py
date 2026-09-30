@@ -48,6 +48,32 @@ class HandoffIn(DeviceIn):
     kind: Literal["flow", "agent"] = "flow"
 
 
+class EnrollIn(DeviceIn):
+    apps: list[str] = Field(min_length=1, max_length=64)
+    days: Literal[7, 14, 30, 60, 90] = 30
+    acknowledge_capture_scope: bool = False
+
+
+#: Readable names for Ekko's canonical application IDs.
+_APP_NAMES = {
+    "browser": "Web browser", "chrome": "Google Chrome", "edge": "Microsoft Edge",
+    "firefox": "Firefox", "safari": "Safari", "spreadsheet": "Spreadsheet app",
+    "excel": "Microsoft Excel", "google_sheets": "Google Sheets",
+    "presentation": "Presentation app", "powerpoint": "Microsoft PowerPoint",
+    "google_slides": "Google Slides", "document": "Document editor",
+    "word": "Microsoft Word", "google_docs": "Google Docs", "file_manager": "File manager",
+    "file_explorer": "File Explorer", "finder": "Finder", "analytics": "Analytics app",
+    "power_bi": "Power BI", "tableau": "Tableau", "database": "Database tool",
+    "crm": "Customer records (CRM)", "salesforce": "Salesforce", "erp": "Business system (ERP)",
+    "sap": "SAP", "email": "Email", "outlook": "Microsoft Outlook", "gmail": "Gmail",
+    "chat": "Chat", "teams": "Microsoft Teams", "slack": "Slack", "lightwork": "Lightwork",
+}
+
+
+def _app_name(app: str) -> str:
+    return _APP_NAMES.get(app, app.replace("_", " ").capitalize())
+
+
 def _app():
     # Included while maverick_dashboard.app is importing; resolve lazily.
     from . import app as app_module
@@ -58,7 +84,7 @@ def _app():
 def _device_id(value: str) -> str:
     value = str(value or "").strip()
     if not _DEVICE_RE.fullmatch(value):
-        raise HTTPException(status_code=422, detail="invalid Ekko device id")
+        raise HTTPException(status_code=422, detail="Device names can use letters, numbers, dots, dashes, colons and underscores.")
     return value
 
 
@@ -169,9 +195,22 @@ def _status_data(request: Request, device_id: str) -> dict:
         if scoped_policy is not None
         else policy
     )
+    blocked = set(policy.get("blocked_apps") or [])
     return {
         "enabled": bool(policy.get("enable", False)),
         "control_managed": "MAVERICK_EKKO" in os.environ,
+        # What a person may choose from when enrolling: the admin ceiling,
+        # minus anything the blocklist always wins over.
+        "app_choices": [
+            {"value": app, "label": _app_name(app)}
+            for app in (policy.get("allowed_apps") or []) if app not in blocked
+        ],
+        "app_labels": {
+            app: _app_name(app)
+            for app in {*(visible_policy.get("allowed_apps") or []),
+                        *(visible_policy.get("blocked_apps") or [])}
+        },
+        "enrollment_days": int(policy.get("enrollment_days", 30)),
         "can_control": auth.has_global_permission(request, "admin"),
         "device_id": device,
         "policy_scope": "enrollment" if scoped_policy is not None else "deployment_ceiling",
@@ -195,12 +234,12 @@ def _require_enabled_policy() -> dict:
     if not bool(policy.get("enable", False)):
         raise HTTPException(
             status_code=409,
-            detail="Ekko is off; a global administrator must enable it first",
+            detail="Ekko is turned off. An administrator needs to turn it on first.",
         )
     if not policy.get("allowed_apps"):
         raise HTTPException(
             status_code=409,
-            detail="Ekko observes nothing until the client configures an application allowlist",
+            detail="No apps are allowed yet. Your administrator needs to choose which apps Ekko may notice.",
         )
     return policy
 
@@ -211,8 +250,8 @@ def _active_enrollment(store):
         raise HTTPException(
             status_code=409,
             detail=(
-                "This owner and device are not enrolled. Review the scope and "
-                "enroll the local device before starting observation."
+                "This device is not enrolled for you yet. Enroll it first, "
+                "then start watching."
             ),
         )
     return enrollment
@@ -232,7 +271,7 @@ def _validated_enrolled_policy(store):
     if policy is None:
         raise HTTPException(
             status_code=409,
-            detail="this owner and device enrollment is expired or unavailable",
+            detail="Your enrollment for this device has ended. Enroll it again to continue.",
         )
     try:
         from maverick.config import validate_ekko_policy_ceiling
@@ -241,7 +280,7 @@ def _validated_enrolled_policy(store):
     except (TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=409,
-            detail="Ekko policy changed; review and re-enroll this device",
+            detail="Your administrator changed what Ekko may notice. Enroll this device again to continue.",
         ) from exc
     return policy
 
@@ -358,10 +397,81 @@ def ekko_control(request: Request, payload: EkkoControlIn) -> dict:
             actor=auth.caller_principal(request) or "local",
         )
     except PermissionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail="This setting is controlled by your installation's configuration, so it cannot be changed here.",
+        ) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="The setting could not be saved. Try again.") from exc
     return {"ekko": status}
+
+
+@router.post("/api/v1/ekko/enroll")
+def ekko_enroll(request: Request, payload: EnrollIn) -> dict:
+    """Enroll this person's device for the chosen apps, for a set number of
+    days -- the dashboard form of ``maverick ekko enroll``. Enrollment only
+    records consent under the administrator's app ceiling; it never starts
+    observing (that stays a separate, confirmed step)."""
+    _app()._require_same_origin(request)
+    auth.require_permission(request, "operate")
+    if not payload.acknowledge_capture_scope:
+        raise HTTPException(
+            status_code=400,
+            detail="Confirm that you have read what Ekko may and may not record.",
+        )
+    _require_enabled_policy()
+    import time
+
+    from maverick.config import get_ekko_policy
+
+    try:
+        policy = get_ekko_policy(allowed_apps=payload.apps)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Choose only from the apps your administrator allows.",
+        ) from exc
+    store = _store(request, payload.device_id)
+    expires_at = time.time() + payload.days * 86_400
+    from maverick.audit import EventKind
+
+    _audit(
+        EventKind.EKKO_CONSENT_CHANGED,
+        required=True,
+        state="enroll_authorized",
+        policy_digest=policy.fingerprint(),
+        expires_at=expires_at,
+    )
+    try:
+        enrollment = store.enroll(policy, expires_at=expires_at)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="This device could not be enrolled. Check that it is not already being watched, then try again.",
+        ) from exc
+    _audit(
+        EventKind.EKKO_CONSENT_CHANGED,
+        state="enrolled",
+        policy_digest=policy.fingerprint(),
+        expires_at=enrollment.expires_at,
+    )
+    return {"enrollment": _public_enrollment(enrollment),
+            "status": _status_data(request, payload.device_id)}
+
+
+@router.post("/api/v1/ekko/revoke")
+def ekko_revoke(request: Request, payload: DeviceIn) -> dict:
+    """Withdraw consent for this device (``maverick ekko revoke``): active
+    observation stops at once. Recorded evidence stays until erased."""
+    _app()._require_same_origin(request)
+    auth.require_permission(request, "operate")
+    store = _store(request, payload.device_id)
+    enrollment = store.revoke_enrollment() if store.path.exists() else None
+    from maverick.audit import EventKind
+
+    _audit(EventKind.EKKO_CONSENT_CHANGED, state="revoked")
+    return {"revoked": enrollment is not None,
+            "status": _status_data(request, payload.device_id)}
 
 
 @router.get("/api/v1/ekko/sessions")
@@ -386,7 +496,7 @@ def ekko_start_session(request: Request, payload: StartSessionIn) -> dict:
     if not payload.acknowledge_capture_scope:
         raise HTTPException(
             status_code=400,
-            detail="confirm the visible capture scope before starting Ekko",
+            detail="Confirm that you have read what Ekko may and may not record.",
         )
     _require_enabled_policy()
     store = _store(request, payload.device_id)
@@ -399,7 +509,7 @@ def ekko_start_session(request: Request, payload: StartSessionIn) -> dict:
     if active:
         raise HTTPException(
             status_code=409,
-            detail="this device already has an active Ekko session",
+            detail="This device is already being watched. Stop or pause that first.",
         )
     from maverick.audit import EventKind
 
@@ -414,7 +524,7 @@ def ekko_start_session(request: Request, payload: StartSessionIn) -> dict:
     try:
         session = store.create_session(policy=enrolled_policy)
     except (ValueError, WorkDiscoveryStoreError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail="Watching could not start. Refresh the page and try again.") from exc
     _audit(EventKind.EKKO_SESSION, session_id=session.session_id, state="running")
     return {"session": _public_session(session), "unsaved": True}
 
@@ -443,7 +553,7 @@ def _transition(request: Request, device_id: str, session_id: str, target: str) 
     try:
         session = store.transition_session(sid, SessionState(target))
     except WorkDiscoveryStoreError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail="That change could not be made. Refresh the page and try again.") from exc
     _audit(EventKind.EKKO_SESSION, session_id=sid, state=target)
     return {"session": _public_session(session)}
 

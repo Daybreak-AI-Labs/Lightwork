@@ -39,6 +39,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
@@ -173,11 +174,84 @@ class ConsentLedgerError(RuntimeError):
     """The standing-consent authority could not be verified safely."""
 
 
+_CONSENT_MODES = frozenset({"auto-approve", "auto-deny", "ask", "dashboard"})
+
+
+def _configured_mode() -> str:
+    """``[safety] consent_mode`` from config, ``""`` when unset or unreadable."""
+    try:
+        from ..config import load_config
+
+        raw = ((load_config() or {}).get("safety") or {}).get("consent_mode")
+    except Exception:
+        return ""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return ""
+    mode = str(raw).strip().lower()
+    return mode if mode in _CONSENT_MODES else "ask"
+
+
+# Consent modes from the strictest to the loosest. "ask" outranks "dashboard":
+# outside a terminal (every server-run task) it refuses, while "dashboard" can
+# still be approved on the Approvals page.
+_STRICTNESS = ("auto-deny", "ask", "dashboard", "auto-approve")
+
+# A per-task consent mode (director mode's autonomy level for one task). It is
+# only ever applied when it is at least as strict as the installation's mode.
+_TASK_MODE: ContextVar[str | None] = ContextVar("maverick_task_consent_mode", default=None)
+
+
+def _strictness(mode: str) -> int:
+    """Position in :data:`_STRICTNESS`; a mode this module does not know ranks
+    strictest (-1), so nothing can be chosen over it."""
+    try:
+        return _STRICTNESS.index(mode)
+    except ValueError:
+        return -1
+
+
+@contextmanager
+def task_consent_mode(mode: str | None) -> Iterator[None]:
+    """Run the enclosed task under ``mode`` where that tightens consent.
+
+    The installation's mode (``MAVERICK_CONSENT_MODE``, ``[safety]
+    consent_mode``, enterprise and secure-by-default rules) stays the ceiling:
+    a task may ask for a stricter mode, never a looser one. A mode this module
+    does not know is treated as "ask". ``None`` or ``""`` leaves consent as it
+    is. Bound through a ContextVar, so concurrent tasks never see each other's
+    mode.
+    """
+    value = str(mode or "").strip().lower() or None
+    if value is not None and value not in _CONSENT_MODES:
+        value = "ask"
+    token = _TASK_MODE.set(value)
+    try:
+        yield
+    finally:
+        _TASK_MODE.reset(token)
+
+
 def _resolve_mode(risk: str | None = None) -> str:
+    """The consent mode for an action: the installation's, or the task's own
+    when that is stricter (see :func:`task_consent_mode`)."""
+    installation = _installation_mode(risk)
+    task = _TASK_MODE.get()
+    if task and _strictness(task) < _strictness(installation):
+        return task
+    return installation
+
+
+def _installation_mode(risk: str | None = None) -> str:
     # Explicit operator setting always wins (any risk level).
     env = os.environ.get("MAVERICK_CONSENT_MODE")
     if env:
         return env.strip().lower()
+    # The same choice made in the dashboard (``[safety] consent_mode``); the
+    # environment variable above still wins. A value this module does not know
+    # fails closed to asking a person.
+    configured = _configured_mode()
+    if configured:
+        return configured
     # Enterprise mode flips the default to 'ask' so destructive actions are gated
     # (and denied in non-interactive contexts) when handling sensitive data.
     try:
@@ -642,14 +716,60 @@ def require_consent(
     return d
 
 
+def require_person(
+    action: str,
+    *,
+    risk: str,
+    scope: str | None = None,
+    detail: str | None = None,
+    provenance: str | None = None,
+) -> ConsentDecision:
+    """A decision made by a person, for a gate an administrator turned on.
+
+    Unlike :func:`require_consent`, the deployment's automatic consent mode
+    never answers: the request goes to the dashboard's Approvals page (or, in
+    ``ask`` mode at an interactive terminal, to the terminal prompt). No
+    decision within the dashboard wait is a refusal, and the unanswered
+    request is withdrawn. ``auto-deny`` refuses at once; nothing grants
+    silently.
+    """
+    ts = time.time()
+    mode = _resolve_mode(risk)
+    if mode == "auto-deny":
+        return _emit(ConsentDecision(False, "auto", risk, ts), action, scope, detail)
+    if mode == "ask" and sys.stdin.isatty():
+        return require_consent(action, risk=risk, scope=scope, detail=detail,
+                               provenance=provenance, allow_auto_approve=False,
+                               consult_ledger=False)
+    decided = _decide_via_dashboard(action, risk, scope, detail, provenance,
+                                    withdraw_on_timeout=True)
+    if decided is not None:
+        return _emit(decided, action, scope, detail)
+    return _emit(ConsentDecision(False, "no-decision", risk, ts), action, scope, detail)
+
+
 def _dashboard_timeout() -> float:
     """How long (seconds) to wait for a dashboard approval before giving up.
 
     A timeout falls through to the interactive/non-tty path (fail-open),
     so a dashboard that's never opened doesn't wedge the agent forever.
+    ``MAVERICK_CONSENT_DASHBOARD_TIMEOUT`` wins; otherwise ``[approval]
+    dashboard_wait_seconds`` (set on Settings > All settings) applies.
     """
+    raw = os.environ.get("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "")
+    if not raw.strip():
+        try:
+            from ..config import load_config
+
+            value = ((load_config() or {}).get("approval") or {}).get("dashboard_wait_seconds")
+        except Exception:  # config never blocks the approval wait
+            value = None
+        if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                and math.isfinite(value):
+            return max(0.0, float(value))
+        raw = "300"
     try:
-        return max(0.0, float(os.environ.get("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "300")))
+        return max(0.0, float(raw))
     except ValueError:
         return 300.0
 
@@ -1094,6 +1214,8 @@ def _decide_via_dashboard(
     detail: str | None,
     provenance: str | None,
     approval_card: Mapping[str, object] | None = None,
+    *,
+    withdraw_on_timeout: bool = False,
 ) -> ConsentDecision | None:
     """Park the action in the world model and poll for a dashboard decision.
 
@@ -1189,6 +1311,13 @@ def _decide_via_dashboard(
             close_world_if_owned(wm)
             return decision
         time.sleep(1.0)
+    if withdraw_on_timeout:
+        # Nobody decided in time and the caller will not act on a later vote:
+        # take the request off the Approvals page instead of leaving it there.
+        try:
+            wm.decide_approval(approval_id, "denied", decided_by="system:no-decision")
+        except Exception:  # pragma: no cover -- the refusal stands either way
+            pass
     close_world_if_owned(wm)
     return None  # timed out: caller falls back
 
@@ -1228,23 +1357,21 @@ def _emit(
     scope: str | None,
     detail: str | None,
 ) -> ConsentDecision:
-    """Log the consent decision to the audit log (fail-safe)."""
-    try:
-        from ..audit import EventKind, record
-        record(
-            EventKind.CONSENT_PROMPT,
-            action=action, risk=decision.risk,
-            scope=scope, detail=detail,
-        )
-        record(
-            EventKind.CONSENT_RESULT,
-            action=action,
-            decision="approve" if decision.granted else "deny",
-            source=decision.source,
-            decided_by=decision.actor,
-        )
-    except Exception:  # pragma: no cover -- never crash on audit
-        pass
+    """Record consent; a required audit refusal must not release approval."""
+    from ..audit import EventKind, audit_event
+
+    audit_event(
+        EventKind.CONSENT_PROMPT,
+        action=action, risk=decision.risk,
+        scope=scope, detail=detail,
+    )
+    audit_event(
+        EventKind.CONSENT_RESULT,
+        action=action,
+        decision="approve" if decision.granted else "deny",
+        source=decision.source,
+        decided_by=decision.actor,
+    )
     return decision
 
 
@@ -1256,6 +1383,7 @@ __all__ = [
     "consume_operation_consent",
     "require_consent",
     "require_operation_consent",
+    "require_person",
     "grant_persistent",
     "revoke",
     "list_grants",

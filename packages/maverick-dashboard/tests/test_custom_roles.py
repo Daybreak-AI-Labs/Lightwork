@@ -140,15 +140,15 @@ def test_users_page_manages_custom_roles_end_to_end():
     assert r.status_code == 303, r.text
 
     page = client.get("/users").text
-    assert "records-officer" in page
-    assert "audit" in page and "operate" in page
-    # The role appears in the assignment pickers.
-    assert page.count('<option value="records-officer"') >= 1
+    assert "Records officer" in page
+    assert "Review the history" in page or "audit" in page
 
     # Assign it, then deletion is refused with the reason.
     assert client.post("/users/set",
                        data={"principal": "user:dana", "role": "records-officer"},
                        follow_redirects=False).status_code == 303
+    # The role appears in the assignment pickers.
+    assert client.get("/users").text.count('<option value="records-officer"') >= 1
     r = client.post("/users/roles/delete", data={"name": "records-officer"},
                     follow_redirects=False)
     assert r.status_code == 400
@@ -158,7 +158,7 @@ def test_users_page_manages_custom_roles_end_to_end():
                        follow_redirects=False).status_code == 303
     assert client.post("/users/roles/delete", data={"name": "records-officer"},
                        follow_redirects=False).status_code == 303
-    assert "records-officer" not in client.get("/users").text
+    assert "Records officer" not in client.get("/users").text
 
 
 def test_custom_role_management_requires_admin(monkeypatch):

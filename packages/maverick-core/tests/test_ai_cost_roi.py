@@ -552,6 +552,26 @@ def test_multi_currency_cost_and_roi_are_never_conflated():
     assert report["benefit_basis"] == "operator_assumptions_only"
 
 
+def test_alternative_scenarios_require_explicit_selection():
+    service = _service()
+    with tenant_scope(tenant="acme"):
+        for scenario, benefit in (("optimistic", "100"), ("pessimistic", "10")):
+            service.upsert_roi_assumption(
+                scenario=scenario, scope_kind="asset", scope_id=ASSET,
+                period_start=START, period_end=END, currency="USD", assumed_benefit=benefit,
+                methodology="Hours saved multiplied by loaded cost.",
+                rationale="Alternative planning assumption, not a measured result.",
+                citations=(_citation(scenario),), idempotency_key=scenario,
+                expected_revision=0, actor="business-owner",
+            )
+        with pytest.raises(ValueError, match="select a scenario"):
+            service.asset_report(ASSET, period_start=START, period_end=END)
+        report = service.asset_report(ASSET, period_start=START, period_end=END, scenario="pessimistic")
+    bucket = _currency(report, "USD")
+    assert bucket["assumed_benefit"] == "10"
+    assert bucket["assumption_bindings"][0]["scenario"] == "pessimistic"
+
+
 def test_roi_assumption_replay_conflict_and_stale_cas():
     service = _service()
     kwargs = {

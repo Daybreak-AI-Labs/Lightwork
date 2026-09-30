@@ -75,6 +75,11 @@ class FakeCASStore:
             record = self.records.get(record_id)
             return copy.deepcopy(record) if record is not None else None
 
+    def list(self, *, limit=None):
+        with self.lock:
+            rows = [copy.deepcopy(value) for _, value in sorted(self.records.items())]
+            return rows if limit is None else rows[:limit]
+
     def create(self, record, *, action, actor, max_records=None):
         del action, actor, max_records
         with self.lock:
@@ -647,6 +652,38 @@ class Clock:
 
     def advance(self, seconds: float) -> None:
         self.value += seconds
+
+
+def test_purview_prepared_changes_are_listed_for_this_tenant_only() -> None:
+    authority = _authority()
+    binding = _binding(authority)
+    mapping = _mapping(authority, binding)
+    service, store, _transport, _authority_box, asset_box = _purview_service(authority=authority)
+    initial = asset_box["current"]
+    prepared = service.prepare(
+        authority,
+        mapping,
+        asset_id=initial.asset_id,
+        classification_codes=("regulated",),
+        expected_binding_sha256=initial.binding_sha256,
+        expected_source_revision=initial.revision,
+        idempotency_key="listed-purview-change-0001",
+    )
+    foreign = copy.deepcopy(store.records[prepared["id"]])
+    foreign["id"] = "IGPW-" + ("9" * 32)
+    foreign["tenant_sha256"] = "9" * 64
+    store.records[foreign["id"]] = foreign
+
+    rows = service.list_intents(limit=10)
+
+    assert [row["intent_id"] for row in rows] == [prepared["id"]]
+    assert rows[0]["capability_mapping_sha256"] == mapping.mapping_sha256
+    assert rows[0]["principal_ref"] == authority.principal_ref
+    assert rows[0]["revision"] == prepared["revision"]
+    assert rows[0]["classification_codes"] == ["regulated"]
+    disabled, *_ = _purview_service(enable=False)
+    with pytest.raises(IdentityGovernanceControlConfigError):
+        disabled.list_intents()
 
 
 def test_purview_writeback_apply_replay_and_compensation_are_revision_bound() -> None:

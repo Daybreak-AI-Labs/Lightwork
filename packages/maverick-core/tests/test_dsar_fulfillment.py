@@ -98,6 +98,32 @@ def test_token_lifecycle_and_delivery_time_redaction():
     assert df.get_fulfillment(request["id"])["response"]["delivered_at"]
 
 
+@pytest.mark.parametrize("channel", ["email", ""])
+def test_channel_binding_survives_fulfillment_and_ambiguity_does_not_burn_link(channel):
+    from maverick import privacy_ops, world_model
+
+    world = world_model.WorldModel(world_model.DEFAULT_DB)
+    for name, message in [("email", "requested channel content"), ("slack", "other subject content")]:
+        conversation = world.get_or_create_conversation(name, "shared-id")
+        world.append_turn(conversation.id, "user", message)
+    request = privacy_ops.open_dsar("shared-id", "access", channel=channel, opened_by="ops")
+    record = df.open_fulfillment(request["id"], actor="ops")
+    record = df.record_identity_verification(record["id"], method="account_login", reference="verified-identity", actor="ops", expected_revision=record["revision"])
+    link = df.prepare_response(record["id"], actor="ops", expected_revision=record["revision"])
+    token = link["response_path"].rsplit("/", 1)[-1]
+    if channel:
+        response = df.response_for_token(token)
+        conversations = response["bundle"]["world"]["conversations"]
+        assert len(conversations) == 1 and conversations[0]["channel"] == "email"
+        assert conversations[0]["turns"][0]["content"] == "requested channel content"
+    else:
+        with pytest.raises(RuntimeError, match="ambiguous"):
+            df.response_for_token(token)
+        status = df.get_fulfillment(request["id"])["response"]
+        assert not status.get("delivered_at") and status.get("reads_used", 0) == 0
+    world.close()
+
+
 def test_expired_tokens_read_as_none(monkeypatch):
     request = _request()
     record = df.open_fulfillment(request["id"], actor="ops")

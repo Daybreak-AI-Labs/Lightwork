@@ -3,8 +3,19 @@
   'use strict';
   var el = function (id) { return document.getElementById('vs-' + id); };
   if (!el('panel')) return;
-  var state = null, context = null, busy = false, locked = false, draft = null;
-  function ownerLabel(owner) { return owner.startsWith('user:') ? owner.slice(5) : owner; }
+  var state = null, context = null, busy = false, locked = false, draft = null, names = {};
+  // People are shown by name from the workspace member list; a sign-in handle
+  // is shown only when no name is known.
+  function ownerLabel(owner) {
+    if (names[owner]) return names[owner];
+    if (!owner.startsWith('user:')) return owner;
+    var handle = owner.slice(5);
+    return handle.indexOf('@') > 0 || /^[A-Za-z][A-Za-z .'-]{0,60}$/.test(handle) ? handle : 'A workspace member';
+  }
+  function connectionLabel(name) {
+    var words = String(name).replace(/[_-]+/g, ' ').trim();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
   function controls() {
     var blocked = !state || !state.readiness || state.readiness.deployment.supported !== true;
     ['ticket', 'document', 'confirm'].forEach(function (id) { el(id).disabled = busy || locked || blocked; });
@@ -12,6 +23,8 @@
     el('enable').disabled = busy || locked || blocked || state.modules_enabled || !el('confirm').checked;
     el('save').disabled = busy || locked || blocked || !state.modules_enabled || !el('resource-owner').value || !el('ticket').value || !el('confirm').checked;
     el('refresh').disabled = busy || locked;
+    el('off').hidden = !state || state.modules_enabled !== true;
+    el('disable').disabled = busy || locked || !state || state.modules_enabled !== true || !el('off-confirm').checked;
   }
   function clear(message, lock) {
     draft = null; state = null; locked = !!lock; el('ticket').replaceChildren(); el('document').replaceChildren();
@@ -85,12 +98,12 @@
     if (!data || !/^[a-f0-9]{64}$/.test(data.context) || !/^[a-f0-9]{64}$/.test(data.configuration) || !Number.isSafeInteger(data.revision) || data.revision < 0 || typeof data.modules_enabled !== 'boolean' || !Array.isArray(data.connections) || data.connections.some(function (row) { return !row || typeof row.name !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(row.name) || !['jira', 'gdrive'].includes(row.connector) || typeof row.revision !== 'string' || !row.revision || row.revision.length > 64 || typeof row.has_token !== 'boolean'; }) || new Set(data.connections.map(function (row) { return row.name; })).size !== data.connections.length || !data.binding || typeof data.owner_locked !== 'boolean' || !Array.isArray(data.eligible_owners) || data.eligible_owners.some(function (owner) { return typeof owner !== 'string' || !owner.startsWith('user:') || owner.length > 256; }) || typeof data.binding.resource_owner !== 'string' || (data.owner_locked && !data.binding.resource_owner)) throw new Error('Setup response was incomplete. Refresh setup before making changes.');
     if (context && data.context !== context) { clear('Your account or workspace changed. Reload the page.', true); return; }
     renderReadiness(data.readiness);
-    state = data; context = data.context; el('confirm').checked = false;
+    state = data; context = data.context; el('confirm').checked = false; el('off-confirm').checked = false;
     ['ticket', 'document'].forEach(function (name) {
       var select = el(name), placeholder = document.createElement('option');
       placeholder.value = ''; placeholder.textContent = name === 'ticket' ? 'Choose Jira connection' : 'Uploaded evidence only'; select.replaceChildren(placeholder);
       data.connections.filter(function (row) { return row.connector === (name === 'ticket' ? 'jira' : 'gdrive') && row.has_token; }).forEach(function (row) {
-        var option = document.createElement('option'); option.value = row.name; option.textContent = row.name; select.appendChild(option);
+        var option = document.createElement('option'); option.value = row.name; option.textContent = connectionLabel(row.name); select.appendChild(option);
       });
       select.value = data.binding[name + '_connection'] || '';
     });
@@ -142,11 +155,23 @@
   el('form').addEventListener('change', function (event) { if (event.target !== el('confirm')) el('confirm').checked = false; controls(); });
   el('refresh').addEventListener('click', function () { call('GET'); });
   el('enable').addEventListener('click', function () { if (!el('enable').disabled) call('POST', '/enable', reviewed()); });
+  el('off-confirm').addEventListener('change', controls);
+  el('disable').addEventListener('click', async function () {
+    if (el('disable').disabled) return;
+    var ask = typeof window.mvConfirm === 'function' ? window.mvConfirm : null;
+    if (ask && !(await ask('Turn off vendor onboarding? Vendor requests stop until you turn it back on. Nothing is deleted.', {okText: 'Turn off'}))) return;
+    if (!state || el('disable').disabled) return;
+    call('POST', '/disable', reviewed());
+  });
   el('form').addEventListener('submit', function (event) {
     event.preventDefault(); if (el('save').disabled) return;
     var ticket = state.connections.find(function (row) { return row.name === el('ticket').value; });
     var doc = state.connections.find(function (row) { return row.name === el('document').value; });
     call('PUT', '', Object.assign(reviewed(), {ticket: ticket.name, ticket_revision: ticket.revision, document: doc ? doc.name : '', document_revision: doc ? doc.revision : '', expected_revision: state.revision, resource_owner: el('resource-owner').value}));
   });
-  call('GET');
+  fetch('/api/v1/choices/people', {credentials: 'same-origin', headers: {'Accept': 'application/json'}})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) { (d && d.people || []).forEach(function (p) { if (p && typeof p.value === 'string' && typeof p.label === 'string') names[p.value] = p.label; }); })
+    .catch(function () { return null; })
+    .then(function () { call('GET'); });
 }());

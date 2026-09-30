@@ -44,6 +44,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # --- fixed-key sections (unknown keys are flagged) ---
     "deployment": {"type", "allow_multiple_control_planes"},
     "budget": {
+        "task_limits_enabled",
+        "strict_pricing",
         "max_dollars",
         "max_wall_seconds",
         "max_tool_calls",
@@ -53,6 +55,11 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # reads [budget] self_tuning; self_healing.py recommends it). Without it
         # here, a client enabling the documented knob got a false "unknown key".
         "self_tuning",
+        # Signed per-task spending receipts (budget_receipts.py).
+        "receipts",
+        # Deployment-wide spend ceilings per AI service (provider_cost_cap.py).
+        "provider_caps",
+        "provider_caps_period",
     },
     "safety": {
         "profile",
@@ -63,6 +70,26 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "constitution",
         "compartments",
         "compartment_unseal",
+        # Periodic human review of long tasks (review_checkpoint.py).
+        "review_checkpoint",
+        # Read at runtime and set from the dashboard's All settings page:
+        # consent gating (safety/consent.py), the shield requirement
+        # (shield_policy.py) and the receipt/screenshot signing keys.
+        "consent_mode",
+        "require_shield",
+        "receipt_key",
+        "screenshot_key",
+        # Shield limits and the start-up software check (All settings).
+        "max_scan_chars",
+        "decode_hidden",
+        "supply_chain_pinning",
+        # Second-opinion scan, scan limit per task, and approvals for
+        # protected settings (All settings).
+        "cascade",
+        "shield_rate_limit",
+        "quorum_required",
+        "quorum_protected_keys",
+        "quorum_ttl_days",
     },
     "sandbox": {
         "backend",
@@ -93,6 +120,14 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "host",
         "ssh_args",
         "host_key_checking",
+        # Per-tool address rules (sandbox/network_policy.py) and the cluster
+        # settings file (sandbox/__init__.py), both on the All settings page.
+        "tool",
+        # The work area's no-network rule (sandbox/network_policy.py).
+        "network_policy",
+        "kubeconfig",
+        "long_command_timeout",
+        "firecracker_strict",
     },
     # Per-tool rate limits (safety/rate_limiter.py): keys are tool names
     # ("web_search", "mcp_*", ...), values "N/window" specs -- user-chosen
@@ -117,6 +152,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # config.py. Missing here, every wizard-written config that answered
         # the ROS question warned "unknown key" on its own output.
         "ros",
+        # How long one per-call tool pass stays valid (tool_token.py).
+        "per_call_token_ttl",
     },
     # Tamper-evident audit log. The runtime reads [audit] sign (audit/writer.py)
     # and migrate.py already lists it; config-lint flagged the whole section as
@@ -187,7 +224,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "group_suites",
         "active_tenant",
     },
-    "analytics": {"mcp_client_language"},
+    "analytics": {"mcp_client_language", "task_questions"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
     # section fixed-key so misspelled retention/privacy knobs do not silently
     # fall back to defaults.
@@ -285,6 +322,11 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "team_budgets",
         "budget_window_seconds",
         "default_max_output_tokens",
+        # Sealed credentials set on the dashboard (env names above still win).
+        "team_passwords",
+        "gateway_token",
+        "upstream_token",
+        "anthropic_upstream_token",
     },
     "vendor_management": {"enable"},
     "consent_registry": {
@@ -298,6 +340,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "red_team_assurance": {
         "enable",
         "commitment_secret_ref",
+        "commitment_key",
         "max_cases",
         "max_response_bytes",
         "campaign_ttl_seconds",
@@ -659,7 +702,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "cross_run_pool",
         "warm",
     },
-    "analytics": {"mcp_client_language"},
+    "analytics": {"mcp_client_language", "task_questions"},
     "self_learning": {
         "preflight",
         "create_tools",
@@ -667,6 +710,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "allow_mcp_acquisition",
         "allow_provider_egress",
         "distill_local",
+        "auto_distill",
     },
     "ekko": {"provider_egress"},
     "model_improvement": {
@@ -988,6 +1032,7 @@ _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
     },
     ("consent_preferences", "storage"): {
         "backend",
+        "dsn",
         "dsn_secret_ref",
     },
     ("consent_preferences", "edge_cache"): {
@@ -1743,10 +1788,9 @@ _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
         1_048_576,
     ),
     (("data_use_governance", "compiler"), "max_operations"): (1, 10_000),
-    (("data_use_governance", "compiler"), "max_row_filter_nodes"): (1, 1_000),
+    # Native adapters accept row filters of at most 256 parts.
+    (("data_use_governance", "compiler"), "max_row_filter_nodes"): (1, 256),
     (("data_use_governance", "enforcement"), "max_attempts"): (1, 5),
-    (("data_use_governance", "enforcement"), "retry_base_seconds"): (1, 3_600),
-    (("data_use_governance", "enforcement"), "retry_max_seconds"): (1, 86_400),
     (("data_use_governance", "provider_audit"), "audit_window_seconds"): (
         60,
         604_800,
@@ -2018,6 +2062,9 @@ _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
 _NESTED_NUMBER_BOUNDS: dict[
     tuple[tuple[str, ...], str], tuple[float, float]
 ] = {
+    # Data-use enforcement retries wait inside one request (seconds, not minutes).
+    (("data_use_governance", "enforcement"), "retry_base_seconds"): (0.05, 10.0),
+    (("data_use_governance", "enforcement"), "retry_max_seconds"): (0.25, 60.0),
     (
         ("privacy_automation", "data_discovery", "adapters"),
         "timeout_seconds",
@@ -2566,14 +2613,8 @@ def _lint_consent_delivery_destinations(cfg: dict) -> list[Finding]:  # noqa: C9
                     "enabled consent destinations require a unique non-empty closed provider list",
                 )
             )
-    elif raw_enabled not in ([], _MISSING):
-        findings.append(
-            _nested_error(
-                section_name,
-                "enabled_providers",
-                "disabled consent destinations cannot select provider adapters",
-            )
-        )
+    # Disabled with services still listed is a clean off: the runtime keeps
+    # the list but binds and sends nothing.
 
     common = {
         "destination_id",
@@ -4387,16 +4428,18 @@ def _lint_product_governance_contracts(  # noqa: C901
                     "consent storage backend must be 'sqlite' or 'postgres'",
                 )
             )
-        if backend == "postgres":
-            secret_ref = storage.get("dsn_secret_ref")
-            if not isinstance(secret_ref, str) or not secret_ref.strip().startswith("$"):
-                findings.append(
-                    _nested_error(
-                        "consent_preferences.storage",
-                        "dsn_secret_ref",
-                        "Postgres consent storage requires an environment-backed dsn_secret_ref",
-                    )
+        secret_ref = storage.get("dsn_secret_ref", _MISSING)
+        if secret_ref is not _MISSING and secret_ref not in ("", None) and (
+            not isinstance(secret_ref, str)
+            or not re.fullmatch(r"\$?[A-Z][A-Z0-9_]{2,63}", secret_ref.strip())
+        ):
+            findings.append(
+                _nested_error(
+                    "consent_preferences.storage",
+                    "dsn_secret_ref",
+                    "consent storage dsn_secret_ref must name an environment variable",
                 )
+            )
 
     findings.extend(_lint_consent_delivery_destinations(cfg))
 

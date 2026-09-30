@@ -39,18 +39,24 @@ from typing import Protocol, runtime_checkable
 
 
 # Tunables.
-def _env_int(name: str, default: int) -> int:
+def _env_int(name: str, default: int, key: str = "") -> int:
     # A non-numeric env value used to raise ValueError at import, killing the
     # compaction path with an opaque traceback instead of using the default.
+    # With ``key`` the value may also come from ``[compaction] <key>`` (read
+    # once at startup); the environment still wins.
+    if key:
+        from ..env_setting import env_or_config_int
+
+        return env_or_config_int(name, "compaction", key, default)
     try:
         return int(os.environ.get(name, default))
     except (TypeError, ValueError):
         return default
 
 
-MAX_TOOL_OUTPUT_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOOL_BYTES", 2 * 1024)
-KEEP_RECENT_TURNS = _env_int("MAVERICK_COMPACT_KEEP_RECENT", 4)
-DIGEST_EVERY = _env_int("MAVERICK_COMPACT_DIGEST_EVERY", 10)
+MAX_TOOL_OUTPUT_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOOL_BYTES", 2 * 1024, "max_tool_bytes")
+KEEP_RECENT_TURNS = _env_int("MAVERICK_COMPACT_KEEP_RECENT", 4, "keep_recent")
+DIGEST_EVERY = _env_int("MAVERICK_COMPACT_DIGEST_EVERY", 10, "digest_every")
 # Ceiling on the WHOLE live window. The per-block pass above only trims
 # content behind keep_recent, so a few results at the per-result cap
 # (agent._MAX_TOOL_RESULT_BYTES, default 100 KB) can still ride inside the
@@ -58,7 +64,7 @@ DIGEST_EVERY = _env_int("MAVERICK_COMPACT_DIGEST_EVERY", 10)
 # into the recent window, oldest first — sparing the first message (the
 # brief) and the last (the freshest results the model must act on). ~200 KB
 # chars (~50k tokens). 0 disables.
-MAX_TOTAL_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOTAL_BYTES", 200_000)
+MAX_TOTAL_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOTAL_BYTES", 200_000, "max_total_bytes")
 
 
 def _block_size(block: dict) -> int:
@@ -355,6 +361,49 @@ def compact_messages(
             out[i] = shrunk
             total += _message_size(shrunk) - before
     return out
+
+
+def digest_cutoff(messages: list[dict], keep_recent: int) -> int:
+    """Expand the preserved tail so a digest cannot orphan a tool exchange.
+
+    Keep incomplete calls and any exchange crossing the digest/tail boundary.
+    An exchange involving the preserved first message prevents middle removal.
+    Supports the internal block shape and OpenAI-style tool call messages.
+    """
+    cutoff = max(1, len(messages) - max(keep_recent, 0))
+    positions: dict[str, list[int]] = {}
+    calls: set[str] = set()
+    results: set[str] = set()
+    for index, message in enumerate(messages):
+        content = message.get("content")
+        blocks = content if isinstance(content, list) else []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            kind = block.get("type")
+            key = block.get("id") if kind == "tool_use" else block.get("tool_use_id")
+            if kind in {"tool_use", "tool_result"} and isinstance(key, str) and key:
+                positions.setdefault(key, []).append(index)
+                (calls if kind == "tool_use" else results).add(key)
+        for call in message.get("tool_calls") or []:
+            key = call.get("id") if isinstance(call, dict) else None
+            if isinstance(key, str) and key:
+                positions.setdefault(key, []).append(index)
+                calls.add(key)
+        key = message.get("tool_call_id")
+        if message.get("role") == "tool" and isinstance(key, str) and key:
+            positions.setdefault(key, []).append(index)
+            results.add(key)
+    while True:
+        old_cutoff = cutoff
+        for key, indices in positions.items():
+            first, last = min(indices), max(indices)
+            if first == 0 and 0 < last < cutoff:
+                return 1
+            if first < cutoff and (last >= cutoff or key not in calls or key not in results):
+                cutoff = max(1, first)
+        if cutoff == old_cutoff:
+            return cutoff
 
 
 def should_digest(step: int, every: int = DIGEST_EVERY) -> bool:

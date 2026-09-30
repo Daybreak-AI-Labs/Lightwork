@@ -278,6 +278,78 @@
         if (text != null) e.textContent = text;
         return e;
       };
+      // Plain-language error text for a failed request. Pass the fetch
+      // Response (or a thrown error) and, optionally, what the person was
+      // trying to do ("save the policy"). Never shows HTTP codes, exception
+      // class names or server internals.
+      window.mvErrorText = function (failure, action) {
+        var what = action ? ('Could not ' + action + '. ') : '';
+        var status = failure && typeof failure.status === 'number' ? failure.status : 0;
+        if (!status) {
+          var name = failure && failure.name;
+          if (name === 'AbortError') return what + 'It took too long. Please try again.';
+          if (name === 'TypeError' || (failure && /fetch|network/i.test(String(failure.message || failure)))) {
+            return what + 'Lightwork could not be reached. Check your connection and try again.';
+          }
+          return what + 'Something went wrong. Please try again.';
+        }
+        if (status === 400 || status === 422) return what + 'Some of the details need fixing. Check what you entered and try again.';
+        if (status === 401) return what + 'Your sign-in has expired. Sign in again to continue.';
+        if (status === 403) return what + 'You do not have permission to do this. Ask an administrator.';
+        if (status === 404) return what + 'That item no longer exists. Refresh the page to see the latest.';
+        if (status === 409) return what + 'This was changed since you opened it. Refresh the page and try again.';
+        if (status === 413) return what + 'That is too large. Try a smaller file or fewer items.';
+        if (status === 429) return what + 'Too many requests right now. Wait a moment and try again.';
+        if (status === 503) {
+          // Only say "turned off" when the caller knows the server said so
+          // (featureOff flag or its detail text); a plain 503 is temporary.
+          var off = failure.featureOff === true ||
+            /\b(turned off|is disabled|not enabled)\b/i.test(typeof failure.detail === 'string' ? failure.detail : '');
+          return what + (off
+            ? 'This feature is turned off. An administrator can turn it on in Settings.'
+            : 'This is temporarily unavailable. Please try again in a few minutes.');
+        }
+        if (status >= 500) return what + 'Something went wrong on our side. Please try again in a minute.';
+        return what + 'Something went wrong. Please try again.';
+      };
+      // A server message is shown only when it is already a plain sentence
+      // written for people ("Pick a later date."). Codes, snake_case names,
+      // paths, data and developer words return '' so the caller falls back
+      // to mvErrorText.
+      var JARGON = /\b(tenant|principal|payload|endpoint|schema|uuid|sha-?\d*|digest|idempotency|revision|lease|json|yaml|toml|http|https|api|config|configuration|token|traceback|exception|null|undefined|nan|maverick|sqlite|postgres|stdout|stderr|regex|cas|etag|manifest|runtime|webhook)\b/i;
+      window.mvPlainDetail = function (detail) {
+        if (typeof detail !== 'string') return '';
+        var text = detail.trim();
+        if (text.length < 8 || text.length > 300) return '';
+        if (!/^[A-Z]/.test(text) || !/[.!?]$/.test(text)) return '';
+        if (/[_{}<>\[\]`\\|=]|\/\w|\w\(|\b[a-z]+[A-Z]\w*\b|(?:^|[^\d,.])[45]\d\d(?![\d,])/.test(text)) return '';
+        if (JARGON.test(text)) return '';
+        return text;
+      };
+      // Show that error as a toast; returns the text for callers that also
+      // write it into the page.
+      window.mvFail = function (failure, action) {
+        var text = window.mvErrorText(failure, action);
+        mvToast(text, { error: true });
+        return text;
+      };
+      // A stored value (status, kind, slug) as a readable label:
+      // "pending_review" -> "Pending review", "ai_act" -> "AI Act".
+      var WORDS = { ai: 'AI', api: 'API', id: 'ID', ids: 'IDs', url: 'URL', sso: 'SSO',
+        dsar: 'DSAR', gdpr: 'GDPR', ccpa: 'CCPA', hipaa: 'HIPAA', soc2: 'SOC 2', pii: 'personal data',
+        sla: 'SLA', mfa: 'MFA', eu: 'EU', us: 'US', uk: 'UK', llm: 'AI model', mcp: 'MCP',
+        sha256: 'fingerprint', csv: 'CSV', pdf: 'PDF', iso: 'ISO', nist: 'NIST', dpia: 'DPIA',
+        ropa: 'record of processing', cmp: 'consent banner', ok: 'OK' };
+      window.mvHuman = function (value) {
+        if (value === null || value === undefined) return '';
+        var words = String(value).trim().replace(/[_-]+/g, ' ').split(/\s+/).filter(Boolean);
+        if (!words.length) return '';
+        var out = words.map(function (w) {
+          var key = w.toLowerCase();
+          return Object.prototype.hasOwnProperty.call(WORDS, key) ? WORDS[key] : key;
+        }).join(' ');
+        return out.charAt(0).toUpperCase() + out.slice(1);
+      };
       window.mvWhen = function (ts) {
         // Return '' for missing/invalid timestamps rather than formatting the
         // Unix epoch: (ts || 0) would turn 0/null/undefined/NaN into 1/1/1970,
@@ -441,9 +513,9 @@
             // clear may still have changed one backend.  Do not display the
             // pre-request state as verified until a fresh read succeeds.
             render('unknown');
-            let detail = 'Emergency stop change failed (error ' + response.status + ').';
-            if (result.body && result.body.detail) detail = String(result.body.detail);
-            mvToast(detail, { error: true });
+            mvToast(typeof mvErrorText === 'function'
+              ? mvErrorText(response, 'change the emergency stop')
+              : 'Emergency stop change failed. Please try again.', { error: true });
           } else {
             // A 204 only acknowledges the mutation request.  It is not a
             // status document and cannot prove either local or cluster state.
@@ -453,7 +525,7 @@
           }
         } catch (e) {
           render('unknown');
-          mvToast('Emergency stop change failed: the dashboard is unreachable.', { error: true });
+          mvToast('Emergency stop change failed. Lightwork is not responding. Check your connection and try again.', { error: true });
         } finally {
           pending = false;
         }
@@ -549,16 +621,24 @@
           const resp = await fetch(form.action, { method: 'POST', body: new FormData(form) });
           if (resp.redirected) { window.location.href = resp.url; return; }
           if (resp.ok) { window.location.reload(); return; }
-          let detail = 'Could not start the goal (' + resp.status + ').';
-          try { const j = await resp.json(); if (j && j.detail) detail = j.detail; } catch (e) {}
+          let serverDetail = '';
+          try { const j = await resp.json(); if (j && typeof j.detail === 'string') serverDetail = j.detail; } catch (e) {}
+          let detail = window.mvErrorText(resp, 'start the task');
           if (resp.status === 429) {
-            const ra = resp.headers.get('Retry-After');
-            if (ra) detail += ' (retry in ' + ra + 's)';
+            const ra = parseInt(resp.headers.get('Retry-After') || '', 10);
+            detail = 'Too many requests right now. ' + (ra > 0
+              ? 'Try again in ' + ra + (ra === 1 ? ' second.' : ' seconds.')
+              : 'Wait a moment and try again.');
+          } else if (resp.status === 400 && /model route/i.test(serverDetail)) {
+            detail = 'Could not start the task. An AI model needs to be set up first. Ask an administrator to finish setup in Settings.';
+          } else if ((resp.status === 400 || resp.status === 422) && window.mvPlainDetail(serverDetail)) {
+            // Messages such as length limits are written for people.
+            detail = window.mvPlainDetail(serverDetail);
           }
           errBox.textContent = detail;
           errBox.style.display = 'block';
         } catch (e) {
-          errBox.textContent = 'Network error — is the dashboard still running?';
+          errBox.textContent = 'Lightwork is not responding. Check your connection and try again.';
           errBox.style.display = 'block';
         } finally {
           if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
@@ -746,16 +826,13 @@
           body: JSON.stringify({ section: section, enabled: true }),
         }).then(function (r) {
           if (r.status === 403) {
-            throw new Error('Only an administrator can turn this on — ask yours.');
+            var denied = new Error('Only an administrator can turn this on. Ask yours.');
+            denied.plain = true; throw denied;
           }
-          if (!r.ok) {
-            return r.json().catch(function () { return {}; }).then(function (b) {
-              throw new Error(b.detail || ('Could not turn this on (' + r.status + ').'));
-            });
-          }
+          if (!r.ok) throw r;
           location.reload();   // re-render with the module live
         }).catch(function (e) {
-          if (err) err.textContent = (e && e.message) || 'Could not reach the server.';
+          if (err) err.textContent = (e && e.plain) ? e.message : window.mvErrorText(e, 'turn this on');
           btn.disabled = false;
         });
       });

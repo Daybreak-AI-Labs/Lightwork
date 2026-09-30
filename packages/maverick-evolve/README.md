@@ -96,3 +96,28 @@ These controls establish protocol behavior. They do not establish a
 against the strongest applicable baselines on a temporal sealed holdout, with a
 pre-registered margin and no safety regression. See
 `docs/research/2026-07-14-risk-limited-dgm-self-learning.md`.
+
+## Evaluation execution evidence
+
+`evaluate` retains an `EvalObservation` for every completed exposure: execution
+status, optional answer grade, bounded diagnostic category, visible-case digest
+and evaluator identity. `evaluate_case` remains a float-returning compatibility
+API; `observe_case` exposes the typed result. A crashed, timed-out or non-string
+execution is never sent to the rubric and contributes zero development fitness.
+A successful empty answer or abstention is still graded normally. A custom
+evaluator without an explicit identity is labeled unversioned; hashing visible
+case fields does not claim to version arbitrary Python check code.
+
+Sealed confirmation rejects the comparison if either arm has any execution
+failure. Ordinary failures still consume exactly the existing counterbalanced
+one-exposure-per-arm schedule; there are no retries. Cancellation, budget,
+accounting and halt signals stop immediately and propagate, so unused exposures
+are not spent. The existing durable permit remains consumed even when evaluation
+fails. Evaluator exceptions and invalid grades reject confirmation as before.
+
+Structured operational log messages link case/status observations to comparison,
+candidate and exposure IDs, including cancellation. They exclude prompts,
+answers, exception messages and sealed grades. These logs are diagnostic evidence,
+not a new durable receipt store. Deployments must retain their configured logs
+to retain these diagnostics. Existing archives and historical scores are not
+rewritten or relabeled as revalidated evidence.

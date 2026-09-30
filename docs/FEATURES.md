@@ -19,6 +19,31 @@ here.
 
 ## Agent kernel & orchestration
 
+- **Guided restored-connection review** — recovery uses ordinary outcome,
+  evidence and date controls instead of editing a data object. Recovery Copilot
+  hosts the same current-authority form locally. Interrupted recording can
+  finish the exact retained review without repeating old work; normal startup
+  still requires separate completion. Manual source-position selection and
+  whole-platform Copilot coverage remain incomplete. See
+  [review boundaries](recovery-connected-services.md).
+
+- **First global Copilot action** — on a workflow run, Copilot can check the
+  current learning example and open the same protected stop-use form as the
+  page. The signed-in person enters a reason and confirms; the native service
+  rechecks current authority and example revision and reports confirmed or
+  audit-pending results. The closed catalog is default-off under
+  `[features] copilot_operations` and appears in Settings and the installer.
+  Direct page withdrawal does not depend on this flag. This covers one
+  operation, not all post-install work; see
+  [operation coverage](post-install-operation-coverage.md).
+
+- **Bounded audit reads and explicit coverage** — live tails seek a bounded
+  suffix; newly sealed history uses authenticated 1 MiB frames without changing
+  signed bytes. Export supports separate coverage receipts and optional segment
+  chain verification. Partial/unreadable evidence is visible and exits nonzero;
+  legacy monolithic seals remain readable with their whole-blob cost reported.
+  See [audit read coverage](audit-read-coverage.md) for limits and proof scope.
+
 - **Customer navigation** — Tasks (`/goals`), Connections (`/connections`),
   Knowledge (`/knowledge-access`), Results (`/deliverables`), and Settings (`/settings`)
   retain existing routes and data permissions. Navigation and direct page
@@ -87,8 +112,16 @@ here.
   `GET /api/v1/run-tree/{goal_id}` (both ends access-checked).
 - **Kernel lifecycle hooks** — `PreToolUse` / `PostToolUse` / `UserPromptSubmit`
   (`hooks.py`), registrable from plugins.
-- **Budget caps** — hard dollar + wall-clock + tool-call ceilings the kernel
-  refuses to exceed (`budget.py`).
+- **Optional task limits and metered usage** — explicit dollar, elapsed-time,
+  token, tool-call and step limits are enforced; ordinary tasks receive no
+  generated limits. Settings can suppress saved task defaults reversibly.
+  Organization allowance checks remain independent and admit each physical
+  provider attempt against current recorded spend plus durable holds. Reported
+  provider cost can exceed its projection and is still recorded. Certified
+  allowance refusals before orchestration preserve resumable workflow progress;
+  later stops remain conservative about prior effects. Goal cancellation is
+  checked during model/tool awaits, with execution owned until cleanup finishes. See
+  [task limits and spend accounting](task-limits.md).
 - **Killswitch** — `~/.maverick/HALT` aborts all running goals (`killswitch.py`).
 - **Long-horizon review checkpoint** — opt-in `[safety] review_checkpoint`
   (`review_checkpoint.py`): the root agent fires a human-review heartbeat every
@@ -121,6 +154,14 @@ here.
   of overflowing the model window — zero-dep lexical ranking by default, an
   injected Chroma/Qdrant store for embedding-quality retrieval; opt-in via
   `[context] retrieval_router`.
+- **Complete tool-result delivery** (`tool_result_stream.py`,
+  `tool_result_artifacts.py`) — bounded 16 MiB collection; safe progress before
+  whole-result screening; encrypted tenant/principal/goal-scoped artifacts for
+  results larger than model previews; `read_tool_result` slices under existing
+  tool ACLs. Programmatic `code_exec` receives complete screened values, and
+  partial streams/cleanup failures require reconciliation. See
+  [tool result lifecycle](tool-result-lifecycle.md) for quotas, seven-day
+  retention and cancellation ownership.
 - **Model-scaled context** (`context_scaling.py`, on by default; `[context]
   model_scaled = false` pins the legacy fixed bounds) — history windows,
   per-turn caps, compaction targets, the retrieval-router threshold, tool-result
@@ -472,6 +513,15 @@ here.
   `output.gate` lighter than the playbook's final sign-off). All 2,031 built-in
   packs lint clean (0 errors, 0 warnings); every pack carries at least a
   suite-level `knowledge_sources` grounding fallback.
+- **Pack deployment prerequisites** — tool-risk checks preserve the declared
+  risk ceilings and denylists. Read-only workflows use `sql_query_read` and
+  `spreadsheet_read`; these tools do not expose their mutable siblings' write
+  operations. Deployment validates required workflow tools against the assembled
+  registry, including custom adapters, and refuses missing requirements with
+  adapter, enablement or approved-export guidance. Optional missing allowlist
+  tools are reported separately. The September 23 catalog review identified
+  255 packs with remaining adapter-name prerequisites; linted content is not
+  proof that all 2,031 packs are operational in a fresh installation.
 - **Governance-posture audit** — `maverick domains-audit [--json <path>
   --suite <name>]` (`domain_audit.py`): the auditable inventory of "what can
   these agents do, and what stops them?" — per pack the compartment seal, risk
@@ -496,13 +546,29 @@ here.
   its parent's grant (no privilege escalation); (4) **compartment isolation** —
   a quarantine seal never bleeds across compartments/suites; (5) **hard
   refusals** — the universal refusal floor is unstrippable; (6) **budget caps**
-  — no cap is ever silently exceeded. Plus hostile-argument fuzzing of every
+  — configured limits retain their refusal behavior. This test scope does not
+  guarantee that a provider's actual invoice stays within a projected charge.
+  Plus hostile-argument fuzzing of every
   connector and tool.
 - **Robustness hardening** (bugs found by the stress sweep and fixed) —
   connectors no longer raise on a non-string op/path/query (they return an
   ERROR string); `Skill.parse` raises `ValueError` (not `AttributeError`) on
   malformed/untrusted frontmatter; `format_money` degrades gracefully on a
   None/empty currency.
+- **Bounded shared connector attempts** — REST/GraphQL factories preserve
+  sanitized status and attempt metadata until the retry decision. Explicit REST
+  GET retries are bounded and charged to the active Agent tool budget; uncertain
+  writes require reconciliation and arbitrary GraphQL documents do not retry.
+  Streaming wire/decompression/JSON limits and per-socket absolute deadlines
+  apply before rendering. Existing consent, credentials, DNS pinning, 202 and
+  truncation semantics remain; synchronous DNS itself is not interruptible.
+  See [connector limits and qualification](operations/connector-attempts.md).
+- **SQL result completeness and execution ownership** — `database` and
+  `sql_query` share explicit row/cell/output completeness, bounded valid JSON
+  previews, and correct limited-RETURNING cursor/commit ordering. SQLite and
+  psycopg 3 support owned query deadlines/cancellation; other drivers report
+  unsupported cancellation honestly. Closed snapshots do not expose an invented
+  continuation cursor. See [SQL contracts and limitations](operations/sql-query-execution.md).
   (`domain_eval.py`): golden cases that test a specialist's load-bearing
   behavior (AP catches a duplicate and never pays; legal cites or marks
   unverified; HR refuses emotion inference; ops refuses an interlock override).
@@ -520,7 +586,11 @@ here.
   --ledger]`) — replays past goals against learned-state snapshots to detect
   when the forgetting loops silently cost coverage: gained / regressed /
   unchanged, deterministically, with no agent re-runs. `--strict` is a
-  learning-regression CI gate; `--ledger` appends a tamper-evident row.
+  learning-regression CI gate; `--ledger` writes an aggregate local summary
+  and a separate audit event. The summary itself is unsigned; audit signing
+  depends on deployment settings. Incomplete recording exits non-zero and
+  warns that the summary may already exist before a retry. Coverage changes
+  alone do not demonstrate improved task outcomes.
 - **Workforce value report** (`workforce_value.py`, `maverick proof
   [--fleet]`) — deliverables completed, agent cost vs human baseline →
   cost avoided + ROI, the capability improvement curve from the hindsight
@@ -1189,6 +1259,11 @@ here.
   assessments, a posture rollup, and a OneTrust third-party CSV importer
   that never overwrites a vendor already registered here. A register and
   audit trail, never a vendor risk rating service.
+- **Indexed vendor questionnaire lookup** (`governed_record_lookup.py`,
+  `governed_record_lookup_pg.py`) — maintained token-digest projections with
+  current canonical revision/association checks, bounded resumable backfill,
+  atomic Postgres updates and local crash recovery. Existing vendor feature
+  admission applies. See [migration and recovery](vendor-questionnaire-index.md).
 - **Consent receipts and preferences registry** (`consent_registry.py`,
   opt-in `[consent_registry] enable` + `subject_salt`, `maverick
   consent`, `/api/v1/consent/*`) — per-subject, per-purpose consent
@@ -1652,8 +1727,12 @@ here.
   authority may imply that narrower read, while training-only authority never
   does. Every direct read and cache hit re-resolves current purpose, requested
   action, approval, checksum, license/usage constraints, freshness, consent,
-  and every parent with the same action. Exports carry a deterministic binding
-  of the user authorization and exact source evidence. Correction, exclusion,
+  and every parent with the same action. Search filters assigned
+  sources before bounded lexical ranking, exposes incomplete/unavailable states,
+  and supports revalidated continuation in the UI and agent tool. Agent evidence
+  preserves claim state, dates, provenance and exact source versions. Exports carry
+  a deterministic binding of the user authorization and exact source evidence.
+  Correction, exclusion,
   and deletion requests preserve what reviewers saw, re-walk derivative state
   on every response, and expose crash recovery for an interrupted approval.
   Raw deletion is never described as erasing learned-weight influence. The
@@ -1733,8 +1812,12 @@ here.
   under `deny_actions` for `agent:finance-1` at T", "`read_file` ran") that an
   auditor, regulator or a customer's customer verifies offline with a public key
   obtained out of band. An executed/failed tool claim is available only when a
-  signed call and terminal-result row carry the same recomputed commitment; a
-  call row on its own proves only a recorded dispatch attempt. The call row and
+  signed call and terminal-result row carry the same recomputed commitment;
+  `execution_unknown` dispositions remain unknown even with a matching pair.
+  Previously exported v2 receipts that incorrectly labeled such rows as
+  executed or failed must be regenerated from the original signed rows; the
+  corrected verifier rejects the inconsistent claim without changing history.
+  A call row on its own proves only a recorded dispatch attempt. The call row and
   its input summary are omitted by default and require the explicit bounded
   `--include-execution-pair` disclosure. The receipt always embeds the claim
   row; `--include-chain` additionally embeds every following row up to the tip,
@@ -1753,8 +1836,11 @@ here.
   with the issuer's mutable checkpoint directory, but does not independently
   anchor history. The minter refuses a broken chain, never mutates the audit
   files, publishes through a byte-exact exclusive two-phase protocol, and stamps
-  `issuer.key_custody` so a co-located key is reported as integrity rather than
-  tamper-evidence. The verifier accepts role-scoped trust inputs for the receipt
+  `issuer.key_custody` to distinguish key sources. The historical `offhost`
+  value means externally supplied: injected and KMS-unwrapped private keys
+  remain available to the local signing process. It does not establish isolated
+  signing or resistance to an actor able to use that key. The verifier accepts
+  role-scoped trust inputs for the receipt
   envelope, historical audit rows, checkpoints, and the anchor ledger without
   claiming that a deployment uses physically distinct keys. Envelope and
   checkpoint key windows are evaluated at verification time; historical row and
@@ -1883,8 +1969,10 @@ here.
   **graduates** the action from "a human approves" to "policy auto-approves"
   — implemented as a revocable standing consent-ledger grant the existing
   approval path already honours — and one miss by ANY agent **demotes
-  instantly** (revoke-before-record, retried on every later miss plus a
-  stale-grant sweep each reconcile, so authority never outruns evidence).
+  the local action state** (withdrawal attempted before recording, retried on
+  every later miss plus a stale-grant sweep each reconcile). Standing consent
+  withdrawal is scoped to the current identity and policy; a demoted local
+  action state does not establish that every identity's grant was withdrawn.
   Interlocks fail toward the human: no graduation while `calibration` is
   frozen or a learning HALT is active, `max_auto_risk` defaults to `medium`
   (graduating irreversible high-risk types is an explicit operator decision;
@@ -1892,7 +1980,11 @@ here.
   unknown level ranks above every ceiling), and `require_reversible` demands
   every card declare an inverse. Disabling the feature stops evidence and
   demotion but not grants already minted — `maverick earned-autonomy --revoke
-  ACTION` is the incident-response path and works while disabled. `run_saga`
+  ACTION` works while disabled, confirms current-authority withdrawal and
+  local recording separately, and reports incomplete results non-zero.
+  Other identities' grants require separate withdrawal. The central audit
+  remains best-effort and records both withdrawal and local-record outcomes
+  when available. `run_saga`
   is the compensating half: steps ship their undo, an irreversible step
   refuses to start, and a mid-saga failure rolls the completed prefix back in
   reverse. **Shadow Mode** (`shadow_execute`) is the centerpiece that ties it
@@ -2001,10 +2093,120 @@ here.
   See
   [`ekko-work-discovery.md`](./ekko-work-discovery.md).
 
+- **Bounded learned pure operators** (opt-in `[flows] learned_operators`) —
+  reviewed scalar examples retain the complete matching expression set from a
+  fixed grammar; an attached agent node uses a learned value only on in-domain
+  agreement, otherwise retaining its original agent fallback. File-only
+  `maverick flow operator` commands learn, refine, inspect, attach and remove
+  draft artifacts; agreement is not verified correctness or action authority.
+  Bounded distinguishing questions expose ambiguity for reviewed labels;
+  `[flows] learned_operator_questions` separately enables authenticated,
+  tenant-owned review records and unpublished refinement drafts with audit
+  recovery. Exhausted search does not imply equivalent candidates.
+  `learn-composed` infers bounded multi-operation scalar expressions from
+  reviewed end-to-end examples, retaining all matching expression trees in a
+  packed graph. The same refinement, question and draft paths handle both
+  artifact schemas. Composed execution also requires `[flows] composed_operators`;
+  incomplete prediction or disagreement preserves the original agent fallback.
+  See [usage and limits](./learned-operators.md).
+
+- **Learned action dataflow** (`maverick.flow.action_recipe`,
+  `[flows] action_recipes`) — infer all matching typed input, earlier-result and
+  constant argument bindings from reviewed straight-line action episodes.
+  `maverick flow recipe learn/refine/draft` produces reviewable native flows with
+  an approval before each action. Fresh runtime IDs remain data dependencies;
+  disagreement stops the sequence without repeating completed work.
+  Explicit `learn --transforms --domain ...` learns bounded arithmetic/text/
+  conditional argument expressions with all consistent candidates retained,
+  up to six eligible source fields per step and eight total argument leaves.
+  Default-off `[flows] action_recipe_transforms` additionally gates v2 execution;
+  native action approvals and authority remain required. Float/null values keep
+  copy-only semantics. Explicit `learn --choices --domain ...` learns a Boolean
+  guard and argument relationships for one shared action followed by one of two
+  demonstrated terminal tools, from at least four episodes with two per outcome.
+  All consistent guards remain; the default mode stops on disagreement after
+  the shared action without replay. Default-off `[flows] action_recipe_choices` requires both
+  recipe and transform opt-ins. Verified learning also accepts `--choices`;
+  existing refinement and draft paths preserve the choice artifact. This bounded
+  topology does not learn arbitrary tool order, nested branches or loops.
+  Separate `learn-workflow-verified` learns next actions and completion from
+  signed reviewed histories with varied counts and repeated tools, within an
+  explicit last-tool/latest-results representation. The strict default-off
+  `[flows] action_workflow_learning` also requires recipe, transform and lineage
+  opt-ins and an actual governed reference. The authenticated
+  `/flows/recipe-lineage/learn-workflow-verified` route learns and admits using
+  current source/owner authority; CLI output remains unadmitted. Bounds include
+  eight executed actions, eight tools, 32 episodes/states, 12 source leaves per
+  state and two operations per expression. All consistent alternatives remain;
+  uncertainty stops work. This is not hidden-policy inference, unrestricted
+  loops, cost-optimal evidence acquisition or proof of business correctness.
+  Workflow execution requires strictly persisted signed receipts, separately
+  from source-bundle verification. Unavailable signing or persistence refuses
+  further execution; receipt failure after an effect quarantines the run without
+  replaying that effect. Enabling workflow learning does not configure global
+  audit signing or install its dependencies. This does not make every product
+  audit event signed or local storage immutable.
+  Separate `learn-memory-verified` and the matching authenticated
+  `/flows/recipe-lineage/learn-memory-verified` route infer a bounded integer
+  history accumulator alongside those next-action and argument expressions.
+  The complete family includes no memory, zero/input initialization and one
+  fixed retain/replace/add/subtract/min/max update program over one selected
+  tool result field. All consistent models and their own expression alternatives
+  remain; every interpretation must agree before execution. The strict default-off
+  `[flows] action_workflow_memory_learning` additionally requires the workflow
+  opt-in and its dependencies, including the same mandatory signed execution
+  receipts. Shared search/history budgets and integer overflow
+  cause refusal; they never select an incomplete set of alternatives. This is
+  one bounded integer cell, not arbitrary hidden-state or business-policy inference.
+  Explicit `draft`/`draft-verified --teach-choices` and the governed draft API's
+  strict `teaching: true` option add human continuation review on a real completed
+  prefix. Both branches' arguments must agree; the chosen terminal still needs
+  separate native approval. Default-off `[flows] action_recipe_teaching` requires
+  the recipe/transform/choice/lineage flags and an actual governed reference,
+  including when general require-lineage policy is off. Inspection markers grant
+  no execution authority and never reopen indeterminate runs. Optional
+  in-memory capture admits only successful native governed action observations,
+  with source-run/definition/call provenance and explicit local review export.
+  Separate `[flows] action_episode_capture` enrollment retains encrypted native
+  evidence across ordinary approval pauses, with declared data bounds, expiry
+  and authenticated human review before export. Learning consent is separate
+  from execution approval. Ordinary capture requires straight-line source flows;
+  a separate teaching family admits only the exact human-choice topology and
+  binds its actual prefix, authenticated selection and native terminal. An
+  agreement-only teaching run cannot supply a new human label. Complete teaching
+  bundles still need separate suitability review, copied-data grant and signed
+  export before verified refinement; no automatic publication follows. This does not
+  learn agent policies. Raw `learn/refine` files remain operator assertions. The separate
+  default-off `[flows] action_recipe_lineage` path signs authenticated reviewed
+  bundles, verifies them against independent issuer/tenant key trust and retains
+  complete training lineage in a package. Authenticated governed admission and
+  draft export bind that package to native decision receipts; current source,
+  review, key and grant eligibility are checked before each proposed action and
+  dispatch. `[flows] require_action_recipe_lineage` can require this path for all
+  learned recipes. Grants expire no later than the original capture deadline
+  (at most seven days); no renewal route is included. Service signatures are not
+  personal reviewer signatures or proof of business correctness. Offline
+  verification reports live status as unchecked, and expiry does not erase
+  downloaded or derived Flow copies. Preserve complete packages and bundles.
+  The run page's **Learning example** card lets an authorized human stop future
+  governed use with an ordinary reason and confirmation form. Restricted
+  withdrawal preparation and withdrawal remain available while execution or
+  learning is disabled, retaining current ownership, source, retention, revision
+  and audit checks. Pending recording is not success; withdrawal does not undo
+  business work or erase exported copies. This completes the withdrawal control,
+  not the wider learning lifecycle or its Copilot operations.
+  See [usage, controls and limits](./learned-action-recipes.md). These engine and
+  API capabilities do not yet have a complete nontechnical dashboard journey;
+  [customer experience acceptance](./learned-capabilities-product-contract.md)
+  defines the remaining setup, teaching, consent, use and recovery requirements.
+
 - **Flow engine & visual automation** (`maverick.flow.*`, gated on `[flows]`) — a
   deterministic graph of typed nodes (`ir.py`: agent / action / branch / switch /
   foreach / while / parallel / approval / delay / wait_event / scope (try-catch) /
   subflow / setvar) run by a pure interpreter (`runner.py`)
+  with [complete private checkpoints](./flow-checkpoint-storage.md) for pause,
+  restart and retry (bounded API previews never replace execution data),
+  tenant-scoped indexed metadata history and cursor-paged due-run recovery,
   with data threading, safe expression rendering (`{{fn(...)}}` incl. arithmetic,
   list ops, `and`/`or` conditions with numeric-or-lexical ordering so date/string
   comparisons work; action params may additionally use `{{secret('NAME')}}` to
@@ -2104,6 +2306,39 @@ here.
   session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
   fires a flow with the submitted fields as data.
 
+  The administrator's connected-automation settings show the effective signing
+  configuration. Reviewed changes recheck current authority and settings,
+  verify the incoming and outgoing resolvers separately, and restore the local
+  configuration when a write cannot be confirmed. The ordinary form reports
+  uncertain outcomes and clears a prior account's credential entry. External
+  secret ownership transfer, independent outgoing-only rotation and durable
+  settings audit history remain open; see the
+  [post-install coverage register](./post-install-operation-coverage.md).
+
+  Polled batches are retained in the tenant world database before dispatch,
+  using the configured at-rest encryption. A failed queue reservation or cursor
+  write retries that retained batch even if the feed no longer contains it.
+  Template events commit their goals and admission receipts together, and both
+  manual polling and scheduled polling publish through the durable queue. Queue
+  admission receipts survive completed-job cleanup. This prevents automatic
+  duplicate admission; it does not make an external service's effects reversible.
+  An unconfirmed non-idempotent callback remains held for reconciliation.
+
+  Source cursors distinguish an initialized empty feed from a new trigger, so
+  its first later item runs. Stored cursor-format metadata preserves legacy raw
+  IDs, including IDs resembling the new envelope format. Flow admission uses
+  the exact source identity rather than truncated display fields. During cursor
+  migration, an existing legacy flow run is reused only when its retained fields
+  establish the same identity; ambiguous truncated records require reconciliation.
+  File batches drain timestamp ties, including new arrivals at the current
+  boundary. A boundary holds at most 4,096 file identities; overflow is reported
+  before advancing, and files arriving with timestamps older than an already
+  advanced boundary remain historical. Legacy timestamps cannot reconstruct
+  files previously skipped by an older installation. IMAP initialization reads
+  the complete UID high-water without fetching historical message bodies;
+  UIDVALIDITY changes establish a new baseline. Provider-wide OAuth vault
+  authorizations and token rotations are serialized across local processes.
+
 - **Migration fidelity** (`automation_import.to_flow`) — a per-source
   `_STRUCTURAL_LOWERERS` registry (register a source in one line): n8n IF/Filter,
   Power Automate (WDL) `If` / `Foreach` / `Switch` / `Until` / `Scope`, Workato
@@ -2122,6 +2357,15 @@ here.
   graphs directly (`as_flows: true` on `POST /import/run`) with the fidelity
   summary rendered per automation — an import never silently pretends to be
   lossless.
+  Supported n8n `$json` references normalize to flow-data paths and every
+  AND/OR clause is retained. WDL `If` preserves nested AND/OR/NOT as a branch
+  graph, including literal types and nested trigger fields. Unsupported
+  operators, unbound action-output references and dynamic right operands
+  require manual repair; graph imports preflight the entire batch before
+  creating templates, schedules or triggers. Agent fallback steps retain
+  bounded, secret-redacted operational inputs without silent truncation.
+  WDL `Until` remains an approximation because the generated loop checks its
+  exit condition before each pass; compound exit expressions require repair.
 
 - **Rich human tasks** — an `approval` node carries `choices` (verdicts beyond
   approve/reject, recorded to `output` for a downstream switch), an `assignee`,
@@ -2647,6 +2891,13 @@ refuses a non-conformant backend rather than falling through to unsandboxed
 local exec) — so third parties ship backends without forking. All in-tree
 backends conform (the check surfaced and fixed a real gap: devcontainer
 lacked `workdir`, crashing path-confined tools).
+Dispatch never retries a backend because an invocation raised `TypeError`.
+Legacy `exec(cmd)` backends can explicitly declare a backend-enforced finite
+execution policy; admission rejects a caller deadline shorter than that fixed
+cap before execution. See [legacy sandbox policy](operations/legacy-sandbox-policy.md).
+Docker/Podman cleanup checks exit status, retains unresolved owned container
+identities, and shares one total cleanup deadline; see
+[runtime integrity and bounded work](operations/refactor-runtime-safety.md).
 **gVisor** is offered as a backend (`backend = "gvisor"`): Docker with the
 `runsc` runtime (`--runtime=runsc`), interposing a userspace application kernel
 between a possibly prompt-injected agent and the host — stronger isolation than
@@ -2761,18 +3012,19 @@ installed and falls back to stdlib `json` otherwise — `dumps` returns `str`,
 honors `sort_keys`, and degrades on any value orjson rejects, so it's a safe
 drop-in for round-trip/transport paths (wired into the tool-output cache
 snapshot). Deliberately NOT used for cache keys/signatures, where exact bytes
-must stay backend-stable. **Self-tuning budgets — online auto-apply**
-(`self_tuning_budget.py`, default-on `[budget] self_tuning`; the auto-applying
-companion to the advisory `maverick budget tune` / `budget_tuner.py`, which
-only *recommends* a cap for a human to set): learns a default spend cap *per
-coarse task class*
+must stay backend-stable. **Self-tuning budget suggestions**
+(`self_tuning_budget.py`, governed `[budget] self_tuning`): retains observed
+spending and can suggest a cap for a caller that explicitly requests a *coarse
+task class*
 (e.g. the goal's leading verb) from how much past runs of that class actually
 cost — a bounded reservoir per class, a high-quantile × margin suggestion
 clamped to [floor, ceiling]. Wired as the **lowest-precedence** layer of
-`budget_from_config` (an operator's configured `max_dollars` always wins) and
-fed by the orchestrator's per-run cost recording; returns nothing until a
-class has enough samples, so it never lowers safety on a guess. Off by
-default.
+`budget_from_config` for such callers (an operator's configured `max_dollars`
+wins) and fed by the orchestrator's per-run cost recording. It returns nothing
+until a class has enough samples. Ordinary production tasks do not request a
+learned class cap, and **Task limits Off** suppresses learned defaults as well
+as configured ones. The advisory `maverick budget tune` command remains a
+recommendation for an operator to review.
 
 **Local-runtime launcher + autoscaler** (`local_runtime.py`, opt-in
 `[local_runtime]`, `maverick local-runtime plan`): composes the correct
@@ -2816,6 +3068,16 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   response so secrets never transit the model).
 - **MCP Tasks (2025-11-25)** — task-augmented `tools/call` → `CreateTaskResult`,
   background worker, `tasks/get|result|cancel|list`, status notifications.
+- **MCP execution ownership** (`maverick_mcp/execution.py`) — cooperative
+  task/request cancellation with separate acknowledgment and worker-exit state,
+  async result waits, bounded transport admission and single-reader stdio.
+  [Execution operations](operations/mcp-execution.md) documents effects and
+  disconnect/shutdown limits; cancelled workers remain counted until they exit.
+- **MCP catalogs** (`mcp_catalog.py`) — shared bounded pagination and atomic,
+  explicitly stale generations for stdio/HTTP; notices retire changed bindings
+  without granting new tools to running agents. See
+  [catalog synchronization](operations/mcp-catalogs.md) for refresh limits and
+  the HTTP notification subscription boundary.
 - **MCP client** (`mcp_client.py`) — consume remote HTTP servers; **OAuth 2.1
   client-credentials and authorization-code + PKCE** grants (`mcp_oauth.py`).
 - **MCP registry** (`mcp_registry.py`) — `maverick mcp-registry browse/add/...`.
@@ -2834,9 +3096,16 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   anything delegates against it) proven both ways by interop tests: Lightwork's
   own card passes its own validator, and third-party-shaped fixture cards
   (rich + minimal) parse correctly. The mounted task engine claims every
-  `messageId` in a tenant-and-principal-scoped SQLite ledger before execution,
+  `messageId` in a tenant-and-principal-scoped durable ledger before execution,
   replays terminal results across workers/restarts, and refuses crash-left
-  indeterminate claims rather than risking duplicate side effects.
+  indeterminate claims rather than risking duplicate side effects. Local mode
+  uses SQLite; the existing governed-record Postgres selection now uses encrypted
+  shared claims with forced RLS and atomic claim/lookup/quota/terminal indexes
+  (`a2a_store.py`, `governed_record_batch.py`). A protected local authority receipt
+  rejects accidental downgrade or a replaced shared namespace. Cached task reads
+  also revalidate authority. Existing local ledgers are refused in shared mode;
+  offline migration remains unfinished. The control plane still requires one
+  active owner; shared A2A storage does not establish platform HA.
 - **Swarm federation** (`federation.py` + `grpc_api/federation.proto`,
   protocol `maverick-federation/1`, opt-in `[federation] enabled` + `peers`):
   delegate goals across *sovereign* swarms (each with its own world DB —
@@ -2849,6 +3118,17 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   in exactly the convention `audit/federation.py` cross-verifies — a dropped
   half is detectable. The protocol layer runs over any `call(method, payload)`
   transport; the gRPC binding is a thin `[grpc]` adapter (live-smoked).
+  New inbound requests atomically reserve one held goal and a sealed, pinned
+  execution contract in the existing SQLite/PostgreSQL world admission ledger.
+  The required audit acknowledgment precedes dispatch. Same-correlation retries
+  repair pending audit/release phases; a claimed dispatch is never automatically
+  repeated after a crash. Additive response fields distinguish pending, accepted,
+  and unknown outcomes from refusal; acceptance does not prove completed work.
+  Current policy can hold a previously pinned grant, but cannot broaden it.
+  Recovery requires the peer to retry the same correlation; there is no automatic
+  startup drain. Retained receipts, including erased-goal tombstones, count
+  toward the existing 250,000-per-tenant / 50,000-per-peer capacity limits.
+  These limits no longer imply TTL eviction that could reopen old work.
 - **Agent Trust Plane** (`agent_trust.py`, engaged by enterprise mode or
   `[agent_trust] enforce = true` / `MAVERICK_AGENT_TRUST=1`) — the *single*
   registry + decision point for talking to **external** agents, unifying what
@@ -3054,6 +3334,23 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   and Trust Center exports remain capability-bound. Native mobile/OTT SDKs,
   production IdP/JWKS and subject-digest-key custody, localization/usability
   acceptance, and live web property deployment remain external work.
+- **Signed consent publishing and visitor sessions**
+  (`consent_publication_signing.py`, `consent_publication_signing_api.py`,
+  `[consent_preferences.publishing] require_signed_publications`,
+  `[consent_preferences.public_api] token_ttl_seconds`) — with signing on,
+  every publish, restore and withdrawal is Ed25519-signed in its own
+  transaction with a per-workspace key derived from one installation root
+  (generated and replaced on the Banner and Preference Center page by a global
+  admin, sealed in the dashboard overlay, audited, never shown; the public key
+  is shown by fingerprint and downloadable; `MAVERICK_CONSENT_PUBLICATION_SIGNING_KEY`
+  wins). Publishing without a key is refused; `/configuration` adds a
+  signature over the served configuration, publication and policy digests
+  only for publications whose publish-time signature verifies, and the web
+  SDK's `publicationKeys` option refuses anything else. `token_ttl_seconds`
+  (60-86400 s, unset = off) requires a short-lived, origin-bound visitor
+  session (`X-Lightwork-Consent-Session`, digest-only storage, renewable
+  before expiry, rate-limited like every public call) next to the site key;
+  the served SDK starts and renews sessions by itself.
 - **Verified consumer identity federation and one-time domain/device pairing**
   (`consent_identity_federation.py`,
   `consent_identity_federation_api.py`,
@@ -3544,7 +3841,9 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   (`maverick_shield/probe_model.py`): plain-JSON linear weights over the probe's
   named features (no pickle → loading an operator model can't execute code),
   combined by MAX so the model only raises recall, opt-in via `[shield]
-  probe_model` / `MAVERICK_SHIELD_PROBE_MODEL`,
+  probe_model` / `MAVERICK_SHIELD_PROBE_MODEL`, with validated content-digest
+  refresh, finite failure retry and explicit stale-model status
+  ([reload policy](operations/shield-probe-reload.md)),
   **voice safety pass** (`safety/voice_safety.py`): transcript screen for
   wake-word stuffing + spoken role-switch before an utterance drives the
   agent, and redact-before-speak (secrets/PII never read aloud) wired into
@@ -3612,10 +3911,15 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `MAVERICK_PROXY_ALLOWED_ROUTES`).
 - **Audit & compliance** — signed append-only audit log (`maverick audit verify`), **federated
   audit-log verification** (`audit/federation.py`) — over a set of nodes/tenants
-  whose signed logs reference each other (delegation, A2A handoff), confirms
-  every cross-node reference is *reciprocated* (a node can't drop its half to
-  hide an action) on top of each node's own chain/anchor check; an
-  unreciprocated or forged link is reported with the missing counterpart,
+  whose signed logs reference each other (delegation, A2A handoff), checks
+  reciprocal references extracted from the same per-segment snapshots whose
+  signatures were verified. Supplied decoded rows must match those snapshots;
+  missing counterparts, conflicting acceptance/goal identities, and unresolved
+  or malformed delegation outcomes prevent a consistent report. Generic
+  references establish reciprocity only; acceptance does not prove completed
+  work. Anchors are checked separately against current files; this is not an
+  atomic multi-day snapshot or independent checkpoint proof. Missing evidence
+  cannot establish the actions that were never recorded. Includes
   date-windowed **SIEM export**, **WORM export** (`audit/worm.py`, `maverick audit
   worm push`) — ships closed day-files to S3 Object-Lock (COMPLIANCE/GOVERNANCE)
   or a local read-only mirror with a retention lock, so the historical trail is
@@ -3689,14 +3993,21 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   unchanged/minor/major/refusal-flip, PASS verdict gated on flips + major-change
   fraction.
 - **Goal risk-tier auto-classifier** (`safety/goal_risk.py`) — deterministic
-  low/medium/high scoring of a goal before it runs (money/infra/credential/
-  bulk-comms/PII/irreversibility signals, read-only de-escalators, documented
-  weights), config floor + require-human mapping for the approval path.
-- **Containment mode** (`containment.py`, opt-in `[containment]`) — lock a
-  run into no-egress + ephemeral 0700 workspace: composes the registry ACL
-  (denies the exfil tools; config *extends*, never replaces the default deny
-  set), black-holed proxy env for subprocesses (advisory; the load-bearing
-  layer is the ACL + container backends' network deny), cleanup handle.
+  low/medium/high scoring of a goal's wording before it runs (money/infra/
+  credential/bulk-comms/PII/irreversibility signals, read-only de-escalators,
+  documented weights). Every goal's tier is recorded on its start audit event
+  and shown on the task list. `[safety] goal_risk_require_human` (off by
+  default) holds risky-looking goals on the Approvals page until a person
+  decides; `goal_risk_floor` raises every goal to a minimum tier. A lexical
+  tripwire only: per-action gates still apply.
+- **Containment mode** (`containment.py`, opt-in `[containment]`, the
+  dashboard's "Locked-down mode") — lock every run into no-egress + ephemeral
+  0700 workspace: when on, the tool registry denies the exfil tools (config
+  *extends*, never replaces the default deny set), `build_sandbox` turns
+  container networking off and gives the run a throwaway folder, the local
+  backend black-holes the proxy env for subprocesses (advisory; the
+  load-bearing layer is the ACL + container backends' network deny), and the
+  task budget is capped at `max_wall_seconds`.
 - **Cryptographic budget receipts** (`budget_receipts.py`) — HMAC-signed,
   hash-chained spend receipts per goal (prev-hash inside the signed payload
   so deletion/reorder is unforgeable; append-only 0600 ledger; refuses to
@@ -3726,7 +4037,9 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
 - **Crash-only logging** (`crash_only_log.py`) — append-only JSONL safe to
   kill -9 at any byte: one fsync'd `os.write` per record, seq resumes after
   reopen, replay tolerates (and counts) the torn tail vs mid-file corruption,
-  gap detection; fsync policy knob for test/throughput mode.
+  gap detection; fsync policy knob for test/throughput mode. Live sink:
+  `[logging] crash_log` keeps a crash-safe copy of warnings and errors
+  (`logging_config`).
 - **Right-to-rectification** (`rectification.py`) — **built, not yet wired:
   no production code path reaches this module** (see
   `maverick.reachability`), so it is available to call but is not part of any
@@ -4023,6 +4336,12 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `base.html`, and the /settings + /users routes live on their own router
   (`maverick_dashboard/admin_pages.py`).
 - **Reverse-proxy SSO** — trusted forwarded-identity header for enterprise auth.
+- **OIDC resolver lifecycle** — [bounded signing-key reuse and off-loop identity
+  verification](./oidc-resolver-lifecycle.md), with current request-task tenant
+  binding, per-request revocation/membership checks and bounded refresh/admission.
+- **Dashboard lifecycle** — [one shutdown deadline](./dashboard-lifecycle.md)
+  covers owned schedulers, goal admission/drain and cleanup; timed-out workers
+  retain ownership and prevent overlapping restart.
 - **SAML 2.0 SSO** (`maverick_dashboard/saml.py`, the `[saml]` extra / pysaml2) —
   a SAML SP browser-login front-end (`/saml/metadata`/`login`/`acs`) for IdPs that
   mandate SAML over OIDC. The IdP's signed assertion is verified by pysaml2 (no
@@ -4065,6 +4384,13 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `MAVERICK_PG_POOL_SIZE`) that hands each transaction its own pooled
   connection for horizontal scale (default 0 = the original single-connection
   model, unchanged).
+- **Bounded governed-record Postgres connections** — the governed backend shares
+  the world-model libpq timeout policy and offers separate opt-in
+  `[governed_records] pool_size` / `pool_timeout_seconds` settings. Transactions
+  retain current RLS, schema, role and encryption-key checks; pooled tenant state
+  is cleared before reuse and unknown writes are never replayed automatically.
+  The installer offers a one-connection starting point. See
+  [connection limits and validation](operations/governed-postgres-connections.md).
 - **Per-tenant KMS at fleet scale** — envelope encryption with a per-tenant DEK
   wrapped by a KEK in a pluggable `KMS` (`tenant/kms.py`; LocalKMS or AWS/GCP/
   Vault BYOK via `kms_backends.py`). **Deterministic per-tenant BYOK**:
@@ -4179,10 +4505,11 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
 - **Multi-tenant `maverick serve`** — the channel server enforces the tenant
   roster at the door: with per-user tenancy on and tenants provisioned, a
   suspended/unknown tenant's message is refused before any goal exists, and a
-  tenant over its provisioned `max_daily_dollars` (`maverick tenant quota`;
-  `tenant_over_quota` sums today's tenant-scoped usage ledger across
-  principals) is refused until the UTC day rolls. No roster = no-op; registry
-  read errors fail soft.
+  tenant over its provisioned `max_daily_dollars` (`maverick tenant quota`) is
+  refused. Admission includes today's tenant-scoped usage across principals
+  and outstanding provider holds. Unknown charges survive UTC-day rollover;
+  a configured tenant's unreadable policy refuses execution. Calls without an
+  active tenant do not acquire an organization allowance.
 - **Out-of-process execution** — a swappable goal **Dispatcher** (`runner.py`)
   with a **QueueDispatcher** (`queue_dispatcher.py`) that enqueues goals for a
   worker pool (arq adapter behind `[queue]`; `install_from_config` wires it).
@@ -4278,12 +4605,17 @@ write-before-delete safety, fact-pinned rows kept hot, and `read_cold`
 (every codec, mixed dirs OK) so archives stay queryable; **speculative tool execution**
 (`speculative_tools.py`, opt-in `[tools] speculative`): pre-execute predicted
 read-only (`parallel_safe`) tool calls concurrently into the tool-output cache
-— `predict_from_history` warms only calls repeated across turns; **async
-compaction** (`async_compaction.py`, opt-in `[context] async_compaction`): the
-expensive prefix of a conversation's history is compacted in the background
-between turns and the hot path pays only a cheap tail-merge — single daemon
-worker, last-write-wins, fingerprint-validated so a changed prefix never mixes
-stale summaries; **cost projection at plan time** (`cost_projection.py`): token/dollar
+— `predict_from_history` warms only calls repeated across turns; the agent
+loop warms them after each tool turn under the caller's cache scope and
+principal (`ToolRegistry.speculate_reads`), budget-checked; **async
+compaction** (`async_compaction.py`, opt-in `[context] async_compaction` together
+with `[context] compact`): a bounded, tenant-scoped cache reuses immutable token
+counts and lexical features of exact source text. Every call reranks the complete
+current history for its current query and budget. The obsolete background worker
+and lossy prefix-result cache have been removed. Optional model-assisted agent
+strategies use native async completion under the agent's wall/halt guard; the
+default heuristic makes no model call. See [compaction execution and feature
+reuse](operations/compaction-execution.md); **cost projection at plan time** (`cost_projection.py`): token/dollar
 estimates per plan step from the role's model + MODEL_PRICES, iterations
 multiplier, OK/TIGHT/OVER budget verdicts; **provider migration calculator**
 (`migration_calculator.py`): re-price a usage ledger on target models
@@ -4291,9 +4623,12 @@ multiplier, OK/TIGHT/OVER budget verdicts; **provider migration calculator**
 tokenizer caveat always rendered); **cross-run learning cache**
 (`learning_cache.py`, opt-in `[memory] learning_cache`): memoize *verified*
 sub-results across runs (required `verified_by` provenance, TTL + LRU cap,
-refuses to store anything the secret detector flags); **energy/CO2
-accounting** (`energy_accounting.py`, **built but unreached: nothing in
-production imports it**): clearly-labeled estimates from configurable
+refuses to store anything the secret detector flags; the orchestrator keys
+each goal by owner + title + details, briefs a repeat run with the checked
+answer as untrusted history, and stores an answer only when the answer checker
+actually ran and accepted it); **energy/CO2
+accounting** (`energy_accounting.py`; the `energy_accounting` tool's token and
+grid defaults come from its `[energy]` coefficients): clearly-labeled estimates from configurable
 Wh/1k-token + grid-CO2 coefficients (output tokens weighted 3x), disclaimer
 always rendered; **Redis tool cache** (`redis_tool_cache.py`,
 `[tools] output_cache_backend = "redis"`): cross-process/cross-host tier
@@ -4411,7 +4746,8 @@ tested without spawning py-spy.
   rejected, Ctrl-C is reserved as the unrebindable emergency exit, and a bad
   override set degrades to the stock keymap rather than an unusable one;
   `handle_key` is the pure key→action adapter the monitor/focus model
-  consume.
+  consume; `maverick monitor` loads the keymap at start (quit, refresh,
+  move/open/close plan steps, pause/follow).
 - **Achievements** (`achievements.py`): a local-only milestone ledger
   *derived from recorded history* (never self-reported; nothing leaves the
   machine) — first/10/100 completed goals, a 5+-sub-goal swarm, 3+ channels,
@@ -4429,8 +4765,10 @@ tested without spawning py-spy.
   existing controls (consent mode, review-checkpoint intervals, a budget
   multiplier over the configured cap, plan-execute-reflect topology) so one
   choice sets the whole envelope. `direct()` is pure assembly (starts
-  nothing; the hard Budget ceiling still applies at run time); profiles are
-  config-overridable and unknown profiles are refused — an autonomy level is
+  nothing; the hard Budget ceiling still applies at run time); `maverick start
+  --director <profile>` applies it to its own one-goal process, with the
+  budget clamped to the configured cap; profiles are
+  config-overridable (`[director.profiles]`, All settings) and unknown profiles are refused — an autonomy level is
   never guessed.
 - **Predictive approvals** (`predictive_approvals.py`): learns the operator's
   historical approve/deny rate per (action, risk tier) from approval history and
@@ -4494,7 +4832,9 @@ tested without spawning py-spy.
   counts once (enforced by the `(approval_id, approver)` PK); `GET
   /approvals/{id}/state` shows quorum progress; a barred self-approval is 403.
   Off by default (`required = 1` = legacy single approver); SQLite migration v21.
-- **Web dashboard** — run list, plan-tree, chat at `/chat`, approval queue with
+- **Web dashboard** — run list, plan-tree, chat at `/chat`,
+  [root conversation summaries and shared durable SSE replay](./dashboard-read-models.md)
+  (schema 37 root indexes; monotonic heartbeat deadlines), and an approval queue with
   **collaborative supervision** (claim/release endpoints so two supervisors
   never double-handle a review — atomic claims, 409 on conflicts, claims
   surfaced in the pending list — plus `decided_by` attribution on every
@@ -4776,12 +5116,13 @@ tested without spawning py-spy.
   (`sandbox/firecracker.py` + `sandbox/pool.py`, `[sandbox]
   cross_run_pool` default OFF): Firecracker warm mode keeps one e2b
   microVM alive between execs (the local firectl path can't, and says so
-  honestly); the cross-run pool parks a still-healthy docker/podman
-  backend at run end (bounded, TTL, injected clock) and hands it to the
-  next run under a strict **scrub contract** — workdir re-pointed, env
-  scrubbed per exec, and only engines whose `run --rm`-per-exec model
-  provably carries no state are eligible (local/firecracker/ssh/k8s/
-  devcontainer are excluded with reasons; they always build fresh).
+  honestly). The optional cross-run API transfers an immutable Docker/Podman
+  policy into a fresh, digest-pinned backend and retires the old handle.
+  It excludes protected mounts, unknown state, active operations, unresolved
+  cleanup and warm guests. Ordinary runner teardown does not park instances:
+  the current architecture adds image checks without avoiding guest startup,
+  so automatic activation and startup benefits remain unqualified. See
+  [sandbox policy handoff](operations/sandbox-pool.md) for ownership and limits.
 - **Speculative drafting across providers** (`speculative_decode.py`): a
   cheap draft model proposes, the target verifies-or-revises in one call;
   per-(draft,target) accept-rate ledger with a floor below which it falls
@@ -4852,6 +5193,13 @@ tested without spawning py-spy.
   scaffold mirrors it as a Runs tool window (Kotlin, same SSE endpoint,
   same backoff); building it requires the IntelliJ SDK, stated in its
   README.
+  Browser/mobile viewers drain server-cursor pages before declaring completion;
+  IDE streams resume from the last displayed event and stop on terminal
+  acknowledgement or access denial. Requests have owned deadlines/cancellation
+  and bounded display history. Editor halt/clear actions require a checked local
+  CLI acknowledgement; remote start timeouts remain unconfirmed until reviewed.
+  See [client lifecycle and qualification limits](client-request-lifecycle.md),
+  including older React Native transport buffering and native-app test gaps.
 - **Apple Watch glance** (`glance.py` + `apps/watch-glance/` SwiftUI
   scaffold): a tiny fixed payload sized for a watch face — active count,
   today's done/failed, today's spend (summed from the usage ledger), and the
@@ -4955,6 +5303,58 @@ tested without spawning py-spy.
   interoperability, subject matching, legal/regulator acceptance or production
   delivery.
 
+## Software development: the code vault
+
+- **Vaulted repositories** (`codebase/vault.py`, `maverick code add|sync|export`):
+  every branch and tag in one sealed git bundle per repository; plaintext only
+  in private, short-lived working copies; credentials named by environment
+  variable, never stored; hardened host git.
+- **Feature swarms** (`codebase/features.py`, `maverick code feature|proposals|
+  show|merge|push`): a governed swarm builds the change on a branch, labelled
+  `code:<repo>` and enforced at the repository's protection mode; the repo's
+  tests run in the sandbox and the independent reviewer reads the diff; the
+  sealed proposal waits for a `codebase_merge` approval before any merge or push.
+
+## Information-flow control
+
+- **Runtime label tracking** (`ifc.py`, `[ifc]`): a sensitive read labels the
+  agent (`data:<tool>`; a codebase run starts `code:<repo>`), labels propagate
+  through the blackboard, spawns and the peer bus, and a labelled agent's call
+  to an external sink is recorded, held for human approval, or blocked at the
+  tool gate. Fingerprints witness literal copies; `ifc_flow` audit rows record
+  labels and outcomes, never data.
+
+## Adaptive immunity
+
+- **Composition-risk discovery** (`immune/network.py`, `maverick immune network`):
+  finds data paths from sensitive reads to external reach across agents
+  (Rule of Two), evaluated at each pack's runtime capability or on any agent
+  graph, with a tool-level witness and the risk of the least-guarded sink.
+  `domains-audit` reports `runtime_expansion` / `runtime_reachable_dangerous`.
+- **Proof of Oversight** (`immune/oversight.py`): opt-in canary approvals
+  (`[immune] canaries`) measure reviewer catch rates per person and decision
+  class; Wilson-bounded earned authority; no-agent capability drills; crux
+  finding; signed oversight records. Canaries never feed agent graduation.
+- **Discovery Title** (`immune/title.py`): commit-reveal priority, pre-run
+  input commitments, human conception gates with a claim-to-conception map,
+  verification and coverage; signed and verified offline. Governed research
+  runs supply gates and input commitments from their hash-chained planning
+  events (`maverick immune title research`).
+- **Production twin** (`immune/twin.py`, `maverick immune twin replay`): opt-in
+  recording (`[immune] twin_record`) of each goal's tool results, sealed and
+  tenant-scoped; a replay re-runs the goal with the recorded results served in
+  place of the tools, so nothing live is touched and nothing marks the run as a
+  test. Near-identical calls are served within a similarity tolerance and
+  reported as divergences; anything further is refused and counted.
+  `maverick immune awareness --goals` replays recorded goals with and without
+  an evaluation cue and tests the behaviour gap. `canary-auto` models canaries
+  on real approvals with one planted flaw.
+- **Analyses** (`immune/policy.py`, `invariance.py`, `reliability.py`,
+  `epistemic.py`, `envelope.py`, `market.py`): rule replay and contradiction
+  discovery, evaluation-awareness gap and model-swap drift, conservative bonds
+  and a verification-allocating truth market, fact contamination tracing,
+  Art. 43(4) learning envelopes, and pricing-parallelism signals.
+
 ## Unified cross-suite audit projection
 
 - **Closed, signed projection plane** (`unified_audit.py`): the default-off
@@ -5016,6 +5416,12 @@ tested without spawning py-spy.
 
 ## Distribution & install
 
+- **Private workbench recovery**: vendor onboarding, account connections,
+  workspace members and knowledge access share response classification and
+  request epochs. Session/context loss clears private state and keeps controls
+  locked; action denial preserves authorized views and disables that action.
+  See [Workbench access recovery](client-access-recovery.md).
+
 - **Workspace recovery center** (`workspace_recovery.py`, dashboard
   `/workspace/recovery`): opt-in administrator snapshots, authenticated bounded
   import/export, separate key custody, real restore drills, and account/build-
@@ -5072,9 +5478,12 @@ tested without spawning py-spy.
   needs the Zed SDK, stated in its README), GitHub Action wrapper
   (`maverick-action`) — all contract-tested against the real CLI verb set.
 - **Native desktop engineering scaffold** (`apps/desktop/`): a Tauri v2 shell for the local
-  dashboard — splash polls `127.0.0.1:8765/healthz` and redirects, spawning
-  `maverick dashboard` as its own child when the port is closed (kills only
-  that child on exit); macOS/Windows/Linux bundle targets, ships unsigned
+  dashboard — splash probes `127.0.0.1:8765/healthz` with bounded aborts and
+  elapsed-time recovery controls; stale attempts cannot navigate after retry.
+  It spawns `maverick dashboard` when the port is closed and requests owned
+  child shutdown over a private pipe before bounded process-tree termination.
+  Maintenance still requires observed process/socket quiescence. See
+  [Dashboard lifecycle](dashboard-lifecycle.md). macOS/Windows/Linux targets ship unsigned
   (installer-desktop posture), building needs Rust + Tauri CLI. It is not
   attached to product releases or claimed as a signed customer installer.
 - **Windows MSI engineering build** (`apps/installer-msi/`): WiX v4 authoring set — per-user
@@ -5271,3 +5680,53 @@ Each new configurable surface is represented in Settings and the installer
 wizard. Local tests and synthetic browser journeys validate the stated code
 paths; they do not establish native signing, clean-machine installation,
 provider permissions, live external mutations, or customer acceptance.
+
+### Document text coverage and private engine jobs
+
+Attachment companions and knowledge ingestion use versioned, loss-aware
+extraction with ordered DOCX table/XLSX cell locations, source/normalized hashes,
+explicit omitted regions and truncation. Unsupported binary formats are never
+UTF-8 replacement text. See [Document extraction](document-extraction.md).
+Office export, image OCR and LaTeX share private document jobs with backend
+capability checks and verified output manifests. Missing or invalid outputs
+retain previous artifacts; native image execution remains separately qualified.
+See [Document processing](document-processing.md).
+
+Chat and REST uploads share bounded staging and serialized attachment admission.
+Chat retries use owner/tenant-bound submission receipts, invalid batches create
+no task, interrupted storage stays an explicit draft, and companion availability
+is recorded before dispatch. Keyed REST admission shares the atomic receipt
+transaction; browser/widget lost responses reconcile the original key through a
+read-only endpoint without repeating a start. See
+[Attachment submissions](attachment-submissions.md) and
+[Client request lifecycle](client-request-lifecycle.md).
+
+Named OAuth renewal uses [per-connection refresh ownership](connection-refresh.md), with short shared-store transactions and conservative recovery for ambiguous rotating tokens.
+
+Messaging delivery receipts and conservative recovery are described in [Durable channel delivery](channel-delivery.md).
+
+Social notification pagination retains durable continuation and explicit incomplete status; see [Bounded social polling](channel-polling.md).
+
+Signal/IRC readers run independently of serial durable agent work; see [Transport supervision](channel-transport-supervision.md).
+
+Voice and wearable callbacks preserve saved results with explicit uncertain delivery; see [Live interaction boundaries](channel-live-interfaces.md), including the CLI exception and blocked bootstrap authority restoration.
+
+The [persistence authority inventory](operations/persistence-authorities.md) maps local/shared store ownership, transaction and recovery contracts. The control-plane singleton restriction remains in force.
+
+### Owned CLI and TypeScript plugin processes
+
+The optional Codex CLI provider owns cancellation, bounded output and process cleanup; the TypeScript host and version-2 SDK add bounded framing, execution deadlines and explicit no-replay outcomes. Legacy plugins remain supported under the same conservative replay policy. See [operating limits](operations/owned-cli-and-plugins.md).
+
+### Bounded model proxy streams
+
+The optional Python and Go proxies authenticate before admitting bounded bodies, stream responses with backpressure, and close owned upstream requests on disconnect or deadline. See [model proxy request ownership](operations/model-proxy-streams.md) for limits and buffered compatibility exceptions.
+
+### Effective provider configuration
+
+Provider adapters declare supported settings and refuse unsupported nonempty fields before dispatch. Immutable admitted settings preserve tenant-aware cache rotation and constructor environment identity. See [provider configuration admission](operations/provider-configuration-admission.md) for the capability matrix and migration guidance.
+
+### PostgreSQL client I/O deadlines
+
+WorldModel and governed-record connections bound established-socket waits, including commit, rollback and pool reset, while preserving unknown outcomes without replaying writes. See [PostgreSQL client I/O deadlines](operations/postgres-io-deadlines.md) for the independent client, connection and server timeout settings and reconciliation contract.
+
+PostgreSQL learning stores use tenant-scoped keys for addenda, line metadata, transfer memory and corpus rows. [Migration 39](operations/learning-store-tenant-keys.md) preserves existing data and refuses unrecognized constraint layouts.

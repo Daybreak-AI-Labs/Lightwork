@@ -388,7 +388,7 @@ class AIGovernanceLoopScheduler:
             self._thread.start()
         return True
 
-    def stop(self, timeout: float = 5.0) -> bool:
+    def stop(self, timeout: float = 5.0, *, wait: bool = True) -> bool:
         if (
             isinstance(timeout, bool)
             or not isinstance(timeout, (int, float))
@@ -399,6 +399,8 @@ class AIGovernanceLoopScheduler:
         self._stop.set()
         with self._lock:
             thread = self._thread
+        if not wait:
+            return False
         if thread is not None:
             thread.join(float(timeout))
         stopped = thread is None or not thread.is_alive()
@@ -440,14 +442,11 @@ def attach_ai_governance_loop_scheduler(
 
     @asynccontextmanager
     async def lifespan(target: Any):
-        from starlette.concurrency import run_in_threadpool
+        from ._lifecycle import supervised_runtime
 
         async with previous(target):
-            await run_in_threadpool(selected.start)
-            try:
+            async with supervised_runtime(target, "ai_governance", selected):
                 yield
-            finally:
-                await run_in_threadpool(selected.stop)
 
     app.router.lifespan_context = lifespan
     state.ai_governance_loop_scheduler = selected

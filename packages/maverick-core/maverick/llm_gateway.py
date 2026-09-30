@@ -62,12 +62,64 @@ _ANTHROPIC_VERSION_RE = re.compile(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}\Z")
 TEAM_BUDGET_SCHEMA = "lightwork.llm-gateway-team-budget.v1"
 
 
+# Credentials the dashboard may store sealed in the settings overlay.
+_SECRET_KEYS = ("gateway_token", "upstream_token", "anthropic_upstream_token")
+
+
+def _token(env_name: str, config_key: str) -> str:
+    """A gateway credential: its environment variable, else the sealed setting.
+
+    Read on demand and never copied into the settings dict, so status views
+    that show the gateway configuration can never carry a credential.
+    """
+    value = os.environ.get(env_name, "")
+    if value:
+        return value
+    try:
+        from .config import load_global_config
+
+        section = (load_global_config() or {}).get("llm_gateway") or {}
+    except Exception:
+        return ""
+    stored = section.get(config_key) if isinstance(section, dict) else None
+    return stored.strip() if isinstance(stored, str) else ""
+
+
 class LLMGatewayError(RuntimeError):
     """Base failure for the governed LLM gateway."""
 
 
 class LLMGatewayConfigError(LLMGatewayError):
     """The gateway is not enabled or configured safely."""
+
+
+def _team_password_names(section: Mapping[str, Any]) -> tuple[str, ...]:
+    """Teams with a sealed dashboard password (``[llm_gateway.team_passwords]``).
+
+    Validated like ``team_tokens`` names; the passwords themselves never leave
+    :func:`_team_password`."""
+    raw = section.get("team_passwords", {})
+    if not isinstance(raw, dict) or len(raw) > _MAX_TEAMS:
+        raise LLMGatewayConfigError("llm_gateway.team_passwords must be a bounded team table")
+    for team, password in raw.items():
+        if not isinstance(team, str) or team == "default" or not _TEAM_RE.fullmatch(team):
+            raise LLMGatewayConfigError("llm_gateway team name is invalid")
+        if not isinstance(password, str) or not password.strip():
+            raise LLMGatewayConfigError(f"llm_gateway.team_passwords.{team} must be text")
+    return tuple(sorted(raw))
+
+
+def _team_password(team: str) -> str:
+    """A team's sealed dashboard password, read on demand (never kept in settings)."""
+    try:
+        from .config import load_global_config
+
+        section = (load_global_config() or {}).get("llm_gateway") or {}
+    except Exception:
+        return ""
+    table = section.get("team_passwords") if isinstance(section, dict) else None
+    stored = table.get(team) if isinstance(table, dict) else None
+    return stored.strip() if isinstance(stored, str) else ""
 
 
 def get_llm_gateway_config() -> dict[str, Any]:  # noqa: C901 - strict config boundary
@@ -97,12 +149,20 @@ def get_llm_gateway_config() -> dict[str, Any]:  # noqa: C901 - strict config bo
         "team_budgets",
         "budget_window_seconds",
         "default_max_output_tokens",
+        # Sealed dashboard secrets; the environment variables named by the
+        # *_token_env keys still win (see _token).
+        *_SECRET_KEYS,
+        # Per-team passwords sealed on the dashboard (see _team_password).
+        "team_passwords",
     }
     unknown = set(section) - known
     if unknown:
         raise LLMGatewayConfigError(
             f"unknown llm_gateway keys: {', '.join(sorted(unknown))}"
         )
+    for key in _SECRET_KEYS:
+        if key in section and not isinstance(section[key], str):
+            raise LLMGatewayConfigError(f"llm_gateway.{key} must be text")
     flag = section.get("enable", False)
     if not isinstance(flag, bool):
         raise LLMGatewayConfigError("llm_gateway.enable must be a boolean")
@@ -195,6 +255,7 @@ def get_llm_gateway_config() -> dict[str, Any]:  # noqa: C901 - strict config bo
             )
         seen_envs.add(env_name)
         team_tokens.append((team, env_name))
+    team_password_teams = _team_password_names(section)
     budget_window = section.get("budget_window_seconds", 3_600)
     if (
         isinstance(budget_window, bool)
@@ -218,7 +279,7 @@ def get_llm_gateway_config() -> dict[str, Any]:  # noqa: C901 - strict config bo
         raise LLMGatewayConfigError(
             "llm_gateway.team_budgets must be a bounded team table"
         )
-    known_teams = {"default", *(team for team, _env in team_tokens)}
+    known_teams = {"default", *(team for team, _env in team_tokens), *team_password_teams}
     team_budgets: list[tuple[str, dict[str, int]]] = []
     for team, raw_budget in sorted(
         team_budgets_raw.items(), key=lambda item: str(item[0])
@@ -269,6 +330,8 @@ def get_llm_gateway_config() -> dict[str, Any]:  # noqa: C901 - strict config bo
         "anthropic_upstream_token_env": anthropic_token_env,
         "anthropic_version": anthropic_version,
         "team_tokens": tuple(team_tokens),
+        # Team names only: the passwords are read on demand (_team_password).
+        "team_password_teams": team_password_teams,
         "team_budgets": tuple(team_budgets),
         "budget_window_seconds": int(budget_window),
         "default_max_output_tokens": int(default_max_output),
@@ -306,9 +369,20 @@ def _team_for_token(caller_token: str, settings: Mapping[str, Any]) -> str | Non
         (str(team), str(env_name))
         for team, env_name in settings.get("team_tokens", ())
     )
+    # A team with only a dashboard password; a team named in both uses its
+    # environment variable when that is set (the environment wins).
+    named = {team for team, _env in candidates}
+    candidates.extend(
+        (str(team), "") for team in settings.get("team_password_teams", ())
+        if team not in named
+    )
     matched: list[str] = []
     for team, env_name in candidates:
-        expected = os.environ.get(env_name, "")
+        if team == "default":
+            expected = _token(env_name, "gateway_token")
+        else:
+            expected = (os.environ.get(env_name, "") if env_name else "") \
+                or _team_password(team)
         if expected and hmac_mod.compare_digest(token, expected):
             matched.append(team)
     # A malformed deployment environment with duplicate secret VALUES should
@@ -1149,14 +1223,14 @@ def _provider_upstream(
             raise LLMGatewayConfigError(
                 "Anthropic compatibility requires llm_gateway.anthropic_upstream_url"
             )
-        token = os.environ.get(str(settings["anthropic_upstream_token_env"]), "")
+        token = _token(str(settings["anthropic_upstream_token_env"]), "anthropic_upstream_token")
         if not token:
             raise LLMGatewayError("The gateway's Anthropic upstream credential is not configured.")
         return f"{base}/v1/messages", {
             "x-api-key": token,
             "anthropic-version": str(settings["anthropic_version"]),
         }
-    token = os.environ.get(str(settings["upstream_token_env"]), "")
+    token = _token(str(settings["upstream_token_env"]), "upstream_token")
     if not token:
         raise LLMGatewayError("The gateway's upstream credential is not configured.")
     return f"{settings['upstream_url']}/v1/chat/completions", {

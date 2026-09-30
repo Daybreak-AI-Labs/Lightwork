@@ -15,33 +15,35 @@
   .tsel__row-name { font-weight: var(--font-medium); }
   .tsel__row-meta { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; }
   .tsel__note { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-3); }
+  .tsel__title, #tsel-title { text-transform: none; letter-spacing: 0; }
+  .tsel__lede { max-width: 640px; }
+  .tsel__create { margin-top: var(--space-4); }
   .tsel__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-3); align-items: end; margin-top: var(--space-3); }
   .tsel__form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); color: var(--muted); }
-  .tsel__form input, .tsel__form select { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg, transparent); color: var(--text); font: inherit; }
 </style>
 
 <div class="tsel">
   {% if detail %}
   <div class="tsel__gate" role="alert">
     <strong>This page needs a workspace.</strong>
-    <span class="muted">{{ detail }} Pick one below — your selection is saved for your
+    <span class="muted">Pick one below. Your choice is saved for your
       account, and reloading brings you straight back to the page that sent you here.</span>
   </div>
   {% endif %}
 
   <div class="panel">
-    <h1 class="page-title" style="text-transform:none; letter-spacing:0;">Choose a workspace</h1>
-    <p class="muted" style="max-width: 640px;">
-      A workspace keeps its own isolated data across the tools that use it
-      (consent, privacy discovery, third parties, and more). Select the one this
-      dashboard should work in. Running solo? One workspace is all you need.
+    <h1 class="page-title" id="tsel-title">Choose a workspace</h1>
+    <p class="muted tsel__lede">
+      A workspace keeps its own separate records across the tools that use it
+      (consent, privacy, vendors and more). Choose the one you want to work in.
+      Working on your own? One workspace is all you need.
     </p>
 
     {% if env_tenant %}
     <div class="tsel__gate">
-      <strong>Set by your deployment: {{ env_tenant }}</strong>
-      <span class="muted">This deployment is fixed to this workspace and it takes priority over
-        the selection below. Ask your administrator if you need to work in a different one.</span>
+      <strong>Your installation always uses one workspace.</strong>
+      <span class="muted">It takes priority over the choice below. Ask your administrator
+        if you need to work in a different one.</span>
     </div>
     {% endif %}
 
@@ -51,11 +53,11 @@
       <li class="tsel__row"
           data-state="{{ 'suspended' if not t.active else ('selected' if t.id == selected else 'idle') }}">
         <span class="badge {{ 'active' if t.id == selected and t.active else '' }}">
-          {{ 'Suspended' if not t.active else ('Selected' if t.id == selected else 'Available') }}
+          {{ 'Paused' if not t.active else ('Selected' if t.id == selected else 'Available') }}
         </span>
         <div class="tsel__row-main">
           <div class="tsel__row-name">{{ t.name }}</div>
-          <div class="tsel__row-meta">{{ t.id }}{% if t.plan %} · {{ t.plan | capitalize }} plan{% endif %}</div>
+          {% if t.plan %}<div class="tsel__row-meta">{{ t.plan | capitalize }} plan</div>{% endif %}
         </div>
         {% if can_select and t.active and t.id != selected %}
         <button type="button" class="btn btn--primary tsel-pick" data-tenant="{{ t.id }}">Work in this workspace</button>
@@ -69,8 +71,8 @@
     <p class="muted">{% if membership_filtered %}You do not have access to a workspace yet.{% else %}No workspaces exist yet.{% endif %}</p>
     {% if is_admin %}
     <button type="button" class="btn btn--primary" id="tsel-quick">Set up my workspace</button>
-    <p class="tsel__note">One click: creates a workspace named <code>local</code> and
-      selects it, so every workbench is ready to use. You can add more tenants later.</p>
+    <p class="tsel__note">Creates your first workspace, called "My workspace", and
+      opens it. You can add more later.</p>
     {% endif %}
     {% endif %}
 
@@ -86,22 +88,15 @@
   </div>
 
   {% if is_admin %}
-  <div class="panel" style="margin-top: var(--space-4);">
-    <h2 style="text-transform:none; letter-spacing:0;">Create a workspace</h2>
-    <p class="muted" style="max-width: 640px; margin-bottom: 0;">
-      Create a new isolated workspace and switch to it. The ID is a short
-      lowercase name — letters, digits, dashes and underscores (e.g.
-      <code>acme-prod</code>).
-    </p>
+  <div class="panel tsel__create">
+    <h2 class="tsel__title">Create a workspace</h2>
+    <p class="muted tsel__lede">Create a new workspace and switch to it.</p>
     <form class="tsel__form" id="tsel-create">
-      <label>Workspace ID
-        <input name="id" required maxlength="128" autocomplete="off" spellcheck="false" placeholder="local">
-      </label>
-      <label>Display name
-        <input name="display_name" maxlength="200" autocomplete="off" placeholder="My workspace">
+      <label>Workspace name
+        <input class="input" name="display_name" required maxlength="200" autocomplete="off" placeholder="e.g. Acme Finance">
       </label>
       <label>Plan
-        <select name="plan">
+        <select class="select" name="plan">
           <option value="free" selected>Free</option>
           <option value="pro">Pro</option>
           <option value="enterprise">Enterprise</option>
@@ -126,16 +121,20 @@
   }
 
   function fail(box, e) {
-    box.textContent = (e && e.message) || 'Could not reach the server.';
+    box.textContent = (e && e.plain) || window.mvErrorText(e, 'finish that');
   }
 
-  async function jsonOrDetail(r, fallback) {
+  async function jsonOrDetail(r, action) {
     if (r.ok) return r.status === 204 ? {} : r.json().catch(function () { return {}; });
+    var err = new Error(action);
     if (r.status === 403 || r.status === 404) {
-      throw new Error('You no longer have access to that workspace — ask a tenant administrator.');
+      err.plain = 'You no longer have access to that workspace. Ask a workspace administrator.';
+    } else if (r.status === 409 && action === 'create the workspace') {
+      err.plain = 'A workspace with that name already exists. Choose another name.';
+    } else {
+      err.plain = window.mvErrorText(r, action);
     }
-    var body = await r.json().catch(function () { return {}; });
-    throw new Error(body.detail || (fallback + ' (' + r.status + ').'));
+    throw err;
   }
 
   async function select(tenantId) {
@@ -143,7 +142,7 @@
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tenant_id: tenantId }),
     });
-    await jsonOrDetail(r, 'Could not switch the workspace');
+    await jsonOrDetail(r, 'switch the workspace');
   }
 
   document.querySelectorAll('.tsel-pick').forEach(function (btn) {
@@ -169,8 +168,8 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      await jsonOrDetail(r, 'Could not create the tenant');
-      await select(payload.id);
+      var created = await jsonOrDetail(r, 'create the workspace');
+      await select(created.id || payload.id);
       resume();
     } catch (e) { fail(box, e); if (btn) btn.disabled = false; }
   }
@@ -189,7 +188,6 @@
       ev.preventDefault();
       var f = new FormData(form);
       createAndSwitch({
-        id: String(f.get('id') || '').trim(),
         display_name: String(f.get('display_name') || '').trim(),
         plan: String(f.get('plan') || 'free'),
       }, document.getElementById('tsel-create-err'),

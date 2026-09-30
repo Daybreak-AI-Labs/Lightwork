@@ -34,18 +34,13 @@ import sys
 from pathlib import Path
 
 from ..paths import data_dir
+from .identity import record_trajectory_id
 from .ingest import (
     candidate_trajectory_id,
     fetch_steps_for_goal,
     load_donations,
     rejected_trajectory_id,
 )
-
-
-def record_trajectory_id(record: dict) -> str:
-    """The id ``ingest.build_trajectory`` assigns, so the sidecar key matches
-    the ``id`` field of the corresponding ``trajectories.jsonl`` row."""
-    return f"{record.get('task_brief_hash', '')}-{int(record.get('ts', 0) or 0)}"
 
 
 def events_to_text(events: list[dict]) -> str:
@@ -79,7 +74,15 @@ def export_texts(records, fetch_events) -> dict[str, str]:
     the DPO sidecar has real text for BOTH halves of a chosen/rejected pair.
     """
     out: dict[str, str] = {}
+    seen: dict[str, str] = {}
     for record in records:
+        identity = record_trajectory_id(record)
+        binding = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if identity in seen:
+            if seen[identity] != binding:
+                raise ValueError("Conflicting donation records share a trajectory identity")
+            continue
+        seen[identity] = binding
         text = events_to_text(fetch_events(record) or [])
         if text:
             out[record_trajectory_id(record)] = text

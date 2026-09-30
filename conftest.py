@@ -57,7 +57,7 @@ def pytest_addoption(parser):
         help="run only the test files in slice INDEX (1-based) of COUNT: files "
              "are dealt round-robin in collection order, so the slices are "
              "deterministic, disjoint and together cover the whole suite. CI "
-             "runs three slices per interpreter on two-core runners.",
+             "runs four slices per interpreter on two-core runners.",
     )
 
 
@@ -120,6 +120,16 @@ def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_runner_shutdown_admission(monkeypatch):
+    """A prior TestClient shutdown must not close admission in another test."""
+    import sys
+
+    runner = sys.modules.get("maverick.runner")
+    if runner is not None:
+        monkeypatch.setattr(runner, "_accepting_goals", True)
+
+
+@pytest.fixture(autouse=True)
 def _restore_environ():
     """Put ``os.environ`` back the way the test found it.
 
@@ -141,6 +151,34 @@ def _restore_environ():
         if os.environ.get(key) != value:
             os.environ[key] = value
 
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_logging():
+    """Put process-wide logging back the way the test found it.
+
+    A test that runs a ``maverick`` command in-process (the finance, audit and
+    first-run pages drive the same kernel commands) triggers its once-per-process
+    logging set-up, which replaces the root handlers and level. Left in place it
+    silenced log capture for whichever test the same worker ran next.
+    """
+    import logging
+
+    from maverick import logging_config
+
+    configured = logging_config._configured
+    root = logging.getLogger()
+    level, handlers, filters = root.level, root.handlers[:], root.filters[:]
+    handler_filters = {id(h): h.filters[:] for h in handlers}
+    disabled = logging.root.manager.disable
+    yield
+    logging_config._configured = configured
+    root.setLevel(level)
+    root.handlers[:] = handlers
+    root.filters[:] = filters
+    for handler in handlers:
+        handler.filters[:] = handler_filters[id(handler)]
+    logging.disable(disabled)
 
 @pytest.fixture(autouse=True)
 def _fail_the_test_that_forks_a_module():
@@ -249,6 +287,44 @@ def _isolate_default_audit_writers():
         yield
     finally:
         _reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_cluster_halt_cache():
+    """Forget the killswitch's cached cluster-wide halt after every test.
+
+    ``killswitch._shared_halt_active`` serves its last answer for up to two
+    seconds without re-reading the backend. A test that armed or observed a
+    cluster halt therefore halted whichever test the same worker ran next --
+    whole files failing with "DID NOT RAISE" when ``run_goal`` stopped cleanly
+    instead of raising. Every package runs agents, so the reset lives here.
+    """
+    yield
+    try:
+        from maverick import killswitch
+        killswitch._last_shared_check_ts = 0.0
+        killswitch._last_shared_halt = None
+        world, killswitch._shared_world = killswitch._shared_world, None
+        if world is not None and hasattr(world, "close"):
+            world.close()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _isolate_channel_execution_authority(request, monkeypatch, tmp_path):
+    """Channels import the default world path once; each test owns a new DB.
+
+    Keep this in the root conftest: both core and channels have a ``tests``
+    package, which otherwise collides during combined importlib collection.
+    """
+    if "maverick-channels" not in request.node.path.parts:
+        return
+    try:
+        from maverick import world_model
+    except ImportError:
+        return  # Channels-only environments may intentionally omit the core.
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "channel-world.db")
 
 
 @pytest.fixture

@@ -9,9 +9,9 @@ telemetry, and analyze OEE, throughput, and bottlenecks. You DRAFT schedule and 
 changes for a human supervisor to release. You DO NOT control, start, stop, or reconfigure
 physical equipment, and you NEVER touch, override, or disable a safety interlock or safety
 control -- those are out of scope; escalate to a human every time. Worker safety overrides
-throughput; if a reading suggests an unsafe condition, raise it immediately."""
+throughput; if a reading suggests an unsafe condition, raise it immediately. Live connectors samsara_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "samsara_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 # Belt-and-suspenders: the read-only whitelist already excludes these; deny makes the
 # safety boundary explicit.
@@ -30,7 +30,7 @@ gate = "approval"
 [[workflow]]
 name = "Read line telemetry"
 instruction = "Pull current work-order status and machine and line telemetry for the shift across the relevant cells."
-tools = ["read_file", "samsara_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Analyze OEE"
 instruction = "Compute OEE, throughput, and downtime and rank the bottleneck constraints limiting the line."

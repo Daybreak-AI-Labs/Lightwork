@@ -52,6 +52,7 @@ log = logging.getLogger(__name__)
 
 _REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _MAX_PRIVACY_JSON_BYTES = 16 * 1024 * 1024
+_MAX_PRIVACY_ENVELOPE_BYTES = 128
 _MAX_DOCX_ENTRIES = 1024
 _MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 _MAX_DOCX_DOCUMENT_XML_BYTES = 8 * 1024 * 1024
@@ -146,6 +147,30 @@ def _validated_private_directory(
     return absolute, tuple(identities)
 
 
+class _SealedPrivateRecord(dict):
+    """Read-local envelope custody; never part of the serialized record body."""
+
+    def __init__(self, value: dict, original: bytes) -> None:
+        super().__init__(value)
+        self.original_envelope = original
+
+
+def _decode_private_json(raw: bytes) -> dict:
+    from .crypto_at_rest import EncryptionUnavailable, is_sealed, unseal
+
+    sealed = is_sealed(raw)
+    try:
+        plaintext = unseal(raw) if sealed else raw
+    except EncryptionUnavailable as exc:
+        raise PrivacyStateError("privacy record encryption did not authenticate") from exc
+    if len(plaintext) > _MAX_PRIVACY_JSON_BYTES:
+        raise ValueError("privacy state exceeds the decoded size limit")
+    value = json.loads(plaintext.decode("utf-8", errors="strict"))
+    if not isinstance(value, dict):
+        raise ValueError("privacy state is not a JSON object")
+    return _SealedPrivateRecord(value, raw) if sealed else value
+
+
 def _read_private_json(path: Path, *, root: Path) -> dict:
     """No-follow, handle-bound JSON read from a verified private directory."""
     from .file_lock import private_path_is_restricted
@@ -161,7 +186,7 @@ def _read_private_json(path: Path, *, root: Path) -> dict:
         or before.st_nlink != 1
     ):
         raise PermissionError("privacy state is not a single-link regular file")
-    if before.st_size > _MAX_PRIVACY_JSON_BYTES:
+    if before.st_size > _MAX_PRIVACY_JSON_BYTES + _MAX_PRIVACY_ENVELOPE_BYTES:
         raise ValueError("privacy state exceeds the size limit")
     if not private_path_is_restricted(lexical, 0o600):
         raise PermissionError("privacy state file is not private")
@@ -202,7 +227,7 @@ def _read_private_json(path: Path, *, root: Path) -> dict:
         ):
             raise PermissionError("privacy state changed during open")
         chunks: list[bytes] = []
-        remaining = _MAX_PRIVACY_JSON_BYTES + 1
+        remaining = _MAX_PRIVACY_JSON_BYTES + _MAX_PRIVACY_ENVELOPE_BYTES + 1
         while remaining:
             chunk = os.read(fd, min(remaining, 64 * 1024))
             if not chunk:
@@ -210,7 +235,7 @@ def _read_private_json(path: Path, *, root: Path) -> dict:
             chunks.append(chunk)
             remaining -= len(chunk)
         raw = b"".join(chunks)
-        if len(raw) > _MAX_PRIVACY_JSON_BYTES:
+        if len(raw) > _MAX_PRIVACY_JSON_BYTES + _MAX_PRIVACY_ENVELOPE_BYTES:
             raise ValueError("privacy state exceeds the size limit")
         after = os.fstat(fd)
         current = lexical.lstat()
@@ -230,10 +255,7 @@ def _read_private_json(path: Path, *, root: Path) -> dict:
             os.close(fd)
         if root_fd is not None:
             os.close(root_fd)
-    value = json.loads(raw.decode("utf-8", errors="strict"))
-    if not isinstance(value, dict):
-        raise ValueError("privacy state is not a JSON object")
-    return value
+    return _decode_private_json(raw)
 
 # --------------------------------------------------------------------------- #
 # Config gate + shared store
@@ -519,11 +541,19 @@ class _RecordStore:
             raise PrivacyStateError("privacy record is not valid bounded JSON") from exc
         if len(rendered.encode("utf-8")) > _MAX_PRIVACY_JSON_BYTES:
             raise PrivacyStateError("privacy record exceeds the 16 MiB JSON limit")
-        atomic_write_text(
-            path,
-            rendered,
-            mode=0o600,
-        )
+        if isinstance(previous, _SealedPrivateRecord):
+            from .crypto_at_rest import EncryptionUnavailable, reseal
+            from .file_lock import atomic_write_bytes
+
+            try:
+                sealed = reseal(previous.original_envelope, rendered.encode("utf-8"))
+            except EncryptionUnavailable as exc:
+                raise PrivacyStateError("privacy record encryption did not authenticate") from exc
+            atomic_write_bytes(path, sealed, mode=0o600)
+        else:
+            # Existing local JSON policy remains unchanged: this is encrypted
+            # record compatibility, not a migration of all legacy plaintext.
+            atomic_write_text(path, rendered, mode=0o600)
         return saved
 
     def save(self, record: dict, *, expected_revision: int | None = None) -> dict:
@@ -615,7 +645,7 @@ class _RecordStore:
                 raise PermissionError(
                     "privacy record scan found an invalid record path"
                 )
-            if info.st_size > _MAX_PRIVACY_JSON_BYTES:
+            if info.st_size > _MAX_PRIVACY_JSON_BYTES + _MAX_PRIVACY_ENVELOPE_BYTES:
                 raise PrivacyStateError(
                     "privacy record payload exceeds the size limit"
                 )
@@ -655,7 +685,7 @@ class _RecordStore:
                 or not _RECORD_ID_RE.fullmatch(record_id)
                 or not record_id.startswith(f"{self.prefix}-")
                 or not private_path_is_restricted(path, 0o600)
-                or info.st_size > _MAX_PRIVACY_JSON_BYTES
+                or info.st_size > _MAX_PRIVACY_JSON_BYTES + _MAX_PRIVACY_ENVELOPE_BYTES
             ):
                 raise PermissionError(
                     "privacy record scan found an invalid record path"

@@ -6,7 +6,7 @@ const readiness={state:'setup_required',configuration_complete:false,actions:[{i
 const initial={context:'a'.repeat(64),configuration:'b'.repeat(64),revision:0,binding:{resource_owner:''},owner_locked:false,owner_source:'initial',eligible_owners:['user:other','user:owner'],principal:'user:owner',modules_enabled:true,connections:[{name:'jira',connector:'jira',revision:'j1',has_token:true},{name:'drive',connector:'gdrive',revision:'d1',has_token:true}],readiness};
 async function fixture(intercept=()=>initial){
   const dom=new JSDOM(markup,{url:'https://app.example/vendor-onboarding',runScripts:'outside-only'}),calls=[],w=dom.window;
-  w.fetch=async(url,options)=>{calls.push({url,options});const value=await intercept(url,options);return value instanceof Response?value:new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});};
+  w.fetch=async(url,options)=>{if(String(url).includes('/api/v1/choices/people'))return new Response(JSON.stringify({people:[{value:'user:other',label:'Olive Other'}]}),{headers:{'Content-Type':'application/json'}});calls.push({url,options});const value=await intercept(url,options);return value instanceof Response?value:new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});};
   w.eval(fs.readFileSync(path.join(folder,'static/lightwork-vendor-setup.js'),'utf8'));
   async function settle(){for(let i=0;i<8;i++)await new Promise(r=>setImmediate(r));}
   const el=id=>w.document.getElementById('vs-'+id);
@@ -109,7 +109,7 @@ test('failed refresh clears credentials and changed account cannot retain prior 
 
 test('fresh owner choice is explicit and changes require a fresh confirmation',async t=>{
   const ui=await fixture();t.after(()=>ui.w.close());assert.equal(ui.el('resource-owner').value,'');
-  assert.equal(ui.el('resource-owner').options[1].textContent,'other');assert.equal(ui.el('resource-owner').options[1].value,'user:other');
+  assert.equal(ui.el('resource-owner').options[1].textContent,'Olive Other');assert.equal(ui.el('resource-owner').options[1].value,'user:other');
   ui.el('ticket').value='jira';ui.el('confirm').checked=true;ui.el('confirm').dispatchEvent(new ui.w.Event('change',{bubbles:true}));
   assert.equal(ui.el('save').disabled,true);ui.el('save').click();assert.equal(ui.calls.length,1);
   ui.el('resource-owner').value='user:other';ui.el('resource-owner').dispatchEvent(new ui.w.Event('change',{bubbles:true}));
@@ -149,4 +149,16 @@ test('setup checklist renders text safely and failed refresh removes stale readi
   fail=true;ui.el('refresh').click();await ui.settle();
   assert.equal(ui.el('next-actions').children.length,0);assert.equal(ui.el('readiness-summary').textContent,'Setup has not been confirmed.');
   assert.equal(ui.el('deployment').textContent,'Deployment status has not been confirmed.');
+});
+
+test('turning vendor onboarding off needs its own consent and a confirmation, and keeps the saved setup',async t=>{
+  const ui=await fixture((url,options)=>String(url).endsWith('/disable')?{...initial,modules_enabled:false}:initial);t.after(()=>ui.w.close());
+  assert.equal(ui.el('off').hidden,false);assert.equal(ui.el('disable').disabled,true);
+  ui.el('off-confirm').checked=true;ui.el('off-confirm').dispatchEvent(new ui.w.Event('change'));assert.equal(ui.el('disable').disabled,false);
+  let asked='';ui.w.mvConfirm=async message=>{asked=message;return false;};ui.el('disable').click();await ui.settle();
+  assert.match(asked,/Nothing is deleted/);assert.equal(ui.calls.some(c=>String(c.url).endsWith('/disable')),false);
+  ui.w.mvConfirm=async()=>true;ui.el('disable').click();await ui.settle();
+  const call=ui.calls.find(c=>String(c.url).endsWith('/disable'));const body=JSON.parse(call.options.body);
+  assert.equal(body.confirm,true);assert.equal(body.context,initial.context);assert.equal(body.configuration,initial.configuration);
+  assert.equal(ui.el('off').hidden,true);assert.equal(ui.el('enable').disabled,true);assert.equal(ui.el('off-confirm').checked,false);
 });

@@ -52,15 +52,15 @@
   <div class="arv__foot">
     <span class="muted" id="arv-status" role="status" aria-live="polite" style="margin-inline-end:auto;"></span>
     <button class="btn" id="arv-send" style="display:none;">Send questions back to requester</button>
-    <label class="muted" id="arv-cadence-wrap" style="display:none; align-items:center; gap:var(--space-2); font-size:var(--text-sm);">next review
-      <select class="ctl" id="arv-cadence" aria-label="Review cadence">
-        <option value="90">90 days</option>
-        <option value="180">180 days</option>
-        <option value="365" selected>1 year</option>
-        <option value="0">none</option>
+    <label class="muted" id="arv-cadence-wrap" style="display:none; align-items:center; gap:var(--space-2); font-size:var(--text-sm);">Next review
+      <select class="ctl" id="arv-cadence" aria-label="When to review again">
+        <option value="90">In 3 months</option>
+        <option value="180">In 6 months</option>
+        <option value="365" selected>In 1 year</option>
+        <option value="0">No scheduled review</option>
       </select>
     </label>
-    <button class="btn" id="arv-trigger" style="display:none;" title="Force a re-review now (renewal, new sub-processor, material change)">Re-review now</button>
+    <button class="btn" id="arv-trigger" style="display:none;" title="Start a new review now, for example at a contract renewal or a new sub-processor">Re-review now</button>
     <button class="btn" id="arv-accept" style="display:none;" title="Formally accept the residual risk with a rationale and expiry">Accept risk</button>
     <button class="btn" id="arv-reject" style="display:none;">Reject</button>
     <button class="btn btn--primary" id="arv-approve" style="display:none;">Approve</button>
@@ -100,6 +100,27 @@
       return 'badge ' + (r === 'high' ? 'blocked' : r === 'medium' ? 'warn' : 'done');
     }
 
+    const TYPE_LABEL = { pia: 'Privacy impact assessment', dpia: 'Data protection impact assessment',
+      aira: 'AI risk assessment', tia: 'Transfer impact assessment', fria: 'Fundamental rights impact assessment',
+      vendor_risk: 'Vendor risk review', vendor: 'Vendor risk review' };
+    const ANSWER_LABEL = { yes: 'Yes', no: 'No', na: 'Not applicable', unknown: 'Unknown', partial: 'Partly' };
+    const STATUS_LABEL = { approved: 'Approved', rejected: 'Rejected', pending_review: 'Waiting for review', needs_more: 'Waiting for answers' };
+    function human(value) {
+      if (typeof window !== 'undefined' && typeof window.mvHuman === 'function') return window.mvHuman(value);
+      const text = String(value || '').replace(/[_-]+/g, ' ').trim();
+      return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
+    }
+    function person(value) {
+      return String(value || '').replace(/^(user|agent|service):/, '');
+    }
+    function inDays(days) {
+      return days >= 0 ? 'in ' + days + (days === 1 ? ' day' : ' days') : (-days) + (days === -1 ? ' day' : ' days') + ' overdue';
+    }
+    function problem(response, action) {
+      if (typeof window !== 'undefined' && typeof window.mvErrorText === 'function') return window.mvErrorText(response, action);
+      return 'Could not ' + action + '. Please try again.';
+    }
+
     function questionnaireCompletion(rec) {
       const result = rec.result || {}, questions = rec.question_text || {};
       const total = Number.isInteger(result.total) ? result.total : Object.keys(questions).length;
@@ -121,16 +142,16 @@
       const inherent = res.inherent_risk || res.risk_rating || '?';
       const residual = res.residual_risk || res.risk_rating || '?';
       const inhEl = document.getElementById('arv-inherent');
-      inhEl.textContent = incomplete ? (hasAnswers ? 'provisional inherent ' + inherent : 'inherent not yet assessed') : 'inherent ' + inherent;
+      inhEl.textContent = incomplete ? (hasAnswers ? 'Risk before safeguards (provisional): ' + human(inherent) : 'Risk before safeguards: not yet assessed') : 'Risk before safeguards: ' + human(inherent);
       inhEl.className = incomplete ? 'badge warn' : riskClass(inherent);
-      riskEl.textContent = incomplete ? (hasAnswers ? 'provisional residual ' + residual : 'residual not yet assessed') : 'residual ' + residual;
+      riskEl.textContent = incomplete ? (hasAnswers ? 'Risk after safeguards (provisional): ' + human(residual) : 'Risk after safeguards: not yet assessed') : 'Risk after safeguards: ' + human(residual);
       riskEl.className = incomplete ? 'badge warn' : riskClass(residual);
       const sub = el('p', 'muted');
       const controls = (!incomplete && res.risks_in_scope != null)
         ? ' · ' + (res.controls_in_place || 0) + ' of ' + res.risks_in_scope +
           ' in-scope risk areas controlled'
         : '';
-      sub.append(rec.type ? rec.type.toUpperCase() + ' · ' : '',
+      sub.append(rec.type ? (TYPE_LABEL[rec.type] || human(rec.type)) + ' · ' : '',
                  (rec.subject || '') + controls);
       body.appendChild(sub);
       if (incomplete) body.appendChild(el('p', 'arv__incomplete', 'Questionnaire incomplete: ' + currentCompletion.answered + ' of ' + currentCompletion.total + ' questions resolved. Unanswered questions and recorded Unknown answers still need resolution. Any risk estimate is provisional; approving now records a decision on an incomplete questionnaire.'));
@@ -140,11 +161,11 @@
         const line = el('p', null);
         line.appendChild(el('span',
           'badge ' + (rec.status === 'approved' ? 'done' : 'blocked'),
-          rec.status));
-        let txt = rec.decided_by ? ' by ' + rec.decided_by : '';
+          STATUS_LABEL[rec.status] || human(rec.status)));
+        let txt = rec.decided_by ? ' by ' + person(rec.decided_by) : '';
         if (rec.next_review_at) {
           const days = Math.ceil((rec.next_review_at * 1000 - Date.now()) / 86400000);
-          txt += ' · next review ' + (days >= 0 ? 'in ' + days + 'd' : (-days) + 'd overdue');
+          txt += ' · next review ' + inDays(days);
         }
         const note = el('span', 'muted', txt);
         note.style.fontSize = 'var(--text-sm)';
@@ -159,17 +180,17 @@
         const days = acc.expires_at ? Math.ceil((acc.expires_at * 1000 - Date.now()) / 86400000) : null;
         const p = el('p', null);
         p.appendChild(el('span', 'badge ' + (expired ? 'blocked' : 'warn'),
-          expired ? 'risk acceptance expired' : 'risk accepted'));
+          expired ? 'Risk acceptance expired' : 'Risk accepted'));
         p.appendChild(el('span', 'muted',
-          (acc.accepted_by ? ' by ' + acc.accepted_by : '') +
-          (days != null ? (expired ? ' · expired' : ' · expires in ' + days + 'd') : '') +
+          (acc.accepted_by ? ' by ' + person(acc.accepted_by) : '') +
+          (days != null ? (expired ? ' · expired' : ' · expires ' + inDays(days)) : '') +
           (acc.rationale ? ' — “' + acc.rationale + '”' : '')));
         p.style.fontSize = 'var(--text-sm)';
         body.appendChild(p);
       }
       if (rec.review_forced_at && rec.review_trigger_reason) {
         const p = el('p', null);
-        p.appendChild(el('span', 'badge warn', 'due for re-review'));
+        p.appendChild(el('span', 'badge warn', 'Due for a new review'));
         p.appendChild(el('span', 'muted', ' · ' + rec.review_trigger_reason));
         p.style.fontSize = 'var(--text-sm)';
         body.appendChild(p);
@@ -183,12 +204,12 @@
       Object.keys(answers).forEach(function (qid) {
         const row = el('div', 'arv__row');
         const meta = qtext[qid] || {};
-        const q = el('div', 'arv__q', meta.text || qid.replace(/_/g, ' '));
+        const q = el('div', 'arv__q', meta.text || human(qid));
         if (meta.section) q.appendChild(el('div', 'arv__note', meta.section));
         if (answers[qid].note) q.appendChild(el('div', 'arv__note', '“' + answers[qid].note + '”'));
-        if (answers[qid].by) q.appendChild(el('div', 'arv__note', '— answered by ' + answers[qid].by));
-        const a = String(answers[qid].answer || '?');
-        const pill = el('span', 'badge ' + (a === 'no' || a === 'unknown' ? 'warn' : 'done'), a);
+        if (answers[qid].by) q.appendChild(el('div', 'arv__note', '— answered by ' + person(answers[qid].by)));
+        const a = String(answers[qid].answer || '');
+        const pill = el('span', 'badge ' + (a === 'no' || a === 'unknown' || !a ? 'warn' : 'done'), ANSWER_LABEL[a] || (a ? human(a) : 'Not answered'));
         const ans = el('div', 'arv__ans'); ans.appendChild(pill);
         row.append(q, ans); body.appendChild(row);
       });
@@ -198,9 +219,9 @@
         body.appendChild(el('div', 'arv__section', 'Findings (' + findings.length + ')'));
         findings.forEach(function (f) {
           const row = el('div', 'arv__row');
-          const q = el('div', 'arv__q', f.question || f.text || f.question_id);
+          const q = el('div', 'arv__q', f.question || f.text || human(f.question_id));
           if (f.recommendation) q.appendChild(el('div', 'arv__note', f.recommendation));
-          const sev = el('span', 'badge ' + (f.severity === 'high' ? 'blocked' : f.severity === 'medium' ? 'warn' : 'done'), f.kind === 'unverified' ? 'unverified' : f.severity);
+          const sev = el('span', 'badge ' + (f.severity === 'high' ? 'blocked' : f.severity === 'medium' ? 'warn' : 'done'), f.kind === 'unverified' ? 'Not yet confirmed' : human(f.severity));
           const ans = el('div', 'arv__ans'); ans.appendChild(sev);
           row.append(q, ans); body.appendChild(row);
         });
@@ -212,15 +233,15 @@
         fups.forEach(function (f) {
           const row = el('div', 'arv__row');
           const q = el('div', 'arv__q', f.question);
-          if (f.answer) q.appendChild(el('div', 'arv__note', '↳ ' + f.answer + (f.answered_by ? ' — ' + f.answered_by : '')));
-          const st = el('span', 'badge ' + (f.answer ? 'done' : 'warn'), f.answer ? 'answered' : 'awaiting reply');
+          if (f.answer) q.appendChild(el('div', 'arv__note', 'Reply: ' + f.answer + (f.answered_by ? ' — ' + person(f.answered_by) : '')));
+          const st = el('span', 'badge ' + (f.answer ? 'done' : 'warn'), f.answer ? 'Answered' : 'Waiting for a reply');
           const ans = el('div', 'arv__ans'); ans.appendChild(st);
           row.append(q, ans); body.appendChild(row);
         });
       }
 
       body.appendChild(el('div', 'arv__section', 'Ask for more detail'));
-      const hint = el('p', 'muted', 'One question per line. The requester is re-interviewed with exactly these questions; the assessment stays parked until they answer.');
+      const hint = el('p', 'muted', 'One question per line. We\'ll ask the requester these questions. The assessment waits until they answer.');
       hint.style.fontSize = 'var(--text-sm)';
       body.appendChild(hint);
       const ta = el('textarea');
@@ -301,7 +322,7 @@
           });
           const data = await response.json();
           if (generation !== viewGeneration || id !== currentId) return;
-          if (!response.ok) throw new Error(response.status === 409 ? 'This assessment changed. Reload the latest version before saving this answer.' : (data && typeof data.detail === 'string' ? data.detail : 'Could not save the answer.'));
+          if (!response.ok) throw new Error(response.status === 409 ? 'This assessment changed. Reload the latest version before saving this answer.' : problem(response, 'save the answer'));
           if (!data || typeof data !== 'object') throw new Error('The saved answer could not be confirmed. Reload the assessment before trying again.');
           const saved = choice.followup ? (data.followups || []).find(function (item) { return item.id === choice.id; }) : data.answers && data.answers[choice.id];
           if (!data || data.id !== id || !Number.isInteger(data.revision) || data.revision < revision || !saved || saved.answer !== value) throw new Error('The saved answer could not be confirmed. Reload the assessment before trying again.');
@@ -326,12 +347,17 @@
         const details = el('details'); details.appendChild(el('summary', '', 'Previous answers and source information'));
         history.forEach(function (item) {
           const old = item.previous_answer, question = questions[item.question_id];
-          details.appendChild(el('p', '', (question ? question.text : item.question_id) + ': ' + old.answer + (old.note ? ' — ' + old.note : '') + (old.by ? ' · ' + old.by : '')));
-          if (old.ai_metadata) { const pre = el('pre'); pre.textContent = JSON.stringify(old.ai_metadata, null, 2); details.appendChild(pre); }
+          details.appendChild(el('p', '', (question ? question.text : human(item.question_id)) + ': ' + (ANSWER_LABEL[old.answer] || human(old.answer)) + (old.note ? ' — ' + old.note : '') + (old.by ? ' · ' + person(old.by) : '')));
+          if (old.ai_metadata) {
+            const meta = old.ai_metadata || {};
+            const source = meta.source || meta.provider || meta.model || '';
+            const confidence = typeof meta.confidence === 'number' ? Math.round((meta.confidence <= 1 ? meta.confidence * 100 : meta.confidence)) : null;
+            details.appendChild(el('p', 'muted', 'Suggested by AI' + (source ? ' from ' + human(source) : '') + (confidence != null ? ', confidence ' + confidence + '%' : '') + '.'));
+          }
         });
         replies.forEach(function (item) {
           const previous = item.previous_answer || {}, question = (rec.followups || []).find(function (followup) { return followup.id === item.followup_id; });
-          details.appendChild(el('p', '', (question ? question.question : 'Follow-up') + ': ' + (previous.answer || 'No previous reply') + (previous.answered_by ? ' · ' + previous.answered_by : '')));
+          details.appendChild(el('p', '', (question ? question.question : 'Follow-up') + ': ' + (previous.answer || 'No previous reply') + (previous.answered_by ? ' · ' + person(previous.answered_by) : '')));
         }); section.appendChild(details);
       }
     }
@@ -346,16 +372,16 @@
         const data = await r.json();
         const t = data.trend || [];
         if (t.length < 2) return;
-        const arrow = data.direction === 'up' ? '▲ risk rising'
-          : data.direction === 'down' ? '▼ risk falling'
-          : data.direction === 'unknown' ? '? review order unknown' : '▬ risk steady';
+        const arrow = data.direction === 'up' ? '▲ Risk rising'
+          : data.direction === 'down' ? '▼ Risk falling'
+          : data.direction === 'unknown' ? '? Trend unclear (review order unknown)' : '▬ Risk steady';
         const cls = data.direction === 'up' ? 'blocked'
           : data.direction === 'down' ? 'done' : 'warn';
         const p = el('p', null);
         p.appendChild(el('span', 'badge ' + cls, arrow));
         if (data.direction_reason) p.title = data.direction_reason;
         p.appendChild(el('span', 'muted', ' · ' +
-          t.map(function (x) { return x.residual_risk; }).join(' → ') +
+          t.map(function (x) { return human(x.residual_risk); }).join(' → ') +
           ' (' + t.length + ' reviews)'));
         p.style.fontSize = 'var(--text-sm)';
         body.appendChild(p);
@@ -371,17 +397,18 @@
         if (id !== currentId || revision !== currentRevision || generation !== viewGeneration || answerBusy || answerDirty) return;
         statusEl.textContent = decision === 'approved' ? 'Approving…' : 'Rejecting…';
         const days = parseInt(cadenceSel.value, 10) || 0;
-        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/decide', {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id) + '/decide', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             decision: decision,
             cadence_days: days,
-            expected_revision: currentRevision
+            expected_revision: revision
           })
         });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!r.ok) throw new Error(problem(r, 'record the decision'));
         const rec = await r.json();
+        if (id !== currentId || generation !== viewGeneration) return;
         decidedInDialog = true;
         statusEl.textContent = decision === 'approved'
           ? (days ? 'Approved — next review in ' + days + ' days.' : 'Approved.')
@@ -391,64 +418,82 @@
         // row decides itself from this (the reviewer shouldn't have to click
         // twice for one decision).
         document.dispatchEvent(new CustomEvent('mv-assessment-decided', {
-          detail: { id: currentId, decision: decision }
+          detail: { id: id, decision: decision }
         }));
       } catch (e) {
-        statusEl.textContent = 'Could not record decision: ' + e.message;
+        if (id === currentId && generation === viewGeneration) statusEl.textContent = e && /^Could not/.test(e.message) ? e.message : problem(e, 'record the decision');
       } finally {
-        approveBtn.disabled = rejectBtn.disabled = false;
+        if (id === currentId && generation === viewGeneration) approveBtn.disabled = rejectBtn.disabled = false;
       }
     }
     approveBtn.addEventListener('click', function () { decide('approved'); });
     rejectBtn.addEventListener('click', function () { decide('rejected'); });
 
-    async function reload() {
-      const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId));
-      if (r.ok) render(await r.json());
+    async function reload(id = currentId, generation = viewGeneration) {
+      const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id));
+      if (r.ok) {
+        const record = await r.json();
+        if (id === currentId && generation === viewGeneration) render(record);
+      }
     }
 
     // Accept the residual risk (B11): named owner, rationale, expiry.
     acceptBtn.addEventListener('click', async function () {
       if (answerBusy || answerDirty) { statusEl.textContent = 'Save or discard the answer changes before accepting risk.'; return; }
-      const rationale = window.prompt('Rationale for accepting this residual risk ' +
-        '(e.g. compensating controls, business justification):');
-      if (rationale == null || !rationale.trim()) return;
-      const days = parseInt(window.prompt('Acceptance expires in how many days?', '365'), 10);
-      if (!days || days < 1) { statusEl.textContent = 'A positive expiry is required.'; return; }
+      const values = await mvForm('Accept the remaining risk', [
+        { key: 'rationale', label: 'Why is this risk acceptable?', type: 'text', required: true,
+          placeholder: 'For example: compensating controls, business need' },
+        { key: 'expires_days', label: 'Acceptance lasts', type: 'select', default: '365', required: true,
+          options: [{ value: '90', label: '3 months' }, { value: '180', label: '6 months' }, { value: '365', label: '1 year' }] }
+      ], { okText: 'Accept risk' });
+      if (!values || !String(values.rationale || '').trim()) return;
+      const rationale = String(values.rationale);
+      const days = parseInt(values.expires_days, 10);
+      if (!days || days < 1) { statusEl.textContent = 'Choose how long the acceptance lasts.'; return; }
+      const id = currentId, revision = currentRevision, generation = viewGeneration;
       acceptBtn.disabled = true;
       statusEl.textContent = 'Recording risk acceptance…';
       try {
-        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/accept-risk', {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id) + '/accept-risk', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rationale: rationale.trim(), expires_days: days, expected_revision: currentRevision })
+          body: JSON.stringify({ rationale: rationale.trim(), expires_days: days, expected_revision: revision })
         });
-        if (!r.ok) { const j = await r.json().catch(function () { return {}; }); throw new Error(j.detail || ('HTTP ' + r.status)); }
-        statusEl.textContent = 'Risk accepted — comes due again in ' + days + ' days.';
-        await reload();
+        if (!r.ok) throw new Error(problem(r, 'accept the risk'));
+        if (id !== currentId || generation !== viewGeneration) return;
+        statusEl.textContent = 'Risk accepted — it comes up for review again in ' + days + ' days.';
+        await reload(id, generation);
       } catch (e) {
-        statusEl.textContent = 'Could not accept risk: ' + e.message;
-      } finally { acceptBtn.disabled = false; }
+        if (id === currentId && generation === viewGeneration) statusEl.textContent = e && /^Could not/.test(e.message) ? e.message : problem(e, 'accept the risk');
+      } finally { if (id === currentId && generation === viewGeneration) acceptBtn.disabled = false; }
     });
 
     // Force a re-review now (B14): an external event trigger.
     triggerBtn.addEventListener('click', async function () {
       if (answerBusy || answerDirty) { statusEl.textContent = 'Save or discard the answer changes before reopening review.'; return; }
-      const reason = window.prompt('Why re-review now? (contract renewal, new sub-processor, material change)');
-      if (reason == null) return;
+      const values = await mvForm('Start a new review now', [
+        { key: 'reason', label: 'Why?', type: 'select', required: true, default: 'Contract renewal',
+          options: ['Contract renewal', 'New sub-processor', 'Material change', 'Other'] },
+        { key: 'note', label: 'Details (optional)', type: 'text' }
+      ], { okText: 'Start review' });
+      if (!values || !values.reason) return;
+      const reason = values.reason + (values.note ? ': ' + String(values.note).trim() : '');
+      const id = currentId, revision = currentRevision, generation = viewGeneration;
       triggerBtn.disabled = true;
       statusEl.textContent = 'Flagging for re-review…';
       try {
-        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/trigger-review', {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id) + '/trigger-review', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reason: reason.trim(), expected_revision: currentRevision })
+          body: JSON.stringify({ reason: reason.trim(), expected_revision: revision })
         });
-        if (!r.ok) { const j = await r.json().catch(function () { return {}; }); throw new Error(j.detail || ('HTTP ' + r.status)); }
-        statusEl.textContent = 'Flagged for re-review.';
-        await reload();
-        document.dispatchEvent(new CustomEvent('mv-assessment-decided', { detail: { id: currentId, decision: 'retriggered' } }));
+        if (!r.ok) throw new Error(problem(r, 'start a new review'));
+        if (id !== currentId || generation !== viewGeneration) return;
+        statusEl.textContent = 'A new review has been started.';
+        await reload(id, generation);
+        if (id !== currentId || generation !== viewGeneration) return;
+        document.dispatchEvent(new CustomEvent('mv-assessment-decided', { detail: { id: id, decision: 'retriggered' } }));
       } catch (e) {
-        statusEl.textContent = 'Could not flag for re-review: ' + e.message;
-      } finally { triggerBtn.disabled = false; }
+        if (id === currentId && generation === viewGeneration) statusEl.textContent = e && /^Could not/.test(e.message) ? e.message : problem(e, 'start a new review');
+      } finally { if (id === currentId && generation === viewGeneration) triggerBtn.disabled = false; }
     });
 
     async function open(id) {
@@ -457,18 +502,20 @@
       const generation = ++viewGeneration; answerDirty = false; selectedQuestion = ''; currentQuestions = {};
       currentId = id;
       currentRevision = null;
+      decidedInDialog = false;
+      approveBtn.disabled = rejectBtn.disabled = acceptBtn.disabled = triggerBtn.disabled = sendBtn.disabled = false;
       statusEl.textContent = '';
       body.innerHTML = '<p class="muted">Loading…</p>';
       sendBtn.style.display = 'none';
       if (!dlg.open) dlg.showModal();
       try {
         const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id));
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!r.ok) throw new Error(problem(r, 'load the assessment'));
         const record = await r.json(); if (generation === viewGeneration) render(record);
       } catch (e) {
         if (generation !== viewGeneration) return;
         body.innerHTML = '';
-        body.appendChild(el('p', 'muted', 'Could not load assessment: ' + e.message));
+        body.appendChild(el('p', 'muted', e && /^Could not/.test(e.message) ? e.message : problem(e, 'load the assessment')));
       }
     }
 
@@ -477,24 +524,27 @@
       const ta = document.getElementById('arv-questions');
       const questions = (ta && ta.value || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
       if (!questions.length) { statusEl.textContent = 'Write at least one question first.'; return; }
+      const id = currentId, revision = currentRevision, generation = viewGeneration;
       sendBtn.disabled = true;
       statusEl.textContent = 'Sending…';
       try {
-        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/followups', {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id) + '/followups', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             questions: questions,
-            expected_revision: currentRevision
+            expected_revision: revision
           })
         });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        statusEl.textContent = 'Sent — the requester will be asked these ' + questions.length + ' question(s).';
-        render(await r.json());
+        if (!r.ok) throw new Error(problem(r, 'send the questions'));
+        const record = await r.json();
+        if (id !== currentId || generation !== viewGeneration) return;
+        statusEl.textContent = 'Sent — the requester will be asked ' + (questions.length === 1 ? 'this question.' : 'these ' + questions.length + ' questions.');
+        render(record);
       } catch (e) {
-        statusEl.textContent = 'Could not send: ' + e.message;
+        if (id === currentId && generation === viewGeneration) statusEl.textContent = e && /^Could not/.test(e.message) ? e.message : problem(e, 'send the questions');
       } finally {
-        sendBtn.disabled = false;
+        if (id === currentId && generation === viewGeneration) sendBtn.disabled = false;
       }
     });
     async function closeReview() {

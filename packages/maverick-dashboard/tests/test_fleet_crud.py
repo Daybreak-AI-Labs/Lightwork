@@ -162,4 +162,4 @@ def test_page_has_create_form_and_remove(monkeypatch, tmp_path):
     save_fleet(Fleet(name="acme", owner=""))
     text = _client().get("/fleets").text
     assert 'id="fleet-create-form"' in text
-    assert 'class="fleet-remove-btn"' in text
+    assert 'fleet-remove-btn"' in text

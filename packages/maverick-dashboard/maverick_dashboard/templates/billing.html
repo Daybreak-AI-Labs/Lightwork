@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Billing · Lightwork{% endblock %}
 {% block content %}
+{% macro month(period) %}{% set parts = period.split('-') %}{% if parts|length == 2 %}{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][parts[1]|int - 1] }} {{ parts[0] }}{% else %}{{ period }}{% endif %}{% endmacro %}
 <style>
   /* Page-scoped; built from the design-system tokens. */
   .bill-bars { display: flex; align-items: flex-end; gap: 4px; height: 140px; margin-top: var(--space-3); }
@@ -9,29 +10,32 @@
   .bill-axis { display: flex; justify-content: space-between; margin-top: var(--space-2); color: var(--muted); font-size: var(--text-xs); }
   .toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
   .toolbar h2 { margin: 0; }
+  .bill-form { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+  .bill-field { display: flex; flex-direction: column; gap: var(--space-1); }
+  .bill-scroll { overflow-x: auto; }
 </style>
 
 <h1 class="page-title">Billing</h1>
 <p class="page-subtitle">
-  Statement for {{ tenant_label }}{% if tenant_label != tenant %} <span class="muted">({{ tenant }})</span>{% endif %} — accrued charges from priced runs, bucketed by month.
+  Charges for {{ tenant_label }}, from finished tasks, by month.
 </p>
 
 <div class="toolbar">
-  <div class="section-head"><h2>Current period — {{ current.period }}</h2></div>
-  <a class="btn btn--primary" href="/billing?format=csv&period={{ current.period }}" download>⤓ Download invoice (CSV)</a>
+  <div class="section-head"><h2>This month — {{ month(current.period) }}</h2></div>
+  <a class="btn btn--primary" href="/billing?format=csv&period={{ current.period }}" download>Download this month (spreadsheet)</a>
 </div>
 <div class="grid">
   <div class="stat">
-    <div class="num">${{ '%.4f'|format(current.cost) }}</div>
-    <div class="label">accrued charges</div>
+    <div class="num" title="${{ '%.6f'|format(current.cost) }}">{{ current.cost | money }}</div>
+    <div class="label">Charges so far</div>
   </div>
   <div class="stat">
     <div class="num">{{ current.runs }}</div>
-    <div class="label">billable runs</div>
+    <div class="label">Tasks run</div>
   </div>
   <div class="stat">
     <div class="num">{{ '{:,}'.format(current.input_tokens + current.output_tokens) }}</div>
-    <div class="label">tokens</div>
+    <div class="label" title="Tokens measure how much text the AI read and wrote.">AI usage (tokens)</div>
   </div>
   <div class="stat">
     <div class="num">
@@ -39,85 +43,200 @@
         <span class="badge {{ 'failure' if delta_pct > 0 else 'done' }}">{{ '+' if delta_pct >= 0 else '' }}{{ delta_pct }}%</span>
       {% else %}—{% endif %}
     </div>
-    <div class="label">period over period{% if previous %} (vs {{ previous.period }}){% endif %}</div>
+    <div class="label">Change from {% if previous %}{{ month(previous.period) }}{% else %}last month{% endif %}</div>
   </div>
 </div>
 
-<div class="section-head"><h2>Spend trend</h2></div>
+<div class="section-head"><h2>Charges over time</h2></div>
 <div class="panel">
   {% if series %}
     {% set _max = (series | map(attribute='cost') | max) or 0 %}
     <div class="bill-bars" role="img"
-         aria-label="Charges for the last {{ series|length }} periods, oldest on the left.">
+         aria-label="Charges for the last {{ series|length }} months, oldest on the left.">
       {% for p in series | reverse %}
-        <div class="bill-bars__col" title="{{ p.period }} · ${{ '%.4f'|format(p.cost) }} · {{ p.runs }} runs">
+        <div class="bill-bars__col" title="{{ month(p.period) }} · {{ p.cost | money }} · {{ p.runs }} tasks">
           <div class="bill-bars__bar" style="height: {{ ((p.cost / _max * 100) if _max else 0) | round(1) }}%;"></div>
         </div>
       {% endfor %}
     </div>
     <div class="bill-axis">
-      <span>{{ series[-1].period if series else '' }}</span>
-      <span>{{ series[0].period if series else '' }}</span>
+      <span>{{ month(series[-1].period) if series else '' }}</span>
+      <span>{{ month(series[0].period) if series else '' }}</span>
     </div>
   {% else %}
-    <p class="muted">No priced runs yet — charges appear here once goals run and accrue cost.</p>
+    <p class="muted">No charges yet. Charges appear after your first task runs.</p>
+    <p><a class="btn btn--primary" href="/chat">Start a task</a></p>
   {% endif %}
 </div>
 
-<div class="section-head"><h2>Statements by period</h2></div>
+<div class="section-head"><h2>Monthly statements</h2></div>
 <div class="panel">
   {% if series %}
   <table>
     <thead>
       <tr>
-        <th scope="col">period</th><th scope="col">charges</th>
-        <th scope="col">runs</th><th scope="col">tokens</th><th scope="col">invoice</th>
+        <th scope="col">Month</th><th scope="col">Charges</th>
+        <th scope="col">Tasks Run</th><th scope="col">AI Usage (Tokens)</th><th scope="col">Statement</th>
       </tr>
     </thead>
     <tbody>
       {% for p in series %}
         <tr>
-          <td><code>{{ p.period }}</code></td>
-          <td>${{ '%.4f'|format(p.cost) }}</td>
+          <td>{{ month(p.period) }}</td>
+          <td title="${{ '%.6f'|format(p.cost) }}">{{ p.cost | money }}</td>
           <td>{{ p.runs }}</td>
           <td>{{ '{:,}'.format(p.input_tokens + p.output_tokens) }}</td>
-          <td><a href="/billing?format=csv&period={{ p.period }}" download>CSV</a></td>
+          <td><a class="btn btn--ghost" href="/billing?format=csv&period={{ p.period }}" download aria-label="Download {{ month(p.period) }}">Download</a></td>
         </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-    <p class="muted">No statements yet.</p>
+    <p class="muted">No statements yet. They appear after your first task runs.</p>
   {% endif %}
 </div>
+
+{% if invoice_admin %}
+<div class="section-head"><h2>Make an invoice for a workspace</h2></div>
+<div class="panel" id="invoice-maker">
+  <p class="muted">Adds up a workspace's recorded AI usage for the dates you choose. Nothing is charged; you get a summary and a spreadsheet to send.</p>
+  <form id="invoice-form" class="bill-form">
+    <label class="bill-field">Workspace
+      <select class="select" name="tenant" required>
+        {% for w in invoice_workspaces %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="bill-field">From
+      <input class="input" type="date" name="since">
+    </label>
+    <label class="bill-field">To
+      <input class="input" type="date" name="until">
+    </label>
+    <label class="bill-field">Markup (%)
+      <input class="input" type="number" name="markup" min="0" max="1000" step="0.1" value="0">
+    </label>
+    <label class="bill-field">Minimum charge (US dollars)
+      <input class="input" type="number" name="minimum" min="0" step="0.01" value="0">
+    </label>
+    <button type="submit" class="btn btn--primary">Make invoice</button>
+    <a class="btn" id="invoice-download" href="#" hidden download>Download invoice (spreadsheet)</a>
+  </form>
+  <p id="invoice-msg" class="muted" role="status" aria-live="polite"></p>
+  <div id="invoice-out" class="bill-scroll"></div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var form = document.getElementById('invoice-form');
+  if (!form) return;
+  var msg = document.getElementById('invoice-msg'), out = document.getElementById('invoice-out');
+  var download = document.getElementById('invoice-download');
+  function money(v) { return new Intl.NumberFormat(undefined, {style: 'currency', currency: 'USD'}).format(v || 0); }
+  function query() {
+    var data = new FormData(form), params = new URLSearchParams();
+    ['tenant', 'since', 'until', 'markup', 'minimum'].forEach(function (k) { var v = String(data.get(k) || '').trim(); if (v) params.set(k, v); });
+    return params.toString();
+  }
+  form.addEventListener('submit', async function (event) {
+    event.preventDefault();
+    msg.textContent = 'Adding up usage…'; out.textContent = ''; download.hidden = true;
+    try {
+      var r = await fetch('/api/v1/admin/billing/invoice?' + query(), {credentials: 'same-origin'});
+      if (!r.ok) { msg.textContent = r.status === 422 ? 'Check the dates: the start must be on or before the end.' : window.mvErrorText(r, 'make the invoice'); return; }
+      var data = await r.json();
+      msg.textContent = 'Total: ' + money(data.total) + (data.lines.length ? '' : '. There was no recorded usage in these dates.')
+        + (data.closed_period ? '' : ' Choose both dates to give the invoice a fixed number.');
+      if (data.lines.length) {
+        var table = document.createElement('table'), head = document.createElement('tr');
+        ['Day', 'Person', 'Charge', 'AI usage (tokens)'].forEach(function (h) { var th = document.createElement('th'); th.scope = 'col'; th.textContent = h; head.appendChild(th); });
+        var thead = document.createElement('thead'); thead.appendChild(head); table.appendChild(thead);
+        var body = document.createElement('tbody');
+        data.lines.forEach(function (line) {
+          var tr = document.createElement('tr');
+          [line.day, line.person, money(line.charge), line.usage.toLocaleString()].forEach(function (v) { var td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+          body.appendChild(tr);
+        });
+        table.appendChild(body); out.appendChild(table);
+      }
+      download.href = '/api/v1/admin/billing/invoice.csv?' + query();
+      download.hidden = false;
+    } catch (e) { msg.textContent = window.mvErrorText(e, 'make the invoice'); }
+  });
+})();
+</script>
+
+<div class="section-head"><h2 id="plan-title">What a workspace's plan includes</h2></div>
+<div class="panel" id="plan-contents">
+  <form id="plan-form" class="bill-form" aria-labelledby="plan-title">
+    <label class="bill-field">Workspace
+      <select class="select" name="workspace" required>
+        {% for w in invoice_workspaces %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn btn--primary">Show the plan</button>
+  </form>
+  <p id="plan-msg" class="muted" role="status" aria-live="polite"></p>
+  <div id="plan-out"></div>
+</div>
+
+<div class="section-head"><h2 id="stripe-title">Stripe billing</h2></div>
+<div class="panel" id="stripe-billing">
+  <p class="muted">Charges a workspace's plan fee (and, when turned on, its AI usage) through Stripe, using the Stripe account already set up for this installation. Preview first; nothing is sent until you confirm.</p>
+  <p><button type="button" class="btn" id="stripe-status-run">Check Stripe billing</button></p>
+  <div id="stripe-status-out"></div>
+  <form id="stripe-form" class="bill-form" aria-labelledby="stripe-title">
+    <label class="bill-field">Workspace
+      <select class="select" name="workspace" required>
+        {% for w in invoice_workspaces %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="bill-field">Usage from
+      <input class="input" type="date" name="since">
+    </label>
+    <label class="bill-field">Usage to
+      <input class="input" type="date" name="until">
+    </label>
+    <label class="bill-field">Markup (%)
+      <input class="input" type="number" name="markup" min="0" max="1000" step="0.1" value="0">
+    </label>
+    <label class="bill-field">Minimum charge (US dollars)
+      <input class="input" type="number" name="minimum" min="0" step="0.01" value="0">
+    </label>
+    <button type="submit" class="btn btn--primary">Preview the charge</button>
+    <button type="button" class="btn" id="stripe-sync" hidden>Send to Stripe</button>
+  </form>
+  <p id="stripe-msg" class="muted" role="status" aria-live="polite"></p>
+  <div id="stripe-out"></div>
+</div>
+<script src="/static/lightwork-billing-ops.js" defer></script>
+{% endif %}
+
 <section class="panel" id="usage-reconciliation">
-  <h2>Usage recovery and reconciliation</h2>
-  <p>These receipts record cumulative usage already counted toward runtime quotas.
-    Resuming an interrupted task charges only newly recorded usage. A repeated receipt does not add the same usage again.</p>
-  <p class="muted">This internal accounting trail is separate from the episode statement above and your provider's invoice.
-    Usage that the provider did not report before an interruption cannot be inferred here.
-    Older tasks may have no recovery receipt; retained daily details follow your retention policy.</p>
-  {% if usage_receipt_error %}<p role="status">{{ usage_receipt_error }}</p>
+  <h2>Interrupted tasks</h2>
+  <p>If a task was interrupted and started again, you are only charged once for the work it already did.
+    This list shows those adjustments.</p>
+  <p class="muted">These records are separate from the statements above and from your AI provider's own bill.</p>
+  {% if usage_receipt_error %}<p role="status">These records couldn't be loaded right now. Missing records are not treated as zero.</p>
   {% elif usage_receipts['items'] %}
-  <div style="overflow-x:auto;"><table>
-    <caption>Confirmed cumulative usage receipts, newest first</caption>
-    <thead><tr><th scope="col">Account</th><th scope="col">Accounted usage</th><th scope="col">Recorded updates</th><th scope="col">Last update</th><th scope="col">Details</th></tr></thead>
+  <div class="bill-scroll"><table>
+    <caption>Adjustments, newest first</caption>
+    <thead><tr><th scope="col">Person</th><th scope="col">Counted So Far</th><th scope="col">Last Update</th><th scope="col">Details</th></tr></thead>
     <tbody>{% for receipt in usage_receipts['items'] %}
-      <tr><td>{{ receipt.principal }}</td>
-        <td>${{ '%.6f'|format(receipt.total.dollars) }} · {{ receipt.total.in_tokens + receipt.total.out_tokens }} tokens</td>
-        <td>{{ receipt.revision }}</td><td><span data-when="{{ receipt.updated_at }}"></span></td>
-        <td><details><summary>Review accounting details</summary>
-          <p>Receipt reference: {{ receipt.scope }}</p>
-          <p>Previously acknowledged usage carried forward: ${{ '%.6f'|format(receipt.credited.dollars) }};
-            {{ receipt.credited.in_tokens + receipt.credited.out_tokens }} tokens.</p>
+      {% set who = receipt.principal | identity %}
+      <tr><td>{{ who.name }}{% if who.detail and who.detail != 'Email' %} <span class="muted">({{ who.detail }})</span>{% endif %}</td>
+        <td>{{ receipt.total.dollars | money }} · {{ '{:,}'.format(receipt.total.in_tokens + receipt.total.out_tokens) }} tokens</td>
+        <td><span data-when="{{ receipt.updated_at }}"></span></td>
+        <td><details><summary>By day</summary>
+          <p>Already counted before the restart: {{ receipt.credited.dollars | money }};
+            {{ '{:,}'.format(receipt.credited.in_tokens + receipt.credited.out_tokens) }} tokens.</p>
           <ul>{% for day, charge in receipt.charges|dictsort %}
-            <li>{{ day }}: ${{ '%.6f'|format(charge.dollars) }}; {{ charge.in_tokens + charge.out_tokens }} new tokens counted.</li>
+            <li>{{ day }}: {{ charge.dollars | money }}; {{ '{:,}'.format(charge.in_tokens + charge.out_tokens) }} new tokens counted.</li>
           {% endfor %}</ul>
         </details></td></tr>
     {% endfor %}</tbody>
   </table></div>
-  {% else %}<p>No recovery receipts are recorded in the accessible ledger.</p>{% endif %}
-  {% if usage_receipts.offset > 0 %}<a class="btn" href="/billing?receipt_offset={{ [0, usage_receipts.offset - 50]|max }}#usage-reconciliation">Previous receipts</a>{% endif %}
-  {% if usage_receipts.has_more %}<a class="btn" href="/billing?receipt_offset={{ usage_receipts.offset + 50 }}#usage-reconciliation">Next receipts</a>{% endif %}
+  {% else %}<p class="muted">No interrupted tasks needed an adjustment.</p>{% endif %}
+  {% if usage_receipts.offset > 0 %}<a class="btn" href="/billing?receipt_offset={{ [0, usage_receipts.offset - 50]|max }}#usage-reconciliation">Newer</a>{% endif %}
+  {% if usage_receipts.has_more %}<a class="btn" href="/billing?receipt_offset={{ usage_receipts.offset + 50 }}#usage-reconciliation">Older</a>{% endif %}
 </section>
 {% endblock %}

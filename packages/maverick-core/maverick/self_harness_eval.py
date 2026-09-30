@@ -1205,6 +1205,28 @@ def import_corpus(corpus_path: str | Path, data: dict, *,
         return added
 
 
+def preview_corpus_import(corpus_path: str | Path, data: dict, *,
+                          replace: bool = False) -> dict:
+    """What :func:`import_corpus` WOULD change, without writing anything: per
+    corpus key, the cases live now and after the import. Same root check as
+    the import (``ValueError`` when the root is not an object); the merge is
+    the import's own merge-by-goal, run on a copy."""
+    if not isinstance(data, dict):
+        raise ValueError("corpus root must be a JSON object")
+    current = _load_raw(corpus_path)
+    after = json.loads(json.dumps(data if replace else current))
+    added = 0 if replace else _merge_corpus_rows(after, data)
+
+    def _count(raw: dict) -> dict[str, int]:
+        return {str(k): len(v) for k, v in raw.items() if isinstance(v, list)}
+    now, then = _count(current), _count(after)
+    keys = sorted(set(now) | set(then))
+    return {"replace": bool(replace), "added": added,
+            "total_now": sum(now.values()), "total_after": sum(then.values()),
+            "keys": [{"key": k, "now": now.get(k, 0), "after": then.get(k, 0)}
+                     for k in keys]}
+
+
 def migrate_corpus_files(corpus_path: str | Path) -> dict | None:
     """One-way import of the FILE corpus family into the world store (used by
     ``self-harness migrate-store``): merge-by-goal for live/pending, union
@@ -1261,5 +1283,5 @@ __all__ = [
     "resolve_pending", "load_pending", "pending_corpus_path",
     "load_rejected", "rejected_corpus_path",
     "corpus_quality", "retire_corpus_cases",
-    "import_corpus", "migrate_corpus_files",
+    "import_corpus", "preview_corpus_import", "migrate_corpus_files",
 ]

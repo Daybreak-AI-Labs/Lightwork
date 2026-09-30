@@ -619,7 +619,8 @@ def test_cli_disabled_message_and_revoke(tmp_path, monkeypatch):
     res = _cli(tmp_path, monkeypatch, ["--revoke", "wire_transfer"],
                env={"MAVERICK_EARNED_AUTONOMY": "0"})
     assert res.exit_code == 0, res.output
-    assert "Revoked earned auto-approval for 'wire_transfer'" in res.output
+    assert "Withdrawal recorded for 'wire_transfer' under the current identity and policy" in res.output
+    assert "Other identities' standing grants are not withdrawn" in res.output
     assert "disabled" in res.output
     # The revoke event landed even while the feature is off.
     assert "wire_transfer: human approves" in res.output

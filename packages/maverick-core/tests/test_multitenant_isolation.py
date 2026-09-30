@@ -272,7 +272,7 @@ def test_llm_provider_client_cache_is_tenant_aware(tmp_path, monkeypatch):
 
     calls = []
 
-    def fake_get_provider_client(name, api_key=None, base_url=None, default_headers=None):
+    def fake_get_provider_client(name, api_key=None, base_url=None, default_headers=None, environment=None):
         calls.append((name, api_key, base_url))
         return FakeProviderClient(
             name, api_key=api_key, base_url=base_url, default_headers=default_headers

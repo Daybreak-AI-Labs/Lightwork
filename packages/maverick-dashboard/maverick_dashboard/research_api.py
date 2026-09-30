@@ -331,10 +331,17 @@ async def research_page(request: Request, response: Response):
     from .app import templates
 
     _, _, context = _binding(request, response)
+    from .model_pickers import config_catalog
+    from .plain_labels import model_label
+
+    try:
+        models = [{"value": spec, "label": model_label(spec)} for spec in config_catalog()]
+    except Exception:  # noqa: BLE001 -- the picker still offers "Another model"
+        models = []
     return templates.TemplateResponse(
         request,
         "research.html",
-        {"research_context": context},
+        {"research_context": context, "model_choices": models},
         headers={"Cache-Control": "private, no-store"},
     )
 

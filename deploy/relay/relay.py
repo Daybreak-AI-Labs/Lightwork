@@ -86,19 +86,28 @@ class Handler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         if not hmac.compare_digest(auth, f"Bearer {CALLER_TOKEN}"):
             return self._send(401, b'{"error":"unauthorized"}')
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            return self._send(400, b'{"error":"invalid content length"}')
         if length <= 0 or length > _MAX_BODY:
             return self._send(413, b'{"error":"bad body size"}')
         try:
-            data = json.loads(self.rfile.read(length) or b"{}")
-        except json.JSONDecodeError:
+            raw = self.rfile.read(length)
+            if len(raw) != length:
+                return self._send(400, b'{"error":"incomplete body"}')
+            data = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return self._send(400, b'{"error":"invalid json"}')
         # A valid-JSON body that isn't an object (e.g. `[1,2,3]`, `"x"`, `42`)
         # would make the .get() calls below raise AttributeError -> 500. Return
         # the same clean 4xx every other bad-input path returns.
         if not isinstance(data, dict):
             return self._send(400, b'{"error":"body must be a json object"}')
-        title = (data.get("title") or "").strip()
+        title = data.get("title", "")
+        if not isinstance(title, str):
+            return self._send(400, b'{"error":"title must be a string"}')
+        title = title.strip()
         if not title:
             return self._send(400, b'{"error":"title is required"}')
         payload = {"title": title}

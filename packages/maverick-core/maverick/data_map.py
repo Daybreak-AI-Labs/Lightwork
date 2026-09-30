@@ -14,6 +14,7 @@ read the data. Never legal advice.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -135,6 +136,24 @@ def get_data_map_config() -> dict[str, Any]:
             "(UPPER_SNAKE_CASE)"
         )
     return {"enable": flag, "graph_token_env": token_env}
+
+
+def graph_token(env_name: str = "MAVERICK_GRAPH_TOKEN") -> str:
+    """The Microsoft Graph token: the environment variable ``env_name`` wins
+    (the data map passes its ``graph_token_env``); otherwise ``[data_map]
+    graph_token``, saved sealed on the All settings page and opened when the
+    configuration loads. Empty means Graph collection is refused."""
+    token = os.environ.get(env_name, "").strip()
+    if token:
+        return token
+    from .config import load_global_config
+
+    try:
+        section = (load_global_config() or {}).get("data_map") or {}
+    except Exception:  # unreadable configuration means "not set"
+        return ""
+    value = section.get("graph_token") if isinstance(section, dict) else None
+    return value.strip() if isinstance(value, str) else ""
 
 
 def enabled() -> bool:
@@ -613,27 +632,17 @@ def _default_graph_fetch(url: str, token: str) -> dict[str, Any]:
     return payload
 
 
-def sync_sharepoint_sites(
-    *,
-    actor: str,
-    owner: str,
-    search: str = "",
-    fetcher: Callable[[str], dict[str, Any]] | None = None,
-) -> dict[str, int]:
-    """Enumerate SharePoint sites via Microsoft Graph into site assets.
-
-    Uses ``GET /sites?search={query}`` when a query is given, else
-    ``GET /sites/getAllSites`` (both need the ``Sites.Read.All``
-    application permission). One page, bounded — a census, not a crawler.
-    """
-
+def _sharepoint_site_rows(
+    search: str,
+    fetcher: Callable[[str], dict[str, Any]] | None,
+) -> list[Any]:
+    """One bounded page of the Microsoft Graph site listing (the census)."""
     settings = _require_enabled()
     query = str(search or "").strip()[:256]
     if fetcher is None:
-        import os
         from urllib.parse import quote
 
-        token = os.environ.get(settings["graph_token_env"], "")
+        token = graph_token(settings["graph_token_env"])
         if not token:
             raise DataMapConfigError(
                 "the SharePoint sync needs a Microsoft Graph token in "
@@ -654,6 +663,46 @@ def sync_sharepoint_sites(
     rows = payload.get("value")
     if not isinstance(rows, list):
         raise DataMapError("Microsoft Graph returned an unexpected shape")
+    return rows
+
+
+def find_sharepoint_site_id(
+    web_url: str,
+    *,
+    search: str = "",
+    fetcher: Callable[[str], dict[str, Any]] | None = None,
+) -> str | None:
+    """The Graph site id of the census site at ``web_url`` (its asset
+    location), from the same bounded listing the census reads; ``None`` when
+    that page does not contain it. Reads only."""
+    wanted = str(web_url or "").strip().rstrip("/").lower()
+    if not wanted:
+        return None
+    for row in _sharepoint_site_rows(search, fetcher)[:_MAX_SITES]:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("webUrl") or "").strip().rstrip("/").lower() != wanted:
+            continue
+        site_id = str(row.get("id") or "").strip()
+        return site_id if _GRAPH_ID_RE.fullmatch(site_id) else None
+    return None
+
+
+def sync_sharepoint_sites(
+    *,
+    actor: str,
+    owner: str,
+    search: str = "",
+    fetcher: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, int]:
+    """Enumerate SharePoint sites via Microsoft Graph into site assets.
+
+    Uses ``GET /sites?search={query}`` when a query is given, else
+    ``GET /sites/getAllSites`` (both need the ``Sites.Read.All``
+    application permission). One page, bounded — a census, not a crawler.
+    """
+
+    rows = _sharepoint_site_rows(search, fetcher)
     imported = 0
     skipped = 0
     for row in rows[:_MAX_SITES]:
@@ -860,9 +909,7 @@ def scan_sharepoint_site_files(
     if not _GRAPH_ID_RE.fullmatch(site):
         raise ValueError("site_id must be a Microsoft Graph site identifier")
     if fetcher is None or downloader is None:
-        import os
-
-        token = os.environ.get(settings["graph_token_env"], "")
+        token = graph_token(settings["graph_token_env"])
         if not token:
             raise DataMapConfigError(
                 "the SharePoint file scan needs a Microsoft Graph token in "
@@ -1004,6 +1051,7 @@ __all__ = [
     "classify_columns",
     "data_map_posture",
     "enabled",
+    "find_sharepoint_site_id",
     "get_data_asset",
     "get_data_map_config",
     "import_information_schema_csv",

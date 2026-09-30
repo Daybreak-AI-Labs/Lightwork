@@ -1,77 +1,157 @@
 {% extends "base.html" %}
-{% block title %}Consent Publishing · Lightwork{% endblock %}
-{% block content %}
-<style>
-  .cpp-shell{max-width:1450px;margin:0 auto;padding:1.25rem}.cpp-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:1rem}
-  .cpp-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.cpp-hero h1{margin:.1rem 0}.cpp-layout{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
-  .cpp-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:1rem}.cpp-card h2{font-size:1rem;margin:.1rem 0 .75rem}.cpp-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}
-  .cpp-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.cpp-form .wide,.cpp-actions{grid-column:1/-1}.cpp-actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
-  .cpp-form .cpp-confirm{flex-direction:row;align-items:flex-start;gap:.55rem}.cpp-confirm input{margin-top:.15rem}.cpp-danger-copy{border-left:3px solid var(--danger);padding-left:.7rem}
-  .cpp-result{white-space:pre-wrap;word-break:break-word;max-height:28rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.7rem;font-size:.78rem}.cpp-banner{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}
-  @media(max-width:900px){.cpp-layout,.cpp-form{grid-template-columns:1fr}.cpp-form .wide,.cpp-actions{grid-column:auto}}
-  @media(max-width:560px){.cpp-hero{flex-direction:column}.cpp-hero>div{min-width:0;width:100%}}
-.cpp-picker{min-width:0;border:1px solid var(--border);border-radius:8px;padding:.65rem}.cpp-picker>input,.cpp-picker>select{width:100%;max-width:100%;margin:.4rem 0}.cpp-picker pre{max-height:18rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.cpp-picker button{margin:.3rem .3rem .3rem 0}.guided-error-summary{grid-column:1/-1}.guided-field-error{color:var(--danger);font-size:var(--text-sm)}
-</style>
+{% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% if not consent_publishing_enabled %}<div class="cpp-shell">{{ module_gate('consent_preferences.publishing', 'Consent publishing', detail='Publishes versioned consent experiences to your public web and mobile properties -- have your privacy owner approve it first.') }}</div>{% endif %}
-<fieldset class="cpp-shell feature-gated-workbench" data-feature-enabled="{{ 'true' if consent_publishing_enabled else 'false' }}"{% if not consent_publishing_enabled %} disabled aria-disabled="true"{% endif %}>
-  <legend class="sr-only">Consent publishing workbench</legend>
-  <header class="cpp-hero"><div><div class="cpp-kicker">Consent experiences</div><h1>Consent Publishing</h1><p class="muted">Register a website or app, prepare and preview consent content, then publish the reviewed version. Restore a previous version or withdraw a publication while keeping its history.</p></div><a class="btn" href="/consent">Back to Consent</a></header>
-  <div id="cpp-status" class="muted" role="status" aria-live="polite"></div>
-  <div class="cpp-layout">
-    <div>
-      <section class="cpp-card"><h2>Property enrollment</h2><form id="cpp-property" class="cpp-form">
-        <label>Property ID<input class="input" name="property_id" required value="web-main"></label><label>Kind<select class="input" name="kind"><option>web</option><option>mobile</option></select></label>
-        <label>Consent group<input class="input" name="consent_group_id" required value="consumer-global"></label><label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
-        <label>Web domains (comma separated)<input class="input" name="web_domains" value="example.com"></label><label>Exact HTTPS origins<input class="input" name="origin_allowlist" value="https://www.example.com"></label>
-        <label>Mobile bundle IDs<input class="input" name="mobile_bundle_ids"></label><label>Mobile platform<input class="input" name="platform" placeholder="ios, android, …"></label>
-        <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label><div class="cpp-actions"><button class="btn btn--primary" type="submit">Enroll / revise property</button><span class="muted">Admin required; origins and bundle IDs are exact.</span></div>
-      </form></section>
+{% block title %}Banner and Preference Center · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
+{% block content %}
+{% set pub_on = consent_publishing_enabled %}
+{% set pub_admin = consent_can_admin if consent_can_admin is defined else true %}
+<div class="governance-workbench">
+  {{ hero('Consent experiences', 'Banner and Preference Center',
+          lede='Build the consent banner and preference center people see on your websites and apps, preview it, and publish it. Every published version is kept, so you can restore an earlier one at any time.') }}
+  {% include "_consent_nav.html" %}
+  {% if not pub_on %}
+  {{ module_gate('consent_preferences.publishing', 'Consent publishing',
+                 detail='Publishes your consent banner and preference center to your websites and apps. Ask your privacy owner to approve it first.') }}
+  {% endif %}
+  {% if not pub_admin %}<p class="muted">You can look around and preview. Only an administrator can save or publish changes.</p>{% endif %}
+  <p id="cpp-status" class="muted" role="status" aria-live="polite"></p>
+  <fieldset class="feature-gated-workbench" id="cpp-root" data-can-admin="{{ 'true' if pub_admin else 'false' }}" data-feature-enabled="{{ 'true' if pub_on else 'false' }}"{% if not pub_on %} disabled aria-disabled="true"{% endif %}>
+    <legend class="sr-only">Banner and preference center</legend>
 
-      <section class="cpp-card"><h2>Consent content</h2><p class="muted">Choose the content type and complete its fields. Text references connect titles, descriptions, and actions to entries in a translation catalog. Saving creates a new version and preserves earlier versions.</p><form id="cpp-resource" class="cpp-form">
-        <label>Resource kind<select class="input" name="kind" id="cpp-resource-kind"><option value="purposes" data-guided-endpoint="/api/v1/consent/publishing/purposes/{purpose_id}/versions">Purpose</option><option value="topics" data-guided-endpoint="/api/v1/consent/publishing/topics/{topic_id}/versions">Topic</option><option value="custom-preferences" data-guided-endpoint="/api/v1/consent/publishing/custom-preferences/{preference_id}/versions">Custom preference</option><option value="notices" data-guided-endpoint="/api/v1/consent/publishing/notices/{notice_id}/versions">Notice</option><option value="translations" data-guided-endpoint="/api/v1/consent/publishing/translations/{catalog_id}/{locale}/versions">Translation catalog</option><option value="themes" data-guided-endpoint="/api/v1/consent/publishing/themes/{theme_token_id}/versions">Brand theme</option><option value="templates" data-guided-endpoint="/api/v1/consent/publishing/templates/{template_id}/versions">Template</option><option value="rule-groups" data-guided-endpoint="/api/v1/consent/publishing/rule-groups/{rule_group_id}/versions">Rule group</option></select></label>
-        <label>Resource ID<input class="input" name="resource_id" required></label><label id="cpp-resource-locale">Locale (translations only)<input class="input" name="locale" placeholder="en-US"></label>
-        <label class="wide">Publication details JSON<textarea class="input" name="payload" rows="14" required data-guided-selector="cpp-resource-kind" data-guided-title="Content details">{"version":1,"expected_current_version":0}</textarea></label>
-        <div class="cpp-actions"><button class="btn btn--primary" type="submit">Save new version</button><span class="muted">Brand themes use four contrast-checked hex colors. Enter six hexadecimal characters per color, without #. HTML, scripts, URLs, and arbitrary CSS are not accepted.</span></div>
-      </form></section>
-    </div>
-    <div>
-      <section class="cpp-card"><h2>Preview and publish</h2><form id="cpp-promotion" class="cpp-form">
-        <label>Property ID<input class="input" name="property_id" required value="web-main"></label><label>Rule group ID<input class="input" name="rule_group_id" required value="production"></label>
-        <label>Rule group version<input class="input" name="rule_group_version" type="number" min="1" value="1" required></label><label>Expected property revision<input class="input" name="expected_property_revision" type="number" min="0" value="1" required></label>
-        <label>Expected publication revision<input class="input" name="expected_publication_revision" type="number" min="0" value="0" required></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label>
-        <div class="cpp-actions"><button class="btn" type="submit" value="preview">Preview exact bundle</button><button class="btn btn--primary" type="submit" value="publish">Publish</button><button class="btn" id="cpp-history" type="button">Load history</button></div>
-      </form></section>
+    <section class="panel" aria-labelledby="cpp-steps-heading">
+      <h2 id="cpp-steps-heading">How it works</h2>
+      <ol>
+        <li>Add each website or app that shows the banner.</li>
+        <li>Write your content: the uses of data people can choose, your privacy notice and the banner design.</li>
+        <li>Set display rules: which content shows in which regions and languages.</li>
+        <li>Preview, then publish to a website or app.</li>
+      </ol>
+    </section>
 
-      <section class="cpp-card"><h2>Rollback</h2><form id="cpp-rollback" class="cpp-form">
-        <label>Property ID<input class="input" name="property_id" required value="web-main"></label><label>Target publication ID<input class="input" name="target_publication_id" required></label>
-        <label>Expected property revision<input class="input" name="expected_property_revision" type="number" min="0" value="1" required></label><label>Expected publication revision<input class="input" name="expected_publication_revision" type="number" min="0" required></label>
-        <label class="wide" hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required></label><div class="cpp-actions"><button class="btn btn--primary" type="submit">Publish rollback record</button><span class="muted">Prior records remain immutable.</span></div>
-      </form></section>
-      <section class="cpp-card"><h2>Withdraw active publication</h2><p id="cpp-withdraw-explanation" class="muted cpp-danger-copy">This creates a content-free immutable tombstone at the next publication revision. Public configuration resolution is denied as withdrawn; prior publication records remain immutable for audit and are not deleted.</p><form id="cpp-withdraw" class="cpp-form">
-        <label>Property ID<input class="input" name="property_id" required value="web-main" {% if not consent_publishing_enabled %}disabled{% endif %}></label><label>Expected property revision<input class="input" name="expected_property_revision" type="number" min="0" value="1" required {% if not consent_publishing_enabled %}disabled{% endif %}></label>
-        <label>Expected publication revision<input class="input" name="expected_publication_revision" type="number" min="0" required {% if not consent_publishing_enabled %}disabled{% endif %}></label><label hidden>Request reference (reuse when retrying)<input data-auto-reference class="input" name="idempotency_key" required {% if not consent_publishing_enabled %}disabled{% endif %}></label>
-        <label class="wide cpp-confirm"><input id="cpp-withdraw-confirm" name="confirm_withdrawal" type="checkbox" required {% if not consent_publishing_enabled %}disabled{% endif %}><span>I understand the active public configuration will stop resolving and an immutable withdrawal tombstone will be recorded.</span></label>
-        <div class="cpp-actions"><button class="btn btn--danger" id="cpp-withdraw-submit" type="submit" aria-describedby="cpp-withdraw-explanation" {% if not consent_publishing_enabled %}disabled{% endif %}>Withdraw active publication</button><span class="muted">Global admin permission and exact revisions required.</span></div>
-      </form></section>
-      <section class="cpp-card"><h2>Authority result</h2><pre id="cpp-result" class="cpp-result">No operation run.</pre></section>
+    <section class="panel" aria-labelledby="cpp-properties-heading">
+      <div class="section-head">
+        <h2 id="cpp-properties-heading">Websites and apps</h2>
+        <button class="btn btn--primary" type="button" id="cpp-property-new"{% if not pub_admin %} disabled{% endif %}>Add a website or app</button>
+      </div>
+      <div id="cpp-property-table"><p class="muted">Loading websites and apps…</p></div>
+
+      <form id="cpp-property" class="cw-editor" hidden novalidate>
+        <fieldset class="cw-form">
+          <legend class="sr-only">Website or app details</legend>
+          <h3 class="cw-wide" id="cpp-property-title">Add a website or app</h3>
+          <label>Name<input class="input" name="property_name" required maxlength="100" autocomplete="off" placeholder="For example: Main website"></label>
+          <fieldset>
+            <legend>Type</legend>
+            <div class="cw-checks">
+              <label><input type="radio" name="kind" value="web" checked> Website</label>
+              <label><input type="radio" name="kind" value="mobile"> Mobile app</label>
+            </div>
+          </fieldset>
+          <label class="cw-wide">Consent group
+            <input class="input" name="group_name" required maxlength="100" list="cpp-group-suggestions" autocomplete="off" placeholder="For example: Customers">
+            <span class="muted">Websites and apps in the same group share each person’s choices.</span>
+          </label>
+          <datalist id="cpp-group-suggestions"></datalist>
+          <label class="cw-wide" data-kind="web">Website addresses (one per line)
+            <textarea class="textarea" name="web_domains" rows="3" placeholder="www.example.com"></textarea>
+            <span class="muted">The banner will only load on these addresses, over a secure connection.</span>
+          </label>
+          <label class="cw-wide" data-kind="mobile" hidden>App store IDs (one per line)
+            <textarea class="textarea" name="mobile_bundle_ids" rows="2" placeholder="com.example.app"></textarea>
+          </label>
+          <label data-kind="mobile" hidden>Platform
+            <select class="select" name="platform">
+              <option value="ios">iPhone and iPad</option><option value="android">Android</option>
+              <option value="tvos">Apple TV</option><option value="fireos">Amazon Fire</option>
+              <option value="roku">Roku</option><option value="tizen">Samsung TV</option><option value="webos">LG TV</option>
+            </select>
+          </label>
+          <input type="hidden" name="property_id">
+          <input type="hidden" name="expected_revision" value="0">
+          <input type="hidden" data-auto-reference name="idempotency_key">
+          <div class="cw-actions">
+            <button class="btn btn--primary" type="submit">Save</button>
+            <button class="btn btn--ghost" type="button" data-cpp-close="cpp-property">Cancel</button>
+          </div>
+        </fieldset>
+      </form>
+
+      <form id="cpp-promotion" class="cw-editor" hidden novalidate>
+        <fieldset class="cw-form">
+          <legend class="sr-only">Preview and publish</legend>
+          <h3 class="cw-wide" id="cpp-promotion-title">Preview and publish</h3>
+          <label class="cw-wide">Display rules to publish<select class="select" name="rule_group" required></select></label>
+          <input type="hidden" name="property_id">
+          <input type="hidden" name="expected_property_revision">
+          <input type="hidden" name="expected_publication_revision">
+          <input type="hidden" data-auto-reference name="idempotency_key">
+          <div class="cw-actions">
+            <button class="btn" type="button" id="cpp-preview">Preview</button>
+            <button class="btn btn--primary" type="button" id="cpp-publish"{% if not pub_admin %} disabled{% endif %}>Publish</button>
+            <button class="btn btn--ghost" type="button" data-cpp-close="cpp-promotion">Close</button>
+          </div>
+          <div id="cpp-preview-result" class="cw-wide cw-result" role="status" aria-live="polite"></div>
+        </fieldset>
+      </form>
+
+      <div id="cpp-history-panel" class="cw-editor" hidden>
+        <h3 id="cpp-history-title">Publishing history</h3>
+        <p class="muted">Every publish, restore and withdrawal is kept. Restoring an earlier version publishes it again as the newest version.</p>
+        <div id="cpp-history"></div>
+        <div class="cw-actions"><button class="btn btn--ghost" type="button" data-cpp-close="cpp-history-panel">Close</button></div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="cpp-content-heading">
+      <div class="section-head">
+        <h2 id="cpp-content-heading">Content</h2>
+        <button class="btn btn--primary" type="button" id="cpp-resource-new"{% if not pub_admin %} disabled{% endif %}>New</button>
+      </div>
+      <div class="cw-toolbar">
+        <label>Show<select class="select" id="cpp-kind">
+          <option value="purposes">Uses of data</option>
+          <option value="topics">Topics</option>
+          <option value="custom-preferences">Extra questions</option>
+          <option value="notices">Privacy notices</option>
+          <option value="templates">Banner designs</option>
+          <option value="themes">Brand themes</option>
+          <option value="translations">Languages</option>
+          <option value="rule-groups">Display rules</option>
+        </select></label>
+        <label>Language for text<select class="select" id="cpp-locale"></select></label>
+      </div>
+      <p class="muted" id="cpp-kind-help"></p>
+      <div id="cpp-resource-table"><p class="muted">Loading content…</p></div>
+      <form id="cpp-resource" class="cw-editor" hidden novalidate>
+        <fieldset class="cw-form">
+          <legend class="sr-only">Content details</legend>
+          <h3 class="cw-wide" id="cpp-resource-title">New</h3>
+          <label class="cw-wide">Name<input class="input" name="resource_name" required maxlength="100" autocomplete="off"></label>
+          <div class="cw-wide cw-form" id="cpp-resource-fields"></div>
+          <input type="hidden" name="resource_id">
+          <input type="hidden" name="version">
+          <input type="hidden" name="expected_current_version">
+          <div class="cw-actions">
+            <button class="btn btn--primary" type="submit"{% if not pub_admin %} disabled{% endif %}>Save</button>
+            <button class="btn btn--ghost" type="button" data-cpp-close="cpp-resource">Cancel</button>
+          </div>
+        </fieldset>
+      </form>
+    </section>
+  </fieldset>
+
+  <section class="panel" id="cpp-signing" aria-labelledby="cpp-signing-heading" data-can-admin="{{ 'true' if pub_admin else 'false' }}">
+    <h2 id="cpp-signing-heading">Signing key</h2>
+    <p class="muted">Websites can check that the consent settings they receive came from Lightwork unchanged. Turn on “Sign published consent settings” in <a href="/settings/all">All settings</a> under Privacy, create the key here and give the public key to your websites. The private key stays sealed on the server and is never shown.</p>
+    <p id="cpp-signing-status" class="muted" role="status" aria-live="polite"></p>
+    <div id="cpp-signing-state"><p class="muted">Loading the signing key…</p></div>
+    <div class="cw-actions">
+      <button class="btn btn--primary" type="button" id="cpp-signing-rotate" disabled>Create signing key</button>
+      <a class="btn" id="cpp-signing-download" href="/api/v1/consent/publishing/signing-key/public-key" download hidden>Download the public key</a>
     </div>
-  </div>
-</fieldset>
-<script>
-(function(){"use strict";var API="/api/v1/consent/publishing",status=document.getElementById('cpp-status'),result=document.getElementById('cpp-result');
-  function val(f,n){return f.elements[n].value.trim();}function list(v){return v.split(',').map(function(x){return x.trim();}).filter(Boolean);}async function call(path,options){var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{})),body;try{body=await response.json();}catch(_error){throw new Error("Request failed: the server returned an invalid JSON response.");}if(!response.ok){var error=new Error(body&&typeof body.detail==="string"?body.detail:('Request not accepted ('+response.status+').'));error.detail=body&&body.detail;throw error;}return body;}function show(body,message){result.textContent=JSON.stringify(body,null,2);status.textContent=message;}
-  var resourceForm=document.getElementById('cpp-resource');
-  function resourceLocale(){var needed=val(resourceForm,'kind')==='translations';document.getElementById('cpp-resource-locale').hidden=!needed;resourceForm.elements.locale.required=needed;resourceForm.elements.locale.disabled=!needed;}
-  resourceForm.elements.kind.addEventListener('change',resourceLocale);resourceLocale();
-  resourceForm.addEventListener('reset',function(){window.setTimeout(resourceLocale,0);});
-document.getElementById('cpp-property').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,p={kind:val(f,'kind'),consent_group_id:val(f,'consent_group_id'),expected_revision:Number(val(f,'expected_revision')),idempotency_key:val(f,'idempotency_key'),web_domains:list(val(f,'web_domains')),origin_allowlist:list(val(f,'origin_allowlist')),mobile_bundle_ids:list(val(f,'mobile_bundle_ids'))};if(val(f,'platform'))p.platform=val(f,'platform');try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id')),{method:'PUT',body:JSON.stringify(p)}),'Property authority updated.');}catch(error){if(error.detail&&Array.isArray(error.detail)&&window.mvValidation&&typeof f!=='undefined'){status.textContent=window.mvValidation.show(f,error.detail);}else{status.textContent=error.message;}}});
-document.getElementById('cpp-resource').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,kind=val(f,'kind'),path='/'+kind+'/'+encodeURIComponent(val(f,'resource_id'));if(kind==='translations')path+='/'+encodeURIComponent(val(f,'locale'));path+='/versions';try{show(await call(path,{method:'POST',body:JSON.stringify(JSON.parse(val(f,'payload')))}),'Immutable resource version appended.');}catch(error){if(error.detail&&Array.isArray(error.detail)&&window.mvValidation&&typeof f!=='undefined'){status.textContent=window.mvValidation.show(f,error.detail);}else{status.textContent=error.message;}}});
-document.getElementById('cpp-promotion').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,action=e.submitter&&e.submitter.value==='publish'?'publish':'preview',p={rule_group_id:val(f,'rule_group_id'),rule_group_version:Number(val(f,'rule_group_version'))};if(action==='publish'){p.expected_property_revision=Number(val(f,'expected_property_revision'));p.expected_publication_revision=Number(val(f,'expected_publication_revision'));p.idempotency_key=val(f,'idempotency_key');}try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id'))+'/'+action,{method:'POST',body:JSON.stringify(p)}),action==='publish'?'Publication promoted.':'Exact unpublished bundle previewed.');}catch(error){if(error.detail&&Array.isArray(error.detail)&&window.mvValidation&&typeof f!=='undefined'){status.textContent=window.mvValidation.show(f,error.detail);}else{status.textContent=error.message;}}});
-document.getElementById('cpp-history').addEventListener('click',async function(){var f=document.getElementById('cpp-promotion');try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id'))+'/history'),'Immutable publication history loaded.');}catch(error){if(error.detail&&Array.isArray(error.detail)&&window.mvValidation&&typeof f!=='undefined'){status.textContent=window.mvValidation.show(f,error.detail);}else{status.textContent=error.message;}}});
-document.getElementById('cpp-rollback').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,p={target_publication_id:val(f,'target_publication_id'),expected_property_revision:Number(val(f,'expected_property_revision')),expected_publication_revision:Number(val(f,'expected_publication_revision')),idempotency_key:val(f,'idempotency_key')};try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id'))+'/rollback',{method:'POST',body:JSON.stringify(p)}),'Rollback published as a new immutable record.');}catch(error){if(error.detail&&Array.isArray(error.detail)&&window.mvValidation&&typeof f!=='undefined'){status.textContent=window.mvValidation.show(f,error.detail);}else{status.textContent=error.message;}}});
-document.getElementById('cpp-withdraw').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,confirmation=f.elements.confirm_withdrawal;if(!confirmation.checked){status.textContent='Confirm the destructive withdrawal before continuing.';return;}var p={expected_property_revision:Number(val(f,'expected_property_revision')),expected_publication_revision:Number(val(f,'expected_publication_revision')),idempotency_key:val(f,'idempotency_key')};try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id'))+'/withdraw',{method:'POST',body:JSON.stringify(p)}),'Active publication withdrawn. An immutable tombstone now denies public configuration resolution.');confirmation.checked=false;}catch(error){if(error.detail&&Array.isArray(error.detail)&&window.mvValidation&&typeof f!=='undefined'){status.textContent=window.mvValidation.show(f,error.detail);}else{status.textContent=error.message;}}});
-})();
-</script>
-<script src="/static/lightwork-consent-picker.js" defer></script>
+  </section>
+</div>
+<script src="/static/lightwork-consent-workbench.js"></script>
+<script src="/static/lightwork-consent-publishing.js"></script>
 {% endblock %}

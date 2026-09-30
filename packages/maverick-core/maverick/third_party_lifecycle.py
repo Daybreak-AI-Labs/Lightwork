@@ -1081,6 +1081,34 @@ class ThirdPartyLifecycleStore:
         with self._connect() as connection:
             return self._get_template(connection, tenant, template, selected_version)
 
+    def list_templates(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 200,
+    ) -> tuple[AssessmentTemplate, ...]:
+        """Return every stored template version (newest first), integrity-checked.
+
+        Read-only: listing never creates, approves or changes a version.
+        """
+
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 1_000)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM templates WHERE tenant_id=? "
+                "ORDER BY template_id, version DESC LIMIT ?",
+                (tenant, bounded),
+            ).fetchall()
+        values = tuple(
+            self._template_from(
+                self._payload(row, "assessment template"),
+                row["integrity_sha256"],
+            )
+            for row in rows
+        )
+        return tuple(sorted(values, key=lambda item: (-item.updated_at, item.template_id, -item.version)))
+
     def approve_template_version(
         self,
         tenant_id: str,

@@ -140,10 +140,10 @@ _DSN = os.environ.get("MAVERICK_PG_DSN")
 
 
 @pytest.mark.skipif(not _DSN, reason="MAVERICK_PG_DSN not set (no Postgres service)")
-def test_world_learning_store_isolates_tenants_on_live_postgres(monkeypatch):
+def test_world_learning_store_isolates_tenants_on_live_postgres(monkeypatch, postgres_test_dsn):
     pytest.importorskip("psycopg")
     monkeypatch.setattr(ls, "_postgres", lambda: True)
-    monkeypatch.setenv("MAVERICK_PG_DSN", _DSN)
+    monkeypatch.setenv("MAVERICK_PG_DSN", postgres_test_dsn)
 
     marker = f"iso-{os.getpid()}"
     try:
@@ -160,7 +160,7 @@ def test_world_learning_store_isolates_tenants_on_live_postgres(monkeypatch):
         assert all("alpha" not in v for v in beta.values())
     finally:
         import psycopg
-        with psycopg.connect(_DSN, autocommit=True) as c, c.cursor() as cur:
+        with psycopg.connect(postgres_test_dsn, autocommit=True) as c, c.cursor() as cur:
             cur.execute(
                 "DELETE FROM harness_addenda WHERE tenant_id IN "
                 "('iso_alpha', 'iso_beta')"

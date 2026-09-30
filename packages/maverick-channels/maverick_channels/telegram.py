@@ -10,10 +10,12 @@ Requires::
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
 from .base import Channel, IncomingMessage, normalize_allowlist
+from .delivery import DeliveryNotSent, DeliveryUnknown, delivery_active, send_chunk
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +55,7 @@ class TelegramChannel(Channel):
         if not self.token:
             raise ValueError("TELEGRAM_BOT_TOKEN not set")
         self._app: Application | None = None
+        self._recovery_task = None
         self.allowed_user_ids = normalize_allowlist(
             allowed_user_ids, "TELEGRAM_ALLOWED_USER_IDS",
         )
@@ -63,6 +66,65 @@ class TelegramChannel(Channel):
             raise ValueError(
                 "Set TELEGRAM_ALLOWED_USER_IDS or TELEGRAM_ALLOWED_CHAT_IDS to restrict access"
             )
+
+    def _account(self):
+        # Bot tokens begin with the stable, public bot id; never persist the
+        # credential suffix or make credential rotation a new inbox identity.
+        return self.token.split(":", 1)[0]
+
+    def _authorized(self, msg, account, chat_type):
+        return account == self._account() and bool(msg.sender_id) and (
+            msg.sender_id in self.allowed_user_ids or
+            (chat_type == "private" and msg.user_id in self.allowed_chat_ids))
+
+    @staticmethod
+    def _file_descriptors(message):
+        files = []
+        for kind in ("document", "voice", "audio", "video", "photo"):
+            obj = getattr(message, kind, None)
+            if not obj:
+                continue
+            if kind == "photo":
+                obj = obj[-1]
+            file_id = getattr(obj, "file_id", None)
+            if not isinstance(file_id, str):
+                continue
+            defaults = {"photo": ("photo.jpg", "image/jpeg"),
+                        "voice": ("voice-note.ogg", "audio/ogg"),
+                        "audio": ("audio.mp3", "audio/mpeg"),
+                        "video": ("video.mp4", "video/mp4")}
+            name, mime = defaults.get(kind, (kind + ".bin", "application/octet-stream"))
+            files.append({"file_id": file_id, "filename": getattr(obj, "file_name", None) or name,
+                          "mime": getattr(obj, "mime_type", None) or mime,
+                          "size": getattr(obj, "file_size", None)})
+        return files[:10]
+
+    async def _prepare_saved(self, msg, route):
+        if route.get("files") and self._app is None:
+            raise RuntimeError("Telegram file recovery requires a running bot")
+        for item in route.get("files", []):
+            if item.get("size") and item["size"] > 100 * 1024 * 1024:
+                continue
+            f = await self._app.bot.get_file(item["file_id"])
+            data = bytes(await f.download_as_bytearray())
+            if data:
+                msg.attachments.append({"filename": item["filename"], "mime": item["mime"], "data": data})
+        return msg
+
+    async def _send_saved(self, msg, reply, route):
+        if reply.text:
+            return await self.send_threaded(msg.user_id, reply.text, reply_to=route["reply_to"])
+
+    async def _recover(self):
+        account = self._account()
+        # The admitted private-chat classification is part of the message
+        # route. Human allowlists remain live; private chat ids are identical
+        # to their sender ids in the Bot API.
+        async with self.recovery_worker(account=account,
+                authorize=lambda msg: self._authorized(msg, account,
+                    "private" if msg.user_id == msg.sender_id else None),
+                send=self._send_saved, prepare=self._prepare_saved):
+            await asyncio.Future()
 
     def _is_authorized(self, update: Update) -> bool:
         user_id = str(update.effective_user.id) if update.effective_user else ""
@@ -138,9 +200,9 @@ class TelegramChannel(Channel):
             return
         # Authorize FIRST, download after — file downloads on behalf of an
         # unauthorized sender would be free resource burn.
-        attachments = await self._collect_attachments(update.message)
         text = update.message.text or update.message.caption or ""
-        if not text and attachments:
+        files = self._file_descriptors(update.message)
+        if not text and files:
             # Attachment-only message: give the swarm a working brief.
             text = "Process the attached file(s)."
         if not text:
@@ -163,24 +225,22 @@ class TelegramChannel(Channel):
             raw=update,
             sender_id=str(update.effective_user.id) if update.effective_user else None,
             message_id=str(update.message.message_id),
-            attachments=attachments,
         )
-        try:
-            reply = await self.dispatch_text(msg)
-        except Exception:  # pragma: no cover
-            # Don't reflect the raw exception text to the remote user -- it can
-            # carry a credential/internal path. The detail is logged above;
-            # the user gets a generic message (matches slack/signal).
-            log.exception("handler error")
-            reply = "⚠ An internal error occurred."
-        # An empty reply (action-only goal, or a Reply whose text dispatch
-        # dropped) must not be sent: Telegram rejects reply_text("") with a 400
-        # "message text is empty", which raises out of the handler. Guard with
-        # `if reply:`, matching bluesky/whatsapp/mastodon and the other channels.
-        if reply:
-            from .formatting import split_for_discord
-            for chunk in split_for_discord(reply, limit=TELEGRAM_LIMIT):
-                await update.message.reply_text(chunk)
+        account = self._account()
+        route = {"reply_to": msg.message_id, "files": files}
+
+        async def prepare(incoming):
+            incoming.attachments = await self._collect_attachments(update.message)
+            return incoming
+
+        async def send(reply):
+            if reply.text:
+                return await self._send_chunks(reply.text, update.message.reply_text,
+                    {"chat_id": msg.user_id, "reply_to": msg.message_id})
+
+        return await self.process_message(msg, external_id=msg.user_id + ":" + msg.message_id,
+            account=account, authorize=lambda: self._authorized(msg, account,
+                getattr(update.effective_chat, "type", None)), route=route, prepare=prepare, send=send)
 
     async def start(self) -> None:
         self._app = Application.builder().token(self.token).build()
@@ -194,13 +254,39 @@ class TelegramChannel(Channel):
         await self._app.initialize()
         await self._app.start()
         await self._app.updater.start_polling()
+        self._recovery_task = asyncio.create_task(self._recover(), name="telegram-recovery-owner")
+
+    @staticmethod
+    async def _send_chunks(text, call, route):
+        from .formatting import split_for_discord
+        receipt = None
+        for index, chunk in enumerate(split_for_discord(text, limit=TELEGRAM_LIMIT)):
+            async def post(chunk=chunk):
+                try:
+                    result = await call(chunk)
+                except DeliveryNotSent:
+                    raise
+                except Exception as exc:
+                    # These SDK errors are explicit Bot API nonacceptance;
+                    # network/timeouts and unclassified failures stay unknown.
+                    try:
+                        from telegram.error import BadRequest, Forbidden, RetryAfter
+                    except ImportError:
+                        raise exc from None
+                    if isinstance(exc, (BadRequest, Forbidden, RetryAfter)):
+                        raise DeliveryNotSent("Telegram rejected the reply") from exc
+                    raise
+                message_id = getattr(result, "message_id", None)
+                if delivery_active() and not isinstance(message_id, int):
+                    raise DeliveryUnknown("Telegram reply acknowledgement has no message id")
+                return str(message_id) if isinstance(message_id, int) else None
+            receipt = await send_chunk("text-" + str(index), {**route, "text": chunk}, post)
+        return receipt
 
     async def send(self, user_id: str, text: str) -> None:
         if self._app is None:
             raise RuntimeError("channel not started")
-        from .formatting import split_for_discord
-        for chunk in split_for_discord(text, limit=TELEGRAM_LIMIT):
-            await self._app.bot.send_message(chat_id=int(user_id), text=chunk)
+        return await self.send_threaded(user_id, text)
 
     async def send_threaded(
         self, user_id: str, text: str, *, reply_to: str | None = None,
@@ -213,13 +299,16 @@ class TelegramChannel(Channel):
                 kwargs["reply_to_message_id"] = int(reply_to)
             except (TypeError, ValueError):
                 pass  # un-threadable id -> plain send
-        from .formatting import split_for_discord
-        for chunk in split_for_discord(text, limit=TELEGRAM_LIMIT):
-            # Every chunk carries the thread anchor so the whole reply stays
-            # attached to the message that asked for it.
-            await self._app.bot.send_message(text=chunk, **kwargs)
+        return await self._send_chunks(text, lambda chunk: self._app.bot.send_message(text=chunk, **kwargs),
+            {"chat_id": user_id, "reply_to": str(kwargs["reply_to_message_id"])
+             if "reply_to_message_id" in kwargs else None})
 
     async def stop(self) -> None:
+        task = self._recovery_task
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            self._recovery_task = None
         if self._app is None:
             return
         await self._app.updater.stop()

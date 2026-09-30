@@ -38,34 +38,28 @@ def page_client() -> TestClient:
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
-def test_page_is_complete_honest_and_confirmation_gated(page_client) -> None:
+def test_page_is_a_list_workflow_in_plain_words(page_client) -> None:
     response = page_client.get("/third-party/lifecycle")
     assert response.status_code == 200
     page = response.text
     assert "Third-Party Lifecycle" in page
-    assert "No network transport, provider writes, or live acceptance" in page
-    assert "governed delivery intent only" in page
+    assert "doesn't contact vendors" in page
     assert "/api/v1/third-party/lifecycle" in page
-    for operation in (
-        "template-create",
-        "template-approve",
-        "assessment-response",
-        "assessment-evaluate",
-        "assessment-task",
-        "offboarding-begin",
-        "legal-hold",
-        "offboarding-task",
-        "independent-completion",
-        "callback-claim",
-        "callback-ack",
-        "callback-requeue",
-        "lifecycle-export",
-        "retention-purge",
-        "integrity",
-    ):
-        assert f'value="{operation}"' in page
-    assert "tpl-confirm" in page
-    assert "textContent" in page
+    # Lists load on open, with a button to start each kind of record.
+    for host in ("tpl-templates", "tpl-assessments", "tpl-lifecycles", "tpl-offboarding"):
+        assert f'id="{host}"' in page
+    for label in ("New questionnaire", "New assessment", "Start tracking a vendor",
+                  "Delete expired records", "Check records haven't been changed"):
+        assert label in page
+    assert "/static/lightwork-third-party-lifecycle.js" in page
+    assert "/static/lightwork-record-workflows.js" in page
+    # No operation dropdown, no JSON boxes, no confirmation checkbox wall.
+    for gone in ('id="tpl-operation"', "tpl-path-values", "Record references (JSON)",
+                 "Action details (JSON)", "callback-claim", "<textarea"):
+        assert gone not in page
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(page) == []
 
 
 def test_page_fails_closed_and_static_dom_is_safe(page_client) -> None:

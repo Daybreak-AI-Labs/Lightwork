@@ -10,15 +10,13 @@ MCPClient. This is how Lightwork consumes the wider MCP ecosystem.
 """
 from __future__ import annotations
 
-import asyncio
-import inspect
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from .. import killswitch
-from ..budget import BudgetExceeded
+from ..budget import BudgetExceeded, UsageAccountingError
 from ..config import load_config
 
 
@@ -114,7 +112,10 @@ def safe_media_args(raw: Any) -> list[str]:
     ``MAVERICK_ALLOW_RAW_MEDIA_ARGS=1`` (then the list passes verbatim).
     """
     items = [str(a) for a in (raw or [])]
-    if _env_true("MAVERICK_ALLOW_RAW_MEDIA_ARGS"):
+    from ..env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_ALLOW_RAW_MEDIA_ARGS", "tools", "raw_media_args")
+            or "").strip().lower() in ("1", "true", "yes", "on"):
         return items
     safe: list[str] = []
     skip_next = False
@@ -168,18 +169,19 @@ def sandbox_run(
     raw argv list (no shell interpolation -- the chokepoint guard forbids that
     outside the sandbox backends), passing ``stdin`` directly.
     """
-    if sandbox is not None and hasattr(sandbox, "exec"):
+    if sandbox is not None:
+        # Resolve the call shape before any effect. Explicitly bounded legacy
+        # backends may be adapted; no internal TypeError authorizes replay.
+        from ..sandbox.sdk import execution_callable
+
+        execute = execution_callable(sandbox)
         import shlex
         cmd = shlex.join(argv)
         if stdin is not None:
             import base64
             b64 = base64.b64encode(stdin.encode("utf-8")).decode("ascii")
             cmd = f"printf %s {shlex.quote(b64)} | base64 -d | {cmd}"
-        try:
-            res = sandbox.exec(cmd, timeout=timeout)
-        except TypeError:
-            # Backend without a per-call timeout kwarg.
-            res = sandbox.exec(cmd)
+        res = execute(cmd, timeout=timeout)
         return res.exit_code, res.stdout, res.stderr
 
     import subprocess
@@ -232,55 +234,45 @@ def host_exec(
         return 124, empty, f"TIMEOUT after {timeout}s"
 
 
-def _forward_chunk(listener, name: str, chunk: Any) -> str:
-    """Streaming tool_result: forward one chunk to the registry listener
-    (best-effort) and return it as text for accumulation."""
-    piece = chunk if isinstance(chunk, str) else str(chunk)
+def _forward_progress(listener, name: str, count: int) -> None:
+    """Only fixed progress may escape before complete-result screening."""
     if listener is not None:
         try:
-            listener(name, piece)
+            from ..safety.secret_detector import redact
+
+            safe_name, _ = redact(name[:128])
+            listener(safe_name, f"[Buffering tool output: {count} bytes; content withheld until screening.]")
         except Exception:  # listener must never break the call
             pass
-    return piece
 
 
 async def _execute_tool_fn(fn, args: dict[str, Any], stream_chunk) -> str:
-    """Run a tool fn under every supported contract.
+    """Collect under a fixed quota; the callback carries byte-count progress only."""
+    from ..tool_result_stream import execute_tool
 
-    str-returning (sync or async) is the classic contract. **Streaming
-    tool_result**: a fn may be an async generator, or return a sync
-    generator/iterator of chunks — chunks flow through ``stream_chunk`` as
-    they are produced (the dashboard/TUI live-view seam) and the joined text
-    is the tool_result the model sees, so the model protocol is unchanged.
-    Sync fns (and sync generators) drain on a worker thread so a slow tool
-    can't stall the event loop.
-    """
-    if inspect.iscoroutinefunction(fn):
-        out = await fn(args)
-    elif inspect.isasyncgenfunction(fn):
-        parts: list[str] = []
-        async for chunk in fn(args):
-            parts.append(stream_chunk(chunk))
-        return "".join(parts)
-    else:
-        out = await asyncio.to_thread(fn, args)
-    if inspect.isawaitable(out):
-        out = await out
-    if inspect.isgenerator(out) or (hasattr(out, "__next__") and not isinstance(out, str)):
-        parts = []
+    return await execute_tool(fn, args, stream_chunk)
 
-        def _drain() -> None:
-            for chunk in out:
-                parts.append(stream_chunk(chunk))
 
-        await asyncio.to_thread(_drain)
-        return "".join(parts)
-    # The fn contract is ``-> str``; a tool that returns None (a latent bug in
-    # tool code) used to propagate None into _cap_tool_output and crash the agent
-    # turn with "NoneType has no len()". Coerce to a stable string instead.
-    if out is None:
-        return ""
-    return out if isinstance(out, str) else str(out)
+def _store_bounded_cached(store, tool, args, result, namespace):
+    if len(result) <= 64_000:
+        store(tool, args, result, namespace=namespace)
+
+
+def _tool_error_result(error, name):
+    from ..tool_result_stream import ToolOutputUncertain
+
+    if getattr(error, "tool_execution_unknown", False):
+        return ToolOutputUncertain(
+            "INDETERMINATE: tool dispatch may have produced effects, but its complete output "
+            "could not be retained within the collection/cleanup limits. Partial output was "
+            "withheld; reconcile external state and do not retry the action blindly."
+        )
+    try:
+        from ..observability import record_metric
+        record_metric("tool_calls", labels={"tool": name, "status": "error"})
+    except Exception:
+        pass
+    return f"ERROR: {type(error).__name__}: {error}"
 
 
 ToolFn = Callable[[dict[str, Any]], str | Awaitable[str]]
@@ -344,9 +336,8 @@ class ToolRegistry:
         self._core_names: set[str] = set()
         self._core: set[str] = set()
         self._activated: set[str] = set()
-        # Streaming tool_result: an optional listener that receives
-        # (tool_name, chunk) for tools whose fn yields chunks (generators).
-        # The model still gets the joined result; this is the live-UX seam.
+        # Listeners receive safe progress before screening, never raw chunks.
+        # The agent explicitly releases screened/redacted content at delivery.
         self._chunk_listener = None
         # Names base_registry marks as deferred-eligible (the SaaS connector
         # long tail). Consumed by Agent._build_tools when the
@@ -360,6 +351,10 @@ class ToolRegistry:
         # four mutation points. Consumers copy before mutating (the Anthropic
         # provider does ``[dict(t) for t in ...]``), so sharing is safe.
         self._anthropic_cache: list[dict[str, Any]] | None = None
+        # MCP refresh is discovery, never authority expansion. These guards
+        # retain only exact admitted metadata while the remote catalog is fresh.
+        self._mcp_bindings: dict[str, Callable[[], bool]] = {}
+        self._mcp_visibility: tuple[str, ...] = ()
 
     def set_acl(
         self,
@@ -386,14 +381,33 @@ class ToolRegistry:
         return True
 
     def set_chunk_listener(self, listener) -> None:
-        """Register ``listener(tool_name, chunk)`` for streaming tool output.
+        """Receive safe progress, then explicitly screened chunks at delivery.
 
-        Tools that return an iterator/generator of str chunks stream through
-        it as they produce output (dashboard/TUI live view); the joined text
-        remains the tool_result the model sees. Pass None to clear. Listener
-        errors are swallowed — observability must never break a tool call.
+        ``run`` returns complete bounded execution data but cannot itself assert
+        the caller's Shield policy. The agent calls ``deliver_screened`` only
+        after full-output policy checks, redaction and terminal audit. Standalone
+        integrations must do the same; raw producer chunks are never forwarded.
         """
         self._chunk_listener = listener
+
+    def deliver_screened(self, name: str, output: str) -> None:
+        """Trusted caller asserts policy screening; redaction is checked again."""
+        if self._chunk_listener is None:
+            return
+        from ..safety.secret_detector import redact
+        from ..tool_result_stream import COPY_CHARS, result_bytes
+
+        try:
+            result_bytes(output)
+            safe, _ = redact(output)
+            safe_name, _ = redact(name[:128])
+        except Exception:
+            return  # fail closed for observers without inviting effect replay
+        for start in range(0, len(safe), COPY_CHARS):
+            try:
+                self._chunk_listener(safe_name, safe[start:start + COPY_CHARS])
+            except Exception:
+                pass  # an observer must not invite replay of a completed effect
 
     def register(self, tool: Tool) -> None:
         if not self._acl_allows(tool.name):
@@ -404,10 +418,16 @@ class ToolRegistry:
         self._anthropic_cache = None
 
     def get(self, name: str) -> Tool:
+        if not self._mcp_binding_current(name):
+            raise KeyError(name)
         return self._tools[name]
 
     def all(self) -> list[Tool]:
-        return list(self._tools.values())
+        return [t for n, t in self._tools.items() if self._mcp_binding_current(n)]
+
+    def _mcp_binding_current(self, name: str) -> bool:
+        check = self._mcp_bindings.get(name)
+        return check is None or check()
 
     # --- deferred tool loading -----------------------------------------
     # With 80+ tools (+ MCP servers), sending every schema every turn
@@ -434,7 +454,7 @@ class ToolRegistry:
     def activate(self, names: list[str]) -> list[str]:
         """Reveal deferred tools to the model. Returns the names that
         resolved to a registered tool (unknown names are ignored)."""
-        resolved = [n for n in names if n in self._tools]
+        resolved = [n for n in names if n in self._tools and self._acl_allows(n) and self._mcp_binding_current(n)]
         if resolved:
             self._activated.update(resolved)
             self._anthropic_cache = None
@@ -447,32 +467,92 @@ class ToolRegistry:
         byte-identical tool catalog (for prompt caching) are unchanged.
         """
         if not self._deferred:
-            return list(self._tools.values())
+            return [t for n, t in self._tools.items() if self._acl_allows(n) and self._mcp_binding_current(n)]
         names = self._exposed_names()
-        return [t for n, t in self._tools.items() if n in names]
+        return [t for n, t in self._tools.items() if n in names and self._acl_allows(n) and self._mcp_binding_current(n)]
 
     def deferred_tools(self) -> list[Tool]:
         """Registered tools not currently exposed -- find_tools' search space."""
         names = self._exposed_names()
-        return [t for n, t in self._tools.items() if n not in names]
+        return [t for n, t in self._tools.items() if n not in names and self._acl_allows(n) and self._mcp_binding_current(n)]
 
     def to_anthropic(self) -> list[dict[str, Any]]:
+        visible = tuple(n for n in self._mcp_bindings if self._mcp_binding_current(n))
+        if visible != self._mcp_visibility:
+            self._mcp_visibility = visible
+            self._anthropic_cache = None
         if self._anthropic_cache is None:
             self._anthropic_cache = [t.to_anthropic() for t in self.exposed()]
         return self._anthropic_cache
 
-    async def run(self, name: str, args: dict[str, Any]) -> str:
+    def cache_namespace(self) -> str:
+        """The tool-output cache scope of this registry's calls: the active
+        tenant and the principal, so two users never share a read result."""
+        from ..paths import current_tenant_id
+
+        return (
+            f"tenant={current_tenant_id() or '<shared>'}\0"
+            f"principal={self._principal or '<anonymous>'}"
+        )
+
+    def speculate_reads(self, predictions, *, budget_guard=None):
+        """Pre-run predicted repeat reads so their results wait in the cache.
+
+        Only tools this registry would run right now for this principal (ACL,
+        current MCP binding, no refused ambient credentials) are offered to
+        :func:`maverick.speculative_tools.speculate`, under the same cache
+        scope and principal a real call uses. When the model then asks, the
+        call still passes every gate in the agent and in :meth:`run`; only the
+        side-effect-free read itself has already happened. Never raises.
+        """
+        from ..speculative_tools import speculate
+
+        allowed = [
+            (name, args) for name, args in predictions
+            if self._tool_access_error(name) is None
+            and _ambient_credential_denial(name, self._principal) is None
+        ]
+        return speculate(self, allowed, namespace=self.cache_namespace(),
+                         principal=self._principal, budget_guard=budget_guard)
+
+    def _tool_access_error(self, name: str) -> str | None:
+        """Check current authorization before touching a lazy executor."""
         if name not in self._tools:
             return f"ERROR: unknown tool {name!r}"
+        if not self._acl_allows(name):
+            return f"ERROR: tool {name!r} is denied by the current tool ACL"
+        if not self._mcp_binding_current(name):
+            return "ERROR: MCP binding is stale or changed; refresh tools and rebuild the registry"
+        return None
+
+    async def _run_tool_attempt(self, name, args, expected_tool):
+        from ..connections import bind_principal
+
+        if denial := self._tool_access_error(name):
+            return denial
+        if self._tools[name] is not expected_tool:
+            return "ERROR: tool registration changed during invocation"
+        if denial := _ambient_credential_denial(name, self._principal):
+            return denial
+        with bind_principal(self._principal):
+            return await _execute_tool_fn(
+                self._tools[name].fn, args,
+                lambda count: _forward_progress(self._chunk_listener, name, count),
+            )
+
+    async def run(self, name: str, args: dict[str, Any]) -> str:
+        access_error = self._tool_access_error(name)
+        if access_error:
+            return access_error
         try:
             from ..observability import gen_ai_tool_attributes, trace_span
         except ImportError:  # pragma: no cover
             import contextlib
 
-            def trace_span(*a, **kw):  # type: ignore
+            def trace_span(*_args, **_kwargs):  # type: ignore
                 return contextlib.nullcontext()
 
-            def gen_ai_tool_attributes(tool_name, **kw):  # type: ignore
+            def gen_ai_tool_attributes(tool_name, **_kwargs):  # type: ignore
                 return {}
         with trace_span(
             "tool.run",
@@ -493,12 +573,7 @@ class ToolRegistry:
                 # invoking the function) and include both tenant and principal
                 # so two users or clients cannot share a credential-bearing
                 # read result merely because the tool arguments match.
-                from ..paths import current_tenant_id
-
-                _cache_namespace = (
-                    f"tenant={current_tenant_id() or '<shared>'}\0"
-                    f"principal={self._principal or '<anonymous>'}"
-                )
+                _cache_namespace = self.cache_namespace()
                 try:
                     from ..cache.tool import get_cached, store_cached
                 except ImportError:  # pragma: no cover
@@ -508,6 +583,8 @@ class ToolRegistry:
                         _tool, args, namespace=_cache_namespace,
                     )
                     if _hit:
+                        from ..tool_result_stream import result_bytes
+                        result_bytes(_cached)
                         try:
                             from ..observability import record_metric as _rm
                             _rm("tool_calls",
@@ -522,25 +599,22 @@ class ToolRegistry:
                 except ImportError:
                     pass
                 async def _invoke() -> str:
-                    from ..connections import bind_principal
-
-                    with bind_principal(self._principal):
-                        return await _execute_tool_fn(
-                            self._tools[name].fn, args,
-                            lambda chunk: _forward_chunk(self._chunk_listener, name, chunk),
-                        )
+                    return await self._run_tool_attempt(name, args, _tool)
 
                 # One shared reliability policy: transient upstream failures
                 # on retry-safe (non-high-risk) tools are retried with backoff.
                 from ..tool_reliability import run_with_retry
                 result = await run_with_retry(name, _invoke)
+                # Internal connector status/retry/dispatch metadata is no
+                # longer needed beyond this model-visible string boundary.
+                from ..connector_attempts import public_result
+                result = public_result(result)
                 from ..tool_results import ToolResultState, classify_tool_result
                 result_state = classify_tool_result(result)
                 if store_cached is not None and result_state is ToolResultState.SUCCEEDED:
                     try:
-                        store_cached(
-                            _tool, args, result,
-                            namespace=_cache_namespace,
+                        _store_bounded_cached(
+                            store_cached, _tool, args, result, _cache_namespace,
                         )
                         # A side-effectful tool may have changed what any
                         # cached read returned; drop stale reads.
@@ -554,7 +628,7 @@ class ToolRegistry:
                 except Exception:  # pragma: no cover
                     pass
                 return result
-            except (BudgetExceeded, killswitch.Halted):
+            except (BudgetExceeded, UsageAccountingError, killswitch.Halted):
                 # Control-flow stop signals are NOT tool errors: a spawned
                 # child (spawn_subagent/spawn_swarm/spawn_specialist) shares
                 # the parent Budget and killswitch, and re-raises these to
@@ -570,12 +644,7 @@ class ToolRegistry:
                 # — this mirrors how real tool exceptions behave. The chaos
                 # gap the council flagged is on the LLM path, fixed by wiring
                 # maybe_fail("llm_call") into complete_async (not here).
-                try:
-                    from ..observability import record_metric as _rm
-                    _rm("tool_calls", labels={"tool": name, "status": "error"})
-                except Exception:  # pragma: no cover
-                    pass
-                return f"ERROR: {type(e).__name__}: {e}"
+                return _tool_error_result(e, name)
             finally:
                 # Always-on per-tool latency profile (complements OTel spans).
                 # Records on both the success and error paths; never raises.
@@ -600,13 +669,13 @@ class ToolRegistry:
 # intersects with the actual registry.
 CORE_TOOL_NAMES = frozenset({
     # filesystem + execution
-    "read_file", "write_file", "list_dir", "shell",
+    "read_file", "write_file", "list_dir", "shell", "read_tool_result",
     # code editing
     "str_replace_editor", "apply_patch", "ast_edit", "preview_diff",
     # repo understanding
     "repo_map", "dep_graph",
     # interaction + attachments
-    "ask_user", "list_attachments",
+    "ask_user", "list_attachments", "read_attachment",
     # web / docs / media basics
     "http_fetch", "web_search", "read_pdf", "view_image",
     # memory + run introspection
@@ -721,7 +790,7 @@ def base_registry(
     check calls ``base_tool_names``.
     """
     from .ask_user import ask_user
-    from .attachments import list_attachments_tool
+    from .attachments import list_attachments_tool, read_attachment_tool
     from .fs import list_dir, read_file, write_file
     from .repo_map import repo_map
     from .shell import shell
@@ -753,6 +822,10 @@ def base_registry(
     reg.register(shell(sandbox))
     reg.register(ask_user(world, goal_id=goal_id))
     reg.register(list_attachments_tool(world, goal_id))
+    from ..tool_result_artifacts import read_tool_result
+
+    reg.register(read_tool_result(goal_id=goal_id, principal=principal or None))
+    reg.register(read_attachment_tool(world, goal_id))
     reg.register(repo_map(sandbox))
     # Wave 10 (B1): surgical exact-match editor. OpenHands' biggest
     # single contribution to SWE-bench scores — eliminates ~30% of
@@ -969,8 +1042,8 @@ def base_registry(
     from .sns_tool import sns_tool
     from .spend_report import spend_report
     from .spotify_tool import spotify_tool
-    from .spreadsheet import spreadsheet
-    from .sql_query import sql_query
+    from .spreadsheet import spreadsheet, spreadsheet_read
+    from .sql_query import sql_query, sql_query_read
     from .streaming_reasoning_trace import streaming_reasoning_trace
     from .stripe_tool import stripe_tool
     from .supply_chain_pin import supply_chain_pin
@@ -1028,6 +1101,7 @@ def base_registry(
     reg.register(apply_patch(sandbox))
     reg.register(compute())
     reg.register(sql_query(sandbox))
+    reg.register(sql_query_read(sandbox))
     reg.register(email_tool())
     reg.register(pandas_query(sandbox))
     reg.register(git_advanced(sandbox))
@@ -1061,6 +1135,7 @@ def base_registry(
     reg.register(notion())
     reg.register(obsidian())
     reg.register(spreadsheet(sandbox))
+    reg.register(spreadsheet_read(sandbox))
     reg.register(translate())
     reg.register(slack_bot())
     reg.register(stripe_tool())
@@ -1284,7 +1359,10 @@ def base_registry(
     # ambient host credentials, so they only register when the operator
     # sets MAVERICK_ENABLE_CRED_TOOLS=true. Their names are reserved in
     # AMBIENT_CRED_TOOL_NAMES above -- keep that set in sync with this list.
-    if _env_true("MAVERICK_ENABLE_CRED_TOOLS"):
+    from ..env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_ENABLE_CRED_TOOLS", "tools", "credential_connectors")
+            or "").strip().lower() in ("1", "true", "yes", "on"):
         reg.register(airtable_tool())
         reg.register(asana_tool())
         reg.register(clickup_tool())
@@ -1431,6 +1509,9 @@ def base_registry(
         channel=channel,
         user_id=user_id,
     )
+    if not _skip_tool_acl:
+        _apply_containment(reg)
+        _apply_network_posture(reg)
     _apply_deferred_loading(reg)
 
     # Route every compatible external connector write through the durable,
@@ -1525,6 +1606,29 @@ def _apply_tool_acl(reg: ToolRegistry, *, channel: str | None, user_id: str | No
         _logging.getLogger(__name__).warning("tool_acl: %s", e)
 
 
+def _apply_containment(reg: ToolRegistry) -> None:
+    """Containment mode: union the exfil tools into the ACL (existing denials
+    are kept). An enabled profile that cannot be applied stops registry
+    construction rather than running uncontained."""
+    from ..containment import active_profile, apply
+
+    profile = active_profile()
+    if profile is not None:
+        apply(profile, registry=reg, sandbox_env={})
+
+
+def _apply_network_posture(reg: ToolRegistry) -> None:
+    """``[security] network_policy``: remove the web tools the posture blocks,
+    unioned into the ACL so existing denials are kept (as containment does)."""
+    from ..sandbox.network_policy import denied_tools
+
+    blocked = denied_tools()
+    if blocked:
+        reg.set_acl(allowed=set(getattr(reg, "_acl_allowed", set()) or set()),
+                    denied=set(getattr(reg, "_acl_denied", set()) or set()) | set(blocked),
+                    max_risk=getattr(reg, "_acl_max_risk", None))
+
+
 def _apply_tool_acl_unless_skipped(
     reg: ToolRegistry,
     *,
@@ -1542,7 +1646,8 @@ def _apply_mcp_tools(reg: ToolRegistry, mcp_clients: list | None) -> None:
         return
     from ..mcp_tools import tools_from_mcp
     for client in mcp_clients:
-        for t in tools_from_mcp(client):
+        guards = {}
+        for t in tools_from_mcp(client, authorize=reg._acl_allows, binding_guards=guards):
             # Never let an external MCP server silently SHADOW a built-in
             # (shell, read_file, ...): every other registration path (plugins,
             # @tool) checks this, but the MCP loop did not, so a malicious or
@@ -1558,6 +1663,8 @@ def _apply_mcp_tools(reg: ToolRegistry, mcp_clients: list | None) -> None:
                 )
                 continue
             reg.register(t)
+            if t.name in guards:
+                reg._mcp_bindings[t.name] = guards[t.name]
 
 
 def _apply_rate_limits(reg: ToolRegistry, *, fail_silently: bool = False) -> None:

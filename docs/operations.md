@@ -87,12 +87,31 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
     "http://127.0.0.1:8765/api/v1/spend?limit=20" | jq
 ```
 
-Hard cap: `~/.maverick/config.toml` → `[budget] max_dollars`.
+For an explicit task limit, enable task limits in Settings and set
+`[budget] max_dollars`, or supply a limit for that invocation. Ordinary tasks
+have no generated cap; previously saved numeric choices remain effective until
+disabled. [Task limits](task-limits.md) explains the distinction from organization
+and principal allowances. Metering still records provider usage.
 
-For multi-user channels (Telegram, SMS, WhatsApp) the per-user budget
-work is on the roadmap. Today the cap is per-goal; any user can drain
-it. **Don't expose channel webhooks to the open internet unless you
-trust everyone who can DM the bot.**
+An administrator can inspect tenants with `maverick tenant list` and configure
+an organization's daily allowance with `maverick tenant quota TENANT_ID AMOUNT`
+(for example, `maverick tenant quota acme 100`). The Workspaces page exposes the
+same allowance. New physical provider attempts check the current allowance and
+durable pending holds; merely starting a task allocates no full-task hold.
+
+For unresolved provider charges, open **Workspace recovery → Provider spending**
+as a global administrator. Select the exact provider and UTC period, inspect the
+reservation, and review final receipt evidence before confirming a correction.
+This is an in-app review, not a CLI reset or retry command. See
+[provider spending recovery](provider-spending.md) for isolation and repair
+requirements. Do not delete accounting files or treat a timeout as zero cost.
+
+Organization holds release only after the cumulative usage ledger acknowledges
+known costs. If the process ended before that acknowledgement, the run still
+needs restoration and settlement; resolving a provider receipt alone does not
+establish that every organization hold was released. Unknown holds do not expire
+at midnight. Keep the tenant usage ledger, pending holds, indexed receipt history
+and their required-state markers together in backup and recovery.
 
 ## Restoring the local application state
 

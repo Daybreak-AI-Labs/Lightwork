@@ -981,7 +981,8 @@ def test_default_agent_runner_propagates_flow_execution_identity(tmp_path, monke
 
     result, outcome = runner("do work", {}, wall=10)
 
-    assert (result, outcome) == ("done", 1.0)
+    assert (result, outcome) == ("ok", 1.0)
+    assert callable(captured.pop("usage_observer"))
     assert captured == {
         "max_dollars": 1.25,
         "max_wall_seconds": 10,

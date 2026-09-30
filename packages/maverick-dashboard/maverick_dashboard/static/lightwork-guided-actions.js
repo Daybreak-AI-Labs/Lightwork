@@ -3,9 +3,12 @@
 (function (root) {
   'use strict';
   function label(key) {
-    var names = {idempotency_key:'Request reference', expected_revision:'Current version', expected_version:'Current version', expected_current_version:'Current version', title_key:'Title text reference', description_key:'Description text reference', body_key:'Body text reference', display_name_key:'Display name text reference', heading_key:'Heading text reference'};
+    var names = {idempotency_key:'Request reference', expected_revision:'Current version', expected_version:'Current version', expected_current_version:'Current version', cas_revision:'Current version', title_key:'Title text', description_key:'Description text', body_key:'Body text', display_name_key:'Display name text', heading_key:'Heading text'};
     if (Object.prototype.hasOwnProperty.call(names, key)) return names[key];
-    return String(key).replace(/_/g, ' ').replace(/\b(id|ref)\b/g, 'reference').replace(/^./, function (s) { return s.toUpperCase(); });
+    var text = String(key).replace(/_sha256$/, '_fingerprint').replace(/_(unix|epoch)(_seconds)?$/, '').replace(/_/g, ' ').replace(/\b(id|ref)\b/g, '').replace(/\s+/g, ' ').trim();
+    if (!text) text = 'Item';
+    if (root.mvHuman) return root.mvHuman(text);
+    return text.replace(/^./, function (s) { return s.toUpperCase(); });
   }
   function allowsRequestReference(schema) {
     if (schema.type !== 'string' || schema.enum || Object.prototype.hasOwnProperty.call(schema, 'const')) return false;
@@ -38,6 +41,12 @@
       return Object.assign(combined, schema, {allOf:undefined});
     }
     return schema;
+  }
+  // Number fields that hold a moment in time (Unix seconds) get a date and
+  // time picker; the value sent stays in seconds.
+  function isMoment(key, schema) {
+    return (schema.type === 'integer' || schema.type === 'number') &&
+      /(^|_)(at|until|after|before|unix|epoch|timestamp|expires|expiry|deadline|due)(_seconds)?$/.test(String(key || ''));
   }
   function pathKeys(path) { return Array.from(new Set(Array.from(String(path).matchAll(/\{([A-Za-z0-9_]+)\}/g), function (match) { return match[1]; }))); }
   if (typeof module !== 'undefined' && module.exports) module.exports = {label:label, resolve:resolve, pathKeys:pathKeys};
@@ -182,8 +191,8 @@
     if (variants) {
       var choices = variants.map(function (v) { return resolve(v, definitions); });
       if (choices.length === 1) return editor(host, choices[0], value, definitions, changed, depth + 1, required);
-      var choice = element('select', undefined, 'input'); choice.setAttribute('aria-label', 'Detail format');
-      choices.forEach(function (v, index) { var option = element('option', v.title || label(v.type || ('Option ' + (index + 1)))); option.value = String(index); choice.append(option); });
+      var choice = element('select', undefined, 'input'); choice.setAttribute('aria-label', 'Choose an option');
+      choices.forEach(function (v, index) { var option = element('option', v.title ? label(v.title.replace(/([a-z])([A-Z])/g, '$1_$2')) : (v.type === 'null' ? 'None' : 'Option ' + (index + 1))); option.value = String(index); choice.append(option); });
       var selected = choices.findIndex(function (v) { return matchesChoice(v, value, definitions); });
       choice.value = String(Math.max(0, selected));
       var child = element('div'); host.append(choice, child);
@@ -218,7 +227,8 @@
         var reader = editor(content, childSchema, initial, definitions, changed, depth + 1, requiredKey);
         var include;
         if (!requiredKey) {
-          include = element('input'); include.type = 'checkbox'; include.checked = initial !== undefined || !!forceInclude;
+          include = element('input'); include.type = 'checkbox';
+          include.checked = initial !== undefined || !!forceInclude || group.dataset.guidedAutoReference === 'true';
           var includeLabel = element('label'); includeLabel.append(include, doc.createTextNode(' Include this detail')); content.before(includeLabel);
           function toggle() { content.hidden = !include.checked; content.disabled = !include.checked; }
           include.addEventListener('change', function () { toggle(); changed(); }); toggle();
@@ -239,7 +249,10 @@
       if (Object.keys(properties).length) {
         options(); missingKeys.addEventListener('focus', options); knownControls.append(missingKeys, button('Add detail', function () { var key = missingKeys.value; if (key && !Object.prototype.hasOwnProperty.call(readers, key)) { add(key, resolve(properties[key], definitions), undefined, true); options(); changed(); } })); host.append(knownControls);
       }
-      if (schema.additionalProperties !== false) {
+      // Free-form extra details only where the API defines what each one is
+      // (for example translations); an open-ended "any detail" box is a
+      // developer tool, not a form.
+      if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
         var custom = element('details', undefined, 'guided-add'); custom.append(element('summary', 'Add another detail'));
         var keyInput = element('input', undefined, 'input'); keyInput.placeholder = 'Detail name'; keyInput.setAttribute('aria-label', 'New detail name');
         var typeInput = element('select', undefined, 'input'); typeInput.setAttribute('aria-label', 'New detail format');
@@ -279,6 +292,13 @@
       var values = schema.enum || [true, false];
       values.forEach(function (item, index) { var option = element('option', typeof item === 'boolean' ? (item ? 'Yes' : 'No') : label(item)); option.value = String(index); input.append(option); });
       if (values.includes(value)) input.value = String(values.indexOf(value));
+    } else if (isMoment((host.closest('[data-guided-field]') || {dataset:{}}).dataset.guidedField, Object.assign({type:type}, schema))) {
+      input = element('input', undefined, 'input'); input.type = 'datetime-local';
+      if (typeof value === 'number' && isFinite(value)) {
+        var when = new Date(value * 1000); when.setMinutes(when.getMinutes() - when.getTimezoneOffset());
+        input.value = when.toISOString().slice(0, 16);
+      }
+      input.dataset.guidedMoment = 'true';
     } else {
       input = element(type === 'string' && (schema.maxLength || 0) > 400 ? 'textarea' : 'input', undefined, 'input');
       if (type === 'number' || type === 'integer') {
@@ -318,24 +338,42 @@
           rawPayload.value = JSON.stringify(payload);rawPayload.dispatchEvent(new Event('change',{bubbles:true}));rawPayload.dispatchEvent(new Event('input',{bubbles:true}));
         }});
     }
+    var autoReference = false;
     if (fieldKey === 'idempotency_key' && allowsRequestReference(schema)) {
-      var generationStatus = element('p', '', 'muted'); generationStatus.setAttribute('role', 'status');
-      host.append(button('Generate reference', function () {
-        try {
-          var generated = requestReference();
-          if (schema.pattern && !new RegExp(schema.pattern).test(generated)) throw new Error('This field requires a custom request reference. Enter one that follows its required format.');
-          input.value = generated; edit(); input.focus();
-          generationStatus.textContent = 'New request reference generated.';
-        } catch (error) { generationStatus.textContent = error.message; }
-      }), element('p', 'Keep this reference for an exact retry. Generate a new one when changing the request.', 'muted'), generationStatus);
+      // A request reference is plumbing, not something a person types: fill
+      // it in and keep it out of sight. It stays the same while the same
+      // request is retried and is replaced when anything else changes.
+      try {
+        var generated = requestReference();
+        if (!schema.pattern || new RegExp(schema.pattern).test(generated)) {
+          var group = host.closest('[data-guided-field]'); if (group) group.hidden = true;
+          // A reference the request already carries is kept exactly, so a
+          // retry stays the same request. One made here is renewed whenever
+          // the person changes the request (that is a new request).
+          if (!input.value) {
+            input.value = generated; autoReference = true;
+            if (group) group.dataset.guidedAutoReference = 'true';
+            var formHost = host.closest('form') || host.closest('section, .panel, .card') || doc;
+            var ownReference = true;
+            formHost.addEventListener('input', function (event) {
+              // A reference entered here (or restored) is the request's own.
+              if (event.target === input) { ownReference = false; return; }
+              if (ownReference && event.target && /^guided-value-/.test(event.target.id || '')) {
+                try { input.value = requestReference(); } catch (_ignored) { /* keep the current one */ }
+              }
+            }, true);
+          }
+        }
+      } catch (_error) { autoReference = false; }
     }
     input.required = !!required && type !== 'string';
-    var dirty = false;
+    var dirty = autoReference;
     function read() {
       // Merely rendering a form must not normalize existing API values.
       if (!dirty) return value;
       if (input.value === '') return type === 'string' && !schema.enum ? '' : undefined;
       if (schema.enum || type === 'boolean') return (schema.enum || [true,false])[Number(input.value)];
+      if (input.dataset.guidedMoment) { var moment = new Date(input.value).getTime(); return isFinite(moment) ? Math.floor(moment / 1000) : undefined; }
       if (type === 'integer' || type === 'number') { var number = Number(input.value); return Number.isFinite(number) ? number : undefined; }
       return input.value;
     }
@@ -408,6 +446,8 @@
       error.textContent = ''; bodyArea.append(element('h3', 'Action details'));
       readBody = editor(bodyArea, schema || {type:'object'}, value, definitions, syncBody, 0, true);
       currentBody = body.value;
+      // A request reference made while building the form belongs in the request.
+      if (bodyArea.querySelector('[data-guided-auto-reference]')) syncBody();
     }
     function renderPaths() {
       var selected = select.options[select.selectedIndex]; var existing = json(paths) || {};
@@ -509,6 +549,7 @@
       area.append(element('h3', title));
       read = editor(area, schema || {}, value, definitions, changed, 0, input.required);
       current = input.value; renderedSchema = schema;
+      if (area.querySelector('[data-guided-auto-reference]')) changed();
     }
     if (selector) selector.addEventListener('change', function () {
       drafts[selectedKey] = {value:input.value, open:raw.open};

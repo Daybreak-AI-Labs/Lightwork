@@ -112,6 +112,9 @@
       background: var(--surface-sunken); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-md);
       padding: var(--space-2) var(--space-3); font: inherit; resize: vertical;
     }
+    .composer__director { display: flex; flex-direction: column; gap: var(--space-1); color: var(--muted); font-size: var(--text-xs); }
+    .composer__director select { max-width: 100%; }
+    #director-profile-help { display: block; font-size: var(--text-xs); margin: var(--space-1) 0 var(--space-2); }
     .composer__bar { display: flex; align-items: center; gap: var(--space-2); }
     .composer__hint { flex: 1; min-width: 0; color: var(--muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .composer__icon, .ask__icon {
@@ -136,11 +139,30 @@
     .composer__send:disabled, .ask__send:disabled { opacity: 0.45; cursor: default; transform: none; }
     .composer__controls { border: 0; padding: 0; margin: 0; min-width: 0; }
 
+    /* ---- small screens: the sidebar becomes a drawer behind a Menu button ---- */
+    .cs-topbar { display: none; }
+    .cs-backdrop { display: none; }
     @media (max-width: 860px) {
       body.chat-shell { grid-template-columns: 1fr; }
-      .cs-side { display: none; }
       body.chat-shell main { grid-column: 1; }
+      .cs-topbar {
+        display: flex; align-items: center; gap: var(--space-2); flex: none;
+        padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--hairline);
+      }
+      .cs-topbar__title { flex: 1; min-width: 0; font-weight: var(--font-semibold); }
+      .cs-side {
+        position: fixed; inset-block: 0; inset-inline-start: 0; z-index: 60;
+        width: min(300px, 86vw); visibility: hidden; transform: translateX(-102%);
+        transition: transform 0.18s ease, visibility 0s linear 0.18s; box-shadow: var(--shadow-lg);
+        background: var(--panel);
+      }
+      [dir="rtl"] .cs-side { transform: translateX(102%); }
+      body.cs-drawer-open .cs-side { visibility: visible; transform: none; transition: transform 0.18s ease; }
+      body.cs-drawer-open .cs-backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim, rgba(0,0,0,.45)); }
+      .cs-side__close { display: flex; }
     }
+    .cs-side__close { display: none; margin-inline-start: auto; }
+    @media (prefers-reduced-motion: reduce) { .cs-side { transition: none !important; } }
     @media (prefers-reduced-motion: no-preference) {
       .cs-anim { opacity: 0; transform: translateY(8px); animation: csUp 0.4s ease forwards; }
     }
@@ -149,13 +171,16 @@
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
 </head>
-<body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}">
+<body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
   <a class="skip-link" href="#content">Skip to content</a>
-  <aside class="cs-side" aria-label="Chats">
-    <a class="cs-brand" href="/overview" title="Open the Lightwork dashboard">
-      <img src="{{ asset('daybreak-mark.png') }}" alt="" width="32" height="22" />
-      <span>Lightwork</span>
-    </a>
+  <aside class="cs-side" id="cs-side" aria-label="Chats">
+    <div style="display:flex; align-items:center;">
+      <a class="cs-brand" href="/overview" title="Open the Lightwork dashboard">
+        <img src="{{ asset('daybreak-mark.png') }}" alt="" width="32" height="22" />
+        <span>Lightwork</span>
+      </a>
+      <button type="button" class="btn btn--ghost cs-side__close" id="cs-menu-close">Close menu</button>
+    </div>
     <a class="cs-item" href="/chat">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.5 2.5l2 2L6 12H4v-2z"/><path d="M2.5 13.5h11"/></svg>
       New chat
@@ -172,7 +197,7 @@
             aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg>
       Find a page
-      <kbd aria-hidden="true">Ctrl K</kbd>
+      <kbd aria-hidden="true" id="cs-find-kbd">Ctrl K</kbd>
     </button>
     <div class="cs-recents">
       <div class="cs-label">Recents</div>
@@ -186,8 +211,14 @@
       {% if show_logout %}<a href="/auth/logout">Sign out</a>{% endif %}
     </div>
   </aside>
+  <div class="cs-backdrop" id="cs-backdrop" aria-hidden="true"></div>
   {% include "_navfinder.html" %}
   <main id="content" tabindex="-1">
+    <div class="cs-topbar">
+      <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">Menu</button>
+      <span class="cs-topbar__title">Lightwork</span>
+      <a class="btn btn--ghost" href="/chat">New chat</a>
+    </div>
     <div class="cs-scroll" id="cs-scroll">
       <div class="cs-column">
         {% block chat %}{% endblock %}
@@ -213,12 +244,56 @@
       </div>
     </div>
   </dialog>
+  <dialog id="mv-form" class="mv-confirm mv-form" aria-labelledby="mv-form-title">
+    <form id="mv-form-form" class="mv-confirm__body">
+      <h2 class="mv-form__title" id="mv-form-title"></h2>
+      <div id="mv-form-fields"></div>
+      <p class="mv-form__err" id="mv-form-err" aria-live="polite"></p>
+      <div class="mv-confirm__row">
+        <button type="button" class="btn btn--ghost" id="mv-form-cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="mv-form-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
   <script src="{{ asset('lightwork-ui.js') }}"></script>
   <script src="{{ asset('lightwork-markdown.js') }}"></script>
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script>
+    // Small screens: the Menu button opens the sidebar as a drawer. Esc, the
+    // Close button or a tap outside closes it and returns focus to Menu.
+    (function () {
+      var body = document.body, side = document.getElementById('cs-side');
+      var openBtn = document.getElementById('cs-menu'), closeBtn = document.getElementById('cs-menu-close');
+      var backdrop = document.getElementById('cs-backdrop');
+      if (!side || !openBtn) return;
+      function isOpen() { return body.classList.contains('cs-drawer-open'); }
+      function open() {
+        body.classList.add('cs-drawer-open'); openBtn.setAttribute('aria-expanded', 'true');
+        var first = side.querySelector('a, button, input'); if (first) first.focus();
+      }
+      function close(refocus) {
+        if (!isOpen()) return;
+        body.classList.remove('cs-drawer-open'); openBtn.setAttribute('aria-expanded', 'false');
+        if (refocus !== false) openBtn.focus();
+      }
+      openBtn.addEventListener('click', function () { if (isOpen()) close(); else open(); });
+      if (closeBtn) closeBtn.addEventListener('click', function () { close(); });
+      if (backdrop) backdrop.addEventListener('click', function () { close(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen()) { e.preventDefault(); close(); } });
+      // Opening "Find a page" from the drawer hands focus to its dialog.
+      var finder = document.getElementById('navfinder-open');
+      if (finder) finder.addEventListener('click', function () { close(false); });
+      // Leaving the small-screen layout never leaves the page locked behind the drawer.
+      if (window.matchMedia) {
+        var mq = window.matchMedia('(max-width: 860px)');
+        var onChange = function () { if (!mq.matches) close(false); };
+        if (mq.addEventListener) mq.addEventListener('change', onChange); else if (mq.addListener) mq.addListener(onChange);
+      }
+      var kbd = document.getElementById('cs-find-kbd');
+      if (kbd && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')) kbd.textContent = '⌘K';
+    })();
     // Filter the recents list as you type. Titles only, on the client.
     (function () {
       var input = document.getElementById('cs-filter');

@@ -20,7 +20,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -64,27 +63,20 @@ def _default_backend(explicit: str) -> str:
     return env or "tesseract"
 
 
-def _tesseract_present() -> bool:
-    return shutil.which("tesseract") is not None
 
 
 def _run_tesseract(path: str, lang: str, sandbox) -> str:
-    if not _tesseract_present():
-        return (
-            "ERROR: tesseract not on PATH. Install (apt: tesseract-ocr; "
-            "brew: tesseract) or set OCR_BACKEND=hf."
-        )
-    from . import sandbox_run
-    # `-` for stdout, suppress info noise on stderr.
-    code, out, stderr = sandbox_run(
-        sandbox, ["tesseract", path, "-", "-l", lang, "--psm", "3"], timeout=120,
-    )
-    if code == 124:
-        return "ERROR: tesseract TIMEOUT"
-    if code != 0:
-        return f"ERROR: tesseract ({code}): {(stderr or '').strip()[:300]}"
-    text = (out or "").strip()
-    return text or "(empty OCR result)"
+    from ..sandbox.workspace_transfer import _read
+    from .document_processing import ocr_pdf, run_document_job, workspace_path
+
+    root, relative = workspace_path(sandbox, path)
+    data = _read(root, relative)
+    suffix = Path(relative).suffix.lstrip(".").lower()
+    if suffix == "pdf":
+        return ocr_pdf(data, "", sandbox)
+    return run_document_job({"operation": "image_ocr", "input_suffix": suffix,
+                             "language": lang}, data, sandbox)
+
 
 
 def _run_hf(path: str, model: str) -> str:

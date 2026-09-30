@@ -12,6 +12,8 @@ import sys
 import types
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def _fake_caldav(monkeypatch):
     """Wire a fake caldav module + creds; return the calendar mock."""
@@ -61,3 +63,27 @@ def test_create_event_keeps_utc_and_naive_unchanged(monkeypatch):
     ical = cal.save_event.call_args.args[0]
     assert "DTSTART:20260701T100000Z" in ical
     assert "DTEND:20260701T110000Z" in ical
+
+
+@pytest.mark.parametrize("busy_hours,expected", [((10, 11), "free slot"), ((9, 10), "free slot"), ((9, 18), "no 30-min slot")])
+def test_find_slot_always_discloses_unparseable_busy_events(monkeypatch, busy_hours, expected):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from maverick.tools import calendar_tool as module
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 1, 9, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(module, "datetime", Clock)
+    start, end = busy_hours
+    event = SimpleNamespace(icalendar_component={
+        "dtstart": SimpleNamespace(dt=Clock(2026, 7, 1, start, tzinfo=timezone.utc)),
+        "dtend": SimpleNamespace(dt=Clock(2026, 7, 1, end, tzinfo=timezone.utc)),
+    })
+    monkeypatch.setattr(module, "_get_caldav_calendar", lambda: SimpleNamespace(search=lambda **kw: [event, object()]))
+    result = module._find_slot({"search_days": 1})
+    assert expected in result
+    assert "1 event(s) could not be parsed" in result

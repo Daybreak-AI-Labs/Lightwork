@@ -21,6 +21,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 
 from .governed_records import GovernedRecordStore
+from .knowledge_retrieval import LexicalProjection, SearchCursor, digest, rank, retrieval_passage
 from .paths import canonical_tenant_id, tenant_scope
 from .privacy_ops import RecordConflict
 from .research_registry import (
@@ -113,6 +114,10 @@ class KnowledgeAccessError(RuntimeError):
 
 class KnowledgeAccessDenied(KnowledgeAccessError, PermissionError):
     """Current source authority does not allow the requested use."""
+
+
+class KnowledgeContentUnavailable(KnowledgeAccessDenied):
+    """Authority may be valid, but its content could not be checked."""
 
 
 class KnowledgeRequestNotFound(KnowledgeAccessError, LookupError):
@@ -237,8 +242,8 @@ def _reference_key(reference: ResearchAssetRef) -> tuple[str, str, str, str]:
 class KnowledgeDocument:
     """A bounded projection from an existing content authority.
 
-    ``summary`` is the only content retained in the small process cache.  The
-    full source remains in its owning store.  The exact tenant, registry ref,
+    Searchable chunks are bounded to the source projector's 256 KiB boundary.
+    The owning store is reread on every access. The exact tenant, registry ref,
     and content digest stop a buggy adapter from crossing a tenant or version
     boundary.
     """
@@ -252,6 +257,9 @@ class KnowledgeDocument:
     observed_at: float | None = None
     verified_at: float | None = None
     schema: str = KNOWLEDGE_DOCUMENT_SCHEMA
+    retrieval_chunks: tuple[str, ...] = ()
+    search_coverage_complete: bool = True
+    summary_truncated: bool = False
 
     def __post_init__(self) -> None:
         canonical_tenant_id(self.tenant)
@@ -262,6 +270,12 @@ class KnowledgeDocument:
             raise ValueError("knowledge content_sha256 must be a lowercase SHA-256 digest")
         _text(self.title, "knowledge title", 240)
         _text(self.summary, "knowledge summary", 8_192, required=False)
+        if (not isinstance(self.retrieval_chunks, tuple) or len(self.retrieval_chunks) > 2048
+            or any(not isinstance(chunk, str) for chunk in self.retrieval_chunks)
+            or sum(len(chunk.encode("utf-8")) for chunk in self.retrieval_chunks) > 256 * 1024
+            or type(self.search_coverage_complete) is not bool
+            or type(self.summary_truncated) is not bool):
+            raise ValueError("knowledge retrieval chunks or coverage are malformed")
         if self.claim_state not in _CLAIM_STATES:
             raise ValueError("knowledge claim_state must be inferred or verified")
         _positive_time(self.observed_at, "knowledge observed_at", optional=True)
@@ -325,6 +339,10 @@ class KnowledgeAccessService:
             tuple[str, str, str, str, str], KnowledgeDocument
         ] = OrderedDict()
         self._cache_lock = threading.RLock()
+        self._lexical: OrderedDict[str, LexicalProjection] = OrderedDict()
+        # Which source each projection was derived from, so revoking one source
+        # evicts only its derived terms instead of every tenant's cache.
+        self._lexical_owner: dict[str, tuple] = {}
 
     def bind_actor_authority(
         self,
@@ -393,6 +411,15 @@ class KnowledgeAccessService:
         key = self._cache_key(tenant, reference)
         with self._cache_lock:
             self._cache.pop(key, None)
+            # Derived lexical terms can contain source words too. Revocation
+            # evicts them along with the rendering, never just its permission.
+            if any(identity not in self._lexical_owner for identity in self._lexical):
+                self._lexical.clear()  # an untracked projection: fail safe
+                self._lexical_owner.clear()
+                return
+            for identity in [i for i, owner in self._lexical_owner.items() if owner == key]:
+                self._lexical.pop(identity, None)
+                self._lexical_owner.pop(identity, None)
 
     def _deny_applying_retirement(
         self,
@@ -508,10 +535,10 @@ class KnowledgeAccessService:
             raise
         except Exception as exc:
             self._evict(tenant, reference)
-            raise KnowledgeAccessDenied("current knowledge content is unavailable") from exc
+            raise KnowledgeContentUnavailable("current knowledge content is unavailable") from exc
         if resolved is None:
             self._evict(tenant, reference)
-            raise KnowledgeAccessDenied(
+            raise KnowledgeContentUnavailable(
                 "registered source content is not available through a governed projector"
             )
         document = resolved
@@ -686,6 +713,7 @@ class KnowledgeAccessService:
         action: str,
         actor_authority: KnowledgeActorAuthority,
         use_cache: bool,
+        include_retrieval_chunks: bool = False,
     ) -> dict:
         admission = self._admission(
             tenant,
@@ -730,6 +758,8 @@ class KnowledgeAccessService:
             "reference": asdict(reference),
             "title": document.title,
             "summary": document.summary,
+            "summary_truncated": document.summary_truncated,
+            "search_coverage_complete": document.search_coverage_complete,
             "content_available": bool(document.summary),
             "claim_state": document.claim_state,
             "observed_at": document.observed_at,
@@ -763,6 +793,8 @@ class KnowledgeAccessService:
             "correction_history": history,
             "training_permission_notice": TRAINING_PERMISSION_NOTICE,
         }
+        if include_retrieval_chunks:
+            item["_retrieval_chunks"] = document.retrieval_chunks
         # Request-history projection performs additional registry/store I/O.
         # Revalidate after it so a revocation during that work cannot release
         # the content assembled above.
@@ -808,6 +840,112 @@ class KnowledgeAccessService:
                 use_cache=use_cache,
             )
 
+    def _search_page(
+        self,
+        tenant: str,
+        authority: KnowledgeActorAuthority,
+        *,
+        query: str,
+        purpose: str,
+        action: str,
+        selectors: tuple[str, ...] | None,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[dict], dict]:
+        binding = digest({
+            "tenant": tenant, "actor": authority.principal,
+            "actor_authorization_sha256": authority.authorization_sha256,
+            "query": query, "purpose": purpose, "action": action,
+            "selectors": selectors, "limit": limit,
+        })
+        continuation = SearchCursor.decode(cursor, binding)
+        page = self.registry.knowledge_candidate_page(
+            tenant, source_selectors=selectors, limit=_MAX_SCAN,
+            after=continuation.after, snapshot=continuation.snapshot,
+        )
+        items: list[dict] = []
+        projections: list[LexicalProjection] = []
+        omitted = unavailable = partial = 0
+        for row in page["items"]:
+            try:
+                item = self._item(
+                    tenant, ResearchAssetRef(**row["reference"]), purpose=purpose,
+                    action=action, actor_authority=authority, use_cache=True,
+                    include_retrieval_chunks=True,
+                )
+            except KnowledgeContentUnavailable:
+                unavailable += 1
+                continue
+            except (ResearchRegistryDenied, KnowledgeAccessDenied):
+                omitted += 1
+                continue
+            # This projection contains no cached authority. _item has already
+            # reread the owning content store and current source/actor rights.
+            partial += not item["search_coverage_complete"]
+            identity = LexicalProjection.key(tenant, item)
+            with self._cache_lock:
+                projection = self._lexical.get(identity)
+                if projection is None:
+                    projection = LexicalProjection.from_item(identity, item)
+                    self._lexical[identity] = projection
+                    ref = item["reference"]
+                    self._lexical_owner[identity] = (canonical_tenant_id(tenant), *(
+                        ref[field] for field in ("kind", "asset_id", "version", "manifest_sha256")))
+                self._lexical.move_to_end(projection.identity)
+                while len(self._lexical) > self.cache_capacity:
+                    evicted, _ = self._lexical.popitem(last=False)
+                    self._lexical_owner.pop(evicted, None)
+            projections.append(projection)
+            items.append(item)
+        ranked = rank(query, projections)
+        ranking_digest = digest([
+            projections[index].identity for index, _score in ranked
+        ])
+        if continuation.ranking is not None and continuation.ranking != ranking_digest:
+            raise ValueError("knowledge candidates changed; restart the search")
+        if continuation.offset > len(ranked):
+            raise ValueError("knowledge cursor exceeds the candidate page; restart the search")
+        end = min(len(ranked), continuation.offset + limit)
+        selected = [retrieval_passage(items[index], query)
+                    for index, _score in ranked[continuation.offset:end]]
+        more_matches = end < len(ranked)
+        next_cursor = None
+        if more_matches:
+            next_cursor = SearchCursor(
+                binding, continuation.after, page["snapshot"], end, ranking_digest,
+                continuation.unavailable_before,
+                continuation.partial_before or bool(partial),
+            ).encode()
+        elif page["has_more"]:
+            next_cursor = SearchCursor(
+                binding, page["last"], page["snapshot"],
+                unavailable_before=continuation.unavailable_before or bool(unavailable),
+                partial_before=continuation.partial_before or bool(partial),
+            ).encode()
+        reasons = []
+        if more_matches:
+            reasons.append("more_matches")
+        if page["has_more"]:
+            reasons.append("more_candidates")
+        if unavailable or continuation.unavailable_before:
+            reasons.append("content_unavailable")
+        if partial or continuation.partial_before:
+            reasons.append("partial_source_coverage")
+        complete = not reasons
+        status = (
+            "unavailable" if "content_unavailable" in reasons and not selected and next_cursor is None
+            else "incomplete" if not complete
+            else "matched" if selected else "no_match"
+        )
+        return selected, {
+            "status": status, "complete": complete, "incomplete_reasons": reasons,
+            "next_cursor": next_cursor, "truncated": not complete,
+            "matched": len(ranked), "matched_scope": "candidate_page",
+            "omitted_ineligible": omitted, "unavailable_sources": unavailable,
+            "candidates_examined": len(page["items"]),
+            "ranking": "lexical_bm25_v1_within_candidate_page",
+        }
+
     def search(
         self,
         tenant: str,
@@ -817,6 +955,7 @@ class KnowledgeAccessService:
         purpose: str,
         limit: int = 20,
         source_selectors: Sequence[str] | None = None,
+        cursor: str | None = None,
     ) -> dict:
         """Search eligible registry-backed projections without duplicating an index.
 
@@ -842,40 +981,10 @@ class KnowledgeAccessService:
                 purpose=exact_purpose,
                 human_display=True,
             )
-            rows = self.registry.list(canonical, kind="dataset", limit=_MAX_SCAN)
-            results: list[dict] = []
-            omitted = 0
-            matched = 0
-            for row in rows:
-                if selectors is not None and not self._source_selected(row, selectors):
-                    continue
-                try:
-                    reference = ResearchAssetRef(**row["reference"])
-                    item = self._item(
-                        canonical,
-                        reference,
-                        purpose=exact_purpose,
-                        action="read",
-                        actor_authority=authority,
-                        use_cache=True,
-                    )
-                except (ResearchRegistryDenied, KnowledgeAccessDenied):
-                    omitted += 1
-                    continue
-                haystack = "\n".join(
-                    (
-                        str(item["title"]),
-                        str(item["summary"]),
-                        reference.asset_id,
-                        reference.version,
-                        str(item["source"]["source_ref"]),
-                    )
-                ).casefold()
-                if needle and needle not in haystack:
-                    continue
-                matched += 1
-                if len(results) < limit:
-                    results.append(item)
+            results, retrieval = self._search_page(
+                canonical, authority, query=needle, purpose=exact_purpose,
+                action="read", selectors=selectors, limit=limit, cursor=cursor,
+            )
             result_references = tuple(
                 ResearchAssetRef(**item["reference"]) for item in results
             )
@@ -897,9 +1006,7 @@ class KnowledgeAccessService:
                     "purpose": exact_purpose,
                     "items": results,
                     "count": len(results),
-                    "matched": matched,
-                    "omitted_ineligible": omitted,
-                    "truncated": matched > len(results) or len(rows) == _MAX_SCAN,
+                    **retrieval,
                     "authority_checks": (
                         "Current registry version, approval, data-use authority, freshness, consent, "
                         "and parent lineage are revalidated before every result."
@@ -1004,6 +1111,7 @@ class KnowledgeAccessService:
         purpose: str,
         action: str,
         job_id: str,
+        retrieval_query: str | None = None,
     ) -> dict:
         """Revalidate and materialize an exact catalogue inside a queued worker.
 
@@ -1015,6 +1123,8 @@ class KnowledgeAccessService:
         canonical = canonical_tenant_id(tenant)
         exact = self._exact_references(references, _MAX_EXPORT)
         exact_job = _identifier(job_id, "job_id")
+        if retrieval_query is not None:
+            retrieval_query = _text(retrieval_query, "knowledge query", 512, required=False)
         if action not in _ACTIONS:
             raise ValueError("knowledge job action is unsupported")
         with tenant_scope(tenant=canonical), self.registry.effect_fence():
@@ -1033,6 +1143,7 @@ class KnowledgeAccessService:
                     action=action,
                     actor_authority=authority,
                     use_cache=True,
+                    include_retrieval_chunks=retrieval_query is not None,
                 )
                 for reference in exact
             ]
@@ -1045,6 +1156,8 @@ class KnowledgeAccessService:
                     purpose=purpose,
                     action=action,
                 )
+                if retrieval_query is not None:
+                    items = [retrieval_passage(item, retrieval_query) for item in items]
                 binding = {
                     "schema": KNOWLEDGE_JOB_MATERIALIZATION_SCHEMA,
                     "tenant": canonical,
@@ -1080,26 +1193,6 @@ class KnowledgeAccessService:
             raise ValueError("knowledge source selectors must be unique")
         return selectors
 
-    @staticmethod
-    def _source_selected(row: Mapping[str, object], selectors: Sequence[str]) -> bool:
-        raw_reference = row.get("reference")
-        manifest = row.get("manifest")
-        if not isinstance(raw_reference, Mapping) or not isinstance(manifest, Mapping):
-            return False
-        asset_id = str(raw_reference.get("asset_id") or "")
-        source_ref = str(manifest.get("source_ref") or "")
-        for selector in selectors:
-            if selector == asset_id or selector == source_ref:
-                return True
-            if source_ref.startswith(selector.rstrip("/") + "/"):
-                return True
-            if any(
-                asset_id.startswith(selector + separator)
-                for separator in ("-", "_", ".", ":")
-            ):
-                return True
-        return False
-
     def search_at_job_start(
         self,
         tenant: str,
@@ -1110,6 +1203,7 @@ class KnowledgeAccessService:
         source_selectors: Sequence[str],
         limit: int,
         job_id: str,
+        cursor: str | None = None,
     ) -> dict:
         """Search only configured sources and rematerialize them for agent use.
 
@@ -1135,40 +1229,11 @@ class KnowledgeAccessService:
                 purpose=exact_purpose,
                 human_display=False,
             )
-            rows = self.registry.list(canonical, kind="dataset", limit=_MAX_SCAN)
-            matched_references: list[ResearchAssetRef] = []
-            omitted = 0
-            matched = 0
-            for row in rows:
-                if not self._source_selected(row, selectors):
-                    continue
-                try:
-                    reference = ResearchAssetRef(**row["reference"])
-                    item = self._item(
-                        canonical,
-                        reference,
-                        purpose=exact_purpose,
-                        action="analyze",
-                        actor_authority=authority,
-                        use_cache=True,
-                    )
-                except (ResearchRegistryDenied, KnowledgeAccessDenied):
-                    omitted += 1
-                    continue
-                haystack = "\n".join(
-                    (
-                        str(item["title"]),
-                        str(item["summary"]),
-                        reference.asset_id,
-                        reference.version,
-                        str(item["source"]["source_ref"]),
-                    )
-                ).casefold()
-                if needle and needle not in haystack:
-                    continue
-                matched += 1
-                if len(matched_references) < limit:
-                    matched_references.append(reference)
+            selected, retrieval = self._search_page(
+                canonical, authority, query=needle, purpose=exact_purpose,
+                action="analyze", selectors=selectors, limit=limit, cursor=cursor,
+            )
+            matched_references = [ResearchAssetRef(**item["reference"]) for item in selected]
             if not matched_references:
                 self._revalidate_return_set(
                     canonical,
@@ -1188,6 +1253,7 @@ class KnowledgeAccessService:
                     purpose=exact_purpose,
                     action="analyze",
                     job_id=exact_job,
+                    retrieval_query=needle,
                 )
                 if (
                     materialization.get("actor") != authority.principal
@@ -1211,9 +1277,7 @@ class KnowledgeAccessService:
                 "source_selectors": list(selectors),
                 "items": items,
                 "count": len(items),
-                "matched": matched,
-                "omitted_ineligible": omitted,
-                "truncated": matched > len(items) or len(rows) == _MAX_SCAN,
+                **retrieval,
                 "job_materialization": (
                     None
                     if materialization is None

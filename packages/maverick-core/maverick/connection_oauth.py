@@ -744,7 +744,25 @@ def renew(record, *, actor):
     if not record.get("oauth"):
         return record
     _authority(actor)
+    # The record lock spans provider I/O, not the shared credential-store lock.
+    # OS ownership releases on process death; persisted pending state does not.
+    # A later caller must never replay a possibly consumed rotating token.
+    target = connections._path().parent / ("refresh-" + _digest(record.get("name")))
+    with cross_process_lock(target, strict=True):
+        return _renew_owned(record, actor=actor)
+
+
+def _refresh_binding(record):
+    """Freeze credentials and authority, allowing only a concurrent test receipt."""
+    return hashlib.sha256(json.dumps(
+        {key: value for key, value in record.items() if key != "last_test"},
+        sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+
+
+def _renew_owned(record, *, actor):
     with connections._mutation_lock():
+        _authority(actor)
         records = connections._load()
         current = records.get(record["name"])
         if (not current or current.get("revision") != record.get("revision")
@@ -774,42 +792,56 @@ def renew(record, *, actor):
         # A crash/lost reply during rotating-token exchange is ambiguous. Mark
         # before sending and refuse automatic replay of the old refresh token.
         oauth["refresh_state"] = "pending"
+        oauth["refresh_lease"] = uuid.uuid4().hex
+        frozen = _refresh_binding(current)
+        app_binding = _refresh_binding(application)
         connections._save(records)
-        try:
-            result = _post_token(selected["provider"], {"grant_type": "refresh_token", "client_id": application["client_id"], "client_secret": application["client_secret"], "refresh_token": oauth["refresh_token"]})
-            access, refresh, expires, granted_scopes, scope_status = _tokens(
-                result, selected["scopes"], provider=selected["provider"],
-                prior_refresh=oauth["refresh_token"], prior_granted=prior_granted,
+    try:
+        result = _post_token(selected["provider"], {"grant_type": "refresh_token", "client_id": application["client_id"], "client_secret": application["client_secret"], "refresh_token": oauth["refresh_token"]})
+        access, refresh, expires, granted_scopes, scope_status = _tokens(
+            result, selected["scopes"], provider=selected["provider"],
+            prior_refresh=oauth["refresh_token"], prior_granted=prior_granted,
+        )
+        identity = _provider_identity(selected["provider"], access)
+        if identity["subject"] != prior_identity["subject"]:
+            raise PermissionError(
+                "The provider returned a different account. Reconnect in Connections."
             )
-            identity = _provider_identity(selected["provider"], access)
-            if identity["subject"] != prior_identity["subject"]:
+        workspace = oauth.get("workspace") or {}
+        if selected["provider"] == "atlassian":
+            sites = _jira_sites(access)
+            if not isinstance(sites, list):
+                raise ValueError("Authorized Jira sites were unavailable.")
+            matches = [row for row in sites if isinstance(row, dict)
+                       and str(row.get("url", "")).rstrip("/") == oauth.get("site_url")
+                       and str(row.get("id", "")) == workspace.get("provider_id")]
+            required = set(selected["scopes"]) - {"offline_access", "read:me"}
+            if (len(matches) != 1 or not isinstance(matches[0].get("scopes"), list)
+                    or not required <= set(matches[0]["scopes"])):
                 raise PermissionError(
-                    "The provider returned a different account. Reconnect in Connections."
+                    "Jira site access changed. Reconnect in Connections."
                 )
-            workspace = oauth.get("workspace") or {}
-            if selected["provider"] == "atlassian":
-                sites = _jira_sites(access)
-                if not isinstance(sites, list):
-                    raise ValueError("Authorized Jira sites were unavailable.")
-                matches = [row for row in sites if isinstance(row, dict)
-                           and str(row.get("url", "")).rstrip("/") == oauth.get("site_url")
-                           and str(row.get("id", "")) == workspace.get("provider_id")]
-                required = set(selected["scopes"]) - {"offline_access", "read:me"}
-                if (len(matches) != 1 or not isinstance(matches[0].get("scopes"), list)
-                        or not required <= set(matches[0]["scopes"])):
-                    raise PermissionError(
-                        "Jira site access changed. Reconnect in Connections."
-                    )
-                workspace = dict(workspace)
-                workspace["name"] = _identity_text(matches[0].get("name"), maximum=512)
-            current["token"] = access
-            oauth.update(refresh_token=refresh, expires_at=expires, refresh_state="ready",
-                         identity=identity, workspace=workspace,
-                         granted_scopes=granted_scopes, scope_status=scope_status)
+            workspace = dict(workspace)
+            workspace["name"] = _identity_text(matches[0].get("name"), maximum=512)
+        with connections._mutation_lock():
+            _authority(actor)
+            records = connections._load()
+            latest = records.get(record["name"])
+            if (not latest or not connections._may_use(latest, actor)
+                    or _refresh_binding(latest) != frozen):
+                raise connections.ConnectionVersionConflict("Connection changed during renewal.")
+            bound_app = _bound_application(_load(), latest["owner"], selected["provider"], latest["oauth"])
+            if not bound_app or _refresh_binding(bound_app) != app_binding:
+                raise connections.ConnectionVersionConflict("App registration changed during renewal.")
+            latest["token"] = access
+            latest["oauth"].update(refresh_token=refresh, expires_at=expires, refresh_state="ready",
+                                   identity=identity, workspace=workspace,
+                                   granted_scopes=granted_scopes, scope_status=scope_status)
+            latest["oauth"].pop("refresh_lease", None)
             connections._save(records)
-        except Exception as exc:
-            raise PermissionError("Account renewal could not be confirmed. Reconnect in Connections before continuing.") from exc
-        return dict(current)
+            return dict(latest)
+    except Exception as exc:
+        raise PermissionError("Account renewal could not be confirmed. Reconnect in Connections before continuing.") from exc
 
 
 def public_status(record):

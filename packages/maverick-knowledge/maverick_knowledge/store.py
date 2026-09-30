@@ -38,6 +38,19 @@ class StoredChunk:
 class VectorStore(Protocol):
     def add(self, collection: str, items: list[tuple[str, str, list[float], dict]]) -> None: ...
 
+    def add_with_identity(
+        self, collection: str, items: list[tuple[str, str, list[float], dict]], fingerprint: str,
+    ) -> None:
+        """Atomically bind immutable document provenance and embedding identity."""
+        ...
+
+    def replace_source_with_identity(
+        self, collection: str, items: list[tuple[str, str, list[float], dict]], fingerprint: str,
+        *, source: str, snapshot: list[StoredChunk],
+    ) -> None:
+        """Compare the prior source and atomically publish its complete revision."""
+        ...
+
     def search(self, collection: str, vector: list[float], k: int = 5) -> list[Match]: ...
 
     def delete_collection(self, collection: str) -> None: ...
@@ -64,6 +77,55 @@ def _cosine(a: list[float], b: list[float]) -> float:
     if na == 0 or nb == 0:
         return 0.0
     return dot / (na * nb)
+
+
+def _document_publication(items: list, existing: list[StoredChunk]) -> list:
+    """Validate admitted provenance under the writer's transaction/fence.
+
+    Matching retries keep the admitted rows (including timestamps and vectors).
+    A partial matching document can add missing chunks with its original time.
+    The caller must hold the publication fence until these additions commit.
+    """
+    incoming = {cid: (text, vec, meta) for cid, text, vec, meta in items}
+    if len(incoming) != len(items):
+        raise ValueError("knowledge publication has duplicate chunk identifiers")
+    documents = {meta["doc_sha256"] for _cid, _text, _vec, meta in items}
+    timestamps = {}
+    admitted = set()
+    for row in existing:
+        digest = row.meta.get("doc_sha256")
+        if row.chunk_id not in incoming and digest not in documents:
+            continue
+        candidate = incoming.get(row.chunk_id)
+        if (candidate is None or row.text != candidate[0]
+                or {key: value for key, value in row.meta.items() if key != "ingested_at"}
+                != {key: value for key, value in candidate[2].items() if key != "ingested_at"}):
+            raise RuntimeError("knowledge document digest is already bound to different provenance")
+        timestamp = row.meta["ingested_at"]
+        if digest in timestamps and timestamps[digest] != timestamp:
+            raise RuntimeError("knowledge document admitted timestamps are inconsistent")
+        timestamps[digest] = timestamp
+        admitted.add(row.chunk_id)
+    return [
+        (cid, text, vec, {**meta, "ingested_at": timestamps.get(meta["doc_sha256"], meta["ingested_at"])})
+        for cid, text, vec, meta in items if cid not in admitted
+    ]
+
+
+def _source_replacement_removals(
+    items: list, existing: list[StoredChunk], source: str, snapshot: list[StoredChunk],
+) -> list[str]:
+    """Validate a staged replacement under the same fence as publication."""
+    if not source or not items or any(meta.get("source") != source for _, _, _, meta in items):
+        raise ValueError("knowledge source replacement requires one nonempty source")
+    current = sorted(
+        (row for row in existing if row.meta.get("source") == source),
+        key=lambda row: row.chunk_id,
+    )
+    if current != sorted(snapshot, key=lambda row: row.chunk_id):
+        raise RuntimeError("knowledge source changed during replacement; retry")
+    incoming = {cid for cid, _, _, _ in items}
+    return [row.chunk_id for row in current if row.chunk_id not in incoming]
 
 
 class SqliteVectorStore:
@@ -103,6 +165,48 @@ class SqliteVectorStore:
                 ],
             )
             self._db.commit()
+
+    def add_with_identity(self, collection, items, fingerprint: str) -> None:
+        """Bind document provenance and identity in one publication transaction."""
+        self._publish_with_identity(collection, items, fingerprint)
+
+    def replace_source_with_identity(
+        self, collection, items, fingerprint: str, *, source: str, snapshot: list[StoredChunk],
+    ) -> None:
+        self._publish_with_identity(collection, items, fingerprint, source=source, snapshot=snapshot)
+
+    def _publish_with_identity(
+        self, collection, items, fingerprint: str, *, source: str | None = None, snapshot=None,
+    ) -> None:
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            rows = self._db.execute(
+                "SELECT id, text, meta FROM chunks WHERE collection = ?", (collection,),
+            )
+            chunk_ids = {item[0] for item in items}
+            documents = {item[3]["doc_sha256"] for item in items}
+            existing = []
+            for cid, text, raw_meta in rows:
+                meta = json.loads(raw_meta)
+                if meta.get("embedding_fingerprint") != fingerprint:
+                    raise RuntimeError("knowledge collection changed embedding identity; reindex required")
+                if (cid in chunk_ids or meta.get("doc_sha256") in documents
+                        or (source is not None and meta.get("source") == source)):
+                    existing.append(StoredChunk(cid, text, meta))
+            removed = (
+                _source_replacement_removals(items, existing, source, snapshot)
+                if source is not None else []
+            )
+            pending = _document_publication(items, existing)
+            self._db.executemany(
+                "INSERT INTO chunks VALUES (?,?,?,?,?)",
+                [(collection, cid, text, json.dumps(vec), json.dumps(meta))
+                 for cid, text, vec, meta in pending],
+            )
+            self._db.executemany(
+                "DELETE FROM chunks WHERE collection = ? AND id = ?",
+                [(collection, cid) for cid in removed],
+            )
 
     def search(self, collection, vector, k: int = 5) -> list[Match]:
         if k <= 0:
@@ -201,6 +305,31 @@ class SqliteVectorStore:
                 if len(result) > maximum:
                     break
         return result
+
+    def read_collection(self, collection: str, *, limit: int) -> list[StoredChunk]:
+        if not 1 <= limit <= 100_000:
+            raise ValueError("knowledge collection-read limit is invalid")
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, text, meta FROM chunks WHERE collection = ? ORDER BY id LIMIT ?",
+                (collection, limit + 1),
+            ).fetchall()
+        return [StoredChunk(cid, text, json.loads(meta)) for cid, text, meta in rows]
+
+    def replace_embeddings(self, collection: str, snapshot: list[StoredChunk], items: list) -> None:
+        """Compare the entire source snapshot and replace vectors in one transaction."""
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            rows = self._db.execute(
+                "SELECT id, text, meta FROM chunks WHERE collection = ? ORDER BY id", (collection,),
+            ).fetchall()
+            current = [StoredChunk(cid, text, json.loads(meta)) for cid, text, meta in rows]
+            if current != snapshot:
+                raise RuntimeError("knowledge collection changed during reindex; retry")
+            self._db.executemany(
+                "UPDATE chunks SET vec = ?, meta = ? WHERE collection = ? AND id = ?",
+                [(json.dumps(vec), json.dumps(meta), collection, cid) for cid, _text, vec, meta in items],
+            )
 
     def close(self) -> None:
         """Close the underlying SQLite connection (idempotent)."""
@@ -413,6 +542,61 @@ class PgVectorStore:
         ) as provider_call:
             provider_call(dispatch)
 
+    def _collection_fence(self, cur, collection: str) -> None:
+        cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (json.dumps([self._namespace, collection]),))
+
+    def add_with_identity(self, collection, items, fingerprint: str) -> None:
+        self._publish_with_identity(collection, items, fingerprint)
+
+    def replace_source_with_identity(
+        self, collection, items, fingerprint: str, *, source: str, snapshot: list[StoredChunk],
+    ) -> None:
+        self._publish_with_identity(collection, items, fingerprint, source=source, snapshot=snapshot)
+
+    def _publish_with_identity(
+        self, collection, items, fingerprint: str, *, source: str | None = None, snapshot=None,
+    ) -> None:
+        def dispatch():
+            with self._lock, self._db.transaction(), self._db.cursor() as cur:
+                self._collection_fence(cur, collection)
+                found = cur.execute(
+                    f"SELECT 1 FROM {self._table} WHERE namespace = %s AND collection = %s "
+                    "AND (meta ->> 'embedding_fingerprint') IS DISTINCT FROM %s LIMIT 1",
+                    (self._namespace, collection, fingerprint),
+                ).fetchone()
+                if found is not None:
+                    raise RuntimeError("knowledge collection changed embedding identity; reindex required")
+                rows = cur.execute(
+                    f"SELECT id, text, meta FROM {self._table} "
+                    "WHERE namespace = %s AND collection = %s "
+                    "AND (id = ANY(%s) OR meta ->> 'doc_sha256' = ANY(%s) "
+                    "OR meta ->> 'source' = %s) FOR UPDATE",
+                    (self._namespace, collection, [item[0] for item in items],
+                     list({item[3]["doc_sha256"] for item in items}), source),
+                ).fetchall()
+                existing = [StoredChunk(cid, text, dict(meta)) for cid, text, meta in rows]
+                removed = (
+                    _source_replacement_removals(items, existing, source, snapshot)
+                    if source is not None else []
+                )
+                pending = _document_publication(items, existing)
+                cur.executemany(
+                    f"INSERT INTO {self._table} (namespace, collection, id, text, embedding, meta) "
+                    "VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb)",
+                    [(self._namespace, collection, cid, text, _to_pgvector(vec), json.dumps(meta))
+                     for cid, text, vec, meta in pending],
+                )
+                if removed:
+                    cur.execute(
+                        f"DELETE FROM {self._table} WHERE namespace = %s AND collection = %s "
+                        "AND id = ANY(%s)",
+                        (self._namespace, collection, removed),
+                    )
+        with metered_operation("pgvector", category="storage", service="vector-store:pgvector",
+                               operation="knowledge-identity-fenced-add") as call:
+            call(dispatch)
+
     def search(self, collection, vector, k: int = 5) -> list[Match]:
         if k <= 0:
             return []
@@ -588,6 +772,45 @@ class PgVectorStore:
             for chunk_id, text, meta in rows
         ]
 
+    def read_collection(self, collection: str, *, limit: int) -> list[StoredChunk]:
+        if not 1 <= limit <= 100_000:
+            raise ValueError("knowledge collection-read limit is invalid")
+        with metered_operation("pgvector", category="retrieval", service="vector-store:pgvector",
+                               operation="knowledge-reindex-read") as call:
+            def dispatch():
+                with self._lock, self._db.cursor() as cur:
+                    return cur.execute(
+                        f"SELECT id, text, meta FROM {self._table} "
+                        "WHERE namespace = %s AND collection = %s ORDER BY id LIMIT %s",
+                        (self._namespace, collection, limit + 1),
+                    ).fetchall()
+            rows = call(dispatch)
+        return [StoredChunk(cid, text, meta if isinstance(meta, dict) else json.loads(meta))
+                for cid, text, meta in rows]
+
+    def replace_embeddings(self, collection: str, snapshot: list[StoredChunk], items: list) -> None:
+        with metered_operation("pgvector", category="storage", service="vector-store:pgvector",
+                               operation="knowledge-reindex-replace") as call:
+            def dispatch():
+                with self._lock, self._db.transaction(), self._db.cursor() as cur:
+                    self._collection_fence(cur, collection)
+                    rows = cur.execute(
+                        f"SELECT id, text, meta FROM {self._table} "
+                        "WHERE namespace = %s AND collection = %s ORDER BY id FOR UPDATE",
+                        (self._namespace, collection),
+                    ).fetchall()
+                    current = [StoredChunk(cid, text, meta if isinstance(meta, dict) else json.loads(meta))
+                               for cid, text, meta in rows]
+                    if current != snapshot:
+                        raise RuntimeError("knowledge collection changed during reindex; retry")
+                    cur.executemany(
+                        f"UPDATE {self._table} SET embedding = %s::vector, meta = %s::jsonb "
+                        "WHERE namespace = %s AND collection = %s AND id = %s",
+                        [(_to_pgvector(vec), json.dumps(meta), self._namespace, collection, cid)
+                         for cid, _text, vec, meta in items],
+                    )
+            call(dispatch)
+
     def close(self) -> None:
         """Close the underlying connection (idempotent)."""
         db = getattr(self, "_db", None)
@@ -603,9 +826,11 @@ class PgVectorStore:
 
 
 class QdrantStore:
-    """Qdrant-backed vector store — the certified external engine for clients
-    with dedicated retrieval infrastructure or corpora beyond pgvector's
-    comfortable range.
+    """Qdrant retrieval/erasure adapter for existing collections.
+
+    Its unconditional upsert is a low-level adapter operation, not atomic
+    document admission. KnowledgeBase refuses ingestion through this adapter
+    until it supports a shared provenance/identity publication fence.
 
     Same protocol + per-collection compartments as the other stores. One Qdrant
     collection per (namespace, knowledge collection) pair, named

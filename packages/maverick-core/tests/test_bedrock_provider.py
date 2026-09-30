@@ -26,6 +26,8 @@ class _FakeSDKClient:
 
     def __init__(self, **kw):
         self.kw = kw
+        self.api_key = kw.get("api_key")
+        self._use_sigv4 = self.api_key is None
         self.base_url = kw.get("base_url") or f"https://fake-{type(self).__name__}/{kw.get('aws_region')}"
         type(self).instances.append(self)
 

@@ -37,15 +37,20 @@ def test_page_is_wired_and_hardened(monkeypatch) -> None:
     csp = response.headers["content-security-policy"]
     assert "'unsafe-inline'" not in csp and "style-src 'self' 'nonce-" in csp
     body = response.text
-    assert "Regulatory obligations" in body
+    assert "Regulations and rules" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert f'data-api-base="{page.API_BASE}"' in body
     assert page.ASSET_PATH in body
     assert 'id="rob-check-form"' in body and 'id="rob-library"' in body
     assert 'id="rob-gateway-preview-form"' in body
     assert 'id="rob-gateway-preview-state"' in body
-    assert "Preview restrictive gateway constraints" in body
-    assert "maverick regulatory verify --ci" in body
+    assert "Advanced: preview rules from an AI gateway" in body
+    assert 'id="rob-action"' in body and "<select" in body
+    # The strict style policy blocks style attributes; the page styles live in its nonce stylesheet.
+    assert " style=" not in body.split('id="rob-root"')[1]
+    for banned in ("maverick regulatory", "[compliance]", "profiles =", "JSON", "Tool / action",
+                   "sql_query", "Vacuous", "rob-output"):
+        assert banned not in body, banned
 
 
 def test_unknown_query_params_are_404(monkeypatch) -> None:
@@ -72,9 +77,8 @@ def test_technical_disclosures_do_not_hide_decisions_or_enforcement_problems(mon
 
     markup = DisclosureMarkup()
     markup.feed(_app(monkeypatch, {"view"}).get(page.PAGE_PATH).text)
-    for identifier in ("rob-enable-snippet", "rob-output"):
-        assert markup.contexts[identifier]
-        assert all("open" not in attrs for attrs in markup.contexts[identifier])
+    assert markup.contexts["rob-gateway-preview-form"]
+    assert all("open" not in attrs for attrs in markup.contexts["rob-gateway-preview-form"])
     for identifier in ("rob-check-form", "rob-verdict", "rob-problem-list", "rob-health-title"):
         assert markup.contexts[identifier] == []
 

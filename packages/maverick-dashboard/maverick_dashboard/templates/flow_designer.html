@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}flow designer · Lightwork{% endblock %}
+{% block title %}Flow designer · Lightwork{% endblock %}
 {% block content %}
 <style>
   /* Mockup layout: a clean header + a hero Draft bar, then a workspace that is
@@ -28,12 +28,9 @@
   @media (max-width: 900px) {
     .fd[data-view="steps"] .fdx-work { grid-template-columns: 1fr; height: auto; }
   }
-  /* Canvas view stacks earlier. Inside the app shell (248px sidebar, 48px main
-     padding) the middle track is narrower than the 320px copilot drawer from
-     ~1200px down, so the drawer overflowed the canvas' start edge and was
-     clipped ("…pilot" header, left-truncated messages). Stacked, the palette
-     wraps into a row and the canvas keeps a real height (a bare auto row
-     collapses the SVG to its 150px default). */
+  /* Stack the canvas workspace before its middle column becomes cramped.
+     The palette wraps into a row; the canvas keeps a real height instead of
+     collapsing to the SVG's 150px default. Copilot is a separate shared drawer. */
   @media (max-width: 1240px) {
     .fd[data-view="canvas"] .fdx-work { grid-template-columns: 1fr; height: auto; }
     .fd[data-view="canvas"] .fd__palette { flex-direction: row; flex-wrap: wrap; }
@@ -70,6 +67,11 @@
   .fd__props .field { margin-bottom: var(--space-3); }
   .fd__props label { display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); }
   .fd__props textarea { width: 100%; min-height: 60px; font-family: var(--font-mono, monospace); font-size: 12px; }
+  .fd-recipe-inputs { max-width: 36rem; max-height: 90vh; overflow: hidden; }
+  .fd-recipe-inputs .mv-confirm__body { display: flex; flex-direction: column; max-height: calc(90vh - 2px); box-sizing: border-box; }
+  .fd-recipe-fields { overflow-y: auto; min-height: 0; padding-inline-end: var(--space-2); margin-bottom: var(--space-3); }
+  .fd-recipe-inputs .mv-confirm__row { flex-shrink: 0; flex-wrap: wrap; padding-top: var(--space-2); }
+  .fd-recipe-inputs [aria-invalid="true"] { border-color: var(--danger); }
   .fd__props input, .fd__props select { width: 100%; }
   .fd__empty { color: var(--muted); font-size: var(--text-sm); }
   .fd__msg { font-size: var(--text-sm); color: var(--muted); }
@@ -131,27 +133,33 @@
                  opacity: .92; cursor: pointer; }
   .fd__minimap rect.mini-node { fill: var(--muted); }
   .fd__minimap rect.mini-view { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-  /* copilot chat drawer (over the canvas' end edge). Width tracks the canvas
-     column: min() keeps the drawer inside its container when the track is
-     narrower than 320px -- absolutely positioned, a fixed width overflowed the
-     clipped start edge instead of shrinking. */
-  .fd__chat { display: none; position: absolute; top: 8px; inset-inline-end: 8px; bottom: 8px;
-              width: min(320px, calc(100% - 16px)); max-width: calc(100% - 16px);
-              z-index: 3; background: var(--surface); border: 1px solid var(--border);
-              border-radius: var(--radius-lg); flex-direction: column; box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,.12)); }
-  .fd__chat.on { display: flex; }
+  /* Shared, nonmodal Copilot: remains visible in Steps and Canvas, and allows
+     editing alongside a pending reply. Only the conversation scrolls. */
+  .fd__chat { display: none; position: fixed; inset-inline-end: 1rem; bottom: 4.6rem;
+              width: min(25rem, calc(100vw - 2rem)); height: min(38rem, calc(100vh - 8rem));
+              height: min(38rem, calc(100dvh - 8rem)); box-sizing: border-box;
+              z-index: 60; background: var(--glass-sheen, none), color-mix(in srgb, var(--panel) 82%, transparent);
+              border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
+              -webkit-backdrop-filter: blur(24px) saturate(175%); backdrop-filter: blur(24px) saturate(175%);
+              flex-direction: column; box-shadow: var(--shadow-lg), var(--glass-edge); }
+  .fd__chat.on:not([hidden]) { display: flex; }
   .fd__chat-head { display: flex; align-items: center; justify-content: space-between;
+                   flex-shrink: 0;
                    padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border);
                    font-weight: var(--font-semibold); font-size: var(--text-sm); }
-  .fd__chat-log { flex: 1; overflow-y: auto; padding: var(--space-3); display: flex;
-                  flex-direction: column; gap: var(--space-2); }
+  .fd__chat-log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+                  padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+  .fd__chat-log > * { flex-shrink: 0; }
   .fd__chat-msg { max-width: 92%; padding: 6px 10px; border-radius: 10px; font-size: var(--text-sm);
                   white-space: pre-wrap; word-break: break-word; }
   .fd__chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
   .fd__chat-msg.assistant { align-self: flex-start; background: var(--surface-sunken); border: 1px solid var(--border); }
   .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 2px; }
-  .fd__chat-form { display: flex; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
-  .fd__chat-form input { flex: 1; }
+  .fd__chat-form { display: flex; flex-shrink: 0; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
+  .fd__chat-form input { flex: 1; min-width: 0; }
+  .fd__chat-msg .btn { max-width: 100%; white-space: normal; margin-top: var(--space-2); }
+  @media (prefers-reduced-transparency: reduce) { .fd__chat { background: var(--panel); backdrop-filter: none; } }
+  body.theme-hicontrast .fd__chat { background: var(--panel); border-color: var(--border); backdrop-filter: none; }
 
   /* ---- Redesign layer: glass surfaces, a hero NL "Draft" band, and a
      friendly Steps view toggled against the Canvas. Additive — the toolbar
@@ -203,7 +211,25 @@
   .fd-conn{ width: 2px; height: 14px; background: var(--border); margin-inline-start: calc(var(--space-4) + 16px); }
   .fd-simple__empty{ text-align: center; color: var(--muted); padding: var(--space-6) var(--space-4);
     border: 1px dashed var(--glass-border); border-radius: var(--radius-lg); background: var(--glass-soft); }
-  .fd-simple__foot{ display: flex; justify-content: center; margin-top: var(--space-4); }
+  .fd-simple__foot{ display: flex; justify-content: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-4); }
+  .fd-scard{ cursor: pointer; }
+  .fd-scard.is-selected{ border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+  .fd-scard__main{ min-width: 0; flex: 1; background: none; border: 0; padding: 0; text-align: start; color: inherit; font: inherit; cursor: pointer; }
+  .fd-scard__tools{ display: flex; gap: 4px; flex: none; }
+  .fd-scard__tools .btn{ padding: 0.25rem 0.55rem; font-size: var(--text-xs); }
+  .fd-simple__add{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+  /* In the Steps view the selected step's settings open in the side rail. */
+  .fd[data-view="steps"] .fdx-rail .fd__props{ display: block; }
+  .fd__pair{ display: flex; gap: 4px; margin-bottom: 4px; flex-wrap: wrap; align-items: center; }
+  .fd__pair > .input, .fd__pair > select{ flex: 1 1 120px; min-width: 0; width: auto; }
+  .fd__check{ display: inline-flex !important; align-items: center; gap: 6px; font-size: var(--text-sm); margin-bottom: var(--space-3); }
+  .fd__check input{ width: auto !important; }
+  .fd__label{ display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); }
+  .fd__fails{ margin: var(--space-2) 0 var(--space-3); }
+  .fd__fails > summary{ cursor: pointer; font-weight: var(--font-semibold); font-size: var(--text-sm); margin-bottom: var(--space-2); }
+  .fd__days{ border: 0; padding: 0; margin: 0 0 var(--space-2); display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: var(--text-sm); }
+  .fd__days legend{ color: var(--muted); font-size: var(--text-sm); margin-bottom: 4px; }
+  .fd__days label{ display: inline-flex; align-items: center; gap: 4px; }
 </style>
 
 {% from "_hero.html" import hero, state %}
@@ -213,9 +239,9 @@
                lede='Describe the work in plain English, choose Draft, and
                      review the steps before saving or publishing.') %}
     {{ state('Current state',
-             ('Editing ' ~ flow_id) if flow_id else 'New draft',
-             badge='saved flow' if flow_id
-                   else ('from template' if seed_flow else 'unsaved'),
+             'Editing a saved flow' if flow_id else 'New draft',
+             badge='Saved flow' if flow_id
+                   else ('From a saved workflow' if seed_flow else 'Not saved yet'),
              badge_class='ok' if flow_id else 'idle',
              copy='Scheduled and real runs use the published version.
                    Test simulates the steps without taking external actions.') }}
@@ -231,13 +257,16 @@
       <button type="button" id="fd-view-canvas" aria-pressed="false">Advanced canvas</button>
     </div>
     <span class="fdx-head__spacer"></span>
+    <button class="btn btn--ghost" type="button" id="fd-undo" title="Undo the last change">Undo</button>
+    <button class="btn btn--ghost" type="button" id="fd-redo" title="Restore the last change">Redo</button>
     <button class="btn btn--primary" type="button" id="fd-save">Save draft</button>
     <button class="btn btn--ghost" type="button" id="fd-publish" title="Activate this exact draft for schedules, triggers, and real runs">Publish</button>
-    <button class="btn btn--ghost" type="button" id="fd-run" title="Simulate the steps without taking external actions">▷ Test</button>
+    <button class="btn btn--ghost" type="button" id="fd-run" title="Try the steps without sending anything to other apps">Test</button>
     <button class="btn btn--ghost" type="button" id="fd-run-real" title="Run the published version using connected services">Run published</button>
-    <button class="btn btn--ghost" type="button" id="fd-history">⏱ History</button>
-    <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">⚡ Triggers</button>
-    <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">💬 Copilot</button>
+    <button class="btn btn--ghost" type="button" id="fd-history">Earlier versions</button>
+    <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">What starts it</button>
+    {% if flow_id %}<a class="btn btn--ghost" id="fd-teach" href="/flows/{{ flow_id | urlencode }}/teach" title="Teach steps from examples, or build a flow from reviewed runs">Teach this flow</a>{% endif %}
+    <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">Assistant</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
   </div>
 
@@ -248,56 +277,40 @@
   </div>
   <div class="fd__examples" id="fd-examples" aria-label="Example workflows"></div>
 
-  <!-- Canvas-only tools: id, history/zoom, import/export, run signal + legend. -->
+  <!-- Canvas-only tools: undo/zoom, download/open a copy, run signal + legend. -->
   <div class="fdx-canvastools">
-    <input class="input" id="fd-id" placeholder="flow-id" aria-label="Flow id" style="width:140px;" />
-    <button class="btn btn--ghost" type="button" id="fd-undo" title="Undo (Ctrl+Z)">↶</button>
-    <button class="btn btn--ghost" type="button" id="fd-redo" title="Redo (Ctrl+Shift+Z)">↷</button>
-    <button class="btn btn--ghost" type="button" id="fd-fit" title="Zoom to fit">⛶</button>
-    <button class="btn btn--ghost" type="button" id="fd-export" title="Download this flow as JSON">⬇</button>
-    <button class="btn btn--ghost" type="button" id="fd-import-json" title="Load a flow from a JSON file">⬆</button>
-    <input type="file" id="fd-import-file" accept=".json,application/json" hidden aria-label="Flow JSON file" />
-    <span class="fd__msg" id="fd-signal" hidden title="Share of triggered runs that completed successfully"></span>
+    <input type="hidden" id="fd-id" />
+    <button class="btn btn--ghost" type="button" id="fd-fit">Fit to screen</button>
+    <button class="btn btn--ghost" type="button" id="fd-export">Download a copy</button>
+    <button class="btn btn--ghost" type="button" id="fd-import-json">Open a saved copy</button>
+    <input type="file" id="fd-import-file" accept=".json,application/json" hidden aria-label="Saved flow copy" />
+    <span class="fd__msg" id="fd-signal" hidden title="How often automatic runs finished successfully"></span>
     <span class="fd__legend" id="fd-legend" aria-hidden="true">
-      <span>🟢 ok</span><span>🔴 failed</span><span>🟠 branch/step</span><span>⏳ waiting</span>
+      <span>🟢 Worked</span><span>🔴 Failed</span><span>🟠 Decided a path</span><span>⏳ Waiting</span>
     </span>
   </div>
-  <datalist id="fd-tools"></datalist>
 
   <div class="fdx-work">
-  <div class="fd__palette" aria-label="Add node">
+  <div class="fd__palette" aria-label="Add a step">
     <div class="fd__empty">Add a step</div>
-    <button class="btn btn--ghost" type="button" data-add="agent">🧠 Agent</button>
-    <button class="btn btn--ghost" type="button" data-add="action">⚙️ Action</button>
-    <button class="btn btn--ghost" type="button" data-add="branch">🔀 Branch</button>
-    <button class="btn btn--ghost" type="button" data-add="switch">🔃 Switch</button>
+    <button class="btn btn--ghost" type="button" data-add="agent">🧠 AI task</button>
+    <button class="btn btn--ghost" type="button" data-add="action">⚙️ Connected action</button>
+    <button class="btn btn--ghost" type="button" data-add="branch">🔀 Decision</button>
+    <button class="btn btn--ghost" type="button" data-add="switch">🔃 Choose a path</button>
     <button class="btn btn--ghost" type="button" data-add="approval">✅ Approval</button>
-    <button class="btn btn--ghost" type="button" data-add="delay">⏱ Delay</button>
-    <button class="btn btn--ghost" type="button" data-add="wait_event">📥 Wait for event</button>
-    <button class="btn btn--ghost" type="button" data-add="foreach">🔁 For-each</button>
-    <button class="btn btn--ghost" type="button" data-add="while">🔄 While</button>
-    <button class="btn btn--ghost" type="button" data-add="parallel">🔱 Parallel</button>
-    <button class="btn btn--ghost" type="button" data-add="scope">🛡 Try/catch</button>
-    <button class="btn btn--ghost" type="button" data-add="subflow">📎 Sub-flow</button>
-    <button class="btn btn--ghost" type="button" data-add="setvar">📝 Set data</button>
+    <button class="btn btn--ghost" type="button" data-add="delay">⏱ Wait</button>
+    <button class="btn btn--ghost" type="button" data-add="wait_event">📥 Wait for another app</button>
+    <button class="btn btn--ghost" type="button" data-add="foreach">🔁 Repeat for each item</button>
+    <button class="btn btn--ghost" type="button" data-add="while">🔄 Repeat while</button>
+    <button class="btn btn--ghost" type="button" data-add="parallel">🔱 Run together</button>
+    <button class="btn btn--ghost" type="button" data-add="scope">🛡 Handle a failure</button>
+    <button class="btn btn--ghost" type="button" data-add="subflow">📎 Run another flow</button>
+    <button class="btn btn--ghost" type="button" data-add="setvar">📝 Update data</button>
   </div>
 
   <div class="fd__canvas-wrap">
     <div id="fd-crumbs" class="fd__crumbs" aria-label="Flow location"></div>
-    <div id="fd-chat" class="fd__chat" aria-label="Flow copilot">
-      <div class="fd__chat-head">
-        <span>💬 Flow copilot</span>
-        <button class="btn btn--ghost" type="button" id="fd-chat-close" aria-label="Close copilot">✕</button>
-      </div>
-      <div id="fd-chat-log" class="fd__chat-log" aria-live="polite">
-        <div class="fd__chat-msg assistant">Tell me what to build or change — “add an approval before the Slack post”, “why did the last run fail?”, “fix it”.</div>
-      </div>
-      <form id="fd-chat-form" class="fd__chat-form">
-        <input class="input" id="fd-chat-input" placeholder="Ask or instruct…" aria-label="Message the flow copilot" autocomplete="off" />
-        <button class="btn btn--primary" type="submit">Send</button>
-      </form>
-    </div>
-    <p class="sr-only" id="fd-canvas-help">Use Tab to reach a flow step, Enter or Space to select it, and the arrow keys to move it. Select the next step in the properties panel to connect steps. When the canvas itself has focus, arrow keys pan and plus or minus zoom.</p>
+    <p class="sr-only" id="fd-canvas-help">Use Tab to reach a flow step, Enter or Space to select it, and the arrow keys to move it. Choose the next step in the step's settings to connect steps. When the canvas itself has focus, arrow keys pan and plus or minus zoom.</p>
     <svg id="fd-canvas" role="application" tabindex="0" aria-label="Flow canvas"
          aria-describedby="fd-canvas-help" data-flow-id="{{ flow_id or '' }}">
       <defs>
@@ -316,12 +329,11 @@
   </div>
 
   <div class="fd__props" id="fd-props">
-    <p class="fd__empty">Select a node to edit it, or add a step from the palette. Connect steps by dragging from a node's bottom dot or by choosing its next step here.</p>
+    <p class="fd__empty">Select a step to change it, or add one from the list. Connect steps by dragging from a step's bottom dot or by choosing its next step here.</p>
   </div>
 
-  <!-- Friendly "Steps" view: a readable overview of the flow's steps, rendered
-       from the flow's saved shape. The toolbar above (Draft / Save / Test /
-       Run) is the shared control bar; switch to Canvas to edit structure. -->
+  <!-- Friendly "Steps" view: the flow's steps as cards. Choose a card to change
+       it in the side rail; move, remove or add steps with the buttons. -->
   <div id="fd-simple" aria-label="Flow steps">
     <div class="fd-simple__inner" id="fd-simple-body"></div>
   </div>
@@ -331,142 +343,223 @@
   <aside class="fdx-rail" aria-label="Flow settings">
     <div class="fdx-panel">
       <h2 class="fdx-panel__t">Schedule</h2>
+      <input type="hidden" id="fd-schedule" />
       <div class="fdx-kv">
-        <label for="fd-schedule-preset">Repeat</label>
-        <select class="input" id="fd-schedule-preset">
+        <label for="fd-sched-freq">Repeat</label>
+        <select class="input" id="fd-sched-freq">
           <option value="">No schedule</option>
-          <option value="0 9 * * *">Every day at 9 am</option>
-          <option value="0 9 * * 1-5">Weekdays at 9 am</option>
-          <option value="0 9 * * 1">Mondays at 9 am</option>
-          <option value="0 9 1 * *">First of each month at 9 am</option>
-          <option value="custom">Custom schedule</option>
+          <option value="hourly">Every hour</option>
+          <option value="daily">Every day</option>
+          <option value="weekdays">Every weekday</option>
+          <option value="weekly">On certain days each week</option>
+          <option value="monthly">Once a month</option>
+          <option value="custom" hidden>Custom timetable (kept as is)</option>
         </select>
       </div>
-      <div class="fdx-kv">
-        <label for="fd-tz">Time zone</label>
-        <input class="input" id="fd-tz" placeholder="America/New_York" aria-label="Schedule time zone" title="Blank uses UTC. Named time zones adjust for daylight saving time." />
+      <fieldset class="fd__days" id="fd-sched-days" hidden>
+        <legend>On these days</legend>
+        <label><input type="checkbox" value="1" checked /> Mon</label>
+        <label><input type="checkbox" value="2" /> Tue</label>
+        <label><input type="checkbox" value="3" /> Wed</label>
+        <label><input type="checkbox" value="4" /> Thu</label>
+        <label><input type="checkbox" value="5" /> Fri</label>
+        <label><input type="checkbox" value="6" /> Sat</label>
+        <label><input type="checkbox" value="0" /> Sun</label>
+      </fieldset>
+      <div class="fdx-kv" id="fd-sched-dom-row" hidden>
+        <label for="fd-sched-dom">Day</label>
+        <select class="input" id="fd-sched-dom">
+          {% for d in range(1, 29) %}<option value="{{ d }}">{{ d }}{{ 'st' if d in (1, 21) else ('nd' if d in (2, 22) else ('rd' if d in (3, 23) else 'th')) }} of the month</option>{% endfor %}
+        </select>
       </div>
-      <p class="fdx-mini">Times use this time zone, or UTC if blank. Publish to activate schedule changes.</p>
-      <details id="fd-schedule-advanced">
-        <summary>Advanced schedule</summary>
-        <label for="fd-schedule">Schedule expression (cron)</label>
-        <input class="input" id="fd-schedule" placeholder="0 9 * * 1" aria-label="Custom schedule expression" />
-        <p class="fdx-mini">For example, 0 9 * * 1 means Mondays at 9 am. Leave blank for manual or event starts only.</p>
-      </details>
+      <div class="fdx-kv" id="fd-sched-minute-row" hidden>
+        <label for="fd-sched-minute">At</label>
+        <select class="input" id="fd-sched-minute">
+          <option value="0">On the hour</option><option value="15">15 minutes past</option>
+          <option value="30">Half past</option><option value="45">45 minutes past</option>
+        </select>
+      </div>
+      <div class="fdx-kv" id="fd-sched-time-row" hidden>
+        <label for="fd-sched-time">At</label>
+        <input class="input" type="time" id="fd-sched-time" value="09:00" />
+      </div>
+      <div class="fdx-kv" id="fd-sched-tz-row" hidden>
+        <label for="fd-tz">Time zone</label>
+        <select class="input" id="fd-tz"><option value="">UTC (world standard time)</option></select>
+      </div>
+      <p class="fdx-mini" id="fd-sched-words" role="status"></p>
     </div>
 
     <div class="fdx-panel">
       <h2 class="fdx-panel__t">Limits</h2>
       <div class="fdx-kv">
-        <label for="fd-maxdollars">Budget $</label>
-        <input class="input" id="fd-maxdollars" type="number" min="0" step="0.5" placeholder="0" aria-label="Flow agent budget in dollars" title="Aggregate agent spend ceiling for one run (0 = none)." />
+        <label for="fd-maxdollars">Spending limit ($)</label>
+        <input class="input" id="fd-maxdollars" type="number" min="0" step="0.5" placeholder="No limit" title="The most one run may spend on AI. Leave empty for no limit." />
       </div>
       <div class="fdx-kv">
-        <label for="fd-maxsec">Time limit (seconds)</label>
-        <input class="input" id="fd-maxsec" type="number" min="0" placeholder="0" aria-label="Flow time limit in seconds" title="Time allowed for the whole flow (0 = no limit)." />
+        <label for="fd-maxsec">Time limit</label>
+        <select class="input" id="fd-maxsec">
+          <option value="">No time limit</option>
+          <option value="300">5 minutes</option><option value="900">15 minutes</option>
+          <option value="1800">30 minutes</option><option value="3600">1 hour</option>
+          <option value="14400">4 hours</option><option value="86400">1 day</option>
+        </select>
       </div>
       <div class="fdx-kv">
-        <label for="fd-maxconc">Max runs</label>
-        <input class="input" id="fd-maxconc" type="number" min="0" placeholder="0" aria-label="Maximum simultaneous runs" title="Limit simultaneous runs (0 = unlimited). Set 1 to prevent overlapping runs." />
+        <label for="fd-maxconc">Runs at once</label>
+        <select class="input" id="fd-maxconc">
+          <option value="">No limit</option>
+          <option value="1">One at a time</option>
+          <option value="3">Up to 3 at once</option>
+          <option value="10">Up to 10 at once</option>
+        </select>
       </div>
-      <p class="fdx-mini">0 means no cap.</p>
     </div>
 
     <div class="fdx-panel">
       <details id="fd-test-data">
-        <summary>Advanced test data</summary>
-        <p class="fdx-mini">Optional values to use in a test. Enter a JSON object when a step needs specific input data.</p>
-        <div class="fdx-kv" style="align-items:flex-start;">
-          <label for="fd-sample">Input data (JSON)</label>
-          <input class="input" id="fd-sample" placeholder='{"issue":"…"}' aria-label="Sample input JSON" />
-        </div>
+        <summary>Sample answers for a test</summary>
+        <p class="fdx-mini">Optional. Test uses these answers instead of asking.</p>
+        <div id="fd-sample-fields"></div>
+        <button class="btn btn--ghost" type="button" id="fd-sample-add">Add a sample value</button>
       </details>
       <label class="fdx-mini" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="fd-notify" /> Notify me on approval / finish
+        <input type="checkbox" id="fd-notify" /> Tell me when it needs approval or finishes
       </label>
     </div>
   </aside>
   </div>
 </div>
 
+<!-- Outside all view-specific containers: the same conversation is available
+     from the default Steps view and the advanced Canvas. -->
+<aside id="fd-chat" class="fd__chat" aria-labelledby="fd-chat-title" hidden>
+  <div class="fd__chat-head">
+    <span id="fd-chat-title">💬 Workflow Copilot</span>
+    <button class="btn btn--ghost" type="button" id="fd-chat-close" aria-label="Close workflow Copilot">✕</button>
+  </div>
+  <div id="fd-chat-log" class="fd__chat-log" aria-live="polite" aria-relevant="additions text">
+    <div class="fd__chat-msg assistant">Tell me what to build or change — “add an approval before the Slack post”, “why did the last run fail?”, “fix it”. Review any changes before saving.</div>
+  </div>
+  <form id="fd-chat-form" class="fd__chat-form">
+    <input class="input" id="fd-chat-input" placeholder="Ask or instruct…" aria-label="Message the workflow Copilot" autocomplete="off" />
+    <button class="btn btn--primary" type="submit">Send</button>
+  </form>
+</aside>
+
 <script id="fd-seed" type="application/json">{{ (seed_flow or none) | tojson }}</script>
 <script>
 {% include "flow_designer_core.js" %}
 </script>
 <script>
+{% include "flow_designer_inputs.js" %}
+</script>
+<script>
 {% include "flow_designer.js" %}
 </script>
 <script>
-  // Steps ⇄ Canvas view switch. The canvas engine (flow_designer.js) owns its
-  // own IIFE state; this only toggles which workspace shows and renders a
-  // read-friendly step list from the flow's seed shape. Structural editing
-  // stays in Canvas — the shared toolbar drives both.
+  // Steps ⇄ Canvas view switch. The Steps view lists the live flow as cards;
+  // choosing a card opens that step's settings in the side rail, and each card
+  // can be moved, removed, or a new step added at the end.
   (function () {
     var fd = document.querySelector('.fd');
     var body = document.getElementById('fd-simple-body');
     var stepsBtn = document.getElementById('fd-view-steps');
     var canvasBtn = document.getElementById('fd-view-canvas');
+    var props = document.getElementById('fd-props');
+    var rail = document.querySelector('.fdx-rail');
+    var canvasWrap = document.querySelector('.fd__canvas-wrap');
     if (!fd || !body || !stepsBtn || !canvasBtn) return;
+    var engine = function () { return window.__fdEngine; };
 
     var ICON = { agent: '🧠', action: '⚙️', branch: '🔀', switch: '🔃', foreach: '🔁',
       while: '🔄', parallel: '🔱', approval: '✅', delay: '⏱', wait_event: '📥',
       scope: '🛡', subflow: '📎', setvar: '📝', trigger: '⚡' };
-    var KLABEL = { agent: 'AI task', action: 'Connected action', branch: 'Decision', switch: 'Choose a path',
-      foreach: 'Repeat for each item', while: 'Repeat while a condition holds', parallel: 'Run together', approval: 'Approval',
-      delay: 'Wait', wait_event: 'Wait for an event', scope: 'Handle a failure',
-      subflow: 'Run another flow', setvar: 'Update data' };
+    var ADDABLE = [['agent', 'AI task'], ['action', 'Connected action'], ['approval', 'Approval'], ['branch', 'Decision'],
+      ['switch', 'Choose a path'], ['delay', 'Wait'], ['wait_event', 'Wait for another app'], ['foreach', 'Repeat for each item'],
+      ['while', 'Repeat while'], ['parallel', 'Run together'], ['scope', 'Handle a failure'], ['subflow', 'Run another flow'],
+      ['setvar', 'Update data']];
 
-    function seed() {
-      // Prefer the canvas engine's LIVE graph, so steps built (or drafted) on
-      // the canvas appear here without a save; fall back to the server seed.
-      try { if (window.__fdLiveFlow) return window.__fdLiveFlow(); } catch (e) { /* engine absent */ }
-      try { return JSON.parse(document.getElementById('fd-seed').textContent || 'null'); }
-      catch (e) { return null; }
+    function btn(text, cls, label, onClick) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn ' + (cls || 'btn--ghost');
+      b.textContent = text; if (label) b.setAttribute('aria-label', label);
+      b.addEventListener('click', function (e) { e.stopPropagation(); onClick(); });
+      return b;
     }
-    function summarize(n) {
+    function showProps() {
+      // The step settings live in the rail while the Steps view is shown.
+      if (fd.getAttribute('data-view') === 'steps' && rail && props && props.parentNode !== rail) rail.insertBefore(props, rail.firstChild);
+    }
+    function summarize(n, learned) {
+      if (learned) {
+        if (n.kind === 'approval') return n.id === 'teaching_review'
+          ? 'Choose how this case should continue. You will review the action separately.'
+          : 'Review the proposed action before it starts.';
+        if (n.kind === 'switch' || n.kind === 'branch') return 'Choose the next step using the learned rules.';
+        if (n.kind === 'setvar') return 'Prepare the next step.';
+        if (n.kind === 'action') return (n.tool || '').replace(/_/g, ' ');
+        return '';
+      }
       return (n.brief || n.prompt || n.condition || (n.tool && n.tool.replace(/_/g, ' ')) || n.name
               || (n.params && Object.keys(n.params).length ? 'Input values configured' : '') || '').toString();
     }
     function render() {
-      var f = seed();
-      var nodes = (f && Array.isArray(f.nodes)) ? f.nodes : [];
+      var eng = engine();
+      var steps = eng ? eng.order() : [];
+      var current = eng ? eng.selected() : null;
+      var live = window.__fdLiveFlow ? window.__fdLiveFlow() : null;
+      var learned = !!(live && live.learned_recipe);
       body.textContent = '';
-      if (!nodes.length) {
+      if (!steps.length) {
         var empty = document.createElement('div');
         empty.className = 'fd-simple__empty';
-        empty.textContent = 'No steps yet. Describe your workflow in the bar above and hit ✨ Draft to generate the steps — then fine-tune here or in Canvas.';
+        empty.textContent = 'No steps yet. Describe your workflow in the bar above and choose ✨ Draft, or add a first step below.';
         body.appendChild(empty);
-        return;
       }
-      nodes.forEach(function (n, i) {
+      steps.forEach(function (n, i) {
         if (i) { var c = document.createElement('div'); c.className = 'fd-conn'; body.appendChild(c); }
         var card = document.createElement('div');
-        card.className = 'fd-scard';
+        card.className = 'fd-scard' + (n.id === current ? ' is-selected' : '');
         var ic = document.createElement('span');
-        ic.className = 'fd-scard__ic'; ic.textContent = ICON[n.kind] || '◆';
-        var mid = document.createElement('span');
-        mid.style.minWidth = '0'; mid.style.flex = '1';
+        ic.className = 'fd-scard__ic'; ic.textContent = ICON[n.kind] || '◆'; ic.setAttribute('aria-hidden', 'true');
+        var main = document.createElement('button');
+        main.type = 'button'; main.className = 'fd-scard__main';
+        main.setAttribute('aria-label', 'Change step ' + (i + 1) + ': ' + n.title);
         var kind = document.createElement('div'); kind.className = 'fd-scard__kind';
-        kind.textContent = KLABEL[n.kind] || (n.kind || 'step');
-        var title = document.createElement('div'); title.className = 'fd-scard__t';
-        title.textContent = n.label || n.title || n.name || KLABEL[n.kind] || 'Step';
-        var desc = document.createElement('div'); desc.className = 'fd-scard__d';
-        desc.textContent = summarize(n);
-        mid.appendChild(kind); mid.appendChild(title); if (desc.textContent) mid.appendChild(desc);
-        card.appendChild(ic); card.appendChild(mid);
+        kind.textContent = (i + 1) + ' · ' + (eng ? eng.kindLabel(n.kind) : n.kind);
+        var title = document.createElement('div'); title.className = 'fd-scard__t'; title.textContent = n.title;
+        var original = live && Array.isArray(live.nodes) ? live.nodes.find(function (item) { return item.id === n.id; }) : null;
+        var description = original ? summarize(original, learned) : n.summary;
+        var desc = document.createElement('div'); desc.className = 'fd-scard__d'; desc.textContent = description;
+        main.appendChild(kind); main.appendChild(title); if (description && description !== n.title) main.appendChild(desc);
+        main.addEventListener('click', function () { showProps(); engine().select(n.id); render(); });
+        var tools = document.createElement('span'); tools.className = 'fd-scard__tools';
+        if (i > 0) tools.appendChild(btn('Move up', 'btn--ghost', 'Move “' + n.title + '” up', function () { if (engine().move(n.id, -1)) render(); }));
+        if (i < steps.length - 1) tools.appendChild(btn('Move down', 'btn--ghost', 'Move “' + n.title + '” down', function () { if (engine().move(n.id, 1)) render(); }));
+        tools.appendChild(btn('Remove', 'btn--ghost btn--danger', 'Remove “' + n.title + '”', async function () {
+          if (window.mvConfirm && !(await window.mvConfirm('Remove the step “' + n.title + '”? You can undo this with Undo on the Advanced canvas.', { okText: 'Remove' }))) return;
+          engine().remove(n.id); render();
+        }));
+        card.appendChild(ic); card.appendChild(main); card.appendChild(tools);
+        card.addEventListener('click', function () { main.click(); });
         body.appendChild(card);
       });
       var foot = document.createElement('div');
       foot.className = 'fd-simple__foot';
-      var edit = document.createElement('button');
-      edit.type = 'button'; edit.className = 'btn btn--ghost';
-      edit.textContent = 'Edit connections in Advanced canvas →';
-      edit.addEventListener('click', function () { setView('canvas'); });
-      foot.appendChild(edit);
+      var addWrap = document.createElement('div'); addWrap.className = 'fd-simple__add';
+      var addSel = document.createElement('select'); addSel.className = 'input'; addSel.id = 'fd-steps-add-kind';
+      addSel.setAttribute('aria-label', 'Kind of step to add');
+      ADDABLE.forEach(function (k) { var o = document.createElement('option'); o.value = k[0]; o.textContent = k[1]; addSel.appendChild(o); });
+      addWrap.appendChild(addSel);
+      addWrap.appendChild(btn('Add step', 'btn--primary', 'Add a step at the end', function () {
+        showProps(); engine().add(addSel.value); render();
+      }));
+      foot.appendChild(addWrap);
+      foot.appendChild(btn('Open the Advanced canvas', 'btn--ghost', '', function () { setView('canvas'); }));
       body.appendChild(foot);
     }
 
-    var fittedOnce = false;
+    var fittedOnce = false, pending = false;
     function setView(v) {
       fd.setAttribute('data-view', v);
       var steps = v === 'steps';
@@ -474,19 +567,31 @@
       canvasBtn.classList.toggle('is-on', !steps);
       stepsBtn.setAttribute('aria-pressed', steps ? 'true' : 'false');
       canvasBtn.setAttribute('aria-pressed', steps ? 'false' : 'true');
-      if (steps) { render(); }
-      else if (!fittedOnce) {
-        // The canvas was hidden on load; re-fit it the first time it's shown.
-        fittedOnce = true;
-        var fit = document.getElementById('fd-fit');
-        if (fit) setTimeout(function () { fit.click(); }, 30);
+      if (steps) { showProps(); render(); }
+      else {
+        if (props && canvasWrap && props.parentNode !== canvasWrap.parentNode) canvasWrap.parentNode.insertBefore(props, canvasWrap.nextSibling);
+        if (!fittedOnce) {
+          // The canvas was hidden on load; re-fit it the first time it's shown.
+          fittedOnce = true;
+          var fit = document.getElementById('fd-fit');
+          if (fit) setTimeout(function () { fit.click(); }, 30);
+        }
       }
     }
     stepsBtn.addEventListener('click', function () { setView('steps'); });
     canvasBtn.addEventListener('click', function () { setView('canvas'); });
+    window.__fdShowCanvas = function () { if (fd.getAttribute('data-view') !== 'canvas') setView('canvas'); };
+    window.__fdShowProps = showProps;
+    window.__fdStepsRefresh = function () {
+      if (fd.getAttribute('data-view') !== 'steps' || pending) return;
+      pending = true;
+      (window.requestAnimationFrame || setTimeout)(function () { pending = false; render(); });
+    };
+    showProps();
     // Re-render the Steps list after a Draft (the seed script node is rewritten
     // server-agnostically by the drafter into the canvas; keep the overview honest
     // by re-reading on focus back to Steps). Default view is Steps.
+    window.addEventListener('lightwork:flow-loaded', render);
     render();
   })();
 </script>

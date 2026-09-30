@@ -8,11 +8,27 @@
   let selected = null;
   let approvalCardCurrent = false;
   let reviewedAt = null;
+  let reviewRefreshRequired = false;
   let busy = false;
   let queueCursor = "", queueNext = null, queueHistory = [], queueView = "all";
   let pendingIntake = null;
   let uploadReview = null, uploadGeneration = 0, uploadDenied = false;
   let exportReview = null, exportDenied = false;
+  const deniedActions = new Set();
+  const access = window.LightworkAccessState.create(() => root.dataset.workspaceContext, clearPrivate);
+  function clearPrivate() {
+    selected = null; approvalCardCurrent = false; reviewedAt = null;
+    uploadDenied = true; exportDenied = true; pendingIntake = null;
+    clearUploadReview(true); clearExportReview();
+    for (const id of ["case-title", "case-reference", "status", "scope", "evidence", "assessment", "corrections",
+      "operation", "operation-record", "outcome", "renewal-status", "history", "cases", "cancellation-status",
+      "attention-summary", "acceptance-evidence-check", "document-results", "new-documents", "selected-documents"])
+      byId(id)?.replaceChildren();
+    root.querySelectorAll("input,textarea").forEach(input => { input.value = ""; input.checked = false; });
+    root.dataset.accessDenied = "true";
+    try { intakeStorage?.removeItem(intakeTaskKey); window.sessionStorage.removeItem(connectionTaskKey); } catch (_) {}
+    buttons();
+  }
   const connectionTaskKey = "lightwork:connection-task:v1";
   const intakeTaskKey = `lightwork:vendor-intake:v1:${root.dataset.workspaceContext || "local"}`;
   let intakeStorage = null;
@@ -40,6 +56,33 @@
     return result;
   }
   const friendly = value => String(value || "pending").replaceAll("_", " ");
+  // Names for people come from the workspace member list; a sign-in handle is
+  // shown only when no name is known.
+  const people = new Map();
+  const person = value => {
+    if (typeof value !== "string" || !value) return "Not recorded";
+    if (people.has(value)) return people.get(value);
+    if (!value.startsWith("user:")) return value;
+    const handle = value.slice(5);
+    return handle.includes("@") || /^[A-Za-z][A-Za-z .'-]{0,60}$/.test(handle) ? handle : "A workspace member";
+  };
+  async function loadPeople() {
+    try {
+      const result = await fetch("/api/v1/choices/people", {method: "GET", credentials: "same-origin", headers: {"Accept": "application/json"}});
+      if (!result.ok) return;
+      const data = await result.json();
+      for (const row of data?.people || []) if (typeof row?.value === "string" && typeof row?.label === "string") people.set(row.value, row.label);
+    } catch (_) { /* names fall back to sign-in handles */ }
+  }
+  const STAGES = {intake: "New", evidence_pending: "Waiting for evidence", evidence_review_required: "Evidence needs your review",
+    assessment_ready: "Assessment ready for review", review_required: "Waiting for your review", reviewed: "Reviewed",
+    action_prepared: "Ticket ready for approval", action_approved: "Ticket approved", executing: "Creating the ticket",
+    reconciliation_required: "Ticket result unclear", verified: "Ticket created", accepted: "Accepted", rejected: "Rejected",
+    cancelled: "Cancelled", acceptance_reevaluation_required: "Evidence changed; needs a new review"};
+  const stageName = value => STAGES[value] || friendly(value).replace(/^./, c => c.toUpperCase());
+  const ATTENTION = {current: "On track", due: "Due", overdue: "Overdue", rejected: "Rejected", cancelled: "Cancelled",
+    needs_reconciliation: "Ticket result needs checking", renewal_required: "Renewal needed"};
+  const attentionName = value => ATTENTION[value] || friendly(value);
   const cardEntries = value => Object.entries(value || {}).map(([key, item]) => `${friendly(key)}: ${String(item)}`).join("\n");
   function approvalCardText(operation) {
     const card = operation?.approval_card;
@@ -57,29 +100,26 @@
         !Array.isArray(consequence.unresolved_assumptions) || !card.preview ||
         typeof card.preview.before !== "string" || typeof card.preview.after !== "string")
       throw new Error("The approval card is incomplete. Prepare and review a fresh operation.");
+    const bullets = items => items.map(item => `• ${item}`).join("\n");
     return [
-      "RECOMMENDATION ONLY — prediction does not grant authority.",
-      `Actor: ${card.authority.actor}`,
-      `Workspace: ${card.authority.workspace}`,
-      `Role: ${card.authority.role}`,
-      `Target: ${card.target.label}`,
-      `Target digest: ${card.target.sha256}`,
-      `Exact input digest: ${card.parameters.sha256}`,
-      `Parameters:\n${card.parameters.summary.map(item => `• ${item}`).join("\n")}`,
-      `Input versions:\n${cardEntries(card.inputs) || "None recorded"}`,
-      `Credential versions:\n${cardEntries(card.credentials) || "None recorded"}`,
-      `Budget:\n${cardEntries(card.budget) || "Unavailable"}`,
-      `Approval expires: ${date(card.expires_at)}`,
+      `${card.summary || "Create the reviewed Jira ticket"} in ${card.target.label}.`,
+      "Lightwork recommends this; nothing happens until you approve it.",
+      `What the ticket contains:\n${bullets(card.parameters.summary)}`,
       `Before: ${card.preview.before}`,
       `After: ${card.preview.after}`,
-      `${consequence.irreversible ? "IRREVERSIBLE OR EXTERNALLY PERSISTENT" : "REVERSIBLE"} KNOWN EFFECTS:\n${consequence.known_effects.map(item => `• ${item}`).join("\n")}`,
-      `UNRESOLVED ASSUMPTIONS:\n${consequence.unresolved_assumptions.length ? consequence.unresolved_assumptions.map(item => `• ${item}`).join("\n") : "None recorded"}`,
+      `${consequence.irreversible ? "This can't be undone automatically" : "This can be undone"}:\n${bullets(consequence.known_effects)}`,
+      ...(consequence.unresolved_assumptions.length ? [`Things Lightwork couldn't confirm:\n${bullets(consequence.unresolved_assumptions)}`] : []),
+      `You're approving as ${person(card.authority.actor)}. This approval expires ${date(card.expires_at)}.`,
     ].join("\n\n");
   }
   function element(tag, text, parent) {
     const node = document.createElement(tag); node.textContent = text; parent.append(node); return node;
   }
   function buttons() {
+    if (access.blocked) {
+      root.querySelectorAll("button,input,textarea,select").forEach(control => { control.disabled = true; });
+      return;
+    }
     const row = selected || {};
     const op = row.operation || {};
     const cancelled = Boolean(row.cancellation) || row.stage === "cancelled";
@@ -100,7 +140,7 @@
       "save-draft": editable,
       accept: !cancelled && op.state === "verified" && !row.outcome && row.stage !== "acceptance_reevaluation_required",
       reject: !cancelled && op.state === "verified" && !row.outcome};
-    for (const [name, enabled] of Object.entries(allowed)) byId(name).disabled = busy || !enabled;
+    for (const [name, enabled] of Object.entries(allowed)) byId(name).disabled = busy || reviewRefreshRequired || !enabled;
     byId("intake").querySelectorAll("input,textarea,select,button").forEach(control => { control.disabled = busy; });
     byId("refresh").disabled = busy;
     if (byId("case-filter")) byId("case-filter").disabled = busy;
@@ -127,8 +167,36 @@
     if (byId("export-confirm")) byId("export-confirm").disabled = busy || exportDenied || !exportReview;
     if (byId("export-download")) byId("export-download").disabled = busy || exportDenied || !exportReview ||
       !byId("export-confirm").checked;
+    for (const name of deniedActions) {
+      const [caseId, operation] = name.split("/");
+      if (caseId === (selected?.id || "")) {
+        const controls = {review:["review-approve", "review-reject"], draft:["save-draft"], accept:["accept", "reject"],
+          "collect-evidence":["collect"], "prepare-action":["prepare"], "approve-action":["approve"],
+          documents:["save-documents"], "evidence-export-preview":["export-preview", "export-download"],
+          "evidence-export":["export-preview", "export-download"]}[operation] || [operation];
+        for (const id of controls) if (byId(id)) byId(id).disabled = true;
+      }
+    }
   }
   const evidenceDocuments = record => record.evidence?.documents || (record.evidence ? [record.evidence] : []);
+  const documentNames = new Map();
+  function documentName(record, id) {
+    const known = evidenceDocuments(record || {}).find(item => item.document_id === id && item.name) ||
+      (record?.uploads || []).find(item => item.document_id === id && item.name);
+    return known?.name || documentNames.get(id) || "a selected document";
+  }
+  // Evidence validity is a choice list; a period saved elsewhere is added as its own choice.
+  function setDays(field, value) {
+    const days = String(value || "");
+    if (days && field.tagName === "SELECT" && !Array.from(field.options || []).some(option => option.value === days)) {
+      const option = document.createElement("option"); option.value = days; option.textContent = `${days} days`; field.append(option);
+    }
+    field.value = days;
+  }
+  function questionText(record, id) {
+    const question = (record?.assessment?.template_snapshot?.questions || []).find(item => item.id === id);
+    return question?.text || friendly(id);
+  }
   const exportReference = value => typeof value === "string" && /^EVR-[0-9a-f]{32}$/.test(value);
   const digestValue = value => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
   function clearExportReview(messageText = "Review a case assessment before preparing an export.") {
@@ -208,11 +276,14 @@
   }
   function showExport(value) {
     byId("export-manifest").replaceChildren();
-    for (const item of value.manifest.included)
-      element("li", `${item.reference}: Included ${friendly(item.source_type)}, reviewed version ${item.reviewed_version || "redacted"}, ${item.freshness}.`, byId("export-manifest"));
-    for (const item of value.manifest.withheld)
-      element("li", `${item.reference}: Withheld external evidence (${friendly(item.reason)}).`, byId("export-manifest"));
-    show("export-status", `${value.claims.length} reviewed claim${value.claims.length === 1 ? "" : "s"}; ${value.manifest.included_count} evidence source${value.manifest.included_count === 1 ? "" : "s"} included; ${value.manifest.withheld_count} withheld. Full files and extracted text are omitted.`);
+    const WITHHELD = {current_source_access_unavailable: "Lightwork can't reach it right now", current_source_missing: "it no longer exists",
+      reviewed_source_changed: "it changed after it was reviewed", current_source_unavailable: "it couldn't be read",
+      review_authority_changed: "who can see it changed"};
+    value.manifest.included.forEach((item, index) =>
+      element("li", `Document ${index + 1}: included (${item.source_type === "customer_upload" ? "uploaded file" : "Google Drive document"}, ${item.freshness === "current" ? "still valid" : "expired"}).`, byId("export-manifest")));
+    value.manifest.withheld.forEach((item, index) =>
+      element("li", `Document ${value.manifest.included.length + index + 1}: left out because ${WITHHELD[item.reason] || "it couldn't be read"}.`, byId("export-manifest")));
+    show("export-status", `${value.claims.length} reviewed claim${value.claims.length === 1 ? "" : "s"}; ${value.manifest.included_count} evidence source${value.manifest.included_count === 1 ? "" : "s"} included; ${value.manifest.withheld_count} left out. Full files and their full text are never included.`);
   }
   function validatedAcceptanceCheck(value) {
     if (value === null || value === undefined) return null;
@@ -265,7 +336,7 @@
         Object.keys(value).length !== keys.length || !keys.every(key =>
           Object.prototype.hasOwnProperty.call(value, key) &&
           Number.isInteger(value[key]) && value[key] >= 0 && value[key] === calculated[key]))
-      throw new Error("Request counts did not match the admitted cases on this page. Reload requests before relying on the totals.");
+      throw new Error("The request totals didn't add up. Reload requests before relying on them.");
     return value;
   }
   function validatedReconciliation(value, businessOwner) {
@@ -365,7 +436,7 @@
       pendingIntake = stored;
       return stored.submission_key;
     }
-    if (!intakeStorage) throw new Error("Durable browser storage is unavailable. Enable local storage before creating a request so a lost response cannot create a duplicate.");
+    if (!intakeStorage) throw new Error("Your browser is blocking storage Lightwork needs to avoid creating the same request twice. Allow site data for this page and try again.");
     pendingIntake = {context: root.dataset.workspaceContext,
       submission_key: newSubmissionKey(), created_at: Date.now()};
     try {
@@ -374,7 +445,7 @@
         throw new Error("intake key was not retained");
     } catch (_) {
       pendingIntake = null;
-      throw new Error("Durable browser storage is unavailable. Enable local storage before creating a request so a lost response cannot create a duplicate.");
+      throw new Error("Your browser is blocking storage Lightwork needs to avoid creating the same request twice. Allow site data for this page and try again.");
     }
     return pendingIntake.submission_key;
   }
@@ -434,18 +505,44 @@
     }
   }
   async function api(path, body) {
+    const token = access.capture();
+    const parts = path.split("/");
+    if (body !== undefined && reviewRefreshRequired && parts[2] === selected?.id)
+      throw new Error("Refresh and review the current request before making another change.");
+    const actionKey = parts[1] === "cases" && parts.length > 3 ? `${parts[2]}/${parts[3]}` : "";
+    if (body !== undefined && actionKey && deniedActions.has(actionKey))
+      throw new Error("This action is unavailable. Check its permissions and reload before trying again.");
     const response = await fetch(base + path, {
       method: body === undefined ? "GET" : "POST", credentials: "same-origin",
       headers: {"Content-Type": "application/json", ...(root.dataset.workspaceContext ? {"X-Lightwork-Vendor-Context": root.dataset.workspaceContext} : {})},
       ...(body === undefined ? {} : {body: JSON.stringify(body)})
     });
+    access.assertCurrent(token);
+    const policy = {forbiddenScope: body === undefined, contextMessage: /active workspace changed/i};
+    const early = access.observe(response, null, policy);
+    if (early.kind === "conflict") { reviewRefreshRequired = true; approvalCardCurrent = false; reviewedAt = null; }
+    if (["session", "scope"].includes(early.kind))
+      throw new Error("Your sign-in or workspace access changed. Sign in again and reload this page.");
+    if (early.kind === "capability" && actionKey) deniedActions.add(actionKey);
     let data;
-    try { data = await response.json(); } catch (_) { throw new Error("Server response unavailable; reload the case before retrying."); }
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Server response unavailable; reload the case before retrying.");
+    try { data = await response.json(); } catch (_) {
+      if (early.kind === "capability") throw new Error("This action is unavailable. Check its permissions and reload before trying again.");
+      throw new Error("Lightwork didn't answer. Reload the request and try again.");
+    }
+    access.assertCurrent(token);
+    if (access.observe(response, data, policy).kind === "context")
+      throw new Error("The account or workspace changed. Reload this page before continuing.");
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Lightwork didn't answer. Reload the request and try again.");
     if (!response.ok) {
       const detail = data.detail;
-      const error = new Error(typeof detail === "string" ? detail :
-        typeof detail?.message === "string" ? detail.message : "Request was rejected; check fields and reload the case.");
+      // Only a message already written as a plain sentence reaches the
+      // person; anything else becomes the shared plain wording.
+      const raw = typeof detail === "string" ? detail : typeof detail?.message === "string" ? detail.message : "";
+      const plain = typeof window.mvPlainDetail === "function" ? window.mvPlainDetail(raw)
+        : (/^[A-Z][^{}<>=_[\]\\/`|]*[.!?]$/.test(raw.trim()) && raw.length <= 300 ? raw.trim() : "");
+      const error = new Error(plain || (typeof window.mvErrorText === "function"
+        ? window.mvErrorText(response, "finish that")
+        : "That didn't work. Check the fields, reload the request and try again."));
       if (detail && typeof detail === "object" && typeof detail.code === "string") error.code = detail.code;
       if (detail && typeof detail === "object" && typeof detail.next_action === "string" &&
           detail.next_action.length > 0 && detail.next_action.trim() === detail.next_action &&
@@ -461,7 +558,7 @@
             typeof current.vendor_name !== "string" || current.vendor_name.length > 256 ||
             (current.updated_at !== null && current.updated_at !== undefined && !Number.isFinite(current.updated_at)) ||
             !work || typeof work !== "object" || Array.isArray(work) || strings.some(value => typeof value !== "string"))
-          throw new Error("The conflict response was incomplete. Reload requests before making another change.");
+          throw new Error("Someone else changed this request and it couldn't be reloaded. Reload requests before making another change.");
         error.current = current;
       }
       throw error;
@@ -479,7 +576,7 @@
   function render(record) {
     if (typeof record.id !== "string" || !Number.isInteger(record.revision) || typeof record.vendor_name !== "string" ||
         (record.due_at !== null && record.due_at !== undefined && (!Number.isFinite(record.due_at) || record.due_at <= 0)))
-      throw new Error("Case response is incomplete; refresh requests before continuing.");
+      throw new Error("This request couldn't be shown in full. Refresh requests before continuing.");
     const acceptanceCheck = validatedAcceptanceCheck(record.acceptance_evidence_check);
     const attention = validatedAttention(record.attention);
     const operation = record.operation || {};
@@ -489,7 +586,7 @@
     if (payload) {
       const cardText = approvalCardText(operation);
       nextApprovalCardCurrent = operation.state === "prepared";
-      operationText = `${cardText}\n\nFULL REVIEWED JIRA CONTENT\nProject: ${payload.project}\nTicket title: ${payload.summary}\n\n${payload.description}\n\nVerified ticket: ${operation.external_confirmation?.key || "pending"}`;
+      operationText = `${cardText}\n\nTHE TICKET\nProject: ${payload.project}\nTitle: ${payload.summary}\n\n${payload.description}\n\nCreated ticket: ${operation.external_confirmation?.key || "not created yet"}`;
     }
     const uncertainOperation = ["executing", "reconciliation_required"].includes(operation.state);
     const reconciliation = uncertainOperation ? validatedReconciliation(record.reconciliation, record.owner) : record.reconciliation;
@@ -497,22 +594,29 @@
       if (reconciliation?.uncertainty?.state === "unresolved" &&
           reconciliation?.safe_next_check?.mode === "read_only" &&
           Array.isArray(reconciliation?.known_observations)) {
-        const observations = reconciliation.known_observations.map(item =>
-          `${friendly(item.kind)}: ${friendly(item.state)}` +
-          (Number.isInteger(item.match_count) ? ` (${item.match_count} match${item.match_count === 1 ? "" : "es"})` :
-            Number.isInteger(item.match_count_lower_bound) ? ` (at least ${item.match_count_lower_bound} matches)` : "")
-        ).join("\n");
-        const operator = reconciliation.responsible_operator?.principal ||
-          reconciliation.responsible_operator?.business_owner || "an authorized operator";
-        operationText += `\n\nUNCERTAIN PROVIDER RESULT\n${reconciliation.uncertainty.explanation}` +
-          `\n\nKnown observations\n${observations || "No authoritative observation is recorded."}` +
-          `\n\nSafe next step: ${reconciliation.safe_next_check.label}. This is a read-only check and cannot create another Jira task.` +
+        const observed = {
+          execution_attempt: item => `Lightwork tried to create the ticket${item.count > 1 ? ` ${item.count} times` : ""}.`,
+          provider_receipt: item => item.state === "recorded" ? "Jira answered the request." : "Jira's answer was not received.",
+          authoritative_readback: item => ({
+            not_completed: "Lightwork hasn't looked the ticket up in Jira yet.",
+            access_unavailable: "Lightwork can't reach Jira to look the ticket up.",
+            no_match: "No matching ticket was found in Jira.",
+            multiple_matches: `More than one matching ticket was found in Jira (${Number.isInteger(item.match_count) ? item.match_count : `at least ${item.match_count_lower_bound}`} matches).`,
+            readback_mismatch: "A ticket was found in Jira but its content doesn't match what you approved.",
+            readback_unavailable: "Jira couldn't be checked.",
+            exact_match_verified: "The exact ticket was found in Jira.",
+          })[item.state] || "Jira's result is unknown.",
+        };
+        const observations = reconciliation.known_observations.map(item => `• ${(observed[item.kind] || (() => ""))(item)}`).join("\n");
+        operationText += `\n\nWE'RE NOT SURE WHETHER THE JIRA TICKET WAS CREATED\n${reconciliation.uncertainty.explanation}` +
+          `\n\nWhat we know\n${observations}` +
+          `\n\nNext: ${reconciliation.safe_next_check.label}. This only looks the ticket up; it cannot create another Jira ticket.` +
           (reconciliation.safe_next_check.kind === "restore_access" ?
             " Open Connections to restore access to the original Jira destination." : "") +
-          `\nResponsible operator: ${operator}.` +
-          `\nResolution boundary: ${reconciliation.resolution?.explanation || "Any provider change requires a separate reviewed action."}`;
+          `\nPerson responsible: ${person(reconciliation.responsible_operator?.principal || reconciliation.responsible_operator?.business_owner)}.` +
+          `\n${reconciliation.resolution?.explanation || "Any change to the ticket needs a separate reviewed decision."}`;
       } else {
-        operationText += "\n\nUNCERTAIN PROVIDER RESULT\nThe effect has not been verified. Check status is read-only and cannot create another Jira task. Any provider change requires a separate reviewed action.";
+        operationText += "\n\nWE'RE NOT SURE WHETHER THE JIRA TICKET WAS CREATED\nUse Check ticket result to look it up; it cannot create another Jira ticket. Any change to the ticket needs a separate reviewed decision.";
       }
     }
     const sameCase = selected?.id === record.id;
@@ -531,7 +635,7 @@
       if (byId("case-documents")) byId("case-documents").value = (record.document_ids || [record.document_id]).filter(Boolean).join("\n");
       if (byId("case-project")) byId("case-project").value = record.project || "";
       if (byId("case-purpose")) byId("case-purpose").value = record.purpose || "";
-      if (byId("case-freshness")) byId("case-freshness").value = String(record.freshness_days || "");
+      if (byId("case-freshness")) setDays(byId("case-freshness"), record.freshness_days);
       if (byId("case-due")) byId("case-due").value = dateInput(record.due_at);
       if (byId("upload")) byId("upload").value = "";
     }
@@ -540,33 +644,39 @@
     show("case-title", record.vendor_name);
     const stableLocation = caseLocation(record.id);
     byId("case-reference").replaceChildren();
-    element("span", `${record.renewal_of ? "Renewal" : "Initial request"} · ${record.id} · `, byId("case-reference"));
-    const stableLink = element("a", "Copyable request link", byId("case-reference"));
+    element("span", `${record.renewal_of ? "Renewal" : "First review"} · `, byId("case-reference"));
+    const stableLink = element("a", "Link to this request", byId("case-reference"));
     stableLink.href = stableLocation;
     byId("status").replaceChildren();
     const outcome = record.outcome || {};
-    for (const label of ["Stage: " + friendly(record.stage), "Version: " + record.revision,
-      "External action: " + friendly(operation.state || operation.status || "not prepared"),
+    const ticketState = {prepared: "ready for approval", approved: "approved", executing: "being created",
+      reconciliation_required: "result unclear", verified: "created"}[operation.state || operation.status] || "not prepared";
+    for (const label of ["Status: " + stageName(record.stage),
+      "Jira ticket: " + ticketState,
       "Customer acceptance: " + (outcome.accepted === true ? "accepted" : outcome.accepted === false ? "rejected" : record.cancellation ? "cancelled; no decision" : "pending"),
-      "Attention: " + friendly(attention.state) + (attention.effective_at ? " · " + date(attention.effective_at) : ""),
+      "Attention: " + attentionName(attention.state) + (attention.effective_at ? " · " + date(attention.effective_at) : ""),
       "Requested completion: " + date(record.due_at)]) {
       const span = document.createElement("span"); span.textContent = label; byId("status").append(span);
     }
     const work = record.work_item || {};
-    const topology = friendly(work.supported_deployment?.topology || "support boundary unavailable");
     const excluded = Array.isArray(work.out_of_scope) && work.out_of_scope.length
-      ? work.out_of_scope.join("; ") : "No exclusions were supplied; refresh before relying on this request.";
-    show("scope", `Technical result: ${work.acceptance_contract?.technical?.effect || "Not specified"}.\n` +
-      `Business completion: ${work.acceptance_contract?.business?.decision || "Not specified"}.\n` +
-      `Supported deployment: ${topology}.\nNot included: ${excluded}.`);
+      ? work.out_of_scope.join("; ") : "Nothing listed; refresh before relying on this request.";
+    show("scope", `Done when ${work.acceptance_contract?.technical?.effect || "the reviewed Jira ticket exists"}, and ${work.acceptance_contract?.business?.decision || "a person accepts or rejects it"}.\n` +
+      `Not included: ${excluded}.`);
     const evidence = record.evidence;
-    show("evidence", evidence ? `Overall status: ${friendly(evidence.status)}\n` + evidenceDocuments(record).map(document => `${document.source === "upload" ? "Uploaded" : "Drive"}: ${document.name || document.document_id || record.document_id}\nStatus: ${friendly(document.status || evidence.status)} · Version: ${document.version || "unverified"}\nDocument date: ${date(document.modified_at)} (${document.source === "upload" ? "uploader asserted" : "Drive modified time"})\nValid until: ${date(document.fresh_until)}\nContent fingerprint: ${document.content_sha256 || "unavailable"}`).join("\n\n") : "No evidence obtained. Add documents, then choose Obtain current evidence.");
+    byId("evidence").replaceChildren();
+    if (evidence) {
+      element("p", `Overall: ${friendly(evidence.status)}`, byId("evidence"));
+      const list = document.createElement("ul"); byId("evidence").append(list);
+      for (const item of evidenceDocuments(record))
+        element("li", `${item.name || documentName(record, item.document_id || record.document_id)} (${item.source === "upload" ? "uploaded" : "Google Drive"}) · ${friendly(item.status || evidence.status)} · dated ${date(item.modified_at)} (${item.source === "upload" ? "uploader asserted" : "last changed in Drive"}) · valid until ${date(item.fresh_until)}`, list);
+    } else show("evidence", "No evidence yet. Add documents, then choose Obtain current evidence.");
     if (byId("uploaded-documents")) {
       byId("uploaded-documents").replaceChildren();
       for (const uploaded of record.uploads || []) {
         const row = document.createElement("div");
-        element("p", `${uploaded.name} · ${friendly(uploaded.status)} · ${date(uploaded.modified_at)}${uploaded.extraction?.method === "human_transcription" ? " · User-supplied transcription; no OCR or source-text verification" : ""}`, row);
-        const remove = element("button", `Remove ${uploaded.name}`, row); remove.type = "button";
+        element("p", `${uploaded.name} · ${friendly(uploaded.status)} · ${date(uploaded.modified_at)}${uploaded.extraction?.method === "human_transcription" ? " · Typed in by you; not checked against the file" : ""}`, row);
+        const remove = element("button", `Remove ${uploaded.name}`, row); remove.type = "button"; remove.className = "btn btn--ghost";
         remove.addEventListener("click", () => run(() => action("documents", {document_ids: record.document_ids || [], upload_ids: record.uploads.filter(item => item.document_id !== uploaded.document_id).map(item => item.document_id)})));
         byId("uploaded-documents").append(row);
       }
@@ -575,8 +685,8 @@
       byId("selected-documents").replaceChildren();
       for (const id of (record.document_ids || [record.document_id]).filter(Boolean)) {
         const row = document.createElement("div");
-        element("p", `Drive document: ${id}`, row);
-        const remove = element("button", `Remove Drive document ${id}`, row); remove.type = "button";
+        element("p", `Drive document: ${documentName(record, id)}`, row);
+        const remove = element("button", `Remove Drive document ${documentName(record, id)}`, row); remove.type = "button"; remove.className = "btn btn--ghost";
         remove.addEventListener("click", () => run(() => action("documents", {
           document_ids: (selected.document_ids || [selected.document_id]).filter(value => value && value !== id),
           upload_ids: (selected.uploads || []).map(item => item.document_id),
@@ -589,9 +699,9 @@
       const changes = evidence?.changes;
       element("p", changes?.comparison === "previous_review" ? "Compared with retained previous evidence. Review every changed claim." : "Initial evidence; no previous review to compare.", byId("evidence-changes"));
       for (const document of changes?.documents || []) {
-        element("p", `${document.document_id}: ${friendly(document.change)} (${document.before_version || "none"} → ${document.after_version || "none"})`, byId("evidence-changes"));
+        element("p", `${documentName(record, document.document_id)}: ${friendly(document.change)}`, byId("evidence-changes"));
         for (const answer of document.answer_changes || []) {
-          element("p", `${friendly(answer.question_id)}: ${friendly(answer.before)} → ${friendly(answer.after)}`, byId("evidence-changes"));
+          element("p", `${questionText(record, answer.question_id)}: ${friendly(answer.before)} → ${friendly(answer.after)}`, byId("evidence-changes"));
           for (const [label, citations] of [["Previous", answer.before_citations], ["Current", answer.after_citations]])
             for (const citation of citations || []) element("blockquote", `${label}: ${citation.quote}`, byId("evidence-changes"));
         }
@@ -599,9 +709,9 @@
     }
     if (acceptanceCheck) {
       show("acceptance-evidence-check", `Status: ${friendly(acceptanceCheck.status)} · checked ${date(acceptanceCheck.checked_at)}\n` +
-        acceptanceCheck.documents.map(item => `${item.source === "upload" ? "Uploaded" : "Drive"} evidence ${item.document_id}: ${friendly(item.status)} · reviewed version ${item.reviewed_version || "redacted"}${item.current_version ? ` · current version ${item.current_version}` : ""}`).join("\n"));
+        acceptanceCheck.documents.map(item => `${documentName(record, item.document_id)}: ${friendly(item.status)}${item.status === "changed" ? " since it was reviewed" : ""}`).join("\n"));
     } else {
-      show("acceptance-evidence-check", "Evidence is checked again against current source bytes, version, access and expiry before acceptance.");
+      show("acceptance-evidence-check", "Each document is checked again before acceptance to make sure it hasn't changed or expired.");
     }
     // Keep the review controls and unsaved corrections for this exact version.
     if (!sameReview) assessmentView(record);
@@ -614,29 +724,30 @@
         ? "No ticket creation was dispatched for this request."
         : "The ticket outcome is still uncertain. Use Check uncertain ticket result; no new ticket will be created.";
     show("cancellation-status", cancellation
-      ? `Local work cancelled by ${cancellation.requested_by} on ${date(cancellation.requested_at)}.\nReason: ${cancellation.rationale}\n${effectStatus}\nCancellation does not delete or reverse a Jira ticket. Any change to that ticket requires a separate decision.`
+      ? `Local work cancelled by ${person(cancellation.requested_by)} on ${date(cancellation.requested_at)}.\nReason: ${cancellation.rationale}\n${effectStatus}\nCancellation does not delete or reverse a Jira ticket. Any change to that ticket requires a separate decision.`
       : "Cancellation stops further work on this request. If ticket creation has started, its result must still be checked. Cancellation does not delete or reverse a Jira ticket.");
     const metrics = record.metrics || {};
     const timedReviews = (record.review_history || []).filter(review => review.review_seconds !== null && review.review_seconds !== undefined);
     const reviewTime = timedReviews.length ? `${Number(metrics.human_review_seconds).toFixed(1)} seconds reported` : "Unmeasured";
     const confirmation = outcome.external_confirmation || operation.external_confirmation || {};
-    show("outcome", `Technical effect: ${friendly(work.technical_effect || "not verified")}\nVerified Jira result: ${confirmation.key || "Not recorded"}\nReadback checked: ${date(confirmation.confirmed_at)}\nCustomer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : cancellation ? "Cancelled request; no acceptance decision" : "Pending"}\nDecision reviewer: ${outcome.reviewer || "Not yet recorded"}\nDecision time: ${date(outcome.decided_at || outcome.accepted_at)}\nReason: ${outcome.rationale || "Not yet recorded"}\nNext renewal: ${date(outcome.renewal_due_at)}\nHuman review time: ${reviewTime}\nExecution cost: ${metrics.execution_cost_usd == null ? "unmeasured" : "$" + metrics.execution_cost_usd}\nPrevious case: ${record.renewal_of || "First onboarding"}\nRelease: separate approval required`);
+    show("outcome", `Customer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : cancellation ? "Cancelled request; no acceptance decision" : "Pending"}\nDecided by: ${outcome.reviewer ? person(outcome.reviewer) : "Not yet recorded"}\nDecided on: ${date(outcome.decided_at || outcome.accepted_at)}\nReason: ${outcome.rationale || "Not yet recorded"}\nJira ticket: ${confirmation.key ? `${confirmation.key} (checked ${date(confirmation.confirmed_at)})` : "Not created"}\nNext renewal: ${date(outcome.renewal_due_at)}\nReview time: ${timedReviews.length ? reviewTime : "not measured"}\nCost: ${metrics.execution_cost_usd == null ? "not measured" : "$" + metrics.execution_cost_usd}`);
     show("renewal-status", attention.kind === "evidence_renewal" || attention.state === "renewal_required"
       ? `Renewal status: ${friendly(attention.state)}${attention.effective_at ? ` · ${date(attention.effective_at)}` : ""}. Start a linked request to preserve this decision and require fresh review and approval.`
       : "Check current evidence and ticket versions before starting a renewal.");
     const history = [
-      ...(record.review_history || []).map(review => `${date(review.at)} · ${review.reviewer}\n${friendly(review.decision)}: ${review.rationale}\n${Object.keys(review.corrections || {}).length} corrected answers; supersedes assessment ${review.supersedes?.id || "none"}.`),
+      ...(record.review_history || []).map(review => `${date(review.at)} · ${person(review.reviewer)}\n${friendly(review.decision)}: ${review.rationale}\n${Object.keys(review.corrections || {}).length} corrected answers.`),
       ...(outcome.accepted === true || outcome.accepted === false ? [
-        `${date(outcome.decided_at || outcome.accepted_at)} · ${outcome.reviewer || "Reviewer unavailable"}\nBusiness ${outcome.accepted ? "accepted" : "rejected"}: ${outcome.rationale || "Rationale unavailable"}\nTechnical effect retained as ${friendly(work.technical_effect)}.`,
+        `${date(outcome.decided_at || outcome.accepted_at)} · ${outcome.reviewer ? person(outcome.reviewer) : "Reviewer unavailable"}\n${outcome.accepted ? "Accepted" : "Rejected"}: ${outcome.rationale || "No reason recorded"}\nThe Jira ticket stays ${work.technical_effect === "verified" ? "created" : friendly(work.technical_effect)}.`,
       ] : []),
       ...(record.cancellation ? [
-        `${date(record.cancellation.requested_at)} · ${record.cancellation.requested_by || "Requester unavailable"}\nCancelled local work: ${record.cancellation.rationale || "Rationale unavailable"}\nTechnical effect retained as ${friendly(work.technical_effect)}.`,
+        `${date(record.cancellation.requested_at)} · ${record.cancellation.requested_by ? person(record.cancellation.requested_by) : "Requester unavailable"}\nCancelled: ${record.cancellation.rationale || "No reason recorded"}\nThe Jira ticket stays ${work.technical_effect === "verified" ? "created" : friendly(work.technical_effect)}.`,
       ] : []),
-      ...(record.renewal_of ? [`Linked renewal of ${record.renewal_of}; the previous case remains unchanged.`] : []),
+      ...(record.renewal_of ? ["Renewal of an earlier review; that review is kept unchanged."] : []),
       ...(record.reconciliation_history || []).map(item => `${date(item.checked_at)} · Read-only Jira check: ${friendly(item.outcome)}.`),
-      ...(record.exceptions || []).map(item => typeof item === "string" ? item : JSON.stringify(item)),
+      ...(record.exceptions || []).map(item => typeof item === "string" ? item : "An exception was recorded (see Technical details)."),
     ];
     show("history", history.join("\n\n") || "No reviewer decisions or exceptions yet.");
+    reviewRefreshRequired = false;
     buttons();
     if (sameCase && !sameReview)
       return "The request or assessment changed. Draft answers, notes, and decision reasons were reset. Review the current version before deciding.";
@@ -654,7 +765,7 @@
     if (typeof hasMore !== "boolean" || (hasMore &&
         (typeof result.next_cursor !== "string" || !/^[A-Za-z0-9_-]{1,768}$/.test(result.next_cursor))) ||
         (!hasMore && result.next_cursor !== undefined && result.next_cursor !== null))
-      throw new Error("Request pagination is unavailable. Reload requests before continuing.");
+      throw new Error("The next page of requests is unavailable. Reload requests before continuing.");
     queueNext = hasMore ? result.next_cursor : null;
     for (const record of result.cases) validatedAttention(record.attention);
     const counts = validatedPageCounts(result.page_counts, result.cases);
@@ -667,10 +778,11 @@
       const button = document.createElement("button"); button.type = "button";
       button.dataset.caseId = record.id;
       button.dataset.attention = String(record.attention.requires_attention);
-      button.textContent = `${record.vendor_name} · ${record.renewal_of ? "Renewal" : "Initial request"} · ${friendly(record.stage)}` +
-        ` · Owner ${record.owner} · Last progress ${date(record.updated_at)}` +
+      button.className = "btn btn--ghost";
+      button.textContent = `${record.vendor_name} — ${stageName(record.stage)}${record.renewal_of ? " (renewal)" : ""}` +
+        ` · Owner ${person(record.owner)} · Last progress ${date(record.updated_at)}` +
         (record.due_at ? ` · Due ${date(record.due_at)}` : "") +
-        ` · ${friendly(record.attention.state)}` +
+        ` · ${attentionName(record.attention.state)}` +
         (record.blocker ? ` · Blocked: ${friendly(record.blocker)}` : "") +
         (record.next_action ? ` · Next: ${friendly(record.next_action)}` : "");
       button.addEventListener("click", () => run(async () => render(await api("/cases/" + encodeURIComponent(record.id))), "Request loaded. Review its evidence and current status."));
@@ -679,12 +791,12 @@
     if (!result.cases.length) byId("cases").textContent = hasMore
       ? "No matching requests in this queue window. Continue to the next page."
       : "No matching vendor requests in this workspace.";
-    show("attention-summary", `This page: ${counts.admitted} admitted request${counts.admitted === 1 ? "" : "s"} · ${counts.accepted} accepted · ${counts.rejected} rejected · ${counts.needs_reconciliation} need reconciliation · ${counts.renewal_attention} overdue renewals.`);
-    if (byId("page-status")) show("page-status", `Page ${queueHistory.length + 1} · ${result.cases.length} request${result.cases.length === 1 ? "" : "s"} shown · ${friendly(queueView)} view${hasMore ? " · more available" : " · end of queue"}`);
+    show("attention-summary", `${counts.admitted} request${counts.admitted === 1 ? "" : "s"} · ${counts.accepted} accepted · ${counts.rejected} rejected · ${counts.needs_reconciliation} need${counts.needs_reconciliation === 1 ? "s" : ""} checking · ${counts.renewal_attention} overdue renewal${counts.renewal_attention === 1 ? "" : "s"}`);
+    if (byId("page-status")) show("page-status", `Page ${queueHistory.length + 1} · ${result.cases.length} request${result.cases.length === 1 ? "" : "s"} shown · ${friendly(queueView)} view${hasMore ? " · more available" : " · end of list"}`);
     buttons();
   }
   async function run(operation, success = "Saved. Review the current case before the next action.", focusId) {
-    if (busy) return;
+    if (busy || access.blocked) return;
     busy = true;
     root.setAttribute("aria-busy", "true");
     buttons();
@@ -719,7 +831,7 @@
       const guidance = error.code === "evidence_reevaluation_required"
         ? `${current.operation?.state === "verified" ? "The verified ticket remains recorded. " : "The stale prepared action was invalidated. "}Review the named evidence status and start a reevaluation request; the prior review cannot be reused.`
         : "Review it before submitting again.";
-      const readable = new Error(`${error.message} Current version ${current.revision} (${friendly(current.stage)}) is now open. ${guidance}`);
+      const readable = new Error(`Someone else updated this request, so the latest version (${stageName(current.stage).toLowerCase()}) is now open. ${guidance}`);
       readable.code = error.code; readable.current = error.current;
       throw readable;
     }
@@ -769,7 +881,7 @@
         if (current.id !== error.current.id || current.revision !== error.current.revision)
           throw new Error("The existing request changed while it was opening. Reload requests before continuing.");
         render(current); await refresh(); retireSubmission(key);
-        throw new Error(`This submission key already belongs to ${current.vendor_name}. Its current request is open; review it or change the form and submit again.`);
+        throw new Error(`This form was already sent as the request for ${current.vendor_name}. That request is now open; review it, or change the form and submit again.`);
       }
       render(record); await refresh(); retireSubmission(key);
     });
@@ -780,7 +892,8 @@
     const result = await api("/documents?query=" + encodeURIComponent(query));
     byId("document-results").replaceChildren();
     for (const document of result.documents || []) {
-      const button = element("button", document.name, byId("document-results")); button.type = "button";
+      const button = element("button", document.name, byId("document-results")); button.type = "button"; button.className = "btn btn--ghost";
+      documentNames.set(document.id, document.name);
       button.addEventListener("click", () => {
         if (busy) return;
         if (byId("document-target")?.value === "selected") {
@@ -831,15 +944,21 @@
     });
   }
   async function uploadRequest(path, body) {
+    const token = access.capture();
     if (uploadDenied) throw new Error("Sign in and reload this page before uploading evidence.");
     const response = await fetch(base + path, {method:"POST", credentials:"same-origin", cache:"no-store",
       headers:{"Content-Type":"application/json",...(root.dataset.workspaceContext?{"X-Lightwork-Vendor-Context":root.dataset.workspaceContext}:{})},body:JSON.stringify(body)});
+    access.assertCurrent(token);
+    access.observe(response);
     if ([401,403].includes(response.status)) {
       clearUploadReview(true); uploadDenied = true;
       throw new Error("Access to evidence upload is unavailable. Sign in or check permissions, then reload this page.");
     }
     let result;
     try { result = await response.json(); } catch (_) { throw new Error("Upload response unavailable. Refresh the request before retrying."); }
+    access.assertCurrent(token);
+    if (access.observe(response, result, {contextMessage: /active workspace changed/i}).kind === "context")
+      throw new Error("The account or workspace changed. Reload this page before continuing.");
     if (!response.ok) {
       const detail = result?.detail;
       const error = new Error(typeof detail === "string" ? detail :
@@ -882,10 +1001,10 @@
       show("upload-text", preview.text || "No supported text was extracted from this file.");
       const manual = preview.extraction?.method === "human_transcription";
       byId("upload-fallback").hidden = !preview.can_transcribe && !manual;
-      show("upload-summary", `${preview.name}: ${manual ? "user-supplied transcription; no OCR performed" : "locally extracted text"}. Nothing has been added to the request yet.`);
+      show("upload-summary", `${preview.name}: ${manual ? "text you typed in" : "text Lightwork read from the file"}. Nothing has been added to the request yet.`);
       for (const limit of preview.extraction?.limits || []) element("li", String(limit), byId("upload-limits"));
       show("upload-fingerprints", `Original file SHA-256: ${preview.source_sha256}\n${manual ? "Supplied" : "Extracted"} text SHA-256: ${preview.text_sha256}\nMethod: ${friendly(preview.extraction?.method)}\nPreview expires: ${date(preview.expires_at)}`);
-      return preview.can_transcribe ? "This PDF needs a readable copy or your explicit transcription. No evidence was added." : "Preview ready. Compare the text against the original, then explicitly add reviewed evidence.";
+      return preview.can_transcribe ? "Lightwork couldn't read the text in this PDF (it may be a scan). Choose a readable copy or type the relevant text below. No evidence was added." : "Preview ready. Compare the text against the original, then explicitly add reviewed evidence.";
     } catch (error) { clearUploadReview(); throw error; }
   }
   byId("upload")?.addEventListener("change", () => { clearUploadReview(); byId("upload-transcription").value = ""; buttons(); });
@@ -938,7 +1057,7 @@
   click("export-download", async () => {
     const reviewed = exportReview;
     if (!reviewed || !byId("export-confirm").checked)
-      throw new Error("Preview the export and confirm its manifest before downloading.");
+      throw new Error("Preview the export and confirm the list of files before downloading.");
     if (selected?.id !== reviewed.caseId || selected?.revision !== reviewed.revision)
       throw new Error("The request changed. Preview the evidence export again.");
     try {
@@ -955,7 +1074,7 @@
       root.append(link); link.click(); link.remove?.();
       setTimeout(() => window.URL.revokeObjectURL(url), 0);
       exportReview = null; byId("export-confirm").checked = false;
-      show("export-status", "Reviewed JSON export downloaded. Preview again before another download.");
+      show("export-status", "Reviewed evidence downloaded. Preview again before another download.");
       return "Evidence export downloaded from the reviewed manifest.";
     } catch (error) {
       if (error.code === "permission_denied") exportDenied = true;
@@ -1007,11 +1126,13 @@
   });
   click("renew", async () => {
     if (!selected) throw new Error("Select the previous request first.");
-    for (const [field, key] of [["vendor", "vendor_name"], ["document", "document_id"], ["project", "project"], ["purpose", "purpose"], ["freshness", "freshness_days"]])
+    for (const [field, key] of [["vendor", "vendor_name"], ["document", "document_id"], ["project", "project"], ["purpose", "purpose"]])
       byId(field).value = selected[key];
+    setDays(byId("freshness"), selected.freshness_days);
     byId("document").value = (selected.document_ids || [selected.document_id]).filter(Boolean).join("\n");
     byId("due").value = dateInput(Date.now() / 1000 + 30 * 86400);
     byId("renewal").value = selected.id;
+    if (byId("renewal-note")) { byId("renewal-note").textContent = `This new request renews the earlier review of ${selected.vendor_name}.`; byId("renewal-note").hidden = false; }
   }, "Renewal details copied. Review the new request fields, then choose Create request.", "document");
   if (byId("due") && !byId("due").value) byId("due").value = dateInput(Date.now() / 1000 + 30 * 86400);
   run(async () => {
@@ -1022,6 +1143,7 @@
       if (!Number.isFinite(returning.created_at) || returning.created_at > Date.now()+300000 || Date.now()-returning.created_at >= 86400000)
         throw new Error("The saved return to this request expired. Select the request again from this workspace.");
     }
+    await loadPeople();
     await refresh();
     if (requested) {
       if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link is invalid. Select a request from this workspace.");

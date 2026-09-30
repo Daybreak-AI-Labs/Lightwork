@@ -71,10 +71,32 @@ def _agent_id_of(principal: str | None) -> str | None:
 TERMINAL_STATES = {"completed", "failed", "canceled", "rejected"}
 
 
+def _a2a_value(env: str, key: str, default: object = None) -> object:
+    """``env`` when set, else ``[a2a] <key>`` (settable on the dashboard's All
+    settings page), else ``default``."""
+    raw = os.environ.get(env)
+    if raw is not None and raw.strip() != "":
+        return raw
+    try:
+        from .config import load_config
+        cfg = (load_config() or {}).get("a2a") or {}
+    except Exception:
+        return default
+    value = cfg.get(key) if isinstance(cfg, dict) else None
+    return default if value is None else value
+
+
+def _a2a_flag(env: str, key: str) -> bool:
+    value = _a2a_value(env, key, False)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return value is True
+
+
 def _max_tasks() -> int:
     try:
-        return max(16, int(os.environ.get("MAVERICK_A2A_MAX_TASKS", "1000")))
-    except ValueError:
+        return max(16, int(_a2a_value("MAVERICK_A2A_MAX_TASKS", "max_tasks", 1000)))
+    except (TypeError, ValueError):
         return 1000
 
 
@@ -87,8 +109,8 @@ def _max_concurrency() -> int:
     asyncio.to_thread uses) with long-running goals and stall every other
     to_thread consumer in the dashboard process. 0 disables the cap."""
     try:
-        return max(0, int(os.environ.get("MAVERICK_A2A_MAX_CONCURRENCY", "4")))
-    except ValueError:
+        return max(0, int(_a2a_value("MAVERICK_A2A_MAX_CONCURRENCY", "max_concurrency", 4)))
+    except (TypeError, ValueError):
         return 4
 
 
@@ -169,12 +191,9 @@ def _new_id() -> str:
 @contextlib.contextmanager
 def _task_tenant_scope(tenant: str):
     """Pin a captured task tenant while its async execution is active."""
-    if not tenant:
-        yield
-        return
     from .paths import reset_tenant, set_tenant
 
-    token = set_tenant(tenant)
+    token = set_tenant(tenant or None)
     try:
         yield
     finally:
@@ -1013,8 +1032,10 @@ class TaskEngine:
         # Directly-constructed engines keep the historical in-memory behavior
         # unless durability is requested. The outward-facing mounted service
         # opts in unconditionally (see a2a._mount_task_endpoint).
+        from .a2a_store import DurableTaskStore
+
         self._store = (
-            _DurableTaskStore(state_path)
+            DurableTaskStore(state_path)
             if durable or state_path is not None else None
         )
 
@@ -1029,7 +1050,7 @@ class TaskEngine:
         (which also establishes per-caller identity, see ``principal_for``).
         Bearer required unless ``MAVERICK_A2A_ALLOW_UNAUTHENTICATED`` and no
         token of either kind is configured."""
-        env_token = os.environ.get("MAVERICK_A2A_TOKEN", "").strip()
+        env_token = str(_a2a_value("MAVERICK_A2A_TOKEN", "token", "") or "").strip()
         given = ""
         if authorization and authorization.startswith("Bearer "):
             given = authorization[len("Bearer "):].strip()
@@ -1041,7 +1062,7 @@ class TaskEngine:
             except Exception:  # pragma: no cover - never break auth on read error
                 per_caller = None
         if not env_token and per_caller is None and not given:
-            if _env_true("MAVERICK_A2A_ALLOW_UNAUTHENTICATED"):
+            if _a2a_flag("MAVERICK_A2A_ALLOW_UNAUTHENTICATED", "allow_unauthenticated"):
                 block = _a2a_trust_block("anon")
                 return (
                     _err(_AUTH_REQUIRED, f"refused by agent trust plane: {block}")
@@ -1127,6 +1148,28 @@ class TaskEngine:
                 task.id, task.request_digest,
             )
 
+    def _revalidate_cached(self, task: _Task) -> _Task:
+        """A cached object cannot hide lost authority or a pruned result."""
+        if self._store is None:
+            return task
+        try:
+            status, persisted = self._store.load(
+                tenant=task.tenant, principal=task.principal, task_id=task.id,
+            )
+        except Exception as error:
+            raise self._durable_error(
+                "durable A2A task state is unavailable; refusing cached state", error,
+            ) from error
+        if status == "terminal" and persisted is not None:
+            return persisted
+        if status == "in_progress" and task.state not in TERMINAL_STATES:
+            # This engine still owns its live object. Other engines have no
+            # such object and continue to refuse indeterminate remote work.
+            return task
+        if status == "tombstone":
+            raise _RpcError(_SERVER_BUSY, "task result is no longer retained, but its messageId remains consumed")
+        raise _RpcError(_SERVER_BUSY, "cached A2A task authority is unavailable or indeterminate")
+
     def _owned(self, task_id: object, principal: str) -> _Task:
         """Look up a task and enforce principal ownership.
 
@@ -1146,7 +1189,7 @@ class TaskEngine:
                 and task.principal == principal
                 and task.tenant == tenant
             ):
-                return task
+                return self._revalidate_cached(task)
         if self._store is None or not key:
             raise _RpcError(_TASK_NOT_FOUND, "task not found")
         try:
@@ -1190,9 +1233,9 @@ class TaskEngine:
         ``min`` was a tautology and the client request was ignored entirely.
         With no client value the run defaults to the operator ceiling."""
         req = task.budget_request if task else {}
-        ceil_dollars = os.environ.get("MAVERICK_A2A_MAX_DOLLARS", 5.0)
-        ceil_wall = os.environ.get("MAVERICK_A2A_MAX_WALL_SECONDS", 3600.0)
-        ceil_depth = os.environ.get("MAVERICK_A2A_MAX_DEPTH", 3)
+        ceil_dollars = _a2a_value("MAVERICK_A2A_MAX_DOLLARS", "max_dollars", 5.0)
+        ceil_wall = _a2a_value("MAVERICK_A2A_MAX_WALL_SECONDS", "max_wall_seconds", 3600.0)
+        ceil_depth = _a2a_value("MAVERICK_A2A_MAX_DEPTH", "max_depth", 3)
         return {
             "max_dollars": _bounded_float(
                 req.get("max_dollars", ceil_dollars),
@@ -1520,7 +1563,7 @@ class TaskEngine:
                                 _INVALID_PARAMS,
                                 "messageId was already used with different content",
                             )
-                        return task, False
+                        return self._revalidate_cached(task), False
                     self._message_index.pop(idempotency_key, None)
 
             task = _Task(context_id, user_message, tenant=tenant)
@@ -1926,10 +1969,6 @@ class TaskEngine:
 
 # Methods that return an SSE stream rather than a single JSON response.
 STREAM_METHODS = {"message/stream"}
-
-
-def _env_true(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _err(code: int, message: str) -> dict:

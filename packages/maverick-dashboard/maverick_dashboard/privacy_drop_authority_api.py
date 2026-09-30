@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from starlette.concurrency import run_in_threadpool
 
 from ._shared import authenticated_subject
-from .auth import require_global_permission
+from .auth import has_global_permission, has_permission, require_global_permission
 
 ClosedRef = Annotated[
     str,
@@ -307,6 +307,85 @@ def create_privacy_drop_authority_router() -> APIRouter:  # noqa: C901,PLR0915
             "proposals": [_proposal_out(value) for value in proposal_values],
             "raw_subject_fields_returned": False,
         }
+
+    @router.get("/overview")
+    async def overview(request: Request, response: Response) -> Mapping[str, object]:
+        """Everything the DROP page lists on arrival: imported requests with
+        their current state, and (for auditors and administrators) brokers and
+        changes waiting for a second administrator."""
+
+        can_audit = has_global_permission(request, "audit")
+        if not (can_audit or has_permission(request, "operate")):
+            raise HTTPException(status_code=403, detail="permission denied")
+        _reject_query(request)
+        tenant = _tenant_id()
+        actor = _principal(request, tenant)
+        registry, _keys, proposals, store_factory = _factories(request, tenant)
+        records = await _call(registry.list_record_details, limit=250)
+        outcomes = await _call(registry.list_authorities, kind="outcome", limit=250)
+        store = await _call(store_factory, tenant_id=tenant, actor_ref=actor, request=request)
+
+        def request_state(detail: Mapping[str, object]) -> Mapping[str, object] | None:
+            if not detail["usable"]:
+                return None
+            try:
+                authority = registry.resolve_record(drop_id=detail["drop_id"])
+                value = store.get_request(authority)
+            except DROPManagementNotFound:
+                return None
+            except DROPManagementConflict:
+                return None
+            return {
+                "status": value.status,
+                "revision": value.revision,
+                "created_at": value.created_at,
+                "updated_at": value.updated_at,
+            }
+
+        rows = []
+        for detail in records:
+            try:
+                current = await run_in_threadpool(request_state, detail)
+            except DROPManagementError as exc:
+                raise HTTPException(status_code=503, detail="DROP authority is unavailable") from exc
+            rows.append(
+                {
+                    **dict(detail),
+                    "request": current,
+                    "outcomes": [
+                        {"status": item["status"], "version": item["version"], "state": item["state"]}
+                        for item in outcomes
+                        if item.get("drop_id") == detail["drop_id"]
+                    ],
+                }
+            )
+        body: dict[str, object] = {
+            "schema": "lightwork.privacy-drop-overview.v1",
+            "requests": rows,
+            "brokers": [],
+            "waiting": [],
+        }
+        if can_audit or has_global_permission(request, "admin"):
+            brokers = await _call(registry.list_authorities, kind="broker", limit=250)
+            body["brokers"] = [
+                {
+                    field: item[field]
+                    for field in (
+                        "broker_ref",
+                        "version",
+                        "state",
+                        "valid_until",
+                        "registration_sha256",
+                    )
+                    if field in item
+                }
+                for item in brokers
+            ]
+            body["waiting"] = list(
+                await _call(proposals.list_open_summaries, proposer_ref=actor, limit=100)
+            )
+        _secure(response)
+        return body
 
     @router.get("/revisions")
     async def revisions(request: Request, response: Response) -> Mapping[str, object]:

@@ -3,9 +3,9 @@ name = "hr_leave"
 compartment = "hr_rewards"
 description = "Leave and absence."
 
-persona = """You are the Leave & Absence specialist: administer FMLA/ADA leave and accommodation intake; medical data is protected and eligibility/accommodation decisions are human-led. You screen, draft, and recommend; a human makes every consequential employment decision (hire, fire, promote, pay, discipline) with a documented, bias-audited rationale; you never use protected-class data or its proxies in a decision; and you refuse prohibited monitoring such as workplace emotion inference."""
+persona = """You are the Leave & Absence specialist: administer FMLA/ADA leave and accommodation intake; medical data is protected and eligibility/accommodation decisions are human-led. You screen, draft, and recommend; a human makes every consequential employment decision (hire, fire, promote, pay, discipline) with a documented, bias-audited rationale; you never use protected-class data or its proxies in a decision; and you refuse prohibited monitoring such as workplace emotion inference. Live connectors bamboohr_read, ukg_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "bamboohr_read", "ukg_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -25,11 +25,11 @@ gate = "review"
 [[workflow]]
 name = "Intake request"
 instruction = "Read the leave or accommodation request and identify the leave type, dates, and minimum medical facts needed."
-tools = ["read_file", "bamboohr_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Check eligibility"
 instruction = "Verify FMLA/ADA eligibility against tenure, hours worked, and policy using HRIS records and company leave documents."
-tools = ["bamboohr_read", "ukg_read", "knowledge_search"]
+tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Draft notices"
 instruction = "Draft the required eligibility and rights notices and a recommended accommodation option grounded in policy, never using protected-class proxies."

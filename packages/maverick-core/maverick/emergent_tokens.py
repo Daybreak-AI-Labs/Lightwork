@@ -280,8 +280,29 @@ def reset_shared() -> None:
         _shared.clear()
 
 
+def learn_from_messages(messages, *, count_tokens) -> tuple[TokenCodebook, float] | None:
+    """Learn the token-aware codebook from real coordination ``messages``,
+    persist it to the shared store, and return ``(book, savings_pct)`` on that
+    corpus -- or ``None`` when the tokenizer offers too few token-cheap markers
+    for the codec to help (nothing is saved then). Shared by ``codec-learn``
+    and the dashboard's Learning page.
+
+    Candidate codes: printable ASCII + Latin/symbol ranges, filtered to the
+    tokenizer's single-token chars that don't occur in the corpus. First
+    viable one is the reserved escape; the rest are markers."""
+    msgs = list(messages)
+    candidates = [chr(c) for c in list(range(0x21, 0x7f)) + list(range(0xa1, 0x600))]
+    pool = single_token_markers(count_tokens, candidates, escape="", corpus=msgs, limit=200)
+    if len(pool) < 2:
+        return None
+    escape, markers = pool[0], pool[1:]
+    book = learn(msgs, escape=escape, markers=markers)
+    shared().update(book)
+    return book, token_savings(msgs, book, count_tokens=count_tokens)
+
+
 __all__ = [
     "TokenCodebook", "learn", "encode", "decode",
-    "token_savings", "single_token_markers",
+    "token_savings", "single_token_markers", "learn_from_messages",
     "TokenCodebookStore", "enabled", "shared", "reset_shared",
 ]

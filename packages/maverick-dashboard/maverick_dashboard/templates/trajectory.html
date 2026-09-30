@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Trajectory · Goal #{{ goal.id }} · Lightwork{% endblock %}
+{% block title %}Step-by-step history · {{ goal.title or 'Task' }} · Lightwork{% endblock %}
 {% block content %}
 <style>
   .timeline {
@@ -19,90 +19,110 @@
   .timeline li.tool::before    { border-color: var(--accent); }
   .timeline li.error::before   { border-color: var(--danger); }
   .timeline li.thinking::before{ border-color: var(--warn); }
-  .ev-meta { color: var(--muted); font-size: 0.85em; }
-  .ev-agent { color: var(--text); margin: 0 0.4rem; }
+  .ev-meta { color: var(--muted); font-size: 0.85em; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+  .ev-agent { color: var(--text); }
   .ev-kind { color: var(--accent); }
   .ev-content {
     margin-top: 0.4rem; white-space: pre-wrap; word-break: break-word;
     background: var(--surface-1); padding: 0.4rem 0.6rem; border-radius: 4px;
-    font: 12px/1.5 ui-monospace, SFMono-Regular, monospace;
   }
-  .controls {
-    display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem;
-  }
-  .controls input[type="range"] { flex: 1; }
-  .controls button {
-    background: var(--surface-1); color: var(--text); border: 1px solid var(--border);
-    border-radius: 4px; padding: 0.4rem 0.8rem; cursor: pointer;
-  }
-  .controls button:hover { border-color: var(--accent); }
-  .filters {
-    display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem;
-    flex-wrap: wrap;
-  }
+  .ev-branch { margin-inline-start: auto; padding: 0.15rem 0.6rem; font-size: var(--text-xs); }
+  .controls { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+  .controls input[type="range"] { flex: 1; min-width: 8rem; }
+  .filters { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
   .filters label { color: var(--muted); font-size: 0.85em; }
-  .filters select {
-    background: var(--surface-1); color: var(--text); border: 1px solid var(--border);
-    border-radius: 4px; padding: 0.3rem 0.5rem;
-  }
-  .filters select:hover { border-color: var(--accent); }
 </style>
-{# Shared event-kind vocabulary. Mirrors KIND_LABELS in chat_goal.html so
-   the same raw kinds read the same on both pages. #}
+{# Shared step-type vocabulary. Mirrors KIND_LABELS in chat_goal.html so the
+   same kinds read the same on both pages. #}
 {% set KIND_LABELS = {
-  'plan': 'thinking', 'finding': 'answer', 'observation': 'result',
-  'error': 'error', 'verify': 'checking', 'artifact': 'produced',
+  'plan': 'Thinking', 'finding': 'Answer', 'observation': 'Result',
+  'error': 'Problem', 'verify': 'Checking', 'artifact': 'Produced a file',
+  'tool': 'Action', 'thinking': 'Thinking', 'thought': 'Thinking', 'handoff': 'Handed over',
+  'status': 'Update', 'question': 'Question', 'answer': 'Answer', 'result': 'Result',
 } %}
-<p class="muted"><a href="/goals">← all goals</a> · <a href="/goals/{{ goal.id }}/plan">plan tree</a></p>
-<div class="section-head"><h2>Trajectory · Goal #{{ goal.id }}: {{ goal.title }}</h2></div>
+<p class="muted"><a href="/goals">← All tasks</a> · <a href="/goals/{{ goal.id }}/plan">Plan</a> · <a href="/chat/goal/{{ goal.id }}">Open the task</a></p>
+<div class="section-head"><h2>Step-by-step history: {{ goal.title }}</h2></div>
+<div class="panel goal-export" id="goal-export" data-goal="{{ goal.id }}" data-can-share="{{ '1' if can_operate else '0' }}">
+  <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/export.json" download="task-{{ goal.id }}.json">Download full history</a>
+  {% if can_operate %}<button class="btn btn--ghost" type="button" id="goal-gist">Share a private copy on GitHub</button>{% endif %}
+  <p class="muted" id="goal-export-msg" role="status" aria-live="polite">The download holds this task, every recorded step and its work summaries, as one file you can keep or move to another installation.</p>
+</div>
 
+{% if events %}
 <div class="panel">
-  <div class="controls" role="group" aria-label="Trajectory playback controls">
-    <button id="rev-all" type="button" aria-label="Jump to start" title="Jump to start">⇤</button>
-    <button id="step-back" type="button" aria-label="Step back" title="Step back">←</button>
+  <div class="controls" role="group" aria-label="Playback">
+    <button class="btn btn--ghost" id="rev-all" type="button">Start</button>
+    <button class="btn btn--ghost" id="step-back" type="button">Back</button>
     <input id="scrub" type="range" min="0" max="{{ events|length }}" value="{{ events|length }}"
-           aria-label="Scrub through events" />
-    <button id="step-fwd" type="button" aria-label="Step forward" title="Step forward">→</button>
-    <button id="rev-end" type="button" aria-label="Jump to end" title="Jump to end">⇥</button>
-    <span id="counter" class="muted" aria-live="polite">{{ events|length }} / {{ events|length }} events</span>
+           aria-label="Move through the steps" />
+    <button class="btn btn--ghost" id="step-fwd" type="button">Next</button>
+    <button class="btn btn--ghost" id="rev-end" type="button">End</button>
+    <span id="counter" class="muted" aria-live="polite">{{ events|length }} of {{ events|length }} steps</span>
   </div>
-  <div class="filters" role="group" aria-label="Trajectory filters">
-    <label for="filter-agent">Agent</label>
-    <select id="filter-agent" class="filter-agent" aria-label="Filter by agent">
-      <option value="">All agents</option>
+  <div class="filters" role="group" aria-label="Filters">
+    <label for="filter-agent">Who</label>
+    <select id="filter-agent" class="select filter-agent">
+      <option value="">Everyone</option>
       {% for agent in events | map(attribute="agent") | unique | sort %}
-        <option value="{{ agent }}">{{ agent }}</option>
+        <option value="{{ agent }}">{{ agent | humanize }}</option>
       {% endfor %}
     </select>
-    <label for="filter-severity">Severity</label>
-    <select id="filter-severity" class="filter-severity" aria-label="Filter by severity">
-      <option value="">All severities</option>
+    <label for="filter-severity">Step type</label>
+    <select id="filter-severity" class="select filter-severity">
+      <option value="">All step types</option>
       {% for kind in events | map(attribute="kind") | unique | sort %}
-        <option value="{{ kind }}">{{ KIND_LABELS[kind] or kind }}</option>
+        <option value="{{ kind }}">{{ KIND_LABELS.get(kind) or (kind | humanize) }}</option>
       {% endfor %}
     </select>
   </div>
+  {% if fork_enabled and can_operate %}
+  <p class="muted" style="font-size: var(--text-sm);">To try another way from any point, choose <strong>Branch from here</strong> on that step. The branch starts from the same place; nothing is re-run or spent until you continue it.</p>
+  <p id="branch-msg" role="status" aria-live="polite"></p>
+  {% endif %}
   <ul class="timeline" id="timeline">
     {% for ev in events %}
       <li data-idx="{{ loop.index0 }}" data-agent="{{ ev.agent }}" data-kind="{{ ev.kind }}" class="{{ ev.kind }}">
         <span class="ev-meta">
-          [{{ ev.ts | datetime }}]
-          <span class="ev-agent">{{ ev.agent }}</span>
-          <span class="ev-kind">{{ KIND_LABELS[ev.kind] or ev.kind }}</span>
+          <span>{{ ev.ts | datetime }}</span>
+          <span class="ev-agent">{{ ev.agent | humanize }}</span>
+          <span class="ev-kind">{{ KIND_LABELS.get(ev.kind) or (ev.kind | humanize) }}</span>
+          {% if fork_enabled and can_operate %}
+          <button type="button" class="btn btn--ghost ev-branch" data-event="{{ ev.id }}"
+                  aria-label="Branch from step {{ loop.index }}">Branch from here</button>
+          {% endif %}
         </span>
-        {% if ev.content %}
-          <div class="ev-content">{{ ev.content[:2000] }}{% if ev.content|length > 2000 %}…{% endif %}</div>
+        {% if ev.content and ev.kind == 'error' %}
+          <p class="ev-content">Something went wrong in this step. <a href="/goals/{{ goal.id }}/errors">See all problems</a></p>
+          <details><summary>Technical details (for support)</summary><div class="ev-content">{{ ev.content }}</div></details>
+        {% elif ev.content %}
+          {% if ev.content|length > 2000 %}
+          <div class="ev-content">{{ ev.content[:2000] }}…</div>
+          <details><summary>Show the full step</summary><div class="ev-content">{{ ev.content }}</div></details>
+          {% else %}
+          <div class="ev-content">{{ ev.content }}</div>
+          {% endif %}
         {% endif %}
       </li>
     {% endfor %}
   </ul>
 </div>
+{% else %}
+<div class="panel">
+  <div class="mv-empty">
+    <p class="mv-empty__title">No steps recorded yet</p>
+    <p class="mv-empty__body">This task hasn’t recorded any steps. They appear here as it works.</p>
+    <a class="btn btn--primary" href="/chat/goal/{{ goal.id }}">Open the task</a>
+  </div>
+</div>
+{% endif %}
 
+<script src="/static/lightwork-goal-export.js" defer></script>
 <script>
-  // Trajectory replay: hide events past the scrubber position so users
-  // can step through the run after the fact.
+  // Step-by-step replay: hide steps past the slider so a person can walk
+  // through the run after the fact.
   (function() {
     const tl = document.getElementById("timeline");
+    if (!tl) return;
     const items = Array.from(tl.querySelectorAll("li"));
     const scrub = document.getElementById("scrub");
     const counter = document.getElementById("counter");
@@ -119,7 +139,7 @@
           (!sev || li.dataset.kind === sev);
         li.style.display = i < n && matches ? "" : "none";
       });
-      counter.textContent = `${n} / ${total} events`;
+      counter.textContent = `${n} of ${total} steps`;
     }
     function refresh() { apply(parseInt(scrub.value, 10)); }
     scrub.addEventListener("input", refresh);
@@ -144,11 +164,41 @@
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
       if (tag === "input" && e.target.id !== "scrub") return;
-      if (tag === "textarea" || tag === "select") return;
+      if (tag === "textarea" || tag === "select" || tag === "button") return;
       if (e.key === "ArrowLeft") { document.getElementById("step-back").click(); }
       else if (e.key === "ArrowRight") { document.getElementById("step-fwd").click(); }
       else if (e.key === "Home") { document.getElementById("rev-all").click(); }
       else if (e.key === "End") { document.getElementById("rev-end").click(); }
+    });
+
+    // Branch from a step: a new task starting from the same point.
+    const msg = document.getElementById("branch-msg");
+    tl.addEventListener("click", async (e) => {
+      const btn = e.target.closest(".ev-branch");
+      if (!btn || !msg) return;
+      const answers = await mvForm("Branch from this step", [
+        { key: "label", label: "What will you try differently? (optional)", type: "text",
+          help: "Saved with the branch so reviewers can compare the two." },
+      ], { okText: "Create branch" });
+      if (answers === null) return;
+      btn.disabled = true;
+      msg.textContent = "Creating the branch…";
+      try {
+        const r = await fetch("/api/v1/run-tree/{{ goal.id }}/fork", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ at_event: Number(btn.dataset.event), label: answers.label || "" }),
+        });
+        if (!r.ok) throw r;
+        const j = await r.json();
+        msg.textContent = "Branch created. ";
+        const open = document.createElement("a");
+        open.href = "/chat/goal/" + encodeURIComponent(j.goal_id); open.textContent = "Open the branch";
+        const compare = document.createElement("a");
+        compare.href = "/run-tree?goal={{ goal.id }}"; compare.textContent = "Compare branches";
+        msg.append(open, " · ", compare);
+      } catch (err) {
+        msg.textContent = window.mvErrorText ? mvErrorText(err, "create the branch") : "Could not create the branch.";
+      } finally { btn.disabled = false; }
     });
   })();
 </script>

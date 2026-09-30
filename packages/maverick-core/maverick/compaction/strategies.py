@@ -14,8 +14,8 @@ module layers the roadmap strategies on top of it, selected the same way
 Env override: ``MAVERICK_COMPACTION_STRATEGY``. Unset / unrecognised values
 mean "no strategy" and :func:`compact_with_strategy` returns exactly what
 ``compact_messages`` returns — byte-identical default behavior. A strategy
-that raises falls back to that same default (fail-open: compaction is an
-optimization, never a correctness dependency).
+that raises an ordinary provider error falls back to that same default.
+Budget, usage-accounting, halt and cancellation stops always propagate.
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ import logging
 import os
 
 from . import KEEP_RECENT_TURNS, MAX_TOOL_OUTPUT_BYTES, compact_messages
+from .requests import STOP_ERRORS
 
 log = logging.getLogger(__name__)
 
@@ -73,39 +74,11 @@ def compact_with_strategy(
             messages, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
         )
     try:
-        if name == "learned":
-            from .learned import LearnedSummarizer
-            # Every strategy path funnels through compact_messages so the
-            # structural shrink AND the total-window ceiling apply uniformly
-            # (the shrink is idempotent, so double application is a no-op).
-            return compact_messages(
-                LearnedSummarizer(llm=llm, budget=budget, scope=scope).compact(
-                    messages, keep_recent=keep_recent),
-                keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
-            )
-        if name == "multimodal":
-            from .multimodal import compact_media
-            # Stub heavy media blocks, then apply the standard shrink pass.
-            return compact_messages(
-                compact_media(
-                    messages, keep_recent=keep_recent, llm=llm, budget=budget),
-                keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
-            )
-        if name == "streaming":
-            from .streaming import compact_streaming
-            return compact_messages(
-                compact_streaming(
-                    messages, conversation_id=conversation_id,
-                    keep_recent=keep_recent, llm=llm, budget=budget,
-                ),
-                keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
-            )
-        from .graph import compact_graph
-        return compact_messages(
-            compact_graph(
-                messages, keep_recent=keep_recent, llm=llm, budget=budget),
-            keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
-        )
+        result = _invoke(name, messages, llm=llm, conversation_id=conversation_id,
+                         keep_recent=keep_recent, budget=budget, scope=scope)
+        return compact_messages(result, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes)
+    except STOP_ERRORS:
+        raise
     except Exception as e:
         log.warning("compaction strategy %r failed (%s); using default path", name, e)
         return compact_messages(
@@ -113,4 +86,51 @@ def compact_with_strategy(
         )
 
 
-__all__ = ["STRATEGIES", "configured_strategy", "compact_with_strategy"]
+def _invoke(name, messages, *, llm, conversation_id, keep_recent, budget, scope,
+            asynchronous=False):
+    """Resolve the same implementation and arguments for both I/O drivers."""
+    kwargs = {"keep_recent": keep_recent}
+    if name == "learned":
+        from .learned import LearnedSummarizer
+        obj = LearnedSummarizer(llm=llm, budget=budget, scope=scope)
+        method = "compact"
+    else:
+        if name == "multimodal":
+            from . import multimodal as obj
+            method = "compact_media"
+        elif name == "streaming":
+            from . import streaming as obj
+            method = "compact_streaming"
+        else:
+            from . import graph as obj
+            method = "compact_graph"
+        kwargs.update(llm=llm, budget=budget)
+        if name == "streaming":
+            kwargs["conversation_id"] = conversation_id
+    if asynchronous:
+        method += "_async"
+    return getattr(obj, method)(messages, **kwargs)
+
+
+async def compact_with_strategy_async(
+    messages: list[dict], *, llm=None, conversation_id: str | None = None,
+    keep_recent: int = KEEP_RECENT_TURNS, max_tool_bytes: int = MAX_TOOL_OUTPUT_BYTES,
+    strategy: str | None = None, budget=None, scope: str | None = None,
+) -> list[dict]:
+    """Async strategy dispatch; stops escape and ordinary failures use heuristic."""
+    name = configured_strategy() if strategy is None else strategy
+    if name in STRATEGIES:
+        try:
+            result = await _invoke(
+                name, messages, llm=llm, conversation_id=conversation_id,
+                keep_recent=keep_recent, budget=budget, scope=scope, asynchronous=True)
+            return compact_messages(result, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes)
+        except STOP_ERRORS:
+            raise
+        except Exception as exc:
+            log.warning("compaction strategy %r failed (%s); using default path", name, exc)
+    return compact_messages(messages, keep_recent=keep_recent, max_tool_bytes=max_tool_bytes)
+
+
+__all__ = ["STRATEGIES", "configured_strategy", "compact_with_strategy",
+           "compact_with_strategy_async"]

@@ -59,6 +59,38 @@ class _Shield:
 
 
 class TestGenerateCompanions:
+    def test_real_docx_companion_carries_source_coverage_and_table_text(self, tmp_path, clean_env):
+        import io
+        import json
+
+        docx = pytest.importorskip("docx")
+        document = docx.Document()
+        document.add_paragraph("Quarterly targets")
+        row = document.add_table(rows=1, cols=2).rows[0]
+        row.cells[0].text, row.cells[1].text = "Revenue", "120000"
+        buffer = io.BytesIO()
+        document.save(buffer)
+        wm = WorldModel(path=tmp_path / "w.db")
+        try:
+            gid = wm.create_goal("document", "")
+            original = _add(wm, gid, "plan.docx",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            buffer.getvalue(), tmp_path / "attachments")
+            assert generate_companions(wm, gid, root=tmp_path / "attachments") == 1
+            attachments = wm.list_attachments(gid)
+            companion = next(a for a in attachments if a.filename.endswith(".extracted.txt"))
+            from pathlib import Path
+            text = Path(companion.path).read_text(encoding="utf-8")
+            metadata = json.loads(text.splitlines()[1])
+            assert metadata["source_sha256"] == original.sha256
+            assert metadata["locations"][2]["kind"] == "table_cell"
+            assert "120000" in text and Path(original.path).read_bytes() == buffer.getvalue()
+            blocks = content_blocks_for_goal(wm, gid, model="claude-opus-4-8")
+            assert "untrusted attachment companion data" in blocks[0]["text"]
+            assert "not factual verification" in blocks[0]["text"]
+        finally:
+            wm.close()
+
     def test_audio_gets_transcript_companion(self, tmp_path, monkeypatch, clean_env):
         monkeypatch.setattr(att, "_transcribe_media", lambda p: "buy milk on friday")
         wm = WorldModel(path=tmp_path / "w.db")

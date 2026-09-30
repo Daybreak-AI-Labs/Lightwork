@@ -36,6 +36,8 @@ function fixture() {
       if (url === "/api/v1/flows") return reply({ flows: [{ id: "draft", name: "Draft", published: false }, { id: "ready", name: "Ready flow", published: true }] });
       throw new Error("Unexpected request " + url);
     }, mvToast() {}, mvConfirm: async () => false, fmtWhen: () => "later", delBtn: () => new Element(),
+    mvHuman: value => String(value || "").replace(/[_-]+/g, " ").replace(/^./, c => c.toUpperCase()),
+    plainError: (_, what) => "Could not " + what + ". Please try again.",
     window: { location: { origin: "https://app.example", href: "https://app.example/automations", assign(url) { this.assigned = url; } },
       history: { replaceState(_, __, url) { this.cleaned = url; } }, crypto: webcrypto,
       sessionStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) } } };
@@ -54,23 +56,49 @@ function eventFixture() {
   return ui;
 }
 
-test("guided source fields preserve typed values, advanced options, and per-source drafts", async () => {
+test("guided source fields keep typed values, tucked-away options and per-source drafts", async () => {
   const ui = eventFixture(); await settle();
   ui.get("auto-event-source").value = "file_dir"; ui.context.changeSource();
-  ui.get("auto-event-config").value = '{"path":"inbound","recursive":false,"extension_setting":{"retain":true}}';
-  ui.context.fillSourceFields();
-  assert.equal(ui.get("auto-source-recursive").checked, false);
+  ui.get("auto-source-path").value = "inbound"; ui.get("auto-source-path").listeners.input();
   ui.get("auto-source-recursive").checked = true; ui.get("auto-source-recursive").listeners.input();
-  assert.deepEqual(JSON.parse(ui.get("auto-event-config").value), { path: "inbound", recursive: true, extension_setting: { retain: true } });
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.context.readSourceConfig())), { path: "inbound", recursive: true });
+  // The file pattern is an optional extra, tucked under "More settings".
+  assert.ok(ui.get("auto-event-more").children.some(child => child.children.some(c => c.id === "auto-source-glob")));
   ui.get("auto-event-source").value = "rss"; ui.context.changeSource();
   ui.get("auto-source-url").value = "https://example.org/feed.xml"; ui.get("auto-source-url").listeners.input();
-  assert.equal(JSON.parse(ui.get("auto-event-config").value).url, "https://example.org/feed.xml");
+  assert.equal(ui.context.readSourceConfig().url, "https://example.org/feed.xml");
   ui.get("auto-event-source").value = "file_dir"; ui.context.changeSource();
   assert.equal(ui.get("auto-source-recursive").checked, true);
-  assert.equal(JSON.parse(ui.get("auto-event-config").value).extension_setting.retain, true);
+  assert.equal(ui.get("auto-source-path").value, "inbound");
   ui.get("auto-event-source").value = "imap_email"; ui.context.changeSource();
   ui.get("auto-source-port").value = "1993"; ui.get("auto-source-port").listeners.input();
-  assert.equal(JSON.parse(ui.get("auto-event-config").value).port, 1993);
+  assert.equal(ui.context.readSourceConfig().port, 1993);
+});
+
+test("extra settings are name and value rows, never a code box", async () => {
+  const ui = eventFixture(); await settle();
+  ui.get("auto-event-source").value = "custom_source"; ui.context.changeSource();
+  assert.equal(ui.get("auto-event-config-advanced").open, true);
+  ui.get("auto-event-extra-add").listeners.click();
+  const row = ui.get("auto-event-extra").children[0];
+  row._key.value = "region"; row._val.value = "eu";
+  const row2 = ui.context.addExtraRow("retain", "true");
+  assert.ok(row2);
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.context.readSourceConfig())), { region: "eu", retain: true });
+  assert.equal(source.includes('id="auto-event-config"'), false);
+  assert.equal(source.includes("Source settings (JSON)"), false);
+  assert.equal(source.includes("Exported definitions (JSON)"), false);
+});
+
+test("a form source gets its link name from the automation name", async () => {
+  const ui = eventFixture(); await settle();
+  ui.get("auto-event-source").value = "form"; ui.context.changeSource();
+  ui.get("auto-event-name").value = "Vendor Intake Form";
+  ui.get("auto-event-template").value = "triage";
+  let body;
+  ui.context.fetch = async (_, options) => { body = JSON.parse(options.body); return ui.reply({ name: "vendor" }); };
+  await ui.get("auto-event-form").listeners.submit({ preventDefault() {} });
+  assert.equal(body.config.token, "vendor-intake-form");
 });
 
 test("catalog picker offers only published flows and retains exact template parameter names", async () => {
@@ -82,17 +110,6 @@ test("catalog picker offers only published flows and retains exact template para
   assert.deepEqual(ui.get("auto-event-template").children.map(option => option.value), ["", "ready"]);
   assert.equal(ui.get("auto-event-params").children.length, 0);
 });
-
-for (const malformed of ["null", "[]", "{incomplete"]) {
-  test("invalid advanced source " + malformed + " is revealed without creating an automation", async () => {
-    const ui = eventFixture(); await settle();
-    ui.get("auto-event-config").value = malformed;
-    await ui.get("auto-event-form").listeners.submit({ preventDefault() {} });
-    assert.equal(ui.get("auto-event-config-advanced").open, true);
-    assert.equal(ui.get("auto-event-config").focused, true);
-    assert.equal(ui.calls.some(call => call.options?.method === "POST"), false);
-  });
-}
 
 test("guided create uses the selected flow contract and suppresses duplicate submissions", async () => {
   const ui = eventFixture(); await settle();
@@ -116,7 +133,7 @@ test("failed check never claims the source was checked and restores the action",
   const ui = eventFixture(); await settle();
   ui.context.fetch = async () => ({ ok: false, json: async () => ({ detail: "Access denied" }) });
   const button = ui.get("auto-event-poll"); await button.listeners.click.call(button);
-  assert.equal(ui.get("auto-event-msg").textContent, "Access denied"); assert.equal(button.disabled, false);
+  assert.match(ui.get("auto-event-msg").textContent, /Could not check for new items/); assert.equal(button.disabled, false);
 });
 
 function loadOAuth(ui) {
@@ -133,44 +150,46 @@ function importFixture() {
   return ui;
 }
 
-test("uploading an export fills definitions without starting an import or changing activation choices", async () => {
+test("choosing an export file prepares definitions without starting an import or changing activation choices", async () => {
   const ui = importFixture(); await settle();
   const file = ui.get("auto-import-file"); file.files = [{ size: 80, name: "workflows.json", text: async () => '[{"name":"Review","nodes":[]}]' }];
   await file.listeners.change();
-  assert.deepEqual(JSON.parse(ui.get("auto-import-defs").value), [{ name: "Review", nodes: [] }]);
+  assert.match(ui.get("auto-import-file-msg").textContent, /Ready to import workflows.json \(1 automation\)/);
   assert.equal(ui.get("auto-import-webhooks").checked, false); assert.equal(ui.get("auto-import-schedules").checked, false);
   assert.equal(ui.calls.some(call => call.options?.method === "POST"), false);
+  let body; ui.context.fetch = async (_, options) => { body = JSON.parse(options.body); return ui.reply({ imported: [], dry_run: true }); };
+  await ui.get("auto-import-form").listeners.submit({ preventDefault() {} });
+  assert.deepEqual(body.definitions, [{ name: "Review", nodes: [] }]);
 });
 
-test("an older file read cannot replace a newer manual edit", async () => {
+test("an older file read cannot replace a newer file choice", async () => {
   const ui = importFixture(); await settle(); let resolve;
   const file = ui.get("auto-import-file"); file.files = [{ size: 80, name: "old.json", text: () => new Promise(done => { resolve = done; }) }];
   const loading = file.listeners.change();
-  ui.get("auto-import-defs").value = '{"name":"Newer draft"}'; ui.get("auto-import-defs").listeners.input();
+  file.files = [{ size: 80, name: "new.json", text: async () => '{"name":"Newer"}' }];
+  await file.listeners.change();
   resolve('{"name":"Old file"}'); await loading;
-  assert.equal(JSON.parse(ui.get("auto-import-defs").value).name, "Newer draft");
+  assert.match(ui.get("auto-import-file-msg").textContent, /new.json/);
 });
 
-test("failed export parsing prevents an accidental live import and keeps earlier definitions", async () => {
+test("a file that is not an export blocks an accidental import", async () => {
   const ui = importFixture(); await settle();
-  ui.get("auto-import-defs").value = '{"name":"Earlier draft"}';
   const file = ui.get("auto-import-file"); file.files = [{ size: 10, name: "broken.json", text: async () => "null" }];
   await file.listeners.change();
+  assert.match(ui.get("auto-import-file-msg").textContent, /not an automation export/);
   await ui.get("auto-import-form").listeners.submit({ preventDefault() {} });
-  assert.equal(JSON.parse(ui.get("auto-import-defs").value).name, "Earlier draft");
   assert.equal(ui.calls.some(call => call.options?.method === "POST"), false);
   assert.match(ui.get("auto-import-results").textContent, /valid export/);
 });
 
-test("import network failures release the submit control and keep the draft", async () => {
+test("import network failures release the submit control with a plain message", async () => {
   const ui = importFixture(); await settle();
-  ui.get("auto-import-defs").value = '{"name":"Draft"}';
-  ui.context.fetch = async () => { throw new Error("Connection lost"); };
+  ui.context.fetch = async () => { throw new TypeError("Failed to fetch"); };
   await ui.get("auto-import-form").listeners.submit({ preventDefault() {} });
   assert.equal(ui.get("auto-import-form").querySelector().disabled, false);
-  assert.equal(JSON.parse(ui.get("auto-import-defs").value).name, "Draft");
-  assert.match(ui.get("auto-import-results").textContent, /Connection lost/);
+  assert.match(ui.get("auto-import-results").textContent, /Could not import these automations/);
 });
+
 function pending(overrides = {}) {
   return { provider: "github", redirect: "https://app.example/automations", context: "context-a", state: "a".repeat(64), verifier: "v".repeat(64), created: Date.now(), ...overrides };
 }
@@ -216,3 +235,14 @@ for (const changes of [{ state: "b".repeat(64) }, { context: "another-workspace"
     assert.match(ui.get("oauth-msg").textContent, /expired|match/);
   });
 }
+
+test("saved timetables are described in words", () => {
+  const ctx = {}; vm.createContext(ctx);
+  vm.runInContext(source.slice(source.indexOf("  var DAYS ="), source.indexOf("  function delBtn(")), ctx);
+  assert.equal(ctx.cronText("0 9 * * 1-5"), "Weekdays at 9 am");
+  assert.equal(ctx.cronText("30 14 * * *"), "Every day at 2:30 pm");
+  assert.equal(ctx.cronText("0 8 * * 1,3"), "Every Monday, Wednesday at 8 am");
+  assert.equal(ctx.cronText("0 7 1 * *"), "Monthly on the 1st at 7 am");
+  assert.equal(ctx.cronText("15 * * * *"), "Every hour at 15 minutes past");
+  assert.equal(ctx.cronText("0 9 1 1 *"), "On a custom timetable");
+});

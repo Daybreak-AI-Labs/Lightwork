@@ -792,3 +792,35 @@ def test_total_cost_per_accepted_includes_rejected_cases_and_requires_complete_c
     assert group["reported_ai_cost_per_accepted"] == "100"
     assert group["reported_cost_difference"] == "300"
     assert group["acceptance_rate"] == .25
+
+
+def test_review_queue_lists_other_peoples_protected_pilots_in_this_workspace_only(records, monkeypatch):
+    from fastapi import HTTPException
+    protected = create_protected(records)
+    assert protected["state"] == "frozen"
+    queue = pilots.review_queue("user:bob")
+    assert [item["id"] for item in queue] == [protected["id"]]
+    assert set(queue[0]) == {"id", "title", "frozen_at", "decision"}
+    assert pilots.review_queue("user:alice") == []          # never your own pilot
+    assert pilots.review_queue("local:dashboard") == []     # a named account only
+    with tenant_scope(tenant="different-tenant"):
+        assert pilots.review_queue("user:bob") == []
+
+    monkeypatch.setattr(api, "context_for", lambda request: "bob")
+    monkeypatch.setattr(api, "caller_principal", lambda request: "user:bob")
+    monkeypatch.setattr(api, "require_permission", lambda *a: None)
+    client = TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Pilot-Context": "bob"})
+    route = "/api/v1/outcome-pilots/independent-review"
+
+    def denied(*_a):
+        raise HTTPException(403, "Global administrator required")
+
+    monkeypatch.setattr(api, "require_global_permission", denied)
+    assert client.get(route).status_code == 403
+    monkeypatch.setattr(api, "require_global_permission", lambda *a: None)
+    listed = client.get(route)
+    assert listed.status_code == 200
+    assert listed.headers["cache-control"] == "private, no-store"
+    assert listed.json() == {"items": queue, "context": "bob"}
+    monkeypatch.setattr(api, "caller_principal", lambda request: "local:dashboard")
+    assert client.get(route).status_code == 403

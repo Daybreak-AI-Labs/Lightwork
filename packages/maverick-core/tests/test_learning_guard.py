@@ -1,6 +1,8 @@
 """The global HALT boundary covers jobs that bypass the agent kernel."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from maverick import dreaming, factory_learning, killswitch, self_harness
 from maverick import self_improvement as si
@@ -40,14 +42,17 @@ def _reflexions() -> list[dict]:
 
 
 def test_learning_refuses_when_local_halt_authority_is_unreadable(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ):
-    class UnreadableHaltPath:
-        def stat(self):
-            raise PermissionError("permission denied")
+    path = tmp_path / "HALT"
+    real_stat = Path.stat
 
-    monkeypatch.setattr(
-        killswitch, "_halt_file_path", lambda: UnreadableHaltPath())
+    def unreadable(candidate, *args, **kwargs):
+        if candidate == path:
+            raise PermissionError("permission denied")
+        return real_stat(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", unreadable)
 
     # The high-frequency agent path preserves its historical fail-open posture.
     killswitch.check(force_refresh=True)
@@ -133,15 +138,18 @@ def test_learning_refuses_when_shared_halt_backend_config_is_malformed(
 
 
 def test_halt_cache_uses_monotonic_time_and_refreshes_after_clock_regression(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ):
     calls = 0
+    path = tmp_path / "HALT"
+    real_stat = Path.stat
 
-    class MissingHaltPath:
-        def stat(self):
-            nonlocal calls
+    def missing(candidate, *args, **kwargs):
+        nonlocal calls
+        if candidate == path:
             calls += 1
             raise FileNotFoundError
+        return real_stat(candidate, *args, **kwargs)
 
     ticks = iter((10.0, 9.0))
     # The autouse kill-switch cleanup also reads the monotonic clock during
@@ -152,7 +160,7 @@ def test_halt_cache_uses_monotonic_time_and_refreshes_after_clock_regression(
         killswitch.time, "time",
         lambda: (_ for _ in ()).throw(AssertionError("wall clock used")),
     )
-    monkeypatch.setattr(killswitch, "_halt_file_path", MissingHaltPath)
+    monkeypatch.setattr(Path, "stat", missing)
 
     assert killswitch._file_halt_active(min_interval=1000.0) is False
     assert killswitch._file_halt_active(min_interval=1000.0) is False

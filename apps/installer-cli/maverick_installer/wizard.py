@@ -28,6 +28,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -1018,7 +1019,19 @@ def pick_safety() -> dict[str, Any]:
             "the rest of the swarm for the run)?",
             default=False,
         )
-    return {
+    # Task-start check (off by default): Lightwork reads each task's wording
+    # and, if asked, holds risky-looking tasks until a person approves them.
+    # Every action is still checked on its own either way.
+    wait = _q_select(
+        "Ask a person before starting tasks whose wording looks risky?",
+        [
+            "never  - Start tasks straight away (default).",
+            "high   - Tasks that look high risk wait for a person.",
+            "medium - Tasks that look medium or high risk wait for a person.",
+        ],
+        default="never  - Start tasks straight away (default).",
+    ).split()[0]
+    picked = {
         "profile": profile,
         "block_threshold": threshold,
         "scan_input": profile != "off",
@@ -1026,6 +1039,9 @@ def pick_safety() -> dict[str, Any]:
         "scan_output": profile != "off",
         "compartments": compartments,
     }
+    if wait in ("high", "medium"):
+        picked["goal_risk_require_human"] = wait
+    return picked
 
 
 def pick_signed_skills() -> dict[str, Any]:
@@ -1058,7 +1074,8 @@ def pick_signed_skills() -> dict[str, Any]:
 
 def pick_budget() -> dict[str, Any]:
     console.print()
-    console.print("[dim]Per-run caps. Edit later in ~/.maverick/config.toml.[/dim]")
+    console.print("[dim]Task limits are optional. Organization spending controls still apply.[/dim]")
+    enabled = _q_confirm("  Add spending, time or tool-count limits to each task?", default=False)
     budget: dict[str, Any] = {
         "max_dollars": _safe_float(
             _q_text("  Max $ per run", default="5.0"),
@@ -1072,7 +1089,7 @@ def pick_budget() -> dict[str, Any]:
             _q_text("  Max tool calls per run", default="500"),
             default=500,
         ),
-    }
+    } if enabled else {}
     # Billing-grade accounting is the safe default. Preserve an explicit false
     # for legacy/custom gateways, where estimates remain provenance-labelled.
     budget["strict_pricing"] = _q_confirm(
@@ -1385,6 +1402,37 @@ def pick_event_triggers() -> dict[str, Any]:
     return {"enable": bool(enable)}
 
 
+def _pick_action_recipe_lineage() -> dict[str, Any]:
+    """Keep service-attested training evidence separate from execution approval."""
+    enabled = _q_confirm(
+        "Enable signed reviewed evidence for action recipes? "
+        "Service signatures attest recorded reviews, not personal reviewer signatures. "
+        "Copied business data needs explicit retention consent; current eligibility is checked before actions.",
+        default=False,
+    )
+    out: dict[str, Any] = {"action_recipe_lineage": enabled}
+    out["require_action_recipe_lineage"] = _q_confirm(
+        "Require governed reviewed lineage for every learned action recipe? "
+        "This blocks raw or stripped-lineage recipes at save, publication and execution.",
+        default=False,
+    )
+    if out["require_action_recipe_lineage"] and not enabled:
+        console.print("[yellow]Lineage is required but disabled; learned recipes remain blocked until configured.[/yellow]")
+    if enabled:
+        issuer = _q_text("Stable action-evidence issuer ID (letters/digits/._:-, max 128; blank keeps signing unavailable)",
+                         default="").strip()
+        if issuer and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", issuer):
+            raise ValueError("action-evidence issuer must be a bounded ASCII identifier, not a URL")
+        out["action_evidence_issuer"] = issuer
+        raw = _q_text("Revoked action-evidence key IDs (comma-separated 16-character lowercase hex; blank = none)",
+                      default="").strip()
+        revoked = [part.strip() for part in raw.split(",")] if raw else []
+        if any(not re.fullmatch(r"[0-9a-f]{16}", key) for key in revoked) or len(set(revoked)) != len(revoked):
+            raise ValueError("revoked action-evidence keys require unique 16-character lowercase hex IDs")
+        out["action_evidence_revoked_keys"] = revoked
+    return out
+
+
 def pick_flows() -> dict[str, Any]:
     """Opt-in to the flow engine (multi-step visual workflows).
 
@@ -1405,6 +1453,69 @@ def pick_flows() -> dict[str, Any]:
     if not _q_confirm("Enable the flow engine?", default=False):
         return {"enable": False}
     out: dict[str, Any] = {"enable": True}
+    out["learned_operators"] = _q_confirm(
+        "Enable bounded learned pure operators from reviewed examples? "
+        "All retained expressions must agree; other inputs use the original agent.",
+        default=False,
+    )
+    out["learned_operator_questions"] = _q_confirm(
+        "Enable stored learned-operator review questions? "
+        "Reviewed answers create drafts; nothing is automatically published.",
+        default=False,
+    )
+    out["composed_operators"] = _q_confirm(
+        "Enable bounded composed pure operators? "
+        "Also requires learned operators; every retained expression must agree.",
+        default=False,
+    )
+    out["action_recipes"] = _q_confirm(
+        "Enable learning action sequences from reviewed examples? "
+        "Generated flows retain approval gates and stop on ambiguous data bindings.",
+        default=False,
+    )
+    out["action_recipe_transforms"] = _q_confirm(
+        "Enable learned transformations in action arguments? "
+        "Also requires action recipes and explicit data bounds; every retained expression must agree. "
+        "Approvals remain required and uncertainty stops further actions.",
+        default=False,
+    )
+    out["action_recipe_choices"] = _q_confirm(
+        "Enable learned binary action choices after one shared action? "
+        "Also requires action recipes and transformed arguments. Every retained guard must agree; "
+        "the chosen terminal action needs approval, and uncertainty never repeats the shared action.",
+        default=False,
+    )
+    out["action_recipe_teaching"] = _q_confirm(
+        "Enable human teaching at a real completed action prefix? "
+        "Requires action recipes, transformed arguments, choices and governed lineage. "
+        "Both continuation arguments must agree; human choice and a separate action approval remain required. "
+        "Teaching never repeats the shared action.",
+        default=False,
+    )
+    out["action_episode_capture"] = _q_confirm(
+        "Enable retaining workflow examples for learning? "
+        "Each run needs enrollment, encrypted storage, an expiry and a separate human review.",
+        default=False,
+    )
+    out["action_workflow_learning"] = _q_confirm(
+        "Enable bounded workflow learning from signed reviewed executions? "
+        "Requires action recipes, transformed arguments and governed lineage. "
+        "Learns next actions and completion from observed history, up to eight actions; "
+        "approvals remain required and ambiguity stops further work. "
+        "Signed execution receipts are mandatory; execution refuses if signing or persistence is unavailable. "
+        "This choice does not enable audit signing or other dependencies.",
+        default=False,
+    )
+    out["action_workflow_memory_learning"] = _q_confirm(
+        "Enable bounded integer history accumulator learning? "
+        "Requires workflow learning, action recipes, transformed arguments and governed lineage. "
+        "One fixed update program runs across each history; all consistent models must agree. "
+        "Native approvals remain in force and ambiguity or resource exhaustion stops further work. "
+        "Signed execution receipts are mandatory; execution refuses if signing or persistence is unavailable. "
+        "This choice does not enable audit signing or other dependencies.",
+        default=False,
+    )
+    out.update(_pick_action_recipe_lineage())
     console.print(
         "[dim]Retries can recover transient agent/tool failures, but every retry "
         "can spend provider budget or repeat side effects. Keep the per-node cap "
@@ -1450,7 +1561,8 @@ def pick_knowledge() -> dict[str, Any]:
 
     Off by default; the kernel never requires maverick-knowledge. When on,
     ``embedder`` selects the embedding provider (hosted Voyage / local /
-    deterministic) and ``store`` selects the vector backend (sqlite / pgvector).
+    deterministic) and ``store`` selects SQLite/pgvector for ingestion or
+    Qdrant for existing-corpus reads and erasure.
     Returns a dict written under ``[knowledge]``.
     """
     console.print()
@@ -1472,12 +1584,21 @@ def pick_knowledge() -> dict[str, Any]:
         default="hosted        - Voyage AI (needs VOYAGE_API_KEY)",
     ).split()[0]
     out["embedder"] = embedder
+    if embedder != "deterministic":
+        console.print(
+            "[dim]Optional embedding revision: local models use a resolved commit hash; "
+            "a hosted revision is your recorded provider version, not provider verification. "
+            "Changing the model or revision requires knowledge reindex.[/dim]"
+        )
+        revision = _q_text("  Embedding revision (blank = automatic/default identity)", default="").strip()
+        if revision:
+            out["revision"] = revision
     store = _q_select(
         "  Vector store:",
         [
             "sqlite   - single-file, local (default; fine to a few million chunks)",
             "pgvector - Postgres + pgvector (enterprise: one DB to encrypt/back up/audit)",
-            "qdrant   - Qdrant (scale / dedicated retrieval infra)",
+            "qdrant   - existing corpus reads/erasure (new ingestion unavailable)",
         ],
         default="sqlite   - single-file, local (default; fine to a few million chunks)",
     ).split()[0]
@@ -1487,6 +1608,10 @@ def pick_knowledge() -> dict[str, Any]:
         if dsn:
             out["dsn"] = dsn
     elif store == "qdrant":
+        console.print(
+            "[yellow]Qdrant can read and erase existing documents. Adding or repairing "
+            "documents is unavailable. Choose SQLite or pgvector to ingest new documents.[/yellow]"
+        )
         url = _q_text("  Qdrant URL (blank = QDRANT_URL env)", default="").strip()
         if url:
             out["url"] = url
@@ -1975,7 +2100,6 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "enable": True,
             "publishing": {
                 "enable": consent_publishing,
-                "require_signed_publications": True,
                 **(
                     {
                         "web_settings": {
@@ -2243,6 +2367,15 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         "live device, service, customer-estate, and legal acceptance remain separate.",
         default=False,
     )
+    if consent_product is not None and _q_confirm(
+        "Keep consent records in a shared PostgreSQL database instead of files on "
+        "this server? The connection is read from MAVERICK_CONSENT_PG_DSN on the server.",
+        default=False,
+    ):
+        consent_product["storage"] = {
+            "backend": "postgres",
+            "dsn_secret_ref": "$MAVERICK_CONSENT_PG_DSN",
+        }
     if consent_global_opt_out and consent_product is not None:
         consent_product["global_opt_out"] = {
             "enable": True,
@@ -2361,6 +2494,11 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
     data_use_governance = _q_confirm(
         "Enable the Data Use Governance authority and policy compiler? "
         "Provider writes remain disabled until a native provider is enrolled.",
+        default=False,
+    )
+    data_use_checks = data_use_governance and _q_confirm(
+        "Run the data-use checks in the background (the change record, decisions that "
+        "no longer match current facts, ended exceptions)? Nothing is changed or sent.",
         default=False,
     )
     data_use_native: dict[str, Any] | None = None
@@ -2584,13 +2722,18 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "enable": True,
             "compiler": {"enable": True},
         }
+        if data_use_checks:
+            data_use_product["scheduler"] = {
+                "enable": True,
+                "poll_seconds": 3_600,
+                "lease_seconds": 900,
+                "history_limit": 50,
+            }
         if data_use_native is not None:
             data_use_product["enforcement"] = {
                 "enable": True,
                 "require_four_eyes": True,
                 "max_attempts": 3,
-                "retry_base_seconds": 30,
-                "retry_max_seconds": 300,
             }
             data_use_product[str(data_use_native["provider"])] = data_use_native["section"]
             provider_audit_config: dict[str, Any] = {
@@ -3791,6 +3934,7 @@ def pick_finance() -> dict[str, Any]:
                 or "Finance Control Owner",
             }
         )
+        operations.update(pick_finance_profile())
     return {
         "enable": True,
         "regimes": regimes,
@@ -3799,6 +3943,58 @@ def pick_finance() -> dict[str, Any]:
         "require_fresh_human_approval": require_fresh,
         "sdn_path": sdn_path,
         **operations,
+    }
+
+
+# The Finance Operating Profile (finance-agent-suite §3.8) -- the same keys
+# and values the dashboard's Settings > All settings > Finance rows write and
+# maverick.finance.profile reads.
+FINANCE_FRAMEWORKS = ("us_gaap", "ifrs")
+FINANCE_AUTOMATION_LEVELS = ("draft", "approve", "auto_threshold", "straight_through")
+FINANCE_SOD_MODES = ("enforce", "warn")
+
+
+def pick_finance_profile() -> dict[str, Any]:
+    """The finance operating profile, asked only with finance operations on.
+
+    Returns ``finance_framework`` / ``finance_materiality`` (0 = not set) /
+    ``finance_automation_default`` / ``finance_sod_mode`` /
+    ``finance_approvals_timeout``. The approval timeout has one value,
+    ``fail_closed``: finance never lets an unanswered approval through.
+    """
+    console.print(
+        "[dim]Finance operating profile: the accounting framework, the "
+        "materiality amount that raises review, how far agents may go on "
+        "finance actions (payments and postings always wait for a person), "
+        "and whether separation-of-duties conflicts block or are recorded.[/dim]"
+    )
+    framework = _q_select(
+        "  Accounting framework:", list(FINANCE_FRAMEWORKS), default="us_gaap",
+    )
+    materiality = max(0.0, _safe_float(
+        _q_text("  Materiality amount (0 = not set)", default="0"), default=0.0,
+    ))
+    automation = _q_select(
+        "  How far agents go on finance actions by default "
+        "(draft = prepare only; approve = act after a person approves; "
+        "auto_threshold = act alone under the approval limit; "
+        "straight_through = act alone):",
+        list(FINANCE_AUTOMATION_LEVELS), default="draft",
+    )
+    sod_mode = _q_select(
+        "  Separation-of-duties conflicts (enforce = block; warn = record and "
+        "ask a person):",
+        list(FINANCE_SOD_MODES), default="enforce",
+    )
+    return {
+        "finance_framework": framework if framework in FINANCE_FRAMEWORKS else "us_gaap",
+        "finance_materiality": materiality,
+        "finance_automation_default": (
+            automation if automation in FINANCE_AUTOMATION_LEVELS else "draft"
+        ),
+        "finance_sod_mode": sod_mode if sod_mode in FINANCE_SOD_MODES else "enforce",
+        # The only value: an unanswered finance approval is refused.
+        "finance_approvals_timeout": "fail_closed",
     }
 
 
@@ -3986,6 +4182,60 @@ def _ask_self_harness_evaluation_boundary(advanced: dict[str, Any]) -> None:
     )
 
 
+def _pick_codebase(advanced: dict[str, Any]) -> None:
+    """Software development: vault your repositories, let swarms build features."""
+    if not _q_confirm(
+        "  Enable the code vault? Your repositories are held sealed inside Lightwork, "
+        "swarms build features on branches, and nothing merges or pushes without "
+        "your approval (`maverick code`).",
+        default=False,
+    ):
+        return
+    advanced["codebase_enable"] = True
+    protect = _q_select(
+        "    While a swarm works on your code, a call that would send it outside should",
+        choices=["block   - be refused (recommended)",
+                 "approve - wait for a human",
+                 "audit   - be recorded and allowed"],
+        default="block   - be refused (recommended)",
+    )
+    advanced["codebase_protect"] = (str(protect or "").split() or ["block"])[0]
+
+
+def _pick_ifc(advanced: dict[str, Any]) -> None:
+    """Information-flow control: what an agent has read decides where it may send."""
+    mode = _q_select(
+        "  Information-flow control: when an agent that has read tenant data (or "
+        "your code) calls a tool that sends outside, Lightwork should",
+        choices=[
+            "audit   - record it and allow (default)",
+            "approve - ask a human each time a new kind of data would leave",
+            "block   - refuse it",
+            "off     - do not track",
+        ],
+        default="audit   - record it and allow (default)",
+    )
+    mode = (str(mode or "").split() or ["audit"])[0]
+    if mode in ("approve", "block", "off"):
+        advanced["ifc_mode"] = mode
+
+
+def _pick_swarm_scale(advanced: dict[str, Any]) -> None:
+    """Swarm scale: a goal may create up to 64 agents by default. Raising it is
+    safe only with a model-call bound, so the swarm queues for the provider."""
+    if not _q_confirm(
+        "  Allow larger swarms (more than 64 agents per goal)? The budget still "
+        "caps total spend.",
+        default=False,
+    ):
+        return
+    advanced["swarm_max_total_spawns"] = max(1, _safe_int(
+        _q_text("    Maximum agents one goal may create", default="256"), default=256))
+    advanced["swarm_max_concurrent_model_calls"] = max(0, _safe_int(
+        _q_text("    Model calls in flight at once per goal (0 = unbounded)",
+                default="16"), default=16))
+
+
 def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
@@ -4092,6 +4342,22 @@ def pick_advanced() -> dict[str, Any]:
             "deposit experience into and recall from Lightwork's governed "
             "memory -- Shield-scanned, provenance-tagged, audited reads. "
             "An explicit trust decision; OFF by default.",
+            default=False,
+        ),
+        "immune_canaries": _q_confirm(
+            "Oversight canaries? Let operators seed realistic, known-flawed "
+            "approvals into the real approvals queue (`maverick immune canary`) "
+            "to measure whether reviewers catch them -- per person and decision "
+            "class, with earned approval authority. Nothing executes on a canary. "
+            "An explicit decision to test your people; OFF by default.",
+            default=False,
+        ),
+        "immune_twin_record": _q_confirm(
+            "Production twin recording? Record every goal's tool results "
+            "(sealed, per tenant) so a goal can be replayed later against exactly "
+            "what production saw (`maverick immune twin replay`) -- to test a new "
+            "model, prompt or policy on real work with nothing live touched. "
+            "Retains tool output; OFF by default.",
             default=False,
         ),
         "cortex": _q_confirm(
@@ -4675,6 +4941,16 @@ def pick_advanced() -> dict[str, Any]:
             "(chargeback / cost governance across runs, beyond the per-run budget).",
             default=False,
         ),
+        "spending_workspace_monthly": _q_text(
+            "Monthly spending limit for the whole workspace, in dollars "
+            "(0 = no limit; you can change it any time in Admin > Spending limits)",
+            default="0",
+        ),
+        "spending_person_monthly": _q_text(
+            "Monthly spending limit for each person, in dollars "
+            "(0 = no limit; you can set different limits per person in the dashboard)",
+            default="0",
+        ),
         "tenant_by_user": _q_confirm(
             "Isolate each user into their own tenant? Per-user cross-session memory "
             "is kept separate — recommended for multi-user servers.",
@@ -4745,6 +5021,20 @@ def pick_advanced() -> dict[str, Any]:
             "with `maverick tenant backfill --tenant <id>` and verify with "
             "`maverick tenant rls-preflight`, or pre-tenancy rows become invisible. "
             "Off by default; leave off for SQLite or single-tenant installs.",
+            default=False,
+        ),
+        "allow_copilot_operations": _q_confirm(
+            "Let Copilot show a learning example's current status and open its "
+            "stop-use review? You confirm each decision in a protected form. "
+            "Other product actions are not included. Page controls remain available "
+            "when this is off.", default=False,
+        ),
+        "governed_pg_pool": _q_confirm(
+            "Reuse one bounded Postgres connection for governed records? "
+            "Only affects a configured Postgres governed-record backend. "
+            "Each operation still validates tenant, schema and key authority; "
+            "waiting is capped at five seconds. Start with one connection and "
+            "measure your workload before increasing pool_size. Off by default.",
             default=False,
         ),
         "audit_sign": _q_confirm(
@@ -4899,6 +5189,69 @@ def pick_advanced() -> dict[str, Any]:
     # Signed channel Approve/Reject links need the dashboard's externally-
     # reachable base URL; blank keeps approvals on the dashboard itself.
     if advanced.get("flows"):
+        advanced["flows_learned_operators"] = _q_confirm(
+            "  Enable bounded learned pure operators from reviewed examples? "
+            "Agreement within declared bounds only; otherwise use the original agent.",
+            default=False,
+        )
+        advanced["flows_learned_operator_questions"] = _q_confirm(
+            "  Enable stored learned-operator review questions? "
+            "Reviewed answers create drafts without automatic publication.",
+            default=False,
+        )
+        advanced["flows_composed_operators"] = _q_confirm(
+            "  Enable bounded composed pure operators? "
+            "Also requires learned operators; otherwise use the original agent.",
+            default=False,
+        )
+        advanced["flows_action_recipes"] = _q_confirm(
+            "  Enable learning action sequences from reviewed examples? "
+            "Generated flows retain approval gates and stop on ambiguous data bindings.",
+            default=False,
+        )
+        advanced["flows_action_recipe_transforms"] = _q_confirm(
+            "  Enable learned transformations in action arguments? "
+            "Also requires action recipes and explicit data bounds; every retained expression must agree. "
+            "Approvals remain required and uncertainty stops further actions.",
+            default=False,
+        )
+        advanced["flows_action_recipe_choices"] = _q_confirm(
+            "  Enable learned binary action choices after one shared action? "
+            "Also requires action recipes and transformed arguments. Every retained guard must agree; "
+            "the chosen terminal action needs approval, and uncertainty never repeats the shared action.",
+            default=False,
+        )
+        advanced["flows_action_recipe_teaching"] = _q_confirm(
+            "  Enable human teaching at a real completed action prefix? "
+            "Requires action recipes, transformed arguments, choices and governed lineage. "
+            "Both continuation arguments must agree; human choice and a separate action approval remain required. "
+            "Teaching never repeats the shared action.",
+            default=False,
+        )
+        advanced["flows_action_episode_capture"] = _q_confirm(
+            "  Enable retaining workflow examples for learning? "
+            "Each run needs enrollment, encrypted storage, an expiry and a separate human review.",
+            default=False,
+        )
+        advanced["flows_action_workflow_learning"] = _q_confirm(
+            "  Enable bounded workflow learning from signed reviewed executions? "
+            "Requires action recipes, transformed arguments and governed lineage. "
+            "Learns next actions and completion from observed history, up to eight actions; "
+            "approvals remain required and ambiguity stops further work. "
+            "Signed execution receipts are mandatory; execution refuses if signing or persistence is unavailable. "
+            "This choice does not enable audit signing or other dependencies.",
+            default=False,
+        )
+        advanced["flows_action_workflow_memory_learning"] = _q_confirm(
+            "  Enable bounded integer history accumulator learning? "
+            "Requires workflow learning, action recipes, transformed arguments and governed lineage. "
+            "One fixed update program runs across each history; all consistent models must agree. "
+            "Native approvals remain in force and ambiguity or resource exhaustion stops further work. "
+            "Signed execution receipts are mandatory; execution refuses if signing or persistence is unavailable. "
+            "This choice does not enable audit signing or other dependencies.",
+            default=False,
+        )
+        advanced.update({"flows_" + key: value for key, value in _pick_action_recipe_lineage().items()})
         flows_url = _q_text(
             "  Public base URL for flow approval links (e.g. https://ops.acme.com; "
             "blank = approve from the dashboard)",
@@ -5032,6 +5385,24 @@ def pick_advanced() -> dict[str, Any]:
                 default=0,
             ),
         )
+    # Chat answers (maverick.agent): a live, redacted, Shield-scanned preview,
+    # and whether plain prose replies also wait on the self-verifier.
+    advanced["stream_answers"] = _q_confirm(
+        "  Stream chat answers as they are written (redacted and Shield-scanned)?",
+        default=True,
+    )
+    advanced["verify_chat_answers"] = _q_confirm(
+        "  Also self-verify plain chat replies (one extra model call each)?",
+        default=False,
+    )
+    # Resource ceilings for the SQL tools and read-only REST connector retries.
+    advanced["query_timeout_seconds"] = min(300, max(1, _safe_int(
+        _q_text("  SQL tool query timeout in seconds (1-300)", default="30"), default=30)))
+    advanced["connector_max_attempts"] = min(5, max(1, _safe_int(
+        _q_text("  REST connector read attempts (1-5)", default="3"), default=3)))
+    _pick_ifc(advanced)
+    _pick_codebase(advanced)
+    _pick_swarm_scale(advanced)
     # Tax-constants content channel: law changes ship as SIGNED bundles
     # (fail-closed against the publisher keys), auto-applied by
     # `maverick tax prepare` / `maverick tax update`.
@@ -5308,6 +5679,16 @@ def _docker_available() -> bool:
 _LANGUAGE_BACKENDS = {"docker", "gvisor", "podman", "kubernetes"}
 
 
+def _ssh_destination(value: Any) -> str:
+    """Validate a destination's structure without invoking SSH or resolving DNS."""
+    destination = value.strip() if isinstance(value, str) else ""
+    if any(ord(character) < 32 or ord(character) == 127 for character in destination) or not re.fullmatch(r"(?:[^\s@/:\\]+@)?[^\s@/\\]+", destination):
+        raise ValueError("SSH destination must be a host, user@host, or SSH config alias")
+    if destination.rsplit("@", 1)[-1].startswith("-") or destination.startswith("-"):
+        raise ValueError("SSH destination cannot start with an option prefix")
+    return destination
+
+
 def pick_sandbox() -> dict[str, Any]:
     # Security-first default: keep Docker selected by default regardless
     # of current daemon reachability to avoid silently falling back to
@@ -5327,8 +5708,20 @@ def pick_sandbox() -> dict[str, Any]:
         default=docker_default,
     )
     backend = pick.split()[0]
-    workdir = _q_text("  Workspace directory", default=str(Path.home() / "maverick-workspace"))
+    remote = backend == "ssh"
+    workdir = _q_text(
+        "  Remote workspace directory" if remote else "  Workspace directory",
+        default="~/maverick-workspace" if remote else os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "maverick-workspace"),
+    )
     cfg: dict[str, Any] = {"backend": backend, "workdir": workdir, "timeout": 60}
+    if remote:
+        while True:
+            try:
+                cfg["host"] = _ssh_destination(_q_text("  SSH destination (user@host or SSH config alias)", default=""))
+                break
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/red]")
+        console.print("[dim]SSH connectivity is checked when the sandbox starts; setup does not contact the remote host.[/dim]")
     # Non-Python coders get a toolchain image that can actually run their tests
     # (cargo/go test, the JS runner, ...). Python is the default image, so we
     # only write [sandbox] language when it's something else -- existing and
@@ -5784,7 +6177,7 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
             "  ntfy topic (any unique string; treat as a password)",
             default="",
         ).strip()
-        return ({"backend": "ntfy", "topic": topic}, []) if topic else ({}, [])
+        return ({"backend": "ntfy", "ntfy_topic": topic}, []) if topic else ({}, [])
     if backend == "pushover":
         return (
             {
@@ -5796,12 +6189,12 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         )
     if backend == "slack":
         return (
-            {"backend": "slack", "webhook_url": "${SLACK_NOTIFY_WEBHOOK}"},
+            {"backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}"},
             ["SLACK_NOTIFY_WEBHOOK"],
         )
     if backend == "discord":
         return (
-            {"backend": "discord", "webhook_url": "${DISCORD_NOTIFY_WEBHOOK}"},
+            {"backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}"},
             ["DISCORD_NOTIFY_WEBHOOK"],
         )
     return {}, []
@@ -6463,6 +6856,18 @@ def _cfg_flows(flows: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _fold_flow_operator_options(flows: dict[str, Any], advanced: dict[str, Any]) -> None:
+    """Keep explicit dedicated answers when merging the advanced flow step."""
+    for key in ("learned_operators", "learned_operator_questions", "composed_operators",
+                "action_recipes", "action_recipe_transforms", "action_recipe_choices", "action_recipe_teaching",
+                "action_episode_capture", "action_workflow_learning", "action_workflow_memory_learning",
+                "action_recipe_lineage", "require_action_recipe_lineage",
+                "action_evidence_issuer", "action_evidence_revoked_keys"):
+        advanced_key = "flows_" + key
+        if advanced_key in advanced:
+            flows.setdefault(key, advanced.pop(advanced_key))
+
+
 def _cfg_knowledge(knowledge: dict[str, Any] | None) -> list[str]:
     if not knowledge:
         return []
@@ -6583,9 +6988,18 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     return lines
 
 
-def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
+def _cfg_governed_records(enable_pool: bool = False) -> list[str]:
+    return [
+        "", "[governed_records]", 'backend = "auto"',
+        f"pool_size = {1 if enable_pool else 0}", "pool_timeout_seconds = 5",
+    ]
+
+
+def _cfg_security_suite(
+    security_suite: dict[str, Any] | None, *, governed_pg_pool: bool = False,
+) -> list[str]:
     if security_suite is None:
-        return []
+        return _cfg_governed_records(True) if governed_pg_pool else []
     allowed_inventory_connectors = {
         "agentforce",
         "azure_ai_foundry",
@@ -6713,9 +7127,7 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "attachment_ttl_seconds = 604800",
         "max_attachments = 100000",
         'allowed_media_types = ["application/json", "application/pdf", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png", "image/webp", "text/csv", "text/plain"]',
-        "",
-        "[governed_records]",
-        'backend = "auto"',
+        *_cfg_governed_records(governed_pg_pool or bool(security_suite.get("governed_pg_pool"))),
         "",
         "[evidence_graph]",
         f"enable = {'true' if security_suite.get('evidence_graph', False) or security_suite.get('vendor_onboarding', False) else 'false'}",
@@ -7163,10 +7575,26 @@ def _cfg_finance(finance: dict[str, Any] | None) -> list[str]:
         lines.append("[governance.deny_above]")
         lines.append(f'"*" = {da}')
     regimes = finance.get("regimes") or []
-    if regimes:
+    framework = finance.get("finance_framework") or ""
+    materiality = finance.get("finance_materiality") or 0
+    if regimes or framework or materiality:
         lines.append("")
         lines.append("[finance]")
-        _emit_kv(lines, "regimes", regimes)
+        if regimes:
+            _emit_kv(lines, "regimes", regimes)
+        if framework:
+            _emit_kv(lines, "framework", framework)
+        if materiality and materiality > 0:
+            _emit_kv(lines, "materiality", materiality)
+    for table, key, value in (
+        ("finance.automation", "default", finance.get("finance_automation_default")),
+        ("finance.sod", "mode", finance.get("finance_sod_mode")),
+        ("finance.approvals", "timeout", finance.get("finance_approvals_timeout")),
+    ):
+        if value:
+            lines.append("")
+            lines.append(f"[{table}]")
+            _emit_kv(lines, key, value)
     sdn = (finance.get("sdn_path") or "").strip()
     if sdn:
         lines.append("")
@@ -7292,10 +7720,26 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.append("verify_ensemble = true")
         if advanced.get("energy_aware"):
             lines.append("energy_aware = true")
-    if advanced.get("risk_proportional_verify"):
+    if advanced.get("risk_proportional_verify") or advanced.get("verify_chat_answers"):
         lines.append("")
         lines.append("[verification]")
-        lines.append("risk_proportional = true")
+        if advanced.get("risk_proportional_verify"):
+            lines.append("risk_proportional = true")
+        if advanced.get("verify_chat_answers"):
+            lines.append("verify_chat_answers = true")
+    # Chat previews are on by default in the kernel: write only a deliberate "no".
+    if advanced.get("stream_answers") is False:
+        lines.append("")
+        lines.append("[chat]")
+        lines.append("stream_answers = false")
+    if advanced.get("query_timeout_seconds", 30) != 30:
+        lines.append("")
+        lines.append("[query_limits]")
+        lines.append(f"timeout_seconds = {int(advanced['query_timeout_seconds'])}")
+    if advanced.get("connector_max_attempts", 3) != 3:
+        lines.append("")
+        lines.append("[connector_limits]")
+        lines.append(f"max_attempts = {int(advanced['connector_max_attempts'])}")
     if advanced.get("autonomy_gate") or advanced.get("headless_assume"):
         lines.append("")
         lines.append("[autonomy]")
@@ -7507,6 +7951,31 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("enable = true")
         lines.append("# Per-node retry cap; bounds repeated provider/tool calls.")
         lines.append("max_node_retries = 5")
+        if "flows_learned_operators" in advanced:
+            _emit_kv(lines, "learned_operators", advanced["flows_learned_operators"])
+        if "flows_learned_operator_questions" in advanced:
+            _emit_kv(lines, "learned_operator_questions",
+                     advanced["flows_learned_operator_questions"])
+        if "flows_composed_operators" in advanced:
+            _emit_kv(lines, "composed_operators", advanced["flows_composed_operators"])
+        if "flows_action_recipes" in advanced:
+            _emit_kv(lines, "action_recipes", advanced["flows_action_recipes"])
+        if "flows_action_recipe_transforms" in advanced:
+            _emit_kv(lines, "action_recipe_transforms", advanced["flows_action_recipe_transforms"])
+        if "flows_action_recipe_choices" in advanced:
+            _emit_kv(lines, "action_recipe_choices", advanced["flows_action_recipe_choices"])
+        if "flows_action_recipe_teaching" in advanced:
+            _emit_kv(lines, "action_recipe_teaching", advanced["flows_action_recipe_teaching"])
+        if "flows_action_episode_capture" in advanced:
+            _emit_kv(lines, "action_episode_capture", advanced["flows_action_episode_capture"])
+        if "flows_action_workflow_learning" in advanced:
+            _emit_kv(lines, "action_workflow_learning", advanced["flows_action_workflow_learning"])
+        if "flows_action_workflow_memory_learning" in advanced:
+            _emit_kv(lines, "action_workflow_memory_learning", advanced["flows_action_workflow_memory_learning"])
+        for key in ("action_recipe_lineage", "require_action_recipe_lineage",
+                    "action_evidence_issuer", "action_evidence_revoked_keys"):
+            if "flows_" + key in advanced:
+                _emit_kv(lines, key, advanced["flows_" + key])
         if advanced.get("flows_auto_evolve"):
             lines.append("# Autonomously revert a node rewrite whose grounded outcomes")
             lines.append("# regressed (the loop undoes its own bad changes).")
@@ -7544,6 +8013,21 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         # dimension. The kernel also reads MAVERICK_QUOTA_* env overrides.
         lines.append("max_dollars_per_day = 25.0")
         lines.append("max_tokens_per_day = 5000000")
+    _workspace_limit = _safe_float(advanced.get("spending_workspace_monthly") or 0, default=0.0)
+    _person_limit = _safe_float(advanced.get("spending_person_monthly") or 0, default=0.0)
+    _workspace_limit = _workspace_limit if math.isfinite(_workspace_limit) else 0.0
+    _person_limit = _person_limit if math.isfinite(_person_limit) else 0.0
+    if _workspace_limit > 0 or _person_limit > 0:
+        # Starting limits; administrators change them in the dashboard
+        # (Admin > Spending limits), which then takes precedence.
+        lines.append("")
+        lines.append("[spending_limits]")
+        if _workspace_limit > 0:
+            lines.append(f"workspace_dollars = {_workspace_limit:.2f}")
+            lines.append('workspace_period = "month"')
+        if _person_limit > 0:
+            lines.append(f"default_user_dollars = {_person_limit:.2f}")
+            lines.append('default_user_period = "month"')
     if advanced.get("tenant_by_user"):
         lines.append("")
         lines.append("[tenancy]")
@@ -7677,6 +8161,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     # and as ONE [features] table (two tables would be a duplicate-key TOML
     # error). The kernel reads these via config.get_features.
     _feature_locks = []
+    if advanced.get("allow_copilot_operations") is True:
+        _feature_locks.append("copilot_operations = true")
     if advanced.get("allow_workflow_readiness") is False:
         _feature_locks.append("workflow_readiness = false")
     if advanced.get("allow_project_reviews") is True:
@@ -7823,6 +8309,38 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[fleet_memory]")
         lines.append("enable = true")
+    if advanced.get("codebase_enable"):
+        lines.append("")
+        lines.append("[codebase]")
+        lines.append("# Code vault and feature swarms (maverick.codebase): repositories sealed")
+        lines.append("# at rest; changes merge or push only after a human approves.")
+        lines.append("enable = true")
+        protect = advanced.get("codebase_protect", "block")
+        if protect in ("block", "approve", "audit"):
+            lines.append(f'default_protect = "{protect}"')
+    if advanced.get("ifc_mode"):
+        lines.append("")
+        lines.append("[ifc]")
+        lines.append("# Information-flow control (maverick.ifc): labelled data reaching an")
+        lines.append("# external sink is recorded (audit), held for approval, or blocked.")
+        lines.append(f'mode = "{advanced["ifc_mode"]}"')
+    if advanced.get("swarm_max_total_spawns"):
+        lines.append("")
+        lines.append("[swarm]")
+        lines.append(f"max_total_spawns = {int(advanced['swarm_max_total_spawns'])}")
+        lines.append("max_concurrent_model_calls = "
+                     f"{int(advanced.get('swarm_max_concurrent_model_calls', 0))}")
+    if advanced.get("immune_canaries") or advanced.get("immune_twin_record"):
+        lines.append("")
+        lines.append("[immune]")
+    if advanced.get("immune_canaries"):
+        lines.append("# Oversight canaries (maverick.immune.oversight): operators may seed")
+        lines.append("# known-flawed approvals to measure reviewer catch rates.")
+        lines.append("canaries = true")
+    if advanced.get("immune_twin_record"):
+        lines.append("# Production twin (maverick.immune.twin): record tool results so a")
+        lines.append("# goal can be replayed against exactly what production saw.")
+        lines.append("twin_record = true")
     if advanced.get("cortex"):
         lines.append("")
         lines.append("[cortex]")
@@ -8325,23 +8843,57 @@ def _tighten_wizard_file(path: Path) -> None:
 
 def _write_wizard_file(path: Path, body: str) -> None:
     """Write one private wizard file, preserving a logically equivalent retry."""
+    from maverick.file_lock import atomic_write_text
 
     if _wizard_file_unchanged(path, body.encode("utf-8")):
         _tighten_wizard_file(path)
         console.print(f"[green]ok[/green] unchanged {path} (chmod 600)")
         return
     _backup_wizard_file(path)
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as destination:
-            destination.write(body)
-    finally:
-        # If the file already existed at a wider mode, tighten it.
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+    atomic_write_text(path, body, mode=0o600)
     console.print(f"[green]ok[/green] wrote {path} (chmod 600)")
+
+
+def _publish_wizard_configuration(config_body: str, env_body: str | None) -> None:
+    """Publish complete files, rolling environment changes back on config failure.
+
+    Each file is atomic. This does not claim crash-atomic replacement of two
+    directory entries; ordinary save failures restore the previous pair.
+    """
+    from maverick.file_lock import atomic_write_text, cross_process_lock
+
+    tomllib.loads(config_body)  # Never replace .env for an invalid configuration.
+    with cross_process_lock(CONFIG_FILE, strict=True):
+        old_env = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else None
+        env_changed = env_body is not None and not _wizard_file_unchanged(ENV_FILE, env_body.encode("utf-8"))
+        try:
+            if env_body is not None:
+                _write_wizard_file(ENV_FILE, env_body)
+            _write_wizard_file(CONFIG_FILE, config_body)
+        except BaseException:
+            if env_changed:
+                if old_env is None:
+                    ENV_FILE.unlink(missing_ok=True)
+                else:
+                    atomic_write_text(ENV_FILE, old_env, mode=0o600)
+            raise
+
+
+def _prepare_wizard_workspace(sandbox: dict[str, Any]) -> dict[str, Any]:
+    """Prepare host workspaces before a configuration is advertised as usable."""
+    result = dict(sandbox)
+    if str(result.get("backend", "local")).strip().lower() == "ssh":
+        result["host"] = _ssh_destination(result.get("host"))
+        return result  # Remote POSIX paths must never be provisioned on this host.
+    workdir = Path(result.get("workdir") or os.environ.get("MAVERICK_WORKDIR") or "~/maverick-workspace").expanduser().resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    # Permission bits alone are insufficient for ACLs and mounted volumes.
+    with tempfile.TemporaryFile(dir=workdir, prefix=".lightwork-setup-") as probe:
+        probe.write(b"workspace-ready\n")
+        probe.flush()
+        os.fsync(probe.fileno())
+    result["workdir"] = str(workdir)
+    return result
 
 
 def write_config(
@@ -8399,6 +8951,7 @@ def write_config(
     per_tenant_keys: bool = False,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    sandbox = _prepare_wizard_workspace(sandbox)
 
     keys = dict(keys)
     if security_suite and security_suite.get("red_team_assurance"):
@@ -8418,17 +8971,9 @@ def write_config(
             prior or secrets.token_urlsafe(48),
         )
 
-    # Re-running the wizard truncates config.toml / .env. The loader explicitly
-    # supports hand-editing, so back up any existing file first (0o600) instead
-    # of silently destroying a user's manual edits.
-    if keys:
-        # Atomic + perm-from-creation: previous version was
-        # ``write_text(...)`` followed by ``chmod(0o600)``, which left
-        # the file world-readable (0o644) for one syscall. Open with
-        # ``O_CREAT | O_WRONLY | O_TRUNC`` and mode 0o600 so the file
-        # never exists at any other permission.
-        body = "\n".join(f"{k}={v}" for k, v in keys.items()) + "\n"
-        _write_wizard_file(ENV_FILE, body)
+    # Preserve private backups of hand-edited files. Compose both new files
+    # before replacing either active file, and publish through private temps.
+    env_body = "\n".join(f"{k}={v}" for k, v in keys.items()) + "\n" if keys else None
 
     # [flows] can be requested by two independent wizard steps: the dedicated
     # flow-engine step (the `flows` arg) and the advanced-reasoning "Flow
@@ -8447,6 +8992,7 @@ def write_config(
         flows.setdefault("enable", True)
         if advanced.pop("flows_auto_evolve", False):
             flows.setdefault("auto_evolve", True)
+        _fold_flow_operator_options(flows, advanced)
         _flows_url = advanced.pop("flows_public_url", None)
         if _flows_url:
             flows.setdefault("public_url", _flows_url)
@@ -8510,7 +9056,9 @@ def write_config(
     lines += _cfg_finance(finance)
     lines += _cfg_value(value)
     lines += _cfg_assessments(assessments)
-    lines += _cfg_security_suite(security_suite)
+    lines += _cfg_security_suite(
+        security_suite, governed_pg_pool=bool(advanced.get("governed_pg_pool")),
+    )
     if security_suite is not None:
         lines += [
             "", "[vendor_onboarding]",
@@ -8575,7 +9123,7 @@ def write_config(
     # secret-bearing in backups/log redaction. chmod 600 so multi-user hosts
     # don't leak it to other accounts.
     config_body = "\n".join(lines) + "\n"
-    _write_wizard_file(CONFIG_FILE, config_body)
+    _publish_wizard_configuration(config_body, env_body)
 
 
 def smoke_test() -> bool:
@@ -8586,6 +9134,8 @@ def smoke_test() -> bool:
 
         cfg = load_config()
         assert cfg.get("sandbox", {}).get("backend"), "sandbox backend missing"
+        if str(cfg["sandbox"]["backend"]).strip().lower() == "ssh":
+            _ssh_destination(cfg["sandbox"].get("host"))
         console.print("[green]✓[/green] Config readable")
     except Exception as e:
         console.print(f"[red]✗[/red] Config read failed: {e}")
@@ -8672,11 +9222,7 @@ def run_fast() -> int:
         "scan_output": True,
         "compartments": False,
     }
-    budget = {
-        "max_dollars": 5.0,
-        "max_wall_seconds": 3600.0,
-        "max_tool_calls": 500,
-    }
+    budget = {"strict_pricing": True}
     # Prefer the isolated Docker sandbox, but fall back to local when the
     # daemon isn't up -- otherwise fast-setup writes a docker config that the
     # very next `maverick start` can't run (the user never chose docker, yet
@@ -8779,19 +9325,17 @@ def pick_mode() -> str:
 def _consumer_budget() -> dict[str, float]:
     """Single-question budget chip picker for consumer mode."""
     pick = _q_select(
-        "Stop after spending how much per task?",
-        ["$1", "$5", "$20", "custom"],
-        default="$5",
+        "Add an optional spending limit to each task?",
+        ["No task limit", "$1", "$5", "$20", "custom"],
+        default="No task limit",
     )
+    if pick == "No task limit":
+        return {}
     if pick == "custom":
         dollars = _safe_float(_q_text("  Custom cap ($)", default="5.0"), default=5.0)
     else:
         dollars = float(pick.lstrip("$"))
-    return {
-        "max_dollars": dollars,
-        "max_wall_seconds": 600.0,
-        "max_tool_calls": 100,
-    }
+    return {"max_dollars": dollars}
 
 
 def _consumer_api_key() -> dict[str, str]:
@@ -8933,8 +9477,8 @@ def run_consumer() -> int:
 
     workdir = _q_text(
         "Where can Lightwork work?",
-        default=str(Path.home() / "Documents" / "Maverick"),
-    ).strip() or str(Path.home() / "Documents" / "Maverick")
+        default=os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "Documents" / "Maverick"),
+    ).strip() or os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "Documents" / "Maverick")
 
     budget = _consumer_budget()
 
@@ -9079,7 +9623,8 @@ _STANDARD_GOVERNANCE: dict[str, Any] = {
     "calibration_enforce": True,  # confidence calibration gate
     "fairness_monitor": True,
     "audit_sign": True,  # Ed25519-signed audit chain
-    "enforce_quotas": True,  # per-principal daily spend/token caps
+    # No spending caps by default: administrators set workspace and
+    # per-person limits in the dashboard (Admin > Spending limits).
 }
 _REGULATED_GOVERNANCE: dict[str, Any] = {
     **_STANDARD_GOVERNANCE,
@@ -9122,7 +9667,7 @@ DEFAULT_GOVERNANCE_PROFILE = "essentials"
 # imports these so the two front ends show the SAME menu and cannot drift.
 GOVERNANCE_CHOICES: list[str] = [
     "essentials - small business: learn + improve, stay out of my way (a gym, a studio, a shop)",
-    "standard   - growing company: + budgets enforced, signed audit trail "
+    "standard   - growing company: + signed audit trail, fairness and memory checks "
     "(a manufacturer, an agency)",
     "regulated  - bank / clinic / government: + human sign-off, immutable audit, long retention",
 ]
@@ -9211,8 +9756,8 @@ def run_express() -> int:
     keys = _consumer_api_key()
     workdir = _q_text(
         "Where can Lightwork work?",
-        default=str(Path.home() / "Documents" / "Maverick"),
-    ).strip() or str(Path.home() / "Documents" / "Maverick")
+        default=os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "Documents" / "Maverick"),
+    ).strip() or os.environ.get("MAVERICK_WORKDIR") or str(Path.home() / "Documents" / "Maverick")
     budget = _consumer_budget()
 
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)

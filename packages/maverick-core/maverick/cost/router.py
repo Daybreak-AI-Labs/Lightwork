@@ -170,6 +170,8 @@ _ROLE_TIERS: dict[str, int] = {
     "orchestrator":    TIER_PREMIUM,
     "revisor":         TIER_PREMIUM,
     "summarizer":      TIER_CHEAP,
+    "shield_judge":    TIER_CHEAP,
+    "cascade_draft":   TIER_CHEAP,
     # Everything else (researcher/coder/writer/analyst/verifier/
     # skill_distiller) is solid mid-tier work.
 }
@@ -465,7 +467,20 @@ def pick(signal: CostSignal, *, estimate_only: bool = False) -> str | None:
     available = healthy or available
     available.sort(key=_score)
     provider, model, *_ = available[0]
-    return f"{provider}:{model}"
+    cheapest = f"{provider}:{model}"
+    # [routing] bandit: learn which of these viable arms pays off best for this
+    # kind of task. It only reorders within the healthy, affordable set above
+    # and falls back to the cheapest arm; off, the cheapest arm is returned.
+    try:
+        from . import router_v3
+
+        if router_v3.enabled():
+            arms = [f"{c[0]}:{c[1]}" for c in available]
+            return router_v3.choose_for(signal.role, tier, arms) or cheapest
+    except Exception as exc:  # noqa: BLE001 -- learning never breaks routing
+        log.warning("cost routing: bandit unavailable (%s); using the cheapest arm",
+                    type(exc).__name__)
+    return cheapest
 
 
 __all__ = [

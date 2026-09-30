@@ -72,6 +72,20 @@ def _env_true(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _refunds_allowed() -> bool:
+    """Real refunds are off unless allowed: ``MAVERICK_STRIPE_ENABLE_REFUNDS``
+    decides when it is set; otherwise ``[commerce] stripe_refunds = true``
+    (the All settings page) allows them."""
+    if os.environ.get("MAVERICK_STRIPE_ENABLE_REFUNDS", "").strip():
+        return _env_true("MAVERICK_STRIPE_ENABLE_REFUNDS")
+    try:
+        from ..config import load_config
+        commerce = (load_config() or {}).get("commerce") or {}
+    except Exception:  # pragma: no cover - config trouble keeps refunds off
+        return False
+    return isinstance(commerce, dict) and commerce.get("stripe_refunds") is True
+
+
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -233,10 +247,11 @@ def _op_refund_create(charge_id: str, amount_cents: int, reason: str,
             f"{' reason=' + reason if reason else ''}. "
             "Re-run with confirm=true to actually issue the refund."
         )
-    if not _env_true("MAVERICK_STRIPE_ENABLE_REFUNDS"):
+    if not _refunds_allowed():
         return (
             "ERROR: refund_create is disabled by policy. "
-            "Set MAVERICK_STRIPE_ENABLE_REFUNDS=true to allow real refunds."
+            "Set MAVERICK_STRIPE_ENABLE_REFUNDS=true (or allow refunds on the "
+            "All settings page) to allow real refunds."
         )
     body: dict = {"charge": charge_id}
     if amount_cents:

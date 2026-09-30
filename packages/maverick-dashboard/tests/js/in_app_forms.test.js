@@ -58,7 +58,7 @@ test('template preparation keeps full text and workspace context in a one-time l
 test('failed template preparation retains inputs and creates no draft',async()=>{
   const dom=fixture(libraryHTML,'lightwork-template-library.js',async()=>response({detail:'Template changed'},409));
   const w=dom.window,d=w.document; d.querySelector('textarea').value='Example'; d.querySelector('.template-prepare').dispatchEvent(new w.Event('submit',{cancelable:true})); await tick();
-  assert.equal(w.sessionStorage.length,0); assert.equal(d.querySelector('textarea').value,'Example'); assert.equal(d.querySelector('.prepare-status').textContent,'Template changed'); w.close();
+  assert.equal(w.sessionStorage.length,0); assert.equal(d.querySelector('textarea').value,'Example'); assert.match(d.querySelector('.prepare-status').textContent,/changed since you opened it/); assert.doesNotMatch(d.querySelector('.prepare-status').textContent,/Template changed/); w.close();
 });
 test('rating saves require a matching confirmation and prevent duplicate requests',async()=>{
   const pending=deferred(); let calls=0; const dom=fixture(libraryHTML,'lightwork-template-library.js',async()=>{calls++;return pending.promise;});

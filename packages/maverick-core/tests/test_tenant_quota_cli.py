@@ -23,19 +23,19 @@ def _provision(tenant_id="acme"):
     tr.create_tenant(tenant_id, plan="pro", max_daily_dollars=0)
 
 
-def test_tenant_create_is_bounded_unless_zero_is_explicit():
+def test_tenant_create_has_no_cap_unless_one_is_given():
     from maverick.tenant.registry import get_tenant
 
-    bounded = CliRunner().invoke(main, ["tenant", "create", "bounded"])
-    unlimited = CliRunner().invoke(
+    default = CliRunner().invoke(main, ["tenant", "create", "default"])
+    bounded = CliRunner().invoke(
         main,
-        ["tenant", "create", "unlimited", "--max-daily-dollars", "0"],
+        ["tenant", "create", "bounded", "--max-daily-dollars", "5"],
     )
 
+    assert default.exit_code == 0, default.output
     assert bounded.exit_code == 0, bounded.output
-    assert unlimited.exit_code == 0, unlimited.output
+    assert get_tenant("default").max_daily_dollars == 0.0
     assert get_tenant("bounded").max_daily_dollars == 5.0
-    assert get_tenant("unlimited").max_daily_dollars == 0.0
 
 
 def test_quota_rejects_negative_instead_of_silently_unlimiting():

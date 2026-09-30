@@ -158,15 +158,29 @@ def permission_label(permission: object) -> str:
     return _PERMISSION_LABELS.get(slug, slug.replace("-", " ").replace("_", " ").capitalize())
 
 
+# Words a stored value spells in lowercase that a person reads differently.
+# Kept in step with ``WORDS`` in static/lightwork-ui.js (mvHuman).
+_WORDS = {
+    "ai": "AI", "api": "API", "id": "ID", "ids": "IDs", "url": "URL", "sso": "SSO",
+    "dsar": "DSAR", "gdpr": "GDPR", "ccpa": "CCPA", "hipaa": "HIPAA", "soc2": "SOC 2",
+    "pii": "personal data", "sla": "SLA", "mfa": "MFA", "eu": "EU", "us": "US", "uk": "UK",
+    "llm": "AI model", "mcp": "MCP", "sha256": "fingerprint", "csv": "CSV", "pdf": "PDF",
+    "iso": "ISO", "nist": "NIST", "dpia": "DPIA", "ropa": "record of processing",
+    "cmp": "consent banner", "ok": "OK",
+}
+
+
 def humanize(value: object) -> str:
     """A generic enum/slug (status, risk level, action, kind) rendered as a
-    readable label: underscores/hyphens become spaces and the first letter is
-    capitalized (``in_progress`` -> ``In progress``, ``send_email`` -> ``Send
-    email``). Empty in, empty out."""
-    slug = "" if value is None else str(value).strip()
-    if not slug:
+    readable label: underscores/hyphens become spaces, the first letter is
+    capitalized and known abbreviations read as a person writes them
+    (``in_progress`` -> ``In progress``, ``ai_act`` -> ``AI act``). Empty in,
+    empty out."""
+    words = ("" if value is None else str(value)).replace("-", " ").replace("_", " ").split()
+    if not words:
         return ""
-    return slug.replace("-", " ").replace("_", " ").strip().capitalize()
+    text = " ".join(_WORDS.get(word.lower(), word.lower()) for word in words)
+    return text[0].upper() + text[1:]
 
 
 __all__ = [

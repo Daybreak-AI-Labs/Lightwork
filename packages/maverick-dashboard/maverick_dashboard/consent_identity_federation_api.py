@@ -40,6 +40,7 @@ from .consent_public_api import (
     _cache_limited_body,
     _origin,
     default_public_consent_dependencies,
+    require_public_session,
 )
 
 _AUTH_DETAIL = "invalid public consent credential"
@@ -415,6 +416,8 @@ def create_consent_identity_federation_router(  # noqa: C901 - isolated route fa
             if not admitted:
                 raise PublicConsentCredentialError(_AUTH_DETAIL)
             deps.public.rate_limit(client.credential_sha256, request.url.path)
+            # A live visitor session too, when the public service uses them.
+            await require_public_session(request, deps.public, client)
             await _cache_limited_body(request)
             raw_profile = request.headers.get("x-lightwork-profile-credential", "")
             profile = await run_in_threadpool(

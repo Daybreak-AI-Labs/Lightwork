@@ -26,9 +26,11 @@ class DestinationIn(_StrictModel):
     origin: str = Field(min_length=1, max_length=2048)
     signing_key_id: str = Field(pattern=_ID)
     idempotency_key: str = Field(pattern=_IDEMPOTENCY)
-    max_attempts: int = Field(default=6, ge=1, le=20)
-    base_backoff_seconds: float = Field(default=5.0, gt=0, le=3600)
-    max_backoff_seconds: float = Field(default=3600.0, gt=0, le=86400)
+    # Omitted values take the installation defaults (Settings > All settings);
+    # tries above the installation's most tries are lowered to it.
+    max_attempts: int | None = Field(default=None, ge=1, le=20)
+    base_backoff_seconds: float | None = Field(default=None, gt=0, le=3600)
+    max_backoff_seconds: float | None = Field(default=None, gt=0, le=86400)
     default_retention_seconds: int = Field(default=2_592_000, ge=1, le=157_680_000)
 
 
@@ -249,6 +251,17 @@ async def enroll_destination(
         destination_id=destination_id,
         **body.model_dump(),
     )
+
+
+@router.get("/destinations")
+async def destinations(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    """Read-only list of the active workspace's destinations for the page."""
+    require_global_permission(request, "audit")
+    ops, tenant, store = _authority()
+    return await _call(ops, store.list_destinations, tenant, limit=limit)
 
 
 @router.get("/destinations/{destination_id}")

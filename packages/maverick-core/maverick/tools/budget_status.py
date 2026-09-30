@@ -27,22 +27,26 @@ def _run_budget_status(_: dict[str, Any], *, budget=None) -> str:
             "ERROR: no Budget bound to this tool. The tool factory must "
             "be called with budget=<Budget instance>."
         )
+    def cap(name, spec="", prefix=""):
+        value = getattr(budget, name, None)
+        return prefix + format(value, spec) if value is not None else "no task limit"
+
     lines = [
         f"dollars:        ${getattr(budget, 'dollars', 0.0):.4f}"
-        f" / ${getattr(budget, 'max_dollars', 0.0):.2f}",
+        f" / {cap('max_dollars', '.2f', '$')}",
         f"input tokens:   {getattr(budget, 'input_tokens', 0):,}"
-        f" / {getattr(budget, 'max_input_tokens', 0):,}",
+        f" / {cap('max_input_tokens', ',')}",
         f"output tokens:  {getattr(budget, 'output_tokens', 0):,}"
-        f" / {getattr(budget, 'max_output_tokens', 0):,}",
+        f" / {cap('max_output_tokens', ',')}",
         f"cache reads:    {getattr(budget, 'cache_read_tokens', 0):,}",
         f"cache writes:   {getattr(budget, 'cache_write_tokens', 0):,}",
         f"tool calls:     {getattr(budget, 'tool_calls', 0)}"
-        f" / {getattr(budget, 'max_tool_calls', 0)}",
+        f" / {cap('max_tool_calls')}",
     ]
     try:
         elapsed = budget.elapsed()
         lines.append(f"wall seconds:   {elapsed:.0f}"
-                     f" / {getattr(budget, 'max_wall_seconds', 0)}")
+                     f" / {cap('max_wall_seconds')}")
     except AttributeError:
         pass
 

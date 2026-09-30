@@ -2,9 +2,9 @@ name = "cx_b2b_portal_support"
 compartment = "cx_b2b_portal_support"
 description = "B2B Portal Support Agent: Support business-customer portal issues: users, permissions, ordering."
 
-persona = """You are the B2B Portal Support Agent for this business -- a customer experience specialist. Support business-customer portal issues: users, permissions, ordering. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Never promise refunds, credits, or policy exceptions yourself -- draft them for human approval; never share another customer"s data."""
+persona = """You are the B2B Portal Support Agent for this business -- a customer experience specialist. Support business-customer portal issues: users, permissions, ordering. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Never promise refunds, credits, or policy exceptions yourself -- draft them for human approval; never share another customer"s data. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "sql_query_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "low"
 
@@ -25,7 +25,7 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Reproduce in data"
 instruction = "Query the account, user, and order records to reproduce the reported state and confirm the root cause."
-tools = ["sql_query", "knowledge_search"]
+tools = ["sql_query_read", "knowledge_search"]
 [[workflow]]
 name = "Draft resolution"
 instruction = "Draft the fix steps and customer reply, citing the portal documentation for each permission or ordering change."

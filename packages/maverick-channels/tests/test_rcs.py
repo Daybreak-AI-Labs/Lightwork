@@ -1,7 +1,7 @@
 """RCS Business Messaging adapter: client-token verification (query param,
 header, and the {clientToken, secret} validation handshake), Pub/Sub
-envelope decoding, MSISDN allowlist, atomic dedup claim with release on
-failure, and outbound agentMessages calls authed by a service-account
+envelope decoding, MSISDN allowlist, durable execution claims held on
+unknown failure, and outbound agentMessages calls authed by a service-account
 Bearer token (google-auth faked via sys.modules)."""
 from __future__ import annotations
 
@@ -55,6 +55,7 @@ def _envelope(event):
 def _claim_ok(monkeypatch):
     """Most tests are not about dedup; provide an available claim store."""
     wm = MagicMock()
+    wm.is_processed_message.return_value = False
     wm.mark_message_processed.return_value = True
     monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
     return wm
@@ -204,6 +205,7 @@ def test_dedup_claim_skips_redelivery(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
     wm = MagicMock()
+    wm.is_processed_message.return_value = True
     wm.mark_message_processed.return_value = False  # already claimed
     monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
     client = TestClient(ch._app)
@@ -212,7 +214,8 @@ def test_dedup_claim_skips_redelivery(monkeypatch):
                     json=_envelope(_event()))
 
     assert r.status_code == 200
-    wm.mark_message_processed.assert_called_once_with("rcs", "rbm-msg-1")
+    wm.is_processed_message.assert_called_with("rcs", "rbm-msg-1")
+    wm.mark_message_processed.assert_not_called()
     assert not ch.handler.await_count
 
 
@@ -234,10 +237,11 @@ def test_claim_store_failure_is_retryable_and_never_runs_handler(monkeypatch):
     assert not ch.send.await_count
 
 
-def test_claim_released_on_handler_failure(monkeypatch):
+def test_claim_remains_held_on_unknown_handler_failure(monkeypatch):
     ch = _channel(handler=AsyncMock(side_effect=RuntimeError("boom")))
     ch.send = AsyncMock()
     wm = MagicMock()
+    wm.is_processed_message.return_value = False
     wm.mark_message_processed.return_value = True
     monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
     client = TestClient(ch._app)
@@ -246,7 +250,12 @@ def test_claim_released_on_handler_failure(monkeypatch):
                     json=_envelope(_event()))
 
     assert r.status_code == 200
-    wm.release_processed_message.assert_called_once_with("rcs", "rbm-msg-1")
+    wm.release_processed_message.assert_not_called()
+    from maverick_channels.delivery import DeliveryJournal
+    row = DeliveryJournal().get(r.json()["receipt"])
+    assert row["execution"] == "execution_unknown"
+    client.post("/webhook/rcs", params={"clientToken": TOKEN}, json=_envelope(_event()))
+    ch.handler.assert_awaited_once()
     # An error report still goes back to the sender (whatsapp_cloud parity), but
     # it's GENERIC -- the raw exception text ("boom") could carry a secret and
     # must not be reflected to the remote user (it's logged server-side instead).

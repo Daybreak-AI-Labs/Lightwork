@@ -51,11 +51,13 @@ test('paging sends the verified snapshot and clears stale results on conflict',a
   const ui=await fixture();ui.handler=async()=>({ok:true,json:async()=>result([row('v1')],{total:2,next_offset:1,complete:false,coverage:[{source:'vendors',state:'partial',indexed:2}]})});
   await ui.search('Acme');assert.equal(ui.d.getElementById('navfinder-more').hidden,false);
   assert.match(ui.d.getElementById('navfinder-record-status').textContent,/partial or unavailable/);
-  ui.handler=async()=>({ok:false,json:async()=>({detail:'Records or access changed while paging. Refresh the search to continue.'})});
+  ui.w.mvErrorText=(failure,action)=>'Could not '+action+'. '+(failure.status===409?'This was changed since you opened it. Refresh the page and try again.':'Please try again.');
+  ui.handler=async()=>({ok:false,status:409,json:async()=>({detail:'snapshot_mismatch: records or access changed while paging'})});
   ui.d.getElementById('navfinder-more').click();await tick();
   assert.equal(ui.calls[1].body.snapshot,snapshot);assert.equal(ui.calls[1].body.offset,1);
   assert.equal(ui.d.getElementById('navfinder-record-0'),null);
-  assert.match(ui.d.getElementById('navfinder-record-status').textContent,/changed while paging/);
+  assert.match(ui.d.getElementById('navfinder-record-status').textContent,/Could not search records\. This was changed since you opened it/);
+  assert.doesNotMatch(ui.d.getElementById('navfinder-record-status').textContent,/snapshot_mismatch|while paging/);
   ui.dom.window.close();
 });
 

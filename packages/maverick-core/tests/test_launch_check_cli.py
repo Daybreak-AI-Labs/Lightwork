@@ -83,3 +83,19 @@ def test_missing_trust_anchor_is_a_fail(monkeypatch):
     res = _run()
     assert res.exit_code != 0, res.output
     assert "license trust anchor" in res.output
+
+
+def test_a_dashboard_spending_limit_satisfies_cost_caps(monkeypatch):
+    # Spending limits set in Admin > Spending limits count as cost governance
+    # without turning on the older [quotas] switch.
+    _configure_go_live(monkeypatch)
+    monkeypatch.delenv("MAVERICK_QUOTA_ENFORCE", raising=False)
+    monkeypatch.setenv("MAVERICK_QUOTA_ENFORCE", "0")
+    res = _run()
+    assert res.exit_code != 0, res.output
+    assert "no spending limit is set" in res.output
+    from maverick import spending_limits
+    spending_limits.set_workspace_limit("500", "month", actor="user:admin")
+    res = _run()
+    assert res.exit_code == 0, res.output
+    assert "spending limits: workspace $500 per month" in res.output

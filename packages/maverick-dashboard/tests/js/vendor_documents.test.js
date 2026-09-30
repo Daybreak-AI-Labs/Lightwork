@@ -21,6 +21,7 @@ async function fixture(records, intercept=()=>undefined) {
   const {window} = dom, calls=[];
   const el = id => window.document.getElementById(`vo-${id}`);
   window.fetch = async (url, opts={}) => {
+    if (String(url).includes('/api/v1/choices/people')) return response({people:[]});
     const call={url:new URL(url,window.location),...opts}; calls.push(call);
     const intercepted = await intercept(call, records);
     if (intercepted !== undefined) return intercepted;
@@ -28,7 +29,7 @@ async function fixture(records, intercept=()=>undefined) {
     const row=records.find(item=>call.url.pathname.endsWith(`/cases/${item.id}`));
     return response(row || {detail:"Unexpected request"},row?200:404);
   };
-  window.eval(code);
+  window.eval(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-access-state.js'), 'utf8'));window.eval(code);
   async function settle() {
     for (let i=0;i<30;i++) { await tick(); if (window.document.getElementById("vendor-onboarding").getAttribute("aria-busy")==="false") return; }
     throw new Error("UI did not settle");

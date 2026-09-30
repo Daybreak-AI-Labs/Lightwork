@@ -60,7 +60,7 @@ def test_auth_form_controls_have_accessible_names(client, make_staff, path, stag
         staff_id = make_staff()
         if stage:
             token = security.sign_session(
-                {"sid": staff_id, "stage": stage}, security.session_key(),
+                {"sid": staff_id, "stage": stage, "ep": 0}, security.session_key(),
             )
             client.cookies.set(auth.SESSION_COOKIE, token)
     _assert_named_controls(client.get(path))
@@ -87,7 +87,7 @@ def test_audit_record_keeps_technical_detail_in_closed_disclosure(admin, app):
                  target="preview", detail={"synthetic_internal_field": "review-only"})
     response = admin.get("/audit")
     assert response.status_code == 200
-    assert "Customer Update" in response.text
+    assert "Updated customer details" in response.text
     assert '<details><summary>View details</summary>' in response.text
     assert "synthetic_internal_field" in response.text
     assert "<details open" not in response.text

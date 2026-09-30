@@ -43,7 +43,7 @@ def test_page_renders_worklist_stats_and_catalog():
     html = resp.text
     # Worklist rows with the risk pair and review triggers.
     assert "Acme CRM" in html and "Globex HRIS" in html
-    assert 'class="pw-review-btn"' in html
+    assert 'class="btn btn--primary pw-review-btn"' in html
     # The shared pop-out is on the page.
     assert 'id="arv-dialog"' in html
     # The catalog lists the PRIVACY frameworks — and only those (the finance
@@ -54,7 +54,7 @@ def test_page_renders_worklist_stats_and_catalog():
     assert "SOX Control Assessment" not in html
     assert "Fraud Risk Assessment" not in html
     # Follow-up state surfaces as awaiting answers.
-    assert "awaiting answers" in html
+    assert "Awaiting answers" in html
 
 
 def test_page_empty_state():
@@ -117,20 +117,21 @@ def test_records_section_renders_all_four_types():
     # DPA reviews tab: vendor row + the clause-detail trigger.
     assert "Acme Corp" in html and "acme-dpa.pdf" in html
     assert 'class="btn pw-dpa-clauses"' in html
-    assert "Extracted evidence — human review required" in html
-    assert "Extraction method" in html
-    assert "Document SHA-256" in html
+    assert "a person must check it" in html
+    assert "How it was read" in html
+    assert "Technical record of the file" in html
+    assert "SHA-256" not in html
     assert "document_id" not in html
     # AI registry tab: high-risk tier from the Annex III employment test.
     assert "CV screener" in html
-    assert ">high</span>" in html
+    assert ">High</span>" in html
     # RoPA tab: the drafted Art. 30 entry with provenance + CSV export.
     assert "Processing via Acme CRM" in html
     assert "/api/v1/privacy/ropa/export.csv" in html
     # DSAR tab: subject + 30-day clock; erasure needs the operator step.
     assert "jordan@example.com" in html
-    assert "d left" in html
-    assert "authenticated operator workflow" in html
+    assert "days left" in html
+    assert "Deletion is never done from this list" in html
     assert "maverick erase" not in html
     assert "erase_command" not in html
     # The records tab strip carries the counts (the old hero stat tiles were
@@ -170,8 +171,8 @@ def test_decide_endpoint_and_review_due_surfacing(monkeypatch):
                              "expected_revision": resp.json()["revision"]}).status_code == 422
 
     html = client.get("/privacy").text
-    assert ">approved</span>" in html
-    assert "re-review in" in html
+    assert ">Approved</span>" in html
+    assert "Re-review in" in html
     assert "Due for re-review (0)" in html
 
     # The cadence elapses: the record surfaces as due.
@@ -263,7 +264,23 @@ def test_program_report_page_and_api():
 
     html = client.get("/privacy/report").text
     assert "Privacy program report" in html
-    assert "most-missed clause" in html
-    assert "Print / save as PDF" in html
+    assert "Clause most often missing" in html
+    assert "Print or save as PDF" in html
+    assert "Approved" in html and "approved" not in html.split("<main", 1)[-1].split("</main>")[0].replace("Approved", "")
+    for jargon in (">JSON<", "Art. 28", "past 72h", "documented-no", "back to the workspace"):
+        assert jargon not in html, jargon
     # The workspace links to it.
     assert 'href="/privacy/report"' in client.get("/privacy").text
+
+
+def test_worklist_and_catalog_read_plainly():
+    from test_support.plain_language import developer_terms
+
+    _seed("Acme CRM", risky=True)
+    html = client.get("/privacy").text
+    worklist = html.split('<div class="section-head"><h2>Worklist</h2></div>', 1)[1].split("<dialog", 1)[0]
+    assert developer_terms("<main>" + worklist + "</main>") == []
+    assert "Questionnaire" in worklist and "Risk before → after safeguards" in worklist
+    assert "window.prompt" not in html and "window.alert" not in html
+    assert "/api/v1/assess/reviewers" in html
+    assert "Type (slug)" not in html and "Publish release" not in html

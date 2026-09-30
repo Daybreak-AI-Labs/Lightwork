@@ -112,7 +112,9 @@ def enabled() -> bool:
     The env-var name and its parsing live here, with the ledger they switch
     on — callers gate on this instead of re-spelling the truthy set."""
     from ._envparse import is_truthy
-    return is_truthy(os.environ.get("MAVERICK_BUDGET_RECEIPTS"))
+    from .env_setting import env_or_config
+
+    return is_truthy(env_or_config("MAVERICK_BUDGET_RECEIPTS", "budget", "receipts"))
 
 
 def receipts_path() -> Path:

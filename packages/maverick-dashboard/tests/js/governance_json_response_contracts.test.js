@@ -8,29 +8,31 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");
 
+// The third-party lifecycle, collaboration and intelligence pages now load
+// their records through lightwork-record-workflows.js (LwRecords.call), which
+// fails closed on malformed JSON and turns errors into plain sentences; their
+// behaviour is covered by the page workflow tests.
 const JSON_CLIENTS = [
   ["consent_delivery.html", "call", ["/probe"]],
   ["consent_experiments.html", "call", ["/probe"]],
   ["consent_public_clients.html", "call", ["/probe"]],
   ["consent_publishing.html", "call", ["/probe"]],
   ["policy_publication_links.html", "call", ["/probe"]],
-  ["privacy_data_discovery.html", "call", ["/probe"]],
-  ["privacy_regulatory_intelligence.html", "call", ["/probe"]],
-  ["third_party_intelligence.html", "request", ["/probe", "GET", {}]],
   ["consent_scan_notice_proposals.html", "call", ["/probe"]],
   ["consent_profile_data.html", "request", ["/probe"]],
   ["data_use_governance.html", "call", ["/probe"]],
   ["consent_scan_inventory.html", "call", ["/probe"]],
   ["data_use_providers.html", "call", ["/probe"]],
   ["consent_preferences.html", "call", ["/probe"]],
-  ["agents.html", "call", ["GET", "/probe"]],
   ["ekko.html", "request", ["/probe"]],
 ];
 
+// Pages rebuilt for non-technical readers say the same thing in plain words.
+const MALFORMED_MESSAGE = {
+  "ekko.html": "Lightwork sent back a reply this page could not read. Try again.",
+};
+
 const TEXT_CLIENTS = [
-  "ai_cloud_agent_governance.html",
-  "third_party_lifecycle.html",
-  "third_party_collaboration.html",
   "consumer_trust_center_authority.html",
   "compliance_scoping.html",
   "compliance_scope_actions.html",
@@ -161,9 +163,17 @@ function harness(file, functionName, args) {
       querySelectorAll() { return []; },
       createElement() { return element("document:created"); },
     },
-    window: { confirm() { return true; } },
+    window: {
+      confirm() { return true; },
+      // Pages show a server message only when it is already a plain sentence.
+      mvPlainDetail(detail) { return typeof detail === "string" && /^[A-Z][^_{}<>]*[.!?]$/.test(detail) ? detail : ""; },
+    },
     confirm() { return true; },
     mvToast() {},
+    // agents.html shares these page helpers from its first script block.
+    mountToolPicks() {},
+    mountToolPick() {},
+    plainError(_failure, what) { return "Could not " + what + ". Please try again."; },
     fetch: async () => validBootResponse,
     setTimeout() { return 0; },
     clearTimeout() {},
@@ -190,7 +200,7 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
   const usesText = functionName === "run";
 
   test(`${file} rejects malformed 2xx without exposing its body`, async () => {
-    const secret = `private-response-content-for-${file}`;
+    const secret = `private-response-content-for-${file}`;  // pragma: allowlist secret
     const response = {
       ok: true,
       status: 200,
@@ -200,7 +210,7 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
     };
 
     await assert.rejects(harness(file, functionName, args).invoke(response), (error) => {
-      assert.equal(error.message, "Request failed: the server returned an invalid JSON response.");
+      assert.equal(error.message, MALFORMED_MESSAGE[file] || "Request failed: the server returned an invalid JSON response.");
       assert.equal(error.message.includes(secret), false);
       return true;
     });
@@ -224,8 +234,33 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
   });
 }
 
+// Plain-language pages: failures read as fixed sentences. They still fail
+// closed on malformed 2xx replies and never echo a response body or a raw
+// server detail.
+test("agents.html rejects malformed 2xx without exposing its body", async () => {
+  const secret = "private-response-content-for-agents";  // pragma: allowlist secret
+  const response = { ok: true, status: 200, ...streamedJsonBody(secret),
+    async json() { throw new Error(secret); }, async text() { return secret; } };
+  await assert.rejects(harness("agents.html", "call", ["GET", "/probe"]).invoke(response), (error) => {
+    assert.match(error.message, /could not be confirmed/);
+    assert.equal(error.message.includes(secret), false);
+    return true;
+  });
+});
+
+test("agents.html turns an error reply into a plain sentence", async () => {
+  const detail = "Reviewed conflict for agents.html.";
+  const response = { ok: false, status: 409, ...streamedJsonBody(JSON.stringify({ detail })),
+    async json() { return { detail }; }, async text() { return JSON.stringify({ detail }); } };
+  await assert.rejects(harness("agents.html", "call", ["GET", "/probe"]).invoke(response), (error) => {
+    assert.equal(error.message.includes(detail), false);
+    assert.match(error.message, /^Could not /);
+    return true;
+  });
+});
+
 test("redact.html marks malformed 2xx as failed without exposing its body", async () => {
-  const secret = "private-redaction-response-content";
+  const secret = "private-redaction-response-content";  // pragma: allowlist secret
   const client = harness("redact.html", "preview", [null]);
   await client.invoke({
     ok: true,
@@ -234,12 +269,12 @@ test("redact.html marks malformed 2xx as failed without exposing its body", asyn
   });
 
   const message = client.element("proof-badge").textContent;
-  assert.equal(message, "Request failed: the server returned an invalid JSON response.");
+  assert.equal(message, "Could not read the result. Please try again.");
   assert.equal(message.includes(secret), false);
   assert.equal(client.element("proof-badge").className, "badge failure");
 });
 
-test("redact.html preserves a valid JSON error detail", async () => {
+test("redact.html shows a plain sentence instead of the server detail", async () => {
   const client = harness("redact.html", "preview", [null]);
   await client.invoke({
     ok: false,
@@ -247,6 +282,6 @@ test("redact.html preserves a valid JSON error detail", async () => {
     async json() { return { detail: "Reviewed redaction error." }; },
   });
 
-  assert.equal(client.element("proof-badge").textContent, "Reviewed redaction error.");
+  assert.equal(client.element("proof-badge").textContent, "Could not check the text. Please try again.");
   assert.equal(client.element("proof-badge").className, "badge failure");
 });

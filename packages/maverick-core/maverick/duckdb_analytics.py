@@ -16,6 +16,27 @@ run with DuckDB external file access disabled. Behind the ``[duckdb]`` extra.
 
 from __future__ import annotations
 
+import threading
+
+#: Question pieces a person picks from; every one maps to a fixed SQL fragment,
+#: so :meth:`WorldAnalytics.ask` never splices caller text into a query.
+METRICS = {
+    "spend": "sum(e.cost)",
+    "tasks": "count(DISTINCT e.goal_id)",
+    "runs": "count(*)",
+    "tokens": "sum(e.in_tok + e.out_tok)",
+    "spend_per_task": "sum(e.cost) / nullif(count(DISTINCT e.goal_id), 0)",
+}
+GROUPS = {
+    "none": ("'all'", False),
+    "day": ("strftime(to_timestamp(e.ended_at), '%Y-%m-%d')", True),
+    "week": ("strftime(date_trunc('week', to_timestamp(e.ended_at)), '%Y-%m-%d')", True),
+    "month": ("strftime(to_timestamp(e.ended_at), '%Y-%m')", True),
+    "status": ("coalesce(g.status, 'unknown')", False),
+    "outcome": ("coalesce(e.outcome, 'unknown')", False),
+    "task": ("CAST(e.goal_id AS VARCHAR) || ' ' || coalesce(g.title, '')", False),
+}
+
 
 class WorldAnalytics:
     """In-memory DuckDB loaded from the world model, for analytical queries."""
@@ -64,18 +85,91 @@ class WorldAnalytics:
         if erows:
             self._conn.executemany("INSERT INTO episodes VALUES (?, ?, ?, ?, ?, ?)", erows)
 
-    def query(self, sql: str) -> list[dict]:
-        """Run a **read-only** analytical query; returns a list of row dicts."""
+    def query(self, sql: str, params: list | None = None, *,
+              timeout: float | None = None) -> list[dict]:
+        """Run a **read-only** analytical query; returns a list of row dicts.
+
+        ``params`` bind ``?`` placeholders in ``sql``. ``timeout`` (seconds)
+        interrupts a query still running at the deadline and raises
+        ``TimeoutError`` -- the bound a shared server puts on ad-hoc SQL."""
         query_sql = (sql or "").strip().removesuffix(";").rstrip()
         s = query_sql.lstrip("(").lstrip()
         if not s.lower().startswith(("select", "with")):
             raise ValueError("only SELECT / WITH queries are allowed")
-        cur = self._conn.execute(
-            "SELECT * FROM (" + query_sql + ") AS maverick_query LIMIT ?",
-            [self._query_limit],
+        self._require_single_select(query_sql)
+        expired = threading.Event()
+        timer = None
+        if timeout is not None:
+            def _expire() -> None:
+                expired.set()
+                self._conn.interrupt()
+            timer = threading.Timer(max(0.01, float(timeout)), _expire)
+            timer.daemon = True
+            timer.start()
+        try:
+            cur = self._conn.execute(
+                "SELECT * FROM (" + query_sql + ") AS maverick_query LIMIT ?",
+                [*(params or []), self._query_limit],
+            )
+            cols = [d[0] for d in cur.description]
+            rows = cur.fetchall()
+        except Exception as exc:
+            if expired.is_set():
+                raise TimeoutError("the query took too long and was stopped") from exc
+            raise
+        finally:
+            if timer is not None:
+                timer.cancel()
+        return [dict(zip(cols, row, strict=False)) for row in rows]
+
+    def _require_single_select(self, query_sql: str) -> None:
+        """Refuse text that parses as anything but one SELECT: a ``)`` that
+        closes the wrapper would otherwise smuggle further statements (writes,
+        ``SET``, an unlimited last SELECT) past the prefix check."""
+        import duckdb
+
+        extract = getattr(self._conn, "extract_statements", None)
+        if extract is None:  # older duckdb: no parser access, refuse any separator
+            if ";" in query_sql:
+                raise ValueError("only SELECT / WITH queries are allowed, one at a time")
+            return
+        statements = extract(query_sql)
+        if len(statements) != 1 or statements[0].type != duckdb.StatementType.SELECT:
+            raise ValueError("only SELECT / WITH queries are allowed, one at a time")
+
+    def ask(self, metric: str, group: str = "none", *, since: float | None = None,
+            until: float | None = None, limit: int = 100,
+            timeout: float | None = None) -> list[dict]:
+        """Answer one picked question: ``metric`` (a :data:`METRICS` key)
+        broken down by ``group`` (a :data:`GROUPS` key) over runs that ended
+        in ``[since, until)`` (Unix seconds; either end optional).
+
+        Returns ``[{"group": label, "value": number}]`` -- time groups in date
+        order, the others largest first. Unknown picks raise ``ValueError``;
+        nothing the caller passes becomes SQL text."""
+        if metric not in METRICS:
+            raise ValueError(f"unknown metric {metric!r}")
+        if group not in GROUPS:
+            raise ValueError(f"unknown grouping {group!r}")
+        label, by_time = GROUPS[group]
+        where, params = [], []
+        if by_time or since is not None or until is not None:
+            where.append("e.ended_at > 0")
+        if since is not None:
+            where.append("e.ended_at >= ?")
+            params.append(float(since))
+        if until is not None:
+            where.append("e.ended_at < ?")
+            params.append(float(until))
+        order = "grp" if by_time else "val DESC NULLS LAST, grp"
+        sql = (
+            f"SELECT {label} AS grp, {METRICS[metric]} AS val "
+            "FROM episodes e LEFT JOIN goals g ON g.id = e.goal_id"
+            + (" WHERE " + " AND ".join(where) if where else "")
+            + f" GROUP BY grp ORDER BY {order} LIMIT {max(1, min(int(limit), 1000))}"
         )
-        cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, row, strict=False)) for row in cur.fetchall()]
+        rows = self.query(sql, params, timeout=timeout)
+        return [{"group": r["grp"], "value": r["val"]} for r in rows]
 
     def cost_percentiles(self) -> dict:
         rows = self.query(
@@ -112,4 +206,4 @@ class WorldAnalytics:
             pass
 
 
-__all__ = ["WorldAnalytics"]
+__all__ = ["GROUPS", "METRICS", "WorldAnalytics"]

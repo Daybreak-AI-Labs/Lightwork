@@ -2,220 +2,300 @@
   "use strict";
 
   var MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+  var MAX_FILE_BYTES = 2 * 1024 * 1024;
   var BLUEPRINT_SCHEMA = "lightwork.no-code-grc-blueprint.v1";
   var ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
   var OP = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$/;
-  var DIGEST = /^[0-9a-f]{64}$/;
+  var FINGERPRINT = /^[0-9a-f]{64}$/;
   var ROOT_KEYS = ["schema", "studio_id", "name_ref", "description_ref", "objects", "forms", "rules", "collector_bindings", "report_views"];
+  var COLLECTIONS = ["objects", "forms", "rules", "collector_bindings", "report_views"];
 
-  function problem(message, code) {
+  var STATE_LABEL = {
+    draft: "Draft", in_review: "Waiting for review", reviewed: "Reviewed", approved: "Approved",
+    published: "Live", superseded: "Replaced by a newer version", rejected: "Sent back"
+  };
+  var STATE_BADGE = {
+    draft: "idle", in_review: "warn", reviewed: "running", approved: "running",
+    published: "ok", superseded: "paused", rejected: "failed"
+  };
+  var EVENT_LABEL = {
+    version_created: "Created", draft_replaced: "Draft changed", submitted_for_review: "Sent for review",
+    review_accepted: "Review accepted", review_rejected: "Sent back by the reviewer", version_approved: "Approved",
+    version_published: "Published", version_superseded: "Replaced by a newer version",
+    version_superseded_by_rollback: "Replaced when an earlier version was restored",
+    version_reactivated: "Restored", version_imported: "Brought in from a copy"
+  };
+  var TYPE_LABEL = {
+    single_choice: "Pick one", multi_choice: "Pick several", boolean: "Yes or no", integer: "Whole number",
+    decimal: "Number", date: "Date", timestamp: "Date and time", text_ref: "Short text",
+    record_ref: "Link to a record", evidence_ref: "Link to evidence", digest: "File fingerprint"
+  };
+  var KIND_LABEL = {
+    risk: "Risk", control: "Control", asset: "Asset", vendor: "Supplier", policy: "Policy", issue: "Issue",
+    assessment: "Assessment", evidence: "Evidence", custom: "Other"
+  };
+  var OPERATOR_LABEL = {
+    equals: "is", not_equals: "is not", greater_than: "is more than", greater_or_equal: "is at least",
+    less_than: "is less than", less_or_equal: "is at most", contains: "includes", is_set: "is answered"
+  };
+  var PROJECTION_LABEL = { questionnaire: "Form", collector: "Evidence link", report: "Report" };
+
+  function problem(message) {
     var error = new Error(message);
-    error.code = code || "invalid_input";
+    error.plain = true;
     return error;
   }
 
-  function identifier(value, label, operation) {
-    var selected = String(value || "").trim();
-    var pattern = operation ? OP : ID;
-    if (!pattern.test(selected)) { throw problem(label + " is invalid."); }
-    return selected;
+  function human(value) {
+    var text = String(value === null || value === undefined ? "" : value).replace(/[_.-]+/g, " ").trim();
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
   }
 
-  function digest(value, label, optional) {
-    var selected = String(value || "").trim();
-    if (optional && !selected) { return null; }
-    if (!DIGEST.test(selected)) { throw problem(label + " must be a lowercase SHA-256 digest."); }
-    return selected;
+  function slug(value, what) {
+    var text = String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
+    if (!text || !ID.test(text)) {
+      throw problem("Give " + (what || "it") + " a name that uses letters or numbers.");
+    }
+    return text;
   }
 
-  function integer(value, label, minimum, maximum) {
-    var selected = Number(value);
-    if (!Number.isSafeInteger(selected) || selected < minimum || selected > maximum) {
-      throw problem(label + " is outside its bound.");
-    }
-    return selected;
-  }
-
-  function parseBoundedJson(value, label, maximum) {
-    var text = String(value || "");
-    if (!text.length || new TextEncoder().encode(text).length > maximum) {
-      throw problem(label + " is empty or exceeds its byte bound.");
-    }
-    var parsed;
-    try { parsed = JSON.parse(text); } catch (_error) { throw problem(label + " is not valid JSON."); }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw problem(label + " must be a JSON object.");
-    }
-    return parsed;
-  }
-
-  function opaqueList(value, label, maximum, minimum) {
-    var text = String(value || "").trim();
-    var items = text ? text.split(",").map(function (item) { return identifier(item.trim(), label, false); }) : [];
-    if (items.length < (minimum || 0) || items.length > maximum || new Set(items).size !== items.length) {
-      throw problem(label + " has an invalid count or duplicate value.");
-    }
+  function listOf(value, what, maximum, minimum) {
+    var items = String(value || "").split(",").map(function (item) { return item.trim(); }).filter(Boolean)
+      .map(function (item) { return slug(item, what); });
+    if (items.length < (minimum || 0)) { throw problem("Add at least one " + what + "."); }
+    if (items.length > maximum) { throw problem("Use at most " + maximum + " " + what + "s."); }
+    if (new Set(items).size !== items.length) { throw problem("Each " + what + " can only be listed once."); }
     return items;
   }
 
-  function literal(value, label, blankIsNull) {
-    var text = String(value === undefined || value === null ? "" : value).trim();
-    if (!text && blankIsNull) { return null; }
-    if (text === "true") { return true; }
-    if (text === "false") { return false; }
-    if (/^-?(?:0|[1-9][0-9]*)$/.test(text)) {
-      var whole = Number(text);
-      if (!Number.isSafeInteger(whole) || Math.abs(whole) > 1000000000000) { throw problem(label + " is outside its bound."); }
-      return whole;
-    }
-    if (/^-?(?:0|[1-9][0-9]*)\.[0-9]+$/.test(text)) {
-      var decimal = Number(text);
-      if (!Number.isFinite(decimal) || Math.abs(decimal) > 1000000000000) { throw problem(label + " is outside its bound."); }
-      return decimal;
-    }
-    return identifier(text, label, false);
-  }
-
-  function copy(value) {
-    return JSON.parse(JSON.stringify(value));
-  }
+  function copy(value) { return JSON.parse(JSON.stringify(value)); }
 
   function emptyComposerState() {
     return { objects: [], forms: [], rules: [], collector_bindings: [], report_views: [] };
   }
 
-  function buildBlueprintFromComposer(metadata, state) {
-    if (!state || !Array.isArray(state.objects) || !Array.isArray(state.forms) || !Array.isArray(state.rules) ||
-        !Array.isArray(state.collector_bindings) || !Array.isArray(state.report_views)) {
-      throw problem("Composer state is invalid.");
+  function operationId() {
+    if (global.crypto && typeof global.crypto.randomUUID === "function") { return "ui-" + global.crypto.randomUUID(); }
+    return "ui-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
+  }
+
+  // Turns what a person typed into the stored value for one field.
+  function parseAnswer(field, text, label) {
+    var raw = String(text === undefined || text === null ? "" : text).trim();
+    var name = "“" + human(field.label_ref || field.field_id) + "”";
+    if (!raw) { return null; }
+    switch (field.field_type) {
+      case "boolean":
+        if (/^(yes|true|y)$/i.test(raw)) { return true; }
+        if (/^(no|false|n)$/i.test(raw)) { return false; }
+        throw problem("Answer yes or no for " + name + ".");
+      case "integer":
+        if (!/^-?\d{1,13}$/.test(raw)) { throw problem("Enter a whole number for " + name + "."); }
+        return Number(raw);
+      case "decimal": {
+        var number = Number(raw);
+        if (!/^-?\d+(\.\d+)?$/.test(raw) || !Number.isFinite(number) || Math.abs(number) > 1e12) {
+          throw problem("Enter a number for " + name + ".");
+        }
+        return number;
+      }
+      case "timestamp": {
+        var parsed = Date.parse(raw);
+        if (!Number.isFinite(parsed) || parsed <= 0) { throw problem("Enter a date and time for " + name + "."); }
+        return Math.floor(parsed / 1000);
+      }
+      case "date":
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(raw) || !Number.isFinite(Date.parse(raw))) {
+          throw problem("Enter the date for " + name + " as year-month-day, for example 2026-03-31.");
+        }
+        return raw;
+      case "single_choice":
+      case "multi_choice": {
+        var choice = slug(raw, label || "the answer");
+        if ((field.options || []).indexOf(choice) < 0) {
+          throw problem("“" + raw + "” is not one of the choices for " + name + ".");
+        }
+        return choice;
+      }
+      case "digest":
+        if (!FINGERPRINT.test(raw)) { throw problem("Enter the 64-character file fingerprint for " + name + "."); }
+        return raw;
+      default:
+        return slug(raw, label || "the answer");
     }
+  }
+
+  function conditionValue(field, operator, text) {
+    var name = "“" + human(field.label_ref || field.field_id) + "”";
+    if (operator === "is_set") { return null; }
+    if (operator === "contains" && field.field_type !== "multi_choice") {
+      throw problem("“Includes” only works for fields where people pick several answers.");
+    }
+    if (field.field_type === "multi_choice" && operator !== "contains") {
+      throw problem("For " + name + ", choose “includes” or “answered”.");
+    }
+    if (["greater_than", "greater_or_equal", "less_than", "less_or_equal"].indexOf(operator) >= 0 &&
+        ["integer", "decimal", "timestamp"].indexOf(field.field_type) < 0) {
+      throw problem("“More than” and “less than” only work for numbers and dates with times.");
+    }
+    var value = parseAnswer(field, text);
+    if (value === null) { throw problem("Enter the answer to compare " + name + " with."); }
+    return value;
+  }
+
+  function buildBlueprintFromComposer(metadata, state) {
+    if (!state || COLLECTIONS.some(function (key) { return !Array.isArray(state[key]); })) {
+      throw problem("The builder was reset. Start again.");
+    }
+    var studioId = String(metadata.studio_id || "");
+    if (!ID.test(studioId)) { throw problem("Give the blueprint a name that uses letters or numbers."); }
     var blueprint = {
       schema: BLUEPRINT_SCHEMA,
-      studio_id: identifier(metadata.studio_id, "Studio ID", false),
-      name_ref: identifier(metadata.name_ref, "Blueprint name reference", false),
-      description_ref: String(metadata.description_ref || "").trim() ? identifier(metadata.description_ref, "Description reference", false) : null,
+      studio_id: studioId,
+      name_ref: slug(metadata.name, "the blueprint"),
+      description_ref: String(metadata.description || "").trim() ? slug(metadata.description, "the description") : null,
       objects: copy(state.objects),
       forms: copy(state.forms),
       rules: copy(state.rules),
       collector_bindings: copy(state.collector_bindings),
       report_views: copy(state.report_views)
     };
-    if (!blueprint.objects.length) { throw problem("Add at least one object before generating the blueprint."); }
+    if (!blueprint.objects.length) { throw problem("Add at least one record type first."); }
+    var empty = blueprint.objects.filter(function (item) { return !item.fields.length; });
+    if (empty.length) { throw problem("Add at least one field to “" + human(empty[0].label_ref) + "”."); }
     return blueprint;
   }
 
   function loadComposerState(value) {
-    var keys = Object.keys(value || {}).sort();
+    var source = value && value.schema !== BLUEPRINT_SCHEMA && value.blueprint ? value.blueprint : value;
+    var keys = Object.keys(source || {}).sort();
     var expected = ROOT_KEYS.slice().sort();
-    if (keys.length !== expected.length || keys.some(function (key, index) { return key !== expected[index]; }) || value.schema !== BLUEPRINT_SCHEMA) {
-      throw problem("Advanced JSON is not the exact closed blueprint schema.");
+    if (keys.length !== expected.length || keys.some(function (key, index) { return key !== expected[index]; }) ||
+        source.schema !== BLUEPRINT_SCHEMA || !ID.test(String(source.studio_id || "")) || !ID.test(String(source.name_ref || ""))) {
+      throw problem("That file is not a blueprint from this studio.");
     }
-    ["objects", "forms", "rules", "collector_bindings", "report_views"].forEach(function (key) {
-      if (!Array.isArray(value[key])) { throw problem("Advanced JSON contains an invalid " + key + " collection."); }
+    COLLECTIONS.forEach(function (key) {
+      if (!Array.isArray(source[key])) { throw problem("That file is not a blueprint from this studio."); }
     });
+    var state = {};
+    COLLECTIONS.forEach(function (key) { state[key] = copy(source[key]); });
     return {
       metadata: {
-        studio_id: identifier(value.studio_id, "Studio ID", false),
-        name_ref: identifier(value.name_ref, "Blueprint name reference", false),
-        description_ref: value.description_ref === null ? "" : identifier(value.description_ref, "Description reference", false)
+        studio_id: source.studio_id,
+        name: human(source.name_ref),
+        description: source.description_ref ? human(source.description_ref) : ""
       },
-      state: {
-        objects: copy(value.objects),
-        forms: copy(value.forms),
-        rules: copy(value.rules),
-        collector_bindings: copy(value.collector_bindings),
-        report_views: copy(value.report_views)
-      }
+      state: state
     };
   }
 
-  function buildBuilderPayload(values) {
-    var mode = values.mode === "replace" ? "replace" : "create";
-    var studioId = identifier(values.studio_id, "Studio ID", false);
-    var blueprint = parseBoundedJson(values.blueprint_json, "Blueprint", 1024 * 1024);
-    if (blueprint.studio_id !== studioId) { throw problem("Blueprint studio_id must match the selected studio."); }
-    var payload = {
-      blueprint: blueprint,
-      operation_id: identifier(values.operation_id, "Operation ID", true)
-    };
-    if (mode === "create") {
-      payload.expected_latest_version = integer(values.version, "Expected latest version", 0, 2147483646);
-    } else {
-      payload.expected_revision = integer(values.expected_revision, "Expected revision", 1, 2147483647);
-      payload.expected_integrity_sha256 = digest(values.expected_integrity_sha256, "Expected integrity", false);
+  // target: {mode: "create", latestVersion} or {mode: "replace", row}
+  function buildSavePayload(target, blueprint, opId) {
+    if (!OP.test(String(opId || ""))) { throw problem("Refresh the page and try again."); }
+    if (target.mode === "replace") {
+      var row = target.row || {};
+      return {
+        method: "PATCH",
+        path: "/studios/" + encodeURIComponent(row.studio_id) + "/versions/" + row.version,
+        body: { blueprint: blueprint, expected_revision: row.revision, expected_integrity_sha256: row.integrity_sha256, operation_id: opId }
+      };
     }
-    return { mode: mode, studioId: studioId, version: integer(values.version, "Version", mode === "create" ? 0 : 1, 2147483647), payload: payload };
+    return {
+      method: "POST",
+      path: "/studios/" + encodeURIComponent(blueprint.studio_id) + "/versions",
+      body: { blueprint: blueprint, expected_latest_version: Number(target.latestVersion) || 0, operation_id: opId }
+    };
   }
 
-  function buildLifecyclePayload(values) {
-    var action = String(values.action || "");
-    if (["submit", "review-accept", "review-reject", "approve", "publish"].indexOf(action) < 0) {
-      throw problem("Lifecycle action is invalid.");
+  function casBody(row, opId) {
+    return { expected_revision: row.revision, expected_integrity_sha256: row.integrity_sha256, operation_id: opId };
+  }
+
+  function buildLifecycleRequest(action, row, options, opId) {
+    var base = "/studios/" + encodeURIComponent(row.studio_id) + "/versions/" + row.version + "/";
+    var body = casBody(row, opId);
+    if (action === "submit") { return { path: base + "submit", body: body }; }
+    if (action === "accept" || action === "reject") {
+      body.accepted = action === "accept";
+      body.rationale_ref = slug(options.reason, "the reason");
+      return { path: base + "review", body: body };
     }
-    var payload = {
-      expected_revision: integer(values.expected_revision, "Expected revision", 1, 2147483647),
-      expected_integrity_sha256: digest(values.expected_integrity_sha256, "Expected integrity", false),
-      operation_id: identifier(values.operation_id, "Operation ID", true)
-    };
-    if (action.indexOf("review-") === 0) {
-      payload.accepted = action === "review-accept";
-      payload.rationale_ref = identifier(values.authority_ref, "Rationale reference", false);
+    if (action === "approve") {
+      body.approval_ref = slug(options.reason, "the approval");
+      return { path: base + "approve", body: body };
     }
-    if (action === "approve") { payload.approval_ref = identifier(values.authority_ref, "Approval reference", false); }
     if (action === "publish") {
-      payload.expected_active_version = integer(values.expected_active_version, "Expected active version", 0, 2147483647);
-      payload.expected_active_blueprint_sha256 = digest(values.expected_active_blueprint_sha256, "Expected active blueprint", payload.expected_active_version === 0);
-      payload.expected_pointer_revision = integer(values.expected_pointer_revision, "Expected pointer revision", 0, 2147483647);
+      var pointer = options.pointer;
+      body.expected_active_version = pointer ? pointer.active_version : 0;
+      body.expected_active_blueprint_sha256 = pointer ? pointer.active_blueprint_sha256 : null;
+      body.expected_pointer_revision = pointer ? pointer.revision : 0;
+      return { path: base + "publish", body: body };
     }
-    return {
-      action: action,
-      studioId: identifier(values.studio_id, "Studio ID", false),
-      version: integer(values.version, "Version", 1, 2147483647),
-      payload: payload
-    };
+    throw problem("That action is not available.");
   }
 
-  function buildRollbackPayload(values) {
-    if (values.confirmation !== true) { throw problem("Rollback confirmation is required."); }
+  function buildRollbackRequest(row, pointer, reason, opId) {
+    if (!pointer) { throw problem("This blueprint has no live version to switch away from."); }
     return {
-      studioId: identifier(values.studio_id, "Studio ID", false),
-      payload: {
-        target_version: integer(values.target_version, "Target version", 1, 2147483647),
-        expected_target_blueprint_sha256: digest(values.expected_target_blueprint_sha256, "Target blueprint", false),
-        expected_active_version: integer(values.expected_active_version, "Active version", 1, 2147483647),
-        expected_active_blueprint_sha256: digest(values.expected_active_blueprint_sha256, "Active blueprint", false),
-        expected_pointer_revision: integer(values.expected_pointer_revision, "Pointer revision", 1, 2147483647),
-        rationale_ref: identifier(values.rationale_ref, "Rationale reference", false),
-        operation_id: identifier(values.operation_id, "Operation ID", true)
+      path: "/studios/" + encodeURIComponent(row.studio_id) + "/rollback",
+      body: {
+        target_version: row.version,
+        expected_target_blueprint_sha256: row.blueprint_sha256,
+        expected_active_version: pointer.active_version,
+        expected_active_blueprint_sha256: pointer.active_blueprint_sha256,
+        expected_pointer_revision: pointer.revision,
+        rationale_ref: slug(reason, "the reason"),
+        operation_id: opId
       }
     };
   }
 
-  function buildProjectionPayload(values) {
-    var kind = String(values.projection_kind || "");
-    if (["questionnaire", "collector", "report"].indexOf(kind) < 0) { throw problem("Projection kind is invalid."); }
-    return {
-      studio_id: identifier(values.studio_id, "Studio ID", false),
-      projection_kind: kind,
-      definition_id: identifier(values.definition_id, "Definition ID", false),
-      target_id: identifier(values.target_id, "Target ID", false),
-      target_revision: integer(values.target_revision, "Target revision", 1, 2147483647),
-      expected_active_version: integer(values.expected_active_version, "Active version", 1, 2147483647),
-      expected_blueprint_sha256: digest(values.expected_blueprint_sha256, "Blueprint digest", false)
+  function buildProjectionPayload(liveRow, definition, values, opId) {
+    var parts = String(definition || "").split(":");
+    if (parts.length !== 2 || !PROJECTION_LABEL[parts[0]] || !ID.test(parts[1])) { throw problem("Choose what to send."); }
+    var target = String(values.target_id || "").trim();
+    if (!ID.test(target)) { throw problem("Choose a destination from the list."); }
+    var revision = Number(values.target_revision);
+    if (!Number.isSafeInteger(revision) || revision < 1) { throw problem("Choose a destination from the list. The details entered by hand are incomplete."); }
+    var payload = {
+      studio_id: liveRow.studio_id,
+      projection_kind: parts[0],
+      definition_id: parts[1],
+      target_id: target,
+      target_revision: revision,
+      expected_active_version: liveRow.version,
+      expected_blueprint_sha256: liveRow.blueprint_sha256
     };
+    if (opId) { payload.operation_id = opId; }
+    return payload;
   }
 
-  function buildProjectionApplyPayload(values) {
-    var payload = buildProjectionPayload(values);
-    payload.operation_id = identifier(values.operation_id, "Operation ID", true);
-    return payload;
+  function projectionChoices(blueprint) {
+    var choices = [];
+    (blueprint && blueprint.forms || []).forEach(function (item) { choices.push({ value: "questionnaire:" + item.form_id, label: "Form: " + human(item.title_ref) }); });
+    (blueprint && blueprint.collector_bindings || []).forEach(function (item) { choices.push({ value: "collector:" + item.binding_id, label: "Evidence link: " + human(item.binding_id) }); });
+    (blueprint && blueprint.report_views || []).forEach(function (item) { choices.push({ value: "report:" + item.view_id, label: "Report: " + human(item.title_ref) }); });
+    return choices;
+  }
+
+  // Which buttons a version row offers to this person.
+  function rowActions(row, permissions) {
+    var actions = ["view"];
+    if (row.state === "draft" && permissions.operate) { actions.push("edit", "submit"); }
+    if (row.state === "in_review" && permissions.audit) { actions.push("accept", "reject"); }
+    if (row.state === "reviewed" && permissions.admin) { actions.push("approve"); }
+    if (row.state === "approved" && permissions.admin) { actions.push("publish"); }
+    if (row.state === "superseded" && permissions.admin) { actions.push("restore"); }
+    if (permissions.operate && row.blueprint) { actions.push("copy"); }
+    if (permissions.audit) { actions.push("download", "history"); }
+    return actions;
   }
 
   async function readBoundedJson(response) {
     var advertised = Number(response.headers.get("content-length") || "0");
     if (advertised > MAX_RESPONSE_BYTES) {
       if (response.body && typeof response.body.cancel === "function") { await response.body.cancel(); }
-      throw problem("Server response exceeds its byte bound.", "oversized_response");
+      throw problem("That is too large to show here.");
     }
     var text;
     if (response.body && typeof response.body.getReader === "function") {
@@ -229,7 +309,7 @@
         total += read.value.byteLength;
         if (total > MAX_RESPONSE_BYTES) {
           await reader.cancel();
-          throw problem("Server response exceeds its byte bound.", "oversized_response");
+          throw problem("That is too large to show here.");
         }
         parts.push(decoder.decode(read.value, { stream: true }));
       }
@@ -237,503 +317,980 @@
       text = parts.join("");
     } else {
       text = await response.text();
-      if (new TextEncoder().encode(text).length > MAX_RESPONSE_BYTES) {
-        throw problem("Server response exceeds its byte bound.", "oversized_response");
-      }
+      if (new TextEncoder().encode(text).length > MAX_RESPONSE_BYTES) { throw problem("That is too large to show here."); }
     }
-    var payload;
-    try { payload = text ? JSON.parse(text) : {}; } catch (_error) { throw problem("Server returned invalid JSON.", "invalid_response"); }
+    var payload = null;
+    try { payload = text ? JSON.parse(text) : {}; } catch (_error) { payload = null; }
     if (!response.ok) {
-      var detail = payload && typeof payload.detail === "string" ? payload.detail : "The operation failed.";
-      throw problem(detail, "http_" + response.status);
+      var failure = new Error("request failed");
+      failure.status = response.status;
+      failure.technical = payload && typeof payload.detail === "string" ? payload.detail : "";
+      throw failure;
     }
+    if (!payload || typeof payload !== "object") { throw problem("Lightwork sent back something unexpected. Refresh the page and try again."); }
     return payload;
   }
 
   global.LightworkNoCodeGRCStudioClient = {
     MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
-    buildBuilderPayload: buildBuilderPayload,
-    buildLifecyclePayload: buildLifecyclePayload,
+    STATE_LABEL: STATE_LABEL,
     buildBlueprintFromComposer: buildBlueprintFromComposer,
+    buildLifecycleRequest: buildLifecycleRequest,
     buildProjectionPayload: buildProjectionPayload,
-    buildProjectionApplyPayload: buildProjectionApplyPayload,
-    buildRollbackPayload: buildRollbackPayload,
+    buildRollbackRequest: buildRollbackRequest,
+    buildSavePayload: buildSavePayload,
+    conditionValue: conditionValue,
     emptyComposerState: emptyComposerState,
+    human: human,
+    listOf: listOf,
     loadComposerState: loadComposerState,
-    opaqueList: opaqueList,
-    parseBoundedJson: parseBoundedJson,
-    readBoundedJson: readBoundedJson
+    parseAnswer: parseAnswer,
+    projectionChoices: projectionChoices,
+    readBoundedJson: readBoundedJson,
+    rowActions: rowActions,
+    slug: slug
   };
 
   if (typeof document === "undefined") { return; }
   var shell = document.getElementById("grc-studio-shell");
   if (!shell) { return; }
   var apiBase = shell.dataset.apiBase;
-  var operations = document.getElementById("grcs-operations");
-  var statusMark = document.getElementById("grcs-status-mark");
-  var readiness = document.getElementById("grcs-readiness");
-  var readinessDetail = document.getElementById("grcs-readiness-detail");
-  var statusOutput = document.getElementById("grcs-status-output");
-  var operationStatus = document.getElementById("grcs-operation-status");
-  var operationOutput = document.getElementById("grcs-operation-output");
-  var listStatus = document.getElementById("grcs-list-status");
-  var versionList = document.getElementById("grcs-version-list");
-  var listCount = document.getElementById("grcs-list-count");
-  var builderForm = document.getElementById("grcs-builder-form");
-  var blueprintEditor = builderForm.elements.blueprint_json;
-  var projectionApply = document.getElementById("grcs-projection-apply");
-  var composerState = emptyComposerState();
   var permissions = {
     operate: shell.dataset.canOperate === "true",
     audit: shell.dataset.canAudit === "true",
     admin: shell.dataset.canAdmin === "true"
   };
+  function $(id) { return document.getElementById(id); }
+  var operations = $("grcs-operations");
+  var statusMark = $("grcs-status-mark");
+  var readiness = $("grcs-readiness");
+  var readinessDetail = $("grcs-readiness-detail");
+  var operationStatus = $("grcs-operation-status");
+  var operationOutput = $("grcs-operation-output");
+  var listStatus = $("grcs-list-status");
+  var versionList = $("grcs-version-list");
+  var builderPanel = $("grcs-builder-panel");
+  var builderForm = $("grcs-builder-form");
+  var composerState = emptyComposerState();
+  var editing = { mode: "create", studioId: null, row: null };
+  var allRows = [];
+  var status = {};
 
-  function values(form) {
-    var output = {};
-    new FormData(form).forEach(function (value, key) { output[key] = value; });
-    form.querySelectorAll('input[type="checkbox"]').forEach(function (input) { output[input.name] = input.checked; });
-    return output;
+  // ---------- small helpers ----------
+  function el(tag, text, cls) {
+    var node = document.createElement(tag);
+    if (cls) { node.className = cls; }
+    if (text !== undefined && text !== null) { node.textContent = String(text); }
+    return node;
   }
-
-  function show(label, payload) {
-    operationStatus.textContent = label;
-    operationOutput.textContent = JSON.stringify(payload, null, 2);
+  function when(ts) {
+    if (typeof global.mvWhen === "function") { return global.mvWhen(ts); }
+    return ts ? new Date(ts * 1000).toLocaleString() : "";
   }
-
-  function showError(error) {
-    var message = error instanceof Error ? error.message : "The operation failed.";
+  function plainError(error, action) {
+    if (error && error.plain) { return error.message; }
+    if (typeof global.mvErrorText === "function") { return global.mvErrorText(error, action); }
+    return "Could not " + action + ". Please try again.";
+  }
+  function report(message, technical) {
     operationStatus.textContent = message;
-    operationOutput.textContent = JSON.stringify({ error: message, code: error && error.code ? error.code : "operation_failed" }, null, 2);
+    operationOutput.textContent = technical === undefined ? "" : (typeof technical === "string" ? technical : JSON.stringify(technical, null, 2));
   }
-
-  function inputValue(id) {
-    var element = document.getElementById(id);
-    return element ? element.value : "";
+  function fail(error, action) {
+    var message = plainError(error, action);
+    report(message, error && error.technical ? error.technical : "");
+    if (typeof global.mvToast === "function") { global.mvToast(message, { error: true }); }
+    if (error && error.status === 409) { loadVersions(); }
+    return message;
   }
-
-  function fieldFor(objectId, fieldId) {
-    var selectedObject = composerState.objects.find(function (item) { return item.object_id === objectId; });
-    if (!selectedObject) { throw problem("Object ID is not present in the composer."); }
-    var selectedField = selectedObject.fields.find(function (item) { return item.field_id === fieldId; });
-    if (!selectedField) { throw problem("Field ID is not present on the selected object."); }
-    return selectedField;
+  function confirmed(message, okText) {
+    if (typeof global.mvConfirm === "function") { return Promise.resolve(global.mvConfirm(message, { okText: okText })); }
+    return Promise.resolve(global.confirm ? global.confirm(message) : false);
   }
-
-  function metadata() {
-    return {
-      studio_id: builderForm.elements.studio_id.value,
-      name_ref: builderForm.elements.name_ref.value,
-      description_ref: builderForm.elements.description_ref.value
-    };
+  function ask(title, fields) {
+    if (typeof global.mvForm === "function") { return Promise.resolve(global.mvForm(title, fields)); }
+    var out = {};
+    fields.forEach(function (field) { out[field.key] = field.default; });
+    return Promise.resolve(out);
   }
-
-  function definitionCard(titleText, detailText, removeLabel, removeAction) {
-    var card = document.createElement("div"); card.className = "grcs-definition";
-    var title = document.createElement("strong"); title.textContent = titleText;
-    var detail = document.createElement("span"); detail.textContent = detailText;
-    var remove = document.createElement("button"); remove.className = "btn"; remove.type = "button";
-    remove.textContent = removeLabel; remove.addEventListener("click", removeAction);
-    card.appendChild(title); card.appendChild(detail); card.appendChild(remove);
-    return card;
-  }
-
-  function renderCollection(id, cards, emptyText) {
-    var target = document.getElementById(id); target.replaceChildren();
-    if (!cards.length) {
-      var empty = document.createElement("p"); empty.className = "grcs-empty"; empty.textContent = emptyText;
-      target.appendChild(empty); return;
+  async function request(path, options) {
+    var settings = Object.assign({ credentials: "same-origin", headers: { Accept: "application/json" } }, options || {});
+    if (settings.body !== undefined && typeof settings.body !== "string") {
+      settings.body = JSON.stringify(settings.body);
+      settings.headers["Content-Type"] = "application/json";
     }
-    cards.forEach(function (card) { target.appendChild(card); });
+    var response;
+    try { response = await fetch(apiBase + path, settings); } catch (error) { throw error; }
+    return readBoundedJson(response);
+  }
+  function button(label, handler, cls, aria) {
+    var node = el("button", label, cls || "btn btn--ghost");
+    node.type = "button";
+    if (aria) { node.setAttribute("aria-label", aria); }
+    node.addEventListener("click", function () {
+      if (node.disabled) { return; }
+      node.disabled = true;
+      Promise.resolve().then(handler).catch(function (error) { fail(error, "finish that"); })
+        .then(function () { node.disabled = false; });
+    });
+    return node;
+  }
+  function download(name, value) {
+    var blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url; link.download = name;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+  }
+  function readFile(input) {
+    return new Promise(function (resolve, reject) {
+      var file = input.files && input.files[0];
+      input.value = "";
+      if (!file) { resolve(null); return; }
+      if (file.size > MAX_FILE_BYTES) { reject(problem("That file is too large. Choose a file under 2 MB.")); return; }
+      var reader = new FileReader();
+      reader.onload = function () {
+        try { resolve(JSON.parse(String(reader.result || ""))); } catch (_error) { reject(problem("That file could not be read. Choose a file saved from this studio.")); }
+      };
+      reader.onerror = function () { reject(problem("That file could not be read.")); };
+      reader.readAsText(file);
+    });
+  }
+  function nameOf(row) {
+    var ref = row && row.blueprint && row.blueprint.name_ref;
+    return human(ref || (row && row.studio_id));
+  }
+  function latestVersion(studioId) {
+    return allRows.filter(function (row) { return row.studio_id === studioId; })
+      .reduce(function (max, row) { return Math.max(max, Number(row.version) || 0); }, 0);
+  }
+  function liveRow(studioId) {
+    return allRows.find(function (row) { return row.studio_id === studioId && row.state === "published"; }) || null;
+  }
+  async function activePointer(studioId) {
+    try {
+      var result = await request("/studios/" + encodeURIComponent(studioId) + "/active");
+      return result.pointer || null;
+    } catch (error) {
+      if (error && error.status === 404) { return null; }
+      throw error;
+    }
+  }
+
+  // ---------- availability ----------
+  async function loadStatus() {
+    statusMark.className = "badge idle";
+    statusMark.textContent = "Checking";
+    readiness.textContent = "Checking…";
+    try {
+      status = await request("/status");
+      var ready = status.enabled === true && status.configured === true && status.ready === true;
+      operations.disabled = !ready;
+      statusMark.className = "badge " + (ready ? "ok" : "failed");
+      statusMark.textContent = ready ? "Ready" : "Not ready";
+      readiness.textContent = ready ? "The studio is ready." : (status.enabled ? "The studio is not set up yet." : "The studio is turned off.");
+      readinessDetail.textContent = ready ? "" : "Ask an administrator to finish setting up the no-code GRC studio for this workspace.";
+      $("grcs-projection-panel").hidden = !(ready && status.runtime_projection_preview_configured === true);
+      $("grcs-projection-apply").disabled = !permissions.admin || status.runtime_projection_apply_configured !== true;
+      if (ready) {
+        await loadVersions();
+        if (permissions.admin) { loadBackups(); }
+      } else {
+        listStatus.textContent = "Nothing to show until the studio is ready.";
+        versionList.replaceChildren();
+      }
+    } catch (error) {
+      operations.disabled = true;
+      statusMark.className = "badge failed";
+      statusMark.textContent = "Not available";
+      readiness.textContent = "The studio could not be reached.";
+      readinessDetail.textContent = plainError(error, "check the studio");
+      listStatus.textContent = "";
+    }
+  }
+
+  // ---------- register ----------
+  async function loadVersions() {
+    listStatus.textContent = "Loading your blueprints…";
+    try {
+      var payload = await request("?limit=1000");
+      allRows = Array.isArray(payload.items) ? payload.items : [];
+      fillStudioFilter();
+      renderVersions();
+      fillProjection();
+    } catch (error) {
+      listStatus.textContent = plainError(error, "load your blueprints");
+    }
+    await loadSources();
+  }
+
+  // ---------- collectors and destinations to choose from ----------
+  var sources = { collectors: [], destinations: [], listed: false, loaded: false };
+  async function loadSources() {
+    try {
+      var payload = await request("/sources");
+      sources = {
+        collectors: Array.isArray(payload.collectors) ? payload.collectors.filter(function (item) {
+          return item && ID.test(String(item.collector_id || "")) && Number.isSafeInteger(item.collector_version) &&
+            item.collector_version > 0 && FINGERPRINT.test(String(item.collector_integrity_sha256 || ""));
+        }) : [],
+        destinations: Array.isArray(payload.destinations) ? payload.destinations.filter(function (item) {
+          return item && PROJECTION_LABEL[item.target_kind] && ID.test(String(item.target_id || "")) &&
+            Number.isSafeInteger(item.target_revision) && item.target_revision > 0;
+        }) : [],
+        listed: payload.destinations_listed === true,
+        loaded: true
+      };
+    } catch (error) {
+      sources = { collectors: [], destinations: [], listed: false, loaded: false };
+    }
+    fillCollectorChoices();
+    fillTargetChoices();
+  }
+  function fillCollectorChoices() {
+    var select = $("grcs-collector-choice");
+    var note = $("grcs-collector-note");
+    fillSelect(select, sources.collectors.map(function (item, index) {
+      return { value: String(index), label: human(item.collector_id) + " (version " + item.collector_version + ")" };
+    }), sources.collectors.length ? "Choose a collector" : "No collectors linked yet");
+    note.textContent = sources.collectors.length ? "" : (sources.loaded
+      ? "No collectors are linked in this workspace yet. Ask your administrator which collector to use, then enter it under Technical details."
+      : "The list of collectors could not be loaded. Refresh the page to try again.");
+    useCollector();
+  }
+  function useCollector() {
+    var item = sources.collectors[Number($("grcs-collector-choice").value)];
+    if ($("grcs-collector-choice").value === "" || !item) { return; }
+    $("grcs-collector-id").value = item.collector_id;
+    $("grcs-collector-version").value = String(item.collector_version);
+    $("grcs-collector-digest").value = item.collector_integrity_sha256;
+  }
+  function fillTargetChoices() {
+    var select = $("grcs-projection-target");
+    var note = $("grcs-projection-target-note");
+    var kind = String($("grcs-projection-definition").value || "").split(":")[0];
+    var matching = [];
+    sources.destinations.forEach(function (item, index) {
+      if (!kind || item.target_kind === kind) {
+        matching.push({ value: String(index), label: (item.label || human(item.target_id)) + " (version " + item.target_revision + ")" });
+      }
+    });
+    fillSelect(select, matching, matching.length ? "Choose a destination" : "No destinations to choose from");
+    note.textContent = matching.length ? "" : (sources.listed
+      ? "No connected destination accepts this kind of item yet."
+      : "Your installation does not list its destinations here. Ask your administrator for the destination, then enter it under Technical details.");
+    useTarget();
+  }
+  function useTarget() {
+    var form = $("grcs-projection-form");
+    var item = sources.destinations[Number($("grcs-projection-target").value)];
+    if ($("grcs-projection-target").value === "" || !item) { return; }
+    form.elements.target_id.value = item.target_id;
+    form.elements.target_revision.value = String(item.target_revision);
+  }
+
+  function fillStudioFilter() {
+    var select = $("grcs-filter-studio");
+    var chosen = select.value;
+    var seen = {};
+    select.replaceChildren(new Option("All blueprints", ""));
+    allRows.forEach(function (row) {
+      if (seen[row.studio_id]) { return; }
+      seen[row.studio_id] = true;
+      select.appendChild(new Option(nameOf(row), row.studio_id));
+    });
+    select.value = seen[chosen] ? chosen : "";
+  }
+
+  function renderVersions() {
+    var studio = $("grcs-filter-studio").value;
+    var state = $("grcs-filter-state").value;
+    var rows = allRows.filter(function (row) { return (!studio || row.studio_id === studio) && (!state || row.state === state); });
+    rows.sort(function (a, b) { return (b.updated_at || 0) - (a.updated_at || 0); });
+    versionList.replaceChildren();
+    $("grcs-list-count").textContent = allRows.length + (allRows.length === 1 ? " version" : " versions");
+    if (!rows.length) {
+      var tr = el("tr"); var td = el("td", allRows.length ? "No versions match these filters." : "No blueprints yet." + (permissions.operate ? " Choose “Start a new blueprint” to build one." : ""));
+      td.colSpan = 5; tr.appendChild(td); versionList.appendChild(tr);
+      listStatus.textContent = "";
+      return;
+    }
+    rows.forEach(function (row) {
+      var tr = el("tr");
+      var th = el("th", nameOf(row)); th.scope = "row"; tr.appendChild(th);
+      tr.appendChild(el("td", "Version " + row.version));
+      var badgeCell = el("td"); badgeCell.appendChild(el("span", STATE_LABEL[row.state] || human(row.state), "badge " + (STATE_BADGE[row.state] || "idle")));
+      tr.appendChild(badgeCell);
+      tr.appendChild(el("td", when(row.updated_at)));
+      var actions = el("td"); var box = el("div", null, "grcs-actions");
+      var label = nameOf(row) + " version " + row.version;
+      rowActions(row, permissions).forEach(function (action) {
+        var spec = ACTIONS[action];
+        if (spec) { box.appendChild(button(spec.label, function () { return spec.run(row); }, spec.cls, spec.label + ": " + label)); }
+      });
+      actions.appendChild(box); tr.appendChild(actions);
+      versionList.appendChild(tr);
+    });
+    listStatus.textContent = "Showing " + rows.length + " of " + allRows.length + ".";
+  }
+
+  function summaryOf(blueprint) {
+    var parts = [];
+    var fields = (blueprint.objects || []).reduce(function (sum, item) { return sum + (item.fields || []).length; }, 0);
+    parts.push((blueprint.objects || []).length + " record types with " + fields + " fields");
+    parts.push((blueprint.forms || []).length + " forms");
+    parts.push((blueprint.rules || []).length + " rules");
+    parts.push((blueprint.report_views || []).length + " reports");
+    if ((blueprint.collector_bindings || []).length) { parts.push(blueprint.collector_bindings.length + " evidence links"); }
+    return parts.join(", ");
+  }
+
+  function showBlueprint(row) {
+    var panel = $("grcs-view-panel");
+    var body = $("grcs-view-body");
+    var blueprint = row.blueprint || {};
+    $("grcs-view-title").textContent = nameOf(row) + " — version " + row.version;
+    body.replaceChildren();
+    body.appendChild(el("p", (STATE_LABEL[row.state] || human(row.state)) + ". " + summaryOf(blueprint) + "."));
+    (blueprint.objects || []).forEach(function (object) {
+      body.appendChild(el("h3", human(object.label_ref) + " (" + (KIND_LABEL[object.kind] || human(object.kind)) + ")"));
+      var list = el("ul");
+      (object.fields || []).forEach(function (field) {
+        var bits = [TYPE_LABEL[field.field_type] || human(field.field_type)];
+        if (field.required) { bits.push("required"); }
+        if (field.options && field.options.length) { bits.push("choices: " + field.options.map(human).join(", ")); }
+        list.appendChild(el("li", human(field.label_ref) + " — " + bits.join(", ")));
+      });
+      body.appendChild(list);
+    });
+    if ((blueprint.rules || []).length) {
+      body.appendChild(el("h3", "Rules"));
+      var rules = el("ul");
+      blueprint.rules.forEach(function (rule) { rules.appendChild(el("li", describeRule(rule))); });
+      body.appendChild(rules);
+    }
+    if ((blueprint.report_views || []).length) {
+      body.appendChild(el("h3", "Reports"));
+      var reports = el("ul");
+      blueprint.report_views.forEach(function (view) { reports.appendChild(el("li", human(view.title_ref) + " — columns: " + view.columns.map(human).join(", "))); });
+      body.appendChild(reports);
+    }
+    panel.hidden = false;
+    $("grcs-view-title").focus();
+  }
+
+  var ACTIONS = {
+    view: { label: "View", run: showBlueprint },
+    edit: { label: "Edit", run: function (row) { openBuilder({ mode: "replace", row: row }); } },
+    copy: { label: "New version from this", run: function (row) { openBuilder({ mode: "create", row: row }); } },
+    submit: { label: "Send for review", cls: "btn", run: function (row) {
+      return confirmed("Send “" + nameOf(row) + "” version " + row.version + " for review? You won't be able to change it while it's being reviewed.", "Send for review")
+        .then(function (ok) { if (ok) { return lifecycle("submit", row, {}, "send it for review", "Sent for review."); } });
+    } },
+    accept: { label: "Accept review", cls: "btn", run: function (row) {
+      return ask("Accept the review of " + nameOf(row), [{ key: "reason", label: "Your conclusion", type: "select", default: "meets-requirements", options: [
+        { value: "meets-requirements", label: "It meets our requirements" },
+        { value: "meets-requirements-with-notes", label: "It meets our requirements, with minor notes" }
+      ] }]).then(function (values) { if (values) { return lifecycle("accept", row, values, "accept the review", "Review accepted. An administrator can now approve it."); } });
+    } },
+    reject: { label: "Send back", cls: "btn btn--danger", run: function (row) {
+      return ask("Send " + nameOf(row) + " back", [{ key: "reason", label: "Why", type: "select", default: "needs-changes", options: [
+        { value: "needs-changes", label: "It needs changes" },
+        { value: "missing-fields", label: "Fields are missing" },
+        { value: "rules-incorrect", label: "The rules are wrong" },
+        { value: "not-needed", label: "It is not needed" }
+      ] }]).then(function (values) { if (values) { return lifecycle("reject", row, values, "send it back", "Sent back to the author."); } });
+    } },
+    approve: { label: "Approve", cls: "btn btn--primary", run: function (row) {
+      return ask("Approve " + nameOf(row), [{ key: "reason", label: "Approval basis", type: "select", default: "approved-for-release", options: [
+        { value: "approved-for-release", label: "Approved for release" },
+        { value: "approved-by-change-board", label: "Approved by the change board" }
+      ] }]).then(function (values) { if (values) { return lifecycle("approve", row, values, "approve it", "Approved. It can now be published."); } });
+    } },
+    publish: { label: "Publish", cls: "btn btn--primary", run: function (row) {
+      return confirmed("Publish “" + nameOf(row) + "” version " + row.version + "? It replaces the live version straight away.", "Publish")
+        .then(async function (ok) {
+          if (!ok) { return; }
+          var pointer = await activePointer(row.studio_id);
+          return lifecycle("publish", row, { pointer: pointer }, "publish it", "Published. Version " + row.version + " is now live.");
+        });
+    } },
+    restore: { label: "Restore this version", cls: "btn", run: function (row) {
+      return ask("Restore " + nameOf(row) + " version " + row.version, [{ key: "reason", label: "Why restore it", type: "select", default: "newer-version-has-problems", options: [
+        { value: "newer-version-has-problems", label: "The newer version has problems" },
+        { value: "requested-by-owner", label: "The owner asked for it" },
+        { value: "audit-finding", label: "An audit finding" }
+      ] }]).then(async function (values) {
+        if (!values) { return; }
+        var pointer = await activePointer(row.studio_id);
+        var built = buildRollbackRequest(row, pointer, values.reason, operationId());
+        try {
+          var result = await request(built.path, { method: "POST", body: built.body });
+          report("Restored. Version " + row.version + " is live again.", result);
+          await loadVersions();
+        } catch (error) { fail(error, "restore this version"); }
+      });
+    } },
+    download: { label: "Download a copy", run: async function (row) {
+      try {
+        var result = await request("/operations/export", { method: "POST", body: { studio_id: row.studio_id, version: row.version, operation_id: operationId() } });
+        download(row.studio_id + "-version-" + row.version + ".json", result);
+        report("Downloaded a copy of " + nameOf(row) + " version " + row.version + ".");
+      } catch (error) { fail(error, "download a copy"); }
+    } },
+    history: { label: "History", run: async function (row) {
+      try {
+        var result = await request("/studios/" + encodeURIComponent(row.studio_id) + "/versions/" + row.version + "/history");
+        var list = $("grcs-history-list"); list.replaceChildren();
+        (result.items || []).forEach(function (item) {
+          var snapshot = item.snapshot || {};
+          var tr = el("tr");
+          tr.appendChild(el("td", when(snapshot.updated_at)));
+          tr.appendChild(el("td", EVENT_LABEL[item.event_type] || human(item.event_type)));
+          tr.appendChild(el("td", STATE_LABEL[snapshot.state] || human(snapshot.state)));
+          list.appendChild(tr);
+        });
+        if (!list.children.length) { var tr = el("tr"); var td = el("td", "Nothing recorded yet."); td.colSpan = 3; tr.appendChild(td); list.appendChild(tr); }
+        $("grcs-history-title").textContent = "History of " + nameOf(row) + " version " + row.version;
+        $("grcs-history-panel").hidden = false;
+        $("grcs-history-title").focus();
+      } catch (error) { fail(error, "load the history"); }
+    } }
+  };
+
+  async function lifecycle(action, row, options, what, done) {
+    var built = buildLifecycleRequest(action, row, options, operationId());
+    try {
+      var result = await request(built.path, { method: "POST", body: built.body });
+      report(done, result);
+      await loadVersions();
+    } catch (error) {
+      if (error && error.status === 403) {
+        fail(problem("Could not " + what + ". The person who built or reviewed a version can't also review or approve it, and some steps need an administrator."));
+      } else {
+        fail(error, what);
+      }
+    }
+  }
+
+  // ---------- builder ----------
+  function openBuilder(options) {
+    var row = options && options.row;
+    composerState = emptyComposerState();
+    editing = { mode: "create", studioId: null, row: null };
+    builderForm.reset();
+    if (row && row.blueprint) {
+      var loaded = loadComposerState(row.blueprint);
+      composerState = loaded.state;
+      $("grcs-name").value = loaded.metadata.name;
+      $("grcs-description").value = loaded.metadata.description;
+      editing = { mode: options.mode, studioId: row.studio_id, row: options.mode === "replace" ? row : null };
+    }
+    $("grcs-name").readOnly = Boolean(editing.studioId);
+    $("grcs-builder-title").textContent = editing.mode === "replace" ? "Edit " + nameOf(row) + " (draft version " + row.version + ")" :
+      editing.studioId ? "New version of " + nameOf(row) : "New blueprint";
+    $("grcs-builder-mode").textContent = editing.mode === "replace" ? "Saving updates this draft." :
+      editing.studioId ? "Saving creates version " + (latestVersion(editing.studioId) + 1) + " as a draft." : "Saving creates the first draft.";
+    builderPanel.hidden = false;
+    renderComposer();
+    $("grcs-builder-title").focus();
+  }
+
+  function objectById(id) { return composerState.objects.find(function (item) { return item.object_id === id; }) || null; }
+  function fieldById(object, id) { return object ? object.fields.find(function (item) { return item.field_id === id; }) || null : null; }
+  function needObject(selectId) {
+    var object = objectById($(selectId).value);
+    if (!object) { throw problem("Add a record type first (step 1)."); }
+    return object;
+  }
+  function needField(object, selectId, what) {
+    var field = fieldById(object, $(selectId).value);
+    if (!field) { throw problem("Choose " + (what || "a field") + ". Add fields to “" + human(object.label_ref) + "” in step 2 first."); }
+    return field;
+  }
+
+  function fillSelect(select, options, emptyText) {
+    var chosen = select.value;
+    select.replaceChildren();
+    if (emptyText) { select.appendChild(new Option(emptyText, "")); }
+    options.forEach(function (option) { select.appendChild(new Option(option.label, option.value)); });
+    if (options.some(function (option) { return option.value === chosen; })) { select.value = chosen; }
+  }
+
+  function fillChecks(fieldset, object, name) {
+    var checked = {};
+    fieldset.querySelectorAll("input:checked").forEach(function (input) { checked[input.value] = true; });
+    Array.prototype.slice.call(fieldset.querySelectorAll("label")).forEach(function (node) { node.remove(); });
+    (object ? object.fields : []).forEach(function (field) {
+      var label = el("label", null, "grcs-check");
+      var input = document.createElement("input");
+      input.type = "checkbox"; input.name = name; input.value = field.field_id; input.checked = Boolean(checked[field.field_id]);
+      label.appendChild(input); label.appendChild(el("span", human(field.label_ref)));
+      fieldset.appendChild(label);
+    });
+    if (!object || !object.fields.length) {
+      var hint = el("label", "Add fields in step 2 first.", "muted");
+      fieldset.appendChild(hint);
+    }
+  }
+
+  function refreshSelectors() {
+    var objects = composerState.objects.map(function (item) { return { value: item.object_id, label: human(item.label_ref) }; });
+    document.querySelectorAll(".grcs-object-select").forEach(function (select) { fillSelect(select, objects); });
+    document.querySelectorAll(".grcs-field-select").forEach(function (select) {
+      var object = objectById($(select.dataset.objectSelect).value);
+      var fields = object ? object.fields.map(function (field) { return { value: field.field_id, label: human(field.label_ref) }; }) : [];
+      fillSelect(select, fields, select.dataset.empty || "");
+    });
+    fillChecks($("grcs-section-fields"), objectById($("grcs-form-object").value), "section_field");
+    fillChecks($("grcs-view-columns"), objectById($("grcs-view-object").value), "view_column");
+  }
+
+  function listItem(text, removeLabel, onRemove) {
+    var li = el("li");
+    li.appendChild(el("span", text));
+    li.appendChild(button("Remove", function () { onRemove(); renderComposer(); }, "btn btn--ghost", removeLabel));
+    return li;
+  }
+  function renderList(id, items, emptyText) {
+    var target = $(id); target.replaceChildren();
+    if (!items.length) { target.appendChild(el("li", emptyText, "muted")); return; }
+    items.forEach(function (item) { target.appendChild(item); });
+  }
+  function describeRule(rule) {
+    var conditions = rule.when.conditions.map(function (condition) {
+      return human(condition.field_id) + " " + (OPERATOR_LABEL[condition.operator] || human(condition.operator)) +
+        (condition.value === null ? "" : " " + (typeof condition.value === "boolean" ? (condition.value ? "yes" : "no") : human(condition.value)));
+    }).join(rule.when.mode === "any" ? " or " : " and ");
+    var actions = rule.then.map(function (action) {
+      if (action.action_type === "set_required") { return (action.value ? "require " : "make optional ") + human(action.target_field_id); }
+      if (action.action_type === "set_visibility") { return (action.value ? "show " : "hide ") + human(action.target_field_id); }
+      if (action.action_type === "set_default") { return "fill in " + human(action.target_field_id) + " with " + human(action.value); }
+      if (action.action_type === "set_severity") { return "set severity to " + human(action.value); }
+      return "create the task " + human(action.value);
+    }).join(", ");
+    return human(rule.rule_id) + ": when " + conditions + ", " + actions + ".";
+  }
+
+  function usedBy(objectId) {
+    return composerState.forms.concat(composerState.rules, composerState.collector_bindings, composerState.report_views)
+      .some(function (item) { return item.object_id === objectId; });
   }
 
   function renderComposer() {
-    renderCollection("grcs-object-list", composerState.objects.map(function (item, index) {
-      return definitionCard(item.object_id, item.kind + " · " + item.fields.length + " fields", "Remove object", function () {
-        var used = composerState.forms.concat(composerState.rules, composerState.collector_bindings, composerState.report_views)
-          .some(function (definition) { return definition.object_id === item.object_id; });
-        if (used) { showError(problem("Remove dependent forms, rules, bindings and views before this object.")); return; }
-        composerState.objects.splice(index, 1); renderComposer();
-      });
-    }), "No objects configured.");
-
-    var fieldCards = [];
-    composerState.objects.forEach(function (objectDefinition) {
-      objectDefinition.fields.forEach(function (item, index) {
-        fieldCards.push(definitionCard(objectDefinition.object_id + "." + item.field_id, item.field_type + " · " + item.sensitivity, "Remove field", function () {
-          objectDefinition.fields.splice(index, 1); renderComposer();
-        }));
+    renderList("grcs-object-list", composerState.objects.map(function (item, index) {
+      return listItem(human(item.label_ref) + " — " + (KIND_LABEL[item.kind] || human(item.kind)) + ", " + item.fields.length + " fields",
+        "Remove record type " + human(item.label_ref), function () {
+          if (usedBy(item.object_id)) { throw problem("Remove the forms, rules, reports and evidence links that use “" + human(item.label_ref) + "” first."); }
+          composerState.objects.splice(index, 1);
+        });
+    }), "No record types yet.");
+    var fieldItems = [];
+    composerState.objects.forEach(function (object) {
+      object.fields.forEach(function (field, index) {
+        fieldItems.push(listItem(human(object.label_ref) + ": " + human(field.label_ref) + " — " + (TYPE_LABEL[field.field_type] || human(field.field_type)) + (field.required ? ", required" : ""),
+          "Remove field " + human(field.label_ref), function () { object.fields.splice(index, 1); }));
       });
     });
-    renderCollection("grcs-field-list", fieldCards, "No fields configured.");
-    renderCollection("grcs-form-list", composerState.forms.map(function (item, index) {
-      return definitionCard(item.form_id, item.object_id + " · " + item.sections.length + " sections", "Remove form", function () { composerState.forms.splice(index, 1); renderComposer(); });
-    }), "No forms configured.");
-    renderCollection("grcs-rule-list", composerState.rules.map(function (item, index) {
-      return definitionCard(item.rule_id, item.object_id + " · " + item.when.conditions.length + " conditions · " + item.then.length + " actions", "Remove rule", function () { composerState.rules.splice(index, 1); renderComposer(); });
-    }), "No rules configured.");
-    renderCollection("grcs-binding-list", composerState.collector_bindings.map(function (item, index) {
-      return definitionCard(item.binding_id, item.collector_id + " v" + item.collector_version + " · " + item.field_mappings.length + " mappings", "Remove binding", function () { composerState.collector_bindings.splice(index, 1); renderComposer(); });
-    }), "No collector bindings configured.");
-    renderCollection("grcs-view-list", composerState.report_views.map(function (item, index) {
-      return definitionCard(item.view_id, item.object_id + " · " + item.columns.length + " columns", "Remove view", function () { composerState.report_views.splice(index, 1); renderComposer(); });
-    }), "No report views configured.");
+    renderList("grcs-field-list", fieldItems, "No fields yet.");
+    renderList("grcs-form-list", composerState.forms.map(function (item, index) {
+      return listItem(human(item.title_ref) + " — " + item.sections.map(function (section) { return human(section.label_ref); }).join(", "),
+        "Remove form " + human(item.title_ref), function () { composerState.forms.splice(index, 1); });
+    }), "No forms yet.");
+    renderList("grcs-rule-list", composerState.rules.map(function (item, index) {
+      return listItem(describeRule(item), "Remove rule " + human(item.rule_id), function () { composerState.rules.splice(index, 1); });
+    }), "No rules yet.");
+    renderList("grcs-view-list", composerState.report_views.map(function (item, index) {
+      return listItem(human(item.title_ref) + " — " + item.columns.length + " columns", "Remove report " + human(item.title_ref), function () { composerState.report_views.splice(index, 1); });
+    }), "No reports yet.");
+    renderList("grcs-binding-list", composerState.collector_bindings.map(function (item, index) {
+      return listItem(human(item.binding_id) + " — fills " + item.field_mappings.map(function (mapping) { return human(mapping.target_field_id); }).join(", "),
+        "Remove evidence link " + human(item.binding_id), function () { composerState.collector_bindings.splice(index, 1); });
+    }), "No evidence links yet.");
+    refreshSelectors();
+    toggleFieldType();
+    toggleActionType();
   }
 
-  function generateBlueprint() {
-    var blueprint = buildBlueprintFromComposer(metadata(), composerState);
-    blueprintEditor.value = JSON.stringify(blueprint, null, 2);
-    return blueprint;
+  function toggleFieldType() {
+    var type = $("grcs-field-type").value;
+    $("grcs-field-options-label").hidden = ["single_choice", "multi_choice"].indexOf(type) < 0;
+    $("grcs-field-reference-label").hidden = ["record_ref", "evidence_ref"].indexOf(type) < 0;
+  }
+  function toggleActionType() {
+    var type = $("grcs-action-type").value;
+    $("grcs-action-target-label").hidden = type === "severity" || type === "task";
+    $("grcs-action-value-label").hidden = ["default", "severity", "task"].indexOf(type) < 0;
   }
 
-  function installComposerHandlers() {
-    document.getElementById("grcs-add-object").addEventListener("click", function () {
-      try {
-        var objectId = identifier(inputValue("grcs-object-id"), "Object ID", false);
-        if (composerState.objects.some(function (item) { return item.object_id === objectId; })) { throw problem("Object ID already exists."); }
-        composerState.objects.push({
-          object_id: objectId,
-          kind: identifier(inputValue("grcs-object-kind"), "Object kind", false),
-          label_ref: identifier(inputValue("grcs-object-label"), "Object label reference", false),
-          description_ref: String(inputValue("grcs-object-description") || "").trim() ? identifier(inputValue("grcs-object-description"), "Object description reference", false) : null,
-          fields: []
-        });
-        renderComposer(); show("Object added to the visual composer.", { object_id: objectId });
-      } catch (error) { showError(error); }
-    });
+  function added(message) { report(message); }
 
-    document.getElementById("grcs-add-field").addEventListener("click", function () {
-      try {
-        var objectId = identifier(inputValue("grcs-field-object"), "Object ID", false);
-        var selectedObject = composerState.objects.find(function (item) { return item.object_id === objectId; });
-        if (!selectedObject) { throw problem("Add the selected object before its field."); }
-        var fieldId = identifier(inputValue("grcs-field-id"), "Field ID", false);
-        if (selectedObject.fields.some(function (item) { return item.field_id === fieldId; })) { throw problem("Field ID already exists on this object."); }
-        var fieldType = inputValue("grcs-field-type");
-        var options = opaqueList(inputValue("grcs-field-options"), "Field option", 256, 0);
-        if (["single_choice", "multi_choice"].indexOf(fieldType) >= 0 && !options.length) { throw problem("Choice fields require at least one option."); }
-        if (["single_choice", "multi_choice"].indexOf(fieldType) < 0 && options.length) { throw problem("Only choice fields accept options."); }
-        var reference = String(inputValue("grcs-field-reference") || "").trim();
-        if (["record_ref", "evidence_ref"].indexOf(fieldType) >= 0 && !reference) { throw problem("Reference fields require a reference kind."); }
-        if (["record_ref", "evidence_ref"].indexOf(fieldType) < 0 && reference) { throw problem("Only reference fields accept a reference kind."); }
-        var defaultValue = literal(inputValue("grcs-field-default"), "Field default", true);
-        if (["multi_choice", "timestamp"].indexOf(fieldType) >= 0 && defaultValue !== null) { throw problem("This field type cannot carry a scalar default."); }
-        if (fieldType === "single_choice" && defaultValue !== null && options.indexOf(defaultValue) < 0) { throw problem("Choice default must be one of the configured options."); }
-        if (fieldType === "digest" && defaultValue !== null) { defaultValue = digest(defaultValue, "Digest default", false); }
-        selectedObject.fields.push({
-          field_id: fieldId,
-          label_ref: identifier(inputValue("grcs-field-label"), "Field label reference", false),
-          field_type: fieldType,
-          required: document.getElementById("grcs-field-required").checked,
-          sensitivity: inputValue("grcs-field-sensitivity"),
-          options: options,
-          reference_kind: reference ? identifier(reference, "Reference kind", false) : null,
-          default: defaultValue
-        });
-        renderComposer(); show("Field added to the visual composer.", { object_id: objectId, field_id: fieldId });
-      } catch (error) { showError(error); }
-    });
-
-    document.getElementById("grcs-add-form").addEventListener("click", function () {
-      try {
-        var formId = identifier(inputValue("grcs-form-id"), "Form ID", false);
-        var objectId = identifier(inputValue("grcs-form-object"), "Object ID", false);
-        var titleRef = identifier(inputValue("grcs-form-title"), "Form title reference", false);
-        var section = {
-          section_id: identifier(inputValue("grcs-section-id"), "Section ID", false),
-          label_ref: identifier(inputValue("grcs-section-label"), "Section label reference", false),
-          field_ids: opaqueList(inputValue("grcs-section-fields"), "Section field ID", 512, 1)
-        };
-        section.field_ids.forEach(function (fieldId) { fieldFor(objectId, fieldId); });
-        var existing = composerState.forms.find(function (item) { return item.form_id === formId; });
-        if (existing) {
-          if (existing.object_id !== objectId || existing.title_ref !== titleRef) { throw problem("Repeated form IDs must retain object and title authority."); }
-          if (existing.sections.some(function (item) { return item.section_id === section.section_id; })) { throw problem("Section ID already exists on this form."); }
-          existing.sections.push(section);
-        } else {
-          composerState.forms.push({ form_id: formId, object_id: objectId, title_ref: titleRef, sections: [section] });
-        }
-        renderComposer(); show("Form section added to the visual composer.", { form_id: formId, section_id: section.section_id });
-      } catch (error) { showError(error); }
-    });
-
-    document.getElementById("grcs-add-rule").addEventListener("click", function () {
-      try {
-        var ruleId = identifier(inputValue("grcs-rule-id"), "Rule ID", false);
-        var objectId = identifier(inputValue("grcs-rule-object"), "Object ID", false);
-        var mode = inputValue("grcs-rule-mode");
-        var conditionField = identifier(inputValue("grcs-condition-field"), "Condition field", false);
-        fieldFor(objectId, conditionField);
-        var conditionOperator = inputValue("grcs-condition-operator");
-        var condition = { field_id: conditionField, operator: conditionOperator, value: literal(inputValue("grcs-condition-value"), "Condition value", conditionOperator === "is_set") };
-        var actionType = inputValue("grcs-action-type");
-        var targetText = String(inputValue("grcs-action-target") || "").trim();
-        var target = targetText ? identifier(targetText, "Action target field", false) : null;
-        if (actionType === "emit_task_ref" && target !== null) { throw problem("emit_task_ref cannot target a field."); }
-        if (actionType !== "emit_task_ref") { fieldFor(objectId, target); }
-        var action = { action_id: identifier(inputValue("grcs-action-id"), "Action ID", false), action_type: actionType, target_field_id: target, value: literal(inputValue("grcs-action-value"), "Action value", true) };
-        var existing = composerState.rules.find(function (item) { return item.rule_id === ruleId; });
-        if (existing) {
-          if (existing.object_id !== objectId || existing.when.mode !== mode) { throw problem("Repeated rule IDs must retain object and match mode."); }
-          if (existing.then.some(function (item) { return item.action_id === action.action_id; })) { throw problem("Action ID already exists on this rule."); }
-          existing.when.conditions.push(condition); existing.then.push(action);
-        } else {
-          composerState.rules.push({ rule_id: ruleId, object_id: objectId, when: { mode: mode, conditions: [condition] }, then: [action] });
-        }
-        renderComposer(); show("Rule step added to the visual composer.", { rule_id: ruleId, action_id: action.action_id });
-      } catch (error) { showError(error); }
-    });
-
-    document.getElementById("grcs-add-binding").addEventListener("click", function () {
-      try {
-        var bindingId = identifier(inputValue("grcs-binding-id"), "Binding ID", false);
-        var objectId = identifier(inputValue("grcs-binding-object"), "Object ID", false);
-        var target = identifier(inputValue("grcs-mapping-target"), "Mapping target field", false);
-        fieldFor(objectId, target);
-        var collectorId = identifier(inputValue("grcs-collector-id"), "Collector ID", false);
-        var collectorVersion = integer(inputValue("grcs-collector-version"), "Collector version", 1, 2147483647);
-        var collectorDigest = digest(inputValue("grcs-collector-digest"), "Collector integrity", false);
-        var mapping = { source_path: opaqueList(inputValue("grcs-source-path"), "Source path segment", 16, 1), target_field_id: target, mode: inputValue("grcs-mapping-mode") };
-        var controls = opaqueList(inputValue("grcs-control-refs"), "Control reference", 512, 1);
-        var existing = composerState.collector_bindings.find(function (item) { return item.binding_id === bindingId; });
-        if (existing) {
-          if (existing.object_id !== objectId || existing.collector_id !== collectorId || existing.collector_version !== collectorVersion || existing.collector_integrity_sha256 !== collectorDigest) { throw problem("Repeated binding IDs must retain pinned collector authority."); }
-          if (existing.field_mappings.some(function (item) { return item.target_field_id === target; })) { throw problem("Binding already maps this target field."); }
-          existing.field_mappings.push(mapping);
-          controls.forEach(function (control) { if (existing.control_refs.indexOf(control) < 0) { existing.control_refs.push(control); } });
-        } else {
-          composerState.collector_bindings.push({ binding_id: bindingId, collector_id: collectorId, collector_version: collectorVersion, collector_integrity_sha256: collectorDigest, object_id: objectId, field_mappings: [mapping], control_refs: controls });
-        }
-        renderComposer(); show("Collector mapping added to the visual composer.", { binding_id: bindingId, target_field_id: target });
-      } catch (error) { showError(error); }
-    });
-
-    document.getElementById("grcs-add-view").addEventListener("click", function () {
-      try {
-        var viewId = identifier(inputValue("grcs-view-id"), "View ID", false);
-        var objectId = identifier(inputValue("grcs-view-object"), "Object ID", false);
-        var titleRef = identifier(inputValue("grcs-view-title"), "View title reference", false);
-        var columns = opaqueList(inputValue("grcs-view-columns"), "View column", 512, 1);
-        var groups = opaqueList(inputValue("grcs-view-groups"), "View group field", 16, 0);
-        columns.concat(groups).forEach(function (fieldId) { fieldFor(objectId, fieldId); });
-        var filterFieldText = String(inputValue("grcs-filter-field") || "").trim();
-        var filter = null;
-        if (filterFieldText) {
-          var filterField = identifier(filterFieldText, "Filter field", false); fieldFor(objectId, filterField);
-          var filterOperator = inputValue("grcs-filter-operator");
-          filter = { field_id: filterField, operator: filterOperator, value: literal(inputValue("grcs-filter-value"), "Filter value", filterOperator === "is_set") };
-        }
-        var sortFieldText = String(inputValue("grcs-sort-field") || "").trim();
-        var sortItem = null;
-        if (sortFieldText) {
-          var sortField = identifier(sortFieldText, "Sort field", false); fieldFor(objectId, sortField);
-          sortItem = { field_id: sortField, direction: inputValue("grcs-sort-direction") };
-        }
-        var existing = composerState.report_views.find(function (item) { return item.view_id === viewId; });
-        if (existing) {
-          if (existing.object_id !== objectId || existing.title_ref !== titleRef || JSON.stringify(existing.columns) !== JSON.stringify(columns) || JSON.stringify(existing.group_by) !== JSON.stringify(groups)) { throw problem("Repeated view IDs must retain object, title, columns and grouping."); }
-          if (filter) { existing.filters.push(filter); }
-          if (sortItem) {
-            if (existing.sort.some(function (item) { return item.field_id === sortItem.field_id; })) { throw problem("View already sorts this field."); }
-            existing.sort.push(sortItem);
-          }
-        } else {
-          composerState.report_views.push({ view_id: viewId, object_id: objectId, title_ref: titleRef, columns: columns, filters: filter ? [filter] : [], group_by: groups, sort: sortItem ? [sortItem] : [] });
-        }
-        renderComposer(); show("Report definition added to the visual composer.", { view_id: viewId });
-      } catch (error) { showError(error); }
-    });
-
-    document.getElementById("grcs-compose-blueprint").addEventListener("click", function () {
-      try { show("Closed blueprint generated from visual definitions.", generateBlueprint()); } catch (error) { showError(error); }
-    });
-    document.getElementById("grcs-load-blueprint").addEventListener("click", function () {
-      try {
-        var loaded = loadComposerState(parseBoundedJson(blueprintEditor.value, "Blueprint", 1024 * 1024));
-        composerState = loaded.state;
-        builderForm.elements.studio_id.value = loaded.metadata.studio_id;
-        builderForm.elements.name_ref.value = loaded.metadata.name_ref;
-        builderForm.elements.description_ref.value = loaded.metadata.description_ref;
-        renderComposer(); show("Advanced blueprint loaded into the visual composer.", loaded.metadata);
-      } catch (error) { showError(error); }
-    });
-    document.getElementById("grcs-reset-composer").addEventListener("click", function () {
-      composerState = emptyComposerState(); blueprintEditor.value = ""; renderComposer();
-      show("Visual composer reset.", { reset: true });
-    });
+  function addObject() {
+    var name = $("grcs-object-name").value;
+    var id = slug(name, "the record type");
+    if (objectById(id)) { throw problem("There is already a record type called “" + human(id) + "”."); }
+    composerState.objects.push({ object_id: id, kind: $("grcs-object-kind").value, label_ref: id, description_ref: null, fields: [] });
+    $("grcs-object-name").value = "";
+    renderComposer();
+    $("grcs-field-object").value = id; $("grcs-form-object").value = id; $("grcs-rule-object").value = id; $("grcs-view-object").value = id; $("grcs-binding-object").value = id;
+    refreshSelectors();
+    added("Added the record type “" + human(id) + "”. Now add its fields in step 2.");
   }
 
-  async function request(path, options) {
-    var settings = Object.assign({ credentials: "same-origin", headers: { Accept: "application/json" } }, options || {});
-    if (settings.body && !settings.headers["Content-Type"]) { settings.headers["Content-Type"] = "application/json"; }
-    return readBoundedJson(await fetch(apiBase + path, settings));
-  }
-
-  async function loadStatus() {
-    statusMark.dataset.state = "checking";
-    statusMark.textContent = "Checking";
-    readiness.textContent = "Checking availability";
-    try {
-      var payload = await request("/status");
-      statusOutput.textContent = JSON.stringify(payload, null, 2);
-      var ready = payload.enabled === true && payload.configured === true && payload.ready === true;
-      operations.disabled = !ready;
-      projectionApply.disabled = !permissions.admin || payload.runtime_projection_apply_configured !== true;
-      statusMark.dataset.state = ready ? "ready" : "failed";
-      statusMark.textContent = ready ? "Ready" : "Unavailable";
-      readiness.textContent = ready ? "Studio authority ready" : "Studio authority unavailable";
-      readinessDetail.textContent = ready ? "The builder is available in this workspace. Applying changes to connected systems requires separate setup." : "Review the availability details before retrying.";
-    } catch (error) {
-      operations.disabled = true;
-      statusMark.dataset.state = "failed";
-      statusMark.textContent = "Unavailable";
-      readiness.textContent = "Status failed closed";
-      readinessDetail.textContent = error.message;
-      statusOutput.textContent = JSON.stringify({ error: error.message }, null, 2);
-      projectionApply.disabled = true;
+  function addField() {
+    var object = needObject("grcs-field-object");
+    var id = slug($("grcs-field-name").value, "the field");
+    if (fieldById(object, id)) { throw problem("“" + human(object.label_ref) + "” already has a field called “" + human(id) + "”."); }
+    var type = $("grcs-field-type").value;
+    var choice = ["single_choice", "multi_choice"].indexOf(type) >= 0;
+    var options = choice ? listOf($("grcs-field-options").value, "choice", 256, 1) : [];
+    var field = {
+      field_id: id, label_ref: id, field_type: type, required: $("grcs-field-required").checked,
+      sensitivity: $("grcs-field-sensitivity").value, options: options,
+      reference_kind: ["record_ref", "evidence_ref"].indexOf(type) >= 0 ? $("grcs-field-reference").value : null,
+      default: null
+    };
+    var starting = $("grcs-field-default").value;
+    if (String(starting).trim()) {
+      if (type === "multi_choice" || type === "timestamp") { throw problem("This type of answer can't have a starting answer. Leave it blank."); }
+      field.default = parseAnswer(field, starting);
     }
+    object.fields.push(field);
+    ["grcs-field-name", "grcs-field-options", "grcs-field-default"].forEach(function (key) { $(key).value = ""; });
+    $("grcs-field-required").checked = false;
+    renderComposer();
+    added("Added the field “" + human(id) + "” to “" + human(object.label_ref) + "”.");
   }
 
-  function appendValue(dl, label, value) {
-    var dt = document.createElement("dt"); dt.textContent = label;
-    var dd = document.createElement("dd"); dd.textContent = String(value);
-    dl.appendChild(dt); dl.appendChild(dd);
+  function checkedValues(fieldset) {
+    return Array.prototype.map.call(fieldset.querySelectorAll("input:checked"), function (input) { return input.value; });
   }
 
-  function renderVersions(payload) {
-    versionList.replaceChildren();
-    var items = Array.isArray(payload.items) ? payload.items : [];
-    items.forEach(function (item) {
-      var article = document.createElement("article"); article.className = "grcs-version";
-      var head = document.createElement("div"); head.className = "grcs-version-head";
-      var title = document.createElement("h3"); title.textContent = item.studio_id + " · v" + item.version;
-      var state = document.createElement("span"); state.className = "grcs-pill"; state.textContent = item.state;
-      head.appendChild(title); head.appendChild(state); article.appendChild(head);
-      var dl = document.createElement("dl");
-      appendValue(dl, "Revision", item.revision);
-      appendValue(dl, "Blueprint", item.blueprint_sha256);
-      appendValue(dl, "Integrity", item.integrity_sha256);
-      appendValue(dl, "Author", item.created_by_ref);
-      article.appendChild(dl);
-      var load = document.createElement("button"); load.className = "btn"; load.type = "button"; load.textContent = "Load in composer";
-      load.disabled = !permissions.operate;
-      load.addEventListener("click", function () {
-        try {
-          var loaded = loadComposerState(item.blueprint);
-          composerState = loaded.state;
-          builderForm.elements.studio_id.value = loaded.metadata.studio_id;
-          builderForm.elements.name_ref.value = loaded.metadata.name_ref;
-          builderForm.elements.description_ref.value = loaded.metadata.description_ref;
-          builderForm.elements.version.value = item.version;
-          builderForm.elements.mode.value = item.state === "draft" ? "replace" : "create";
-          builderForm.elements.expected_revision.value = item.state === "draft" ? item.revision : "";
-          builderForm.elements.expected_integrity_sha256.value = item.state === "draft" ? item.integrity_sha256 : "";
-          builderForm.elements.operation_id.value = "";
-          blueprintEditor.value = JSON.stringify(item.blueprint, null, 2);
-          renderComposer(); show("Version loaded into the visual composer.", { studio_id: item.studio_id, version: item.version, mode: builderForm.elements.mode.value });
-        } catch (error) { showError(error); }
-      });
-      article.appendChild(load); versionList.appendChild(article);
-    });
-    listCount.textContent = items.length + (items.length === 1 ? " version" : " versions");
-    listStatus.textContent = "Loaded " + items.length + " tenant-scoped versions.";
+  function addForm() {
+    var object = needObject("grcs-form-object");
+    var formId = slug($("grcs-form-name").value, "the form");
+    var sectionId = slug($("grcs-section-name").value, "the section");
+    var fields = checkedValues($("grcs-section-fields"));
+    if (!fields.length) { throw problem("Tick at least one field for this section."); }
+    var existing = composerState.forms.find(function (item) { return item.form_id === formId; });
+    if (existing) {
+      if (existing.object_id !== object.object_id) { throw problem("The form “" + human(formId) + "” is for “" + human(existing.object_id) + "”. Choose that record type or use a different form name."); }
+      if (existing.sections.some(function (item) { return item.section_id === sectionId; })) { throw problem("That form already has a section called “" + human(sectionId) + "”."); }
+      var used = {};
+      existing.sections.forEach(function (section) { section.field_ids.forEach(function (id) { used[id] = true; }); });
+      var repeated = fields.filter(function (id) { return used[id]; });
+      if (repeated.length) { throw problem("“" + human(repeated[0]) + "” is already in another section of this form."); }
+      existing.sections.push({ section_id: sectionId, label_ref: sectionId, field_ids: fields });
+    } else {
+      composerState.forms.push({ form_id: formId, object_id: object.object_id, title_ref: formId, sections: [{ section_id: sectionId, label_ref: sectionId, field_ids: fields }] });
+    }
+    $("grcs-section-name").value = "";
+    renderComposer();
+    added("Added the section “" + human(sectionId) + "” to the form “" + human(formId) + "”.");
   }
 
-  document.getElementById("grcs-refresh-status").addEventListener("click", loadStatus);
-  installComposerHandlers();
-  renderComposer();
-  document.getElementById("grcs-filter-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var selected = values(event.currentTarget);
-      var query = new URLSearchParams();
-      if (String(selected.studio_id || "").trim()) { query.set("studio_id", identifier(selected.studio_id, "Studio ID", false)); }
-      if (selected.state) { query.set("state", selected.state); }
-      query.set("limit", String(integer(selected.limit, "Limit", 1, 1000)));
-      renderVersions(await request("?" + query.toString()));
-    } catch (error) { listStatus.textContent = error.message; showError(error); }
-  });
-  document.getElementById("grcs-builder-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      if (composerState.objects.length) { generateBlueprint(); }
-      var built = buildBuilderPayload(values(event.currentTarget));
-      var path = "/studios/" + encodeURIComponent(built.studioId) + "/versions" + (built.mode === "replace" ? "/" + built.version : "");
-      show("Draft saved.", await request(path, { method: built.mode === "replace" ? "PATCH" : "POST", body: JSON.stringify(built.payload) }));
-    } catch (error) { showError(error); }
-  });
-  document.getElementById("grcs-lifecycle-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var built = buildLifecyclePayload(values(event.currentTarget));
-      var admitted = built.action === "submit" ? permissions.operate : built.action.indexOf("review-") === 0 ? permissions.audit : permissions.admin;
-      if (!admitted) { throw problem("Current principal lacks authority for this lifecycle action.", "permission_denied"); }
-      var suffix = { submit: "submit", "review-accept": "review", "review-reject": "review", approve: "approve", publish: "publish" }[built.action];
-      show("Lifecycle transition completed.", await request("/studios/" + encodeURIComponent(built.studioId) + "/versions/" + built.version + "/" + suffix, { method: "POST", body: JSON.stringify(built.payload) }));
-    } catch (error) { showError(error); }
-  });
-  document.getElementById("grcs-rollback-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var built = buildRollbackPayload(values(event.currentTarget));
-      show("Rollback completed.", await request("/studios/" + encodeURIComponent(built.studioId) + "/rollback", { method: "POST", body: JSON.stringify(built.payload) }));
-    } catch (error) { showError(error); }
-  });
-  document.getElementById("grcs-inspect-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var selected = values(event.currentTarget);
-      var studioId = identifier(selected.studio_id, "Studio ID", false);
-      var readType = String(selected.read_type || "");
-      if (["active", "version", "history"].indexOf(readType) < 0) { throw problem("Read type is invalid."); }
-      if (readType === "history" && !permissions.audit) { throw problem("History requires audit authority.", "permission_denied"); }
-      var path = "/studios/" + encodeURIComponent(studioId) + "/active";
-      if (readType !== "active") {
-        var version = integer(selected.version, "Version", 1, 2147483647);
-        path = "/studios/" + encodeURIComponent(studioId) + "/versions/" + version + (readType === "history" ? "/history" : "");
+  function uniqueAction(rule, base) {
+    var id = base.slice(0, 100); var n = 2;
+    while (rule && rule.then.some(function (item) { return item.action_id === id; })) { id = base.slice(0, 96) + "-" + n; n += 1; }
+    return id;
+  }
+
+  function addRule() {
+    var object = needObject("grcs-rule-object");
+    var ruleId = slug($("grcs-rule-name").value, "the rule");
+    var mode = $("grcs-rule-mode").value === "any" ? "any" : "all";
+    var whenField = needField(object, "grcs-condition-field", "the field to check");
+    var operator = $("grcs-condition-operator").value;
+    var condition = { field_id: whenField.field_id, operator: operator, value: conditionValue(whenField, operator, $("grcs-condition-value").value) };
+    var kind = $("grcs-action-type").value;
+    var existing = composerState.rules.find(function (item) { return item.rule_id === ruleId; });
+    var action;
+    if (kind === "severity" || kind === "task") {
+      var text = $("grcs-action-value").value;
+      if (!String(text).trim()) { throw problem(kind === "task" ? "Name the follow-up task." : "Enter the severity, for example High."); }
+      var value = slug(text, kind === "task" ? "the task" : "the severity");
+      action = { action_id: uniqueAction(existing, (kind === "task" ? "task-" : "severity-") + value), action_type: kind === "task" ? "emit_task_ref" : "set_severity", target_field_id: null, value: value };
+    } else {
+      var target = needField(object, "grcs-action-target", "the field to change");
+      var types = { require: ["set_required", true], optional: ["set_required", false], show: ["set_visibility", true], hide: ["set_visibility", false] };
+      if (kind === "default") {
+        var filled = parseAnswer(target, $("grcs-action-value").value);
+        if (filled === null) { throw problem("Enter the value to fill in."); }
+        action = { action_id: uniqueAction(existing, "fill-" + target.field_id), action_type: "set_default", target_field_id: target.field_id, value: filled };
+      } else if (types[kind]) {
+        action = { action_id: uniqueAction(existing, kind + "-" + target.field_id), action_type: types[kind][0], target_field_id: target.field_id, value: types[kind][1] };
+      } else {
+        throw problem("Choose what the rule should do.");
       }
-      show("Governed record loaded.", await request(path));
-    } catch (error) { showError(error); }
-  });
-  document.getElementById("grcs-projection-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var selected = values(event.currentTarget);
-      var apply = event.submitter && event.submitter.value === "apply";
-      if (apply && !permissions.admin) { throw problem("Projection apply requires administrator authority.", "permission_denied"); }
-      var payload = apply ? buildProjectionApplyPayload(selected) : buildProjectionPayload(selected);
-      show(apply ? "Projection applied through server authority." : "Projection preview loaded.", await request("/operations/projections/" + (apply ? "apply" : "preview"), { method: "POST", body: JSON.stringify(payload) }));
     }
-    catch (error) { showError(error); }
-  });
-  document.getElementById("grcs-export-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var selected = values(event.currentTarget);
-      show("Authenticated export created.", await request("/operations/export", { method: "POST", body: JSON.stringify({ studio_id: identifier(selected.studio_id, "Studio ID", false), version: integer(selected.version, "Version", 1, 2147483647), operation_id: identifier(selected.operation_id, "Operation ID", true) }) }));
-    } catch (error) { showError(error); }
-  });
-  document.getElementById("grcs-import-form").addEventListener("submit", async function (event) {
-    event.preventDefault();
-    try {
-      var selected = values(event.currentTarget);
-      show("Authenticated export imported as a draft.", await request("/operations/import", { method: "POST", body: JSON.stringify({ envelope: parseBoundedJson(selected.envelope_json, "Export envelope", 2 * 1024 * 1024), expected_latest_version: integer(selected.expected_latest_version, "Expected latest version", 0, 2147483646), operation_id: identifier(selected.operation_id, "Operation ID", true) }) }));
-    } catch (error) { showError(error); }
-  });
-  document.getElementById("grcs-integrity").addEventListener("click", async function () { try { show("Integrity verification completed.", await request("/operations/integrity")); } catch (error) { showError(error); } });
-  document.getElementById("grcs-retention").addEventListener("click", async function () { try { var limit = integer(document.getElementById("grcs-retention-limit").value, "Limit", 1, 1000); show("Retention queue loaded.", await request("/operations/retention?limit=" + limit)); } catch (error) { showError(error); } });
-  document.getElementById("grcs-retention-purge").addEventListener("click", async function () { try { var limit = integer(document.getElementById("grcs-retention-limit").value, "Limit", 1, 1000); show("Retention purge completed.", await request("/operations/retention/purge", { method: "POST", body: JSON.stringify({ limit: limit }) })); } catch (error) { showError(error); } });
-  document.getElementById("grcs-backup").addEventListener("click", async function () { try { show("Recovery backup created.", await request("/operations/recovery/backups", { method: "POST" })); } catch (error) { showError(error); } });
-  document.getElementById("grcs-backup-verify-form").addEventListener("submit", async function (event) { event.preventDefault(); try { var selected = values(event.currentTarget); var backupId = identifier(selected.backup_id, "Backup ID", false); show("Recovery backup verified.", await request("/operations/recovery/backups/" + encodeURIComponent(backupId))); } catch (error) { showError(error); } });
-
-  var lifecycleForm = document.getElementById("grcs-lifecycle-form");
-  var lifecycleSubmit = document.getElementById("grcs-lifecycle-submit");
-  function updateLifecyclePermission() {
-    var action = lifecycleForm.elements.action.value;
-    lifecycleSubmit.disabled = action === "submit" ? !permissions.operate : action.indexOf("review-") === 0 ? !permissions.audit : !permissions.admin;
+    if (existing) {
+      if (existing.object_id !== object.object_id) { throw problem("The rule “" + human(ruleId) + "” is for another record type. Use a different rule name."); }
+      existing.when.mode = mode;
+      existing.when.conditions.push(condition); existing.then.push(action);
+    } else {
+      composerState.rules.push({ rule_id: ruleId, object_id: object.object_id, when: { mode: mode, conditions: [condition] }, then: [action] });
+    }
+    $("grcs-condition-value").value = ""; $("grcs-action-value").value = "";
+    renderComposer();
+    added("Added to the rule “" + human(ruleId) + "”.");
   }
-  lifecycleForm.elements.action.addEventListener("change", updateLifecyclePermission);
-  updateLifecyclePermission();
 
+  function addView() {
+    var object = needObject("grcs-view-object");
+    var viewId = slug($("grcs-view-name").value, "the report");
+    if (composerState.report_views.some(function (item) { return item.view_id === viewId; })) { throw problem("There is already a report called “" + human(viewId) + "”."); }
+    var columns = checkedValues($("grcs-view-columns"));
+    if (!columns.length) { throw problem("Tick at least one column."); }
+    var view = { view_id: viewId, object_id: object.object_id, title_ref: viewId, columns: columns, filters: [], group_by: [], sort: [] };
+    if ($("grcs-view-group").value) { view.group_by.push(needField(object, "grcs-view-group").field_id); }
+    if ($("grcs-filter-field").value) {
+      var filterField = needField(object, "grcs-filter-field");
+      var operator = $("grcs-filter-operator").value;
+      view.filters.push({ field_id: filterField.field_id, operator: operator, value: conditionValue(filterField, operator, $("grcs-filter-value").value) });
+    }
+    if ($("grcs-sort-field").value) {
+      view.sort.push({ field_id: needField(object, "grcs-sort-field").field_id, direction: $("grcs-sort-direction").value === "descending" ? "descending" : "ascending" });
+    }
+    composerState.report_views.push(view);
+    $("grcs-view-name").value = ""; $("grcs-filter-value").value = "";
+    renderComposer();
+    added("Added the report “" + human(viewId) + "”.");
+  }
+
+  function addBinding() {
+    var object = needObject("grcs-binding-object");
+    var bindingId = slug($("grcs-binding-name").value, "the evidence link");
+    var collector = String($("grcs-collector-id").value || "").trim();
+    if (!ID.test(collector)) { throw problem("Choose a collector from the list."); }
+    var version = Number($("grcs-collector-version").value);
+    if (!Number.isSafeInteger(version) || version < 1) { throw problem("Choose a collector from the list, or enter its version as a whole number under Technical details."); }
+    var fingerprint = String($("grcs-collector-digest").value || "").trim().toLowerCase();
+    if (!FINGERPRINT.test(fingerprint)) { throw problem("Choose a collector from the list. The details entered by hand are incomplete."); }
+    var target = needField(object, "grcs-mapping-target", "the field to fill");
+    var path = String($("grcs-source-path").value || "").split(",").map(function (item) { return item.trim(); }).filter(Boolean);
+    if (!path.length || path.length > 16 || path.some(function (item) { return !ID.test(item); })) {
+      throw problem("Enter where the value comes from, for example: findings, severity.");
+    }
+    var mapping = { source_path: path, target_field_id: target.field_id, mode: $("grcs-mapping-mode").value === "append" ? "append" : "replace" };
+    var controls = listOf($("grcs-control-refs").value, "control", 512, 1);
+    var existing = composerState.collector_bindings.find(function (item) { return item.binding_id === bindingId; });
+    if (existing) {
+      if (existing.object_id !== object.object_id || existing.collector_id !== collector || existing.collector_version !== version || existing.collector_integrity_sha256 !== fingerprint) {
+        throw problem("The evidence link “" + human(bindingId) + "” uses a different collector. Use a different link name.");
+      }
+      if (existing.field_mappings.some(function (item) { return item.target_field_id === target.field_id; })) { throw problem("This evidence link already fills “" + human(target.label_ref) + "”."); }
+      existing.field_mappings.push(mapping);
+      controls.forEach(function (control) { if (existing.control_refs.indexOf(control) < 0) { existing.control_refs.push(control); } });
+    } else {
+      composerState.collector_bindings.push({ binding_id: bindingId, collector_id: collector, collector_version: version, collector_integrity_sha256: fingerprint, object_id: object.object_id, field_mappings: [mapping], control_refs: controls });
+    }
+    renderComposer();
+    added("Added the evidence link “" + human(bindingId) + "”.");
+  }
+
+  function currentBlueprint() {
+    var name = $("grcs-name").value;
+    var studioId = editing.studioId || slug(name, "the blueprint");
+    if (!editing.studioId && allRows.some(function (row) { return row.studio_id === studioId; })) {
+      throw problem("A blueprint called “" + human(studioId) + "” already exists. Use “New version from this” on it, or pick another name.");
+    }
+    return buildBlueprintFromComposer({ studio_id: studioId, name: name, description: $("grcs-description").value }, composerState);
+  }
+
+  async function saveDraft(event) {
+    event.preventDefault();
+    try {
+      var blueprint = currentBlueprint();
+      var built = buildSavePayload(editing.mode === "replace" ? { mode: "replace", row: editing.row } : { mode: "create", latestVersion: latestVersion(blueprint.studio_id) }, blueprint, operationId());
+      var result = await request(built.path, { method: built.method, body: built.body });
+      report("Saved “" + human(blueprint.name_ref) + "” as draft version " + (result.version || "") + ". Send it for review when it's ready.", result);
+      builderPanel.hidden = true;
+      await loadVersions();
+    } catch (error) { fail(error, "save the draft"); }
+  }
+
+  // ---------- projection ----------
+  function fillProjection() {
+    var studioSelect = $("grcs-projection-studio");
+    var live = allRows.filter(function (row) { return row.state === "published"; });
+    fillSelect(studioSelect, live.map(function (row) { return { value: row.studio_id, label: nameOf(row) + " (version " + row.version + ")" }; }));
+    fillDefinitions();
+  }
+  function fillDefinitions() {
+    var row = liveRow($("grcs-projection-studio").value);
+    fillSelect($("grcs-projection-definition"), row ? projectionChoices(row.blueprint) : []);
+  }
+
+  async function projection(event) {
+    event.preventDefault();
+    var apply = event.submitter && event.submitter.value === "apply";
+    var what = apply ? "put it into use" : "preview it";
+    try {
+      var row = liveRow($("grcs-projection-studio").value);
+      if (!row) { throw problem("Publish a blueprint first."); }
+      var form = event.currentTarget;
+      var payload = buildProjectionPayload(row, $("grcs-projection-definition").value, { target_id: form.elements.target_id.value, target_revision: form.elements.target_revision.value }, apply ? operationId() : null);
+      if (apply) {
+        var ok = await confirmed("Send this to “" + payload.target_id + "” now? The destination changes straight away.", "Put into use");
+        if (!ok) { return; }
+      }
+      var result = await request("/operations/projections/" + (apply ? "apply" : "preview"), { method: "POST", body: payload });
+      var choice = $("grcs-projection-definition").selectedOptions[0];
+      report((apply ? "Sent " : "Preview ready for ") + (choice ? choice.textContent : "the selection") + " to “" + payload.target_id + "”." + (apply ? "" : " Open Technical details to see exactly what would change."), result);
+    } catch (error) { fail(error, what); }
+  }
+
+  // ---------- import ----------
+  async function importCopy() {
+    try {
+      var envelope = await readFile($("grcs-import-file"));
+      if (!envelope) { return; }
+      if (!envelope || typeof envelope !== "object" || !ID.test(String(envelope.studio_id || "")) || !envelope.blueprint) {
+        throw problem("That file is not a copy downloaded from this studio.");
+      }
+      var ok = await confirmed("Bring in “" + human(envelope.blueprint.name_ref || envelope.studio_id) + "” as a new draft?", "Bring in");
+      if (!ok) { return; }
+      var result = await request("/operations/import", { method: "POST", body: { envelope: envelope, expected_latest_version: latestVersion(envelope.studio_id), operation_id: operationId() } });
+      report("Brought in as draft version " + (result.version || "") + ".", result);
+      await loadVersions();
+    } catch (error) { fail(error, "bring in the copy"); }
+  }
+
+  // ---------- maintenance ----------
+  async function checkIntegrity() {
+    try {
+      var result = await request("/operations/integrity");
+      var counts = result.counts || {};
+      report(result.verified === true ? "Everything checks out: " + (counts.versions || 0) + " versions and their history are unchanged." :
+        "Some records could not be confirmed as unchanged. Contact your administrator.", result);
+    } catch (error) {
+      fail(error && error.status === 503 ? problem("Some records could not be confirmed as unchanged. Contact your administrator.") : error, "check the records");
+    }
+  }
+  async function showRetention() {
+    try {
+      var result = await request("/operations/retention?limit=1000");
+      var items = result.items || [];
+      renderList("grcs-retention-list", items.map(function (item) {
+        return el("li", nameOf(item) + " version " + item.version + " — " + (STATE_LABEL[item.state] || human(item.state)) + ", due " + when(item.retention_due_at));
+      }), "No versions are due for deletion.");
+      report(items.length ? items.length + " sent-back versions are due for deletion." : "No versions are due for deletion.");
+      return items.length;
+    } catch (error) { fail(error, "load the versions due for deletion"); return 0; }
+  }
+  async function purgeDue() {
+    var count = await showRetention();
+    if (!count) { return; }
+    var ok = await confirmed("Permanently delete the content of " + count + " sent-back version" + (count === 1 ? "" : "s") + " that are past their keep-until date? A record that they existed is kept.", "Delete");
+    if (!ok) { return; }
+    try {
+      var result = await request("/operations/retention/purge", { method: "POST", body: { limit: 1000 } });
+      report("Deleted " + (result.purged_count || 0) + " versions.", result);
+      await showRetention();
+      await loadVersions();
+    } catch (error) { fail(error, "delete the versions"); }
+  }
+  async function loadBackups() {
+    var statusLine = $("grcs-backup-status");
+    var list = $("grcs-backup-list");
+    try {
+      var result = await request("/operations/recovery/backups");
+      var items = result.items || [];
+      list.replaceChildren();
+      statusLine.textContent = items.length ? "" : "No backups yet.";
+      items.forEach(function (item) {
+        var tr = el("tr");
+        tr.appendChild(el("td", when(item.created_at)));
+        var cell = el("td");
+        var outcome = el("span", "", "muted");
+        cell.appendChild(button("Check it", async function () {
+          try {
+            var verified = await request("/operations/recovery/backups/" + encodeURIComponent(item.backup_id));
+            outcome.className = "badge " + (verified.verified === true ? "ok" : "failed");
+            outcome.textContent = verified.verified === true ? "Intact" : "Could not confirm";
+            report(verified.verified === true ? "The backup from " + when(item.created_at) + " is intact." : "Could not confirm the backup is intact.", verified);
+          } catch (error) {
+            outcome.className = "badge failed"; outcome.textContent = "Could not confirm";
+            fail(error, "check the backup");
+          }
+        }, "btn btn--ghost", "Check the backup from " + when(item.created_at)));
+        cell.appendChild(document.createTextNode(" "));
+        cell.appendChild(outcome);
+        tr.appendChild(cell);
+        list.appendChild(tr);
+      });
+    } catch (error) { statusLine.textContent = plainError(error, "load backups"); }
+  }
+  async function makeBackup() {
+    try {
+      var result = await request("/operations/recovery/backups", { method: "POST" });
+      report("Backup made.", result);
+      await loadBackups();
+    } catch (error) { fail(error, "make a backup"); }
+  }
+
+  // ---------- wiring ----------
+  function guarded(handler) {
+    return function () { try { handler(); } catch (error) { fail(error, "add that"); } };
+  }
+  $("grcs-refresh-status").addEventListener("click", loadStatus);
+  $("grcs-filter-studio").addEventListener("change", renderVersions);
+  $("grcs-filter-state").addEventListener("change", renderVersions);
+  $("grcs-new").addEventListener("click", function () { openBuilder(null); });
+  $("grcs-builder-close").addEventListener("click", function () { builderPanel.hidden = true; });
+  $("grcs-view-close").addEventListener("click", function () { $("grcs-view-panel").hidden = true; });
+  $("grcs-history-close").addEventListener("click", function () { $("grcs-history-panel").hidden = true; });
+  $("grcs-add-object").addEventListener("click", guarded(addObject));
+  $("grcs-add-field").addEventListener("click", guarded(addField));
+  $("grcs-add-form").addEventListener("click", guarded(addForm));
+  $("grcs-add-rule").addEventListener("click", guarded(addRule));
+  $("grcs-add-view").addEventListener("click", guarded(addView));
+  $("grcs-add-binding").addEventListener("click", guarded(addBinding));
+  $("grcs-field-type").addEventListener("change", toggleFieldType);
+  $("grcs-action-type").addEventListener("change", toggleActionType);
+  ["grcs-form-object", "grcs-rule-object", "grcs-view-object", "grcs-binding-object", "grcs-field-object"].forEach(function (id) {
+    $(id).addEventListener("change", refreshSelectors);
+  });
+  builderForm.addEventListener("submit", saveDraft);
+  $("grcs-import-blueprint").addEventListener("click", function () { $("grcs-import-blueprint-file").click(); });
+  $("grcs-import-blueprint-file").addEventListener("change", async function () {
+    try {
+      var value = await readFile($("grcs-import-blueprint-file"));
+      if (!value) { return; }
+      var loaded = loadComposerState(value);
+      composerState = loaded.state;
+      if (!editing.studioId) { $("grcs-name").value = loaded.metadata.name; }
+      $("grcs-description").value = loaded.metadata.description;
+      renderComposer();
+      report("Loaded the blueprint from the file. Check it, then save it as a draft.");
+    } catch (error) { fail(error, "load the file"); }
+  });
+  $("grcs-download-blueprint").addEventListener("click", function () {
+    try {
+      var blueprint = currentBlueprint();
+      download(blueprint.studio_id + "-blueprint.json", blueprint);
+      report("Saved the blueprint to a file.");
+    } catch (error) { fail(error, "save the file"); }
+  });
+  $("grcs-reset-composer").addEventListener("click", function () {
+    confirmed("Clear everything you've added to this blueprint?", "Clear").then(function (ok) {
+      if (!ok) { return; }
+      composerState = emptyComposerState(); renderComposer(); report("Cleared.");
+    });
+  });
+  $("grcs-projection-studio").addEventListener("change", function () { fillDefinitions(); fillTargetChoices(); });
+  $("grcs-projection-definition").addEventListener("change", fillTargetChoices);
+  $("grcs-projection-target").addEventListener("change", useTarget);
+  $("grcs-collector-choice").addEventListener("change", useCollector);
+  $("grcs-projection-form").addEventListener("submit", projection);
+  $("grcs-import").addEventListener("click", function () { $("grcs-import-file").click(); });
+  $("grcs-import-file").addEventListener("change", importCopy);
+  $("grcs-integrity").addEventListener("click", checkIntegrity);
+  $("grcs-retention").addEventListener("click", showRetention);
+  $("grcs-retention-purge").addEventListener("click", purgeDue);
+  $("grcs-backup").addEventListener("click", makeBackup);
+
+  renderComposer();
   loadStatus();
 }(typeof window !== "undefined" ? window : globalThis));

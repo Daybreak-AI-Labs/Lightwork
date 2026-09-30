@@ -2,7 +2,10 @@
 
 The page is deliberately tenant-neutral and contains no invitation material.
 It loads a same-origin client which keeps the respondent credential in memory
-and sends it only in the external API ``Authorization`` header.
+and sends it only in the external API ``Authorization`` header.  It is written
+for an outside supplier: plain words only, a file chooser for evidence (the
+server measures each file), and any reference values inside collapsed
+"Technical details".
 """
 
 from __future__ import annotations
@@ -23,45 +26,34 @@ _PAGE = """<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Third-party assurance response | Lightwork</title>
+  <title>Supplier questionnaire | Lightwork</title>
   <link rel="stylesheet" href="portal/assets/styles.css">
   <script defer src="portal/assets/client.js"></script>
 </head>
 <body>
   <main class="portal-shell" id="portal-shell">
     <header class="portal-hero">
-      <p class="eyebrow">Lightwork assurance exchange</p>
-      <h1>Third-party assurance response</h1>
+      <p class="eyebrow">Lightwork</p>
+      <h1>Supplier Questionnaire</h1>
       <p class="lede">
-        Review and answer only the questions authorized by your invitation.
-        Conditional questions are resolved by the server after each draft save.
+        Answer the questions you have been sent and add any documents that back
+        up your answers. You can save and come back until the request closes.
       </p>
     </header>
 
-    <aside class="boundary" aria-labelledby="boundary-title">
-      <h2 id="boundary-title">Security and evidence boundary</h2>
-      <ul>
-        <li>The invitation credential is held only in this page's memory and is cleared on lock.</li>
-        <li>Evidence is represented by a SHA-256 digest manifest; files and file bytes are never accepted here.</li>
-        <li>Respondent attestations remain unverified evidence until separately reviewed.</li>
-        <li>Submission does not prove evidence completeness, truthfulness, or independent assurance.</li>
-      </ul>
-    </aside>
-
     <p class="status" id="portal-status" role="status" aria-live="polite">
-      Enter the opaque invitation credential to open this workspace.
+      Paste your access code to begin.
     </p>
 
     <section class="panel" id="unlock-panel" aria-labelledby="unlock-title">
-      <h2 id="unlock-title">Open invitation</h2>
+      <h2 id="unlock-title">Open Your Request</h2>
       <form id="unlock-form" autocomplete="off" novalidate>
         <div class="field">
-          <label for="invitation-credential">Invitation credential</label>
+          <label for="invitation-credential">Access code</label>
           <input
             id="invitation-credential"
             type="password"
-            minlength="48"
-            maxlength="48"
+            maxlength="256"
             autocapitalize="none"
             autocomplete="off"
             spellcheck="false"
@@ -69,105 +61,137 @@ _PAGE = """<!doctype html>
             required
           >
           <p class="help" id="credential-help">
-            Paste the credential supplied out of band. It is not placed in a URL,
-            cookie, or browser storage by this portal.
+            Paste the access code from your invitation. For your security it is
+            kept only while this page is open.
           </p>
         </div>
-        <button type="submit" id="unlock-button">Open secure workspace</button>
+        <label class="check-label" for="show-credential">
+          <input id="show-credential" type="checkbox">
+          <span>Show the code</span>
+        </label>
+        <div class="actions">
+          <button type="submit" id="unlock-button">Open my request</button>
+        </div>
       </form>
     </section>
 
     <section class="workspace" id="workspace" aria-labelledby="workspace-title" hidden>
       <div class="workspace-heading">
         <div>
-          <p class="eyebrow">Invitation-scoped contract</p>
-          <h2 id="workspace-title">Assessment workspace</h2>
+          <h2 id="workspace-title">Your Questions</h2>
+          <p class="help">
+            You can send your answers until <time id="invitation-expiry"></time>.
+          </p>
+          <p class="progress" id="question-progress"></p>
         </div>
-        <button class="secondary" type="button" id="lock-button">Lock and forget credential</button>
+        <button class="secondary" type="button" id="lock-button">Close and sign out</button>
       </div>
-
-      <dl class="contract-meta" aria-label="Invitation contract details">
-        <div><dt>Respondent reference</dt><dd id="vendor-reference"></dd></div>
-        <div><dt>Assessment reference</dt><dd id="assessment-reference"></dd></div>
-        <div><dt>Notice reference</dt><dd id="notice-reference"></dd></div>
-        <div><dt>Notice SHA-256</dt><dd class="digest" id="notice-digest"></dd></div>
-        <div><dt>Invitation expires</dt><dd><time id="invitation-expiry"></time></dd></div>
-        <div><dt>Draft revision</dt><dd id="draft-revision"></dd></div>
-      </dl>
-
-      <section class="limitations" aria-labelledby="limitations-title">
-        <h3 id="limitations-title">Declared completeness limits</h3>
-        <ul id="contract-limitations"></ul>
-      </section>
 
       <form id="response-form" novalidate>
         <section aria-labelledby="questions-title">
-          <div class="section-heading">
-            <div>
-              <h3 id="questions-title">Authorized questions</h3>
-              <p class="help">
-                Save a draft to have the server evaluate and return the next set of
-                conditional questions. Prior values are never returned to the browser.
-              </p>
-            </div>
-            <p class="progress" id="question-progress"></p>
-          </div>
+          <h3 id="questions-title">Questions</h3>
+          <p class="help">
+            Questions marked Required must be answered before you send. Some
+            questions only appear after you save, depending on your answers.
+          </p>
           <div id="questions"></div>
         </section>
 
         <section class="evidence" aria-labelledby="evidence-title">
           <div class="section-heading">
             <div>
-              <h3 id="evidence-title">Evidence digest manifests</h3>
+              <h3 id="evidence-title">Evidence Files</h3>
               <p class="help">
-                Record metadata and an independently calculated SHA-256 digest.
-                This form has no file chooser and does not transfer document bytes.
+                Add documents that back up your answers, such as certificates,
+                audit reports or policies. Each file is checked as soon as you
+                add it.
               </p>
             </div>
-            <button class="secondary" type="button" id="add-artifact-button">
-              Add evidence manifest
-            </button>
+            <button class="secondary" type="button" id="add-files-button">Add files</button>
+            <input
+              id="evidence-file-input"
+              type="file"
+              multiple
+              hidden
+              aria-label="Choose evidence files from your computer"
+            >
           </div>
-          <p class="policy" id="artifact-policy"></p>
-          <div id="artifact-manifests"></div>
+          <p class="policy" id="evidence-policy"></p>
+          <p class="help empty-files" id="evidence-empty">
+            No files added yet. Choose Add files to pick documents from your computer.
+          </p>
+          <ul class="file-list" id="evidence-files" aria-labelledby="evidence-title"></ul>
         </section>
 
-        <section class="attestation" aria-labelledby="attestation-title">
-          <h3 id="attestation-title">Final respondent attestation</h3>
+        <section class="attestation" id="attestation-section" aria-labelledby="attestation-title">
+          <h3 id="attestation-title">Confirm and Send</h3>
           <label class="check-label" for="respondent-attestation">
-            <input id="respondent-attestation" type="checkbox">
+            <input id="respondent-attestation" type="checkbox" data-answer="confirmation">
             <span>
-              I attest that I am authorized to respond and that the submitted
-              answers and digest manifests are accurate to the best of my knowledge.
-              I understand this attestation is recorded as unverified evidence.
+              I am allowed to answer for my organisation, and my answers and files
+              are accurate to the best of my knowledge. I understand the
+              organisation that invited me will review them.
             </span>
           </label>
+          <p class="field-error" id="attestation-error" hidden></p>
         </section>
 
         <div class="actions">
-          <button type="button" id="save-draft-button">Save draft and refresh questions</button>
-          <button class="danger" type="button" id="finalize-button">Finalize attested response</button>
+          <button class="secondary" type="button" id="save-draft-button">Save my answers</button>
+          <button type="button" id="finalize-button">Send my answers</button>
         </div>
       </form>
+
+      <details class="technical">
+        <summary>Technical details</summary>
+        <p class="help">Only needed if you contact support about this request.</p>
+        <dl class="contract-meta">
+          <div><dt>Request reference</dt><dd class="code" id="detail-request"></dd></div>
+          <div><dt>Questionnaire reference</dt><dd class="code" id="detail-questionnaire"></dd></div>
+          <div><dt>Your organisation's reference</dt><dd class="code" id="detail-company"></dd></div>
+          <div><dt>Notice</dt><dd id="detail-notice"></dd></div>
+          <div><dt>Notice fingerprint</dt><dd class="code" id="detail-notice-fingerprint"></dd></div>
+          <div><dt>Saved version</dt><dd id="detail-version"></dd></div>
+        </dl>
+      </details>
     </section>
 
     <section class="panel receipt" id="receipt-panel" aria-labelledby="receipt-title" hidden>
-      <p class="eyebrow">Submission recorded</p>
-      <h2 id="receipt-title">Final response receipt</h2>
+      <h2 id="receipt-title">Your Answers Have Been Sent</h2>
+      <p id="receipt-summary"></p>
       <p>
-        The invitation credential has been cleared from this page. Preserve the
-        following digests with your internal response records.
+        Thank you. The organisation that invited you will review your answers
+        and may contact you with follow-up questions. You can close this page.
       </p>
-      <dl class="contract-meta">
-        <div><dt>Assessment revision</dt><dd id="receipt-revision"></dd></div>
-        <div><dt>Assessment integrity SHA-256</dt><dd class="digest" id="receipt-assessment-digest"></dd></div>
-        <div><dt>Attestation SHA-256</dt><dd class="digest" id="receipt-attestation-digest"></dd></div>
-        <div><dt>Evidence status</dt><dd id="receipt-evidence-status"></dd></div>
-      </dl>
+      <details class="technical">
+        <summary>Technical details</summary>
+        <p class="help">Keep these with your records if you want proof of what you sent.</p>
+        <dl class="contract-meta">
+          <div><dt>Confirmation code</dt><dd class="code" id="receipt-confirmation-code"></dd></div>
+          <div><dt>Record fingerprint</dt><dd class="code" id="receipt-assessment-fingerprint"></dd></div>
+          <div><dt>Record version</dt><dd id="receipt-revision"></dd></div>
+          <div><dt>Review status</dt><dd id="receipt-evidence-status"></dd></div>
+        </dl>
+      </details>
     </section>
 
+    <details class="safeguards">
+      <summary>About this page's safeguards</summary>
+      <ul>
+        <li>
+          Your access code is kept only while this page is open. It is never
+          saved in your browser, in a cookie or in the web address.
+        </li>
+        <li>Closing and signing out clears the code and your unsaved answers from this page.</li>
+      </ul>
+      <ul id="contract-limitations"></ul>
+    </details>
+
     <noscript>
-      <p class="boundary">JavaScript is required for the in-memory credential boundary.</p>
+      <p class="status" data-state="error">
+        This page needs JavaScript turned on to keep your access code safe. Turn
+        it on and reload the page.
+      </p>
     </noscript>
   </main>
 </body>

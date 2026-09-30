@@ -1,7 +1,5 @@
-# NOTE: the %i / /home/%i tokens below are PLACEHOLDERS. deploy/vps/install.sh
-# renders them to the install user + their home before writing this file to
-# /etc/systemd/system/. Don't `cp` this file directly -- run install.sh (or
-# sed-substitute %i yourself), or systemd gets an empty User= and broken paths.
+# NOTE: @...@ tokens are rendered by render_service.py from the installed
+# user's saved workspace. Run install.sh; do not copy this template directly.
 [Unit]
 Description=Lightwork agent (long-horizon multi-agent swarm)
 Documentation=https://github.com/Daybreak-AI-Labs/Lightwork
@@ -15,12 +13,12 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=%i
-WorkingDirectory=/home/%i/maverick-workspace
-EnvironmentFile=/home/%i/.maverick/.env
-Environment=MAVERICK_CONFIG=/home/%i/.maverick/config.toml
+User=@USER@
+WorkingDirectory=@WORKDIR@
+EnvironmentFile=-@ENV_FILE@
+Environment=@CONFIG_ENV@
 # Idle by default — channels (telegram etc.) wake it.
-ExecStart=/home/%i/.local/bin/maverick serve
+ExecStart=@EXECUTABLE@ serve
 Restart=on-failure
 RestartSec=5s
 # Give in-flight goals 30s to wind down on stop/restart.
@@ -40,7 +38,7 @@ MemoryMax=75%
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/%i/.maverick /home/%i/maverick-workspace
+ReadWritePaths=@STATE@ @WORKDIR@
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true

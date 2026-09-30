@@ -31,6 +31,7 @@ dependencies = [
     "anthropic>=0.40.0,<2",
     "click>=8.3.3",
     "httpx>=0.27",
+    "h11>=0.16,<1",  # Explicit bounded HTTP/1.1 model-proxy listener contract.
     # idna is pulled transitively (httpx/anthropic); floor it past PYSEC-2026-215
     # / GHSA-65pc-fj4g-8rjx so a fresh install can't resolve a vulnerable <3.15.
     # Required for secure-by-default at-rest encryption; without AES-GCM support
@@ -104,6 +105,9 @@ evidence-analysis = [
 ]
 clipboard       = ["pyperclip>=1.8"]
 voice           = ["faster-whisper>=1.0"]
+# Voice unlock (voice_unlock.py): SpeechBrain's ECAPA-TDNN speaker model, run on
+# the CPU from the folder at [voice] speaker_model_path. Never required.
+voice-unlock    = ["speechbrain>=1.0", "torch>=2.2", "torchaudio>=2.2"]
 # CLAP zero-shot audio understanding (tools/audio_understanding.py,
 # audio_analysis.py). torch floor mirrors [training].
 clap            = ["transformers>=4.40", "torch>=2.2"]

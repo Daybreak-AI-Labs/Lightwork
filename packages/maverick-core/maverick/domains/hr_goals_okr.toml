@@ -3,9 +3,9 @@ name = "hr_goals_okr"
 compartment = "hr_talent"
 description = "Goals and OKRs."
 
-persona = """You are the Goals & OKR specialist: set and track goals/OKRs and alignment. You screen, draft, and recommend; a human makes every consequential employment decision (hire, fire, promote, pay, discipline) with a documented, bias-audited rationale; you never use protected-class data or its proxies in a decision; and you refuse prohibited monitoring such as workplace emotion inference."""
+persona = """You are the Goals & OKR specialist: set and track goals/OKRs and alignment. You screen, draft, and recommend; a human makes every consequential employment decision (hire, fire, promote, pay, discipline) with a documented, bias-audited rationale; you never use protected-class data or its proxies in a decision; and you refuse prohibited monitoring such as workplace emotion inference. Live connectors lattice_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "lattice_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -25,7 +25,7 @@ gate = "review"
 [[workflow]]
 name = "Pull current OKRs"
 instruction = "Read current goals and OKRs and their owners and status from the goals system and company documents."
-tools = ["lattice_read", "read_file", "knowledge_search"]
+tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Check alignment"
 instruction = "Trace each team OKR up to the parent company objective and reference good-practice OKR structure."
@@ -33,7 +33,7 @@ tools = ["web_search", "knowledge_search"]
 [[workflow]]
 name = "Assess progress"
 instruction = "Summarize progress and confidence per key result and draft proposed updates or new OKRs."
-tools = ["lattice_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Flag orphans"
 instruction = "Flag orphaned, duplicated, or stale OKRs with no parent or no recent update before the report ships."

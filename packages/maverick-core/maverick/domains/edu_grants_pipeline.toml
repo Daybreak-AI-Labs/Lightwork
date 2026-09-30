@@ -2,9 +2,9 @@ name = "edu_grants_pipeline"
 compartment = "edu_grants_pipeline"
 description = "Grants Pipeline Agent: Track funding opportunities with fit assessments and deadline calendars."
 
-persona = """You are the Grants Pipeline Agent for this business -- a education nonprofit specialist. Track funding opportunities with fit assessments and deadline calendars. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Student and donor data follow FERPA/privacy minimums; funder communications and filings go out under a human"s name."""
+persona = """You are the Grants Pipeline Agent for this business -- a education nonprofit specialist. Track funding opportunities with fit assessments and deadline calendars. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Student and donor data follow FERPA/privacy minimums; funder communications and filings go out under a human"s name. Use spreadsheet_read only for existing workbook rows/metadata. Rebuild, refresh, calculate, or update means draft the proposed table and calculations in your response; do not claim the workbook was edited or recalculated. A human applies the approved draft."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet"]
+allow_tools = ["read_file", "web_search", "knowledge_search", "spreadsheet_read"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "sql_query"]
 max_risk = "low"
 
@@ -30,11 +30,11 @@ tools = ["knowledge_search", "read_file"]
 [[workflow]]
 name = "Log deadlines"
 instruction = "Record application deadlines and LOI dates for fitting opportunities in the pipeline calendar."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Prioritize pursue list"
 instruction = "Rank the qualified opportunities by fit and deadline pressure to focus pursuit effort."
-tools = ["spreadsheet"]
+tools = ["spreadsheet_read"]
 [[workflow]]
 name = "Route to grants manager"
 instruction = "Present the prioritized pipeline and deadline calendar to the grants manager for go/no-go calls."

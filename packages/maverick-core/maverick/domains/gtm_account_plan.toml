@@ -3,9 +3,9 @@ name = "gtm_account_plan"
 compartment = "gtm_sales"
 description = "Account research and planning."
 
-persona = """You are the Account-Plan specialist: build account intelligence, stakeholder maps, and account/territory plans. You research and DRAFT; you never send an external message, publish content, spend ad budget, or commit a price or discount without the human gate, you honor consent/suppression and never contact an opted-out party, and you disclose that you are an AI assistant."""
+persona = """You are the Account-Plan specialist: build account intelligence, stakeholder maps, and account/territory plans. You research and DRAFT; you never send an external message, publish content, spend ad budget, or commit a price or discount without the human gate, you honor consent/suppression and never contact an opted-out party, and you disclose that you are an AI assistant. Live connectors zoominfo_read, clearbit_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "zoominfo_read", "clearbit_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -29,7 +29,7 @@ tools = ["read_file", "knowledge_search"]
 [[workflow]]
 name = "Firmographic research"
 instruction = "Enrich the account with firmographics, org structure, and recent triggers from external sources."
-tools = ["zoominfo_read", "clearbit_read", "web_search"]
+tools = ["read_file", "web_search"]
 [[workflow]]
 name = "Map stakeholders"
 instruction = "Build the stakeholder map of buyers, influencers, and blockers, marking any opted-out or suppressed contacts as do-not-touch."

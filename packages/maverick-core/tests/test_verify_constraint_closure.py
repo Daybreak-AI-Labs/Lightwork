@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -99,8 +100,27 @@ def test_repository_constraints_are_exact_and_cover_current_environment():
     )
 
     assert canonicalize_name("maverick-agent") in first_party
-    assert constraints["tzdata"].specifier.contains("2026.3")
+    assert constraints["tzdata"].specifier.contains("2026.4")
     assert constraints["psycopg-pool"].specifier.contains("3.3.1")
+
+
+def test_workflow_and_build_pins_agree_with_dependency_constraints():
+    verifier = _load_verifier()
+    constraints = verifier.active_constraints(REPO_ROOT / "requirements" / "ci.txt")
+    sources = [*(REPO_ROOT / ".github" / "workflows").glob("*.yml"),
+               *(REPO_ROOT / ".github" / "actions").glob("*/action.yml"),
+               REPO_ROOT / "scripts" / "build-nuitka.sh"]
+    mismatches = []
+    for source in sources:
+        for line_no, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            for name, version in re.findall(r"([\w.-]+)==([\d][\w.+-]*)", line):
+                requirement = constraints.get(canonicalize_name(name))
+                if requirement and not requirement.specifier.contains(version):
+                    mismatches.append(f"{source.relative_to(REPO_ROOT)}:{line_no}: {name}=={version}, "
+                                      f"constraint {requirement.specifier}")
+    assert not mismatches, "\n".join(mismatches)
 
 
 def test_parser_allows_explicit_additional_first_party_distributions():

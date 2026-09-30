@@ -14,14 +14,17 @@ store    = "sqlite"    # sqlite | pgvector | qdrant
 
 ## Storage: pick a backend per deployment
 
-One `VectorStore` protocol, three interchangeable backends. Choice is a config
-line, not a fork — the agent-facing behaviour is identical.
+The adapters support three backends, with different publication guarantees.
+SQLite and pgvector support atomic governed document ingestion. Qdrant supports
+existing-corpus reads and erasure; new governed publication is refused because
+the adapter lacks a shared atomic provenance and embedding-identity fence.
+Qualify the selected backend with your corpus.
 
 | Backend    | When                                            | Notes |
 |------------|-------------------------------------------------|-------|
-| **sqlite** (default) | Single box, SMB, air-gapped                | Dependency-free brute-force cosine, sealed by the platform's encryption-at-rest. Comfortable to a few million chunks per tenant. |
-| **pgvector** | Enterprise self-hosted — **the recommended default for regulated clients** | Rides the Postgres you already run and the platform already supports (world model + knowledge in one database to encrypt, back up, audit, and isolate with RLS). Hybrid keyword+vector in one engine. Adequate to ~5M vectors/tenant. Needs `maverick-knowledge[pgvector]` + the Postgres `vector` extension. |
-| **qdrant** | Very large corpora / dedicated retrieval infra  | Apache-2.0, self-hosted single binary, fast filtered search. The certified escape hatch when a client outgrows pgvector. Needs `maverick-knowledge[qdrant]`. |
+| **sqlite** (default) | Single box, SMB, air-gapped | Brute-force cosine over local records; measure latency at the intended corpus size. |
+| **pgvector** | Deployments already operating Postgres | Needs `maverick-knowledge[pgvector]`, the `vector` extension, and verified database isolation, backup and permissions. |
+| **qdrant** | Existing retrieval infrastructure | Needs `maverick-knowledge[qdrant]`. Existing exact documents remain readable and erasable. New ingestion, interrupted-document repair and in-place reindex are refused; migrate ingestion to SQLite or pgvector. |
 
 We do **not** ship a managed-only vector service as the default: the platform
 sells "your data never leaves your boundary," so the knowledge store — the
@@ -52,14 +55,45 @@ dim     = 1024
 # api_key via QDRANT_API_KEY
 ```
 
+This adapter's low-level upsert does not provide atomic document admission.
+New governed ingestion fails with an actionable error before document embedding
+or vector/document writes. Read attempts may still produce local accounting
+receipts. A complete existing document with the same text and provenance can
+still satisfy an idempotent, read-only retry. No backend is silently substituted.
+Qdrant's newer conditional point writes do not by themselves supply this
+adapter's required multi-chunk document and collection-identity transaction;
+this release does not claim distributed publication qualification for Qdrant.
+Chroma is a separate core recall adapter, not a `KnowledgeBase` storage backend.
+
 ## Embedders
 
 `hosted` (Voyage, needs `VOYAGE_API_KEY`), `local` (on-box
 sentence-transformers, no key), or `deterministic` (a hashing stub — offline and
 keyless, but low recall quality; for tests and smoke runs only). **Meaningful
-semantic recall needs `local` or `hosted`.** If you change embedder or model,
-the vector dimension changes — re-embed the corpus (the store raises rather than
-silently returning garbage on a dim mismatch).
+semantic recall needs `local` or `hosted`.** Changing an embedder or model can
+change the vector space even when its dimension stays the same. Chunks record
+an embedding identity; retrieval and ingestion refuse a mixed or incompatible
+collection instead of silently comparing unrelated vectors.
+
+Existing untagged collections require an explicit migration. With the intended
+embedding configuration active, run
+`maverick knowledge reindex <collection> --tenant <tenant>` for a supported
+SQLite or pgvector store. Reindex uses the existing complete chunk text and
+preserves chunk IDs, provenance and content commitments. Vector replacement is
+atomic against the captured collection state; a concurrent corpus change
+requires a retry. This in-place operation is bounded to 100,000 chunks. A
+pgvector store also requires the replacement vectors to match the existing
+table dimension; changing dimensions requires a new store and an explicit
+corpus migration. For Qdrant, migrate the source corpus into a SQLite or pgvector
+store and switch the configured knowledge sources after verifying it; Qdrant
+in-place reindex and new governed ingestion are refused before embedding work.
+
+Hosted identities bind the configured provider, model, endpoint, dimensions
+and optional `[knowledge] revision`. That revision is an operator-supplied
+identity, not independent proof of which remote weights served a request.
+Changing provider weights without changing a published or configured revision
+cannot be inferred from equal-sized vectors. Opaque custom embedder instances
+do not share a persistent cache identity.
 
 ## Governance
 
@@ -68,6 +102,20 @@ Every chunk is provenance-stamped at ingest: `source` (the citation), `subject`
 (3 first-party … 0 external), `sensitivity`, `ingested_by`, `ingested_at`, and a
 `doc_sha256` content hash. Ingestion is screened for prompt-injection on the way
 in and recorded on the signed audit chain (`evidence_capture`).
+
+Within one collection, a document digest binds its content, chunk layout and
+provenance at publication. SQLite and pgvector compare that binding inside the
+same transaction as insertion, including when independent workers have both
+read an absent document. Conflicting provenance is rejected without partial
+publication. Matching retries retain the first admitted rows and timestamp;
+repair of missing matching chunks uses that same timestamp. Embedding-identity
+checks remain inside the transaction and continue to fence reindex operations.
+
+One document may contain at most 2,048 chunks. Ingestion checks the complete
+chunk count before embedding or publication and rejects larger documents;
+split them into separately attributable sources. The bound also applies to
+exact-document verification, so an oversized document cannot be published and
+then reported as a failed ingestion solely because verification is truncated.
 
 Because chunks carry a subject, the knowledge plane participates in the platform's
 compliance flows:
@@ -95,6 +143,12 @@ suite collections the shipped packs already point at. So a privacy/GRC
 specialist can cite the governing regulation out of the box; customers layer
 their own documents on top. Redistributable-restricted standards (e.g. ISO) are
 deliberately excluded.
+
+Reseeding reuses unchanged content. On SQLite and pgvector, a changed source is
+embedded and validated before replacing its prior chunks in one transaction.
+A provider failure or conflicting embedding identity leaves the accepted source
+intact. Concurrent changes to that source require a retry. Replacement is atomic
+per source; a seed command covering several sources is not one global transaction.
 
 ```
 maverick knowledge seed --list          # show the shipped corpora

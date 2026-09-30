@@ -136,8 +136,8 @@ def test_thread_page_shows_earlier_turns_the_composer_and_the_chat_list(chat_env
     assert page.count("Shorter, please.") == 1
     assert f'action="/chat/goal/{new_id}/reply"' in page
     assert 'name="message"' in page
-    # The sidebar lists the thread by its root and marks it as the open chat.
-    assert f'href="/chat/goal/{root_id}" class="active" aria-current="true"' in page
-    assert f'href="/chat/goal/{new_id}"' not in page.split('id="content"')[0]
+    # Stable root identity/title, but Recents reopens the latest actual turn.
+    assert f'href="/chat/goal/{new_id}" class="active" aria-current="true"' in page
+    assert f'href="/chat/goal/{root_id}"' not in page.split('id="content"')[0]
     landing = client.get("/chat").text
-    assert f'href="/chat/goal/{root_id}"' in landing.split('id="content"')[0]
+    assert f'href="/chat/goal/{new_id}"' in landing.split('id="content"')[0]

@@ -82,6 +82,15 @@ class ExportDeliveryIn(_StrictModel):
     idempotency_key: IdempotencyKey
 
 
+class EvidenceRecordIn(_StrictModel):
+    idempotency_key: IdempotencyKey
+
+
+#: Signing key the page's "Download evidence record" button uses, so nobody is
+#: asked for a key reference. The key itself stays in the environment.
+DEFAULT_EVIDENCE_SIGNING_KEY_REF = "env:MAVERICK_PRIVACY_DELIVERY_SIGNING_KEY"
+
+
 class PurgeDeliveryIn(_StrictModel):
     cutoff: float | int = Field(gt=0, lt=100_000_000_000.0)
     idempotency_key: IdempotencyKey
@@ -547,6 +556,44 @@ def create_privacy_rights_consumer_delivery_router(  # noqa: C901
             )
         )
 
+    @router.post("/deliveries/{delivery_id}/evidence-record")
+    async def evidence_record(
+        request: Request,
+        response: Response,
+        delivery_id: ObjectPath,
+    ):
+        """Signed metadata record for one link, signed with the deployment key
+        (no bearer or object secret is ever included)."""
+
+        require_permission(request, "operate")
+        _private(response)
+        body = await _body(request, EvidenceRecordIn)
+        assert isinstance(body, EvidenceRecordIn)
+        ops, tenant, store = authority(request)
+        current = _expect(
+            await call(ops, store.get_delivery, tenant, delivery_id),
+            ops.RightsConsumerDelivery,
+        )
+        export_id = "evidence-" + hashlib.sha256(
+            f"{delivery_id}:{body.idempotency_key}".encode()
+        ).hexdigest()[:24]
+        return _jsonable(
+            _expect(
+                await call(
+                    ops,
+                    store.export_signed_metadata,
+                    tenant,
+                    delivery_id,
+                    export_id,
+                    expected_delivery_revision=current.revision,
+                    signing_key_ref=DEFAULT_EVIDENCE_SIGNING_KEY_REF,
+                    retained_until=current.retained_until,
+                    idempotency_key=body.idempotency_key,
+                ),
+                ops.SignedRightsConsumerDeliveryExport,
+            )
+        )
+
     @router.get("/exports/{export_id}")
     async def get_export(
         request: Request,
@@ -603,6 +650,7 @@ def create_privacy_rights_consumer_delivery_router(  # noqa: C901
 router = create_privacy_rights_consumer_delivery_router()
 
 __all__ = [
+    "DEFAULT_EVIDENCE_SIGNING_KEY_REF",
     "PrivacyRightsConsumerDeliveryDependencies",
     "create_privacy_rights_consumer_delivery_router",
     "privacy_rights_consumer_delivery_enabled_for_page",

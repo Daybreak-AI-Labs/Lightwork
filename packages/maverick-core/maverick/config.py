@@ -30,6 +30,7 @@ Schema overview::
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import math
 import os
@@ -41,6 +42,7 @@ from typing import Any
 
 # Initialize encryption before a worker resolves sealed dashboard settings.
 from . import crypto_at_rest
+from .file_lock import atomic_read_bytes
 
 try:
     import tomllib  # Python 3.11+
@@ -224,7 +226,9 @@ def _read_toml_raw(path: Path) -> dict:
     if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
         return cached[2]
     try:
-        with open(path, "rb") as f:
+        # Private Windows publication retains the verified write handle until
+        # rename completes. A reader can see the name before that handle closes.
+        with io.BytesIO(atomic_read_bytes(path)) as f:
             raw = tomllib.load(f)
     except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError) as e:
         # The kernel must tolerate a missing config (returns {} above); a
@@ -236,6 +240,12 @@ def _read_toml_raw(path: Path) -> dict:
             path, type(e).__name__, e,
         )
         _toml_errors[key] = f"{type(e).__name__}: {e}"
+        if isinstance(e, OSError):
+            # A sharing/permission failure is not parsed file content. Keep
+            # health fail-closed now, but retry the next read even when this
+            # complete file's mtime and size have not changed.
+            _toml_cache.pop(key, None)
+            return {}
         raw = {}
     else:
         _toml_errors.pop(key, None)
@@ -364,27 +374,18 @@ def load_governed_records_config() -> dict:
     """Load only sources allowed to select the governed-record backend.
 
     Tenant overlays must not select a deployment-global persistence plane.
-    Base/operator configuration and environment variables remain the authority
-    for that selection.
+    The deployment-global sources do: config.toml, the dashboard settings
+    overlay (written only by a global administrator on Settings > All
+    settings), then the operator overlay; environment variables still win in
+    the readers. This is :func:`load_global_config`, which never merges a
+    tenant overlay.
     """
-    _load_wizard_env()
-    cfg = _load_config_file(config_path())
-    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
-    if overlay:
-        cfg = _deep_merge_config(
-            cfg,
-            _load_config_file(Path(overlay).expanduser()),
-        )
-    return cfg
+    return load_global_config()
 
 
 def governed_records_config_source_errors() -> dict[str, str]:
     """Unreadable sources participating in governed-backend selection."""
-    paths = [config_path()]
-    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
-    if overlay:
-        paths.append(Path(overlay).expanduser())
-    return _source_errors(paths)
+    return config_source_errors(include_tenant=False)
 
 
 def _source_errors(paths: list[Path]) -> dict[str, str]:
@@ -879,7 +880,9 @@ def azure_provider_configuration_missing(
     else:
         authentication = bool(key) ^ bool(ad_token)
 
-    deployment = present(os.environ.get("AZURE_OPENAI_DEPLOYMENT"))
+    deployment = present(os.environ.get("AZURE_OPENAI_DEPLOYMENT")) or present(
+        table.get("deployment")
+    )
     return tuple(
         item
         for item, configured in (
@@ -969,6 +972,9 @@ def get_capabilities() -> dict:
         # Programmatic tool calling: a sandboxed Python script that orchestrates
         # declared tool calls (also enableable via MAVERICK_CODE_EXEC).
         "code_exec": bool(cfg.get("code_exec", False)),
+        # Deferred connector loading (default on); agent.py reads it from this
+        # dict, so without it here the documented knob could never turn it off.
+        "deferred_tools": _strict_config_bool(cfg, "deferred_tools", True, invalid=True),
     }
 
 
@@ -1038,6 +1044,7 @@ def get_features() -> dict:
         "workflow_readiness": cfg.get("workflow_readiness", True) is True,
         "project_reviews": cfg.get("project_reviews", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
+        "copilot_operations": (not config_source_errors() and cfg.get("copilot_operations", False) is True),
         "scheduling": bool(cfg.get("scheduling", True)),
         "triggers": bool(cfg.get("triggers", True)),
     }
@@ -1135,7 +1142,7 @@ def get_sandbox() -> dict:
     cfg = load_config().get("sandbox", {})
     return {
         "backend": "kubernetes" if os.environ.get("MAVERICK_DEPLOYMENT_ISOLATION") == "kubernetes" else cfg.get("backend", "local"),
-        "workdir": cfg.get("workdir", "~/maverick-workspace"),
+        "workdir": cfg.get("workdir", os.environ.get("MAVERICK_WORKDIR") or "~/maverick-workspace"),
         "timeout": cfg.get("timeout", 60),
     }
 
@@ -1145,7 +1152,8 @@ def get_knowledge() -> dict:
 
     Off by default; the agent kernel never requires the maverick-knowledge
     package. ``embedder`` selects hosted/local/deterministic; ``store`` selects
-    sqlite/pgvector. Provider details (model/base_url/dim/path) are read by
+    sqlite/pgvector for ingestion, or qdrant for existing-corpus reads/erasure.
+    Provider details (model/base_url/dim/path/url) are read by
     maverick_knowledge.build_embedder / build_store.
     """
     cfg = load_config().get("knowledge", {}) or {}
@@ -1154,11 +1162,16 @@ def get_knowledge() -> dict:
         "embedder": cfg.get("embedder", "hosted"),
         "store": cfg.get("store", "sqlite"),
         "model": cfg.get("model", "voyage-3"),
+        "revision": cfg.get("revision"),
         "base_url": cfg.get("base_url", "https://api.voyageai.com/v1"),
         "dim": int(cfg.get("dim", 1024)),
         "path": cfg.get("path", ""),
+        "url": cfg.get("url", ""),
         # DSN for the pgvector scale backend (falls back to env in build_store).
         "dsn": cfg.get("dsn", ""),
+        # Key for the hosted indexing service (build_embedder falls back to
+        # MAVERICK_EMBED_API_KEY); without it here the documented setting was lost.
+        "api_key": cfg.get("api_key", ""),
     }
 
 
@@ -1473,6 +1486,10 @@ def get_self_learning(*, config: dict[str, Any] | None = None) -> dict:
         # engines themselves default on.
         "allow_provider_egress": cfg.get("allow_provider_egress") is True,
         "distill_local": _strict_config_bool(cfg, "distill_local", True),
+        # A model writes a recallable skill straight from each finished run.
+        # Run text is untrusted, so this stays a strict, default-off opt-in
+        # (MAVERICK_AUTO_DISTILL, when set, decides instead).
+        "auto_distill": cfg.get("auto_distill") is True,
         "max_acquisitions": max(1, max_acq),
     }
 
@@ -1991,6 +2008,88 @@ def get_fleet_memory() -> dict:
     return {"enable": bool(cfg.get("enable", False))}
 
 
+def get_codebase() -> dict:
+    """Return the ``[codebase]`` section (:mod:`maverick.codebase`).
+
+    ``enable`` turns on the code vault and feature swarms (OFF by default: it
+    stores a company's source). ``default_protect`` is the information-flow
+    mode a newly registered repository enforces on every run over it:
+    ``block`` (default), ``approve`` or ``audit``."""
+    cfg = load_config().get("codebase", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    protect = str(cfg.get("default_protect", "block")).strip().lower()
+    return {"enable": _strict_config_bool(cfg, "enable", False),
+            "default_protect": protect if protect in ("audit", "approve", "block") else "block"}
+
+
+def get_ifc() -> dict:
+    """Return the ``[ifc]`` section: runtime information-flow control (:mod:`maverick.ifc`).
+
+    ``mode``: ``off`` | ``audit`` (default: record labelled data reaching an
+    external sink, allow it) | ``approve`` (a human approves each new
+    sink/label pair through the consent path) | ``block``. ``scope``:
+    ``context`` (default: an agent that has seen labelled data is labelled) or
+    ``explicit`` (act only when the data appears literally in the call).
+    ``allow_sinks``: external tools exempt from the check (e.g. ``web_search``).
+    ``MAVERICK_IFC_MODE`` overrides ``mode``. A malformed value falls back to
+    the default rather than silently disabling a stricter setting."""
+    cfg = load_config().get("ifc", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    mode = str(os.environ.get("MAVERICK_IFC_MODE") or cfg.get("mode", "audit")).strip().lower()
+    scope = str(cfg.get("scope", "context")).strip().lower()
+    sinks = cfg.get("allow_sinks", [])
+    return {
+        "mode": mode if mode in ("off", "audit", "approve", "block") else "audit",
+        "scope": scope if scope in ("context", "explicit") else "context",
+        "allow_sinks": sorted({str(t) for t in sinks}) if isinstance(sinks, list) else [],
+    }
+
+
+def get_swarm() -> dict:
+    """Return the ``[swarm]`` section: how large one goal's swarm may grow.
+
+    ``max_total_spawns`` bounds the agents a single goal may create (default
+    64; ``MAVERICK_MAX_TOTAL_SPAWNS`` wins). ``max_concurrent_model_calls``
+    bounds how many of the goal's agents are inside a model call at once
+    (0 = unbounded, the historical behaviour); set it when raising the spawn
+    cap so a large swarm queues for the provider instead of tripping its rate
+    limits. The budget still caps total spend whatever the size.
+    ``finding_post_max_chars`` is how much of a helper's final answer is
+    posted to the shared board (default 1500, floor 200;
+    ``MAVERICK_FINDING_POST_MAX_CHARS`` wins)."""
+    cfg = load_config().get("swarm", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    def _int(key: str, default: int, floor: int) -> int:
+        try:
+            return max(floor, int(cfg.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+
+    return {"max_total_spawns": _int("max_total_spawns", 64, 1),
+            "max_concurrent_model_calls": _int("max_concurrent_model_calls", 0, 0),
+            "finding_post_max_chars": _int("finding_post_max_chars", 1500, 200)}
+
+
+def get_immune() -> dict:
+    """Return the ``[immune]`` section (:mod:`maverick.immune`).
+
+    ``canaries`` lets operators seed known-flawed approvals into the real queue
+    to measure whether reviewers catch them. OFF by default: it is an explicit
+    decision to test your people. ``twin_record`` records every goal's tool
+    results (sealed, tenant-scoped) so the goal can be replayed as a production
+    twin (:mod:`maverick.immune.twin`); OFF by default because it retains tool
+    output. A malformed value stays off."""
+    cfg = load_config().get("immune", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    return {"canaries": _strict_config_bool(cfg, "canaries", False),
+            "twin_record": _strict_config_bool(cfg, "twin_record", False)}
+
+
 def get_commerce() -> dict:
     """Return the ``[commerce]`` section (shopper + merchant agent surface over
     the governed storefront/merchant backends, :mod:`maverick.commerce`).
@@ -2027,12 +2126,14 @@ def get_billing_stripe() -> dict:
 
     OFF by default: turning real charges on is an explicit operator decision,
     like ``[commerce]``. Also honored via ``MAVERICK_STRIPE_ENABLE=1``. The
-    Stripe secret + webhook signing key are NEVER read from config -- they come
+    Stripe secret + webhook signing key are never returned here -- they come
     from ``MAVERICK_STRIPE_SECRET_KEY`` / ``MAVERICK_STRIPE_WEBHOOK_SECRET`` via
-    the secret provider -- so this section holds only the enable flag, the
-    metered-usage pricing flag (a pricing decision is pending; default off bills
-    the platform fee only), the currency, and the per-plan ``prices`` map of
-    Stripe recurring price ids for the platform subscription fee."""
+    the secret provider, else from the sealed values saved on the All settings
+    page (read only by :mod:`maverick.billing_stripe`) -- so this returns only
+    the enable flag, the metered-usage pricing flag (a pricing decision is
+    pending; default off bills the platform fee only), the currency, and the
+    per-plan ``prices`` map of Stripe recurring price ids for the platform
+    subscription fee."""
     billing = load_config().get("billing", {})
     if not isinstance(billing, dict):
         billing = {}
@@ -2054,7 +2155,8 @@ def get_billing_stripe() -> dict:
             currency.strip().lower()
             if isinstance(currency, str) and currency.strip() else "usd"
         ),
-        # plan id -> Stripe recurring price id (e.g. "pro" -> "price_...").
+        # plan id -> Stripe recurring price id (e.g. "pro" or "enterprise" ->
+        # "price_...").
         "prices": {
             str(k): v.strip()
             for k, v in prices.items()
@@ -3028,6 +3130,8 @@ def get_flows() -> dict:
     default deployment is unaffected.
     """
     cfg = load_config().get("flows", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
     try:
         max_node_retries = int(cfg.get("max_node_retries", 5) or 5)
     except (TypeError, ValueError):
@@ -3045,6 +3149,37 @@ def get_flows() -> dict:
         # this key here auto_apply could never be read from config (only the env
         # var / a monkeypatch), so the [flows] auto_apply knob was inert.
         "auto_apply": bool(cfg.get("auto_apply", False)),
+        # Reviewed, bounded pure operators may replace an agent result only on
+        # agreement inside their declared input domain. Explicit boolean opt-in.
+        "learned_operators": _strict_config_bool(cfg, "learned_operators", False),
+        # Composed pure expressions need a separate runtime opt-in.
+        "composed_operators": _strict_config_bool(cfg, "composed_operators", False),
+        # Reviewed action sequences keep native authorization and explicit gates.
+        "action_recipes": _strict_config_bool(cfg, "action_recipes", False),
+        # Expressions learned across action results require an independent opt-in.
+        "action_recipe_transforms": _strict_config_bool(cfg, "action_recipe_transforms", False),
+        # Inferring control flow needs its own opt-in in addition to expressions.
+        "action_recipe_choices": _strict_config_bool(cfg, "action_recipe_choices", False),
+        "action_recipe_teaching": _strict_config_bool(cfg, "action_recipe_teaching", False),
+        # Bounded next-action/completion learning requires verified lineage and
+        # strict signed execution receipts; enabling it never enables signing.
+        "action_workflow_learning": _strict_config_bool(cfg, "action_workflow_learning", False),
+        # Inferred integer history accumulators need a separate explicit opt-in.
+        "action_workflow_memory_learning": _strict_config_bool(cfg, "action_workflow_memory_learning", False),
+        # Retaining native business examples requires a separate explicit opt-in.
+        "action_episode_capture": _strict_config_bool(cfg, "action_episode_capture", False),
+        "action_recipe_lineage": _strict_config_bool(cfg, "action_recipe_lineage", False),
+        # Malformed restrictions must not quietly enable unprovenanced recipes.
+        "require_action_recipe_lineage": _strict_config_bool(
+            cfg, "require_action_recipe_lineage", False, invalid=True),
+        # Preserve malformed policy for the trust validator to reject. Silently
+        # discarding a malformed revocation list would restore revoked keys.
+        "action_evidence_issuer": cfg.get("action_evidence_issuer", ""),
+        "action_evidence_revoked_keys": cfg.get("action_evidence_revoked_keys", []),
+        # Stored distinguishing questions and reviewed answers are a separate
+        # opt-in; preparing a draft does not enable its execution/publication.
+        "learned_operator_questions": _strict_config_bool(
+            cfg, "learned_operator_questions", False),
         # Per-node action/agent retries are useful for transient failures, but
         # must stay bounded because every retry may invoke tools/providers. Env
         # MAVERICK_FLOW_MAX_NODE_RETRIES can override this at runtime; the flow

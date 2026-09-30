@@ -272,33 +272,29 @@ class EmailChannel(Channel):
                 log.exception("email poll failed")
                 messages = []
                 errors += 1
-            for from_addr, subject, body, attachments in messages:
-                if not is_allowed((from_addr or "").lower(), self.allowed_user_ids):
-                    log.warning("unauthorized email access: from=%s", from_addr)
-                    continue
-                text = f"Subject: {subject}\n\n{body}" if subject else body
-                if not text.strip():
-                    # Attachment-only email: give the swarm a working brief.
-                    text = "Process the attached file(s)."
-                msg = IncomingMessage(
-                    user_id=from_addr, text=text, channel="email",
-                    attachments=attachments,
-                )
-                try:
-                    reply = await self.dispatch_text(msg)
-                except Exception:  # pragma: no cover
-                    # Generic reply; raw exception detail (possible secret) is
-                    # logged above, not emailed back to the sender.
-                    log.exception("handler error")
-                    reply = "⚠ An internal error occurred."
-                reply_subject = f"Re: {subject}" if subject else "Lightwork"
-                # A single SMTP send failure must not abort the batch —
-                # otherwise already-handled messages get reprocessed (and
-                # re-run the swarm) on the next poll.
-                try:
-                    await self.send(from_addr, reply, subject=reply_subject)
-                except Exception:
-                    log.exception("email send failed for %s", from_addr)
+            from .delivery import DeliveryJournal
+
+            journal = DeliveryJournal()
+            try:
+                recovered, checkpoint = await asyncio.to_thread(journal.recovery_window, channel="email", account=self._account())
+                batch = {row["id"]: row for row in [*messages, *recovered]}
+                for row in batch.values():
+                    sender = row["message"]["user_id"]
+                    if not is_allowed(sender.lower(), self.allowed_user_ids):
+                        continue
+                    incoming = IncomingMessage(user_id=sender, text=row["message"]["text"], channel="email",
+                                               message_id=row["external_id"])
+                    def authority(sender=sender):
+                        return is_allowed(sender.lower(), self.allowed_user_ids)
+                    async def send_saved(reply, sender=sender, row=row):
+                        if reply.text:
+                            return await self.send(sender, reply.text, subject=row["route"]["subject"])
+                        return None
+                    await self.process_message(incoming, external_id=row["external_id"], account=self._account(),
+                                               authorize=authority, send=send_saved, receipt=row, journal=journal)
+                await asyncio.to_thread(journal.finish_recovery_window, checkpoint)
+            except Exception:
+                log.warning("Email durable recovery window requires review")
             await asyncio.sleep(backoff_delay(self.poll_interval, errors))
 
     @staticmethod
@@ -334,47 +330,55 @@ class EmailChannel(Channel):
             })
         return out
 
-    def _fetch_unseen(self) -> list[tuple[str, str, str, list[dict]]]:
-        out: list[tuple[str, str, str, list[dict]]] = []
+    def _account(self):
+        return self.imap_host.lower() + ":" + self.imap_user.lower()
+
+    def _fetch_unseen(self) -> list[dict]:
+        from .delivery import DeliveryJournal
+
+        out = []
+        journal = DeliveryJournal()
         with imaplib.IMAP4_SSL(self.imap_host, timeout=IMAP_TIMEOUT) as mail:
             mail.login(self.imap_user, self.imap_password)
-            mail.select("INBOX")
-            _, data = mail.search(None, "UNSEEN")
-            for num in data[0].split():
-                # BODY.PEEK does NOT implicitly set \Seen; we mark it explicitly
-                # below so the message is never re-fetched by a second poller or
-                # after a restart (which would re-drive the swarm at real cost).
-                _, msg_data = mail.fetch(num, "(BODY.PEEK[])")
-                if not msg_data or not msg_data[0]:
-                    continue
+            status, _ = mail.select("INBOX")
+            if status != "OK":
+                raise RuntimeError("Email inbox is unavailable")
+            _, validity = mail.response("UIDVALIDITY")
+            epoch = validity[0].decode("ascii") if validity and isinstance(validity[0], bytes) else ""
+            if not epoch.isdecimal():
+                raise RuntimeError("Email inbox identity is unavailable")
+            status, data = mail.uid("search", None, "UNSEEN")
+            if status != "OK" or not data or not isinstance(data[0], bytes):
+                raise RuntimeError("Email unread-message query is unavailable")
+            for uid in data[0].split()[:50]:
+                if not uid.isdigit():
+                    raise RuntimeError("Email message identity is invalid")
+                status, msg_data = mail.uid("fetch", uid, "(BODY.PEEK[])")
+                if status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
+                    raise RuntimeError("Email source message is unavailable")
                 payload = msg_data[0][1]
-                if not isinstance(payload, (bytes, bytearray)):
+                if not isinstance(payload, bytes):
+                    raise RuntimeError("Email source message has no body")
+                parsed = email.message_from_bytes(payload)
+                sender = email.utils.parseaddr(parsed.get("From", ""))[1]
+                if (_authentication_verdict(parsed) == "fail"
+                        or not is_allowed(sender.lower(), self.allowed_user_ids)):
+                    mail.uid("store", uid, "+FLAGS", "\\Seen")
                     continue
-                m = email.message_from_bytes(payload)
-                from_addr = email.utils.parseaddr(m.get("From", ""))[1]
-                subject = m.get("Subject", "")
-                body = self._extract_body(m)
-                # Claim the message before handing it off: at-most-once delivery
-                # (a crash mid-dispatch drops one message rather than looping the
-                # swarm forever). Mirrors the dedup the other channels do.
-                try:
-                    mail.store(num, "+FLAGS", "\\Seen")
-                except Exception:  # pragma: no cover - flag store best-effort
-                    log.warning("email: could not mark message %s seen", num)
-                # The allowlist downstream trusts the From address verbatim, but
-                # an IMAP From is unauthenticated and trivially forgeable. If the
-                # receiving server evaluated SPF/DKIM and it explicitly failed,
-                # the From is forged -- drop it before it can impersonate an
-                # allowlisted sender. (Marked \Seen above so it isn't re-fetched.)
-                if _authentication_verdict(m) == "fail":
-                    log.warning(
-                        "email: rejecting message with failed SPF/DKIM from=%s",
-                        from_addr,
-                    )
+                subject, body = str(parsed.get("Subject", "")), self._extract_body(parsed)
+                attachments = self._extract_attachments(parsed)
+                if not body and not attachments:
+                    mail.uid("store", uid, "+FLAGS", "\\Seen")
                     continue
-                attachments = self._extract_attachments(m)
-                if from_addr and (body or attachments):
-                    out.append((from_addr, subject, body, attachments))
+                external_id = epoch + ":" + uid.decode("ascii")
+                incoming = IncomingMessage(user_id=sender, text=f"Subject: {subject}\n\n{body}" if subject else (body or "Process the attached file(s)."),
+                                           channel="email", message_id=external_id, attachments=attachments)
+                row = journal.admit(incoming, external_id=external_id, account=self._account(),
+                                    route={"subject": f"Re: {subject}" if subject else "Lightwork"})
+                # Crash after this acknowledgement is recovered from the
+                # bounded rotating journal window, never from a second run.
+                mail.uid("store", uid, "+FLAGS", "\\Seen")
+                out.append(row)
         return out
 
     def _extract_body(self, msg) -> str:
@@ -409,17 +413,37 @@ class EmailChannel(Channel):
         return _trim_reply_noise(text)
 
     async def send(self, user_id: str, text: str, subject: str = "Lightwork") -> None:
-        await asyncio.to_thread(self._send_sync, user_id, text, subject)
+        from .delivery import chunk_idempotency_key, send_chunk
 
-    def _send_sync(self, to_addr: str, text: str, subject: str) -> None:
+        message_id = "<" + chunk_idempotency_key("email-0") + "@lightwork.local>"
+        async def create():
+            return await asyncio.to_thread(self._send_sync, user_id, text, subject, message_id=message_id)
+        return await send_chunk("email-0", {"text": text, "subject": subject, "recipient": user_id}, create)
+
+    def _send_sync(self, to_addr: str, text: str, subject: str, *, message_id=None):
+        from .delivery import DeliveryNotSent
+
         msg = EmailMessage()
         msg["From"] = self.smtp_user
         msg["To"] = to_addr
         msg["Subject"] = subject
+        msg["Message-ID"] = message_id or email.utils.make_msgid()
         msg.set_content(text)
-        with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=SMTP_TIMEOUT) as smtp:
-            smtp.login(self.smtp_user, self.smtp_password)
-            smtp.send_message(msg)
+        sending = False
+        try:
+            with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=SMTP_TIMEOUT) as smtp:
+                smtp.login(self.smtp_user, self.smtp_password)
+                sending = True
+                refused = smtp.send_message(msg)
+                if refused:
+                    raise DeliveryNotSent("SMTP rejected the recipient")
+        except (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError) as exc:
+            raise DeliveryNotSent("SMTP explicitly rejected the message") from exc
+        except Exception as exc:
+            if not sending:
+                raise DeliveryNotSent("SMTP unavailable before sending") from exc
+            raise
+        return str(msg["Message-ID"])
 
     async def stop(self) -> None:
         self._stop = True

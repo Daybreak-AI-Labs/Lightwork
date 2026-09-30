@@ -39,20 +39,34 @@ def page_client():
 
 
 def test_scan_inventory_page_renders_safe_operator_contract(page_client: TestClient) -> None:
+    from test_support.plain_language import developer_terms
+
     response = page_client.get("/consent/scan-inventory")
     assert response.status_code == 200
-    assert "Consent Scan Inventory" in response.text
-    assert "External side effect" in response.text
-    assert "prove that no tracker exists" in response.text
-    assert "Every discovery starts as unknown" in response.text
-    assert "Run leased scan" in response.text
-    assert "Dead letters" in response.text
-    assert "Bridge fresh reviewed mappings" in response.text
-    assert "Retention status" in response.text
-    assert 'type="password"' in response.text
-    assert 'name="after_tracker_key"' in response.text
-    assert "next exact discovery page" in response.text
-    assert "/api/v1/consent/scan-inventory" in response.text
+    page = response.text
+    assert "Tracker Scans" in page
+    assert "cannot prove a tracker is absent" in page
+    assert "Only “Scan now” and “Run due scans now” visit your websites" in page
+    # Websites, scans and trackers are lists with row buttons; the worker
+    # protocol runs behind "Scan now" on the server.
+    for host in ("csi-sites", "csi-jobs", "csi-trackers", "csi-reports", "csi-approvals"):
+        assert f'id="{host}"' in page
+    for label in ("Add a website", "Scan now", "Run due scans now", "Trackers found",
+                  "Apply reviewed results", "Compare with previous", "Try again",
+                  "Reviews waiting for a second person", "Delete old scan data"):
+        assert label in page
+    assert "/scan-now" in page and "/review-requests" in page
+    from test_support.plain_language import visible_text
+
+    text = visible_text(page)
+    assert 'type="password"' not in page and "lease_token" not in page
+    for typed in ("lease", "Lease", "Tracker key", "Property ID", "Job ID",
+                  "Unix time", "Second reviewer", "Interval seconds", "Claim work"):
+        assert typed not in text
+    assert 'type="datetime-local"' in page and 'type="date"' in page
+    assert "window.confirm" not in page
+    assert page.count("CW.confirm(") >= 6
+    assert "/api/v1/consent/scan-inventory" in page
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"
@@ -60,12 +74,13 @@ def test_scan_inventory_page_renders_safe_operator_contract(page_client: TestCli
         / "consent_scan_inventory.html"
     ).read_text(encoding="utf-8")
     assert ".innerHTML" not in template
+    assert developer_terms(page) == []
 
 
 def test_scan_inventory_page_renders_when_gate_is_off(page_client: TestClient) -> None:
     response = page_client.get("/consent/scan-inventory", params={"enabled": False})
     assert response.status_code == 200
     assert 'data-module-gate="consent_preferences.scanner"' in response.text
-    assert "Consent application scanning is turned off." in response.text
+    assert "Website tracker scans is turned off." in response.text
     assert "[consent_preferences.scanner] enable = true" not in response.text
-    assert "Live acceptance flags remain false" in response.text
+    assert 'id="csi-controls" disabled' in response.text

@@ -35,11 +35,9 @@ from .base import (
     Channel,
     IncomingMessage,
     add_webhook_body_limit,
-    claim_processed_message,
     is_allowed,
     normalize_allowlist,
     public_url_for,
-    release_processed_message,
 )
 
 log = logging.getLogger(__name__)
@@ -139,57 +137,33 @@ class WhatsAppChannel(Channel):
             log.warning("unauthorized whatsapp access: from=%s", From)
             raise HTTPException(status_code=403, detail="sender not allowed")
 
-        # Twilio retries within ~15s on a slow or non-2xx handler. CLAIM the
-        # MessageSid atomically before processing: mark_message_processed
-        # INSERTs under the UNIQUE(channel, external_id) constraint and returns
-        # False if the row already exists. The old code checked
-        # is_processed_message() here and only marked AFTER the handler -- so a
-        # retry that raced a still-running handler passed the check too and
-        # spawned a second goal + second spend. Claiming first makes the racing
-        # retry a no-op.
-        claimed = False
-        if MessageSid:
-            try:
-                claimed = claim_processed_message("whatsapp", MessageSid)
-                if not claimed:
-                    log.info("WhatsApp MessageSid %s already claimed; skipping", MessageSid)
-                    return Response(content="", media_type="text/xml")
-            except Exception as exc:  # pragma: no cover
-                log.exception("WhatsApp dedup claim failed; asking Twilio to retry")
-                raise HTTPException(
-                    status_code=503, detail="message claim store unavailable"
-                ) from exc
+        if not MessageSid:
+            raise HTTPException(status_code=400, detail="message identity required")
+        from starlette.background import BackgroundTask
 
-        msg = IncomingMessage(user_id=From, text=Body, channel="whatsapp")
+        msg = IncomingMessage(user_id=From, text=Body, channel="whatsapp", message_id=MessageSid)
+        def authority():
+            return account == self.account_sid + ":" + self.from_number and is_allowed(From, self.allowed_user_ids)
+        account = self.account_sid + ":" + self.from_number
         try:
-            reply = await self.dispatch_text(msg)
-        except Exception:  # pragma: no cover
-            log.exception("handler error")
-            # The goal didn't complete -- release the claim so Twilio's retry
-            # re-processes instead of being deduped against a failed run.
-            if claimed:
-                try:
-                    release_processed_message("whatsapp", MessageSid)
-                except Exception:  # pragma: no cover
-                    # The claim remains durable, so a Twilio retry cannot
-                    # execute this failed delivery a second time.
-                    log.exception("WhatsApp dedup release failed; claim remains held")
-            try:
-                # Generic text only; the raw exception (possible secret) is
-                # logged above, never sent back to the user.
-                await self.send(From, "⚠ An internal error occurred.")
-            except Exception:  # pragma: no cover
-                log.exception("WhatsApp error-reply send failed")
-            return Response(content="", media_type="text/xml")
+            receipt = await self.admit_message(msg, external_id=MessageSid, account=account, authorize=authority)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="message intake unavailable") from exc
 
-        # Already claimed above; a transient outbound-send failure must NOT
-        # 500 (Twilio would retry and re-run the whole goal). Attempt the
-        # reply, logging a send failure without re-raising.
-        try:
-            await self.send(From, reply)
-        except Exception:  # pragma: no cover
-            log.exception("WhatsApp reply send failed (goal already processed)")
-        return Response(content="", media_type="text/xml")
+        async def send_saved(reply):
+            if reply.text:
+                return await self.send(From, reply.text)
+            return None
+
+        async def process():
+            try:
+                await self.process_message(msg, external_id=MessageSid, account=account, authorize=authority,
+                                           send=send_saved, receipt=receipt)
+            except Exception:
+                log.warning("WhatsApp durable processing requires review: %s", receipt["id"])
+
+        return Response(content="", media_type="text/xml", background=BackgroundTask(process),
+                        headers={"X-Lightwork-Receipt": receipt["id"]})
 
     async def start(self) -> None:
         import uvicorn
@@ -198,16 +172,34 @@ class WhatsAppChannel(Channel):
             self._app, host=self.bind_host, port=self.port, log_level="info",
         )
         self._uvicorn_server = uvicorn.Server(config)
-        await self._uvicorn_server.serve()
+        account = self.account_sid + ":" + self.from_number
+        def authorize(message):
+            return self.account_sid + ":" + self.from_number == account and is_allowed(message.principal_id, self.allowed_user_ids)
+        async def send_saved(message, reply, route):
+            if reply.text:
+                return await self.send(message.user_id, reply.text)
+            return None
+        async with self.recovery_worker(account=account, authorize=authorize, send=send_saved):
+            await self._uvicorn_server.serve()
 
     async def send(self, user_id: str, text: str) -> None:
         import asyncio
-        await asyncio.to_thread(
-            self._twilio.messages.create,
-            body=text,
-            from_=self.from_number,
-            to=user_id,
-        )
+
+        from .delivery import DeliveryNotSent, send_chunk
+
+        async def create():
+            try:
+                message = await asyncio.to_thread(self._twilio.messages.create,
+                                                  body=text, from_=self.from_number, to=user_id)
+                return getattr(message, "sid", "")
+            except Exception as exc:
+                # An explicit provider 4xx rejects this request. Transport
+                # timeouts and server failures may have accepted it upstream.
+                status = getattr(exc, "status", None)
+                if isinstance(status, int) and 400 <= status < 500 and status != 408:
+                    raise DeliveryNotSent("Provider rejected the message") from exc
+                raise
+        return await send_chunk("text-0", text, create)
 
     async def stop(self) -> None:
         if self._uvicorn_server is not None:

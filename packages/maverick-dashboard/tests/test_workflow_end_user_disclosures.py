@@ -58,14 +58,17 @@ def test_flow_technical_values_are_optional_and_primary_actions_stay_outside(cli
     response = client.get("/flows/designer")
     assert response.status_code == 200
     page = Markup(response.text)
-    for disclosure, control in [("fd-test-data", "fd-sample"), ("fd-schedule-advanced", "fd-schedule")]:
-        page.closed(disclosure)
-        assert page.within(control, disclosure)
-        assert "required" not in page.ids[control]["attrs"]
-        for action in ["fd-save", "fd-publish", "fd-run", "fd-run-real"]:
-            assert not page.within(action, disclosure)
-    assert not page.within("fd-schedule-preset", "fd-schedule-advanced")
+    page.closed("fd-test-data")
+    assert page.within("fd-sample-fields", "fd-test-data")
+    for action in ["fd-save", "fd-publish", "fd-run", "fd-run-real"]:
+        assert not page.within(action, "fd-test-data")
     assert not page.within("fd-notify", "fd-test-data")
+    # The schedule is chosen with plain controls; the timetable itself is hidden.
+    assert page.ids["fd-schedule"]["attrs"].get("type") == "hidden"
+    assert page.ids["fd-sched-freq"]["tag"] == "select"
+    assert page.ids["fd-tz"]["tag"] == "select"
+    assert page.ids["fd-sched-time"]["attrs"].get("type") == "time"
+    assert "fd-sample" not in page.ids and "fd-schedule-advanced" not in page.ids
 
 
 def test_automation_advanced_forms_contain_their_own_submit_and_preserve_visible_status(client):
@@ -87,11 +90,13 @@ def test_automation_advanced_forms_contain_their_own_submit_and_preserve_visible
     assert not page.within("oauth-get-url", "oauth-advanced-setup")
     assert not page.within("oauth-msg", "oauth-advanced-setup")
     page.closed("auto-event-config-advanced")
-    assert page.within("auto-event-config", "auto-event-config-advanced")
+    assert page.within("auto-event-more", "auto-event-config-advanced")
+    assert page.within("auto-event-extra-add", "auto-event-config-advanced")
     assert not page.within("auto-event-fields", "auto-event-config-advanced")
     assert page.ids["auto-event-template"]["tag"] == "select"
-    page.closed("auto-import-json-advanced")
-    assert not page.within("auto-import-file", "auto-import-json-advanced")
+    assert page.ids["auto-event-interval"]["tag"] == "select"
+    # No raw settings or definitions boxes remain.
+    assert "auto-event-config" not in page.ids and "auto-import-defs" not in page.ids
 
 
 def test_playbook_permissions_have_visible_selections_with_optional_exact_identifiers(client):
@@ -123,3 +128,13 @@ def test_chat_keeps_full_log_closed_without_hiding_errors_or_human_inputs(client
     assert page.within("halt-resume-budget", "halt-resume-form")
     assert page.within("halt-resume", "halt-resume-form")
     assert page.ids["halt-resume"]["attrs"]["type"] == "submit"
+
+
+def test_flow_designer_reads_plainly(client):
+    from test_support.plain_language import developer_terms
+
+    text = client.get("/flows/designer").text
+    assert developer_terms(text) == []
+    for label in ("Earlier versions", "What starts it", "Sample answers for a test",
+                  "On certain days each week", "Runs at once", "Add a step"):
+        assert label in text

@@ -1,172 +1,73 @@
 {% extends "base.html" %}
+{% from "_hero.html" import hero %}
+{% from "_module_gate.html" import module_gate %}
 {% block title %}Third-Party Lifecycle - Lightwork{% endblock %}
 {% block content %}
 <style>
-  .tpl-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
-              gap:var(--space-4); }
-  .tpl-stack { display:flex; flex-direction:column; gap:var(--space-3); }
-  .tpl-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
-  .tpl-stack textarea { min-height:18rem; font-family:var(--font-mono); }
-  .tpl-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
-                word-break:break-word; }
-  .tpl-warning { border:2px solid var(--danger); padding:var(--space-3);
-                 border-radius:8px; background:var(--surface-2); }
-  .tpl-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
-  @media (max-width:900px) { .tpl-grid { grid-template-columns:1fr; } }
+  .tpl-grid { display:grid; gap:var(--space-3); grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr)); }
+  .tpl-grid label, .tpl-field { display:grid; gap:.3rem; }
+  .tpl-question { border:1px solid var(--border); border-radius:var(--radius-sm); padding:var(--space-3); margin-bottom:var(--space-3); }
+  .tpl-actions { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
 </style>
+{{ hero('Third-party management', 'Third-Party Lifecycle',
+        lede='Run vendor questionnaires, track each vendor from onboarding to offboarding, and follow up on the tasks that come out of them. Lightwork doesn\'t contact vendors from this page.') }}
 
-<h1>Third-Party Lifecycle</h1>
-<p>Manage vendor assessments, record lifecycle decisions, and plan offboarding. These records are maintained in Lightwork; external provider actions require separate setup.</p>
-<div class="tpl-warning">
-  <strong>No network transport, provider writes, or live acceptance.</strong>
-  Callback records are governed delivery intent only. Claim, fail, acknowledge,
-  and requeue change local state; they do not contact a vendor or provider.
-</div>
-
-{% from "_module_gate.html" import module_gate %}
 {% if not third_party_lifecycle_enabled %}
 {{ module_gate('third_party_management.lifecycle', 'Third-party lifecycle',
-               detail='Versioned conditional assessments, lifecycle decisions,
-                       and governed offboarding stay off until your vendor-risk
-                       owner approves this control plane.') }}
+               detail='Run vendor assessments, record decisions and plan offboarding.') }}
 {% else %}
-<p><button class="btn" id="tpl-load-status" type="button">Check availability</button></p>
-<div class="tpl-grid">
-  <section class="panel tpl-stack">
-    <h2>Choose an action</h2>
-    <p>Tenant and actor are taken only from the authenticated request. Do not put
-      either field in JSON; unknown fields are rejected.</p>
-    <label>Operation
-      <select id="tpl-operation" data-guided-api="/api/v1/third-party/lifecycle">
-        <option value="template-create" data-method="PUT" data-path="/templates/{template_id}">Template: create version</option>
-        <option value="template-get" data-method="GET" data-path="/templates/{template_id}/versions/{version}">Template: get version</option>
-        <option value="template-approve" data-method="POST" data-path="/templates/{template_id}/versions/{version}/approve">Template: independent approval</option>
-        <option value="assessment-create" data-method="PUT" data-path="/assessments/{assessment_id}">Assessment: create</option>
-        <option value="assessment-get" data-method="GET" data-path="/assessments/{assessment_id}">Assessment: get</option>
-        <option value="assessment-required" data-method="GET" data-path="/assessments/{assessment_id}/required-questions">Assessment: required questions</option>
-        <option value="assessment-response" data-method="PUT" data-path="/assessments/{assessment_id}/responses/{question_id}">Assessment: record response</option>
-        <option value="assessment-evaluate" data-method="POST" data-path="/assessments/{assessment_id}/evaluate">Assessment: evaluate</option>
-        <option value="assessment-task" data-method="PUT" data-path="/assessments/{assessment_id}/tasks/{task_id}">Assessment: task state</option>
-        <option value="assessment-export" data-method="PUT" data-path="/assessments/{assessment_id}/exports/{export_id}">Assessment: export</option>
-        <option value="lifecycle-create" data-method="PUT" data-path="/lifecycles/{lifecycle_id}">Lifecycle: create</option>
-        <option value="lifecycle-get" data-method="GET" data-path="/lifecycles/{lifecycle_id}">Lifecycle: get</option>
-        <option value="lifecycle-transition" data-method="POST" data-path="/lifecycles/{lifecycle_id}/transition">Lifecycle: transition</option>
-        <option value="offboarding-begin" data-method="POST" data-path="/lifecycles/{lifecycle_id}/offboarding/{plan_id}">Offboarding: begin</option>
-        <option value="offboarding-get" data-method="GET" data-path="/offboarding/{plan_id}">Offboarding: get</option>
-        <option value="legal-hold" data-method="POST" data-path="/offboarding/{plan_id}/legal-hold">Offboarding: legal hold</option>
-        <option value="offboarding-task" data-method="PUT" data-path="/offboarding/{plan_id}/tasks/{task_id}">Offboarding: task state</option>
-        <option value="independent-completion" data-method="POST" data-path="/offboarding/{plan_id}/complete">Offboarding: independent completion</option>
-        <option value="callback-get" data-method="GET" data-path="/callbacks/{callback_id}">Callback: get</option>
-        <option value="callback-claim" data-method="POST" data-path="/callbacks/claim">Callback: claim lease</option>
-        <option value="callback-fail" data-method="POST" data-path="/callbacks/{callback_id}/fail">Callback: record failure</option>
-        <option value="callback-ack" data-method="POST" data-path="/callbacks/{callback_id}/acknowledge">Callback: acknowledge evidence</option>
-        <option value="callback-requeue" data-method="POST" data-path="/callbacks/{callback_id}/requeue">Callback: requeue dead letter</option>
-        <option value="lifecycle-export" data-method="PUT" data-path="/lifecycles/{lifecycle_id}/exports/{export_id}">Lifecycle: export</option>
-        <option value="export-get" data-method="GET" data-path="/exports/{export_id}">Export: get</option>
-        <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge</option>
-        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify</option>
-      </select>
-    </label>
-    <label>Record references (JSON)
-      <input class="input" id="tpl-path-values" value="{}" autocomplete="off">
-    </label>
-    <label>Action details (JSON)
-      <textarea class="input" id="tpl-body">{}</textarea>
-    </label>
-    <div class="tpl-warning" id="tpl-confirm-panel">
-      <label class="tpl-confirm"><input id="tpl-confirm" type="checkbox">
-        <span>I reviewed the exact tenant context, revision, evidence, task or
-          callback state, and understand this is a governed state change.</span>
-      </label>
+<div id="tpl-root" data-api="/api/v1/third-party/lifecycle"
+     data-can-admin="{{ 'true' if lifecycle_can_admin else 'false' }}"
+     data-can-audit="{{ 'true' if lifecycle_can_audit else 'false' }}">
+  <p class="muted" id="tpl-status" role="status" aria-live="polite">Loading…</p>
+
+  <div class="section-head"><h2>Questionnaires</h2><button type="button" class="btn btn--primary" id="tpl-new-template">New questionnaire</button></div>
+  <section class="panel" aria-label="Questionnaires">
+    <div id="tpl-templates"><p class="muted">Loading questionnaires…</p></div>
+    <form id="tpl-template-form" hidden aria-labelledby="tpl-template-form-title">
+      <h3 id="tpl-template-form-title">New Questionnaire</h3>
+      <div class="tpl-grid">
+        <label>Questionnaire name<input class="input" name="title" required maxlength="100" placeholder="For example: Security review"></label>
+      </div>
+      <div id="tpl-questions"></div>
+      <div class="tpl-actions">
+        <button type="button" class="btn" id="tpl-add-question">Add a question</button>
+        <button type="submit" class="btn btn--primary">Save questionnaire</button>
+        <button type="button" class="btn btn--ghost" id="tpl-template-cancel">Cancel</button>
+      </div>
+      <p class="muted">A new questionnaire must be approved by a different administrator before it can be used.</p>
+    </form>
+  </section>
+
+  <div class="section-head"><h2>Assessments</h2><button type="button" class="btn btn--primary" id="tpl-new-assessment">New assessment</button></div>
+  <section class="panel" aria-label="Assessments">
+    <div id="tpl-assessments"><p class="muted">Loading assessments…</p></div>
+    <div id="tpl-assessment-detail" hidden></div>
+  </section>
+
+  <div class="section-head"><h2>Vendors Being Tracked</h2><button type="button" class="btn btn--primary" id="tpl-new-lifecycle">Start tracking a vendor</button></div>
+  <section class="panel" aria-label="Vendors being tracked">
+    <div id="tpl-lifecycles"><p class="muted">Loading vendors…</p></div>
+  </section>
+
+  <div class="section-head"><h2>Offboarding</h2></div>
+  <section class="panel" aria-label="Offboarding plans">
+    <div id="tpl-offboarding"><p class="muted">Loading offboarding plans…</p></div>
+    <div id="tpl-plan-detail" hidden></div>
+  </section>
+
+  <details class="panel" id="tpl-admin">
+    <summary><strong>Administrator tools</strong></summary>
+    <div class="tpl-actions" style="margin-top:var(--space-3)">
+      <button type="button" class="btn" id="tpl-integrity">Check records haven't been changed</button>
+      <label class="tpl-field" for="tpl-purge-before">Delete records whose keep period ended before
+        <input class="input" type="date" id="tpl-purge-before"></label>
+      <button type="button" class="btn btn--danger" id="tpl-purge">Delete expired records</button>
     </div>
-    <button class="btn btn--primary" id="tpl-submit" type="button">Continue with selected action</button>
-  </section>
-  <section class="panel">
-    <h2>Result</h2>
-    <pre class="tpl-output" id="tpl-output" aria-live="polite">No request made.</pre>
-  </section>
+    <p class="muted" id="tpl-admin-result" role="status" aria-live="polite"></p>
+  </details>
 </div>
-
-<script>
-(function () {
-  "use strict";
-  var API = "/api/v1/third-party/lifecycle";
-  var operation = document.getElementById("tpl-operation");
-  var paths = document.getElementById("tpl-path-values");
-  var body = document.getElementById("tpl-body");
-  var confirmation = document.getElementById("tpl-confirm");
-  var confirmationPanel = document.getElementById("tpl-confirm-panel");
-  var output = document.getElementById("tpl-output");
-  var highImpact = new Set([
-    "template-approve", "assessment-task", "lifecycle-transition",
-    "offboarding-begin", "legal-hold", "offboarding-task",
-    "independent-completion", "callback-claim", "callback-fail",
-    "callback-ack", "callback-requeue", "retention-purge"
-  ]);
-
-  function show(value) {
-    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  }
-  function updateConfirmation() {
-    confirmation.checked = false;
-    confirmationPanel.hidden = !highImpact.has(operation.value);
-  }
-  function selectedRoute() {
-    return operation.options[operation.selectedIndex];
-  }
-  function buildPath(template, values) {
-    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
-      if (typeof values[key] !== "string" || !values[key]) {
-        throw new Error("Missing string path value: " + key);
-      }
-      return encodeURIComponent(values[key]);
-    });
-  }
-  async function run(method, path, payload) {
-    var options = {method: method, headers: {"Accept": "application/json"}};
-    if (method !== "GET") {
-      options.headers["Content-Type"] = "application/json";
-      options.body = JSON.stringify(payload);
-    }
-    var response = await fetch(API + path, options);
-    var text = await response.text();
-    var result;
-    try {
-      if (!text) { throw new Error("empty response"); }
-      result = JSON.parse(text);
-    } catch (_error) {
-      throw new Error("Request failed: the server returned an invalid JSON response.");
-    }
-    if (!response.ok) {
-      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
-    }
-    show({status: response.status, ok: response.ok, result: result});
-  }
-
-  document.getElementById("tpl-load-status").addEventListener("click", function () {
-    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
-  });
-  operation.addEventListener("change", updateConfirmation);
-  document.getElementById("tpl-submit").addEventListener("click", function () {
-    try {
-      if (highImpact.has(operation.value) && !confirmation.checked) {
-        throw new Error("Confirm the governed state change before continuing.");
-      }
-      var route = selectedRoute();
-      var pathValues = JSON.parse(paths.value || "{}");
-      var payload = JSON.parse(body.value || "{}");
-      if (Object.prototype.hasOwnProperty.call(payload, "tenant") ||
-          Object.prototype.hasOwnProperty.call(payload, "tenant_id") ||
-          Object.prototype.hasOwnProperty.call(payload, "actor") ||
-          Object.prototype.hasOwnProperty.call(payload, "actor_ref")) {
-        throw new Error("Tenant and actor fields are never accepted.");
-      }
-      var path = buildPath(route.dataset.path, pathValues);
-      run(route.dataset.method, path, payload).catch(function (error) { show(String(error)); });
-    } catch (error) { show(String(error)); }
-  });
-  updateConfirmation();
-}());
-</script>
+<script src="/static/lightwork-record-workflows.js" defer></script>
+<script src="/static/lightwork-third-party-lifecycle.js" defer></script>
 {% endif %}
 {% endblock %}

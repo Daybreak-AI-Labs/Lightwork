@@ -64,8 +64,13 @@ private key is never stored in the DB or returned by any route.
 
 ## Roles
 
-`owner` / `admin` can mint + revoke licenses and manage customers; `support` /
-`viewer` are read-only (support gains the ticket desk in a later drop).
+`owner` / `admin` can mint + revoke licenses and manage customers; `support`
+works the support desk; `viewer` is read-only. Owners add people, change roles
+and turn sign-in off under **Team** (audited; nobody can change their own role or access).
+A new person gets a single-use set-up link (hash-only storage, 72 h expiry)
+where they choose their own password and then enrol TOTP; owners never set
+anyone's password. Everyone can change their own password under **Change my
+password**, which ends their other sessions.
 
 ## Releases & support (serve/intake APIs)
 

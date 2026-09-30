@@ -13,9 +13,9 @@ in a thread pool. The queue is the durable layer underneath: it
 survives process restarts and gives the dashboard a single place to
 see what's pending.
 
-Schema: ONE table ``jobs(id, kind, payload, run_at, status, attempts,
-last_error, created_at, updated_at)``. SQLite WAL mode for concurrent
-readers (dashboard) + writer (worker).
+The jobs table stores execution attempts separately from immutable recurrence
+identity/template and the committed successor link. SQLite WAL mode supports
+concurrent readers (dashboard) and transactionally fenced writers (workers).
 
 Workflow:
 
@@ -35,6 +35,7 @@ import math
 import sqlite3
 import threading
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -68,6 +69,43 @@ class Job:
     last_error: str = ""
     created_at: float = 0.0
     updated_at: float = 0.0
+    recurrence_id: str | None = None
+    occurrence: int | None = None
+    scheduled_at: float | None = None
+    successor_id: int | None = None
+    recurrence_reconcile_required: bool = False
+
+
+class LeaseLost(RuntimeError):
+    """The claimed attempt no longer owns this job's running lease."""
+
+
+class RecurrenceReconciliationRequired(RuntimeError):
+    """A legacy occurrence needs an explicit local operator decision."""
+
+
+_RECURRENCE_COLUMNS = {
+    "recurrence_id": "TEXT",
+    "occurrence": "INTEGER",
+    "scheduled_at": "REAL",
+    "successor_id": "INTEGER",
+    "recurrence_payload": "TEXT",
+    "recurrence_reconcile_required": "INTEGER NOT NULL DEFAULT 0",
+}
+_RECONCILE_REASON = (
+    "recurrence reconciliation required: legacy attempted occurrence has no "
+    "durable successor link; stop old workers, inspect job IDs, then use "
+    "JobQueue.reconcile_recurrence to link a successor or confirm one future run"
+)
+
+
+def _recurrence_template(kind: str, payload: dict) -> dict:
+    template = {k: v for k, v in payload.items() if k != "__rearmed__"}
+    # A start_goal checkpoint belongs to this occurrence, not the next goal.
+    if kind == "start_goal":
+        template.pop("goal_id", None)
+        template.pop("_slot_defers", None)
+    return template
 
 
 _SCHEMA = """
@@ -83,6 +121,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_ready ON jobs(status, run_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_flow_run ON jobs(
+ kind,
+ COALESCE(json_extract(CASE WHEN json_valid(payload) THEN payload ELSE '{}' END,'$.tenant'),''),
+ json_extract(CASE WHEN json_valid(payload) THEN payload ELSE '{}' END,'$.run_id'), id DESC
+);
 
 -- Durable at-most-once claims for authenticated queue dispatch envelopes.
 -- The database itself is tenant-scoped by JobQueue's lazy default path.
@@ -94,6 +137,15 @@ CREATE TABLE IF NOT EXISTS dispatch_envelope_claims (
 );
 CREATE INDEX IF NOT EXISTS idx_dispatch_claim_expiry
   ON dispatch_envelope_claims(expires_at);
+-- Admission receipts outlive purged completed jobs. A retry cannot recreate
+-- a previously dispatched event after routine queue retention cleanup.
+CREATE TABLE IF NOT EXISTS job_admissions (
+  admission_key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  payload_hash TEXT NOT NULL,
+  job_id INTEGER NOT NULL,
+  created_at REAL NOT NULL
+);
 """
 
 
@@ -102,8 +154,8 @@ class JobQueue:
 
     Multiple ``JobQueue`` instances against the same DB file are
     safe — SQLite WAL handles concurrent writers; the ``claim()``
-    method uses a single UPDATE ... WHERE id=(SELECT MIN id) so
-    workers don't double-claim.
+    method selects, updates and returns the owned attempt in one transaction,
+    so workers don't double-claim or return a peer's reclaimed attempt.
     """
 
     def __init__(self, db_path: Path | None = None) -> None:
@@ -128,6 +180,71 @@ class JobQueue:
     def _ensure_schema(self) -> None:
         with self._conn() as c:
             c.executescript(_SCHEMA)
+            c.execute("BEGIN IMMEDIATE")
+            columns = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}
+            for name, definition in _RECURRENCE_COLUMNS.items():
+                if name not in columns:
+                    c.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+            c.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_job_occurrence "
+                "ON jobs(recurrence_id, occurrence) WHERE recurrence_id IS NOT NULL"
+            )
+            c.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_job_successor "
+                "ON jobs(successor_id) WHERE successor_id IS NOT NULL"
+            )
+            # Backfill EVERY cron row without a schedule identity, not only on
+            # the first upgrade: rows an older binary inserted after the
+            # columns existed (a rollback, a mixed-version rollout) would
+            # otherwise run once and silently never re-arm.
+            rows = [self._row_to_job(row) for row in c.execute(
+                "SELECT * FROM jobs WHERE recurrence_id IS NULL")]
+            for job in rows:
+                if not job.payload.get("__cron__"):
+                    continue
+                # Old rows have no reliable schedule identity. Never merge two
+                # legitimate schedules merely because their payloads match: a
+                # row that ran without its re-arm marker goes to an operator
+                # (`maverick queue reconcile`), who links or re-arms it.
+                uncertain = job.attempts > 0 and not job.payload.get("__rearmed__")
+                c.execute(
+                    "UPDATE jobs SET recurrence_id=?, occurrence=0, "
+                    "scheduled_at=run_at, recurrence_payload=?, "
+                    "recurrence_reconcile_required=?, "
+                    "status=CASE WHEN ? THEN 'failed' ELSE status END, "
+                    "last_error=CASE WHEN ? THEN ? ELSE last_error END WHERE id=?",
+                    (uuid.uuid4().hex, json.dumps(_recurrence_template(job.kind, job.payload),
+                                                default=str), int(uncertain), uncertain,
+                     uncertain, _RECONCILE_REASON, job.id),
+                )
+            c.commit()
+
+    @contextmanager
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
+        """Serialize related writes across processes and roll back all of them."""
+        with self._lock, self._conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            try:
+                yield c
+                c.commit()
+            except BaseException:
+                c.rollback()
+                raise
+
+    @staticmethod
+    def _insert_job(c, kind, payload, run_at, now, *, recurrence_id=None,
+                    occurrence=None, recurrence_payload=None) -> int:
+        if recurrence_id is None and payload.get("__cron__"):
+            recurrence_id, occurrence = uuid.uuid4().hex, 0
+            recurrence_payload = json.dumps(_recurrence_template(kind, payload), default=str)
+        cur = c.execute(
+            "INSERT INTO jobs (kind, payload, run_at, created_at, updated_at, "
+            "recurrence_id, occurrence, scheduled_at, recurrence_payload) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (kind, json.dumps(payload, default=str), run_at, now, now,
+             recurrence_id, occurrence, run_at if recurrence_id else None, recurrence_payload),
+        )
+        return int(cur.lastrowid)
 
     def enqueue(
         self,
@@ -140,12 +257,36 @@ class JobQueue:
         rid = run_at if run_at is not None else now
         from .task_file_recovery import mutation_gate
         with mutation_gate(), self._lock, self._conn() as c:
-            cur = c.execute(
-                "INSERT INTO jobs (kind, payload, run_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (kind, json.dumps(payload or {}, default=str), rid, now, now),
-            )
-            return int(cur.lastrowid)
+            return self._insert_job(c, kind, payload or {}, rid, now)
+
+    def enqueue_once(self, kind: str, payload: dict, *, idempotency_key: str,
+                     run_at: float | None = None) -> int:
+        """Atomically admit an immutable job once, including after completion.
+
+        Retrying an uncertain enqueue returns its original ID. Reusing a key
+        for different work refuses instead of silently substituting payloads.
+        """
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise ValueError("job admission key is required")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(encoded.encode()).hexdigest()
+        from .task_file_recovery import mutation_gate
+        now = time.time()
+        with mutation_gate(), self._transaction() as conn:
+            row = conn.execute(
+                "SELECT kind,payload_hash,job_id FROM job_admissions WHERE admission_key=?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is not None:
+                if row["kind"] != kind or row["payload_hash"] != digest:
+                    raise ValueError("job admission key is bound to different work")
+                return int(row["job_id"])
+            job_id = self._insert_job(
+                conn, kind, payload, now if run_at is None else run_at, now)
+            conn.execute(
+                "INSERT INTO job_admissions(admission_key,kind,payload_hash,job_id,created_at) "
+                "VALUES(?,?,?,?,?)", (idempotency_key, kind, digest, job_id, now))
+            return job_id
 
     def claim_dispatch_envelope(
         self,
@@ -227,7 +368,7 @@ class JobQueue:
             assert_bootstrap_start_allowed()
         n = now if now is not None else time.time()
         cutoff = ready_at if ready_at is not None else n
-        with self._lock, self._conn() as c:
+        with self._transaction() as c:
             # Pick a candidate.
             row = c.execute(
                 "SELECT id FROM jobs WHERE status='pending' AND run_at <= ? "
@@ -309,15 +450,125 @@ class JobQueue:
                 )
             return cur.rowcount == 1
 
-    def set_payload(self, job_id: int, payload: dict) -> bool:
+    def set_payload(self, job_id: int, payload: dict, *, expected_attempts: int) -> bool:
         """Replace a job's payload. Lets a handler persist state across retries
-        (e.g. a created goal id) so a re-run reuses it instead of redoing work."""
-        with self._lock, self._conn() as c:
+        (e.g. a created goal id) so a re-run reuses it instead of redoing work.
+        A claimed running attempt is mandatory; False means ownership was lost.
+        Recurrence identity, template and advancement live outside this mutable
+        checkpoint and cannot be changed by replacing its payload.
+        """
+        with self._transaction() as c:
+            row = c.execute(
+                "SELECT payload, successor_id FROM jobs "
+                "WHERE id=? AND attempts=? AND status='running'",
+                (job_id, expected_attempts),
+            ).fetchone()
+            if row is None:
+                return False
+            payload = dict(payload)
+            payload.pop("__rearmed__", None)
+            if row["successor_id"] or json.loads(row["payload"]).get("__rearmed__"):
+                payload["__rearmed__"] = True
             cur = c.execute(
-                "UPDATE jobs SET payload=?, updated_at=? WHERE id=?",
-                (json.dumps(payload, default=str), time.time(), job_id),
+                "UPDATE jobs SET payload=?, updated_at=? "
+                "WHERE id=? AND attempts=? AND status='running'",
+                (json.dumps(payload, default=str), time.time(), job_id, expected_attempts),
             )
             return cur.rowcount == 1
+
+    @staticmethod
+    def _require_attempt(c, job_id: int, expected_attempts: int):
+        row = c.execute(
+            "SELECT * FROM jobs WHERE id=? AND attempts=? AND status='running'",
+            (job_id, expected_attempts),
+        ).fetchone()
+        if row is None:
+            raise LeaseLost(f"job {job_id}: running lease is no longer owned")
+        return row
+
+    def _advance_recurrence(self, c, row, *, now: float) -> int:
+        from .scheduler import next_run
+
+        template = json.loads(row["recurrence_payload"])
+        run_at = next_run(template["__cron__"], after=now,
+                          tz=str(template.get("__tz__") or ""))
+        successor = self._insert_job(
+            c, row["kind"], template, run_at, now,
+            recurrence_id=row["recurrence_id"], occurrence=row["occurrence"] + 1,
+            recurrence_payload=row["recurrence_payload"],
+        )
+        payload = json.loads(row["payload"])
+        payload["__rearmed__"] = True
+        c.execute(
+            "UPDATE jobs SET successor_id=?, payload=?, updated_at=? WHERE id=?",
+            (successor, json.dumps(payload, default=str), now, row["id"]),
+        )
+        return successor
+
+    def rearm(self, job_id: int, *, expected_attempts: int,
+              now: float | None = None) -> Job:
+        """Atomically create one successor and advance the current occurrence.
+
+        The transaction's running-attempt check fences stale workers. The
+        immutable (recurrence_id, occurrence) unique index is an additional
+        database invariant; no payload comparison or backlog scan is involved.
+        Return the current parent checkpoint so its handler keeps the marker.
+        """
+        from .task_file_recovery import mutation_gate
+
+        n = time.time() if now is None else now
+        with mutation_gate(), self._transaction() as c:
+            row = self._require_attempt(c, job_id, expected_attempts)
+            if row["recurrence_reconcile_required"]:
+                raise RecurrenceReconciliationRequired(_RECONCILE_REASON)
+            payload = json.loads(row["payload"])
+            # Marked legacy rows have no successor link, but already made the
+            # at-most-once decision. Retain it, including a cancelled successor.
+            if row["recurrence_id"] and not (row["successor_id"] or payload.get("__rearmed__")):
+                self._advance_recurrence(c, row, now=n)
+            return self._row_to_job(c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
+
+    def reconcile_recurrence(self, job_id: int, *, expected_attempts: int,
+                             successor_id: int | None = None,
+                             rearm: bool = False, confirm: bool = False) -> int:
+        """Local operator recovery; never called by a worker or exposed as a tool.
+
+        Requires filesystem/operator authority over this queue, explicit
+        confirmation and the inspected attempt. Link a reviewed compatible
+        successor OR authorize one future occurrence. The ambiguous historical
+        job remains failed: this decision never replays its business work.
+        """
+        if confirm is not True or rearm == (successor_id is not None):
+            raise ValueError("confirm exactly one recovery: successor_id or rearm=True")
+        from .task_file_recovery import mutation_gate
+
+        with mutation_gate(), self._transaction() as c:
+            row = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None or row["attempts"] != expected_attempts or row["status"] != "failed":
+                raise ValueError("reconciliation state changed; inspect the job again")
+            if not row["recurrence_reconcile_required"]:
+                if row["successor_id"] and (rearm or row["successor_id"] == successor_id):
+                    return int(row["successor_id"])
+                raise ValueError("job does not require recurrence reconciliation")
+            if successor_id is not None:
+                child = c.execute("SELECT * FROM jobs WHERE id=?", (successor_id,)).fetchone()
+                if child is None or child["id"] <= job_id or child["kind"] != row["kind"]:
+                    raise ValueError("successor is missing or incompatible")
+                if (json.loads(child["recurrence_payload"] or "null")
+                        != json.loads(row["recurrence_payload"])):
+                    raise ValueError("successor schedule/authority template differs")
+                payload = json.loads(row["payload"])
+                payload["__rearmed__"] = True
+                c.execute("UPDATE jobs SET successor_id=?, payload=? WHERE id=?",
+                          (successor_id, json.dumps(payload, default=str), job_id))
+            else:
+                successor_id = self._advance_recurrence(c, row, now=time.time())
+            c.execute(
+                "UPDATE jobs SET recurrence_reconcile_required=0, last_error=?, updated_at=? WHERE id=?",
+                (f"recurrence reconciled by local operator; successor job {successor_id}; "
+                 "historical execution not replayed", time.time(), job_id),
+            )
+            return int(successor_id)
 
     def fail(
         self,
@@ -343,24 +594,21 @@ class JobQueue:
             attempts = int(row[0])
             if expected_attempts is not None and attempts != expected_attempts:
                 return False  # lease lost to a re-claim; the current owner owns it
-            # Fence out a self-reclaimed row: reclaim_stale requeues a stale
-            # 'running' lease back to 'pending' WITHOUT bumping attempts, so an
-            # attempts-only guard would clobber a job another worker is about to
-            # own -- rescheduling/killing the wrong occurrence. Guarding on
-            # ``status != 'pending'`` blocks that while still allowing a fail()
-            # to finalize/annotate a job that is already terminal.
+            # A worker can only fail its current running attempt. Legacy
+            # operator calls without a fence can still annotate terminal rows.
+            status_guard = "status='running'" if expected_attempts is not None else "status != 'pending'"
             if retry_after is not None and attempts < max_attempts:
                 next_run = now + float(retry_after)
                 cur = c.execute(
                     "UPDATE jobs SET status='pending', run_at=?, "
                     "last_error=?, updated_at=? "
-                    "WHERE id=? AND attempts=? AND status != 'pending'",
+                    f"WHERE id=? AND attempts=? AND {status_guard}",
                     (next_run, error[:1000], now, job_id, attempts),
                 )
             else:
                 cur = c.execute(
                     "UPDATE jobs SET status='failed', last_error=?, "
-                    "updated_at=? WHERE id=? AND attempts=? AND status != 'pending'",
+                    f"updated_at=? WHERE id=? AND attempts=? AND {status_guard}",
                     (error[:1000], now, job_id, attempts),
                 )
             return cur.rowcount == 1
@@ -442,6 +690,45 @@ class JobQueue:
                 ).fetchall()
         return [self._row_to_job(r) for r in rows]
 
+    def iter_pending(self, kind: str, *, page_size: int = 256,
+                     include_running: bool = False) -> Iterator[Job]:
+        """Inspect every pending job of one kind, without a dashboard page cutoff.
+
+        Keyset pages tolerate cancellation during reconciliation. A fixed high
+        water mark bounds the pass if producers keep appending new jobs.
+        """
+        if not 1 <= page_size <= 1000:
+            raise ValueError("page_size must be between 1 and 1000")
+        # Reconciliation also needs claimed occurrences whose successor has
+        # not yet been armed. Dashboard callers retain pending-only behavior.
+        status = "status IN ('pending','running')" if include_running else "status='pending'"
+        with self._conn() as c:
+            upper = c.execute("SELECT COALESCE(MAX(id), 0) FROM jobs").fetchone()[0]
+        after = 0
+        while after < upper:
+            with self._conn() as c:
+                rows = c.execute(
+                    f"SELECT * FROM jobs WHERE kind=? AND {status} "
+                    "AND id>? AND id<=? ORDER BY id LIMIT ?",
+                    (kind, after, upper, page_size),
+                ).fetchall()
+            if not rows:
+                return
+            after = rows[-1]["id"]
+            yield from (self._row_to_job(row) for row in rows)
+
+    def find_for_run(self, kind: str, run_id: str, tenant: str = "") -> Job | None:
+        """Latest exact run delivery, including terminal jobs; never a scan cutoff."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM jobs WHERE kind=? "
+                "AND COALESCE(json_extract(CASE WHEN json_valid(payload) THEN payload ELSE '{}' END,'$.tenant'),'')=? "
+                "AND json_extract(CASE WHEN json_valid(payload) THEN payload ELSE '{}' END,'$.run_id')=? "
+                "ORDER BY id DESC LIMIT 1",
+                (kind, tenant, run_id),
+            ).fetchone()
+            return self._row_to_job(row) if row else None
+
     def counts(self) -> dict[str, int]:
         """``{status: count}`` across the whole queue — backlog + dead-letter
         visibility for metrics/ops (a growing ``pending`` is an alert; ``failed``
@@ -456,7 +743,8 @@ class JobQueue:
         cutoff = time.time() - older_than_days * 86400
         with self._lock, self._conn() as c:
             cur = c.execute(
-                "DELETE FROM jobs WHERE status IN ('done','failed') AND updated_at < ?",
+                "DELETE FROM jobs WHERE status IN ('done','failed') AND updated_at < ? "
+                "AND recurrence_reconcile_required=0",
                 (cutoff,),
             )
             return cur.rowcount
@@ -477,7 +765,12 @@ class JobQueue:
             last_error=str(row["last_error"] or ""),
             created_at=float(row["created_at"]),
             updated_at=float(row["updated_at"]),
+            recurrence_id=row["recurrence_id"],
+            occurrence=row["occurrence"],
+            scheduled_at=row["scheduled_at"],
+            successor_id=row["successor_id"],
+            recurrence_reconcile_required=bool(row["recurrence_reconcile_required"]),
         )
 
 
-__all__ = ["JobQueue", "Job", "DEFAULT_DB"]
+__all__ = ["JobQueue", "Job", "DEFAULT_DB", "LeaseLost", "RecurrenceReconciliationRequired"]

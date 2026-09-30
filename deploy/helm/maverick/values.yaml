@@ -109,8 +109,9 @@ resources:
 probes:
   enabled: true
 
-# Grace period for in-flight goals to finish on SIGTERM (rolling upgrade, node
-# drain). Paired with a preStop sleep so the LB deregisters first.
+# Total grace includes the 5-second preStop, the dashboard's shared 20-second
+# shutdown budget, and 5 seconds for process exit. If env.MAVERICK_SHUTDOWN_TIMEOUT
+# (or legacy env.MAVERICK_DRAIN_TIMEOUT) changes, increase this total accordingly.
 terminationGracePeriodSeconds: 30
 
 # PodDisruptionBudget. Gates voluntary disruptions (node drains, upgrades). With

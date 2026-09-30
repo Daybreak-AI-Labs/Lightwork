@@ -22,6 +22,8 @@ nav:
       - Getting started: getting-started.md
   - Guides:
       - Configuration: configuration.md
+      - Task limits and spend accounting: task-limits.md
+      - Provider spending recovery: provider-spending.md
       - Pricing governance: pricing-governance.md
       - Environment variables: env-vars.md
       - Deployment: deployment.md

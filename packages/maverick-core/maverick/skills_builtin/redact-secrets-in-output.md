@@ -7,19 +7,19 @@ triggers:
   - strip api keys
 tools_needed:
   - read_file
-  - secret_scan
+  - redact
 ---
 # What this skill does
 
-Runs an entropy-plus-pattern scan over any text headed for a commit, a log, a ticket, or a shared channel and strips API keys, tokens, private keys, connection strings, and card numbers before they leak. The goal class is "never commit or share a credential": catch both well-known token formats and generic high-entropy secrets, and replace them with placeholders.
+Runs the shipped `redact` tool on text headed for a commit, log, ticket, or shared channel. It returns cleaned text and a detector-relative proof status. It does not certify that every unknown token format or contextual credential has been recognized.
 
 # Steps
 
-1. Read the candidate output with read_file (the diff, the log buffer, the message body) and run secret_scan over the entire text including code comments and config blocks.
+1. Read the candidate text with `read_file` using `path`, then call `redact` with `op="redact"` and the entire `text`, including code comments and configuration blocks.
 2. For each hit, replace the secret value with a typed placeholder such as [REDACTED:provider-key] while leaving surrounding non-secret text intact; preserve the variable name so the code still reads sensibly.
 3. Treat connection strings with inline credentials, private-key PEM blocks, and bearer values as full-block redactions — redact the whole key material, not just the prefix.
-4. Emit a count of redactions by type and, if any secret was found in something about to be committed, block the commit and flag for human review rather than committing the redacted version automatically.
+4. Call `redact` with `op="verify"` and the cleaned `text`. Report any residuals and the returned status without inventing category counts. If a secret was found, request human review and credential rotation as appropriate; this skill does not perform a commit or send.
 
 # Notes
 
-Redacting only a token prefix and leaving the body is a real leak — match and remove the whole secret. High-entropy generic strings (random 32+ char values next to words like token/secret/password) must be caught even without a known provider prefix. A secret already pushed cannot be unpushed by redacting locally; if one is found in history, escalate for rotation, do not just delete the line. This skill scans and proposes a cleaned artifact; it does not perform the commit/send. False positives are cheap and acceptable; false negatives are not.
+Redacting only a token prefix leaves the credential exposed. Contextual and unfamiliar high-entropy values require human review even after a clean detector result. A secret already pushed cannot be removed from history by redacting the local text; escalate for rotation. This skill prepares a cleaned draft; it does not perform a commit or send.

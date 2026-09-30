@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from html.parser import HTMLParser
 
 import pytest
 from fastapi.testclient import TestClient
@@ -119,13 +120,14 @@ def test_assurance_page_renders_all_governance_operator_contracts():
     assert "calculated ROI is" in page
     assert "not a verified financial outcome" in page
     assert "live, read-only billing" in page
-    assert "Credential values are never returned" in page
+    assert "Passwords and keys are never shown here" in page
     assert "OpenAI organization costs" in page
     assert "OpenAI (unsupported)" not in page
     assert "not a legal conclusion" in page
     assert "compliance certification" in page
     assert "does not discover, poll, or stream live telemetry" in page
-    assert "This was not a live telemetry query" in page
+    assert "This was not a live check of the system" in page
+    # The precise safeguard wording is kept for auditors under "Technical details".
     assert "versioned Ed25519 report trust roots and an HTTPS coordinator" in page
     assert "transmission remains a separate human action" in page
     assert "independently verified differential privacy" in page
@@ -146,8 +148,10 @@ def test_assurance_page_renders_all_governance_operator_contracts():
     assert "default verification and signing" in page
     assert "persisted. Adapter-reported validation" in page
     assert "Lightwork certification, proof of authorship or truth" in page
-    assert "regulatory acceptance" in page
-    assert "No backend detail was displayed" in page
+    assert "not a certification or a regulator's approval" in page
+    # Failures are plain sentences: no status codes or server wording.
+    assert "(HTTP ${response.status})" not in page
+    assert "This was changed since you opened it" in page
 
 
 def test_governance_panels_render_api_values_as_text_only():
@@ -171,8 +175,8 @@ def test_governance_panels_render_api_values_as_text_only():
     assert "No financial conclusion is shown" in page
     assert "No delivery conclusion is shown" in page
     assert "No policy-coverage conclusion is shown" in page
-    assert "No telemetry-coverage conclusion is shown" in page
-    assert "No benchmark-coverage conclusion is shown" in page
+    assert "No monitoring-coverage conclusion is shown" in page
+    assert "No network, cohort, or coverage conclusion is shown" in page
     assert "No discovery-completeness conclusion is shown" in page
     assert "No identity-completeness conclusion is shown" in page
     assert "No grant-completeness conclusion is shown" in page
@@ -327,30 +331,31 @@ def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
     ):
         assert path_contract in page
 
-    assert 'maxlength="16384"' in page
-    assert 'maxlength="32768"' in page
-    assert 'pattern="MAA-[0-9a-f]{32}"' in page
-    assert 'pattern="[0-9a-f]{64}"' in page
-    assert "JSON exceeds the ${maxLength}-character bound." in page
+    # AI systems are picked from the inventory, never typed as MAA- IDs.
+    assert 'pattern="MAA-[0-9a-f]{32}"' not in page
+    assert '<select class="select" name="asset_id" required><option value="">Choose an AI system</option>' in page
+    # Fingerprints, references and version numbers are never typed.
+    assert 'pattern="[0-9a-f]{64}"' not in page
+    assert 'pattern="prn_[0-9a-f]{32}"' not in page
+    assert 'pattern="(?:sub|idn)_[0-9a-f]{32}"' not in page
+    assert 'pattern="IGPW-[0-9a-f]{32}"' not in page
+    assert "JSON exceeds" not in page
+    assert "parseObject(" not in page
     assert "encodeURIComponent(key)" in page
     assert "encodeURIComponent(policyId)" in page
     assert "encodeURIComponent(assetId)" in page
     assert "encodeURIComponent(signalId)" in page
-    assert "Raw content was not persisted" in page
+    assert "The text you entered was not saved" in page
     assert "Raw feature values" in page
     assert "policy facts come from its current" in page
     assert "voluntary_opt_in: true" in page
-    assert "complete_discovery_assessed remains false" in page
-    assert 'item.observation_id, item.identity_kind, item.enabled' in page
-    assert 'item.resource_id, `${asText(item.grant_kind)} / ${asText(item.permission_id)}`' in page
+    assert "It does not claim that every AI tool in your organisation was found" in page
     assert "Array.isArray(item.classification_codes)" in page
-    assert 'pattern="prn_[0-9a-f]{32}"' in page
-    assert 'pattern="(?:sub|idn)_[0-9a-f]{32}"' in page
-    assert "capability mapping digest to the resume form" in page
-    assert "Provider policy was observed, not mutated" in page
+    assert '"/pickers/identity-controls"' in page
+    assert "The service's sign-in rules were only read, not changed" in page
     assert 'enctype="multipart/form-data"' in page
     assert 'prefix + "/ai-media-provenance/sign"' in page
-    assert "mediaProvenanceReceipt.elements.receipt.value = \"\"" in page
+    assert 'mediaProvenanceReceipt.elements.receipt_file' in page
     assert "mediaProvenanceVerify.elements.file.value = \"\"" in page
 
 
@@ -549,3 +554,142 @@ def test_admin_page_explains_trusted_article_73_authority_boundary():
     assert "/sync`" in page
     assert "authority_role:" not in page
     assert "authority_refs:" not in page
+
+
+class _VisibleText(HTMLParser):
+    """Collect what a person sees: text and prompts, not scripts, styles or
+    the collapsed "Technical details" kept for auditors."""
+
+    _VOID = {"input", "br", "meta", "link", "img", "hr", "option", "source"}
+
+    def __init__(self):
+        super().__init__()
+        self.parts: list[str] = []
+        self.stack: list[list] = []
+        self.hidden = 0
+
+    def handle_starttag(self, tag, attrs):
+        values = dict(attrs)
+        if tag not in self._VOID:
+            skip = tag in {"script", "style"}
+            self.stack.append([tag, skip])
+            self.hidden += skip
+        if not self.hidden:
+            for name in ("placeholder", "title", "aria-label", "alt"):
+                if values.get(name):
+                    self.parts.append(values[name])
+
+    def handle_endtag(self, tag):
+        while self.stack:
+            name, skip = self.stack.pop()
+            self.hidden -= skip
+            if name == tag:
+                break
+
+    def handle_data(self, data):
+        text = data.strip()
+        if text == "Technical details":
+            for entry in reversed(self.stack):
+                if entry[0] == "details":
+                    if not entry[1]:
+                        entry[1] = True
+                        self.hidden += 1
+                    break
+            return
+        if text and not self.hidden:
+            self.parts.append(text)
+
+
+_BANNED = re.compile(
+    r"json|sha-?256|digest|principal|revision|idempotency|tenant|endpoint|schema|uuid|ed25519",
+    re.IGNORECASE,
+)
+
+
+def _governance_fragment(page: str) -> str:
+    return page[
+        page.index('<section class="panel" id="governance-operations-panel"'):
+        page.index('<p><a class="btn" href="/security">')
+    ]
+
+
+def _visible(fragment: str) -> str:
+    parser = _VisibleText()
+    parser.feed(fragment)
+    return "\n".join(parser.parts)
+
+
+@pytest.mark.parametrize("admin", [True, False])
+def test_governance_tools_offer_forms_and_pickers_in_plain_words(monkeypatch, admin):
+    from maverick_dashboard import auth
+
+    if not admin:
+        monkeypatch.setattr(auth, "has_global_permission", lambda *_args: False)
+    response = client.get("/security/assurance")
+
+    assert response.status_code == 200
+    fragment = _governance_fragment(response.text)
+    hits = [line for line in _visible(fragment).splitlines() if _BANNED.search(line)]
+    assert hits == []
+    # No data-format text boxes remain; structured requests are guided forms.
+    assert re.search(
+        r'<textarea[^>]*name="(statements|context|scope|details|receipt|'
+        r'evidence_bindings|report|observation|source|action_arguments)"',
+        fragment,
+    ) is None
+    for slot in (
+        "policy-context",
+        "insurability-create",
+        "insurability-version",
+        "regulated-content",
+        "benchmark-evidence",
+        "discovery-observation",
+        "action-details",
+    ):
+        assert f'data-structured="{slot}"' in fragment
+    assert '<script src="/static/lightwork-assurance-forms.js"></script>' in fragment
+    # Records, versions and outside results are chosen, never typed.
+    assert 'name="source_choice" required data-grc-source' in fragment
+    assert 'data-version-options="profile"' in fragment
+    assert 'name="section" required data-conformity-sections' in fragment
+    assert 'name="deployment_id" required data-deployment-choice' in fragment
+    assert 'name="receipt_file"' in fragment and 'name="report_file"' in fragment
+    assert 'name="purpose_code" required><option' in fragment
+    assert 'name="incident_member_states" value="DE"' in fragment
+    # Values that come from other systems are picked from what Lightwork
+    # already has, with typing only as a clearly secondary fallback.
+    assert fragment.count('<fieldset class="assurance-form__wide" data-provision-picker') == 4
+    assert fragment.count("<select class=\"select\" data-provision-choice") == 4
+    assert re.search(r'<input[^>]*name="provision"', fragment) is None
+    assert re.search(r'<input[^>]*name="context_id"', fragment) is None
+    assert fragment.count('<div class="assurance-form__wide" data-release-picker>') == (2 if admin else 1)
+    assert fragment.count('<select class="select" required data-release-choice>') == (2 if admin else 1)
+    assert '"/pickers/media-release-references"' in fragment
+    assert '"/pickers/legal-provisions"' in fragment
+    assert "Employee number from your HR system" in fragment
+    if admin:
+        assert '<fieldset class="assurance-form__wide" data-purview-labels>' in fragment
+        assert re.search(r'<input[^>]*name="classification_codes"', fragment) is None
+        assert 'list="ai-literacy-edition-choices"' in fragment
+        assert "Filing reference the authority gave you" in fragment
+        assert 'name="submission_reference" required maxlength="128"' in fragment
+    else:
+        assert '<fieldset class="assurance-form__wide" data-purview-labels>' not in fragment
+    if admin:
+        assert 'name="resolution_code" required><option value="fixed">' in fragment
+        assert 'data-structured="report-details"' in fragment
+        assert 'data-structured="policy-create-statements"' in fragment
+        assert 'data-structured="exception-scope"' in fragment
+        assert 'name="identity_choice" required data-identity-choice' in fragment
+        assert 'name="intent_choice" required data-purview-intent-choice' in fragment
+        assert 'select class="select" name="version" required data-policy-versions' in fragment
+    else:
+        assert 'data-identity-choice' not in fragment
+
+
+def test_assurance_forms_script_is_served():
+    response = client.get("/static/lightwork-assurance-forms.js")
+
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "window.LWAssuranceForms" in response.text

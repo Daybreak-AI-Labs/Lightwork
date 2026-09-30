@@ -34,7 +34,7 @@ def page_client() -> TestClient:
         return templates.TemplateResponse(
             request,
             "compliance_scope_actions.html",
-            {"compliance_scope_actions_enabled": enabled},
+            {"compliance_scope_actions_enabled": enabled, "can_admin": True, "can_audit": True},
         )
 
     return TestClient(app, headers={"Origin": "http://testserver"})
@@ -44,13 +44,17 @@ def test_page_exposes_complete_honest_operator_workbench(page_client) -> None:
     response = page_client.get("/compliance/scope-actions")
     assert response.status_code == 200
     page = response.text
-    assert "Compliance Scope Actions" in page
-    assert "finalized compliance scope" in page
-    assert "No licensed framework text, raw evidence, free-text task descriptions" in page
-    assert "built-in provider writes, network I/O" in page
-    assert "or live acceptance" in page
-    assert "callback can never be" in page
+    assert "Turn scope into tasks" in page
+    assert "About this page&rsquo;s safeguards" in page
+    assert "does not include licensed framework text" in page
     assert "/api/v1/compliance/scope-actions" in page
+    for element in ('id="csa-scopes"', 'id="csa-plans"', 'id="csa-reports"',
+                    'id="csa-catalogs"', "lightwork-compliance-scope-actions.js"):
+        assert element in page
+    before, technical = page.split("<summary>Technical details: advanced operations</summary>", 1)
+    for jargon in ("JSON", "Tenant", "CAS", "callback", "SHA-256", "Operation"):
+        assert jargon not in before.split("<main", 1)[-1], jargon
+    assert 'id="csa-operation"' in technical
     for operation in (
         "catalog-create",
         "catalog-get",

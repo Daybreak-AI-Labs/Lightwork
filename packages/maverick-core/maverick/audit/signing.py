@@ -46,6 +46,8 @@ import logging
 import os
 import re
 import threading
+from collections.abc import Iterable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -483,12 +485,11 @@ _LOCAL_KEY_WARNED = False
 
 
 def require_offhost_signing() -> bool:
-    """Whether the audit signing key MUST live off-host (KMS / injected), so the
-    on-disk generated-and-left key is refused.
+    """Whether signing requires an externally supplied key instead of a disk key.
 
-    On by default under enterprise mode -- the audit chain is the tamper-evidence
-    a regulator relies on, and a same-host on-disk private key lets a local root
-    rewrite history and re-sign it. Also flips on via ``[audit]
+    On by default under enterprise mode to avoid leaving a generated private
+    key on local disk. Injected and KMS-unwrapped keys still sign locally; this
+    policy does not establish isolated key custody. Also flips on via ``[audit]
     require_offhost_key`` / ``MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY``. Off by default
     otherwise (the local-key happy path is unchanged)."""
     env = os.environ.get("MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY", "").strip().lower()
@@ -518,8 +519,9 @@ def _kms_wrapped_keypair() -> tuple[bytes, bytes, str] | None:
 
     ``MAVERICK_AUDIT_SIGNING_KEY_WRAPPED`` (hex/base64 of a KMS-wrapped 32-byte
     Ed25519 private key) + a configured cloud KMS (``[encryption.kms]`` AWS / GCP
-    / Vault) lets the audit signer's private key live in KMS custody and be
-    unwrapped only into process memory at startup -- never written to local disk.
+    / Vault) keeps the stored private key wrapped and unwraps it into process
+    memory at startup -- never written to local disk. This is local signing,
+    not an isolated KMS signing operation; the process receives the private key.
     Returns ``(priv, pub, key_id)`` or ``None`` (no config / crypto absent / any
     error -> fall through to the next key source)."""
     raw = os.environ.get(_KMS_WRAPPED_KEY_ENV)
@@ -563,17 +565,16 @@ def _kms_wrapped_keypair() -> tuple[bytes, bytes, str] | None:
 
 
 def active_key_is_offhost() -> bool:
-    """Whether the ACTIVE audit signing key is held off-host (KMS / injected).
+    """Whether the active key is externally supplied rather than stored on disk.
 
     True when the signer's private key comes from an env-injected key
     (:func:`_injected_keypair`, sourced from a KMS / secrets manager) or a
     KMS-wrapped key (:func:`_kms_wrapped_keypair`) -- it never lives
-    generated-and-left on local disk. False for the default co-located on-disk
-    key: that key still lets :func:`verify_chain` detect accidental /
-    non-privileged edits (integrity), but an actor running as the maverick uid
-    can read it and cleanly re-sign the whole chain, so it is NOT tamper-evidence
-    against a same-uid actor. Any *tamper-evidence* claim must be gated on this
-    returning True.
+    generated-and-left on local disk. The historical function name describes
+    key sourcing, not the location of signing: both sources expose private key
+    bytes to this process. True does not establish a non-exportable signer or
+    protection from an actor able to use the process's key. Independently
+    retained checkpoints provide a separate history commitment.
     """
     if _injected_keypair() is not None:
         return True
@@ -623,8 +624,9 @@ def _load_or_create_keypair_unlocked() -> tuple[bytes, bytes, str]:
     two keep the private key off local disk (only the public half is persisted,
     for verification) so the audit chain's trust anchor can live in a KMS / HSM /
     secrets manager. When :func:`require_offhost_signing` is on (enterprise mode)
-    and neither off-host source is available, this RAISES rather than generate a
-    same-host on-disk key a local root could use to rewrite + re-sign history.
+    and neither external source is available, this RAISES rather than generate a
+    local private-key file. In every current path the signer receives private
+    key bytes, so this is not an isolated signing-service boundary.
     """
     injected = _injected_keypair()
     if injected is not None:
@@ -680,9 +682,10 @@ def _load_or_create_keypair_unlocked() -> tuple[bytes, bytes, str]:
             "A same-uid on-disk key gives integrity against accidental / "
             "non-privileged edits only -- it is NOT tamper-evidence against an "
             "actor running as the maverick uid, who can read the key and cleanly "
-            "re-sign the chain. For tamper-evidence, custody the key off-host: set "
+            "re-sign the chain. To avoid a private key on local disk, set "
             "%s (a KMS / secrets-manager-sourced Ed25519 key) or %s (a KMS-wrapped "
-            "key).",
+            "key). Both still expose the private key to the signing process; "
+            "use independently retained checkpoints to detect later history changes.",
             key_dir, _SIGNING_KEY_ENV, _KMS_WRAPPED_KEY_ENV,
         )
     priv, pub, key_id = _generate_keypair()
@@ -977,6 +980,8 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
     pubkey_hex: str | None = None,
     *,
     segment: str | None = None,
+    lines: Iterable[str] | None = None,
+    max_breaks: int | None = None,
 ) -> list[ChainBreak]:
     """Walk every line; verify chain links + signatures.
 
@@ -986,8 +991,12 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
     Returns a list of breaks. Empty list = chain intact. Proof-producing
     callers that already opened a sealed segment may pass its authenticated
     plaintext through ``segment`` so verification and aggregation operate on
-    the exact same immutable bytes rather than reading the file twice.
+    the exact same immutable bytes rather than reading the file twice. ``lines``
+    supports bounded caller-owned snapshot iteration; its read failures propagate
+    so the caller cannot turn a partial scan into an intact-chain result.
     """
+    if max_breaks is not None and (type(max_breaks) is not int or not 1 <= max_breaks <= 1000):
+        raise ValueError("max_breaks must be an integer from 1 to 1000")
     if not _have_crypto():
         return [ChainBreak(0, "no_crypto", "cryptography not installed")]
     from cryptography.exceptions import InvalidSignature
@@ -1032,7 +1041,9 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
         pubkey_cache[key_id] = obj
         return obj
 
-    if segment is None:
+    if lines is not None and segment is not None:
+        raise ValueError("supply audit segment or lines, not both")
+    if segment is None and lines is None:
         try:
             text = _segment_text(path)
         # failure-policy: fail_closed
@@ -1041,13 +1052,15 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
     else:
         text = segment
 
-    with io.StringIO(text) as f:
+    with (nullcontext(lines) if lines is not None else io.StringIO(text)) as f:
         for n, line in enumerate(f, start=1):
+            if max_breaks is not None and len(breaks) >= max_breaks:
+                break  # nonempty failure result; never claim the remaining scan passed
             if not line.strip():
                 continue
             try:
                 data = json.loads(line)
-            except json.JSONDecodeError as e:
+            except (ValueError, RecursionError) as e:
                 breaks.append(ChainBreak(n, "malformed", str(e)))
                 continue
             if not isinstance(data, dict):
@@ -1103,9 +1116,13 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
                     )
                 )
             payload_for_hash = {k: v for k, v in data.items() if k not in ("hash", "sig")}
-            expected_hash = hashlib.sha256(
-                json.dumps(payload_for_hash, sort_keys=True, default=str).encode("utf-8")
-            ).hexdigest()
+            try:
+                expected_hash = hashlib.sha256(
+                    json.dumps(payload_for_hash, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest()
+            except (ValueError, RecursionError, UnicodeError) as e:
+                breaks.append(ChainBreak(n, "malformed", str(e)))
+                continue
             if expected_hash != row_hash:
                 breaks.append(ChainBreak(n, "bad_hash", "content rehash != row hash"))
             pub = _load_pubkey(key_id)
@@ -1201,9 +1218,12 @@ def day_files(audit_dir: Path) -> list[Path]:
     The single definition of "what counts as an audit day-file"; the read-side
     consumers (export / dsar / soc2) reach it via :mod:`maverick.audit.reader`.
     """
-    return sorted(
-        p for p in audit_dir.glob("*.ndjson") if _DAY_RE.fullmatch(p.stem)
-    )
+    try:
+        return sorted(
+            p for p in audit_dir.iterdir() if p.suffix == ".ndjson" and _DAY_RE.fullmatch(p.stem)
+        )
+    except FileNotFoundError:
+        return []
 
 
 def _anchored_days(audit_dir: Path) -> set[str]:

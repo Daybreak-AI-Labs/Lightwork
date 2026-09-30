@@ -32,13 +32,14 @@ class VLLMClient(OpenAIClient):
     PRICE_MODEL_PREFIX = "vllm:"  # self-hosted: unknown ids price $0
     USAGE_REQUIRED = False  # local server may omit usage; $0 -> nothing to enforce
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
-        key = api_key or os.environ.get("VLLM_API_KEY") or "vllm-no-auth"
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, *, environment=None):
+        env = os.environ if environment is None else environment
+        key = api_key or env.get("VLLM_API_KEY") or "vllm-no-auth"
         url = (
             base_url
-            or os.environ.get("VLLM_BASE_URL")
+            or env.get("VLLM_BASE_URL")
             or "http://localhost:8000/v1"
         )
         if not url.rstrip("/").endswith("/v1"):
             url = url.rstrip("/") + "/v1"
-        super().__init__(api_key=key, base_url=url, allow_openai_env_fallback=False)
+        super().__init__(api_key=key, base_url=url, allow_openai_env_fallback=False, environment=environment)

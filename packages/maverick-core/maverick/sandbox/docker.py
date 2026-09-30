@@ -5,9 +5,8 @@ container is removed on exit (``--rm``). Network is disabled by
 default (``--network=none``); enable via ``allow_network=True`` if a
 specific run needs it.
 
-Why a fresh container per command? Simpler, no state leakage between
-calls, mirrors how Hermes / OpenClaw approach ephemeral execution.
-Long-lived container with ``docker exec`` is a future optimization.
+Fresh containers are the default. Opt-in ``reuse_container`` keeps a guest
+within one run; failed cleanup prevents another execution until reconciled.
 
 Falls back loudly: if Docker isn't installed or the daemon isn't
 running, ``DockerBackend.__init__`` raises ``RuntimeError`` so the
@@ -15,39 +14,24 @@ wizard's smoke test catches it before the agent runs.
 """
 from __future__ import annotations
 
+import logging
 import shlex
 import subprocess
+import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from .container_cleanup import CLEANUP_SECONDS, ContainerCleanup, cleanup_container
+from .lease import BackendLease, operation_lease
 from .local import ExecResult, container_user_args, scrub_env
+
+log = logging.getLogger(__name__)
 
 
 def _kill_container(name: str, engine: str = "docker") -> str:
-    """Reap an orphaned container by name; return a stderr note on failure.
-
-    ``subprocess.run(timeout=...)`` only kills the local client process, so the
-    daemon-side container survives the timeout. ``{engine} kill`` stops it and
-    ``{engine} rm -f`` removes it; we retry the kill once in case the daemon was
-    briefly busy. If both attempts fail we return a short ``; cleanup failed``
-    note so the leak is visible rather than swallowed under a bare except.
-    """
-    last_err = ""
-    for _ in range(2):
-        try:
-            subprocess.run(
-                [engine, "kill", name],
-                capture_output=True, timeout=10, env=scrub_env(),
-            )
-            subprocess.run(
-                [engine, "rm", "-f", name],
-                capture_output=True, timeout=10, env=scrub_env(),
-            )
-            return ""
-        except Exception as e:  # daemon wedged / binary gone -- note + retry
-            last_err = str(e) or e.__class__.__name__
-    return f"; container cleanup failed ({last_err}); {name} may be orphaned"
+    """Compatibility renderer for callers that consume a stderr note."""
+    return cleanup_container(name, engine).note
 
 
 @dataclass
@@ -93,6 +77,8 @@ class DockerBackend:
     # closed. In-process filesystem tools enforce the same list at the agent
     # dispatch chokepoint.
     read_only_paths: tuple[str, ...] = ()
+    pending_cleanup: dict[str, ContainerCleanup] = field(default_factory=dict, init=False, repr=False)
+    _pool_lease: BackendLease = field(default_factory=BackendLease, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.workdir = Path(self.workdir)
@@ -171,6 +157,14 @@ class DockerBackend:
         return flags
 
     def exec(self, cmd: str, timeout: float | None = None) -> ExecResult:
+        with operation_lease(self):
+            return self._exec_owned(cmd, timeout)
+
+    def _exec_owned(self, cmd: str, timeout: float | None = None) -> ExecResult:
+        if getattr(self, "pending_cleanup", {}):
+            self.close()
+            if self.pending_cleanup:
+                raise RuntimeError("previous sandbox container cleanup is unresolved")
         # Wave 11: per-call `timeout` matches LocalBackend so the shell
         # tool can plumb a longer cap for pytest/npm test/etc. Falls
         # back to self.timeout (default 60 s).
@@ -204,7 +198,7 @@ class DockerBackend:
             # until reaped. Force-remove it by name. Surface a cleanup failure
             # in stderr instead of swallowing it under a bare except: a leaked
             # container is a real condition the operator should see.
-            cleanup_note = _kill_container(container_name)
+            cleanup_note = self._cleanup_owned(container_name).note
             stdout = e.stdout or ""
             if isinstance(stdout, bytes):
                 stdout = stdout.decode("utf-8", errors="replace")
@@ -234,12 +228,14 @@ class DockerBackend:
             proc = subprocess.run(args, capture_output=True, text=True,
                                   timeout=self.timeout, env=scrub_env())
         except subprocess.TimeoutExpired as e:
+            cleanup = self._cleanup_owned(name)
             raise RuntimeError(
-                f"warm container start timed out after {self.timeout}s") from e
+                f"warm container start timed out after {self.timeout}s{cleanup.note}") from e
         if proc.returncode != 0:
+            cleanup = self._cleanup_owned(name)
             raise RuntimeError(
                 f"warm container start failed (exit {proc.returncode}): "
-                f"{(proc.stderr or '').strip()[-500:]}")
+                f"{(proc.stderr or '').strip()[-500:]}{cleanup.note}")
         self._warm_name = name
 
     def _exec_warm(self, cmd: str, effective: float) -> ExecResult:
@@ -258,12 +254,13 @@ class DockerBackend:
             # A timed-out `docker exec` can leave daemon-side children running
             # inside the warm container. Reap the container, just like the cold
             # path does, so no command can outlive its timeout/budget boundary.
-            self.close()
+            cleanup = self._cleanup_owned(self._warm_name)
+            self._warm_name = None  # the timed-out guest is never reusable
             stdout = e.stdout or ""
             if isinstance(stdout, bytes):
                 stdout = stdout.decode("utf-8", errors="replace")
             return ExecResult(stdout=stdout[-8000:],
-                              stderr=f"TIMEOUT after {effective}s", exit_code=124)
+                              stderr=f"TIMEOUT after {effective}s{cleanup.note}", exit_code=124)
 
     def _warm_command(self, cmd: str) -> str:
         """Run a command, then reap any processes it left behind.
@@ -297,14 +294,28 @@ class DockerBackend:
             "exit $rc",
         ])
 
+    def _cleanup_owned(self, name: str, timeout: float = CLEANUP_SECONDS) -> ContainerCleanup:
+        cleanup = cleanup_container(name, timeout=timeout)
+        # Legacy/unpickled instances may predate this field.
+        if not hasattr(self, "pending_cleanup"):
+            self.pending_cleanup = {}
+        if cleanup.removed:
+            self.pending_cleanup.pop(name, None)
+        else:
+            self.pending_cleanup[name] = cleanup
+            log.warning("sandbox%s", cleanup.note)
+        return cleanup
+
     def close(self) -> None:
-        """Tear down the warm container (no-op when reuse is off / unused)."""
-        if self._warm_name is None:
-            return
-        try:
-            subprocess.run(["docker", "rm", "-f", self._warm_name],
-                           capture_output=True, text=True, timeout=15,
-                           env=scrub_env())
-        except Exception:  # pragma: no cover -- best-effort teardown
-            pass
-        self._warm_name = None
+        """Drain owned cleanup against one deadline; retain unresolved identities."""
+        with operation_lease(self, cleanup=True):
+            self._close_owned()
+
+    def _close_owned(self) -> None:
+        names = set(getattr(self, "pending_cleanup", {}))
+        if self._warm_name is not None:
+            names.add(self._warm_name)
+            self._warm_name = None
+        deadline = time.monotonic() + CLEANUP_SECONDS
+        for name in sorted(names):
+            self._cleanup_owned(name, max(0.0, deadline - time.monotonic()))

@@ -217,7 +217,9 @@ def test_browser_409_renders_the_picker_api_keeps_json():
     assert "Choose a workspace" in r.text
     assert '<h1 class="page-title"' in r.text
     assert 'var returnTo = "/consent/publish-settings";' in r.text
-    assert "select an active tenant" in r.text  # the gate's own message
+    # The gate's internal message is never shown; the picker explains itself.
+    assert "select an active tenant" not in r.text
+    assert "This page needs a workspace." in r.text
 
     r = client.get(
         "/api/v1/consent/publish-settings/status",

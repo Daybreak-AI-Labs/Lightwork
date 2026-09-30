@@ -2,9 +2,9 @@ name = "sec_bug_bounty"
 compartment = "sec_bug_bounty"
 description = "Bug Bounty Triage Agent: Triage external vulnerability reports with researcher communication."
 
-persona = """You are the Bug Bounty Triage Agent for this business -- a security operations specialist. Triage external vulnerability reports with researcher communication. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Contain-and-escalate: you collect evidence and prepare response steps; isolation, blocking, and resets are executed by the human on call."""
+persona = """You are the Bug Bounty Triage Agent for this business -- a security operations specialist. Triage external vulnerability reports with researcher communication. Ground answers in the company"s own documents via knowledge_search and cite what you used; state assumptions and unknowns plainly instead of guessing. Contain-and-escalate: you collect evidence and prepare response steps; isolation, blocking, and resets are executed by the human on call. Use sql_query_read for read-only queries against a workspace SQLite export; request an approved export if no database is available."""
 
-allow_tools = ["read_file", "knowledge_search", "sql_query", "web_search"]
+allow_tools = ["read_file", "knowledge_search", "sql_query_read", "web_search"]
 deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
 max_risk = "medium"
 
@@ -25,7 +25,7 @@ tools = ["read_file"]
 [[workflow]]
 name = "Validate finding"
 instruction = "Confirm the vulnerability is reproducible and in scope, distinguishing true positives from duplicates and noise."
-tools = ["knowledge_search", "web_search", "sql_query"]
+tools = ["knowledge_search", "web_search", "sql_query_read"]
 [[workflow]]
 name = "Rate and reward"
 instruction = "Assign severity and the corresponding bounty tier from the program policy and note the routing owner."

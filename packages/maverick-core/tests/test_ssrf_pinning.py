@@ -169,3 +169,18 @@ def test_safe_get_strips_follow_redirects(monkeypatch):
     assert "follow_redirects" not in seen["kwargs"]
     # Genuine request kwargs are still forwarded untouched.
     assert seen["kwargs"].get("params") == {"a": 1}
+
+
+@pytest.mark.parametrize("ip", ["100.100.100.200", "100.64.0.1", "100.127.255.254"])
+def test_resolve_pinned_ip_rejects_shared_address_space(monkeypatch, ip):
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo(ip))
+    with pytest.raises(_ssrf.BlockedHost):
+        _ssrf.resolve_pinned_ip("cgnat.test")
+
+
+def test_resolve_pinned_ip_keeps_the_neighbours_of_shared_space_public(monkeypatch):
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    for ip in ("100.63.255.255", "100.128.0.1"):
+        monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo(ip))
+        assert _ssrf.resolve_pinned_ip("public.test") == ip

@@ -57,6 +57,7 @@ _IDENTITY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/+\-=]{0,255}\Z")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 _MAX_RECORDS = 10_000
+_MAX_REFERENCE_LIST = 500
 _MAX_ASSERTIONS = 64
 _MAX_RECEIPT_BYTES = 128 * 1024
 _MAX_MEDIA_BYTES = 64 * 1024 * 1024
@@ -1465,6 +1466,46 @@ class MediaProvenanceService:
         return [
             self._public(row)
             for row in sorted(validated, key=lambda item: (item["observed_at"], item["id"]))
+        ]
+
+    def release_references(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        """Release references this workspace's media records already use.
+
+        Newest use first.  Only stored, integrity-checked records of the
+        active tenant are read; the release-context authority is not consulted,
+        so a listed reference is a suggestion that checking or signing still
+        resolves and binds exactly as before.
+        """
+
+        tenant_ref = self._require_active()
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= _MAX_REFERENCE_LIST
+        ):
+            raise ValueError(f"limit must be between 1 and {_MAX_REFERENCE_LIST}")
+        rows = self._records.list(limit=_MAX_RECORDS + 1)
+        if len(rows) > _MAX_RECORDS:
+            raise MediaProvenanceStateError("media provenance namespace exceeds its bound")
+        used: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            record = self._validate_record(row, tenant_ref)
+            entry = used.setdefault(
+                record["context_id"],
+                {"last_used_at": 0.0, "deployment_ids": set(), "record_count": 0},
+            )
+            entry["last_used_at"] = max(entry["last_used_at"], float(record["observed_at"]))
+            entry["deployment_ids"].add(record["deployment_id"])
+            entry["record_count"] += 1
+        ordered = sorted(used.items(), key=lambda item: (-item[1]["last_used_at"], item[0]))
+        return [
+            {
+                "context_id": context_id,
+                "last_used_at": entry["last_used_at"],
+                "deployment_ids": sorted(entry["deployment_ids"]),
+                "record_count": entry["record_count"],
+            }
+            for context_id, entry in ordered[:limit]
         ]
 
     def prepare_release_record(

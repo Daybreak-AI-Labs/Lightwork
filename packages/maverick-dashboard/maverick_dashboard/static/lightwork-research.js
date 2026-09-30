@@ -20,6 +20,14 @@
     return item;
   }
 
+  function human(value) {
+    return window.mvHuman ? window.mvHuman(value) : String(value || '').replace(/_/g, ' ');
+  }
+
+  function person(value) {
+    return String(value || '').replace(/^user:/, '');
+  }
+
   function message(text, error) {
     byId('research-status').textContent = text;
     byId('research-status').classList.toggle('error', !!error);
@@ -96,13 +104,13 @@
     if (!response.ok) {
       const error = new Error(response.status === 409 ? 'This research record changed. Refresh and review it again.' :
         response.status === 403 ? 'Your current account cannot perform that research action.' :
-        response.status === 422 ? 'Review the research fields and try again.' :
-        'Research is temporarily unavailable. Refresh before retrying.');
+        response.status === 422 ? 'Some details need fixing. Check the highlighted fields and try again.' :
+        'The research lab is not available right now. Refresh and try again.');
       error.status = response.status;
       throw error;
     }
     if (value && value.context && value.context !== context) {
-      throw new Error('The account or workspace changed. Reload this page.');
+      throw new Error('You switched account or workspace. Reload this page.');
     }
     return value;
   }
@@ -115,7 +123,7 @@
         (data.settings !== null && (!data.settings || typeof data.settings.enabled !== 'boolean' ||
           typeof data.settings.valid !== 'boolean' || typeof data.settings.writable !== 'boolean' ||
           typeof data.settings.source !== 'string' || typeof data.settings.settings_sha256 !== 'string'))) {
-      throw new Error('The research overview could not be verified. Refresh before taking action.');
+      throw new Error('The research lab could not be loaded correctly. Refresh the page.');
     }
     return data;
   }
@@ -123,20 +131,50 @@
   function addEvaluator(value) {
     const row = element('div', undefined, 'research-evaluator');
     for (const [field, label, placeholder] of [
-      ['id', 'Evaluator ID', 'smoke'], ['version', 'Version', 'v1'],
-      ['stdout_sha256', 'Expected output SHA-256', '64 lowercase hex characters']]) {
+      ['id', 'Check name', 'For example: smoke'], ['version', 'Version', 'v1']]) {
       const wrapper = element('label', label);
       const input = element('input');
       input.className = 'input';
       input.dataset.field = field;
       input.required = true;
       input.maxLength = 64;
-      input.pattern = field === 'stdout_sha256' ? '[a-f0-9]{64}' : '[A-Za-z0-9][A-Za-z0-9_-]{0,63}';
+      input.pattern = '[A-Za-z0-9][A-Za-z0-9_-]{0,63}';
+      input.title = 'Letters, numbers, dashes and underscores';
       input.placeholder = placeholder;
-      input.value = value?.[field] || '';
+      input.value = value?.[field] || (field === 'version' ? 'v1' : '');
       wrapper.appendChild(input);
       row.appendChild(wrapper);
     }
+    // The correct output is chosen as a file; the server records its
+    // fingerprint (the page never asks anyone to type one).
+    const expected = element('input');
+    expected.type = 'hidden';
+    expected.dataset.field = 'stdout_sha256';
+    expected.value = value?.stdout_sha256 || '';
+    const fileLabel = element('label', 'Correct output file');
+    const file = element('input');
+    file.type = 'file';
+    file.className = 'input';
+    file.required = !expected.value;
+    const state = element('span', expected.value ? 'Saved' : 'Choose the file with the correct output', 'muted');
+    file.addEventListener('change', async () => {
+      const chosen = file.files && file.files[0];
+      if (!chosen) return;
+      state.textContent = `Reading ${chosen.name}…`;
+      try {
+        const response = await fetch('/api/v1/research-files/fingerprint', {method:'POST', credentials:'same-origin',
+          headers:{'Content-Type':'application/octet-stream'}, body:chosen});
+        if (!response.ok) throw response;
+        expected.value = (await response.json()).fingerprint;
+        state.textContent = `Ready: ${chosen.name}`;
+        settingsDirty = true;
+        syncControls();
+      } catch (error) {
+        state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file.';
+      }
+    });
+    fileLabel.append(file, state);
+    row.append(fileLabel, expected);
     const remove = element('button', 'Remove', 'btn');
     remove.type = 'button';
     remove.addEventListener('click', () => {
@@ -154,10 +192,10 @@
     if (!settings) return;
     const available = settings.writable === true && sha(settings.settings_sha256);
     byId('research-settings-readiness').textContent = settings.source === 'operator_overlay' ?
-      'This profile is managed by the operator config overlay and is read-only in the app.' : available ?
-      (settings.valid ? 'The saved execution profile is valid.' :
-        'The saved profile needs repair. Enter a complete profile or disable execution.') :
-      'Research setup storage is unavailable. Reload after repairing installation settings.';
+      'This setup is managed by your IT team and cannot be changed here.' : available ?
+      (settings.valid ? 'The saved setup is complete.' :
+        'The saved setup is incomplete. Fill in every field, or turn experiments off.') :
+      'The setup cannot be saved right now. Ask your IT team to check the installation settings.';
     if (settingsDirty) {
       syncControls();
       return;
@@ -185,20 +223,19 @@
     if (!rows.length) list.appendChild(element('li', 'No research submissions yet.'));
     rows.forEach(row => {
       const item = element('li', undefined, 'research-item');
-      item.appendChild(element('strong', row.id));
-      item.appendChild(element('p', `Status: ${row.status.replaceAll('_', ' ')} · Evaluator: ${row.evaluator_id}`));
-      item.appendChild(element('p', `Source SHA-256: ${row.input_sha256}`, 'muted'));
+      item.appendChild(element('strong', `Submission ${row.id}`));
+      item.appendChild(element('p', `Status: ${human(row.status)} · Check: ${row.evaluator_id}`));
       if (row.execution?.state) {
-        item.appendChild(element('p', `Execution record: ${String(row.execution.state).replaceAll('_', ' ')}`));
+        item.appendChild(element('p', `Run: ${human(row.execution.state)}`));
       }
       const counts = row.evaluation?.counts;
       if (counts && Number.isSafeInteger(counts.passed) && counts.passed >= 0 &&
           Number.isSafeInteger(counts.failed) && counts.failed >= 0) {
         const outcome = counts.passed > 0 && counts.failed === 0 ? 'passed' : 'failed';
-        item.appendChild(element('p', `Evaluation: ${outcome} (${counts.passed} passed, ${counts.failed} failed)`));
+        item.appendChild(element('p', `Result: ${outcome === 'passed' ? 'Passed' : 'Failed'} (${counts.passed} passed, ${counts.failed} failed)`));
       }
       if (typeof row.next_action === 'string' && row.next_action.length <= 512) {
-        item.appendChild(element('p', `Next action: ${row.next_action}`));
+        item.appendChild(element('p', `Next step: ${row.next_action}`));
       }
       if (['queued', 'running'].includes(row.status)) {
         const cancel = element('button', row.status === 'queued' ? 'Cancel submission' : 'Request cancellation', 'btn');
@@ -223,26 +260,28 @@
     const choice = byId('research-review-choice');
     choice.replaceChildren(new Option('Choose a submission', ''));
     rows.forEach(row => {
-      choice.appendChild(new Option(`${row.status} · ${row.submitted_by} · ${row.id}`, row.id));
+      choice.appendChild(new Option(`${human(row.status)} · ${person(row.submitted_by)} · submission ${row.id}`, row.id));
     });
   }
 
   function renderReviewDetail(review) {
     const host = byId('research-review-detail');
     host.replaceChildren();
-    host.appendChild(element('p', `Submitted by ${review.submitted_by || 'unknown'} · ${review.status}`));
+    host.appendChild(element('p', `Sent by ${person(review.submitted_by) || 'someone'} · ${human(review.status)}`));
     const counts = review.evaluation?.counts;
     if (counts && Number.isSafeInteger(counts.passed) && counts.passed >= 0 &&
         Number.isSafeInteger(counts.failed) && counts.failed >= 0) {
-      host.appendChild(element('p', `Exact-output evaluation: ${counts.passed} passed · ${counts.failed} failed`));
+      host.appendChild(element('p', `Correct-output check: ${counts.passed} passed · ${counts.failed} failed`));
     }
     const observation = review.observation;
     if (observation && Number.isSafeInteger(observation.exit_code) &&
         typeof observation.reason === 'string' && observation.reason.length <= 128) {
-      host.appendChild(element('p', `Execution exit: ${observation.reason} · code ${observation.exit_code}`));
+      host.appendChild(element('p', observation.exit_code === 0 ? 'The program finished normally.' :
+        observation.exit_code === 137 ? 'The program was stopped because it used too much memory or time.' :
+        `The program stopped with a problem (${human(observation.reason)}).`));
     }
     if (typeof review.next_action === 'string' && review.next_action.length <= 512) {
-      host.appendChild(element('p', `Next action: ${review.next_action}`));
+      host.appendChild(element('p', `Next step: ${review.next_action}`));
     }
     Object.entries(review.files || {}).sort().forEach(([name, source]) => {
       const details = element('details');
@@ -257,16 +296,16 @@
     byId('research-review-detail').replaceChildren();
     byId('research-dispatch-confirm').checked = false;
     byId('research-readiness').textContent = data.execution_available ?
-      `Ready for reviewed jobs. ${data.evaluators.length} evaluator${data.evaluators.length === 1 ? '' : 's'} configured.` :
-      'Execution is unavailable. Existing jobs remain visible and cancellable; an administrator can repair the profile below.';
+      `Ready. ${data.evaluators.length} correct-output check${data.evaluators.length === 1 ? '' : 's'} set up.` :
+      'Experiments cannot run yet. Existing submissions can still be seen and cancelled; an administrator can finish the setup below.';
     const evaluator = byId('research-submit').elements.evaluator_id;
-    evaluator.replaceChildren(new Option(data.evaluators.length ? 'Choose an evaluator' : 'No evaluator is available', ''));
+    evaluator.replaceChildren(new Option(data.evaluators.length ? 'Choose a check' : 'No check is set up yet', ''));
     data.evaluators.forEach(row => evaluator.appendChild(new Option(`${row.id} · ${row.version}`, row.id)));
     renderSettings(data.settings);
     renderJobs(data.jobs);
     renderReviewQueue(data.review_queue, !!data.settings);
-    message(data.execution_available ? 'Research workspace is ready for source review.' :
-      'Research jobs are available for recovery; execution needs administrator setup.');
+    message(data.execution_available ? 'Ready.' :
+      'Experiments need an administrator to finish the setup before they can run.');
     syncControls();
   }
 
@@ -280,7 +319,7 @@
     try {
       await work();
     } catch (error) {
-      message(error.message || 'Research action failed.', true);
+      message(error.message || 'Something went wrong. Please try again.', true);
     } finally {
       setBusy(false);
     }
@@ -325,13 +364,13 @@
       if (!enable) {
         await api('/settings', 'PUT', payload);
         settingsDirty = false;
-        message('Research execution disabled. Existing jobs remain available for review and cancellation.');
+        message('Experiments are turned off. Existing submissions can still be seen and cancelled.');
         await refresh();
         return;
       }
       await api('/settings', 'PUT', payload);
       settingsDirty = false;
-      message('Research execution setup saved. Queued source must be reviewed again.');
+      message('Setup saved. Waiting submissions need to be reviewed again.');
       await refresh();
     });
   });
@@ -343,8 +382,8 @@
     // Never retain a prior valid selection while validating a replacement.
     // Any failure leaves submission disabled until a fresh set succeeds.
     selectedFiles = {};
-    byId('research-files').textContent = 'No source files selected.';
-    entry.replaceChildren(new Option('Choose the Python entrypoint', ''));
+    byId('research-files').textContent = 'No files chosen.';
+    entry.replaceChildren(new Option('Choose the file to start with', ''));
     form.elements.confirm.checked = false;
     syncControls();
     if (busy) {
@@ -352,7 +391,7 @@
       return;
     }
     act(async () => {
-    if (!files.length || files.length > 64) throw new Error('Choose one to 64 source files.');
+    if (!files.length || files.length > 64) throw new Error('Choose between 1 and 64 files.');
     const next = {};
     let bytes = 0;
     for (const file of files) {
@@ -360,11 +399,11 @@
       const source = await file.text();
       if (generation !== fileSelectionGeneration) return;
       bytes += new Blob([source]).size;
-      if (bytes > 262144) throw new Error('The selected source exceeds the 256 KiB limit.');
+      if (bytes > 262144) throw new Error('The chosen files are larger than 256 KB in total.');
       next[file.name] = source;
     }
     selectedFiles = next;
-    byId('research-files').textContent = `${files.length} file${files.length === 1 ? '' : 's'} · ${bytes} UTF-8 bytes`;
+    byId('research-files').textContent = `${files.length} file${files.length === 1 ? '' : 's'} · ${Math.ceil(bytes / 1024)} KB`;
     Object.keys(next).filter(name => name.endsWith('.py')).sort().forEach(name => {
       entry.appendChild(new Option(name, name));
     });
@@ -389,8 +428,8 @@
       form.reset();
       fileSelectionGeneration += 1;
       selectedFiles = {};
-      byId('research-files').textContent = 'Choose up to 64 UTF-8 files, 256 KiB total.';
-      message('Source submitted for administrator review.');
+      byId('research-files').textContent = 'Choose up to 64 text files, 256 KB in total.';
+      message('Sent to an administrator for review.');
       await refresh();
     });
   });
@@ -408,7 +447,7 @@
         !validJob(review) || !sha(review.review_sha256) || !review.files ||
         Object.values(review.files).some(value => typeof value !== 'string')) {
       selectedReview = null;
-      throw new Error('The exact source review could not be verified.');
+      throw new Error('The files could not be opened for review. Refresh and try again.');
     }
     selectedReview = review;
     renderReviewDetail(selectedReview);
@@ -424,23 +463,23 @@
     const result = await api(`/jobs/${encodeURIComponent(reviewed.id)}/run`, 'POST', {context, confirm:true,
       expected_revision:selectedReview.revision, review_sha256:selectedReview.review_sha256});
     if (!validJob(result) || result.id !== reviewed.id) {
-      throw new Error('The research result could not be verified. Refresh before taking another action.');
+      throw new Error('The result could not be confirmed. Refresh before doing anything else.');
     }
     const completedReview = {...reviewed, ...result};
     selectedReview = completedReview;
     renderReviewDetail(completedReview);
     byId('research-dispatch-confirm').checked = false;
-    message('Reviewed source finished or moved to a recovery state. Its exact outcome is shown below.');
+    message('The reviewed program has finished. Its result is shown below.');
     syncControls();
     try {
       await refresh();
     } catch (_) {
-      throw new Error('The reviewed run finished, but the job list could not be refreshed. Its exact result remains below.');
+      throw new Error('The program finished, but the list could not be refreshed. Its result is shown below.');
     }
     selectedReview = completedReview;
     renderReviewDetail(completedReview);
     byId('research-dispatch-confirm').checked = false;
-    message('Reviewed source finished or moved to a recovery state. Its exact outcome is shown below.');
+    message('The reviewed program has finished. Its result is shown below.');
     syncControls();
   }));
   byId('research-admin-cancel').addEventListener('click', () => act(async () => {

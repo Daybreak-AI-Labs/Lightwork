@@ -271,6 +271,13 @@ def _file_sha256(path: Path, *, maximum_bytes: int = 536_870_912) -> str:
         raise LocalParserAttestationError("local parser executable is unavailable") from exc
 
 
+def _resolved_or_none(path: Path) -> Path | None:
+    try:
+        return path.resolve(strict=True)
+    except OSError:
+        return None
+
+
 def _manifest_file_sha256(path: Path, *, maximum_bytes: int = 536_870_912) -> str:
     """Hash an attested package file; empty marker files are legitimate."""
 
@@ -1087,7 +1094,12 @@ class GovernedLocalExtractionAdapter(evidence.BoundedLocalExtractionAdapter):
         )
         self._implementation_components = _implementation_components()
         self._implementation_digest = _implementation_sha256()
-        self._python_executable = Path(sys.executable).resolve(strict=True)
+        # Launch through the interpreter path this process runs as, so a
+        # virtual environment (whose python is a symlink to the base
+        # interpreter) keeps its own site-packages; attest the file it
+        # resolves to, and refuse later if the link is repointed.
+        self._python_launch = Path(sys.executable).absolute()
+        self._python_executable = self._python_launch.resolve(strict=True)
         self._python_executable_sha256 = _file_sha256(self._python_executable)
         if self.sandbox is not None:
             if _sandbox_launcher_version(self.sandbox, self._runner) != (
@@ -1121,7 +1133,7 @@ class GovernedLocalExtractionAdapter(evidence.BoundedLocalExtractionAdapter):
         )
         result = self._runner(
             (
-                str(self._python_executable),
+                str(self._python_launch),
                 "-I",
                 "-m",
                 _XLS_WORKER_MODULE,
@@ -1147,7 +1159,7 @@ class GovernedLocalExtractionAdapter(evidence.BoundedLocalExtractionAdapter):
             raise LocalParserAttestationError("OCR worker probe contract is invalid")
         result = self._runner(
             (
-                str(self._python_executable),
+                str(self._python_launch),
                 "-I",
                 "-m",
                 _XLS_WORKER_MODULE,
@@ -1203,7 +1215,7 @@ class GovernedLocalExtractionAdapter(evidence.BoundedLocalExtractionAdapter):
         self_test: bool,
     ) -> tuple[str, ...]:
         command = [
-            str(self._python_executable),
+            str(self._python_launch),
             "-I",
             "-m",
             _XLS_WORKER_MODULE,
@@ -1290,6 +1302,7 @@ class GovernedLocalExtractionAdapter(evidence.BoundedLocalExtractionAdapter):
             or
             _implementation_sha256() != self._implementation_digest
             or _file_sha256(self._python_executable) != self._python_executable_sha256
+            or _resolved_or_none(self._python_launch) != self._python_executable
         ):
             raise LocalParserAttestationError("local parser implementation changed")
         if self.sandbox is not None:
@@ -1326,7 +1339,7 @@ class GovernedLocalExtractionAdapter(evidence.BoundedLocalExtractionAdapter):
             raise LocalParserAttestationError("OCR executable version mismatch")
         _require_tesseract_english(config, self._runner, sandbox)
         validation_command = (
-            str(self._python_executable),
+            str(self._python_launch),
             "-I",
             "-m",
             _XLS_WORKER_MODULE,

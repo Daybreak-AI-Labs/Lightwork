@@ -222,10 +222,12 @@ async def test_mastodon_poll_uses_since_id():
             instance="mastodon.test",
             allowed_user_ids={"user@example"},
         )
+        # Start from an explicitly admitted empty checkpoint. A fresh account
+        # seeds from the newest historical notification to avoid replaying it.
+        ch._last_seen_id = "0"
         first = await ch._poll_once()
         assert len(first) == 1
-        # First call: no since_id.
-        assert "since_id" not in captured["params"]
+        assert captured["params"]["since_id"] == "0"
 
         second_resp = MagicMock()
         second_resp.status_code = 200

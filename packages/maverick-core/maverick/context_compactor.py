@@ -32,7 +32,9 @@ from __future__ import annotations
 import logging
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -92,6 +94,44 @@ _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
 _token_counter: object = None
 
 
+@dataclass(frozen=True)
+class TextFeatures:
+    """Query-independent features of an exact immutable text string."""
+
+    tokens: int | None
+    terms: frozenset[str]
+
+
+_FEATURES: ContextVar[Mapping[str, TextFeatures] | None] = ContextVar(
+    "compaction_text_features", default=None)
+
+
+def feature_identity() -> tuple:
+    """Invalidate cached work when tokenizer or feature implementation changes."""
+    return (_resolve_token_counter(), _TOKEN_PATTERN, _message_text, prepare_features)
+
+
+def prepare_features(text: str) -> TextFeatures:
+    counter = _resolve_token_counter()
+    try:
+        count = counter(text) if counter and text else (len(text) + 3) // 4
+    except Exception:
+        # A transient tokenizer failure must not pin heuristic counts after
+        # the tokenizer recovers. Lexical features remain safe to reuse.
+        count = None
+    return TextFeatures(count, frozenset(t.lower() for t in _TOKEN_PATTERN.findall(text)))
+
+
+@contextmanager
+def feature_scope(features: Mapping[str, TextFeatures]):
+    """Use an immutable per-call view; no state leaks across threads or tasks."""
+    token = _FEATURES.set(features)
+    try:
+        yield
+    finally:
+        _FEATURES.reset(token)
+
+
 def _resolve_token_counter():
     """A real BPE token counter (local tiktoken) or False if unavailable.
 
@@ -100,7 +140,10 @@ def _resolve_token_counter():
     global _token_counter
     if _token_counter is not None:
         return _token_counter
-    if os.environ.get("MAVERICK_COMPACT_TIKTOKEN", "1").strip().lower() in {
+    from .env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_COMPACT_TIKTOKEN", "context", "compact_tiktoken", "1")
+            or "1").strip().lower() in {
             "0", "false", "no", "off"}:
         _token_counter = False
         return _token_counter
@@ -113,6 +156,10 @@ def _resolve_token_counter():
 
 
 def _approx_tokens(text: str) -> int:
+    features = _FEATURES.get()
+    cached = features.get(text) if features is not None else None
+    if cached is not None and cached.tokens is not None:
+        return cached.tokens
     if not text:
         return 0
     counter = _resolve_token_counter()
@@ -158,7 +205,10 @@ def _message_text(msg: dict) -> str:
     return ""
 
 
-def _tokens(text: str) -> set[str]:
+def _tokens(text: str) -> set[str] | frozenset[str]:
+    features = _FEATURES.get()
+    if features is not None and text in features:
+        return features[text].terms
     return {t.lower() for t in _TOKEN_PATTERN.findall(text)}
 
 

@@ -2,7 +2,7 @@
 //! Both desktop entry points use the same installation lookup and retry rules.
 
 use std::ffi::OsString;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 pub const DASHBOARD_URL: &str = "http://127.0.0.1:8765/";
 const MAX_LOG_BYTES: usize = 32 * 1024;
 const OWNED_STOP_DEADLINE: Duration = Duration::from_secs(5);
+const DESKTOP_DRAIN: &[u8] = b"LIGHTWORK_DESKTOP_DRAIN_V1\n";
 
 type Logs = Arc<Mutex<String>>;
 
@@ -22,6 +23,7 @@ struct Control {
     binary: Option<PathBuf>,
     child_environment: Vec<(OsString, OsString)>,
     recovery: bool,
+    drain_timeout: Option<Duration>,
 }
 
 #[derive(Default)]
@@ -123,6 +125,7 @@ fn spawn_dashboard(
     recovery: bool,
     child_environment: &[(OsString, OsString)],
 ) -> Result<Child, String> {
+    let drain_timeout = configured_drain_timeout(child_environment)?;
     let mut command = Command::new(
         binary
             .map(|path| path.as_os_str().to_owned())
@@ -130,12 +133,24 @@ fn spawn_dashboard(
     );
     command
         .args(["dashboard", "--host", "127.0.0.1", "--port", "8765"])
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     command.envs(child_environment.iter().cloned());
+    command.env("MAVERICK_DESKTOP_CONTROL", "stdin-v1");
+    // Native and Python shutdown share this exact budget, including an
+    // explicitly configured legacy timeout. No extra independent drain wait.
+    command.env(
+        "MAVERICK_SHUTDOWN_TIMEOUT",
+        drain_timeout.as_secs_f64().to_string(),
+    );
     if recovery {
         command.arg("--recovery-mode");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
     }
     #[cfg(windows)]
     {
@@ -154,6 +169,26 @@ fn spawn_dashboard(
         capture(stderr, Arc::clone(logs));
     }
     Ok(child)
+}
+
+fn configured_drain_timeout(environment: &[(OsString, OsString)]) -> Result<Duration, String> {
+    let value = |name: &str| {
+        environment
+            .iter()
+            .rev()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+            .or_else(|| std::env::var_os(name))
+    };
+    let raw = value("MAVERICK_SHUTDOWN_TIMEOUT")
+        .or_else(|| value("MAVERICK_DRAIN_TIMEOUT"))
+        .unwrap_or_else(|| "20".into());
+    let seconds = raw
+        .to_str()
+        .and_then(|text| text.trim().parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && (0.0..=300.0).contains(seconds))
+        .ok_or("Dashboard shutdown timeout must be finite and between 0 and 300 seconds.")?;
+    Ok(Duration::from_secs_f64(seconds))
 }
 
 fn reap(control: &mut Control) -> Result<(), String> {
@@ -237,6 +272,7 @@ impl Dashboard {
         let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
         let binary = control.binary.clone();
         let child_environment = control.child_environment.clone();
+        control.drain_timeout = Some(configured_drain_timeout(&child_environment)?);
         let recovery = control.recovery;
         ensure_started(&mut control, listening, |logs| {
             spawn_dashboard(logs, binary.as_deref(), recovery, &child_environment)
@@ -249,16 +285,20 @@ impl Dashboard {
         let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
         reap(&mut control)?;
         may_switch_mode(control.child.is_some(), listening())?;
-        stop_control(&mut control);
+        let deadline = stop_control(&mut control)?;
         // Windows can finish the owned bootloader's termination before its
         // worker's listening socket closes. Observe closure within a bound;
         // never start recovery while the previous workspace still responds.
-        if !wait_for_listener_exit(listening, OWNED_STOP_DEADLINE) {
+        if !wait_for_listener_exit(
+            listening,
+            deadline.saturating_duration_since(Instant::now()),
+        ) {
             return Err("The previous workspace is still responding. Recovery has not started; retry after it closes.".into());
         }
         control.recovery = recovery;
         let binary = control.binary.clone();
         let child_environment = control.child_environment.clone();
+        control.drain_timeout = Some(configured_drain_timeout(&child_environment)?);
         ensure_started(
             &mut control,
             || false,
@@ -283,17 +323,29 @@ impl Dashboard {
     /// An independently running dashboard is never placed in our owned state.
     pub fn stop_owned(&self) {
         if let Ok(mut control) = self.0.lock() {
-            stop_control(&mut control);
+            if let Err(error) = stop_control(&mut control) {
+                record(&control.logs, &format!("\n{error}\n"));
+            }
         }
     }
 
     /// Maintenance may pause only a process owned by this desktop instance.
     pub fn pause_for_maintenance(&self) -> Result<(), String> {
+        self.pause_for_maintenance_with(listening)
+    }
+
+    fn pause_for_maintenance_with(
+        &self,
+        mut is_listening: impl FnMut() -> bool,
+    ) -> Result<(), String> {
         let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
         reap(&mut control)?;
-        may_switch_mode(control.child.is_some(), listening())?;
-        stop_control(&mut control);
-        if !wait_for_listener_exit(listening, OWNED_STOP_DEADLINE) {
+        may_switch_mode(control.child.is_some(), is_listening())?;
+        let deadline = stop_control(&mut control)?;
+        if !wait_for_listener_exit(
+            is_listening,
+            deadline.saturating_duration_since(Instant::now()),
+        ) {
             return Err("Lightwork is still responding. Installation has not started; retry after it closes.".into());
         }
         Ok(())
@@ -307,8 +359,62 @@ fn may_switch_mode(owned: bool, responding: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn stop_control(control: &mut Control) {
-    if let Some(mut child) = control.child.take() {
+fn wait_for_child_exit(child: &mut Child, deadline: Instant) -> Result<bool, String> {
+    loop {
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Ok(true);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(false);
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(25)));
+    }
+}
+
+fn stop_control(control: &mut Control) -> Result<Instant, String> {
+    let grace = control.drain_timeout.unwrap_or(Duration::from_secs(20));
+    stop_control_with_budget(control, grace, OWNED_STOP_DEADLINE)
+}
+
+fn stop_control_with_budget(
+    control: &mut Control,
+    grace: Duration,
+    force: Duration,
+) -> Result<Instant, String> {
+    let start = Instant::now();
+    let mut deadline = start + grace + force;
+    if let Some(child) = control.child.as_mut() {
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            control.child = None;
+            return Ok(deadline);
+        }
+        if let Some(mut channel) = child.stdin.take() {
+            record(
+                &control.logs,
+                "\nSaving active work before closing Lightwork…\n",
+            );
+            if channel.write_all(DESKTOP_DRAIN).is_ok()
+                && wait_for_child_exit(child, start + grace)?
+            {
+                record(&control.logs, "Lightwork completed graceful shutdown.\n");
+                control.child = None;
+                return Ok(deadline);
+            }
+        }
+        record(
+            &control.logs,
+            "Graceful shutdown did not complete; stopping the owned process tree.\n",
+        );
+        deadline = deadline.min(Instant::now() + force);
         // A frozen one-file runtime owns an extraction/worker child.
         // Kill only this still-live owned process tree before MSI
         // replaces its files; killing just the bootloader leaves the
@@ -317,18 +423,40 @@ fn stop_control(control: &mut Control) {
         if matches!(child.try_wait(), Ok(None)) {
             use std::os::windows::process::CommandExt;
             if let Some(system_root) = std::env::var_os("SystemRoot") {
-                let _ = Command::new(PathBuf::from(system_root).join("System32/taskkill.exe"))
+                let killer = Command::new(PathBuf::from(system_root).join("System32/taskkill.exe"))
                     .args(["/PID", &child.id().to_string(), "/T", "/F"])
                     .creation_flags(0x0800_0000)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
-                    .status();
+                    .spawn();
+                if let Ok(mut killer) = killer {
+                    if !wait_for_child_exit(&mut killer, deadline)? {
+                        let _ = killer.kill();
+                    }
+                }
+            }
+        }
+        #[cfg(unix)]
+        if matches!(child.try_wait(), Ok(None)) {
+            // Only children spawned into their own process group reach here.
+            // Signal that owned group before reaping its leader.
+            unsafe extern "C" {
+                fn kill(pid: i32, signal: i32) -> i32;
+            }
+            unsafe {
+                kill(-(child.id() as i32), 9);
             }
         }
         let _ = child.kill();
-        let _ = child.wait();
+        if !wait_for_child_exit(child, deadline)? {
+            // Retain the handle and refuse maintenance/recovery until its
+            // actual exit can be observed. A timeout is never quiescence.
+            return Err("The owned Lightwork process is still stopping. Maintenance and recovery have not started.".into());
+        }
+        control.child = None;
     }
+    Ok(deadline)
 }
 
 impl Drop for Dashboard {
@@ -470,7 +598,53 @@ mod tests {
 
     #[test]
     fn child_fixture() {
-        if std::env::var_os("LIGHTWORK_RUNTIME_TEST_CHILD").is_some() {
+        let mode = std::env::var("LIGHTWORK_RUNTIME_TEST_CHILD").ok();
+        if mode.as_deref() == Some("descendant") {
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            std::fs::write(
+                std::env::var_os("LIGHTWORK_RUNTIME_TEST_MARKER").unwrap(),
+                format!("{}\n{}", std::process::id(), listener.local_addr().unwrap()),
+            )
+            .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((stream, _)) => drop(stream),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("owned descendant listener failed: {error}"),
+                }
+            }
+        } else if mode.as_deref() == Some("tree") {
+            let mut command = Command::new(std::env::current_exe().unwrap());
+            command
+                .args(["--exact", "tests::child_fixture"])
+                .env("LIGHTWORK_RUNTIME_TEST_CHILD", "descendant")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x0800_0000);
+            }
+            let mut descendant = command.spawn().unwrap();
+            std::thread::sleep(Duration::from_secs(30));
+            let _ = descendant.kill();
+            let _ = descendant.wait();
+        } else if mode.as_deref() == Some("graceful") {
+            use std::io::BufRead;
+            let mut command = String::new();
+            std::io::stdin().lock().read_line(&mut command).unwrap();
+            assert_eq!(command.as_bytes(), DESKTOP_DRAIN);
+            std::fs::write(
+                std::env::var_os("LIGHTWORK_RUNTIME_TEST_MARKER").unwrap(),
+                "final state saved",
+            )
+            .unwrap();
+        } else if mode.is_some() {
             std::thread::sleep(Duration::from_secs(30));
         }
     }
@@ -485,12 +659,227 @@ mod tests {
         if running {
             command.env("LIGHTWORK_RUNTIME_TEST_CHILD", "1");
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000);
         }
         command.spawn().unwrap()
+    }
+
+    #[test]
+    fn graceful_owned_child_persists_final_state_before_exit() {
+        let marker =
+            std::env::temp_dir().join(format!("lightwork-drain-{}.txt", std::process::id()));
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", "tests::child_fixture"])
+            .env("LIGHTWORK_RUNTIME_TEST_CHILD", "graceful")
+            .env("LIGHTWORK_RUNTIME_TEST_MARKER", &marker)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut control = Control {
+            child: Some(command.spawn().unwrap()),
+            ..Control::default()
+        };
+        stop_control_with_budget(&mut control, Duration::from_secs(3), Duration::from_secs(1))
+            .unwrap();
+        assert!(control.child.is_none());
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "final state saved"
+        );
+        assert!(control
+            .logs
+            .lock()
+            .unwrap()
+            .contains("completed graceful shutdown"));
+        std::fs::remove_file(marker).unwrap();
+    }
+
+    #[test]
+    fn unresponsive_owned_child_is_forced_and_reaped_within_budget() {
+        let mut control = Control {
+            child: Some(fixture_child(true)),
+            ..Control::default()
+        };
+        let began = Instant::now();
+        stop_control_with_budget(
+            &mut control,
+            Duration::from_millis(50),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        assert!(control.child.is_none());
+        assert!(began.elapsed() < Duration::from_secs(3));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn forced_owned_tree_terminates_descendant_and_its_actual_listener() {
+        use std::ffi::c_void;
+        use std::os::windows::process::CommandExt;
+
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+            fn WaitForSingleObject(handle: *mut c_void, timeout: u32) -> u32;
+            fn TerminateProcess(handle: *mut c_void, code: u32) -> i32;
+            fn CloseHandle(handle: *mut c_void) -> i32;
+        }
+        struct OwnedDescendant(*mut c_void);
+        impl Drop for OwnedDescendant {
+            fn drop(&mut self) {
+                unsafe {
+                    if WaitForSingleObject(self.0, 0) == 258 {
+                        // The handle pins only the descendant created by our
+                        // fixture. It cannot target a reused numeric PID.
+                        TerminateProcess(self.0, 99);
+                        WaitForSingleObject(self.0, 5000);
+                    }
+                    CloseHandle(self.0);
+                }
+            }
+        }
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let marker = std::env::temp_dir().join(format!(
+            "lightwork-owned-tree-{}-{nonce}.txt",
+            std::process::id()
+        ));
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::child_fixture"])
+            .env("LIGHTWORK_RUNTIME_TEST_CHILD", "tree")
+            .env("LIGHTWORK_RUNTIME_TEST_MARKER", &marker)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .unwrap();
+        let dashboard = Dashboard(Mutex::new(Control {
+            child: Some(child),
+            drain_timeout: Some(Duration::from_millis(50)),
+            ..Control::default()
+        }));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let (pid, address) = loop {
+            if let Ok(details) = std::fs::read_to_string(&marker) {
+                let mut lines = details.lines();
+                if let (Some(pid), Some(address)) = (lines.next(), lines.next()) {
+                    if let (Ok(pid), Ok(address)) =
+                        (pid.parse::<u32>(), address.parse::<SocketAddr>())
+                    {
+                        break (pid, address);
+                    }
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "owned descendant did not report ready"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        let process = unsafe { OpenProcess(0x0010_0001, 0, pid) };
+        assert!(!process.is_null());
+        let descendant = OwnedDescendant(process);
+        assert_eq!(unsafe { WaitForSingleObject(descendant.0, 0) }, 258);
+        assert!(TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok());
+        let began = Instant::now();
+        let (stopped, reaped, forced) = {
+            let mut control = dashboard.0.lock().unwrap();
+            let stopped = stop_control_with_budget(
+                &mut control,
+                Duration::from_millis(50),
+                Duration::from_secs(2),
+            );
+            let forced = control
+                .logs
+                .lock()
+                .unwrap()
+                .contains("stopping the owned process tree");
+            (stopped, control.child.is_none(), forced)
+        };
+        stopped.unwrap();
+        assert!(reaped && forced);
+        assert_eq!(unsafe { WaitForSingleObject(descendant.0, 1000) }, 0);
+        assert!(wait_for_listener_exit(
+            || TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_ok(),
+            Duration::from_secs(1)
+        ));
+        assert!(began.elapsed() < Duration::from_secs(4));
+        std::fs::remove_file(marker).unwrap();
+    }
+
+    #[test]
+    fn maintenance_cannot_advance_while_an_actual_socket_outlives_owned_child() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let close = Arc::new(AtomicBool::new(false));
+        let requested = Arc::clone(&close);
+        let worker = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !requested.load(Ordering::SeqCst) && Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((stream, _)) => drop(stream),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("owned maintenance listener failed: {error}"),
+                }
+            }
+        });
+        let dashboard = Dashboard(Mutex::new(Control {
+            child: Some(fixture_child(true)),
+            drain_timeout: Some(Duration::ZERO),
+            ..Control::default()
+        }));
+        let probe = || TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok();
+        let result = dashboard.pause_for_maintenance_with(probe);
+        let still_live = probe();
+        close.store(true, Ordering::SeqCst);
+        worker.join().unwrap();
+        assert!(result.unwrap_err().contains("Installation has not started"));
+        assert!(still_live);
+        assert!(dashboard.0.lock().unwrap().child.is_none());
+        assert!(dashboard.pause_for_maintenance_with(probe).is_ok());
+    }
+
+    #[test]
+    fn invalid_desktop_shutdown_policy_refuses_launch() {
+        for value in ["", "NaN", "inf", "-1", "301"] {
+            assert!(configured_drain_timeout(&[(
+                "MAVERICK_SHUTDOWN_TIMEOUT".into(),
+                value.into()
+            )])
+            .is_err());
+        }
+        assert_eq!(
+            configured_drain_timeout(&[("MAVERICK_SHUTDOWN_TIMEOUT".into(), "0.25".into())])
+                .unwrap(),
+            Duration::from_millis(250)
+        );
     }
 
     #[test]

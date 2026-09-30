@@ -898,8 +898,9 @@ def test_retention_integrity_and_complete_mount_surface(environment) -> None:
 
     paths = client.app.openapi()["paths"]
     scoped = [path for path in paths if path.startswith(API)]
-    assert len(scoped) == 45
-    assert len(api.router.routes) == 52
+    # 45 governed operations plus 11 read-only list routes for the page.
+    assert len(scoped) == 56
+    assert len(api.router.routes) == 63
     expected_fragments = {
         "/status",
         "/provider-runtime/",
@@ -918,3 +919,52 @@ def test_retention_integrity_and_complete_mount_surface(environment) -> None:
         "/integrity",
     }
     assert all(any(fragment in path for path in scoped) for fragment in expected_fragments)
+
+
+def test_record_lists_load_for_the_page_and_stay_in_the_workspace(environment) -> None:
+    client, _store, _clock, state = environment
+    _create_vendor(client)
+    _enroll_source(client, "sanctions")
+    assert client.put(f"{API}/risk/policies/standard", json={
+        "required_source_kinds": ["sanctions"], "maximum_source_age_seconds": 86_400,
+        "minimum_completeness": 0.9, "factor_weights": dict.fromkeys(("inherent_risk", "criticality", "sanctions", "pep", "watchlist", "adverse_media", "cyber_posture", "breach_intelligence", "compliance", "performance"), 1),
+        "maximum_autoapproval_score": 10, "allow_low_risk_autoapproval": False,
+        "allowed_territories": ["EU"], "maximum_vendor_criticality": 2,
+        "maximum_data_access_level": "limited", "expected_latest_version": 0,
+        "idempotency_key": "policy-list"}).status_code == 200
+    lists = {path: client.get(f"{API}{path}").json()["items"] for path in (
+        "/sources", "/snapshots", "/vendors", "/screening/runs", "/risk/policies",
+        "/risk/decisions", "/edd/cases", "/monitors", "/monitoring/alerts", "/exchange/consents")}
+    assert [v["vendor_id"] for v in lists["/vendors"]] == ["vendor-1"]
+    assert [s["state"] for s in lists["/sources"]] == ["active"]
+    assert len(lists["/snapshots"]) == 1
+    assert [(p["policy_id"], p["version"], p["state"]) for p in lists["/risk/policies"]] == [
+        ("standard", 1, "pending")]
+    assert lists["/screening/runs"] == [] and lists["/exchange/consents"] == []
+    me = client.get(f"{API}/me").json()["principal_ref"]
+    assert me.startswith("tpi-principal-")
+    state["tenant"] = "tenant-b"
+    assert client.get(f"{API}/vendors").json() == {"items": []}
+    assert client.get(f"{API}/risk/policies").json() == {"items": []}
+
+
+def test_record_lists_are_off_with_the_feature(environment) -> None:
+    client, _store, _clock, state = environment
+    state["enabled"] = False
+    for path in ("/sources", "/vendors", "/risk/policies", "/exchange/consents"):
+        assert client.get(f"{API}{path}").status_code == 403
+
+
+def test_record_lists_need_view_permission(environment, monkeypatch) -> None:
+    client, _store, _clock, _state = environment
+    from fastapi import HTTPException
+
+    seen = []
+
+    def deny(_request, permission):
+        seen.append(permission)
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    monkeypatch.setattr(api, "require_permission", deny)
+    assert client.get(f"{API}/vendors").status_code == 403
+    assert seen == ["view"]

@@ -6,7 +6,7 @@ changing its capabilities or safety surface. Read from [persona] in
 
     [persona]
     name = "Atlas"
-    style = "concise"   # concise | thorough | friendly | formal | playful
+    style = "concise"   # concise | thorough | verbose | friendly | formal | playful
     addendum = "Always cite sources with URLs."
 
 All three keys are optional. Empty persona = generic assistant
@@ -29,6 +29,9 @@ _warned_styles: set[str] = set()
 STYLES = {
     "concise":  "Be brief. Skip filler words. Trim qualifications.",
     "thorough": "Provide context and trade-offs. Don't oversimplify.",
+    # The dashboard's "Explains its reasoning" choice.
+    "verbose":  "Explain your reasoning step by step and show how you reached "
+                "each conclusion.",
     "friendly": "Be warm and conversational. Use a human tone.",
     "formal":   "Use formal, professional language. No colloquialisms.",
     "playful":  "Be witty and lively. Lean into wordplay when it fits.",
@@ -40,12 +43,22 @@ def load_persona() -> dict:
         from .config import load_config
         cfg = load_config().get("persona", {})
     except Exception:
-        return {"name": "", "style": "", "addendum": ""}
+        return {"name": "", "style": "", "addendum": "", "user_name": ""}
     return {
         "name": str(cfg.get("name", "")),
         "style": str(cfg.get("style", "")),
         "addendum": str(cfg.get("addendum", "")),
+        "user_name": _clean_user_name(cfg.get("user_name", "")),
     }
+
+
+def _clean_user_name(value: object) -> str:
+    """The name agents call the person, safe to place in a prompt: one short
+    line with no control characters or template braces. The installer's
+    placeholder "you" means no name was given."""
+    text = str(value or "").splitlines()[0] if str(value or "").strip() else ""
+    text = "".join(ch for ch in text if ch.isprintable() and ch not in "<>{}").strip()[:60]
+    return "" if text.lower() == "you" else text
 
 
 def render_persona_prompt() -> str:
@@ -55,11 +68,13 @@ def render_persona_prompt() -> str:
     concatenate without checking.
     """
     p = load_persona()
-    if not (p["name"] or p["style"] or p["addendum"]):
+    if not (p["name"] or p["style"] or p["addendum"] or p.get("user_name")):
         return ""
     parts: list[str] = []
     if p["name"]:
         parts.append(f"You are {p['name']}.")
+    if p.get("user_name"):
+        parts.append(f"The person you work for likes to be called {p['user_name']}.")
     style = (p["style"] or "").strip().lower()
     if style and style in STYLES:
         parts.append(STYLES[style])

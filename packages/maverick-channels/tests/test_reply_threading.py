@@ -46,7 +46,9 @@ def _slack_channel(monkeypatch, thread_replies):
         allowed_user_ids=["U123"], thread_replies=thread_replies,
     )
     ch._web = MagicMock()
-    ch._web.chat_postMessage = AsyncMock()
+    ch._web.chat_postMessage = AsyncMock(return_value={"ok": True, "ts": "reply-1"})
+    ch._account_id = "T1:B1"
+    ch._team_id = "T1"
     return ch
 
 
@@ -71,7 +73,7 @@ def test_slack_inbound_reply_threads_when_enabled(monkeypatch):
     req = MagicMock()
     req.type = "events_api"
     req.envelope_id = "e1"
-    req.payload = {"event": {"type": "message", "user": "U123",
+    req.payload = {"team_id": "T1", "event": {"type": "message", "user": "U123",
                              "channel": "C9", "text": "do it", "ts": "171.5"}}
     monkeypatch.setattr(slack_mod, "SocketModeResponse", MagicMock())
     asyncio.run(ch._on_request(client, req))
@@ -89,7 +91,7 @@ def test_slack_inbound_unthreaded_by_default(monkeypatch):
     req = MagicMock()
     req.type = "events_api"
     req.envelope_id = "e1"
-    req.payload = {"event": {"type": "message", "user": "U123",
+    req.payload = {"team_id": "T1", "event": {"type": "message", "user": "U123",
                              "channel": "C9", "text": "do it", "ts": "171.5"}}
     monkeypatch.setattr(slack_mod, "SocketModeResponse", MagicMock())
     asyncio.run(ch._on_request(client, req))

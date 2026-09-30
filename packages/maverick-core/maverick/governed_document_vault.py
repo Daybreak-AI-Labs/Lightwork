@@ -24,7 +24,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -1134,11 +1134,15 @@ class GovernedDocumentVault:
         ).fetchone()
         if row is None:
             raise VaultNotFound("document_vault_document_not_found")
+        self._validate_document_row(row)
+        return row
+
+    def _validate_document_row(self, row: Mapping[str, Any]) -> None:
+        """Validate the selected head without reading a different revision."""
         if not hmac.compare_digest(
             row["row_sha256"], canonical_sha256(self._document_material(row))
         ):
             raise VaultIntegrityError("document_vault_document_integrity_invalid")
-        return row
 
     @staticmethod
     def _record(row: Mapping[str, Any]) -> GovernedDocumentRecord:
@@ -1153,6 +1157,11 @@ class GovernedDocumentVault:
             return self._record(self._head_on(connection, identifier))
 
     def list_documents(self, *, state: str | None = None, limit: int = 100) -> list[GovernedDocumentRecord]:
+        """List integrity-checked heads from one read snapshot, not grants.
+
+        A subsequent authority resolution or grant consumption still reads the
+        current authoritative record; a listing never authorizes delivery.
+        """
         selected_limit = _integer(limit, "limit", 1, 500)
         if state not in {None, "active", "revoked"}:
             raise VaultValidationError("document_vault_state_invalid")
@@ -1163,10 +1172,13 @@ class GovernedDocumentVault:
             params.append(state)
         sql += " ORDER BY updated_at DESC, document_ref LIMIT ?"
         params.append(selected_limit)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN")
             self._verify_meta(connection)
             rows = connection.execute(sql, params).fetchall()
-            return [self._record(self._head_on(connection, row["document_ref"])) for row in rows]
+            for row in rows:
+                self._validate_document_row(row)
+            return [self._record(row) for row in rows]
 
     def context_record_count(self) -> int:
         """Return the exact current-head count without scanning document bodies."""

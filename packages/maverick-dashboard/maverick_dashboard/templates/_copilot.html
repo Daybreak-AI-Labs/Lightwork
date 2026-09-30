@@ -12,19 +12,25 @@
       <strong id="mv-copilot-title">Copilot</strong>
     </div>
     <button class="btn btn--ghost btn--icon" id="mv-copilot-close" type="button"
-            aria-label="Close Copilot">✕</button>
+            aria-label="Close Copilot">Close</button>
   </div>
   <p class="mv-copilot__hello" id="mv-copilot-hello">
     Ask how to use this page, what needs your approval, or what to do next.
   </p>
   <p class="mv-copilot__egress" id="mv-copilot-egress">
-    If a model provider is configured, this question and recent user questions
-    may be sent to that provider. Do not enter document contents, secrets, personal
-    data, credentials, or other restricted evidence.
+    If an AI provider is set up, this question and your last few questions
+    may be sent to that provider. Do not type in document contents, passwords,
+    personal details, or anything else that must stay private.
   </p>
   <ul class="mv-copilot__tips" id="mv-copilot-tips"></ul>
   <div class="mv-copilot__prompts" id="mv-copilot-prompts"
        aria-label="Suggested Copilot questions"></div>
+  <section id="mv-copilot-operations" class="mv-copilot__operations" aria-labelledby="mv-copilot-operations-title" hidden>
+    <h2 id="mv-copilot-operations-title">This learning example</h2>
+    <p id="mv-copilot-operation-status" role="status"></p>
+    <div id="mv-copilot-operation-buttons" class="mv-copilot__operation-buttons"></div>
+    <div id="mv-copilot-action" data-draft-recovery="off"></div>
+  </section>
   <div class="mv-copilot__log" id="mv-copilot-log"
        aria-live="polite" aria-relevant="additions text"></div>
   <form id="mv-copilot-form">

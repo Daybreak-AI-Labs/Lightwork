@@ -138,3 +138,14 @@ def test_board_empty_tenant_zeroes():
                for r in body["throughput"])
     assert all(p["pct"] is None for p in body["posture"])
     assert body["sessions"] == []
+
+
+def test_board_page_speaks_plainly_and_opens_assessments():
+    html = client.get("/privacy/board").text
+    assert "30 days" in html and "12 months" in html and "All time" in html
+    assert "Data-subject requests: time left" in html
+    assert "window.mvAssessmentReview.open(s.id)" in html
+    assert 'id="mv-assessment-review"' in html or "mvAssessmentReview" in html
+    for jargon in ("[privacy_ops]", "API payload", "load-bearing ·", "DSAR SLA runway",
+                   "Chapter V safeguard coverage", "could not load the board", ">30d<", ">12m<"):
+        assert jargon not in html, jargon

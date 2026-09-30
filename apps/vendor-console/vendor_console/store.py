@@ -7,6 +7,7 @@ import json
 import sqlite3
 import time
 
+from . import audit, db
 from .models import Customer, License, Release, Staff, Ticket, TicketComment
 
 # ---- staff -----------------------------------------------------------------
@@ -55,14 +56,105 @@ def list_staff(conn: sqlite3.Connection) -> list[Staff]:
             conn.execute("SELECT * FROM staff ORDER BY email").fetchall()]
 
 
+def set_staff_role(conn: sqlite3.Connection, staff_id: int, role: str) -> None:
+    """Change a role and end that person's live sessions, so the new role
+    applies from their next sign-in (roles are read from the DB, never the cookie)."""
+    conn.execute("UPDATE staff SET role = ?, session_epoch = session_epoch + 1 WHERE id = ?",
+                 (role, staff_id))
+    conn.commit()
+
+
+def set_staff_disabled(conn: sqlite3.Connection, staff_id: int, disabled: bool) -> None:
+    """Turn sign-in off (or back on). Turning it off also ends live sessions."""
+    conn.execute("UPDATE staff SET disabled = ?, session_epoch = session_epoch + 1 WHERE id = ?",
+                 (1 if disabled else 0, staff_id))
+    conn.commit()
+
+
+def set_password(conn: sqlite3.Connection, staff_id: int, pw_hash: str) -> int:
+    """Replace a password and end every live session; returns the new epoch so
+    the caller can re-issue its own session."""
+    conn.execute("UPDATE staff SET pw_hash = ?, session_epoch = session_epoch + 1 WHERE id = ?",
+                 (pw_hash, staff_id))
+    conn.commit()
+    return conn.execute("SELECT session_epoch FROM staff WHERE id = ?",
+                        (staff_id,)).fetchone()["session_epoch"]
+
+
+# ---- set-up links ------------------------------------------------------------
+
+def create_invite(conn: sqlite3.Connection, *, staff_id: int, token_hash: str,
+                  expires_at: float, created_by: str, reset: bool = False) -> None:
+    """Store a new set-up link for a person and retire every older unused one.
+    ``reset`` (a re-sent link) also clears their password and unfinished
+    two-step secret, so only the newest link can finish the account."""
+    now = time.time()
+    with db.transaction(conn) as tx:
+        tx.execute("UPDATE staff_invites SET used_at = ? WHERE staff_id = ? AND used_at IS NULL",
+                   (now, staff_id))
+        if reset:
+            tx.execute("UPDATE staff SET pw_hash = '', totp_secret = '', "
+                       "session_epoch = session_epoch + 1 WHERE id = ? AND totp_enrolled = 0",
+                       (staff_id,))
+        tx.execute("INSERT INTO staff_invites(staff_id, token_hash, created_by, created_at, "
+                   "expires_at) VALUES (?,?,?,?,?)",
+                   (staff_id, token_hash, created_by, now, expires_at))
+
+
+def invite_staff(conn: sqlite3.Connection, token_hash: str,
+                 *, now: float | None = None) -> Staff | None:
+    """The person a still-usable link belongs to (unused, unexpired, account
+    on, two-step set-up not finished), without using it up. None for unknown, used and expired alike."""
+    now = now if now is not None else time.time()
+    r = conn.execute(
+        "SELECT s.* FROM staff_invites i JOIN staff s ON s.id = i.staff_id "
+        "WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? "
+        "AND s.disabled = 0 AND s.totp_enrolled = 0", (token_hash, now)).fetchone()
+    return Staff.from_row(r) if r else None
+
+
+def consume_invite(conn: sqlite3.Connection, token_hash: str, pw_hash: str,
+                   *, now: float | None = None) -> Staff | None:
+    """Atomically use a link once and set the person's own password. Returns
+    None (changing nothing) for an unknown, used, expired or disabled link, and
+    for an account that already finished two-step set-up (a link must never
+    reset a finished account's password)."""
+    now = now if now is not None else time.time()
+    with db.transaction(conn) as tx:
+        row = tx.execute(
+            "SELECT i.id, i.staff_id FROM staff_invites i JOIN staff s ON s.id = i.staff_id "
+            "WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? "
+            "AND s.disabled = 0 AND s.totp_enrolled = 0", (token_hash, now)).fetchone()
+        if row is None:
+            return None
+        cur = tx.execute("UPDATE staff_invites SET used_at = ? WHERE id = ? AND used_at IS NULL",
+                         (now, row["id"]))
+        if cur.rowcount != 1:
+            return None
+        tx.execute("UPDATE staff SET pw_hash = ?, session_epoch = session_epoch + 1 "
+                   "WHERE id = ?", (pw_hash, row["staff_id"]))
+        staff_id = row["staff_id"]
+    return get_staff(conn, staff_id)
+
+
+def count_active_owners(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) AS n FROM staff WHERE role = 'owner' AND disabled = 0"
+                        ).fetchone()["n"]
+
+
 def count_staff(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) AS n FROM staff").fetchone()["n"]
 
 
 def set_totp(conn: sqlite3.Connection, staff_id: int, secret: str, enrolled: bool) -> None:
-    conn.execute("UPDATE staff SET totp_secret = ?, totp_enrolled = ? WHERE id = ?",
-                 (secret, 1 if enrolled else 0, staff_id))
-    conn.commit()
+    """Store the two-step secret. Finishing enrolment also retires every open
+    set-up link for the account, in the same transaction."""
+    with db.transaction(conn) as tx:
+        tx.execute("UPDATE staff SET totp_secret = ?, totp_enrolled = ? WHERE id = ?",
+                   (secret, 1 if enrolled else 0, staff_id))
+        if enrolled:
+            tx.execute("UPDATE staff_invites SET used_at = ? WHERE staff_id = ? "
+                       "AND used_at IS NULL", (time.time(), staff_id))
 
 
 def set_totp_last_step(conn: sqlite3.Connection, staff_id: int, step: int) -> None:
@@ -131,10 +223,17 @@ def customer_by_serve_token_hash(conn: sqlite3.Connection, token_hash: str) -> C
 
 # ---- licenses --------------------------------------------------------------
 
-def add_license(conn: sqlite3.Connection, *, customer_id: int, license_id: str,
+def add_license(conn: sqlite3.Connection, **values) -> int:
+    with db.transaction(conn) as owned:
+        return add_license_in_transaction(owned, **values)
+
+
+def add_license_in_transaction(conn: sqlite3.Connection, *, customer_id: int, license_id: str,
                 tier: str, suites: list[str], features: list[str], seats: int | None,
                 issued_at: str, expires_at: str | None, grace_days: int, key_id: str,
-                doc: dict, note: str, created_by: str, at: float | None = None) -> int:
+                 doc: dict, note: str, created_by: str, at: float | None = None) -> int:
+    if not conn.in_transaction:
+        raise ValueError("license creation requires an owned transaction")
     cur = conn.execute(
         "INSERT INTO licenses(customer_id, license_id, tier, suites_json, features_json, "
         "seats, issued_at, expires_at, grace_days, key_id, doc_json, note, created_by, "
@@ -142,7 +241,6 @@ def add_license(conn: sqlite3.Connection, *, customer_id: int, license_id: str,
         (customer_id, license_id, tier, json.dumps(suites), json.dumps(features),
          seats, issued_at, expires_at, grace_days, key_id, json.dumps(doc), note,
          created_by, at if at is not None else time.time()))
-    conn.commit()
     return cur.lastrowid
 
 
@@ -161,11 +259,18 @@ def list_licenses(conn: sqlite3.Connection, customer_id: int) -> list[License]:
 
 def revoke_license(conn: sqlite3.Connection, license_id: str, *, note: str = "",
                    at: float | None = None) -> bool:
+    with db.transaction(conn) as owned:
+        return revoke_license_in_transaction(owned, license_id, note=note, at=at)
+
+
+def revoke_license_in_transaction(conn: sqlite3.Connection, license_id: str, *, note: str = "",
+                                  at: float | None = None) -> bool:
+    if not conn.in_transaction:
+        raise ValueError("license revocation requires an owned transaction")
     cur = conn.execute(
         "UPDATE licenses SET revoked_at = ?, note = ? WHERE license_id = ? "
         "AND revoked_at IS NULL",
         (at if at is not None else time.time(), note, license_id))
-    conn.commit()
     return cur.rowcount > 0
 
 
@@ -273,13 +378,103 @@ def get_ticket(conn: sqlite3.Connection, ticket_id: int) -> Ticket | None:
     return Ticket.from_row(r) if r else None
 
 
-def ticket_by_correlation(conn: sqlite3.Connection, correlation_id: str) -> Ticket | None:
+def ticket_by_correlation(conn: sqlite3.Connection, correlation_id: str, *,
+                          customer_id: int | None) -> Ticket | None:
+    """Latest ticket in an explicitly selected customer (or unassigned) scope."""
     if not correlation_id:
         return None
     r = conn.execute(
-        "SELECT * FROM tickets WHERE correlation_id = ? ORDER BY id DESC LIMIT 1",
-        (correlation_id,)).fetchone()
+        "SELECT * FROM tickets WHERE customer_id IS ? AND correlation_id = ? "
+        "ORDER BY id DESC LIMIT 1", (customer_id, correlation_id)).fetchone()
     return Ticket.from_row(r) if r else None
+
+
+class SupportIntakeConflict(RuntimeError):
+    """The active intake key conflicts with the canonical ticket state."""
+
+
+def _active_intake_ticket(conn, customer_id, correlation_id) -> Ticket | None:
+    if not correlation_id:
+        return None
+    scope = "unassigned" if customer_id is None else f"customer:{customer_id}"
+    key = conn.execute(
+        "SELECT ticket_id FROM support_intake_keys WHERE customer_scope=? AND correlation_id=?",
+        (scope, correlation_id)).fetchone()
+    if key:
+        ticket = get_ticket(conn, key["ticket_id"])
+        if (ticket is None or not ticket.open or ticket.customer_id != customer_id
+                or ticket.correlation_id != correlation_id):
+            raise SupportIntakeConflict("support intake index requires reconciliation")
+        return ticket
+    # Reconcile a missing derived key or an older duplicate whose selected
+    # sibling was closed. Canonical ownership/status is always checked first.
+    row = conn.execute(
+        "SELECT * FROM tickets WHERE customer_id IS ? AND correlation_id=? "
+        "AND status NOT IN ('resolved','closed') ORDER BY id DESC LIMIT 1",
+        (customer_id, correlation_id)).fetchone()
+    if row is None:
+        return None
+    conn.execute("INSERT INTO support_intake_keys VALUES (?,?,?)",
+                 (scope, correlation_id, row["id"]))
+    return Ticket.from_row(row)
+
+
+def intake_ticket(conn: sqlite3.Connection, *, customer_id: int | None,
+                  correlation_id: str, subject: str, priority: str, tier: str,
+                  agent_version: str, summary: dict, bundle: dict,
+                  actor: str, resend_note: str, allow_unassigned: bool = False) -> Ticket:
+    """One customer-scoped create/append and audit commit, with no hidden commits.
+
+    A closed/resolved ticket is historical; the next bundle starts a new active
+    ticket. Each successful resend appends one note and one chained audit event.
+    Staff-only unassigned intake requires explicit opt-in from a trusted caller.
+    """
+    if customer_id is None:
+        if not allow_unassigned:
+            raise ValueError("unassigned support intake requires explicit staff scope")
+    elif type(customer_id) is not int or customer_id <= 0:
+        raise ValueError("authenticated customer id is required")
+    with db.transaction(conn) as tx:
+        now = time.time()
+        ticket = _active_intake_ticket(tx, customer_id, correlation_id)
+        if ticket is not None:
+            tid = ticket.id
+            tx.execute("INSERT INTO ticket_comments(ticket_id,author,body,kind,created_at) "
+                       "VALUES (?,?,?,'note',?)", (tid, actor, resend_note, now))
+            tx.execute("UPDATE tickets SET updated_at=? WHERE id=?", (now, tid))
+            action = "ticket.bundle_appended"
+        else:
+            cursor = tx.execute(
+                "INSERT INTO tickets(customer_id,correlation_id,subject,status,priority,tier,"
+                "agent_version,summary_json,bundle_json,created_at,updated_at) "
+                "VALUES (?,?,?,'open',?,?,?,?,?,?,?)",
+                (customer_id, correlation_id, subject, priority, tier, agent_version,
+                 json.dumps(summary), json.dumps(bundle), now, now))
+            tid = cursor.lastrowid
+            action = "ticket.create"
+        audit.record_in_transaction(
+            tx, actor=actor, action=action, target=correlation_id or str(tid),
+            detail={"ticket": tid, "customer_id": customer_id,
+                    "failing": summary.get("readiness_failing") or []})
+        result = get_ticket(tx, tid)
+        assert result is not None
+        return result  # Context manager commits before the result is returned.
+
+
+def intake_conflicts(conn: sqlite3.Connection, *, limit: int = 100) -> list[dict]:
+    """Bounded staff report; migration never deletes or closes duplicates."""
+    rows = conn.execute(
+        "SELECT customer_id,correlation_id,COUNT(*) AS active_count FROM tickets "
+        "WHERE correlation_id<>'' AND status NOT IN ('resolved','closed') "
+        "GROUP BY customer_id,correlation_id HAVING COUNT(*)>1 "
+        "ORDER BY customer_id,correlation_id LIMIT ?", (max(1, min(int(limit), 100)),)).fetchall()
+    result = []
+    for row in rows:
+        ids = conn.execute("SELECT id FROM tickets WHERE customer_id IS ? AND correlation_id=? "
+                           "AND status NOT IN ('resolved','closed') ORDER BY id DESC LIMIT 100",
+                           (row["customer_id"], row["correlation_id"])).fetchall()
+        result.append({**dict(row), "ticket_ids": [item["id"] for item in ids]})
+    return result
 
 
 def list_tickets(conn: sqlite3.Connection, *, status: str = "",

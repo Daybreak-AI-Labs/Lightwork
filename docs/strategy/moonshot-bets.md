@@ -153,15 +153,18 @@ against the shipped `signing.verify_chain` over clean and every tampered
 fixture, so a drift in either shows up as a test failure rather than as a false
 accusation against a customer.
 
-Remaining for the full bet: step 4 (TEE-attested + ZK policy proofs) and
-off-host key custody, which is what turns tamper-evidence against an outside
-editor into tamper-evidence against the operator.
+Remaining for the full bet: step 4 (TEE-attested + ZK policy proofs), isolated
+signing with independently enforced authorization, and externally retained
+history commitments. Supplying a key from elsewhere or unwrapping it through
+KMS still permits local signing; key location alone does not prevent an
+operator authorized to sign from producing a different history.
 
 ---
 
 ## Bet 2 — The Institutional Memory: a vendor-neutral plane that compounds and ports
 
-**Thesis.** Bet 1 proves the *past* was safe. Bet 2 compounds the accumulating
+**Thesis.** Bet 1 makes recorded actions and policy checks independently
+verifiable within their stated evidence boundaries. Bet 2 compounds the accumulating
 *future*. The deepest enterprise moat isn't the model — models commoditize — it's
 the firm's accumulated operational judgment. The firm that accumulates that
 judgment in a governed, portable memory can't be cheaply displaced — and the

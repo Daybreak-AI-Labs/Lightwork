@@ -268,6 +268,34 @@ def test_public_governance_body_cap_stops_lengthless_stream_before_authority(
         assert "access-control-allow-origin" not in response.headers
 
 
+def test_evidence_files_skip_the_json_cap_and_meet_authentication_first(monkeypatch):
+    """A supplier's evidence file is larger than the portal's JSON cap by design.
+
+    It is not buffered by the JSON cap: the route authenticates the invitation
+    before reading anything and then streams only up to that invitation's own
+    file limit (see test_third_party_collaboration_evidence.py).
+    """
+
+    from maverick_dashboard import app as dash_app
+
+    monkeypatch.setattr(dash_app, "_MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES", 64)
+    resolver_calls: list[str] = []
+    monkeypatch.setattr(
+        dash_app.app.state,
+        "third_party_collaboration_portal_resolver",
+        lambda *_args, **_kwargs: resolver_calls.append("called"),
+        raising=False,
+    )
+    portal = "portal_ref_1234567890"
+    response = _client().post(
+        f"/api/v1/external/third-party-collaboration/{portal}/evidence",
+        content=b"%PDF-" + b"x" * 500,
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "invitation unavailable"}
+    assert resolver_calls == []
+
 # ---------- task 4: /healthz minimal payload under a token ----------
 
 def test_healthz_minimal_payload_when_token_set(monkeypatch, tmp_path):

@@ -33,6 +33,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from . import consent_storage
 from .consent_profile_data import PublicProfileAuthority
 from .consumer_trust_center import (
     ConsumerTrustCenterError,
@@ -442,7 +443,10 @@ class ConsumerTrustCenterAuthorityStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=30.0, implicit_transactions=True)
+        else:
+            connection = sqlite3.connect(self.path, timeout=30.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -543,7 +547,8 @@ class ConsumerTrustCenterAuthorityStore:
                     f"unsupported trust-center authority schema version {version}"
                 )
             connection.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
-        ensure_private_file(self.path)
+        if not consent_storage.shared():
+            ensure_private_file(self.path)
 
     def _check_gate(self) -> None:
         self._gate()
@@ -2470,6 +2475,48 @@ class ConsumerTrustCenterAuthorityStore:
                 (_text_sha256(tenant), object_kind, ref, bounded),
             ).fetchall()
         return tuple(_loads(row["payload_json"], "authority history") for row in rows)
+
+    def list_authority(self, tenant_id: str, *, limit: int = 100) -> dict[str, tuple[object, ...]]:
+        """Newest-first contexts, capability grants and rights authorizations.
+
+        Read-only and integrity-checked like the single-object reads, so an
+        operator page can show every record with its own buttons.
+        """
+
+        self._check_gate()
+        tenant = _tenant(tenant_id)
+        now = _now(self._clock)
+        self._principal(tenant, "authority_read", now)
+        bounded = _integer(limit, "limit", 1, _MAX_HISTORY_LIMIT)
+        tenant_sha = _text_sha256(tenant)
+        with self._connect() as connection:
+            contexts = connection.execute(
+                "SELECT * FROM trust_center_authority_contexts WHERE tenant_sha256=? "
+                "ORDER BY valid_until DESC,context_ref LIMIT ?",
+                (tenant_sha, bounded),
+            ).fetchall()
+            grants = connection.execute(
+                "SELECT * FROM trust_center_authority_grants WHERE tenant_sha256=? "
+                "ORDER BY valid_until DESC,grant_ref LIMIT ?",
+                (tenant_sha, bounded),
+            ).fetchall()
+            rights = connection.execute(
+                "SELECT * FROM trust_center_authority_rights WHERE tenant_sha256=? "
+                "ORDER BY valid_until DESC,authorization_ref LIMIT ?",
+                (tenant_sha, bounded),
+            ).fetchall()
+            return {
+                "contexts": tuple(
+                    _context_from_payload(self._row_payload(row, "context")) for row in contexts
+                ),
+                "grants": tuple(
+                    _grant_from_payload(self._row_payload(row, "grant")) for row in grants
+                ),
+                "rights_authorizations": tuple(
+                    _rights_from_payload(self._row_payload(row, "rights authorization"))
+                    for row in rights
+                ),
+            }
 
     def verify_integrity(self, tenant_id: str) -> Mapping[str, int]:
         self._check_gate()

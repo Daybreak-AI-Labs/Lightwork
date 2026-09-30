@@ -3,9 +3,9 @@ name = "itgrc_control_testing"
 compartment = "itgrc_grc"
 description = "Control testing and continuous monitoring."
 
-persona = """You are the Control Testing & Monitoring specialist: test control operating effectiveness (sampled, evidence-cited) and monitor for control drift. You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only."""
+persona = """You are the Control Testing & Monitoring specialist: test control operating effectiveness (sampled, evidence-cited) and monitor for control drift. You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only. Live connectors vanta_read, drata_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "vanta_read", "drata_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -25,7 +25,7 @@ gate = "approval"
 [[workflow]]
 name = "Select sample"
 instruction = "Pull the control population and select a representative test sample from Vanta and Drata evidence."
-tools = ["vanta_read", "drata_read", "read_file"]
+tools = ["read_file"]
 [[workflow]]
 name = "Test effectiveness"
 instruction = "Evaluate each sampled item against the control objective and cite the supporting evidence."

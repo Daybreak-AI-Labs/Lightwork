@@ -5,18 +5,18 @@ export function connectionValidationError(baseUrl: string, token = ""): string |
     if (baseUrl.length > 4096 || /[\r\n]/.test(baseUrl)) throw new Error();
     url = new URL(baseUrl.trim());
   } catch {
-    return "Enter your organization's full dashboard HTTPS address.";
+    return "Enter the full dashboard address, starting with https:// (for example https://lightwork.yourcompany.com).";
   }
   if (!url.hostname || url.username || url.password || url.search || url.hash) {
-    return "Use the dashboard address without sign-in details, a query, or a fragment.";
+    return "Enter only the dashboard address. Remove anything after a ? or #, and any name or password in it.";
   }
   const host = url.hostname.toLowerCase();
   const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(host);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
-    return "Use an HTTPS dashboard address. HTTP is allowed only on this device.";
+    return "Use a secure address that starts with https://. Addresses starting with http:// work only for a dashboard running on this same device.";
   }
   if (token.length > 8192 || /[\r\n]/.test(token.trim())) {
-    return "The access token is too long or contains a line break. Check it and try again.";
+    return "The access token doesn't look right: it is too long or has a line break in it. Copy it again from your administrator's message.";
   }
   return null;
 }

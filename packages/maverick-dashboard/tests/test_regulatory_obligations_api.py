@@ -193,8 +193,9 @@ def test_bad_input_is_422():
     assert client.post(f"{BASE}/check", json={"action": "x", "profiles": ["BAD KEY"]}).status_code == 422
 
 
-def test_the_surface_is_read_only():
-    """Nothing here may change enforcement: the only POST is a pure query."""
+def test_the_surface_can_only_add_enforcement():
+    """Nothing here may loosen enforcement: besides pure queries, the only
+    change is turning a regulation on (global admin, sign-in required)."""
     found = {path: {m.upper() for m in ops} for path, ops in app.openapi()["paths"].items()
              if path.startswith(BASE + "/")}
     assert set(found) == {
@@ -203,6 +204,7 @@ def test_the_surface_is_read_only():
         f"{BASE}/profiles/{{key}}",
         f"{BASE}/check",
         f"{BASE}/gateway-constraints/preview",
+        f"{BASE}/profiles/{{key}}/activate",
     }
     assert set().union(*found.values()) <= {"GET", "POST"}
     assert found[f"{BASE}/check"] == {"POST"}
@@ -224,3 +226,32 @@ def test_roles_gate_every_read(monkeypatch):
         f"{BASE}/gateway-constraints/preview",
         json={"document": _gateway_constraint_document()},
     ).status_code == 403
+
+
+def test_a_global_admin_can_turn_a_regulation_on_but_never_off(monkeypatch):
+    from maverick import regulatory_compiler as rc
+
+    # Without sign-in configured, a regulated posture would lock everyone out.
+    refused = client.post(f"{BASE}/profiles/soc2/activate")
+    assert refused.status_code == 409 and "sign-in" in refused.json()["detail"]
+    assert "soc2" not in rc.active_keys()
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", TOKEN)
+    r = authed.post(f"{BASE}/profiles/soc2/activate")
+    assert r.status_code == 200, r.text
+    assert "soc2" in rc.active_keys()
+    again = authed.post(f"{BASE}/profiles/soc2/activate").json()
+    assert again["active"] is True and "already on" in again["message"]
+    assert authed.post(f"{BASE}/profiles/sox/activate").status_code == 404
+    from maverick_dashboard import settings_store
+
+    with pytest.raises(ValueError):
+        settings_store.set_compliance_settings({("compliance", "profiles"): []})
+
+
+def test_a_viewer_cannot_turn_a_regulation_on(monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:v", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:v")
+    assert client.post(f"{BASE}/profiles/soc2/activate").status_code == 403

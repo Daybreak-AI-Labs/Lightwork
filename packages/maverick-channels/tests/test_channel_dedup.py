@@ -81,8 +81,13 @@ def test_webhook_claims_sid_before_running_handler(
     async def _handler(msg):
         # A concurrent Twilio retry arriving *now* must already see the SID as
         # claimed -- i.e. the claim happened before us. (Old code: still False.)
-        wm = wm_mod.WorldModel(wm_mod.DEFAULT_DB)
-        claimed_when_handler_ran.append(wm.is_processed_message(channel, sid))
+        from maverick_channels.delivery import DeliveryJournal
+        receipt = DeliveryJournal().store.list(limit=2)[0]
+        with wm_mod.WorldModel(wm_mod.DEFAULT_DB) as wm:
+            claimed_when_handler_ran.append(
+                receipt["execution"] == "execution_started_unconfirmed"
+                and wm.is_processed_message("delivery:" + channel, receipt["id"])
+            )
         ran.append(msg.text)
         return "ok"
 

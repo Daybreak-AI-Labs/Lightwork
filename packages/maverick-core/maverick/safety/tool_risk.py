@@ -39,6 +39,7 @@ RISK_LEVELS = ("low", "medium", "high")
 # the host, run arbitrary code, or drive a real machine/browser; low-risk
 # tools are read-only or pure lookups.
 _DEFAULT_RISK: dict[str, str] = {
+    "read_tool_result": "low",  # same-goal, same-principal screened artifact
     # high: arbitrary code / host mutation / full control
     "shell": "high",
     # The session kernel executes model-written Python. It is exactly as
@@ -230,6 +231,9 @@ _DEFAULT_RISK: dict[str, str] = {
     "zoom": "high",
     # low: read-only / pure lookups
     "read_file": "low",
+    "sql_query_read": "low",  # forced SQLite read-only connection and authorizer
+    "spreadsheet_read": "low",  # info/read only; no edits or recalculation
+    "read_attachment": "low",
     "list_dir": "low",
     "list_specialists": "low",
     "repo_map": "low",

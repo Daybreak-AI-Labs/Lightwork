@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import consent_storage
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -542,7 +543,10 @@ class ConsentProfileDataStore:
         return _id(actor, "authenticated principal")
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=30.0)
+        else:
+            connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -623,7 +627,8 @@ class ConsentProfileDataStore:
                 raise ConsentProfileDataIntegrityError(
                     "consent profile-data database schema is unsupported"
                 )
-        ensure_private_file(self.path)
+        if not consent_storage.shared():
+            ensure_private_file(self.path)
 
     @staticmethod
     def _begin(connection: sqlite3.Connection) -> None:
@@ -997,6 +1002,23 @@ class ConsentProfileDataStore:
         selected = _integer(version, "version", 1, 1_000_000)
         with self._connect() as connection:
             return self._get_catalog(connection, tenant, catalog, selected)
+
+    def list_catalogs(self, tenant_id: str, *, limit: int = 100) -> dict[str, Any]:
+        """List one tenant's integrity-checked catalog versions, newest first."""
+
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 500)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT catalog_id,version FROM catalogs WHERE tenant_id=? "
+                "ORDER BY catalog_id,version DESC LIMIT ?",
+                (tenant, bounded + 1),
+            ).fetchall()
+            items = [
+                self._get_catalog(connection, tenant, str(row[0]), int(row[1]))
+                for row in rows[:bounded]
+            ]
+        return {"items": items, "truncated": len(rows) > bounded}
 
     def approve_catalog_version(
         self,
@@ -1815,6 +1837,23 @@ class ConsentProfileDataStore:
         selected = _integer(version, "version", 1, 1_000_000)
         with self._connect() as connection:
             return self._get_journey(connection, tenant, journey, selected)
+
+    def list_journeys(self, tenant_id: str, *, limit: int = 100) -> dict[str, Any]:
+        """List one tenant's integrity-checked journey versions, newest first."""
+
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 500)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT journey_id,version FROM journeys WHERE tenant_id=? "
+                "ORDER BY journey_id,version DESC LIMIT ?",
+                (tenant, bounded + 1),
+            ).fetchall()
+            items = [
+                self._get_journey(connection, tenant, str(row[0]), int(row[1]))
+                for row in rows[:bounded]
+            ]
+        return {"items": items, "truncated": len(rows) > bounded}
 
     def approve_journey_version(
         self,

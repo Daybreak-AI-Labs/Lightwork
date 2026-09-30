@@ -3,17 +3,15 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% call hero('Human in command', 'Approvals',
-               subtitle='The approval queue',
-               lede='High-risk actions an agent has parked for your decision.
-                     The agent waits here — nothing proceeds until a person
-                     approves or denies, and every click lands on the signed
-                     audit chain.') %}
+               subtitle='Requests waiting for your decision',
+               lede='Risky actions an agent wants to take wait here. Nothing
+                     goes ahead until a person approves it, and every decision
+                     is recorded in the audit log.') %}
     {{ state('Current state',
-             approvals | length ~ ' awaiting decision',
-             badge='action needed' if approvals else 'clear',
+             (approvals | length) ~ (' request waiting' if approvals | length == 1 else ' requests waiting'),
+             badge='Action needed' if approvals else 'All clear',
              badge_class='warn' if approvals else 'ok',
-             copy='Approving or denying here decides the same governed
-                   approval row the API and OneTrust bridge use.') }}
+             copy='Approve, reject, or send a request back with a note saying what should change.') }}
   {% endcall %}
 
   <div class="panel">

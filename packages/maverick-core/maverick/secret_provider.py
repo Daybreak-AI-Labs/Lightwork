@@ -132,4 +132,18 @@ def get_secret(name: str, default: str | None = None) -> str | None:
     return os.environ.get(name, default)
 
 
-__all__ = ["get_secret"]
+def get_secret_or_saved(name: str, saved: object = None) -> str | None:
+    """Resolve ``name`` like :func:`get_secret`, then fall back to ``saved``.
+
+    ``saved`` is a key an administrator stored (sealed) in the dashboard
+    settings, already opened by ``load_config``. A value the server holds for
+    ``name`` always wins, so a deployment secret is never overridden from the
+    app it protects.
+    """
+    value = get_secret(name) if name else None
+    if value:
+        return value
+    return saved if isinstance(saved, str) and saved else None
+
+
+__all__ = ["get_secret", "get_secret_or_saved"]

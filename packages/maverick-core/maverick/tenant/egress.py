@@ -67,7 +67,21 @@ def host_allowed(host: str, *, tenant: str | None = "__active__", policy: dict |
 
 def egress_allowed(tool: str, host: str, *, tenant: str | None = "__active__") -> bool:
     """Compose the per-tenant plane AND the per-tool policy: ``host`` is reachable
-    by ``tool`` only if both layers allow it."""
+    by ``tool`` only if both layers allow it -- and the network posture
+    (``[security] network_policy``) permits it: ``deny-all`` refuses every
+    host, ``allowlist`` only hosts on an approved list."""
+    from ..sandbox.network_policy import load_policy, network_posture
+
+    posture = network_posture()
+    if posture == "deny-all":
+        return False
+    if posture == "allowlist":
+        rule = (load_policy() or {}).get(tool) or {}
+        tool_list = rule.get("allow_egress") if isinstance(rule, dict) else None
+        tenant_list = (load_tenant_egress(tenant) or {}).get("allow")
+        if not (tool_list and _matches(host, tool_list)) and not (
+                tenant_list and _matches(host, tenant_list)):
+            return False
     return host_allowed(host, tenant=tenant) and _tool_host_allowed(tool, host)
 
 

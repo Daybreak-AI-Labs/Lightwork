@@ -1,72 +1,62 @@
 {% extends "base.html" %}
-{% block title %}Evolution Ledger - Lightwork{% endblock %}
+{% block title %}Learning history · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
-  .elv-shell{--elv-glass:color-mix(in srgb,var(--panel) 68%,transparent);--elv-soft:color-mix(in srgb,var(--panel) 48%,transparent);--elv-edge:color-mix(in srgb,var(--text) 14%,transparent);display:grid;gap:var(--space-5);isolation:isolate;position:relative}
-  .elv-shell::before{background:radial-gradient(circle at 9% 6%,color-mix(in srgb,#7c3aed 17%,transparent),transparent 30rem),radial-gradient(circle at 91% 17%,color-mix(in srgb,#0ea5e9 15%,transparent),transparent 31rem),radial-gradient(circle at 49% 94%,color-mix(in srgb,#14b8a6 12%,transparent),transparent 28rem);content:"";inset:0;pointer-events:none;position:fixed;z-index:-1}
-  .elv-glass{background:var(--elv-glass);border:1px solid var(--elv-edge);box-shadow:0 18px 52px color-mix(in srgb,#000 22%,transparent),inset 0 1px 0 color-mix(in srgb,#fff 13%,transparent);-webkit-backdrop-filter:blur(26px) saturate(155%);backdrop-filter:blur(26px) saturate(155%)}
-  .elv-hero{align-items:center;border-radius:1.65rem;display:grid;gap:var(--space-5);grid-template-columns:minmax(0,1fr) minmax(16rem,24rem);overflow:hidden;padding:clamp(1.4rem,3vw,2.8rem)}
-  .elv-kicker{color:var(--accent);font-size:.73rem;font-weight:850;letter-spacing:.13em;margin:0 0 .5rem;text-transform:uppercase}.elv-title{font-size:clamp(2.2rem,6vw,4.7rem);letter-spacing:-.055em;line-height:.95;margin:0;max-width:13ch}.elv-lede{color:var(--text-muted);line-height:1.65;margin:1rem 0 0;max-width:72ch}
-  .elv-health{background:var(--elv-soft);border-radius:1.2rem;display:grid;gap:.8rem;padding:1.1rem}.elv-row,.elv-card-head{align-items:center;display:flex;flex-wrap:wrap;gap:.7rem;justify-content:space-between}.elv-mark{align-items:center;background:var(--elv-soft);border:1px solid var(--elv-edge);border-radius:999px;display:inline-flex;font-size:.72rem;font-weight:850;gap:.42rem;padding:.34rem .68rem;text-transform:uppercase}.elv-mark::before{background:currentColor;border-radius:50%;content:"";height:.55rem;width:.55rem}.elv-mark[data-state=ready]{color:var(--success,#45c786)}.elv-mark[data-state=partial]{color:var(--warn)}.elv-mark[data-state=failed]{color:var(--danger,#f06b75)}
-  .elv-boundary{border-left:.3rem solid var(--accent);border-radius:1.15rem;padding:1.1rem 1.35rem}.elv-boundary h2,.elv-card h2{margin:0 0 .55rem}.elv-boundary p,.elv-help{color:var(--text-muted);line-height:1.55;margin:.35rem 0}.elv-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;word-break:break-all}
-  .elv-metrics{display:grid;gap:var(--space-3);grid-template-columns:repeat(4,minmax(0,1fr))}.elv-metric{border-radius:1.1rem;padding:1rem 1.1rem}.elv-metric strong{display:block;font-size:1.45rem;letter-spacing:-.03em}.elv-metric span{color:var(--text-muted);font-size:.78rem}
-  .elv-grid{display:grid;gap:var(--space-4);grid-template-columns:repeat(12,minmax(0,1fr))}.elv-card{border-radius:1.2rem;grid-column:span 5;min-width:0;padding:clamp(1rem,2vw,1.45rem)}.elv-card--wide{grid-column:span 7}.elv-card--full{grid-column:1/-1}
-  .elv-table-wrap{max-height:30rem;overflow:auto}.elv-table{border-collapse:collapse;font-size:.78rem;width:100%}.elv-table th,.elv-table td{border-bottom:1px solid var(--elv-edge);padding:.55rem;text-align:left;vertical-align:top}.elv-table td{color:var(--text-muted);word-break:break-all}.elv-table code{font-size:.69rem}.elv-table-wrap caption{caption-side:top;color:var(--text-muted);padding:0 0 .65rem;text-align:left}
-  .elv-limitations{display:grid;gap:.5rem;list-style:none;margin:.8rem 0 0;padding:0}.elv-limitations li{background:var(--elv-soft);border:1px solid var(--elv-edge);border-radius:.75rem;color:var(--text-muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.73rem;padding:.55rem;word-break:break-word}
-  .elv-form{display:grid;gap:.85rem}.elv-form label{color:var(--text-muted);display:grid;font-size:.82rem;font-weight:700;gap:.35rem}.elv-form textarea{background:color-mix(in srgb,var(--bg) 55%,transparent);border:1px solid var(--elv-edge);border-radius:.6rem;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.75rem;min-height:10rem;padding:.6rem;resize:vertical;width:100%}.elv-output{background:color-mix(in srgb,#020617 77%,transparent);border:1px solid var(--elv-edge);border-radius:1rem;color:#dbeafe;max-height:18rem;min-height:7rem;overflow:auto;padding:1rem;white-space:pre-wrap;word-break:break-word}.elv-verdict{font-size:1.25rem;font-weight:900;letter-spacing:-.02em;margin:.75rem 0 .25rem}.elv-verdict[data-valid=true]{color:var(--success,#45c786)}.elv-verdict[data-valid=false]{color:var(--danger,#f06b75)}
-  @media(max-width:900px){.elv-hero{grid-template-columns:1fr}.elv-card,.elv-card--wide{grid-column:1/-1}.elv-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
-  @media(max-width:560px){.elv-metrics{grid-template-columns:1fr}.elv-table{font-size:.72rem}.elv-table th,.elv-table td{padding:.4rem}}
+  .elv-shell{display:grid;gap:var(--space-4)}
+  .elv-head{align-items:center;display:flex;flex-wrap:wrap;gap:var(--space-3);justify-content:space-between}
+  .elv-head h2{margin:0}
+  .elv-metrics{display:grid;gap:var(--space-3);grid-template-columns:repeat(3,minmax(0,1fr))}
+  .elv-metric strong{display:block;font-size:1.5rem}.elv-metric span{color:var(--text-muted);font-size:.85rem}
+  .elv-table-wrap{max-height:32rem;overflow:auto}
+  .elv-table{border-collapse:collapse;font-size:.9rem;width:100%}
+  .elv-table th,.elv-table td{border-bottom:1px solid color-mix(in srgb,var(--text) 12%,transparent);padding:.5rem;text-align:left;vertical-align:top}
+  .elv-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.75rem;word-break:break-all}
+  .elv-form{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center}
+  .elv-verdict{font-weight:700;margin:.6rem 0 .2rem}
+  @media(max-width:700px){.elv-metrics{grid-template-columns:1fr}}
 </style>
 {% endblock %}
 {% block content %}
+{% from "_hero.html" import hero %}
 <div class="elv-shell" id="elv-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-read-only="true">
-  <section class="elv-hero elv-glass" aria-labelledby="elv-title">
-    <div>
-      <p class="elv-kicker">Read-only governed learning evidence</p>
-      <h1 class="elv-title" id="elv-title">Evolution ledger</h1>
-      <p class="elv-lede">Inspect a bounded, digest-only projection of durable promotion and rollback evidence. This surface cannot start learning, approve a promotion, alter a journal, change an artifact, or roll anything back.</p>
-    </div>
-    <aside class="elv-health" aria-labelledby="elv-health-title">
-      <div class="elv-row"><span class="elv-mark" id="elv-state" data-state="partial">Loading</span><button class="btn" id="elv-refresh" type="button">Refresh projection</button></div>
-      <strong id="elv-health-title">Checking the bounded source</strong>
-      <p class="elv-help" id="elv-health-detail" role="status" aria-live="polite">No source state has been accepted yet.</p>
-    </aside>
+  {{ hero('Learning', 'Learning history',
+          lede='Every time Lightwork adopted or undid a learned improvement, with a tamper-evident record of it.
+                This page only shows the history; it cannot change it.') }}
+  <div class="elv-head">
+    <p class="muted" id="elv-health-detail" role="status" aria-live="polite">Loading.</p>
+    <button class="btn btn--ghost" id="elv-refresh" type="button">Refresh</button>
+  </div>
+  <p class="danger-text" id="elv-error" role="alert" aria-live="assertive"></p>
+
+  <section class="elv-metrics" aria-label="Learning history summary">
+    <article class="panel elv-metric"><span>Improvements adopted</span><strong id="elv-promotions">—</strong></article>
+    <article class="panel elv-metric"><span>Improvements undone</span><strong id="elv-rollbacks">—</strong></article>
+    <article class="panel elv-metric"><span>Records shown</span><strong id="elv-entry-count">—</strong></article>
   </section>
 
-  <section class="elv-boundary elv-glass" aria-labelledby="elv-boundary-title">
-    <h2 id="elv-boundary-title">Evidence boundary</h2>
-    <p>The browser receives digests, lifecycle state, limited approval metadata, and explicit limitations—not journal rows, candidate identifiers, summaries, prompts, raw provenance, approval requests, signatures, or artifact locations. Receipt integrity is different from verification of a human approval.</p>
+  <section class="panel" aria-labelledby="elv-table-title">
+    <div class="elv-head"><h2 id="elv-table-title">History</h2><span class="muted" id="elv-table-note"></span></div>
+    <div class="elv-table-wrap"><table class="elv-table"><caption class="sr-only">Learned improvements that were adopted or undone</caption>
+      <thead><tr><th scope="col">When</th><th scope="col">What happened</th><th scope="col">Record intact</th><th scope="col">Approved by a person</th><th scope="col">For auditors</th></tr></thead>
+      <tbody id="elv-entries"><tr><td colspan="5">Loading.</td></tr></tbody></table></div>
   </section>
 
-  <section class="elv-metrics" aria-label="Evolution Ledger summary">
-    <article class="elv-metric elv-glass"><span>Visible entries</span><strong id="elv-entry-count">—</strong></article>
-    <article class="elv-metric elv-glass"><span>Promotions</span><strong id="elv-promotions">—</strong></article>
-    <article class="elv-metric elv-glass"><span>Rollbacks</span><strong id="elv-rollbacks">—</strong></article>
-    <article class="elv-metric elv-glass"><span>Projection scope</span><strong id="elv-source-state">—</strong></article>
+  <section class="panel" aria-labelledby="elv-verify-title">
+    <h2 id="elv-verify-title">Check a receipt</h2>
+    <p class="muted">If someone sent you a receipt file for an adopted improvement, choose it here to check that it has not been changed. No private approval material is accepted here.</p>
+    <form class="elv-form" id="elv-verify-form" autocomplete="off">
+      <label for="elv-receipt">Receipt file</label>
+      <input type="file" id="elv-receipt" name="receipt" class="input" accept=".json,application/json">
+      <button class="btn btn--primary" type="submit">Check receipt</button>
+    </form>
+    <div id="elv-verdict-box" hidden role="status" aria-live="polite"><p class="elv-verdict" id="elv-verdict" data-valid="false">—</p><p class="muted" id="elv-verdict-detail"></p></div>
   </section>
 
-  <section class="elv-grid">
-    <article class="elv-card elv-card--wide elv-glass" aria-labelledby="elv-table-title">
-      <div class="elv-card-head"><div><p class="elv-kicker">Lifecycle projection</p><h2 id="elv-table-title">Promotion and rollback entries</h2></div><span class="elv-help" id="elv-table-note" role="status" aria-live="polite">Refresh to load a bounded projection.</span></div>
-      <div class="elv-table-wrap"><table class="elv-table" aria-labelledby="elv-table-title"><caption class="sr-only">Digest-only Evolution Ledger entries</caption><thead><tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Integrity</th><th scope="col">Approval</th><th scope="col">Entry digest</th><th scope="col">Receipt digest</th></tr></thead><tbody id="elv-entries"><tr><td colspan="6">No projection loaded.</td></tr></tbody></table></div>
-    </article>
-    <article class="elv-card elv-glass" aria-labelledby="elv-limits-title">
-      <p class="elv-kicker">Do not overclaim</p><h2 id="elv-limits-title">Projection limitations</h2>
-      <p class="elv-help">These are part of the evidence surface, not hidden implementation notes.</p>
-      <ul class="elv-limitations" id="elv-limitations"><li>Refresh to load limitations.</li></ul>
-    </article>
-    <article class="elv-card elv-card--full elv-glass" aria-labelledby="elv-verify-title">
-      <div class="elv-card-head"><div><p class="elv-kicker">Receipt check</p><h2 id="elv-verify-title">Verify a digest-only promotion receipt</h2></div><span class="elv-help">No private approval material is accepted here.</span></div>
-      <form class="elv-form" id="elv-verify-form" autocomplete="off">
-        <label for="elv-receipt">Promotion receipt JSON<textarea id="elv-receipt" name="receipt" maxlength="65536" spellcheck="false" aria-describedby="elv-verify-help" placeholder='{"schema":"lightwork.evolution-promotion-receipt.v1", ...}'></textarea></label>
-        <p class="elv-help" id="elv-verify-help">Paste only the digest-only receipt. This endpoint verifies receipt integrity and reports approval-verification limits; it never receives or persists an approval request, signature, or trust key.</p>
-        <p><button class="btn btn--primary" type="submit">Verify receipt</button></p>
-      </form>
-      <div id="elv-verdict-box" hidden><p class="elv-verdict" id="elv-verdict" data-valid="false">—</p><p class="elv-help" id="elv-verdict-detail"></p></div>
-      <pre class="elv-output" id="elv-output" tabindex="0">No receipt verification has run.</pre>
-    </article>
-  </section>
-  <noscript><p class="elv-boundary elv-glass">JavaScript is required to request the bounded, API-backed projection.</p></noscript>
+  <details class="panel">
+    <summary>About this record</summary>
+    <ul id="elv-limitations"><li>Loading.</li></ul>
+  </details>
+  <noscript><p class="panel">This page needs JavaScript turned on.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-evolution-ledger.js"></script>{% endblock %}

@@ -28,6 +28,280 @@ async function harness(handler, overrides = {}) {
   return { dom, calls, get, state, select };
 }
 
+test('channel review without a current typed form stays unresolved and never exposes editable identities', async () => {
+  const template = { schema: 1, namespace: 'channel-deliveries', record_id: 'chd-' + 'a'.repeat(56),
+    source_sha256: 'b'.repeat(64), binding_sha256: 'c'.repeat(64), observed_at: null,
+    evidence_reference: '', outcome: 'unknown', execution: 'unknown', delivery: 'unknown', chunks: {} };
+  const item = reconciliationItem({ category: 'channel_authority', safe_state: 'channel_restore_held',
+    requires_external_readback: true, readback_template: template });
+  const h = await harness(async url => url.endsWith('/reconciliation') ? reconciliationReport([item]) : {}, {
+    recovery_mode: true, bootstrap: { state: 'reconciliation_required' },
+  });
+  assert.equal(h.get('reconciliation-items').querySelector('textarea'), null);
+  assert.equal(h.get('reconciliation-items').querySelector('form'), null);
+  assert.doesNotMatch(h.get('reconciliation-items').textContent, /chd-|source_sha256|binding_sha256/);
+  assert.match(h.get('reconciliation-items').textContent, /Refresh|refresh/);
+  assert.equal(h.calls.some(row => row.init.method === 'POST'), false);
+  assert.equal(h.get('reconciliation-complete').disabled, true);
+  h.dom.window.close();
+});
+
+function channelItem(kind, descriptor = {}, item = {}) {
+  return reconciliationItem({ category: 'channel_authority', safe_state: 'channel_restore_held',
+    record_id: 'private-record-identity', source: 'private/channel/path', requires_external_readback: true,
+    channel_review: { schema: 1, kind, review_token: 'a'.repeat(64), title: 'Review connection', source_label: 'Messages',
+      status: 'review_required', restored_at: new Date(Date.now() - 600000).toISOString(),
+      ...(kind === 'message' ? { execution_choices: ['absent', 'recorded'], delivery_choices: ['absent', 'recorded'], chunks: [] } : {}),
+      ...descriptor }, ...item });
+}
+function enteredTime(offset = -30000) {
+  const time = new Date(Date.now() + offset), pad = value => String(value).padStart(2, '0');
+  return `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}T${pad(time.getHours())}:${pad(time.getMinutes())}:${pad(time.getSeconds())}`;
+}
+function formOf(h, id = '1'.repeat(32)) { return h.dom.window.document.getElementById('wrec-channel-' + id); }
+function enter(h, name, value, id) {
+  const input = formOf(h, id).elements.namedItem(name);
+  if (input.type === 'checkbox') input.checked = value; else input.value = value;
+  input.dispatchEvent(new h.dom.window.Event('change', { bubbles: true })); return input;
+}
+function completeCommon(h, id) {
+  h.dom.window.LightworkChannelReview.select(id || '1'.repeat(32));
+  enter(h, 'checked_at', enteredTime(), id); enter(h, 'evidence_reference', 'service-ticket-12345', id);
+}
+function channelPosts(h) { return h.calls.filter(call => call.url.endsWith('/operations/channel-review')); }
+async function channelHarness(items, override) {
+  const report = reconciliationReport(items);
+  const h = await harness(async (url, init) => {
+    if (url.endsWith('/reconciliation')) return report;
+    if (url.endsWith('/operations/channel-review')) {
+      if (override) return override(url, init, report);
+      const body = JSON.parse(init.body), item = report.items.find(row => row.id === body.item_id);
+      item.state = 'resolved'; item.channel_review.status = 'recorded'; report.unresolved--;
+      return { state: 'resolved', item_id: item.id, disposition: 'channel_readback_confirmed', unresolved: report.unresolved,
+        automatic_replay_blocked: true, normal_start_blocked: true };
+    }
+    return {};
+  }, { recovery_mode: true, bootstrap: { state: 'reconciliation_required' } });
+  return { ...h, report };
+}
+
+for (const kind of ['message', 'delivery_restart', 'imessage_position', 'notification_position', 'poll_time']) {
+  test(`${kind} uses typed controls, exact answers and current authenticated context`, async () => {
+    const h = await channelHarness([channelItem(kind, kind.includes('position') ? { minimum_position: '2' } : {})]);
+    const form = formOf(h); assert.ok(form); assert.equal(form.querySelector('textarea'), null);
+    assert.doesNotMatch(h.get('reconciliation-items').textContent, /private-record-identity|private\/channel\/path|Unix|JSON|[a-f0-9]{64}/);
+    completeCommon(h);
+    const checked = form.elements.checked_at.value, expected = { kind, checked_at: new Date(checked).toISOString(), evidence_reference: 'service-ticket-12345' };
+    if (kind === 'message') { enter(h, 'execution', 'recorded'); enter(h, 'delivery', 'absent'); Object.assign(expected, { execution: 'recorded', delivery: 'absent', chunks: {} }); }
+    if (kind.includes('position')) { enter(h, 'position', '9007199254740993123456789'); expected.position = '9007199254740993123456789'; }
+    if (kind === 'poll_time') { const at = enteredTime(-60000); enter(h, 'resume_time', at); expected.resume_time = new Date(at).toISOString(); }
+    form.dispatchEvent(new h.dom.window.Event('submit', { cancelable: true })); await tick();
+    assert.equal(channelPosts(h).length, 0, 'form submit cannot bypass explicit confirmation');
+    enter(h, 'confirm', true); form.querySelector('[type=submit]').click(); await tick(); await tick();
+    assert.equal(channelPosts(h).length, 1);
+    assert.deepEqual(JSON.parse(channelPosts(h)[0].init.body), { confirm: true, item_id: '1'.repeat(32), expected_review_token: 'a'.repeat(64), answers: expected });
+    assert.equal(channelPosts(h)[0].init.headers['X-Lightwork-Recovery-Context'], 'account-context');
+    assert.equal(channelPosts(h)[0].init.headers['X-Lightwork-Expected-Tenant'], 'acme');
+    assert.equal(h.calls.some(call => call.url.includes('/reconciliation/items/')), false);
+    assert.match(h.get('reconciliation-items').textContent, /Review recorded/);
+    assert.equal(h.get('reconciliation-complete').disabled, true);
+    assert.equal(h.calls.some(call => call.url.endsWith('/reconciliation/complete')), false);
+    h.dom.window.close();
+  });
+}
+
+test('unknown outcomes, inconsistent delivery and incomplete parts stay unresolved with focused errors', async () => {
+  const h = await channelHarness([channelItem('message', { chunks: [{ key: 'opaque-part-key', label: 'Message part 1', choices: ['absent', 'recorded'], receipt_locked: false, receipt: '' }] })]);
+  completeCommon(h); enter(h, 'confirm', true);
+  let result = await h.dom.window.LightworkChannelReview.submit('1'.repeat(32));
+  assert.equal(result.status, 'needs_input'); assert.equal(channelPosts(h).length, 0);
+  assert.equal(h.dom.window.document.activeElement.name, 'execution');
+  assert.equal(formOf(h).elements.execution.getAttribute('aria-invalid'), 'true');
+  assert.ok(h.dom.window.document.getElementById(formOf(h).elements.execution.getAttribute('aria-describedby').split(' ')[0]).textContent);
+  enter(h, 'execution', 'absent'); enter(h, 'delivery', 'recorded'); enter(h, 'chunk_0', 'recorded'); enter(h, 'confirm', true);
+  result = await h.dom.window.LightworkChannelReview.submit('1'.repeat(32)); assert.equal(result.status, 'needs_input');
+  assert.equal(channelPosts(h).length, 0); assert.equal(h.dom.window.document.activeElement.name, 'execution');
+  enter(h, 'execution', 'recorded'); enter(h, 'delivery', 'absent'); enter(h, 'confirm', true);
+  await h.dom.window.LightworkChannelReview.submit('1'.repeat(32)); assert.equal(channelPosts(h).length, 0);
+  assert.equal(h.dom.window.document.activeElement.name, 'delivery'); h.dom.window.close();
+});
+
+test('retained confirmed outcomes and exact message receipts are kept without editable identities', async () => {
+  const h = await channelHarness([channelItem('message', { execution_choices: ['recorded'], delivery_choices: ['recorded'],
+    chunks: [{ key: '__proto__', label: 'Message part 1', choices: ['recorded'], receipt_locked: true, receipt: 'native-receipt-001' }] })]);
+  completeCommon(h); assert.equal(formOf(h).elements.receipt_0.disabled, true);
+  assert.deepEqual([...formOf(h).elements.execution.options].map(o => o.value), ['', 'recorded']);
+  enter(h, 'execution', 'recorded'); enter(h, 'delivery', 'recorded'); enter(h, 'chunk_0', 'recorded'); enter(h, 'confirm', true);
+  await h.dom.window.LightworkChannelReview.submit('1'.repeat(32));
+  const answers = JSON.parse(channelPosts(h)[0].init.body).answers;
+  assert.deepEqual(answers.chunks, JSON.parse('{"__proto__":{"outcome":"recorded","provider_id":"native-receipt-001"}}'));
+  assert.doesNotMatch(h.get('reconciliation-items').textContent, /__proto__/); h.dom.window.close();
+});
+
+for (const value of ['9007199254740992', '1.5', '1e20', '-1', '9,007', '1 2']) test(`invalid or older exact iMessage position ${value} cannot submit`, async () => {
+  const h = await channelHarness([channelItem('imessage_position', { minimum_position: '9007199254740993' })]);
+  completeCommon(h); enter(h, 'position', value); enter(h, 'confirm', true);
+  await h.dom.window.LightworkChannelReview.submit('1'.repeat(32));
+  assert.equal(channelPosts(h).length, 0); assert.equal(h.dom.window.document.activeElement.name, 'position'); h.dom.window.close();
+});
+
+test('4096 digit iMessage position preserves every digit and confirmation clears on edits', async () => {
+  const h = await channelHarness([channelItem('imessage_position')]); completeCommon(h);
+  const exact = '8' + '1'.repeat(4095); enter(h, 'position', exact); enter(h, 'confirm', true);
+  enter(h, 'evidence_reference', 'another-evidence-123'); assert.equal(formOf(h).elements.confirm.checked, false);
+  enter(h, 'confirm', true); await h.dom.window.LightworkChannelReview.submit('1'.repeat(32));
+  assert.equal(JSON.parse(channelPosts(h)[0].init.body).answers.position, exact); h.dom.window.close();
+});
+
+test('stale observations and restart times before restoration require a new source check', async () => {
+  const h = await channelHarness([channelItem('poll_time')]); completeCommon(h);
+  enter(h, 'checked_at', enteredTime(-1000000)); enter(h, 'resume_time', enteredTime(-700000)); enter(h, 'confirm', true);
+  await h.dom.window.LightworkChannelReview.submit('1'.repeat(32)); assert.equal(channelPosts(h).length, 0);
+  assert.equal(h.dom.window.document.activeElement.name, 'checked_at');
+  enter(h, 'checked_at', enteredTime()); enter(h, 'confirm', true);
+  await h.dom.window.LightworkChannelReview.submit('1'.repeat(32)); assert.equal(channelPosts(h).length, 0);
+  assert.equal(h.dom.window.document.activeElement.name, 'resume_time'); h.dom.window.close();
+});
+
+test('cancel preserves the entered draft without consent or any mutation', async () => {
+  const h = await channelHarness([channelItem('delivery_restart')]); completeCommon(h); enter(h, 'confirm', true);
+  const form = formOf(h), cancel = [...form.querySelectorAll('button')].find(button => button.textContent === 'Leave unresolved');
+  cancel.click(); assert.equal(form.hidden, true); assert.equal(form.elements.confirm.checked, false); assert.equal(channelPosts(h).length, 0);
+  h.dom.window.LightworkChannelReview.select('1'.repeat(32)); assert.equal(form.elements.evidence_reference.value, 'service-ticket-12345');
+  assert.equal(form.hidden, false); h.dom.window.close();
+});
+
+test('safe refresh preserves same-binding work, changed token or authenticated context clears it', async () => {
+  const h = await channelHarness([channelItem('imessage_position')]); completeCommon(h); enter(h, 'position', '9007199254740993'); enter(h, 'confirm', true);
+  h.get('refresh').click(); await tick(); await tick();
+  assert.equal(formOf(h).elements.position.value, '9007199254740993'); assert.equal(formOf(h).elements.confirm.checked, false);
+  h.report.items[0].channel_review.review_token = 'b'.repeat(64); h.get('refresh').click(); await tick(); await tick();
+  assert.equal(formOf(h).elements.position.value, ''); assert.match(h.get('reconciliation-items').textContent, /item changed/);
+  completeCommon(h); enter(h, 'position', '999'); h.state.context = 'new-authenticated-account';
+  h.get('refresh').click(); await tick(); await tick(); assert.equal(formOf(h).elements.position.value, '');
+  assert.equal(channelPosts(h).length, 0); h.dom.window.close();
+});
+
+test('resolving one item retains unfinished entries for another current item', async () => {
+  const second = '2'.repeat(32), h = await channelHarness([channelItem('delivery_restart'), channelItem('imessage_position', {}, { id: second })]);
+  completeCommon(h, second); enter(h, 'position', '9007199254740993', second); enter(h, 'confirm', true, second);
+  completeCommon(h); enter(h, 'confirm', true); await h.dom.window.LightworkChannelReview.submit('1'.repeat(32));
+  assert.equal(formOf(h, second).elements.position.value, '9007199254740993'); assert.equal(formOf(h, second).elements.confirm.checked, false);
+  assert.equal(channelPosts(h).length, 1); h.dom.window.close();
+});
+
+test('stale refusal keeps work, blocks repeat and needs readback plus a deliberate new confirmation', async () => {
+  const h = await channelHarness([channelItem('delivery_restart')], () => ({ error: 'private technical failure must not be exposed' }));
+  completeCommon(h); enter(h, 'confirm', true); await h.dom.window.LightworkChannelReview.submit('1'.repeat(32));
+  assert.equal(formOf(h).elements.evidence_reference.value, 'service-ticket-12345'); assert.equal(formOf(h).elements.confirm.checked, false);
+  assert.doesNotMatch(h.get('reconciliation-items').textContent, /private technical/);
+  assert.equal(h.dom.window.document.activeElement.textContent, 'Refresh status');
+  await h.dom.window.LightworkChannelReview.submit('1'.repeat(32)); assert.equal(channelPosts(h).length, 1);
+  h.dom.window.document.activeElement.click(); await tick(); await tick();
+  assert.equal(formOf(h).elements.evidence_reference.value, 'service-ticket-12345'); assert.equal(formOf(h).elements.confirm.checked, false);
+  assert.equal(h.dom.window.document.activeElement.textContent, 'Refresh status');
+  assert.equal(channelPosts(h).length, 1); h.dom.window.close();
+});
+
+test('network-uncertain commit is reconciled by GET without resending the action', async () => {
+  const h = await channelHarness([channelItem('delivery_restart')]); const fetch = h.dom.window.fetch, events = [];
+  h.dom.window.addEventListener('lightwork:channel-review', event => events.push(event.detail));
+  h.dom.window.fetch = async (url, init) => { const response = await fetch(url, init); if (url.endsWith('/operations/channel-review')) throw new Error('transport lost after commit'); return response; };
+  completeCommon(h); enter(h, 'confirm', true); await h.dom.window.LightworkChannelReview.submit('1'.repeat(32));
+  assert.equal(channelPosts(h).length, 1); assert.match(h.get('reconciliation-items').textContent, /could not confirm/);
+  h.dom.window.document.activeElement.click(); await tick(); await tick();
+  assert.match(h.get('reconciliation-items').textContent, /Review recorded/); assert.equal(channelPosts(h).length, 1);
+  assert.equal(h.dom.window.document.activeElement, h.get('reconciliation-status'));
+  assert.equal(events.at(-1).status, 'recorded'); assert.equal(events.at(-1).item_id, '1'.repeat(32));
+  h.dom.window.close();
+});
+
+test('a channel-only refresh detects changed account before retaining or exposing the draft', async () => {
+  const h = await channelHarness([channelItem('delivery_restart')]); completeCommon(h);
+  const reference = formOf(h).elements.evidence_reference;
+  h.state.context = 'another-person';
+  [...formOf(h).querySelectorAll('button')].find(button => button.textContent === 'Refresh status').click(); await tick(); await tick();
+  assert.equal(reference.value, ''); assert.equal(h.get('reconciliation-items').children.length, 0);
+  assert.equal(h.dom.window.LightworkChannelReview.list().length, 0); assert.equal(channelPosts(h).length, 0);
+  assert.match(h.get('status').textContent, /account changed/); h.dom.window.close();
+});
+
+test('transient GET failure keeps the draft visible but does not leave old mutation authority active', async () => {
+  const h = await channelHarness([channelItem('delivery_restart')]); completeCommon(h); const fetch = h.dom.window.fetch;
+  let failing = true;
+  h.dom.window.fetch = async (url, init) => {
+    if (url.endsWith('/reconciliation') && failing) throw new Error('private network error');
+    return fetch(url, init);
+  };
+  [...formOf(h).querySelectorAll('button')].find(button => button.textContent === 'Refresh status').click(); await tick(); await tick();
+  assert.equal(formOf(h).elements.evidence_reference.value, 'service-ticket-12345');
+  assert.equal(formOf(h).elements.confirm.disabled, true); assert.doesNotMatch(h.get('reconciliation-items').textContent, /private network error/);
+  assert.equal(h.dom.window.document.activeElement.textContent, 'Refresh status');
+  await h.dom.window.LightworkChannelReview.submit('1'.repeat(32)); assert.equal(channelPosts(h).length, 0);
+  failing = false; h.dom.window.document.activeElement.click(); await tick(); await tick();
+  assert.equal(formOf(h).elements.evidence_reference.value, 'service-ticket-12345'); assert.equal(formOf(h).elements.confirm.disabled, false);
+  assert.equal(formOf(h).elements.confirm.checked, false); h.dom.window.close();
+});
+
+for (const override of [
+  { kind: 'unknown_family' }, { review_token: 'not-a-token' }, { status: 'maybe_done' },
+  { execution_choices: ['unknown'] }, { chunks: [{ key: 'x', label: 'x', choices: ['recorded'], receipt_locked: 1, receipt: '' }] },
+  { status: 'recording_incomplete', retry_answers: { kind: 'finish_recording', receipt: 'd'.repeat(64) },
+    recorded_review: { kind: 'message', checked_at: new Date().toISOString(), evidence_reference: 'saved-evidence', execution: 'recorded', delivery: 'recorded', chunks: { extra: {} } } },
+]) test('malformed channel descriptor fails closed without JSON fallback: ' + JSON.stringify(override), async () => {
+  const h = await channelHarness([channelItem('message', override)]);
+  assert.equal(formOf(h), null); assert.equal(h.get('reconciliation-items').querySelector('textarea'), null);
+  assert.equal(h.dom.window.LightworkChannelReview.list().length, 0); assert.equal(channelPosts(h).length, 0);
+  h.dom.window.close();
+});
+
+test('malformed success never claims recording complete and cannot replay automatically', async () => {
+  const h = await channelHarness([channelItem('delivery_restart')], () => ({ state: 'resolved' }));
+  completeCommon(h); enter(h, 'confirm', true); await h.dom.window.LightworkChannelReview.submit('1'.repeat(32));
+  assert.match(h.get('reconciliation-items').textContent, /could not confirm/); assert.doesNotMatch(h.get('status').textContent, /Your review was recorded/);
+  assert.equal(channelPosts(h).length, 1); assert.equal(formOf(h).querySelector('[type=submit]').disabled, true); h.dom.window.close();
+});
+
+test('an interrupted recording displays saved findings and sends only the exact opaque retry proof', async () => {
+  const retry = { kind: 'finish_recording', receipt: 'd'.repeat(64) };
+  const h = await channelHarness([channelItem('imessage_position', { status: 'recording_incomplete', retry_answers: retry,
+    recorded_review: { kind: 'imessage_position', checked_at: new Date(Date.now() - 7200000).toISOString(), evidence_reference: 'original-service-evidence', position: '9007199254740993123' } })]);
+  h.dom.window.LightworkChannelReview.select('1'.repeat(32)); const form = formOf(h);
+  assert.equal(form.elements.position.value, '9007199254740993123'); assert.equal(form.elements.position.disabled, true);
+  assert.equal(form.elements.checked_at.disabled, true); assert.equal(form.elements.evidence_reference.disabled, true);
+  assert.match(form.textContent, /Finish recording this review/); assert.doesNotMatch(form.textContent, /within the last 15 minutes/);
+  enter(h, 'confirm', true); await h.dom.window.LightworkChannelReview.submit('1'.repeat(32));
+  assert.deepEqual(JSON.parse(channelPosts(h)[0].init.body).answers, retry); h.dom.window.close();
+});
+
+test('direct controls and Copilot share one mounted form, exact draft and explicit confirmation', async () => {
+  let release; const blocked = new Promise(resolve => { release = resolve; });
+  const h = await channelHarness([channelItem('delivery_restart')], async (_url, init, report) => {
+    await blocked; const body = JSON.parse(init.body); report.items[0].state = 'resolved'; report.items[0].channel_review.status = 'recorded'; report.unresolved = 0;
+    return { state: 'resolved', item_id: body.item_id, disposition: 'channel_readback_confirmed', unresolved: 0, automatic_replay_blocked: true, normal_start_blocked: true };
+  });
+  completeCommon(h); const form = formOf(h), api = h.dom.window.LightworkChannelReview;
+  assert.equal(api.mount('1'.repeat(32), h.get('assistant-review')), true); assert.equal(formOf(h), form);
+  assert.equal(h.get('assistant-review').contains(form), true); assert.equal(h.get('reconciliation-items').contains(form), false);
+  assert.equal(api.prepare('1'.repeat(32)).status, 'needs_confirmation'); await api.submit('1'.repeat(32)); assert.equal(channelPosts(h).length, 0);
+  enter(h, 'confirm', true); assert.equal(api.prepare('1'.repeat(32)).status, 'ready'); const first = api.submit('1'.repeat(32));
+  await api.submit('1'.repeat(32)); api.unmount(); assert.equal(h.get('reconciliation-items').contains(form), true);
+  assert.equal(channelPosts(h).length, 1); release(); await first; assert.equal(channelPosts(h).length, 1);
+  assert.equal(h.get('assistant-review').children.length, 0); h.dom.window.close();
+});
+
+for (const status of [401, 403]) test(`channel ${status} erases mounted private evidence and cannot submit again`, async () => {
+  const h = await channelHarness([channelItem('delivery_restart')]); completeCommon(h);
+  const api = h.dom.window.LightworkChannelReview; api.mount('1'.repeat(32), h.get('assistant-review'));
+  const field = formOf(h).elements.evidence_reference; let parsed = 0;
+  h.dom.window.fetch = async () => ({ ok: false, status, json: async () => { parsed++; throw new Error('no JSON'); } });
+  enter(h, 'confirm', true); await api.submit('1'.repeat(32));
+  assert.equal(parsed, 0); assert.equal(field.value, ''); assert.equal(h.get('assistant-review').children.length, 0);
+  assert.match(h.get('status').textContent, /Your recovery access is unavailable/);
+  assert.equal(h.dom.window.document.activeElement, h.get('status'));
+  assert.equal(api.list().length, 0); assert.equal((await api.submit('1'.repeat(32))).status, 'unavailable'); h.dom.window.close();
+});
+
 test('restore needs prepared target-bound review and explicit checkbox; changing selection invalidates it', async () => {
   const h = await harness(async url => url.endsWith('/prepare') ? { review: 'review-a', target: 'target-a', tenant: 'acme', application_version: '1.0.0', file_count: 3, restore_mode: 'ordinary' } : {});
   h.select();
@@ -223,6 +497,12 @@ test('comparison pages and downloads the exact captured report without enabling 
   assert.equal(h.get('comparison-items').children.length, 50);
   assert.match(h.get('comparison-items').textContent, /<img/);
   assert.equal(h.get('comparison-items').querySelector('img'), null);
+  const first = h.get('comparison-items').children[0];
+  const plain = [...first.children].filter(node => node.tagName !== 'DETAILS').map(node => node.textContent).join(' ');
+  assert.match(plain, /Size in the snapshot: not present · Size now: 32 bytes\./);
+  assert.doesNotMatch(plain, /fingerprint|[0-9a-f]{64}/);
+  assert.equal(first.querySelector('details summary').textContent, 'Technical details');
+  assert.equal(first.querySelector('details').open, false);
   assert.equal(h.get('prepare').disabled, true);
   assert.equal(h.get('comparison-previous').disabled, true);
   h.get('comparison-next').click(); await tick();
@@ -424,12 +704,41 @@ function chooseCustody(h, size) {
   let value = 'synthetic-file-selection';
   Object.defineProperty(input, 'value', { configurable: true, get: () => value, set: next => { value = next; } });
   Object.defineProperty(input, 'files', { configurable: true, get: () => value ? [file] : [] });
-  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: require('node:crypto').webcrypto.subtle });
+  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: trackedSubtle() });
   input.dispatchEvent(new h.dom.window.Event('change'));
   return file;
 }
 function confirmCustody(h) { h.get('custody-confirm').checked = true; h.get('custody-confirm').dispatchEvent(new h.dom.window.Event('change')); }
-async function settleCustody() { for (let i = 0; i < 5; i++) await tick(); }
+// Hashing a chosen file uses WebCrypto, which finishes on the thread pool
+// rather than within a fixed number of ticks; under load it can take longer.
+// Count the page's in-flight WebCrypto calls and wait for them to finish.
+const cryptoInFlight = { count: 0 };
+function trackedSubtle() {
+  const real = require('node:crypto').webcrypto.subtle;
+  return new Proxy(real, {
+    get(target, key) {
+      const value = target[key];
+      if (typeof value !== 'function') return value;
+      return (...args) => {
+        cryptoInFlight.count++;
+        return Promise.resolve(value.apply(target, args)).finally(() => { cryptoInFlight.count--; });
+      };
+    },
+  });
+}
+async function settleCustody() {
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < 5; i++) await tick();
+    const deadline = Date.now() + 5000;
+    while (cryptoInFlight.count > 0 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  for (let i = 0; i < 5; i++) await tick();
+}
+async function waitForCustody(predicate) {
+  const deadline = Date.now() + 5000;
+  while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+  await settleCustody();
+}
 
 test('custody rehearsal requires a user file and fresh consent, binds inspected snapshot and uploaded bytes, and never autoexports keys', async () => {
   const h = await harness(async url => url.endsWith('/inspect') ? { id: 'snapshot-a', sha256: 'a'.repeat(64) } : url.endsWith('/custody-test') ? custodyReport() : {}, { live_restore_available: false });
@@ -458,7 +767,7 @@ test('oversized custody uploads and programmatic unconfirmed clicks never inspec
   chooseCustody(h, 4 * 1024 * 1024 + 1); confirmCustody(h);
   h.get('custody-test').click(); await settleCustody();
   assert.equal(h.calls.some(call => /inspect|custody-test/.test(call.url)), false);
-  assert.equal(h.get('custody-file').value, ''); assert.match(h.get('status').textContent, /4 MiB/);
+  assert.equal(h.get('custody-file').value, ''); assert.match(h.get('status').textContent, /4 MB/);
   h.dom.window.close();
 });
 
@@ -520,6 +829,7 @@ test('recovery summary keeps failed and unsupported coverage visible outside the
   const h=await harness(async()=>report);h.select();h.get('custody-report-load').click();await settleCustody();
   assert.match(h.get('custody-totals').textContent,/3 recognized encrypted records verified; 1 failed; 1 unsupported/);
   assert.match(h.get('custody-totals').textContent,/2 files were not examined/);assert.equal(h.get('custody-totals').closest('details'),null);
+  assert.match(h.get('custody-coverage').textContent,/database columns scanned/);assert.doesNotMatch(h.get('custody-coverage').textContent,/SQLite/);
   assert.equal(h.get('custody-checks').closest('details').open,false);assert.match(h.get('custody-summary').textContent,/0.9 seconds/);assert.doesNotMatch(h.get('custody-summary').textContent,/0.855624/);h.dom.window.close();
 });
 
@@ -598,7 +908,7 @@ test('oversized bridge is not uploaded and a changed file cannot use a late tran
   const h = await harness(async url => url.endsWith('/identity-transition') ? new Promise(resolve => { complete = resolve; }) : {});
   chooseTransition(h, 65537); h.get('installation-transition-review').click(); await settleCustody();
   assert.equal(h.calls.some(call => call.url.endsWith('/identity-transition')), false);
-  assert.match(h.get('status').textContent, /64 KiB/);
+  assert.match(h.get('status').textContent, /64 KB/);
   chooseTransition(h); h.get('installation-transition-review').click(); await settleCustody();
   chooseTransition(h); complete(transitionSummary()); await settleCustody();
   assert.equal(h.get('installation-transition-details').textContent, '');
@@ -643,7 +953,7 @@ function chooseCustodyInstall(h, bytes = custodyBytes) {
   let value = 'synthetic-install-selection';
   Object.defineProperty(input, 'value', { configurable: true, get: () => value, set: next => { value = next; } });
   Object.defineProperty(input, 'files', { configurable: true, get: () => value ? [file] : [] });
-  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: require('node:crypto').webcrypto.subtle });
+  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: trackedSubtle() });
   input.dispatchEvent(new h.dom.window.Event('change'));
   return file;
 }
@@ -706,7 +1016,8 @@ test('key installation rechecks the exact tested ZIP and binds snapshot, report 
   assert.equal(h.calls.some(call => call.url.endsWith('/retained-keys/install')), false);
   h.get('custody-install-confirm').checked = true;
   h.get('custody-install-confirm').dispatchEvent(new h.dom.window.Event('change'));
-  h.get('custody-install').click(); h.get('custody-install').click(); await settleCustody();
+  h.get('custody-install').click(); h.get('custody-install').click();
+  await waitForCustody(() => h.calls.some(call => call.url.endsWith('/retained-keys/install')));
   const calls = h.calls.filter(call => call.url.endsWith('/retained-keys/install'));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].init.body, file);
@@ -729,7 +1040,8 @@ test('a different key ZIP cannot reuse retained-key evidence or send an install 
   chooseCustodyInstall(h, Buffer.from('different key bytes'));
   h.get('custody-install-confirm').checked = true;
   h.get('custody-install-confirm').dispatchEvent(new h.dom.window.Event('change'));
-  h.get('custody-install').click(); await settleCustody();
+  h.get('custody-install').click();
+  await waitForCustody(() => /does not match/.test(h.get('status').textContent));
   assert.equal(h.calls.some(call => call.url.endsWith('/retained-keys/install')), false);
   assert.match(h.get('status').textContent, /does not match the signed retained-key test/);
   assert.equal(h.get('custody-install-file').value, '');
@@ -761,7 +1073,7 @@ test('restored work renders as text and records each disposition without complet
   assert.deepEqual(JSON.parse(call.init.body), { confirm: true, disposition: 'retire_and_create_new_request', evidence_reference: null });
   const evidence = h.get('reconciliation-items').querySelector('input[type="text"]');
   evidence.value = 'ticket-12345';
-  const record = [...h.get('reconciliation-items').querySelectorAll('button')].find(button => /Record the existing external effect/.test(button.textContent));
+  const record = [...h.get('reconciliation-items').querySelectorAll('button')].find(button => /It did happen: record it/.test(button.textContent));
   record.click(); await tick(); await tick();
   call = h.calls.find(row => row.url.endsWith('/' + '2'.repeat(32)));
   assert.deepEqual(JSON.parse(call.init.body), { confirm: true, disposition: 'external_effect_recorded', evidence_reference: 'ticket-12345' });
@@ -815,4 +1127,57 @@ for (const status of [401, 403]) test(`HTML ${status} clears reconciliation evid
   assert.equal(evidence.value, '');
   for (const button of h.dom.window.document.querySelectorAll('#workspace-recovery button')) assert.equal(button.disabled, true);
   h.dom.window.close();
+});
+
+test('held reading positions are recorded with plain fields and exact checkpoint shapes', async () => {
+  const base = { schema: 1, record_id: 'cur-1', source_sha256: 'b'.repeat(64), binding_sha256: 'c'.repeat(64),
+    observed_at: null, evidence_reference: '', outcome: 'unknown' };
+  const cases = [
+    [{ ...base, namespace: 'imessage-intake-cursors', checkpoint: { last_rowid: null } }, (items) => { items.querySelector('input[type="number"]').value = '42'; }, { last_rowid: 42 }],
+    [{ ...base, namespace: 'channel-delivery-cursors', checkpoint: { cursor: '' } }, () => {}, { cursor: '' }],
+    [{ ...base, namespace: 'channel-intake-cursors', checkpoint: { watermark: '' } }, (items) => { items.querySelectorAll('input[type="text"]')[1].value = '1234'; }, { watermark: '1234' }],
+  ];
+  for (const [template, fill, checkpoint] of cases) {
+    const item = reconciliationItem({ category: 'channel_authority', safe_state: 'channel_restore_held',
+      requires_external_readback: true, readback_template: template });
+    const h = await harness(async url => url.endsWith('/reconciliation') ? reconciliationReport([item]) : {}, {
+      recovery_mode: true, bootstrap: { state: 'reconciliation_required' },
+    });
+    const items = h.get('reconciliation-items');
+    assert.equal(items.querySelector('textarea'), null);
+    items.querySelector('input[type="text"]').value = 'service-log-2024';
+    fill(items);
+    [...items.querySelectorAll('button')].find(b => /Confirm what I found/.test(b.textContent)).click(); await tick(); await tick();
+    const call = h.calls.find(row => row.url.includes('/reconciliation/items/'));
+    const body = JSON.parse(call.init.body).channel_readback;
+    assert.deepEqual(body.checkpoint, checkpoint);
+    assert.equal(body.outcome, 'confirmed'); assert.equal(body.evidence_reference, 'service-log-2024');
+    assert.equal(typeof body.observed_at, 'number');
+    h.dom.window.close();
+  }
+});
+
+test('the private approval code has a Copy code button and an empty code is explained', async () => {
+  const h = await harness(async () => ({}));
+  const copied = [], toasts = [];
+  h.dom.window.mvCopy = text => copied.push(text);
+  h.dom.window.mvToast = (text, opts) => toasts.push([text, opts]);
+  const button = h.dom.window.document.getElementById('wrec-installation-code-copy');
+  assert.equal(button.textContent, 'Copy code');
+  button.click();
+  assert.deepEqual(copied, []);
+  assert.match(toasts[0][0], /no approval code yet/);
+  h.get('installation-code').value = '  code-123  ';
+  button.click();
+  assert.deepEqual(copied, ['code-123']);
+  h.dom.window.close();
+});
+
+test('changed review on item refresh focuses the visible review toggle rather than a hidden control', async () => {
+  const h = await channelHarness([channelItem('delivery_restart')]); completeCommon(h);
+  h.report.items[0].channel_review.review_token = 'b'.repeat(64);
+  [...formOf(h).querySelectorAll('button')].find(button => button.textContent === 'Refresh status').click(); await tick(); await tick();
+  assert.equal(formOf(h).hidden, true); assert.equal(formOf(h).elements.evidence_reference.value, '');
+  assert.equal(h.dom.window.document.activeElement.textContent, 'Review this connection');
+  assert.equal(channelPosts(h).length, 0); h.dom.window.close();
 });

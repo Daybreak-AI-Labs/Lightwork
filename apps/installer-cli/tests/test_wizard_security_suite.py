@@ -625,7 +625,7 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
 
     parsed = tomllib.loads((tmp_path / "config.toml").read_text())
     assert parsed["security_ops"]["enable"] is True
-    assert parsed["governed_records"] == {"backend": "auto"}
+    assert parsed["governed_records"] == {"backend": "auto", "pool_size": 0, "pool_timeout_seconds": 5}
     assert parsed["evidence_graph"]["enable"] is True
     assert parsed["model_risk_assurance"] == {
         "enable": True,

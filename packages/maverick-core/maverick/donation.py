@@ -31,6 +31,7 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -84,6 +85,7 @@ class TrajectoryRecord:
     values, no return values.
     """
     schema_version: int = 1
+    record_id: str = field(default_factory=lambda: "trj_" + uuid.uuid4().hex)
     ts: float = field(default_factory=time.time)
     task_brief_hash: str = ""
     task_brief_text: str | None = None  # only when donate_text=true
@@ -306,13 +308,20 @@ def write_record(
             out_dir.chmod(0o700)
         except OSError:
             pass
-        fname = f"{record.ts:.0f}-{record.task_brief_hash}.json"
+        from .file_lock import atomic_create_text, atomic_read_text, ensure_private_directory
+        from .training.identity import record_trajectory_id
+
+        ensure_private_directory(out_dir)
+        identity = record_trajectory_id({"record_id": record.record_id})
+        payload["record_id"] = identity
+        fname = f"{identity}.json"
         path = out_dir / fname
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        body = json.dumps(payload, indent=2)
         try:
-            path.chmod(0o600)
-        except OSError:
-            pass
+            atomic_create_text(path, body)
+        except FileExistsError:
+            if atomic_read_text(path) != body:
+                raise ValueError("donation record identity already binds different content") from None
         return path
     except Exception as e:  # pragma: no cover
         log.warning("trajectory donation write failed: %s", e)

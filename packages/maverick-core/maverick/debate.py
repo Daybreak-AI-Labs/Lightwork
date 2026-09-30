@@ -171,7 +171,8 @@ def run_debate(
     if rounds < 1:
         raise ValueError("rounds must be >= 1")
     if budget is None:
-        budget = Budget(max_dollars=2.0)
+        from .budget import budget_from_config
+        budget = budget_from_config()
     start_dollars = budget.dollars
 
     transcript: list[DebateTurn] = []

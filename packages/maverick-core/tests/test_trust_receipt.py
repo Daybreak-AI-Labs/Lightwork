@@ -125,6 +125,21 @@ def test_a_receipt_verifies_against_the_out_of_band_key(denial_receipt):
     assert result.depth == tv.DEPTH_SIGNED
 
 
+@pytest.mark.parametrize("custody", ["colocated", "offhost"])
+def test_key_source_label_does_not_promote_offline_assurance(denial_receipt, custody):
+    denial_receipt["issuer"]["key_custody"] = custody
+    result = tv.verify(_resign(denial_receipt), trusted_keys=[_key()])
+    assert result.ok, result.reason
+    assert result.depth == tv.DEPTH_SIGNED
+    assert _claim(result, "commitment").status == tv.INDETERMINATE
+    report = tv.format_report(result)
+    if custody == "offhost":
+        assert "does not establish isolated signing" in report
+        assert "local signing process" in report
+    else:
+        assert "an actor who can read that key" in report
+
+
 def test_the_claim_is_derived_from_the_row(denial_receipt):
     assert denial_receipt["claim"] == {
         "kind": "governance_denied", "decision": "denied", "tool": "wire_transfer",
@@ -354,6 +369,61 @@ def test_output_withheld_disposition_is_portable_claim_evidence(audit_dir):
     assert result.ok, result.reason
     assert _claim(result, "claim_consistency").status == tv.HOLDS
     assert "disposition output_withheld" in tv.format_report(result)
+
+
+@pytest.mark.parametrize("status", ["ok", "error"])
+@pytest.mark.parametrize("include_execution_pair", [False, True])
+def test_response_loss_receipt_keeps_execution_unknown(
+        audit_dir, status, include_execution_pair):
+    # A dispatched effect can complete even though result collection fails.
+    # Transport status and a matching call row cannot resolve that uncertainty.
+    rows = _paired_rows()
+    rows[1].update(
+        status=status,
+        disposition="execution_unknown",
+        output_summary="Tool response lost after dispatch; do not repeat the action.",
+    )
+    path = _write_chain(audit_dir, DAY, rows)
+    receipt = tr.sign(tr.build(
+        audit_dir=audit_dir,
+        day=DAY,
+        row_hash=_hashes(path)[1],
+        include_execution_pair=include_execution_pair,
+    ))
+
+    assert receipt["claim"]["decision"] == "execution_unknown"
+    assert receipt["claim"]["disposition"] == "execution_unknown"
+    result = tv.verify(receipt, trusted_keys=[_key()])
+    assert result.ok, result.reason
+    assert _claim(result, "row_integrity").status == tv.HOLDS
+    assert _claim(result, "claim_consistency").status == tv.HOLDS
+    assert _claim(result, "execution_pair").status == (
+        tv.HOLDS if include_execution_pair else tv.INDETERMINATE
+    )
+    assert _claim(result, "claim_consistency").detail.startswith("execution_unknown ")
+
+
+@pytest.mark.parametrize("status", ["ok", "error"])
+@pytest.mark.parametrize("decision", ["executed", "failed"])
+def test_unknown_execution_cannot_be_relabelled_as_a_definite_outcome(
+        audit_dir, status, decision):
+    rows = _paired_rows()
+    rows[1].update(status=status, disposition="execution_unknown")
+    path = _write_chain(audit_dir, DAY, rows)
+    receipt = tr.sign(tr.build(
+        audit_dir=audit_dir,
+        day=DAY,
+        row_hash=_hashes(path)[1],
+        include_execution_pair=True,
+    ))
+    receipt["claim"]["decision"] = decision
+
+    result = tv.verify(_resign(receipt), trusted_keys=[_key()])
+
+    assert not result.ok
+    assert _claim(result, "row_integrity").status == tv.HOLDS
+    assert _claim(result, "claim_consistency").status == tv.FAILS
+    assert _claim(result, "execution_pair").status == tv.HOLDS
 
 
 def test_v2_pair_survives_real_writer_goal_resolution_and_anonymization(

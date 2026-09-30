@@ -66,6 +66,13 @@ Edit → Action groups → Add**):
    contents of `lightwork-external.json` — or upload it to S3 first and
    select it there. (You can also fetch it live:
    `curl -H "Authorization: Bearer lw-rest-EXAMPLE" https://lightwork.example.com/api/v1/external/openapi.json`.)
+   The packaged schema and forwarder cover the same gateway operations,
+   including runtime evaluation. Red-team operations are optional: the live
+   schema omits them when that feature is disabled. Prefer the live schema
+   from the same Lightwork release as the forwarder; importing those optional
+   operations does not enable the server feature. The contract regression
+   checks packaged operation, parameter and request-property parity with the
+   gateway schema.
 5. Save, then **Prepare** the agent.
 
 ### 4. Instruct the agent

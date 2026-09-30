@@ -138,7 +138,8 @@ def run_plan_execute_reflect(
     if max_iterations < 1:
         raise ValueError("max_iterations must be >= 1")
     if budget is None:
-        budget = Budget(max_dollars=2.0)
+        from .budget import budget_from_config
+        budget = budget_from_config()
     start_dollars = budget.dollars
 
     plan = _plan(planner_complete, goal, budget=budget, model=model)

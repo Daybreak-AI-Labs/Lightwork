@@ -1,10 +1,9 @@
 """Persistence for flow definitions and their (resumable) runs.
 
-Definitions and run state are plain JSON under the tenant-scoped data dir, 0600.
-A run row carries everything :func:`~.runner.run_flow` needs to resume -- status,
-the threaded ``data``, the node it paused at, and a delay's ``resume_at`` -- so a
-paused flow survives a restart and a human approval days later. Best-effort I/O
-that degrades to an empty list rather than raising into a request.
+Definitions and bounded run previews live under the tenant-scoped data dir.
+Complete execution data is inline when small, otherwise in a private encrypted
+artifact referenced by the run row. Missing/corrupt execution data fails closed;
+display truncation is never used as resume input.
 """
 from __future__ import annotations
 
@@ -194,6 +193,8 @@ def save_flow(
     # Reject unsafe content before any history/version side effect, then check
     # the exact stamped payload again under the definition lock.
     _assert_safe_definition(flow.to_dict())
+    from .recipe_flow import check_persisted_lineage
+    check_persisted_lineage(flow)
     with _definitions_lock():
         prior = load_flow(flow.id)
         actual_version = int(prior.version) if prior is not None else 0
@@ -218,6 +219,7 @@ def save_flow(
             flow.revision = _new_revision()
         payload = flow.to_dict()
         _assert_safe_definition(payload)
+        check_persisted_lineage(Flow.from_dict(payload))
         if prior is not None:
             # Snapshot the version being replaced under its own number, then advance.
             _write_json(
@@ -509,6 +511,7 @@ def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | 
     # Apply the same size/secret persistence policy before writing CAS objects.
     _assert_safe_definition(flow.to_dict())
     manifest: dict[str, str | None] = {}
+    pending_objects: dict[str, dict] = {}
     # A subflow is executable code/data owned by its definition owner.  Flow ids
     # are not capabilities: an authenticated caller who guesses another user's
     # id must not be able to smuggle that private graph into an otherwise-owned
@@ -519,6 +522,9 @@ def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | 
     root_owner = str(flow.owner or "")
 
     def walk(raw: dict) -> None:
+        from .recipe_flow import check_persisted_lineage
+        _assert_safe_definition(raw)
+        check_persisted_lineage(Flow.from_dict(raw), owner=root_owner)
         for node in raw.get("nodes") or []:
             if not isinstance(node, dict):
                 continue
@@ -542,12 +548,17 @@ def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | 
                     f"subflow {ref!r} is unavailable to this flow owner"
                 )
             child_raw = child.to_dict()
-            manifest[ref] = _store_flow_object(child_raw)
+            # Mark visited for cycles, but write no objects until the entire
+            # selected graph passes persistence and lineage policy.
+            manifest[ref] = None
+            pending_objects[ref] = child_raw
             walk(child_raw)
 
     root = flow.to_dict()
-    root_digest = _store_flow_object(root)
     walk(root)
+    root_digest = _store_flow_object(root)
+    for ref, raw in pending_objects.items():
+        manifest[ref] = _store_flow_object(raw)
     return root_digest, int(flow.version), manifest
 
 
@@ -1027,6 +1038,9 @@ class FlowRun:
     dry_run: bool = False
     # Agent spend reserved for this run (dollars), so a viewer can see run cost.
     cost_dollars: float = 0.0
+    # Explicit operator increase applies to this run, without rewriting its
+    # immutable graph or discarding already metered work.
+    budget_limit_dollars: float | None = None
     # Snapshot of the paused human task (choices/form/assignee) taken AT PAUSE
     # time, like `prompt` -- so the run viewer renders what the paused node
     # actually declared, even if the flow is edited while the run waits.
@@ -1054,16 +1068,23 @@ class FlowRun:
     execution_channel: str = ""
     execution_user_id: str = ""
     allowed_suites: list[str] | None = None
+    # A listing record is a projection, never a checkpoint that can be saved.
+    metadata_only: bool = field(default=False, repr=False, compare=False)
+    # Private execution frames, excluded from public to_dict projections.
+    continuation: dict = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict:
+        from .payloads import preview
+
         return {
             "run_id": self.run_id, "flow_id": self.flow_id, "status": self.status,
-            "data": self.data, "cursor": self.cursor, "resume_at": self.resume_at,
+            "data": preview(self.data), "cursor": self.cursor, "resume_at": self.resume_at,
             "prompt": self.prompt, "error": self.error, "owner": self.owner,
             "created": self.created, "updated": self.updated, "nodes": self.nodes,
-            "input_data": self.input_data, "idem_key": self.idem_key,
+            "input_data": preview(self.input_data), "idem_key": self.idem_key,
             "origin": self.origin, "dry_run": self.dry_run,
             "cost_dollars": self.cost_dollars,
+            "budget_limit_dollars": self.budget_limit_dollars,
             "human": self.human,
             "decided_by": self.decided_by,
             "definition_digest": self.definition_digest,
@@ -1079,6 +1100,12 @@ class FlowRun:
 
     @staticmethod
     def from_dict(d: dict) -> FlowRun:
+        import math
+
+        limit = d.get("budget_limit_dollars")
+        if limit is not None:
+            if isinstance(limit, bool) or not isinstance(limit, (int, float)) or not math.isfinite(limit) or limit <= 0:
+                raise FlowSnapshotError("flow run spending allowance is invalid")
         definition_digest = str(d.get("definition_digest") or "")
         subflow_digests = {
             str(k): (str(v) if v is not None else None)
@@ -1099,6 +1126,7 @@ class FlowRun:
             run_id=str(d.get("run_id", "")), flow_id=str(d.get("flow_id", "")),
             status=str(d.get("status", "")), data=dict(d.get("data") or {}),
             cursor=d.get("cursor"), resume_at=d.get("resume_at"),
+            continuation=dict(d.get("continuation") or {}),
             prompt=str(d.get("prompt", "")), error=str(d.get("error", "")),
             owner=str(d.get("owner", "")),
             created=float(d.get("created", 0.0)), updated=float(d.get("updated", 0.0)),
@@ -1107,6 +1135,7 @@ class FlowRun:
             origin=str(d.get("origin", "manual") or "manual"),
             dry_run=bool(d.get("dry_run", False)),
             cost_dollars=float(d.get("cost_dollars", 0.0) or 0.0),
+            budget_limit_dollars=float(limit) if limit is not None else None,
             human=dict(d.get("human") or {}),
             decided_by=str(d.get("decided_by") or "")[:500],
             definition_digest=definition_digest,
@@ -1174,7 +1203,10 @@ def find_run_by_idem(
                      or claimed.release_id == expected_release_id)
                 and (owner is None or claimed.owner == owner)):
             return claimed
-    for r in list_runs(flow_id=flow_id, limit=within):
+    for meta in list_run_metadata(flow_id=flow_id, owner=owner, idem_key=idem_key, limit=within):
+        r = load_run(meta.run_id, owner=owner, flow_id=flow_id)
+        if r is None:
+            continue
         if (r.idem_key == idem_key
                 and (revision is None or r.definition_revision == revision)
                 and (expected_digest is None
@@ -1272,6 +1304,10 @@ def new_run_id() -> str:
 
 
 def save_run(run: FlowRun) -> None:
+    from . import payloads, run_index
+
+    if run.metadata_only:
+        raise payloads.FlowPayloadError("load complete execution data before saving a run")
     expected_release_digest = (
         release_digest_for(run.definition_digest, run.subflow_digests)
         if run.definition_digest else ""
@@ -1288,15 +1324,10 @@ def save_run(run: FlowRun) -> None:
     if not run.created:
         run.created = now
     run.updated = now
-    from .redact import cap, redact
+    values = payloads.prepare(run.data, run.input_data, continuation=run.continuation)
     d = run.to_dict()
-    # Bound first (so an attacker cannot make detection scan unbounded strings),
-    # then deep-redact both secret-looking keys and secret-bearing ordinary
-    # values. Persisted state is a trust boundary, not merely the API response.
-    d["data"] = redact(cap(d.get("data") or {}))
-    d["input_data"] = redact(cap(d.get("input_data") or {}))
-    run.data = dict(d["data"])
-    run.input_data = dict(d["input_data"])
+    d["data"] = payloads.preview(values["data"])
+    d["input_data"] = payloads.preview(values["input_data"])
     if d.get("error"):
         try:
             from ..safety.secret_detector import redact
@@ -1307,20 +1338,87 @@ def save_run(run: FlowRun) -> None:
             # failure without persisting the potentially secret details.
             d["error"] = "execution failed (details redacted)"
         run.error = str(d["error"])
-    _write_json(_runs_dir() / f"{_safe_id(run.run_id)}.json", d)
+    target = _runs_dir() / f"{_safe_id(run.run_id)}.json"
+    artifact_root = _runs_dir().parent / "run_payloads"
+    with _checkpoint_lock(run.run_id):
+        prior = _read_json(target)
+        if prior is None and target.exists():
+            raise payloads.FlowPayloadError("existing flow checkpoint row is unreadable; restore it before saving")
+        # Remove artifacts orphaned by a crash before publishing the row. This
+        # keeps peak storage to the old and new checkpoint, not every save ever.
+        payloads.reclaim(artifact_root, run.run_id, (prior or {}).get("data_state"))
+        previous_ref = (prior or {}).get("data_state")
+        if (previous_ref and prior.get("flow_id") == run.flow_id
+                and prior.get("owner", "") == run.owner
+                and payloads.decode(artifact_root, prior) == values):
+            # Status/lease checkpoints reuse unchanged immutable data.
+            d["data_state"] = previous_ref
+        else:
+            d["data_state"] = payloads.encode(artifact_root, d, values)
+        if d["data_state"]["kind"] == "inline":
+            d.update(values)
+        with run_index.mutation(_runs_dir(), run.run_id):
+            _write_json(target, d)
+        # A committed row is the acknowledgement; cleanup failure must not
+        # turn that successful transition into an apparent failed execution.
+        try:
+            payloads.reclaim(artifact_root, run.run_id, d["data_state"])
+        except OSError:
+            pass  # the next checkpoint retries orphan cleanup before writing
+    run.data = values["data"]
+    run.input_data = values["input_data"]
+    run.continuation = values["continuation"]
 
 
-def load_run(run_id: str) -> FlowRun | None:
-    d = _read_json(_runs_dir() / f"{_safe_id(run_id)}.json")
-    return FlowRun.from_dict(d) if d else None
+@contextmanager
+def _checkpoint_lock(run_id: str):
+    """Short publication/read lock, independent of the whole execution lock."""
+    from ..file_lock import cross_process_lock
+
+    with cross_process_lock(_runs_dir() / f".{_safe_id(run_id)}.checkpoint", strict=True):
+        yield
+
+
+def load_run(run_id: str, *, owner: str | None = None,
+             flow_id: str | None = None) -> FlowRun | None:
+    """Load complete data only after optional metadata access filters match."""
+    from .payloads import FlowPayloadError, decode
+
+    with _checkpoint_lock(run_id):
+        target = _runs_dir() / f"{_safe_id(run_id)}.json"
+        d = _read_json(target)
+        if not d:
+            if owner is not None or flow_id is not None:
+                # A malformed row cannot establish access to its private data.
+                return None
+            if target.exists():
+                raise FlowPayloadError("flow checkpoint row is unreadable; restore it before resuming")
+            return None
+        if owner is not None and d.get("owner", "") != owner:
+            return None
+        if flow_id is not None and d.get("flow_id") != flow_id:
+            return None
+        if d.get("run_id") != run_id:
+            raise FlowPayloadError("flow checkpoint belongs to a different run")
+        d.update(decode(_runs_dir().parent / "run_payloads", d))
+        return FlowRun.from_dict(d)
 
 
 def delete_run(run_id: str) -> bool:
-    try:
-        (_runs_dir() / f"{_safe_id(run_id)}.json").unlink()
+    from . import run_index
+    from .payloads import reclaim
+
+    with _checkpoint_lock(run_id):
+        try:
+            with run_index.mutation(_runs_dir(), run_id):
+                (_runs_dir() / f"{_safe_id(run_id)}.json").unlink()
+        except OSError:
+            return False
+        try:
+            reclaim(_runs_dir().parent / "run_payloads", run_id, None)
+        except OSError:
+            pass
         return True
-    except OSError:
-        return False
 
 
 @contextmanager
@@ -1340,26 +1438,49 @@ def run_lock(run_id: str):
         yield
 
 
+def list_run_metadata(*, flow_id: str | None = None, owner: str | None = None,
+                      limit: int | None = 50, statuses=None, due_before=None,
+                      cursor=None, idem_key=None) -> list[FlowRun]:
+    """Indexed bounded previews; callers must load_run before executing/saving."""
+    from . import run_index
+
+    rows = run_index.query(_runs_dir(), flow_id=flow_id, owner=owner, limit=limit,
+                           statuses=statuses, due_before=due_before, cursor=cursor,
+                           idem_key=idem_key)
+    runs = [FlowRun.from_dict(row) for row in rows]
+    for run in runs:
+        run.metadata_only = True
+    return runs
+
+
+def iter_run_metadata(*, batch_size: int = 200, **filters):
+    """Keyset paging for recovery; no newest-N cutoff hides old due runs."""
+    cursor = None
+    while True:
+        batch = list_run_metadata(limit=max(1, batch_size), cursor=cursor, **filters)
+        if not batch:
+            return
+        yield from batch
+        last = batch[-1]
+        cursor = (last.resume_at if filters.get("due_before") is not None else last.updated,
+                  last.run_id)
+
+
+def rebuild_run_index() -> None:
+    from . import run_index
+
+    run_index.rebuild(_runs_dir())
+
+
 def list_runs(*, flow_id: str | None = None, owner: str | None = None,
               limit: int | None = 50) -> list[FlowRun]:
-    d = _runs_dir()
-    if not d.exists():
-        return []
-    runs: list[FlowRun] = []
-    for p in d.glob("*.json"):
-        raw = _read_json(p)
-        if not raw:
-            continue
-        run = FlowRun.from_dict(raw)
-        if flow_id is not None and run.flow_id != flow_id:
-            continue
-        if owner is not None and run.owner != owner:
+    runs = []
+    for meta in list_run_metadata(flow_id=flow_id, owner=owner, limit=limit):
+        run = load_run(meta.run_id, owner=owner, flow_id=flow_id)
+        if run is None:
             continue
         runs.append(run)
-    runs.sort(key=lambda r: r.updated, reverse=True)
-    if limit is None:
-        return runs
-    return runs[: max(0, int(limit))]
+    return runs
 
 
 __all__: list[str] = [
@@ -1372,6 +1493,7 @@ __all__: list[str] = [
     "unpublish_flow", "load_published_bundle", "list_published_bundles",
     "published_flow_guard", "active_release_guard",
     "FlowRun", "new_run_id", "save_run", "load_run", "delete_run", "run_lock",
-    "list_runs", "find_run_by_idem", "idempotency_lock", "save_idempotency_claim",
+    "list_runs", "list_run_metadata", "iter_run_metadata", "rebuild_run_index",
+    "find_run_by_idem", "idempotency_lock", "save_idempotency_claim",
     "load_flow_schema", "record_flow_schema",
 ]

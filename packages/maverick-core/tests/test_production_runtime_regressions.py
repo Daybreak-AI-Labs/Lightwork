@@ -131,7 +131,8 @@ def test_text_and_json_logging_scrub_messages_and_cached_tracebacks(formatter, c
 
 
 def _pg_world(monkeypatch, *, dsn="postgresql://localhost/test", pool_size=0):
-    psycopg = pytest.importorskip("psycopg")
+    pytest.importorskip("psycopg")
+    from maverick.postgres_io import BoundedConnection
     from maverick.world_model_backends import postgres
 
     calls = []
@@ -140,7 +141,7 @@ def _pg_world(monkeypatch, *, dsn="postgresql://localhost/test", pool_size=0):
         calls.append((value, kwargs))
         return SimpleNamespace(closed=False)
 
-    monkeypatch.setattr(psycopg, "connect", connect)
+    monkeypatch.setattr(BoundedConnection, "connect", connect)
     monkeypatch.setattr(postgres, "_pool_size", lambda: pool_size)
     monkeypatch.setattr(postgres, "_rls_enabled", lambda: False)
     monkeypatch.setattr(postgres.PostgresWorldModel, "_migrate", lambda _self: None)
@@ -151,8 +152,10 @@ def _pg_world(monkeypatch, *, dsn="postgresql://localhost/test", pool_size=0):
 def test_postgres_retains_operator_options_and_timeouts_after_reconnect(monkeypatch, existing):
     monkeypatch.delenv("MAVERICK_PG_STATEMENT_TIMEOUT_MS", raising=False)
     monkeypatch.delenv("MAVERICK_PG_IDLE_TX_TIMEOUT_MS", raising=False)
+    monkeypatch.setenv("MAVERICK_PG_IO_TIMEOUT_SECONDS", "0.25")
     dsn = "postgresql://localhost/test?options=" + quote(existing, safe="")
     world, calls = _pg_world(monkeypatch, dsn=dsn)
+    monkeypatch.setenv("MAVERICK_PG_IO_TIMEOUT_SECONDS", "1")
     world.conn.closed = True
     world._reconnect_if_broken()
     assert len(calls) == 2 and calls[0] == calls[1]
@@ -161,6 +164,7 @@ def test_postgres_retains_operator_options_and_timeouts_after_reconnect(monkeypa
     assert options.count("statement_timeout=") == 1
     assert "idle_in_transaction_session_timeout=60000" in options
     assert calls[0][1]["autocommit"] is False
+    assert calls[0][1]["io_timeout_seconds"] == 0.25
 
 
 def test_postgres_timeout_detection_ignores_user_and_database_names(monkeypatch):

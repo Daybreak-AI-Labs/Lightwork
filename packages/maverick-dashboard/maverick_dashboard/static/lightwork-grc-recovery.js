@@ -37,21 +37,28 @@
     try { data = await response.json(); } catch (_) { throw new Error("The review result could not be read. Reload the delivery before trying again; your note is retained here."); }
     if (!response.ok) {
       if ([404, 409].includes(response.status)) invalidate();
-      throw new Error(typeof data.detail === "string" ? data.detail : "The review could not be saved. Check the fields and reload the delivery if it changed.");
+      throw new Error(response.status === 409
+        ? "This delivery changed while you were looking at it. Reload the page and compare again; your note is kept here."
+        : response.status === 404
+          ? "This delivery is no longer held. Reload the page to see the latest list."
+          : response.status === 422
+            ? "Check the record number and note, then try again."
+            : "The review could not be saved. Reload the delivery and try again; your note is kept here.");
     }
     delivery.selectedOptions[0].dataset.revision = String(data.revision);
     return data;
   }
   function render(result) {
     comparison.replaceChildren();
-    const title = document.createElement("p"); title.textContent = result.detail; comparison.append(title);
+    const title = document.createElement("p"); title.textContent = (window.mvPlainDetail && window.mvPlainDetail(result.detail)) || "Here is how this record compares with the other system."; comparison.append(title);
     if (result.remote_id) {
-      const identity = document.createElement("p"); identity.textContent = `External record: ${result.remote_id}`; comparison.append(identity);
+      const identity = document.createElement("p"); identity.textContent = `Record in the other system: ${result.remote_id}`; comparison.append(identity);
     }
     const list = document.createElement("ul");
     (result.fields || []).forEach(field => {
       const item = document.createElement("li");
-      item.textContent = `${field.name}: ${field.matches ? "matches" : "differs"}. Attempted: ${String(field.expected)}. External: ${String(field.actual)}.`;
+      const label = String(field.name || "").replace(/[_-]+/g, " ");
+      item.textContent = `${label.charAt(0).toUpperCase() + label.slice(1)}: ${field.matches ? "matches" : "differs"}. Lightwork sent: ${String(field.expected)}. The other system has: ${String(field.actual)}.`;
       list.append(item);
     });
     comparison.append(list); comparison.focus();
@@ -69,7 +76,7 @@
       if (action === "confirm") body.evidence_sha256 = evidence;
     }
     pending(true);
-    status.textContent = action === "inspect" ? "Checking the external record…" : "Saving your review…";
+    status.textContent = action === "inspect" ? "Checking the other system…" : "Saving your review…";
     try {
       const result = await request(action === "inspect" ? "inspect" : "resolve", body);
       if (action === "inspect") {

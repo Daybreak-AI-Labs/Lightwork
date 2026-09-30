@@ -418,7 +418,9 @@ async def scan_finance_anomalies(
             for row in body.config.approval_thresholds
         )
         config_data["business_days"] = tuple(body.config.business_days)
-        config = anomaly.FinanceAnomalyConfig(**config_data)
+        config = anomaly.with_configured_materiality(
+            anomaly.FinanceAnomalyConfig(**config_data)
+        )
         transactions = [
             anomaly.FinanceTransaction.from_mapping(row.model_dump())
             for row in body.transactions

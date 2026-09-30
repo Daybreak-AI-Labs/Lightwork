@@ -104,8 +104,9 @@ def test_trajectory_controls_have_aria_labels(monkeypatch, tmp_path):
     dash_app._world_cache.clear()
     r = _client().get(f"/goals/{gid}/trajectory")
     assert r.status_code == 200
-    for label in ("Jump to start", "Step back", "Step forward", "Jump to end",
-                  "Scrub through events"):
+    # Playback buttons carry visible words, and the slider is named.
+    for label in (">Start</button>", ">Back</button>", ">Next</button>", ">End</button>",
+                  'aria-label="Move through the steps"'):
         assert label in r.text
     # Keyboard handler wired.
     assert "ArrowLeft" in r.text and "ArrowRight" in r.text

@@ -53,13 +53,16 @@ def test_unifies_every_guardrail(monkeypatch, tmp_path):
     text = _client().get("/oversight").text
     # Every guardrail's events surface in one pane (the gap: capability + egress
     # had no aggregated view before).
-    for kind in ("governance_denied", "shield_block", "capability_denied", "egress_blocked"):
-        assert kind in text
-    # And their key details render.
-    assert "require_human_actions" in text
+    for label in ("Held by a company rule", "Stopped by the safety filter", "Tool not allowed",
+                  "Data not allowed to leave"):
+        assert label in text
+    # And their key details render, in plain words.
+    assert "company rule: require human actions" in text
     assert "prompt injection" in text
-    assert "s3" in text
-    assert "openai" in text
+    assert "Not allowed to use s3" in text
+    assert "Not allowed to send data to Openai" in text
+    from test_support.plain_language import developer_terms
+    assert developer_terms(text) == []
 
 
 def test_consent_approve_excluded_deny_counted(monkeypatch, tmp_path):
@@ -79,7 +82,7 @@ def test_non_intervention_events_excluded(monkeypatch, tmp_path):
     record("tool_call", agent="a", name="read_file", input_summary="x")
     text = _client().get("/oversight").text
     # Ordinary activity isn't an intervention -> empty state.
-    assert "No interventions for the selected day" in text
+    assert "No interventions on this day" in text and "Pick another day" in text
 
 
 def test_halt_state_reflected(monkeypatch, tmp_path):
@@ -90,13 +93,15 @@ def test_halt_state_reflected(monkeypatch, tmp_path):
     # read so it re-stats the isolated file. (base.html's halt-pill JS always
     # contains "HALTED. Click to resume.", so assert on the template marker.)
     ks._last_file_check_ts = 0.0
-    assert "<strong>HALTED</strong>" not in _client().get("/oversight").text
+    page = _client().get("/oversight").text
+    assert 'data-halted="false"' in page and "Stop all work now" in page
     # Arm the killswitch (the same HALT file the nav pill / api toggle uses).
     p = ks._halt_file_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("test halt", encoding="utf-8")
     ks._last_file_check_ts = 0.0
-    assert "<strong>HALTED</strong>" in _client().get("/oversight").text
+    page = _client().get("/oversight").text
+    assert 'data-halted="true"' in page and "Resume all work" in page
 
 
 def test_pending_holds_are_actionable_inline(monkeypatch, tmp_path):
@@ -115,8 +120,9 @@ def test_pending_holds_are_actionable_inline(monkeypatch, tmp_path):
     assert 'data-action="approve"' in text
     assert 'data-action="deny"' in text
     assert "/api/v1/approvals/" in text
-    # Governance REQUIRE_HUMAN holds are labelled (EU AI Act Art 14).
-    assert "Art 14" in text
+    # Governance REQUIRE_HUMAN holds are labelled with the EU AI Act's
+    # human-oversight requirement (Article 14), in plain words.
+    assert "human-oversight requirement" in text
 
 
 def test_pending_exact_operation_renders_current_and_actionable_inline(
@@ -168,7 +174,7 @@ def test_pending_exact_operation_renders_current_and_actionable_inline(
     assert "Customer settings save button" in row.group(0)
     assert f'data-binding="{card["binding_sha256"]}"' in row.group(0)
     assert 'data-action="approve" disabled' not in row.group(0)
-    assert "older request has no exact-operation review" not in row.group(0)
+    assert "older request is missing the details" not in row.group(0)
 
 
 def test_oversight_approval_sources_use_trusted_provenance(monkeypatch, tmp_path):
@@ -187,16 +193,16 @@ def test_oversight_approval_sources_use_trusted_provenance(monkeypatch, tmp_path
 
     text = _client().get("/oversight").text
 
-    assert "governed-shell" in text
-    assert "ordinary-shell" in text
-    assert text.count("governance · Art 14") == 1
-    assert text.count('class="muted">Consent</span>') == 1
+    assert "Governed shell" in text
+    assert "Ordinary shell" in text
+    assert text.count("Required human oversight (EU AI Act)") == 1
+    assert text.count('class="muted">An agent asked for permission</span>') == 1
 
 
 def test_no_pending_holds_shows_empty_state(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/oversight").text
-    assert "No pending approvals." in text
+    assert "Nothing needs your decision right now." in text
 
 
 def _enable_oidc_principal_map(monkeypatch):
@@ -265,10 +271,12 @@ def test_oversight_audit_events_are_owner_scoped(monkeypatch, tmp_path):
 
     text = _client().get("/oversight", headers=_as("alice")).text
 
-    assert "alice.agent.internal" in text
-    assert "alice-secret-tool" in text
-    assert "bob.agent.internal" not in text
-    assert "prod-admin-shell" not in text
+    # Names are shown in plain words; the owner scoping is what matters.
+    lowered = text.lower()
+    assert "alice.agent.internal" in lowered
+    assert "alice secret tool" in lowered
+    assert "bob.agent.internal" not in lowered
+    assert "prod admin shell" not in lowered and "prod-admin-shell" not in lowered
     assert '<div class="num">1</div>' in text
 
 

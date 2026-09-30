@@ -24,12 +24,17 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlparse, urlunparse
 
+from . import consent_storage
 from .consent_scanner import (
     SCAN_REPORT_SCHEMA,
+    ConsentScannerConfigError,
     ScanFinding,
     ScanLimits,
     ScanReport,
+    capped_scan_limits,
+    default_scan_limits,
     require_enabled,
+    scan_limit_settings,
 )
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
@@ -352,16 +357,19 @@ class ConsentScanInventory:
 
     @contextlib.contextmanager
     def _connect(self):
-        ensure_private_directory(self.path.parent)
-        if not self.path.exists():
-            try:
-                descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-            except FileExistsError:
-                pass
-            else:
-                os.close(descriptor)
-        ensure_private_file(self.path, 0o600)
-        connection = sqlite3.connect(str(self.path), isolation_level=None, timeout=10.0)
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=10.0)
+        else:
+            ensure_private_directory(self.path.parent)
+            if not self.path.exists():
+                try:
+                    descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(descriptor)
+            ensure_private_file(self.path, 0o600)
+            connection = sqlite3.connect(str(self.path), isolation_level=None, timeout=10.0)
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA busy_timeout=10000")
@@ -951,7 +959,7 @@ class ConsentScanInventory:
         schedule_id: str,
         property_id: str,
         *,
-        interval_seconds: int,
+        interval_seconds: int | None,
         next_due_at: float,
         expected_revision: int,
         idempotency_key: str,
@@ -964,17 +972,33 @@ class ConsentScanInventory:
         lease_seconds: int = 300,
         enabled: bool = True,
     ) -> dict[str, Any]:
-        """Create or CAS-revise one interval schedule."""
+        """Create or CAS-revise one interval schedule.
+
+        The installation's scanner settings supply the interval when none is
+        given, raise a shorter interval to the installation's shortest, and
+        lower each scan limit to the installation's cap.
+        """
 
         self._require()
         tenant = _tenant_id(tenant_id)
         schedule_ref = _ref(schedule_id, "schedule_id")
         property_ref = _ref(property_id, "property_id")
-        interval = _positive_int(
-            interval_seconds,
-            "interval_seconds",
-            _MIN_INTERVAL_SECONDS,
-            _MAX_INTERVAL_SECONDS,
+        try:
+            installation = scan_limit_settings()
+        except ConsentScannerConfigError as exc:
+            raise ConsentScanValidationError("scanner configuration is invalid") from exc
+        if interval_seconds is None:
+            if "interval_seconds" not in installation:
+                raise ConsentScanValidationError("interval_seconds is required")
+            interval_seconds = installation["interval_seconds"]
+        interval = max(
+            _positive_int(
+                interval_seconds,
+                "interval_seconds",
+                _MIN_INTERVAL_SECONDS,
+                _MAX_INTERVAL_SECONDS,
+            ),
+            installation.get("interval_seconds", _MIN_INTERVAL_SECONDS),
         )
         due = _timestamp(next_due_at, "next_due_at")
         expected = _revision(expected_revision, "expected_revision")
@@ -997,7 +1021,9 @@ class ConsentScanInventory:
             raise ConsentScanValidationError(
                 "authenticated scans are not enabled by scanner configuration"
             )
-        scan_limits = (limits or ScanLimits()).validated()
+        scan_limits = capped_scan_limits(
+            limits or default_scan_limits(installation), installation
+        )
         limits_body = asdict(scan_limits)
         _raw_key, key_sha = _idempotency(idempotency_key)
         request = {
@@ -1323,6 +1349,12 @@ class ConsentScanInventory:
         tenant = _tenant_id(tenant_id)
         now = self._now() if due_at is None else _timestamp(due_at, "due_at")
         page_size = _limit(limit)
+        try:
+            shortest_interval = scan_limit_settings().get(
+                "interval_seconds", _MIN_INTERVAL_SECONDS
+            )
+        except ConsentScannerConfigError as exc:
+            raise ConsentScanValidationError("scanner configuration is invalid") from exc
         jobs: list[dict[str, Any]] = []
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -1342,9 +1374,12 @@ class ConsentScanInventory:
                     )
                     property_result = self._property_result(property_row)
                     scheduled_for = float(row["next_due_at"])
-                    intervals_elapsed = int((now - scheduled_for) // schedule["interval_seconds"])
+                    # The installation's shortest interval also holds schedules
+                    # saved before it was set.
+                    interval = max(int(schedule["interval_seconds"]), shortest_interval)
+                    intervals_elapsed = int((now - scheduled_for) // interval)
                     missed = max(0, intervals_elapsed)
-                    next_due = scheduled_for + (missed + 1) * schedule["interval_seconds"]
+                    next_due = scheduled_for + (missed + 1) * interval
                     body = {
                         "job_id": self._new_id("CSI-JOB"),
                         "schedule_id": schedule["schedule_id"],

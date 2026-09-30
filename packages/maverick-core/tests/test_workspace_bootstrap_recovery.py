@@ -639,11 +639,14 @@ def test_retained_key_install_expiry_is_safe_and_reauthorization_preserves_recei
     )["at_rest.key"]
 
 
+@pytest.mark.parametrize("tampered_relative", [
+    "vendor_management/.record-lookup-rebuild", "vendor_management/VMR-vendor.json",
+])
 def test_interrupted_bootstrap_restore_finalizes_only_exact_committed_state(
-    monkeypatch, tmp_path,
+    monkeypatch, tmp_path, tampered_relative,
 ):
     exported, recovery_key, custody, _, _, _, _ = _source_snapshot(monkeypatch, tmp_path)
-    _select_home(monkeypatch, tmp_path / "target-home")
+    target = _select_home(monkeypatch, tmp_path / "target-home")
     recovery.configure_key(imported=recovery_key)
     imported = recovery.import_archive(exported)
     recovery.prepare_bootstrap(isolated=True, actor="admin-a", source_offline=True)
@@ -676,10 +679,51 @@ def test_interrupted_bootstrap_restore_finalizes_only_exact_committed_state(
     assert recovery.bootstrap_reconciliation_pending() is True
 
     monkeypatch.setattr(recovery, "_write_bootstrap", original)
+    changed = target.joinpath(*tampered_relative.split("/"))
+    committed_bytes = changed.read_bytes()
+    file_lock.atomic_write_bytes(changed, b"changed after signed publication")
+    with pytest.raises(recovery.RecoveryError, match="neither the signed empty state nor the exact staged state"):
+        recovery.resume_bootstrap_restore(isolated=True, actor="admin-a")
+    assert recovery._read_bootstrap(actor="admin-a")["state"] == "restore_pending"
+    file_lock.atomic_write_bytes(changed, committed_bytes)
     resumed = recovery.resume_bootstrap_restore(isolated=True, actor="admin-a")
     assert resumed["state"] == "reconciliation_required"
     assert resumed["outcome"] == "committed_state_verified"
     assert recovery.reconciliation_status(actor="admin-a")["unresolved"] == 2
+
+
+@pytest.mark.parametrize("relative,marker_relative", [
+    ("vendor_management/VMR-test.json", "vendor_management/.record-lookup-rebuild"),
+    ("flows/runs/test.json", "flows/.run-index-rebuild"),
+])
+@pytest.mark.parametrize("existing_marker", [False, True])
+def test_bootstrap_fingerprint_binds_actual_derived_marker_publication(
+    monkeypatch, tmp_path, relative, marker_relative, existing_marker,
+):
+    root = _select_home(monkeypatch, tmp_path / "target-home")
+    stage = file_lock.ensure_private_directory(tmp_path / "stage")
+    source = stage.joinpath(*relative.split("/"))
+    file_lock.ensure_private_directory(source.parent)
+    file_lock.atomic_create_text(source, '{"id":"synthetic-canonical-row"}')
+    staged_marker = stage.joinpath(*marker_relative.split("/"))
+    if existing_marker:
+        file_lock.ensure_private_directory(staged_marker.parent)
+        file_lock.atomic_create_text(staged_marker, "retained marker bytes\n")
+    signed_expected = recovery._staged_live_state(stage)
+    expected = {
+        path.relative_to(stage).as_posix(): (backup._sha256(path), path.stat().st_size)
+        for path in stage.rglob("*") if path.is_file()
+    }
+    key = b"k" * 32
+    with backup.recovery_scope(root, "acme", key):
+        backup._apply_transaction(root, stage, expected, key=key, replace_existing=True)
+    assert recovery._live_state() == signed_expected
+    marker = root.joinpath(*marker_relative.split("/"))
+    assert marker.read_bytes() == (
+        staged_marker.read_bytes() if existing_marker else backup._DERIVED_REBUILD_MARKER_BYTES
+    )
+    file_lock.atomic_write_text(marker, "tampered derived marker\n")
+    assert recovery._live_state() != signed_expected
 
 
 def test_interrupted_bootstrap_restore_rolls_exact_empty_state_back_to_prepared(

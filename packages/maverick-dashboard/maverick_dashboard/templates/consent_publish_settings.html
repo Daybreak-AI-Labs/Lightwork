@@ -1,217 +1,125 @@
 {% extends "base.html" %}
-{% block title %}Website Publish Settings - Lightwork{% endblock %}
-{% block head_extra %}
-<style nonce="{{ csp_style_nonce }}">
-  .publish-settings-shell {
-    --publish-glass: color-mix(in srgb, var(--panel, #111827) 74%, transparent);
-    --publish-line: color-mix(in srgb, var(--text, #f8fafc) 18%, transparent);
-    --publish-glow: color-mix(in srgb, var(--accent, #67e8f9) 25%, transparent);
-    display: grid;
-    gap: 1.2rem;
-  }
-  .publish-settings-hero,
-  .publish-settings-panel,
-  .publish-settings-boundary {
-    background: var(--publish-glass);
-    border: 1px solid var(--publish-line);
-    border-radius: 1.4rem;
-    box-shadow: 0 1.2rem 3.6rem color-mix(in srgb, #020617 32%, transparent),
-      inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
-    -webkit-backdrop-filter: blur(24px) saturate(150%);
-    backdrop-filter: blur(24px) saturate(150%);
-  }
-  .publish-settings-hero {
-    display: grid;
-    gap: .75rem;
-    padding: clamp(1.4rem, 3vw, 2.5rem);
-  }
-  .publish-settings-hero h1 { margin: 0; max-width: 19ch; }
-  .publish-settings-hero p { margin: 0; max-width: 74ch; }
-  .publish-settings-boundary,
-  .publish-settings-panel { padding: 1.15rem; }
-  .publish-settings-boundary { border-inline-start: .34rem solid var(--accent, #67e8f9); }
-  .publish-settings-grid {
-    border: 0;
-    display: grid;
-    gap: 1rem;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
-    margin: 0;
-    min-inline-size: 0;
-    padding: 0;
-  }
-  .publish-settings-panel { min-inline-size: 0; }
-  .publish-settings-form,
-  .publish-settings-form fieldset { display: grid; gap: .8rem; }
-  .publish-settings-form fieldset { border: 0; margin: 0; min-inline-size: 0; padding: 0; }
-  .publish-settings-row {
-    display: grid;
-    gap: .8rem;
-    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-  }
-  .publish-settings-checks {
-    display: grid;
-    gap: .5rem;
-    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-  }
-  .publish-settings-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
-  .publish-settings-output {
-    background: color-mix(in srgb, #020617 48%, transparent);
-    border: 1px solid var(--publish-line);
-    border-radius: 1rem;
-    max-block-size: 34rem;
-    min-block-size: 9rem;
-    overflow: auto;
-    padding: 1rem;
-    white-space: pre-wrap;
-  }
-  .publish-settings-status[data-state="failed"] { color: var(--danger, #fb7185); }
-  .publish-settings-status[data-state="ready"] { color: var(--success, #4ade80); }
-  .publish-settings-shell :focus-visible {
-    outline: .2rem solid var(--accent, #67e8f9);
-    outline-offset: .18rem;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .publish-settings-shell *, .publish-settings-shell *::before,
-    .publish-settings-shell *::after { transition-duration: .001ms !important; }
-  }
-  @media (forced-colors: active) {
-    .publish-settings-hero, .publish-settings-panel,
-    .publish-settings-boundary, .publish-settings-output {
-      border: 1px solid CanvasText; box-shadow: none;
-    }
-  }
-</style>
-{% endblock %}
+{% from "_hero.html" import hero %}
+{% block title %}Website Banner Settings · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
-<div class="publish-settings-shell" id="publish-settings-shell"
-      data-api-base="{{ api_base }}" data-copilot-page="/consent/publish-settings">
-  <header class="publish-settings-hero">
-    <p class="eyebrow">Consent publishing governance</p>
-    <h1>Website SDK publish settings</h1>
-    <p>Review and activate consent settings for your website SDK. Lightwork verifies the website and current consent publication before activation.</p>
-  </header>
+{% set ps_admin = publish_settings_can_admin %}
+{% set ps_audit = publish_settings_can_audit %}
+<div class="governance-workbench" id="publish-settings-shell"
+     data-api-base="{{ api_base }}" data-copilot-page="/consent/publish-settings"
+     data-sdk-version="{{ publish_settings_sdk_version | default('1.0.0') }}"
+     data-can-admin="{{ 'true' if ps_admin else 'false' }}" data-can-audit="{{ 'true' if ps_audit else 'false' }}">
+  {{ hero('Consent publishing', 'Website Banner Settings',
+          lede='Choose how the consent banner behaves on each website: which trackers it controls, when to ask people again, and how its cookie works. Settings are saved as versions, and you choose which version is live.') }}
+  {% include "_consent_nav.html" %}
+  {% if module_off %}{% from "_module_gate.html" import module_gate %}{{ module_gate("consent_preferences.publishing.web_settings", "Website banner settings", detail="Lets you publish and roll back the settings your website's consent banner uses.") }}{% endif %}
+  <p id="publish-settings-runtime-status" class="muted" role="status" aria-live="polite">Checking that website banner settings are available…</p>
+  {% if not ps_admin %}<p class="muted">Only an administrator can create or switch settings.</p>{% endif %}
 
-  <aside class="publish-settings-boundary" aria-labelledby="publish-settings-boundary-title">
-    <p class="eyebrow">Trust boundary</p>
-    <h2 id="publish-settings-boundary-title">Before activation</h2>
-    <ul>
-      <li>Property and publication revisions, digests, tenant, operator, retention, and custody are never browser inputs.</li>
-      <li>A CSP nonce requirement can be published; nonce values are never accepted, stored, or projected.</li>
-      <li>Publication drift, withdrawal, or a non-web property makes activation and public SDK projection fail closed.</li>
-      <li>Local integrity and recovery readiness do not prove browser behavior, live website installation, SDK delivery, or customer-property acceptance.</li>
-    </ul>
-  </aside>
+  <fieldset class="feature-gated-workbench" id="publish-settings-operations" disabled>
+    <legend class="sr-only">Website banner settings</legend>
 
-  <section class="publish-settings-panel" aria-labelledby="publish-settings-status-title">
-    <p class="eyebrow">Availability</p>
-    <h2 id="publish-settings-status-title">Service availability</h2>
-    <p id="publish-settings-runtime-status" class="publish-settings-status" role="status" aria-live="polite">Checking the server-owned publishing authority…</p>
-    <div class="publish-settings-actions">
-      <button class="btn" id="publish-settings-refresh-status" type="button">Refresh status</button>
-    </div>
-    <pre hidden class="publish-settings-output" id="publish-settings-status-output" tabindex="0"></pre>
-  </section>
+    <section class="panel" aria-labelledby="publish-settings-site-title">
+      <h2 id="publish-settings-site-title">Website</h2>
+      <label class="cw-toolbar">Website<select class="select" id="publish-settings-property-id"></select></label>
+      <p id="publish-settings-head" class="muted" role="status" aria-live="polite"></p>
+    </section>
 
-  <fieldset class="publish-settings-grid" id="publish-settings-operations" disabled>
-    <legend class="sr-only">Website publish-settings operations</legend>
+    <section class="panel" aria-labelledby="publish-settings-versions-title">
+      <div class="section-head">
+        <h2 id="publish-settings-versions-title">Settings versions</h2>
+        <div class="cw-actions">
+          <button class="btn btn--primary" id="publish-settings-new" type="button"{% if not ps_admin %} disabled{% endif %}>New settings</button>
+          <button class="btn btn--danger" id="publish-settings-withdraw" type="button" hidden{% if not ps_admin %} disabled{% endif %}>Turn settings off</button>
+        </div>
+      </div>
+      <div id="publish-settings-versions-table"><p class="muted">Choose a website to see its settings.</p></div>
+    </section>
 
-    <section class="publish-settings-panel" aria-labelledby="publish-settings-create-title">
-      <p class="eyebrow">Immutable version</p>
-      <h2 id="publish-settings-create-title">Create settings</h2>
-      <form class="publish-settings-form" id="publish-settings-create-form" autocomplete="off" novalidate>
-        <fieldset id="publish-settings-create-controls"{% if not publish_settings_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <label for="publish-settings-property-id">Web property reference</label>
-          <input class="input" id="publish-settings-property-id" name="property_id" maxlength="128" required>
-          <div class="publish-settings-row">
-            <div>
-              <label for="publish-settings-expected-revision">Expected settings head revision</label>
-              <input class="input" id="publish-settings-expected-revision" name="expected_head_revision" type="number" min="0" max="2147483647" step="1" value="0" required>
-            </div>
-            <div>
-              <label for="publish-settings-idempotency">Request reference (reuse when retrying)</label>
-              <input class="input" id="publish-settings-idempotency" name="idempotency_key" minlength="8" maxlength="192" required>
-            </div>
-          </div>
-          <label for="publish-settings-sdk-version">SDK version</label>
-          <input class="input" id="publish-settings-sdk-version" name="sdk_version" placeholder="2.4.1" maxlength="64" required>
-          <label for="publish-settings-geolocation">Per-geolocation reconsent</label>
-          <textarea class="input" id="publish-settings-geolocation" name="geolocation_reconsent" rows="3" maxlength="4096" placeholder="US=365&#10;CA-QC=180"></textarea>
-          <label for="publish-settings-assignments">Analytics tracker category assignments</label>
-          <textarea class="input" id="publish-settings-assignments" name="analytics_category_assignments" rows="3" maxlength="2048" placeholder="google_analytics=analytics"></textarea>
-          <fieldset>
-            <legend>Common trackers</legend>
-            <div class="publish-settings-checks">
-              {% for tracker in ["google_analytics", "google_tag_manager", "linkedin_insight", "meta_pixel", "microsoft_clarity", "tiktok_pixel"] %}
-              <label><input type="checkbox" name="common_trackers" value="{{ tracker }}"> {{ tracker | replace('_', ' ') }}</label>
+    <section class="panel cw-editor" id="publish-settings-create-panel" hidden aria-labelledby="publish-settings-create-title">
+      <h2 id="publish-settings-create-title">New settings</h2>
+      <form id="publish-settings-create-form" autocomplete="off" novalidate>
+        <fieldset class="cw-form" id="publish-settings-create-controls"{% if not ps_admin %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Settings</legend>
+          <label>Banner code version<select class="select" id="publish-settings-sdk-version" name="sdk_version"></select></label>
+          <input type="hidden" id="publish-settings-expected-revision" name="expected_head_revision" value="0">
+          <input type="hidden" id="publish-settings-idempotency" name="idempotency_key" data-auto-reference>
+
+          <fieldset class="cw-wide">
+            <legend>Trackers on this website</legend>
+            <p class="muted">Tick the trackers your website uses and choose what each one is for.</p>
+            <div id="publish-settings-trackers" class="cw-form">
+              {% for tracker, label in [("google_analytics", "Google Analytics"), ("google_tag_manager", "Google Tag Manager"), ("linkedin_insight", "LinkedIn Insight Tag"), ("meta_pixel", "Meta Pixel"), ("microsoft_clarity", "Microsoft Clarity"), ("tiktok_pixel", "TikTok Pixel")] %}
+              <div class="cw-row" data-tracker="{{ tracker }}">
+                <label><input type="checkbox" name="common_trackers" value="{{ tracker }}"> {{ label }}</label>
+                <label>Used for<select class="select" name="analytics_category_assignments" data-tracker="{{ tracker }}">
+                  <option value="">Not set</option><option value="analytics">Measuring visits</option><option value="advertising">Advertising</option>
+                  <option value="functional">Site features</option><option value="essential">Essential</option>
+                </select></label>
+              </div>
               {% endfor %}
             </div>
+            <label><input id="publish-settings-analytics-enabled" name="analytics_tracking_enabled" type="checkbox"> Turn on measuring visits for people who agree</label>
           </fieldset>
-          <label><input id="publish-settings-analytics-enabled" name="analytics_tracking_enabled" type="checkbox"> Enable analytics tracking</label>
-          <div class="publish-settings-row">
-            <div>
-              <label for="publish-settings-same-site">Cookie SameSite policy</label>
-              <select class="select" id="publish-settings-same-site" name="cookie_same_site"><option value="strict">Strict</option><option value="lax" selected>Lax</option><option value="none">None</option></select>
-            </div>
-            <div>
-              <label for="publish-settings-domain-separation">Cookie domain separation</label>
-              <select class="select" id="publish-settings-domain-separation" name="cookie_domain_separation"><option value="host_only">Host only</option><option value="property_domain">Property domain</option></select>
-            </div>
-          </div>
-          <label><input id="publish-settings-spa-reload" name="spa_reload_on_route_change" type="checkbox"> Reload consent state on SPA route changes</label>
-          <label><input id="publish-settings-csp-required" name="csp_nonce_required" type="checkbox"> Require the relying page to provide its runtime CSP nonce</label>
-          <label for="publish-settings-refresh-seconds">Automatic refresh seconds (blank disables)</label>
-          <input class="input" id="publish-settings-refresh-seconds" name="automatic_refresh_seconds" type="number" min="30" max="86400" step="1">
-          <button class="btn btn--primary" type="submit">Create immutable settings version</button>
-        </fieldset>
-      </form>
-      {% if not publish_settings_can_admin %}<p class="help">Administrator permission is required to create or activate settings.</p>{% endif %}
-    </section>
 
-    <section class="publish-settings-panel" aria-labelledby="publish-settings-lifecycle-title">
-      <p class="eyebrow">Version management</p>
-      <h2 id="publish-settings-lifecycle-title">Review or activate a version</h2>
-      <form class="publish-settings-form" id="publish-settings-lifecycle-form" autocomplete="off" novalidate>
-        <fieldset id="publish-settings-lifecycle-controls"{% if not publish_settings_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <label for="publish-settings-version-id">Settings version reference</label>
-          <input class="input" id="publish-settings-version-id" name="version_id" maxlength="128">
-          <label for="publish-settings-lifecycle-revision">Expected settings head revision</label>
-          <input class="input" id="publish-settings-lifecycle-revision" name="expected_head_revision" type="number" min="1" max="2147483647" step="1">
-          <label for="publish-settings-lifecycle-idempotency">Request reference (reuse when retrying)</label>
-          <input class="input" id="publish-settings-lifecycle-idempotency" name="idempotency_key" minlength="8" maxlength="192">
-          <div class="publish-settings-actions">
-            <button class="btn" id="publish-settings-load" type="button">Load property head</button>
-            <button class="btn btn--primary" id="publish-settings-activate" type="button">Activate version</button>
-            <button class="btn" id="publish-settings-rollback" type="button">Rollback to version</button>
-            <button class="btn btn--danger" id="publish-settings-withdraw" type="button">Withdraw settings</button>
+          <fieldset class="cw-wide">
+            <legend>Ask people again after a while</legend>
+            <div id="publish-settings-geolocation"></div>
+            <button class="btn" id="publish-settings-geo-add" type="button">Add a region</button>
+          </fieldset>
+
+          <fieldset class="cw-wide">
+            <legend>How the banner works on your site</legend>
+            <label><input id="publish-settings-spa-reload" name="spa_reload_on_route_change" type="checkbox"> My site changes pages without reloading (a single-page app)</label>
+            <label>Check for updated choices<select class="select" id="publish-settings-refresh-seconds" name="automatic_refresh_seconds">
+              <option value="">Only when a page loads</option><option value="300">Every 5 minutes</option><option value="3600">Every hour</option><option value="86400">Once a day</option>
+            </select></label>
+          </fieldset>
+
+          <details class="governance-details cw-wide">
+            <summary>Advanced cookie and security options</summary>
+            <div class="cw-form">
+              <label>When browsers send the consent cookie<select class="select" id="publish-settings-same-site" name="cookie_same_site">
+                <option value="lax" selected>Normal (recommended)</option><option value="strict">Only on this site</option><option value="none">Also from other sites</option>
+              </select></label>
+              <label>Share choices across<select class="select" id="publish-settings-domain-separation" name="cookie_domain_separation">
+                <option value="host_only">This exact address only</option><option value="property_domain">All addresses of this website</option>
+              </select></label>
+              <label class="cw-wide"><input id="publish-settings-csp-required" name="csp_nonce_required" type="checkbox"> My site uses a strict content security policy and gives the banner a one-time code on each page</label>
+            </div>
+          </details>
+          <div class="cw-actions">
+            <button class="btn btn--primary" type="submit">Save as a new version</button>
+            <button class="btn btn--ghost" id="publish-settings-cancel" type="button">Cancel</button>
           </div>
         </fieldset>
       </form>
     </section>
 
-    <section class="publish-settings-panel" aria-labelledby="publish-settings-audit-title">
-      <p class="eyebrow">Evidence</p>
-      <h2 id="publish-settings-audit-title">History, integrity, recovery</h2>
-      <fieldset id="publish-settings-audit-controls"{% if not publish_settings_can_audit %} disabled aria-disabled="true"{% endif %}>
-        <legend class="sr-only">Publish-settings audit operations</legend>
-        <div class="publish-settings-actions">
-          <button class="btn" id="publish-settings-versions" type="button">List versions</button>
-          <button class="btn" id="publish-settings-history" type="button">Audit history</button>
-          <button class="btn" id="publish-settings-integrity" type="button">Verify integrity</button>
-          <button class="btn" id="publish-settings-recovery" type="button">Recovery readiness</button>
-        </div>
+    <section class="panel" aria-labelledby="publish-settings-audit-title">
+      <h2 id="publish-settings-audit-title">History</h2>
+      <fieldset id="publish-settings-audit-controls" class="cw-actions"{% if not ps_audit %} disabled aria-disabled="true"{% endif %}>
+        <legend class="sr-only">Settings history checks</legend>
+        <button class="btn" id="publish-settings-integrity" type="button">Check history is intact</button>
+        <button class="btn" id="publish-settings-recovery" type="button">Check backups are ready</button>
       </fieldset>
-    </section>
-
-    <section class="publish-settings-panel" aria-labelledby="publish-settings-output-title">
-      <p class="eyebrow">Governed result</p>
-      <h2 id="publish-settings-output-title">Operation output</h2>
-      <p id="publish-settings-operation-status" class="publish-settings-status" role="status" aria-live="polite">No operation has run.</p>
-      <pre class="publish-settings-output" id="publish-settings-operation-output" tabindex="0"></pre>
+      <p id="publish-settings-operation-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="publish-settings-history-table"></div>
+      {% if not ps_audit %}<p class="muted">You need audit access to see the history.</p>{% endif %}
+      <details class="governance-details">
+        <summary>About this page’s safeguards</summary>
+        <ul>
+          <li>Settings are tied to the banner version that is published. If the banner is withdrawn or changed, these settings stop being used until you save them again.</li>
+          <li>Lightwork never asks for or stores your site’s one-time security codes.</li>
+          <li>Saved versions cannot be changed; switching versions is recorded in the history.</li>
+        </ul>
+      </details>
     </section>
   </fieldset>
-  <noscript><p class="publish-settings-boundary">Enable JavaScript to use these controls.</p></noscript>
+  <noscript><p class="muted">Turn on JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}
+<script src="/static/lightwork-consent-workbench.js" defer></script>
 <script src="/static/lightwork-consent-publish-settings.js" defer></script>
 {% endblock %}

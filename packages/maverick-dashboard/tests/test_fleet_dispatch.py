@@ -11,6 +11,7 @@ stub so no real goal runs.
 """
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
 
@@ -137,7 +138,7 @@ def test_authenticated_owner_can_observe_real_principal_bound_fleet_run(
 
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", _Sandbox)
-    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kw: object())
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kw: budget_mod.Budget())
     monkeypatch.setattr(trace_pin, "pin_trace", lambda *_a, **_kw: None)
     monkeypatch.setattr(orchestrator, "run_goal_sync", _finish_without_provider)
 
@@ -219,6 +220,22 @@ def test_dispatch_preserves_explicit_zero_budget(monkeypatch, tmp_path):
     assert calls[0]["kwargs"]["max_dollars"] == 0.0
 
 
+@pytest.mark.parametrize("ceiling,expected", [(None, 10_000.0), (25.0, 25.0), (0.0, 0.0)])
+def test_dispatch_uses_only_configured_budget_ceiling(monkeypatch, tmp_path, ceiling, expected):
+    _isolate(monkeypatch, tmp_path)
+    _save_fleet()
+    calls = _stub_runner(monkeypatch)
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "configured_max_dollars", lambda: ceiling)
+    response = _client().post("/api/v1/fleets/acme/run", json={
+        "agent": "coder", "prompt": "run the authorized work", "max_dollars": 10_000.0,
+    })
+    assert response.status_code == 201, response.text
+    assert len(calls) == 1
+    assert calls[0]["kwargs"]["max_dollars"] == expected
+
+
 def test_dispatch_unknown_agent_404(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
@@ -262,7 +279,7 @@ def test_fleets_page_has_run_form(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
     text = _client().get("/fleets").text
-    assert 'class="fleet-run-form"' in text
+    assert 'class="fleet-run-form' in text
     assert "/api/v1/fleets/" in text  # the dispatch target
 
 

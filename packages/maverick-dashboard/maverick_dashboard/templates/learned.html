@@ -1,78 +1,86 @@
 {% extends "base.html" %}
 {% block title %}Learned · Lightwork{% endblock %}
 {% block content %}
+  {% set kind_labels = {'tool': 'Tool', 'skill': 'Skill', 'mcp_server': 'Tool connection',
+                        'integration': 'Integration', 'connector': 'Connection'} %}
+  {% set outcome_labels = {'acquired': 'Added', 'failed': 'Failed', 'denied': 'Not allowed',
+                           'blocked': 'Blocked', 'skipped': 'Skipped'} %}
   {% from "_hero.html" import hero, state %}
   {% call hero('Self-improving workforce', 'Learned',
-               subtitle='Capabilities & guidance',
-               lede='What Lightwork taught itself — skills, tools, and
-                     integrations picked up mid-run, working guidance
-                     distilled from its own mistakes, and the tools it built
-                     for itself. Everything here comes from the tamper-evident
-                     record kept on this server.') %}
+               subtitle='Skills and lessons',
+               lede='What Lightwork taught itself: skills and tools it picked up while working, lessons it
+                     learned from its own mistakes, and tools it wrote for itself. Anything here can be removed.') %}
     {{ state('Current state',
-             learned | length ~ ' learned capabilit' ~ ('y' if learned | length == 1 else 'ies') ~ ' on record',
-             badge='self-harness on' if harness_enabled else 'self-harness off',
+             learned | length ~ ' learned skill' ~ ('' if learned | length == 1 else 's') ~ ' and tool' ~ ('' if learned | length == 1 else 's') ~ ' on record',
+             badge='Self-coaching on' if harness_enabled else 'Self-coaching off',
              badge_class='ok' if harness_enabled else 'idle',
-             copy='Self-learning is off by default — switch it on from the
-                   <a href="/learning">Learning</a> page. Any guidance line or
-                   generated tool can be rolled back from this page.') }}
+             copy='Self-learning is switched on or off on the <a href="/learning">Learning</a> page.') }}
   {% endcall %}
+  <p id="gt-msg" role="status" aria-live="polite" class="muted"></p>
 
-  <div class="section-head"><h2>Learned capabilities</h2></div>
+  <div class="section-head"><h2>Learned skills and tools</h2></div>
   <div class="panel">
     {% if learned %}
       <table>
         <thead><tr>
-          <th scope="col">kind</th><th scope="col">name</th>
-          <th scope="col">need</th><th scope="col">when</th>
-          <th scope="col">outcome</th>
+          <th scope="col">Kind</th><th scope="col">Name</th>
+          <th scope="col">Why it was needed</th><th scope="col">When</th>
+          <th scope="col">Result</th>
         </tr></thead>
         <tbody>
         {% for e in learned %}
           <tr>
-            <td><span class="badge">{{ e.kind }}</span></td>
-            <td><code>{{ e.name }}</code></td>
+            <td><span class="badge">{{ kind_labels.get(e.kind) or (e.kind | humanize) }}</span></td>
+            <td>{{ e.name | humanize }}</td>
             <td class="muted">{{ e.need }}</td>
             <td>{{ e.ts | datetime }}</td>
             <td>
-              {% if e.outcome == 'acquired' %}<span class="badge active">{{ e.outcome }}</span>
-              {% else %}<span class="badge blocked">{{ e.outcome }}</span>{% endif %}
+              {% if e.outcome == 'acquired' %}<span class="badge active">{{ outcome_labels[e.outcome] }}</span>
+              {% else %}<span class="badge blocked">{{ outcome_labels.get(e.outcome) or (e.outcome | humanize) }}</span>{% endif %}
             </td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="muted" id="no-learned">Nothing learned yet.</p>
+      <p class="muted" id="no-learned">Nothing learned yet. Lightwork picks up skills and tools as it works once self-learning is on.</p>
+      <p><a class="btn btn--ghost" href="/learning">Turn on self-learning</a></p>
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Self-harness guidance</h2></div>
+  <div class="section-head"><h2>Lessons Lightwork taught itself</h2></div>
   <div class="panel" id="harness-guidance">
     <p class="muted">
-      Working guidance Lightwork learned from its own recurring mistakes —
-      reminders it now gives itself before doing similar work. Any line can
-      be rolled back.
-      {% if harness and not harness_enabled %}
-        <strong>Self-harness is OFF</strong> — this guidance is stored but
-        <em>not</em> used until self-harness is switched on from the
-        <a href="/learning">Learning</a> page.
-      {% endif %}
+      Reminders Lightwork now gives itself before similar work, learned from its own repeated mistakes.
+      Any lesson can be removed.
     </p>
-    {% if transfer_memory and transfer_memory.pairs %}
-      <p class="muted">transfer memory: {{ transfer_memory.pairs }} (target, line) pair{{ '' if transfer_memory.pairs == 1 else 's' }} judged{% if transfer_memory.last_judged_at %} · last {{ transfer_memory.last_judged_at | datetime }}{% endif %}</p>
+    {% if harness and not harness_enabled %}
+      <p><strong>Self-coaching is off.</strong> These lessons are kept but not used until it is switched on on the
+        <a href="/learning">Learning</a> page.</p>
+    {% endif %}
+    {% if can_manage and harness %}
+    <div class="lnd-row">
+      <label for="lnd-retire-days">Remove lessons not confirmed in the last</label>
+      <select id="lnd-retire-days" class="select">
+        <option value="30">30 days</option>
+        <option value="90" selected>90 days</option>
+        <option value="180">6 months</option>
+        <option value="365">1 year</option>
+      </select>
+      <button type="button" class="btn btn--ghost" id="lnd-retire">Remove old lessons</button>
+    </div>
     {% endif %}
     {% for key, count in pending_corpus | dictsort %}
       {% set items = pending_items.get(key, []) %}
-      <p class="badge info" style="display:inline-block">📥 <code>{{ key }}</code>: {{ count }} harvested corpus candidate{{ '' if count == 1 else 's' }} awaiting review</p>
+      <p class="badge info lnd-badge">{{ count }} suggested test case{{ '' if count == 1 else 's' }} for {{ key | model_label }} waiting for review</p>
       {% if items %}
         <ul class="pending-corpus" data-key="{{ key }}">
         {% for c in items %}
           <li>
             {{ c.goal }}
-            <span class="muted">(expected: {{ c.expected }})</span>
-            <button type="button" class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="accept">Accept</button>
-            <button type="button" class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="reject">Reject</button>
+            <span class="muted">(the right result: {{ c.expected }})</span>
+            <button type="button" class="btn btn--ghost pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="accept">Keep as a test case</button>
+            <button type="button" class="btn btn--ghost pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="reject">Discard</button>
           </li>
         {% endfor %}
         </ul>
@@ -80,137 +88,168 @@
     {% endfor %}
     {% if harness %}
       {% for h in harness %}
-        <h3><code>{{ h.model_id }}</code> <span class="muted">({{ h.lines | length }} line{{ '' if h.lines | length == 1 else 's' }})</span></h3>
+        <div class="lnd-model">
+        <h3>{{ h.model_id | model_label }} <span class="muted">({{ h.lines | length }} lesson{{ '' if h.lines | length == 1 else 's' }})</span></h3>
         {% if h.conflicts %}
-          <p class="badge blocked" style="display:inline-block">⚔ {{ h.conflicts | length }} possible conflict{{ '' if h.conflicts | length == 1 else 's' }} flagged for review</p>
+          <p class="badge blocked lnd-badge">{{ h.conflicts | length }} pair{{ '' if h.conflicts | length == 1 else 's' }} of lessons may contradict each other</p>
+          <details>
+            <summary>Show lessons that may contradict each other</summary>
+            <ul>
+            {% for pair in h.conflicts %}<li>“{{ pair[0] }}” and “{{ pair[1] }}”</li>{% endfor %}
+            </ul>
+            <p class="muted">Remove whichever lesson is wrong from the list below.</p>
+          </details>
         {% endif %}
-        <ul>
+        {% if can_manage and (h.provenance | selectattr('canary') | list) %}
+          <p><button type="button" class="btn btn--ghost lnd-probation" data-model="{{ h.model_id }}">Decide lessons on trial now</button>
+            <span class="muted">Keeps lessons that worked and removes ones that did not.</span></p>
+        {% endif %}
+        <ul class="lnd-lines">
         {% for rec in h.provenance %}
           <li>{{ rec.text }}
-            {% if rec.domain %}<span class="badge" style="display:inline-block">{{ rec.domain }}</span>{% endif %}
-            {% if rec.canary %}<span class="badge info" style="display:inline-block" title="recently learned — on probation until it proves itself">🐤 canary</span>{% endif %}
+            {% if rec.domain %}<span class="badge lnd-badge">{{ rec.domain | humanize }}</span>{% endif %}
+            {% if rec.canary %}<span class="badge info lnd-badge" title="Recently learned: on trial until it proves itself">On trial</span>{% endif %}
             {% if rec.signature %}
-              <br><span class="muted">why: {{ rec.signature }}{% if rec.held_out_delta is not none and rec.samples %} · held-out {{ '%+.3g' | format(rec.held_out_delta) }} over {{ rec.samples }} samples{% endif %}{% if rec.last_recalled_at %} · in use{% endif %}</span>
+              <br><span class="muted">Learned from: {{ rec.signature }}{% if rec.held_out_delta is not none and rec.samples %} · in testing it changed results by {{ '%+.0f' | format(rec.held_out_delta * 100) }} points over {{ rec.samples }} tries{% endif %}{% if rec.last_recalled_at %} · in use{% endif %}</span>
             {% endif %}
             {% if rec.rate is defined and rec.rate is not none %}
-              <br><span class="muted">outcomes: {{ rec.success }}✓ / {{ rec.failure }}✗ · {{ '%.0f%%' | format(rec.rate * 100) }} success{% if rec.recent_rate is defined and rec.recent_rate is not none %} · recent {{ rec.recent_success }}✓/{{ rec.recent_failure }}✗ ({{ '%.0f%%' | format(rec.recent_rate * 100) }}){% endif %}</span>
+              <br><span class="muted">Used {{ rec.success + rec.failure }} time{{ '' if (rec.success + rec.failure) == 1 else 's' }}: {{ rec.success }} went well, {{ rec.failure }} did not ({{ '%.0f%%' | format(rec.rate * 100) }} success){% if rec.recent_rate is defined and rec.recent_rate is not none %} · lately {{ rec.recent_success }} went well, {{ rec.recent_failure }} did not ({{ '%.0f%%' | format(rec.recent_rate * 100) }}){% endif %}</span>
+            {% endif %}
+            {% if can_manage %}
+              <br><button type="button" class="btn btn--ghost lnd-remove" data-model="{{ h.model_id }}" data-line="{{ rec.text }}" data-domain="{{ rec.domain or '' }}">Remove this lesson</button>
             {% endif %}
           </li>
         {% else %}
           {% for ln in h.lines %}<li>{{ ln }}</li>{% endfor %}
         {% endfor %}
         </ul>
+        </div>
       {% endfor %}
     {% else %}
-      <p class="muted" id="no-harness">No self-harness guidance learned.</p>
+      <p class="muted" id="no-harness">No lessons learned yet.</p>
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Generated tools</h2></div>
+  <div class="section-head"><h2>Tools Lightwork wrote for itself</h2></div>
   <div class="panel" id="generated-tools">
-    <p class="muted">
-      Tools Lightwork wrote for itself. Remove pulls a misbehaving tool —
-      it's deleted and won't load on the next run.
-    </p>
+    <p class="muted">Remove a tool that misbehaves. It is deleted and will not be used again.</p>
     {% if generated_tools %}
       <table>
-        <thead><tr><th scope="col">file</th><th scope="col">action</th></tr></thead>
+        <thead><tr><th scope="col">Tool</th><th scope="col">Actions</th></tr></thead>
         <tbody>
         {% for f in generated_tools %}
+          {% set tool_name = (f[:-3] if f.endswith('.py') else f) %}
+          {% set tool_name = (tool_name[4:] if tool_name.startswith('gen_') else tool_name) | humanize %}
           <tr data-name="{{ f }}">
-            <td><code>{{ f }}</code></td>
-            <td><button type="button" class="gt-remove" data-name="{{ f }}" aria-label="Remove generated tool {{ f }}">Remove</button></td>
+            <td>{{ tool_name }}</td>
+            <td>{% if can_remove_tools %}<button type="button" class="btn btn--danger gt-remove" data-name="{{ f }}" data-label="{{ tool_name }}" aria-label="Remove {{ tool_name }}">Remove</button>{% else %}<span class="muted">Administrators can remove tools.</span>{% endif %}</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="muted" id="no-generated">No generated tools.</p>
+      <p class="muted" id="no-generated">No tools written yet.</p>
     {% endif %}
   </div>
 
-  <p id="gt-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em;"></p>
+  {% include "_learning_loop.html" %}
+  {% include "_learned_ops.html" %}
 
   <style>
-    button.gt-remove { padding: 0.35rem 0.85rem; background: var(--surface-1); color: var(--danger); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
-    button.gt-remove:hover { border-color: var(--danger); }
-    button.gt-remove[disabled] { opacity: 0.6; cursor: not-allowed; }
-    button.pc-resolve { padding: 0.2rem 0.6rem; margin-left: 0.35rem; background: var(--surface-1); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
-    button.pc-resolve:hover { border-color: var(--accent); }
-    button.pc-resolve[disabled] { opacity: 0.6; cursor: not-allowed; }
+    .lnd-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: .5rem 0 1rem; }
+    .lnd-badge { display: inline-block; }
+    .lnd-lines li { margin-bottom: .6rem; }
+    .lnd-model { margin-top: var(--space-4); }
   </style>
 
   <script>
-    (function() {
-      // Staged-candidate review: one verdict per click, then a full reload --
-      // pending indexes are positional and REBASE after every resolution, so
-      // surgically removing rows would desynchronize the remaining buttons.
-      document.querySelectorAll('button.pc-resolve').forEach(function(btn) {
-        btn.addEventListener('click', async function() {
-          const verdict = btn.dataset.verdict;
+    (function () {
+      var msg = document.getElementById('gt-msg');
+      function say(text) { if (msg) msg.textContent = text; }
+      async function post(url, body, action) {
+        try {
+          var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {}) });
+          if (!r.ok) {
+            var j = await r.json().catch(function () { return {}; });
+            say(r.status === 404 && typeof j.detail === 'string' ? j.detail : window.mvErrorText(r, action));
+            return null;
+          }
+          return await r.json().catch(function () { return {}; });
+        } catch (e) { say(window.mvErrorText(e, action)); return null; }
+      }
+
+      // Suggested test cases: one decision per click, then reload -- positions
+      // renumber after every decision.
+      document.querySelectorAll('button.pc-resolve').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          var verdict = btn.dataset.verdict;
           if (!(await mvConfirm(verdict === 'accept'
-              ? 'Merge this candidate into the LIVE eval corpus?'
-              : 'Reject this candidate? (It will never be re-staged.)',
-              { okText: verdict === 'accept' ? 'Merge it' : 'Reject it' }))) return;
-          btn.closest('ul').querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-          const body = { key: btn.dataset.key };
+              ? 'Keep this as a test case Lightwork must keep passing?'
+              : 'Discard this suggested test case? It will not be suggested again.',
+              { okText: verdict === 'accept' ? 'Keep it' : 'Discard it' }))) return;
+          var list = btn.closest('ul');
+          list.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+          var body = { key: btn.dataset.key };
           body[verdict] = [parseInt(btn.dataset.index, 10)];
-          function reenable() {
-            btn.closest('ul').querySelectorAll('button').forEach(function(b) { b.disabled = false; });
-          }
-          try {
-            const r = await fetch('/api/v1/harness-corpus/review', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body),
-            });
-            if (!r.ok) {
-              const j = await r.json().catch(function() { return {}; });
-              mvToast(j.detail || ('Failed: ' + r.status), { error: true });
-              reenable();
-              return;
-            }
-          } catch (e) {
-            mvToast('Network error — could not save your review', { error: true });
-            reenable();
-            return;
-          }
-          // Reload only on success — pending indexes rebase after a resolution.
-          location.reload();
+          var out = await post('/api/v1/harness-corpus/review', body, 'save your decision');
+          if (out) { location.reload(); return; }
+          list.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
         });
       });
-    })();
 
-    (function() {
-      const msg = document.getElementById('gt-msg');
-      document.querySelectorAll('button.gt-remove').forEach(function(btn) {
-        btn.addEventListener('click', async function() {
-          const name = btn.dataset.name;
-          if (!(await mvConfirm('Remove generated tool ' + name + '?', { okText: 'Remove tool' }))) return;
+      document.querySelectorAll('button.lnd-remove').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          if (!(await mvConfirm('Remove this lesson? Lightwork stops using it right away.', { okText: 'Remove lesson' }))) return;
           btn.disabled = true;
-          msg.style.color = 'var(--muted)';
-          msg.textContent = 'Removing ' + name + '…';
+          var out = await post('/api/v1/learned/guidance/remove', { model_id: btn.dataset.model,
+            line: btn.dataset.line, domain: btn.dataset.domain || null }, 'remove the lesson');
+          if (out) { var li = btn.closest('li'); if (li) li.remove(); say('Lesson removed.'); }
+          else { btn.disabled = false; }
+        });
+      });
+
+      document.querySelectorAll('button.lnd-probation').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          if (!(await mvConfirm('Decide the lessons on trial now? Lessons that worked are kept; lessons that failed are removed.', { okText: 'Decide now' }))) return;
+          btn.disabled = true;
+          var out = await post('/api/v1/learned/guidance/probation-review', { model_id: btn.dataset.model }, 'decide the lessons on trial');
+          if (out) { say('Kept ' + out.kept + ', removed ' + out.removed + '. Refreshing…'); setTimeout(function () { location.reload(); }, 800); }
+          else { btn.disabled = false; }
+        });
+      });
+
+      var retire = document.getElementById('lnd-retire');
+      if (retire) retire.addEventListener('click', async function () {
+        var sel = document.getElementById('lnd-retire-days');
+        var label = sel.options[sel.selectedIndex].textContent;
+        if (!(await mvConfirm('Remove every lesson not confirmed in the last ' + label + '?', { okText: 'Remove old lessons' }))) return;
+        retire.disabled = true;
+        var out = await post('/api/v1/learned/guidance/retire', { older_than_days: Number(sel.value) }, 'remove old lessons');
+        retire.disabled = false;
+        if (out) { say(out.retired ? 'Removed ' + out.retired + (out.retired === 1 ? ' lesson.' : ' lessons.') + ' Refreshing…' : 'No lessons were old enough to remove.');
+          if (out.retired) setTimeout(function () { location.reload(); }, 800); }
+      });
+
+      document.querySelectorAll('button.gt-remove').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          var label = btn.dataset.label || 'this tool';
+          if (!(await mvConfirm('Remove the tool “' + label + '”? It is deleted and will not be used again.', { okText: 'Remove tool' }))) return;
+          btn.disabled = true;
+          say('Removing ' + label + '…');
           try {
-            const r = await fetch('/api/v1/generated-tools/' + encodeURIComponent(name), {
-              method: 'DELETE',
-            });
+            var r = await fetch('/api/v1/generated-tools/' + encodeURIComponent(btn.dataset.name), { method: 'DELETE' });
             if (r.ok || r.status === 204) {
-              msg.style.color = 'var(--accent)';
-              msg.textContent = name + ' removed. Gone on the next run.';
-              // Drop the row in place (keeps scroll position) instead of
-              // a full reload — mirrors permissions.html.
-              const row = btn.closest('tr');
+              say(label + ' removed.');
+              var row = btn.closest('tr');
               if (row) row.remove();
             } else {
-              const j = await r.json().catch(function() { return {}; });
               btn.disabled = false;
-              msg.style.color = 'var(--danger)';
-              msg.textContent = (j.detail || ('Failed: ' + r.status));
+              say(window.mvErrorText(r, 'remove the tool'));
             }
           } catch (e) {
             btn.disabled = false;
-            msg.style.color = 'var(--danger)';
-            msg.textContent = String(e);
+            say(window.mvErrorText(e, 'remove the tool'));
           }
         });
       });

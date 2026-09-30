@@ -49,12 +49,12 @@ def test_recorded_run_shows_up_with_goal_title_and_status(monkeypatch, tmp_path)
     r = _client().get("/fleets")
     assert r.status_code == 200
     text = r.text
-    assert "recent runs" in text.lower()
-    # The agent, goal id, title, and status all render.
-    assert "researcher" in text
-    assert f"#{gid}" in text
+    assert "recent tasks" in text.lower()
+    # The agent, a link to the task, its title, and status all render.
+    assert "Researcher" in text
+    assert f'href="/chat/goal/{gid}"' in text
     assert "Summarize the Q3 board deck" in text
-    assert "done" in text
+    assert "Done" in text
 
 
 def test_empty_state_when_no_runs(monkeypatch, tmp_path):
@@ -62,7 +62,7 @@ def test_empty_state_when_no_runs(monkeypatch, tmp_path):
     _save_fleet()
     r = _client().get("/fleets")
     assert r.status_code == 200
-    assert "No runs yet" in r.text
+    assert "No tasks yet" in r.text
 
 
 def test_runs_are_newest_first_and_capped(monkeypatch, tmp_path):
@@ -97,7 +97,7 @@ def test_missing_goal_renders_fail_soft(monkeypatch, tmp_path):
     r = _client().get("/fleets")
     assert r.status_code == 200
     text = r.text
-    assert "#999999" in text
+    assert 'href="/chat/goal/999999"' in text
     assert "missing" in text
 
 

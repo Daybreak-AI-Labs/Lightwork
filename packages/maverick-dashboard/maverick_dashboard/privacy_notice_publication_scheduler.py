@@ -462,16 +462,18 @@ class PrivacyNoticePublicationScheduler:
             self._thread.start()
         return True
 
-    def stop(self, *, timeout: float = 5.0) -> bool:
+    def stop(self, *, timeout: float = 5.0, wait: bool = True) -> bool:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
             raise ValueError("scheduler stop timeout is invalid")
-        wait = max(0.0, min(float(timeout), 30.0))
+        wait_seconds = max(0.0, min(float(timeout), 30.0))
         self._stop.set()
         with self._state_lock:
             worker = self._thread
         if worker is None:
             return False
-        worker.join(wait)
+        if not wait:
+            return False
+        worker.join(wait_seconds)
         if worker.is_alive():
             return False
         with self._state_lock:

@@ -10,7 +10,6 @@
     "packages/maverick-core/maverick/hindsight.py::write_ledger",
     "packages/maverick-core/maverick/intake.py::ingest_docs",
     "packages/maverick-core/maverick/safety/canaries.py::check",
-    "packages/maverick-core/maverick/safety/consent.py::_emit",
     "packages/maverick-core/maverick/self_harness.py::forget_addendum",
     "packages/maverick-core/maverick/self_harness.py::retire_stale",
     "packages/maverick-core/maverick/self_harness.py::review_relapses",

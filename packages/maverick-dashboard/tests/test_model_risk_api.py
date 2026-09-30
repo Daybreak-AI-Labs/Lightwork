@@ -1446,6 +1446,58 @@ def test_ai_literacy_http_lifecycle_is_tenant_bound(monkeypatch):
     assert next(item for item in calls if item[0] == "upsert")[2]["actor"] == "local:dashboard"
 
 
+def test_ai_literacy_employee_numbers_are_bounded_like_the_export(monkeypatch):
+    from maverick import ai_literacy
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    looked_up = []
+
+    class Register:
+        def compute_gaps(self, person_id, **_kwargs):
+            looked_up.append(person_id)
+            return {"summary": {}}
+
+    monkeypatch.setattr(ai_literacy, "enabled", lambda: True)
+    monkeypatch.setattr(ai_literacy, "default_register", Register())
+    base = "/api/v1/security/assurance/ai-literacy/people"
+
+    assert client.get(f"{base}/{'7' * 129}/status").status_code == 422
+    assert client.get(f"{base}/{'7' * 129}/assignment").status_code == 422
+    assert client.get(f"{base}/{'7' * 129}/receipts").status_code == 422
+    assert client.put(f"{base}/{'7' * 129}/assignment", json={
+        "role_ids": [], "system_ids": [], "expected_revision": 0, "idempotency_key": "one",
+    }).status_code == 422
+    assert looked_up == []
+    _ok(client.get(f"{base}/{'7' * 128}/status"))
+    assert looked_up == ["7" * 128]
+
+
+@pytest.mark.parametrize(
+    ("reference", "status"),
+    [
+        ("has spaces", 422),
+        ("-starts-with-a-dash", 422),
+        ("x" * 129, 422),
+        ("line\nbreak", 422),
+        # A well-formed reference passes the form check and reaches the
+        # workspace check (no workspace is active here).
+        ("DE-2026/0042", 409),
+        ("x" * 128, 409),
+    ],
+)
+def test_article_73_filing_reference_is_checked_like_the_register(reference, status):
+    response = client.post(
+        "/api/v1/security/assurance/eu-ai-incidents/A73-one/reports/A73R-one/submission",
+        json={
+            "expected_revision": 4,
+            "submission_reference": reference,
+            "receipt_sha256": "b" * 64,
+        },
+    )
+
+    assert response.status_code == status, response.text
+
+
 def test_ai_business_intake_http_resume_and_submit(monkeypatch):
     from maverick import ai_business_intake as intake
 
@@ -1666,6 +1718,29 @@ def test_ai_cost_roi_http_batch_reports_and_assumptions(monkeypatch):
     invalid_correction["batch_id"] = "correction-one"
     response = client.post(f"{base}/corrections", json=invalid_correction)
     assert response.status_code == 422
+
+
+def test_ai_cost_report_requires_one_scenario_and_never_adds_alternatives(monkeypatch):
+    from maverick import ai_cost_roi as cost
+
+    monkeypatch.setenv("MAVERICK_TENANT", "roi-scenarios")
+    monkeypatch.setattr(cost, "enabled", lambda: True)
+    base = "/api/v1/security/assurance/ai-cost-roi"
+    period = {"period_start": "2026-08-01T00:00:00Z", "period_end": "2026-09-01T00:00:00Z"}
+    for scenario, amount in (("optimistic", "100"), ("pessimistic", "10")):
+        _ok(client.put(f"{base}/roi-assumptions/{scenario}", json={
+            **period, "scope_kind": "portfolio", "scope_id": "", "currency": "USD",
+            "assumed_benefit": amount, "methodology": "Operator planning estimate.",
+            "rationale": "Alternative scenarios, not additive measured results.",
+            "citations": [{"uri": "urn:lightwork:assumption:" + scenario, "sha256": "d" * 64}],
+            "idempotency_key": scenario, "expected_revision": 0,
+        }))
+    ambiguous = client.get(f"{base}/portfolio", params=period)
+    assert ambiguous.status_code == 422, ambiguous.text
+    assert "select a scenario" in ambiguous.json()["detail"]
+    selected = _ok(client.get(f"{base}/portfolio", params={**period, "scenario": "pessimistic"}))
+    assert selected["currencies"][0]["assumed_benefit"] == "10"
+    assert selected["currencies"][0]["assumption_bindings"][0]["scenario"] == "pessimistic"
 
 
 def test_ai_cost_collector_status_and_manual_collection_are_human_bound(monkeypatch):

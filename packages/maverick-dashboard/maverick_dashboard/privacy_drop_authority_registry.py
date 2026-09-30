@@ -1391,6 +1391,42 @@ class DROPAuthorityRegistry:
             projections.append(projection)
         return tuple(projections)
 
+    def list_record_details(self, *, limit: int = 250) -> tuple[Mapping[str, object], ...]:
+        """Current imported DROP records with the closed request details a
+        person needs to start or follow a request. No subject or broker
+        digests are returned."""
+
+        self._gate()
+        bounded = _integer(limit, "limit", 1, 250)
+        now = self._now()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM drop_registry_versions current WHERE tenant_id=? AND kind='record' "
+                "AND version=(SELECT MAX(version) FROM drop_registry_versions latest "
+                "WHERE latest.tenant_id=current.tenant_id AND latest.kind=current.kind "
+                "AND latest.object_key=current.object_key) ORDER BY object_key LIMIT ?",
+                (self.tenant_id, bounded),
+            ).fetchall()
+        details: list[Mapping[str, object]] = []
+        for row in rows:
+            payload = self._row_payload(row)
+            authority = self._record(payload)
+            details.append(
+                {
+                    "drop_id": authority.drop_id,
+                    "request_type": authority.request_type,
+                    "template_id": authority.template_id,
+                    "language": authority.language,
+                    "valid_until": authority.valid_until,
+                    "version": payload["version"],
+                    "state": payload["state"],
+                    "usable": payload["state"] == "active"
+                    and authority.valid_until > now
+                    and float(payload["retained_until"]) > now,
+                }
+            )
+        return tuple(details)
+
     def revision_history(
         self,
         *,

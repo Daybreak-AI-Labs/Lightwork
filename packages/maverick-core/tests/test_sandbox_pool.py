@@ -5,6 +5,7 @@ TTL clock is injected.
 """
 from __future__ import annotations
 
+import hashlib
 import sys
 import types
 
@@ -19,9 +20,9 @@ from maverick.sandbox.podman import PodmanBackend
 @pytest.fixture(autouse=True)
 def _isolated_pool(monkeypatch):
     pool.reset_shared_pool()
-    # No subprocess: digest == tag-derived marker, consistent for park+acquire.
+    # No daemon calls: return a stable synthetic content identity.
     monkeypatch.setattr(pool, "_image_digest",
-                        lambda engine, image: f"id-{image}")
+                        lambda engine, image: _digest(image))
     yield
     pool.reset_shared_pool()
 
@@ -36,6 +37,10 @@ def _backend(tmp_path, **kw):
     return DockerBackend(workdir=tmp_path / "run1", **kw)
 
 
+def _digest(image):
+    return image if image.startswith("sha256:") else "sha256:" + hashlib.sha256(image.encode()).hexdigest()
+
+
 # ------------------------------------------------------------- the pool ----
 
 def test_park_acquire_round_trip_scrubs_workdir_and_timeout(tmp_path, docker_ok):
@@ -44,7 +49,10 @@ def test_park_acquire_round_trip_scrubs_workdir_and_timeout(tmp_path, docker_ok)
     assert p.park(sb) is True
     assert len(p) == 1
     out = p.acquire("docker", sb.image, workdir=tmp_path / "run2", timeout=90.0)
-    assert out is sb
+    assert type(out) is DockerBackend and out is not sb
+    assert sb.workdir == tmp_path / "run1"  # old reference is never redirected
+    with pytest.raises(RuntimeError, match="lease was transferred"):
+        sb.exec("must not execute")
     assert out.workdir == tmp_path / "run2"
     assert out.workdir.is_dir()          # workspace re-pointed + created
     assert out.timeout == 90.0           # per-run timeout reapplied
@@ -85,9 +93,9 @@ def test_pool_is_bounded_to_two_evicting_oldest(tmp_path, docker_ok):
     assert len(p) == pool.POOL_MAX == 2
     assert p.acquire("docker", "img0:latest", workdir=tmp_path, timeout=60) is None
     assert p.acquire("docker", "img1:latest", workdir=tmp_path,
-                     timeout=60) is backends[1]
+                     timeout=60).image == _digest("img1:latest")
     assert p.acquire("docker", "img2:latest", workdir=tmp_path,
-                     timeout=60) is backends[2]
+                     timeout=60).image == _digest("img2:latest")
 
 
 def test_ineligible_backends_fail_to_fresh(tmp_path):
@@ -102,10 +110,7 @@ def test_unhealthy_sandbox_is_not_parked(tmp_path, monkeypatch):
     monkeypatch.setattr(DockerBackend, "_verify_docker", lambda self: None)
     sb = _backend(tmp_path)
 
-    def boom(self):
-        raise RuntimeError("daemon gone")
-
-    monkeypatch.setattr(DockerBackend, "_verify_docker", boom)
+    monkeypatch.setattr(pool, "_image_digest", lambda *a: None)
     p = pool.SandboxPool(clock=lambda: 0.0)
     assert p.park(sb) is False
     assert len(p) == 0
@@ -139,7 +144,7 @@ def test_knob_on_hands_parked_sandbox_to_next_run(tmp_path, docker_ok, monkeypat
     parked = _backend(tmp_path)
     assert pool.shared_pool().park(parked)
     built = build_sandbox(workdir=tmp_path / "next")
-    assert built is parked
+    assert built is not parked and built.image == _digest(parked.image)
     assert built.workdir == tmp_path / "next"
     # Pool now empty -> a second build constructs fresh.
     again = build_sandbox(workdir=tmp_path / "next2")
@@ -325,7 +330,7 @@ def test_acquire_does_not_hold_lock_across_digest(tmp_path, docker_ok, monkeypat
     def slow_digest(engine, image):
         in_digest.set()
         release.wait(timeout=5)
-        return f"id-{image}"
+        return _digest(image)
 
     monkeypatch.setattr(pool, "_image_digest", slow_digest)
 

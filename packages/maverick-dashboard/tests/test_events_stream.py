@@ -124,3 +124,51 @@ def test_stream_poll_parameter_does_not_control_sleep(monkeypatch, tmp_path):
     assert resp.status_code == 200
     assert "event: end" in resp.text
     assert sleeps == []
+
+
+def test_stream_pushes_the_answer_preview_without_an_event(monkeypatch, tmp_path):
+    """The model's answer lands in ``result`` while the goal is still running
+    (agent._PartialAnswerStream). The stream must push it as soon as it
+    changes, without waiting for an event row, and the terminal payload must
+    carry the final text."""
+    import threading
+    import time
+
+    from maverick import world_model
+
+    w = world_model.WorldModel(world_model.DEFAULT_DB)
+    gid = w.create_goal("stream me", "")
+    w.set_goal_status(gid, "running")
+    assert w.set_goal_partial_result(gid, "Hello, I am") is True
+
+    def writer():
+        time.sleep(0.8)
+        w.set_goal_partial_result(gid, "Hello, I am still writing")
+        time.sleep(0.8)
+        w.set_goal_status(gid, "done", "Hello, I am done.")
+
+    threading.Thread(target=writer, daemon=True).start()
+    payloads = []
+    with client.stream("GET", f"/api/goal/{gid}/events/stream") as r:
+        assert r.status_code == 200
+        for line in r.iter_lines():
+            if line.startswith("data: "):
+                payloads.append(json.loads(line[6:]))
+            if payloads and payloads[-1].get("terminal") is True:
+                break
+    results = [p["result"] for p in payloads]
+    assert results[0] == "Hello, I am"                     # first tick: the preview already there
+    assert "Hello, I am still writing" in results          # pushed on change, no event needed
+    assert payloads[-1]["terminal"] is True
+    assert payloads[-1]["result"] == "Hello, I am done."
+    assert all(p["events"] == [] for p in payloads)
+
+
+def test_partial_result_never_overwrites_a_finished_goal(tmp_path):
+    from maverick import world_model
+
+    w = world_model.WorldModel(world_model.DEFAULT_DB)
+    gid = w.create_goal("finished", "")
+    w.set_goal_status(gid, "done", "final answer")
+    assert w.set_goal_partial_result(gid, "late preview") is False
+    assert w.get_goal(gid).result == "final answer"

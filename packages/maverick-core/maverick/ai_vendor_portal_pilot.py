@@ -602,11 +602,11 @@ def representative_synthetic_cases() -> tuple[SyntheticVendorCase, ...]:
         "aiv_human_oversight": "yes",
     }
     gaps = {
-        # The deliberately ambiguous provenance and role language fires both
-        # conservative lexical signals, so the extractor must return unknown
-        # rather than silently promote a negative phrase to a verified fact.
-        "aiv_provenance": "unknown",
-        "aiv_training_data": "no",
+        # Unknown provenance explicitly fails the documented-provenance check.
+        # "May be used" and the unresolved EU role need human resolution;
+        # neither is a definite positive or negative document assertion.
+        "aiv_provenance": "no",
+        "aiv_training_data": "unknown",
         "aiv_subprocessors": "no",
         "aiv_evaluation": "no",
         "aiv_incidents": "yes",

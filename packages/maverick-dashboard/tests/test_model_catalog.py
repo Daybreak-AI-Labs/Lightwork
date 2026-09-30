@@ -38,7 +38,7 @@ def test_settings_picker_is_multi_provider(monkeypatch, tmp_path):
     assert r.status_code == 200
     # Real pickers with a typed-id escape hatch; every provider's catalog is
     # listed for the allow-list even before a key is saved.
-    assert '<select class="ctl" name="model"' in r.text and 'value="__custom__"' in r.text
+    assert '<select class="select" name="model"' in r.text and 'value="__custom__"' in r.text
     assert 'name="models" value="openai:gpt-5.4"' in r.text
     assert 'name="models" value="gemini:gemini-3.5-pro"' in r.text
 

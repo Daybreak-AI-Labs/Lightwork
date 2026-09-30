@@ -28,9 +28,12 @@ Pieces:
   ``status`` reports ``"expired"`` for stale proposals; ``prune`` deletes
   them. The clock is injectable so expiry is unit-testable.
 
-Opt-in and default-OFF in effect: nothing consults this module unless the
-config-write path calls :func:`apply_gate`, and the default policy only
-exists once a caller asks for it. ``policy_from_config()`` reads ``[safety]
+Opt-in and default-OFF in effect: the dashboard's settings save flow
+(``maverick_dashboard.settings_quorum``) consults :func:`configured_policy`,
+which is None until an operator sets a quorum of 2 or more; then a save that
+touches a protected setting becomes an approval request (the dashboard's
+Approvals, N distinct approvers, never the requester) and applies only once
+approved. ``policy_from_config()`` reads ``[safety]
 quorum_required`` / ``quorum_protected_keys`` (env
 ``MAVERICK_QUORUM_REQUIRED`` wins for the count), fail-soft. Stdlib-only.
 """
@@ -58,12 +61,19 @@ log = logging.getLogger(__name__)
 
 DEFAULT_REQUIRED = 2
 DEFAULT_TTL_DAYS = 7.0
+# A settings approval request (approval card) can be voted on for at most 7
+# days, so a longer approval lifetime would promise what can't be delivered.
+MAX_TTL_DAYS = 7.0
 DEFAULT_PROTECTED_KEYS = frozenset({
     "safety.*",
     "governance.*",
     "budget.max_dollars",
     "plugins.*",
 })
+# The quorum's own settings ([safety] quorum_*): always protected, whatever
+# ``protected_keys`` lists, so one person can never switch the approvals off,
+# narrow what they cover or stretch how long they last.
+SELF_PROTECTED_KEYS = frozenset({"safety.quorum_*"})
 
 PENDING = "pending"
 APPROVED = "approved"
@@ -109,8 +119,11 @@ class Proposal:
 
 
 def is_protected(key: str, policy: QuorumPolicy) -> bool:
-    """True iff ``key`` matches any protected pattern (fnmatch, case-sensitive)."""
-    return any(fnmatchcase(key, pat) for pat in policy.protected_keys)
+    """True iff ``key`` matches any protected pattern (fnmatch, case-sensitive).
+
+    The quorum's own settings (:data:`SELF_PROTECTED_KEYS`) always are."""
+    return any(fnmatchcase(key, pat)
+               for pat in (*policy.protected_keys, *SELF_PROTECTED_KEYS))
 
 
 def apply_gate(key: str, *, policy: QuorumPolicy) -> bool:
@@ -160,7 +173,32 @@ def policy_from_config() -> QuorumPolicy:
             ttl = DEFAULT_TTL_DAYS
     except (TypeError, ValueError):
         ttl = DEFAULT_TTL_DAYS
+    if ttl > MAX_TTL_DAYS:
+        log.warning("[safety] quorum_ttl_days=%s is above the %s-day approval window; "
+                    "using %s days", ttl, MAX_TTL_DAYS, MAX_TTL_DAYS)
+        ttl = MAX_TTL_DAYS
     return QuorumPolicy(required=required, protected_keys=protected, ttl_days=ttl)
+
+
+def configured_policy() -> QuorumPolicy | None:
+    """The policy the settings save flow enforces, or None when it is off.
+
+    On only when an operator set a quorum (``MAVERICK_QUORUM_REQUIRED`` or
+    ``[safety] quorum_required``) of at least 2: one approver who could be
+    the person asking adds nothing, and an unset quorum keeps today's
+    behaviour (a protected setting saves at once).
+    """
+    raw: object = os.environ.get("MAVERICK_QUORUM_REQUIRED", "").strip() or None
+    if raw is None:
+        try:
+            from .config import load_config
+            raw = ((load_config() or {}).get("safety") or {}).get("quorum_required")
+        except Exception:
+            return None
+    if raw is None or isinstance(raw, bool) or not str(raw).strip():
+        return None
+    policy = policy_from_config()
+    return policy if policy.required >= 2 else None
 
 
 def _default_path() -> Path:
@@ -384,8 +422,9 @@ def prune(
 
 __all__ = [
     "QuorumPolicy", "Proposal", "ProposalStore", "QuorumError",
-    "DEFAULT_PROTECTED_KEYS", "DEFAULT_REQUIRED", "DEFAULT_TTL_DAYS",
+    "DEFAULT_PROTECTED_KEYS", "DEFAULT_REQUIRED", "DEFAULT_TTL_DAYS", "MAX_TTL_DAYS",
+    "SELF_PROTECTED_KEYS",
     "PENDING", "APPROVED", "EXPIRED",
     "propose", "approve", "status", "prune",
-    "is_protected", "apply_gate", "policy_from_config",
+    "is_protected", "apply_gate", "policy_from_config", "configured_policy",
 ]

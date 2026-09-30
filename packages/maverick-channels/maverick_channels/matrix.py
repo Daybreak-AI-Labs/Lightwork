@@ -20,6 +20,13 @@ import logging
 import os
 
 from .base import Channel, IncomingMessage, is_allowed, normalize_allowlist
+from .delivery import (
+    DeliveryNotSent,
+    DeliveryUnknown,
+    chunk_idempotency_key,
+    delivery_active,
+    send_chunk,
+)
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +77,17 @@ class MatrixChannel(Channel):
         # LLM spend. Seeded in start(); ms epoch to match event.server_timestamp.
         self._start_ts_ms: int | None = None
 
+    def _account(self):
+        return self.homeserver.rstrip("/") + "|" + self.user_id
+
+    def _authorized(self, msg, account):
+        return (account == self._account() and msg.principal_id != self.user_id
+                and is_allowed(msg.principal_id, self.allowed_user_ids))
+
+    async def _send_saved(self, msg, reply, route):
+        if reply.text:
+            return await self.send(msg.user_id, reply.text)
+
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
         if event.sender == self.user_id:
             return
@@ -86,31 +104,40 @@ class MatrixChannel(Channel):
             channel="matrix",
             raw=event,
             sender_id=event.sender,
+            message_id=event.event_id,
         )
-        try:
-            reply = await self.dispatch_text(msg)
-        except Exception:  # pragma: no cover
-            log.exception("handler error")
-            reply = "⚠ An internal error occurred."
-        # An action-only goal returns "" (dispatch_text can drop a Reply to
-        # empty); room_send posts a blank m.text event the homeserver accepts,
-        # spamming the room. Guard like the other channels.
-        if not reply:
-            return
-        await self.send(room.room_id, reply)
+        account = self._account()
+        return await self.process_message(msg, external_id=event.event_id, account=account,
+            authorize=lambda: self._authorized(msg, account), idempotent=True,
+            send=lambda reply: self._send_saved(msg, reply, {}))
 
     async def start(self) -> None:
         import time
         self._start_ts_ms = int(time.time() * 1000)
         log.info("Matrix channel syncing")
-        await self._client.sync_forever(timeout=30000, full_state=True)
+        account = self._account()
+        async with self.recovery_worker(account=account,
+                authorize=lambda msg: self._authorized(msg, account),
+                send=self._send_saved, idempotent=True):
+            await self._client.sync_forever(timeout=30000, full_state=True)
 
     async def send(self, user_id: str, text: str) -> None:
-        await self._client.room_send(
-            room_id=user_id,
-            message_type="m.room.message",
-            content={"msgtype": "m.text", "body": text},
-        )
+        payload = {"room_id": user_id, "message_type": "m.room.message",
+                   "content": {"msgtype": "m.text", "body": text}}
+        async def post():
+            result = await self._client.room_send(**payload, tx_id=chunk_idempotency_key("text-0"))
+            # matrix-nio returns error response objects instead of raising.
+            # Only explicit nonacceptance permits a non-ambiguous retry.
+            if getattr(result, "status_code", None) in {
+                "M_FORBIDDEN", "M_UNKNOWN_TOKEN", "M_MISSING_TOKEN", "M_LIMIT_EXCEEDED",
+                "M_BAD_JSON", "M_NOT_JSON", "M_INVALID_PARAM", "M_NOT_FOUND",
+            }:
+                raise DeliveryNotSent("Matrix rejected the reply")
+            provider_id = getattr(result, "event_id", None)
+            if delivery_active() and not isinstance(provider_id, str):
+                raise DeliveryUnknown("Matrix reply acknowledgement has no event id")
+            return provider_id
+        return await send_chunk("text-0", payload, post, idempotent=True)
 
     async def stop(self) -> None:
         await self._client.close()

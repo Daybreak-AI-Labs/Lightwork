@@ -10,7 +10,9 @@
 // but the shell-out path is good enough for v0.1.
 
 import { spawn } from "child_process";
+import { createHash } from "crypto";
 import * as vscode from "vscode";
+import { watchEvents } from "./eventWatch";
 
 function getCli(): string {
   return vscode.workspace.getConfiguration("maverick").get<string>("cliPath", "maverick");
@@ -44,9 +46,9 @@ function runCliCapture(args: string[]): Promise<string> {
       stderr += data.toString();
     });
     child.on("error", reject);
-    child.on("close", (code: number | null) => {
-      if ((code ?? 0) !== 0) {
-        reject(new Error(`maverick exited with code ${code ?? 0}\n${stderr}`));
+    child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
+      if (code !== 0 || signal !== null) {
+        reject(new Error(`Lightwork command was not acknowledged (exit ${code}, signal ${signal}).\n${stderr}`));
         return;
       }
       resolve(stdout);
@@ -71,11 +73,23 @@ function runCliStream(args: string[], onLine: (line: string) => void): Promise<n
     child.stdout.on("data", flush);
     child.stderr.on("data", flush);
     child.on("error", reject);
-    child.on("close", (code: number | null) => {
+    child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
       if (buf) onLine(buf);
-      resolve(code ?? 0);
+      if (code === null || signal !== null) reject(new Error(`Lightwork command ended without acknowledgement (signal ${signal}).`));
+      else resolve(code);
     });
   });
+}
+
+async function checkedHaltCommand(command: "halt" | "unhalt"): Promise<void> {
+  const output = await runCliCapture([command, "--json"]);
+  let result;
+  try { result = JSON.parse(output); }
+  catch { throw new Error("Local halt-file acknowledgement was unreadable. Update the CLI and review its state."); }
+  if (result.command !== command || result.acknowledged !== true || result.scope !== "local" ||
+      result.halt_file_present !== (command === "halt") || result.work_stopped !== false) {
+    throw new Error("Local halt-file state was not confirmed. Check the CLI before retrying.");
+  }
 }
 
 // One run = one episode, as emitted by `maverick runs --json`. Keep in
@@ -236,6 +250,9 @@ async function exportCommand() {
 // a stop command. The dashboard URL/token come from machine-scoped settings.
 
 let liveAbort: (() => void) | null = null;
+let watchGeneration = 0;
+const watchCursors = new Map<string, number>();
+const watchOutputs: vscode.OutputChannel[] = [];
 
 function dashboardBase(): string {
   return vscode.workspace
@@ -262,81 +279,45 @@ async function shouldSendDashboardToken(url: URL, token: string): Promise<boolea
 }
 
 async function watchRunCommand(): Promise<void> {
+  const generation = ++watchGeneration;
+  liveAbort?.(); liveAbort = null;
   const goalId = await vscode.window.showInputBox({
     prompt: "Goal id to watch live",
     validateInput: (v) => (/^\d+$/.test(v.trim()) ? null : "numeric goal id"),
   });
-  if (!goalId) return;
-  if (liveAbort) {
-    liveAbort();
-    liveAbort = null;
-  }
+  if (!goalId || generation !== watchGeneration) return;
+  let url: URL;
+  try {
+    url = new URL(`${dashboardBase()}/api/v1/goals/${goalId.trim()}/events/stream`);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("unsafe URL");
+  } catch { vscode.window.showErrorMessage("Dashboard URL must use HTTP(S) without embedded credentials."); return; }
   const channel = vscode.window.createOutputChannel(`Lightwork run #${goalId}`);
   channel.show(true);
-  const url = new URL(`${dashboardBase()}/api/v1/goals/${goalId.trim()}/events/stream`);
   const configuredToken = vscode.workspace.getConfiguration("maverick").get<string>("dashboardToken", "");
   const token = (await shouldSendDashboardToken(url, configuredToken)) ? configuredToken : "";
+  if (generation !== watchGeneration) { channel.dispose(); return; }
   const http = url.protocol === "https:" ? await import("https") : await import("http");
-  let stopped = false;
-  let backoffMs = 1000;
-
-  const connect = () => {
-    if (stopped) return;
-    const req = http.get(
-      url,
-      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
-      (res) => {
-        if ((res.statusCode ?? 0) >= 400) {
-          // Drain the body so the socket frees, then retry with backoff like
-          // the end/error paths -- otherwise watching a goal id that doesn't
-          // exist yet (404 until the goal is created) dies permanently on the
-          // first response instead of reconnecting once it appears.
-          res.resume();
-          if (!stopped) {
-            channel.appendLine(`[stream error: HTTP ${res.statusCode}; retrying in ${backoffMs / 1000}s]`);
-            setTimeout(connect, backoffMs);
-            backoffMs = Math.min(backoffMs * 2, 30000);
-          }
-          return;
-        }
-        backoffMs = 1000; // healthy connection resets the backoff
-        let buf = "";
-        res.on("data", (chunk: Buffer) => {
-          buf += chunk.toString();
-          let idx: number;
-          while ((idx = buf.indexOf("\n\n")) >= 0) {
-            const frame = buf.slice(0, idx);
-            buf = buf.slice(idx + 2);
-            for (const line of frame.split("\n")) {
-              if (line.startsWith("data:")) {
-                channel.appendLine(stripTerminalControl(line.slice(5).trim()));
-              }
-            }
-          }
-        });
-        res.on("end", () => {
-          if (!stopped) {
-            channel.appendLine(`[stream ended; reconnecting in ${backoffMs / 1000}s]`);
-            setTimeout(connect, backoffMs);
-            backoffMs = Math.min(backoffMs * 2, 30000);
-          }
-        });
-      },
-    );
-    req.on("error", (e) => {
-      if (!stopped) {
-        channel.appendLine(`[stream error: ${e.message}; retrying in ${backoffMs / 1000}s]`);
-        setTimeout(connect, backoffMs);
-        backoffMs = Math.min(backoffMs * 2, 30000);
-      }
-    });
-    liveAbort = () => {
-      stopped = true;
-      req.destroy();
-      channel.appendLine("[live watch stopped]");
-    };
+  if (generation !== watchGeneration) { channel.dispose(); return; }
+  const key = createHash("sha256").update(url.href + "\0" + token).digest("hex");
+  if (!watchCursors.has(key) && watchCursors.size >= 16) watchCursors.delete(watchCursors.keys().next().value!);
+  watchOutputs.push(channel);
+  if (watchOutputs.length > 4) watchOutputs.shift()!.dispose();
+  let outputBytes = 0;
+  const append = (line: string) => {
+    if (generation !== watchGeneration) return;
+    const safe = stripTerminalControl(line).slice(0, 262144);
+    outputBytes += safe.length;
+    if (outputBytes > 1000000) {
+      channel.clear(); outputBytes = safe.length;
+      channel.appendLine("[Earlier output cleared; open the dashboard for full history.]");
+    }
+    channel.appendLine(safe);
   };
-  connect();
+  const cursor = watchCursors.get(key) || 0;
+  if (cursor) append(`[Resuming after event ${cursor}; earlier output is in the previous watch or dashboard.]`);
+  liveAbort = watchEvents({url, headers: token ? {Authorization: `Bearer ${token}`} : {}, cursor,
+    connect: http.get, onEvent: append, onCursor: value => { if (generation === watchGeneration) watchCursors.set(key, value); },
+    onNotice: line => append(`[${line}]`), onStop: reason => append(`[${reason}]`)});
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -351,8 +332,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("maverick.status", statusCommand),
     vscode.commands.registerCommand("maverick.halt", async () => {
       try {
-        await runCliCapture(["halt"]);
-        vscode.window.showInformationMessage("Lightwork halted.");
+        await checkedHaltCommand("halt");
+        vscode.window.showInformationMessage("Lightwork kill switch armed. Running work stops at its next checkpoint.");
       } catch (e: unknown) {
         // A silent failure here is dangerous: the user would believe the
         // agent was halted when the CLI call actually failed.
@@ -361,8 +342,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("maverick.unhalt", async () => {
       try {
-        await runCliCapture(["unhalt"]);
-        vscode.window.showInformationMessage("Lightwork resumed.");
+        await checkedHaltCommand("unhalt");
+        vscode.window.showInformationMessage("Lightwork kill switch cleared. This does not restart prior tasks.");
       } catch (e: unknown) {
         showFailure("Could not clear the Lightwork emergency stop.", e);
       }
@@ -371,6 +352,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("maverick.refreshRuns", () => runs.refresh()),
     vscode.commands.registerCommand("maverick.watchRun", watchRunCommand),
     vscode.commands.registerCommand("maverick.stopWatch", () => {
+      watchGeneration++;
       if (liveAbort) {
         liveAbort();
         liveAbort = null;
@@ -378,10 +360,18 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showInformationMessage("No live watch running.");
       }
     }),
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration("maverick.dashboardUrl") || event.affectsConfiguration("maverick.dashboardToken")) {
+        liveAbort?.(); liveAbort = null; watchGeneration++;
+        for (const channel of watchOutputs.splice(0)) channel.dispose();
+      }
+    }),
   );
 }
 
 export function deactivate(): void {
   if (liveAbort) liveAbort();
+  liveAbort = null; watchGeneration++;
+  for (const channel of watchOutputs.splice(0)) channel.dispose();
   if (outputChannel) outputChannel.dispose();
 }

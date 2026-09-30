@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import pytest
 from maverick import operating_record as orec
@@ -33,6 +34,17 @@ def test_assemble_threads_goals_and_approvals(world):
     s = orec.stats(records)
     assert s.n_goals == 1 and s.n_approvals == 1 and s.n_human_decisions == 1
     assert s.departments == {"finance_sox": 1}
+
+
+def test_approval_history_orders_equal_timestamps_before_limiting(tmp_path, monkeypatch):
+    from maverick import world_model
+
+    with WorldModel(tmp_path / "approval-order.db") as world:
+        monkeypatch.setattr(world_model, "time", SimpleNamespace(time=lambda: 1_000.0))
+        first = world.create_approval("first")
+        second = world.create_approval("second")
+        assert [row.id for row in world.list_approvals()] == [second, first]
+        assert [row.id for row in world.list_approvals(limit=1)] == [second]
 
 
 def test_query_finds_every_decision_that_touched_x(world):

@@ -32,8 +32,8 @@ def test_forecast_goal_renders_as_a_deliverable_grid(tmp_path, monkeypatch):
     t = client.get(f"/chat/goal/{gid}").text
     # Titled, gated deliverable card keyed off the pack's output contract.
     assert "13-week cash forecast" in t
-    assert "review gate" in t
-    assert "fpa_analyst" in t
+    assert "Needs review</span>" in t       # plain sign-off label
+    assert "Fpa analyst" in t and "fpa_analyst" not in t
     # The result is a real table, not a <pre> dump.
     assert '<table class="deliverable__table">' in t
     assert "<th scope=\"col\">Week</th>" in t
@@ -52,4 +52,4 @@ def test_generic_goal_keeps_plain_prose(tmp_path, monkeypatch):
     # present in the page's <style> block; assert on the rendered markup).
     assert '<table class="deliverable__table">' not in t
     assert 'class="deliverable__head"' not in t
-    assert "review gate" not in t
+    assert "Needs review</span>" not in t

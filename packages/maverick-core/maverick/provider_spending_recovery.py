@@ -151,6 +151,22 @@ def review(identifier, *, actor, context):
     return public_review(record)
 
 
+def open_reviews(*, actor, context, limit=50):
+    """The administrator's own unfinished reviews in this workspace, newest first.
+
+    Same visibility rule as :func:`review`: only records prepared by this
+    actor, in this signed-in context, against the current accounting target.
+    Completed reviews are left out; reopening never applies anything."""
+    actor = _actor(actor)
+    binding = target()
+    rows = [record for record in _REVIEWS.list(limit=1000)
+            if record.get("actor") == actor and record.get("context") == context
+            and record.get("target") == binding and record.get("kind") in {"hold", "repair"}
+            and record.get("state") != "completed"]
+    rows.sort(key=lambda record: float(record.get("expires_at") or 0), reverse=True)
+    return [public_review(record) for record in rows[:max(1, min(int(limit), 100))]]
+
+
 def prepare_hold(provider, period, identity, actual, evidence, *, actor, context, isolated=False):
     binding = target()
     total, receipts, _ = _state(provider, period)

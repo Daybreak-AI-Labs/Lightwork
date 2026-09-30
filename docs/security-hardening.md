@@ -61,8 +61,11 @@ opt-in controls build on:
   decode bombs; escape hatch `MAVERICK_SHIELD_NO_DECODE=1`.
 - **Sandbox-mediated shell** — all tool shell execution goes through
   `sandbox.exec()` (local/Firecracker backends), never raw `subprocess`.
-- **Hard `Budget` caps** — every long-running path respects a per-run budget
-  (`budget.check()`); a single run cannot spend without bound.
+- **Explicit task limits and organization allowances** — configured task caps
+  are enforced at execution and metering boundaries. Ordinary tasks have no
+  generated dollar, time, token, tool or step cap. Organization spend controls,
+  provider accounting, cancellation and HALT remain separate authorities. See
+  [task limits](task-limits.md) before choosing an allowance policy.
 - **Append-only audit log** — every notable action is written to an
   append-only NDJSON audit log; when [signing](#audit-log-signing-tamper-evidence)
   is enabled it becomes an Ed25519 Merkle-chained, tamper-evident log.
@@ -797,6 +800,52 @@ export MAVERICK_RISK_PROPORTIONAL_VERIFY=1
 
 **Wizard toggle:** yes — risk-proportional verification prompt under advanced
 options.
+
+---
+
+## Chat answers: streamed, and verified in proportion to risk
+
+**What it does.** A chat turn (any run that answers inside a conversation:
+the dashboard chat or a channel thread) shows its answer while the model is
+still writing it. The root agent streams the model's text into the goal's
+result as it arrives, throttled, secret-redacted, and replaced by the final
+result when the turn ends, and the chat page renders it live. Streaming needs
+the Anthropic provider; other providers still deliver the answer when the
+turn completes. The evidence gateway, when enabled, withholds the preview
+exactly as it withholds every other model-derived excerpt.
+
+The preview shows only whole words that ended at least 96 characters before
+the text received so far. A line that opens a quoted value for a named secret
+(`API_TOKEN="...`) is held until the quote closes. Every update also passes
+the Shield output scan: if a later part is blocked, the preview is withdrawn
+and the chat page clears it. When the model stops at its output limit, the
+cut-off tail is never shown, because it may end partway through a credential.
+In scripts that do not separate words with spaces (Chinese, Japanese,
+Korean), each character counts as a complete token.
+
+A plain chat answer, reached with no tool use, no code block, and no edit
+block, is handed to the person without the self-verifier's second model round
+trip. Tool use, code, edit blocks, and long-form answers are always verified,
+and standalone goals (REST, MCP, CLI) keep full verification.
+
+**config.toml**
+
+```toml
+[chat]
+stream_answers = true          # default; false disables the live preview
+
+[verification]
+verify_chat_answers = false    # default; true runs the verifier on every chat answer
+```
+
+**Environment variables**
+
+```bash
+export MAVERICK_STREAM_ANSWERS=0        # disable the live preview
+export MAVERICK_VERIFY_CHAT_ANSWERS=1   # verify every chat answer
+```
+
+**Wizard toggle:** no; both are runtime defaults edited in config.toml.
 
 **Gotcha.** Off by default; with it off, the orchestrator's FINAL is always
 verified (subject to budget). Leave it off if you want maximal verification

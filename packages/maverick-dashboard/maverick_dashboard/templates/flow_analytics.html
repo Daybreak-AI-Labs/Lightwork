@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Flow Analytics · Lightwork{% endblock %}
+{% block title %}Flow results · Lightwork{% endblock %}
 {% block content %}
 <style>
   .fa { max-width: 940px; }
@@ -18,16 +18,17 @@
 </style>
 
 <div class="fa">
-  <h1 class="page-title" style="margin:0 0 4px;">Flow analytics</h1>
-  <p class="fa__sub">Success rate, throughput, and duration across recent runs of each flow.
-    <a href="/automations">Automations</a> · <a href="/flows/designer">Designer</a></p>
-  <p class="fa__msg" id="fa-msg">Loading…</p>
+  <h1 class="page-title" style="margin:0 0 4px;">Flow results</h1>
+  <p class="fa__sub">How often each flow finishes, how many runs it has, and how long runs take.
+    <a href="/automations">Automations</a> · <a href="/flows/designer">Flow designer</a></p>
+  <p class="fa__msg" id="fa-msg" role="status">Loading…</p>
+  <p id="fa-empty" hidden><a class="btn btn--primary" href="/flows/designer">Design a flow</a></p>
   <div style="overflow-x:auto;">
     <table class="fa__table" id="fa-table" hidden>
       <thead><tr>
-        <th>Flow</th><th class="num">Runs</th><th>Success</th>
-        <th class="num">✓</th><th class="num">✗</th><th class="num">⏸</th>
-        <th class="num">p50</th><th class="num">p95</th><th>Top errors</th>
+        <th scope="col">Flow</th><th scope="col" class="num">Runs</th><th scope="col">Finished</th>
+        <th scope="col" class="num">Succeeded</th><th scope="col" class="num">Failed</th><th scope="col" class="num">Paused</th>
+        <th scope="col" class="num">Typical time</th><th scope="col" class="num">Slowest runs</th><th scope="col">Most common problems</th>
       </tr></thead>
       <tbody id="fa-body"></tbody>
     </table>
@@ -40,22 +41,49 @@
   var msg = document.getElementById('fa-msg');
   {% include "_dash_helpers.js" %}
   function pct(x) { return x == null ? '—' : Math.round(x * 100) + '%'; }
-  function secs(x) { return (x || x === 0) ? (x < 1 ? Math.round(x * 1000) + 'ms' : x.toFixed(1) + 's') : '—'; }
-
-  api('/api/v1/flows/analytics').then(function (r) {
-    if (r.status === 403) { msg.textContent = 'The flow engine is off.'; return { off: true }; }
-    return r.ok ? r.json() : null;
+  function secs(x) {
+    if (!(x || x === 0)) return '—';
+    if (x < 1) return 'under a second';
+    if (x < 90) return Math.round(x) + ' seconds';
+    if (x < 5400) return Math.round(x / 60) + ' minutes';
+    return (x / 3600).toFixed(1) + ' hours';
+  }
+  function problem(text) {
+    var t = String(text || '');
+    if (/budget|spend|cost/i.test(t)) return 'Spending limit reached';
+    if (/timeout|timed out/i.test(t)) return 'Took too long';
+    if (/reject/i.test(t)) return 'Rejected by a person';
+    if (/permission|forbidden|denied|403/i.test(t)) return 'Not allowed';
+    if (/connect|network|unreachable|dns/i.test(t)) return 'Couldn’t reach another app';
+    return 'A step failed';
+  }
+  var names = {};
+  Promise.all([
+    api('/api/v1/flows').then(function (r) { return r.ok ? r.json() : { flows: [] }; }).catch(function () { return { flows: [] }; }),
+    api('/api/v1/flows/analytics')
+  ]).then(function (pair) {
+    (pair[0].flows || []).forEach(function (f) { names[f.id] = f.name; });
+    var r = pair[1];
+    if (r.status === 403) {
+      msg.textContent = 'Workflows are turned off, or you don’t have access to them.';
+      var on = document.createElement('a'); on.href = '/learning'; on.textContent = ' Turn on workflows';
+      msg.appendChild(on);
+      return { off: true };
+    }
+    if (!r.ok) { msg.textContent = window.mvErrorText ? window.mvErrorText(r, 'load flow results') : 'Could not load flow results.'; return { off: true }; }
+    return r.json();
   }).then(function (j) {
-    if (j && j.off) { return; }               // 403 message already shown
-    if (!j) { msg.textContent = 'Could not load analytics.'; return; }
+    if (j && j.off) { return; }
+    if (!j) { msg.textContent = 'Could not load flow results.'; return; }
     var flows = j.flows || [];
-    if (!flows.length) { msg.textContent = 'No flow runs yet.'; return; }
-    msg.textContent = flows.length + ' flow' + (flows.length === 1 ? '' : 's') + ' · ' + j.run_window + ' runs in window';
+    if (!flows.length) { msg.textContent = 'No flow runs yet. Design a flow and run it to see results here.'; document.getElementById('fa-empty').hidden = false; return; }
+    msg.textContent = flows.length + ' flow' + (flows.length === 1 ? '' : 's') + ' · based on the last ' + j.run_window + ' runs';
     var body = document.getElementById('fa-body');
     flows.forEach(function (f) {
       var tr = document.createElement('tr');
       var nameTd = el('td');
-      var a = document.createElement('a'); a.href = '/flows/designer/' + encodeURIComponent(f.flow_id); a.textContent = f.flow_id;
+      var a = document.createElement('a'); a.href = '/flows/designer/' + encodeURIComponent(f.flow_id);
+      a.textContent = names[f.flow_id] || (window.mvHuman ? window.mvHuman(f.flow_id) : f.flow_id);
       nameTd.appendChild(a); tr.appendChild(nameTd);
       tr.appendChild(el('td', 'num', String(f.runs)));
       var rate = el('td');
@@ -68,13 +96,15 @@
       tr.appendChild(el('td', 'num', secs(f.p95_seconds)));
       var errTd = el('td', 'fa__err');
       (f.top_errors || []).forEach(function (e) {
-        errTd.appendChild(el('div', null, '×' + e.count + ' ' + e.error));
+        var d = el('div', null, problem(e.error) + ' (' + e.count + (e.count === 1 ? ' time)' : ' times)'));
+        d.title = String(e.error || '');
+        errTd.appendChild(d);
       });
       tr.appendChild(errTd);
       body.appendChild(tr);
     });
     document.getElementById('fa-table').hidden = false;
-  }).catch(function () { msg.textContent = 'Could not load analytics.'; });
+  }).catch(function (e) { msg.textContent = window.mvErrorText ? window.mvErrorText(e, 'load flow results') : 'Could not load flow results.'; });
 })();
 </script>
 {% endblock %}

@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi import Path as ApiPath
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
@@ -473,6 +473,15 @@ def create_consent_scan_notice_proposals_router(  # noqa: C901
             expected_revision=body.expected_head_revision,
             idempotency_key=body.idempotency_key,
         )
+
+    @router.get("/proposals")
+    async def list_proposals(
+        request: Request,
+        limit: int = Query(default=100, ge=1, le=500),
+    ):
+        require_permission(request, "view")
+        proposals, store = authority(request)
+        return await call(proposals, store.list_proposals, limit=limit)
 
     @router.get("/proposals/{proposal_id}")
     async def get_proposal(request: Request, proposal_id: OpaquePath):

@@ -3,18 +3,67 @@ const assert = require('node:assert/strict');
 const { React, act, create, source, deferred, connection, newer, text, tab, button } = require('./helpers.cjs');
 const mocks = settings => ({ './src/settings': settings, '../settings': settings });
 
-test('connection errors lead with guidance and reveal technical detail only on request', async () => {
+test('connection problems read plainly and offer Try again and Check settings', async () => {
   const { ConnectionNotice } = source('src/components/ConnectionNotice.tsx');
-  const message = 'GET /api/v1/goals -> HTTP 403';
+  const api = source('src/api.ts');
+  let retries = 0, opened = 0, app;
+  await act(async () => { app = create(React.createElement(ConnectionNotice, {
+    message: api.statusMessage(403), accessDenied: true,
+    onRetry() { retries++; }, onOpenSettings() { opened++; },
+  })); });
+  assert.match(text(app), /Access problem/);
+  assert.match(text(app), /Ask your administrator/);
+  assert.doesNotMatch(text(app), /HTTP|403|\/api\//);
+  await act(async () => { button(app, 'Try again').props.onPress(); });
+  await act(async () => { button(app, 'Check settings').props.onPress(); });
+  assert.deepEqual([retries, opened], [1, 1]);
+  app.unmount();
+});
+
+test('an out-of-date app build is told to update and offered no retry loop', async () => {
+  const { ConnectionNotice } = source('src/components/ConnectionNotice.tsx');
+  const api = source('src/api.ts');
   let app;
-  await act(async () => { app = create(React.createElement(ConnectionNotice, { message })); });
-  assert.match(text(app), /Check your connection/);
-  assert.doesNotMatch(text(app), /GET \/api/);
-  await act(async () => { button(app, 'Connection details').props.onPress(); });
-  assert.match(text(app), /GET \/api/);
-  assert.equal(app.root.findByType('Pressable').props.accessibilityState.expanded, true);
-  await act(async () => { button(app, 'Hide connection details').props.onPress(); });
-  assert.doesNotMatch(text(app), /GET \/api/);
+  await act(async () => { app = create(React.createElement(ConnectionNotice, {
+    message: api.UNSUPPORTED_BUILD, unsupported: true, onRetry() {},
+  })); });
+  assert.match(text(app), /Update needed/);
+  assert.equal(button(app, 'Try again'), undefined);
+  app.unmount();
+});
+
+test('every dashboard status becomes a plain sentence without codes', () => {
+  const api = source('src/api.ts');
+  for (const status of [400, 401, 403, 404, 429, 500, 503]) {
+    const message = api.statusMessage(status);
+    assert.doesNotMatch(message, /\d{3}|HTTP|GET|\/api/);
+    assert.match(message, /\.$/);
+  }
+});
+
+test('fresh installs open the connection setup without tabs until saved', async () => {
+  let current = { baseUrl: 'http://127.0.0.1:8400', token: '', needsSetup: true }, saved = null, app;
+  const App = source('App.tsx', mocks({
+    loadSettings: async () => current,
+    saveSettings: async value => { saved = value; current = { ...value }; },
+  })).default;
+  await act(async () => { app = create(React.createElement(App)); });
+  assert.match(text(app), /Connect to Lightwork/);
+  assert.equal(tab(app, 'Tasks'), undefined);
+  assert.equal(app.root.findAllByType('TextInput')[0].props.value, '');
+  await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText('lightwork.example.test'); });
+  await act(async () => { await button(app, 'Save and connect').props.onPress(); });
+  assert.equal(saved.baseUrl, 'https://lightwork.example.test');
+  assert.ok(tab(app, 'Tasks'));
+  assert.equal(app.root.findByType('RunsListScreen').props.settings.baseUrl, 'https://lightwork.example.test');
+  app.unmount();
+});
+
+test('tabs use plain names', async () => {
+  let app;
+  const App = source('App.tsx', mocks({ loadSettings: async () => connection })).default;
+  await act(async () => { app = create(React.createElement(App)); });
+  for (const name of ['Tasks', 'Overview', 'Settings']) assert.ok(tab(app, name), name);
   app.unmount();
 });
 
@@ -26,7 +75,7 @@ test('startup keychain errors remain visible and retryable', async () => {
   } })).default;
   let app;
   await act(async () => { app = create(React.createElement(App)); });
-  assert.match(text(app), /Could not load connection settings/);
+  assert.match(text(app), /Could not open your connection settings/);
   await act(async () => { button(app, 'Retry loading settings').props.onPress(); });
   assert.equal(app.root.findByType('RunsListScreen').props.settings, connection);
   app.unmount();
@@ -40,7 +89,7 @@ test('settings load failure prevents overwriting unread values and permits retry
   }));
   let app;
   await act(async () => { app = create(React.createElement(SettingsScreen, { onSaved() {} })); });
-  assert.match(text(app), /Could not load saved settings/);
+  assert.match(text(app), /Could not open your saved settings/);
   assert.equal(app.root.findAllByType('TextInput')[0].props.editable, false);
   assert.equal(button(app, 'Save').props.disabled, true);
   await act(async () => { button(app, 'Retry loading settings').props.onPress(); });
@@ -59,7 +108,7 @@ test('save failure retains entered values and retry success confirms the save', 
   await act(async () => { app = create(React.createElement(SettingsScreen, { onSaved() { callbacks++; } })); });
   await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText(newer.baseUrl); });
   await act(async () => { await button(app, 'Save').props.onPress(); });
-  assert.match(text(app), /Could not save settings/);
+  assert.match(text(app), /Could not save your settings/);
   assert.equal(app.root.findAllByType('TextInput')[0].props.value, newer.baseUrl);
   assert.equal(callbacks, 0);
   await act(async () => { await button(app, 'Save').props.onPress(); });
@@ -95,7 +144,7 @@ test('invalid address stays editable with actionable guidance and no false save'
   await act(async () => { await button(app, 'Save').props.onPress(); });
   assert.equal(saves, 0);
   assert.equal(callbacks, 0);
-  assert.match(text(app), /HTTPS/);
+  assert.match(text(app), /starts with https:\/\//);
   assert.doesNotMatch(text(app), /Saved\./);
   assert.equal(app.root.findAllByType('TextInput')[0].props.value, 'http://remote.example.test');
   await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText(newer.baseUrl); });
@@ -114,7 +163,7 @@ test('confirmation stays mounted during the post-save connection refresh', async
     saveSettings: async () => {},
   })).default;
   await act(async () => { app = create(React.createElement(App)); });
-  await act(async () => { tab(app, 'settings').props.onPress(); });
+  await act(async () => { tab(app, 'Settings').props.onPress(); });
   await act(async () => { await button(app, 'Save').props.onPress(); });
   assert.match(text(app), /Saved\./);
   assert.equal(app.root.findAllByType('TextInput').length, 2);
@@ -132,14 +181,14 @@ for (const failure of [false, true]) {
       saveSettings: async () => {},
     })).default;
     await act(async () => { app = create(React.createElement(App)); });
-    await act(async () => { tab(app, 'settings').props.onPress(); });
+    await act(async () => { tab(app, 'Settings').props.onPress(); });
     await act(async () => { await button(app, 'Save').props.onPress(); });
     await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText(newer.baseUrl); });
     await act(async () => { await button(app, 'Save').props.onPress(); });
-    await act(async () => { tab(app, 'runs').props.onPress(); });
+    await act(async () => { tab(app, 'Tasks').props.onPress(); });
     assert.equal(app.root.findByType('RunsListScreen').props.settings, newer);
     await act(async () => { failure ? stale.reject(new Error('obsolete read failure')) : stale.resolve(connection); });
-    assert.doesNotMatch(text(app), /Could not load connection settings/);
+    assert.doesNotMatch(text(app), /Could not open your connection settings/);
     assert.equal(app.root.findByType('RunsListScreen').props.settings, newer);
     app.unmount();
   });
@@ -149,7 +198,7 @@ test('callbacks retained after App unmount cannot start another settings read', 
   let calls = 0, app;
   const App = source('App.tsx', mocks({ loadSettings: async () => { calls++; return connection; } })).default;
   await act(async () => { app = create(React.createElement(App)); });
-  await act(async () => { tab(app, 'settings').props.onPress(); });
+  await act(async () => { tab(app, 'Settings').props.onPress(); });
   const onSaved = app.root.find(node => node.type.name === 'SettingsScreen').props.onSaved;
   await act(async () => { app.unmount(); });
   const before = calls;
@@ -165,9 +214,9 @@ test('a save finishing after leaving Settings updates the still-mounted App', as
     saveSettings: async () => { await saved.promise; current = newer; },
   })).default;
   await act(async () => { app = create(React.createElement(App)); });
-  await act(async () => { tab(app, 'settings').props.onPress(); });
+  await act(async () => { tab(app, 'Settings').props.onPress(); });
   await act(async () => { operation = button(app, 'Save').props.onPress(); });
-  await act(async () => { tab(app, 'runs').props.onPress(); });
+  await act(async () => { tab(app, 'Tasks').props.onPress(); });
   await act(async () => { saved.resolve(); await operation; });
   assert.equal(app.root.findByType('RunsListScreen').props.settings, newer);
   app.unmount();

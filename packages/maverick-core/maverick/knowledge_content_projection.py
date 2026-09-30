@@ -301,6 +301,13 @@ def _vector_projection(
     # The verified text is deterministically reconstructed from the committed
     # chunks and offsets. Do not duplicate it in the bounded projection payload.
     committed_record.pop("text", None)
+    # Vector-space migration does not change the admitted source document.
+    # Keep operational index identity outside its immutable content commitment.
+    if isinstance(committed_record.get("metadata"), Mapping):
+        committed_record["metadata"] = {
+            key: value for key, value in committed_record["metadata"].items()
+            if key not in {"embedding_identity", "embedding_fingerprint"}
+        }
     title = str(record.get("source") or f"{collection} knowledge document")
     observed = record.get("ingested_at")
     observed_at = float(observed) if isinstance(observed, int | float) else None
@@ -389,6 +396,7 @@ def inspect_existing_source(
     knowledge_base_factory: Callable[[str], Any | None] | None = None,
     work_discovery_factory: Callable[[str, str, str], Any] | None = None,
     correction_store: GovernedRecordStore | None = None,
+    include_retrieval_chunks: bool = False,
 ) -> dict:
     """Return the exact content commitment and safe preview for registration."""
 
@@ -454,7 +462,7 @@ def inspect_existing_source(
                             _correction_projection(match[1], correction_store)
                         )
                         claim_state = "verified"
-    return {
+    inspected = {
         "source_ref": source_ref,
         "content_sha256": _commitment(payload),
         "title": _bounded_title(title),
@@ -464,6 +472,34 @@ def inspect_existing_source(
         "verified_at": verified_at,
         "projection_schema": _PROJECTION_SCHEMA,
     }
+    chunks, truncated = _retrieval_chunks(payload, summary)
+    inspected["summary_truncated"] = truncated
+    if include_retrieval_chunks:
+        inspected["retrieval_chunks"] = chunks
+    return inspected
+
+
+def _retrieval_chunks(payload: Mapping, summary: str) -> tuple[tuple[str, ...], bool]:
+    """Return bounded source text from the SAME checksum-verified snapshot."""
+    record = payload["record"]
+    store = payload["store"]
+    if store == "vector_knowledge":
+        return (tuple(chunk["text"] for chunk in record["chunks"]),
+                record["document_length"] > len(summary))
+    if store == "evidence_graph":
+        text = str(record.get("summary") or "")
+    elif store == "fleet_memory":
+        text = "\n\n".join(str(record.get(key) or "").strip()
+                           for key in ("task_brief_text", "verifier_critique"))
+    elif store == "knowledge_correction":
+        text = str(record.get("correction") or "")
+    elif store == "work_discovery":
+        text = "\n".join(f"{item.get('title')} ({item.get('occurrences')} occurrences)"
+                         for item in record["candidates"] if isinstance(item, Mapping))
+    else:
+        text = summary
+    return (tuple(text[start:start + 1000] for start in range(0, len(text), 900)),
+            text.strip() != summary)
 
 
 class ExistingKnowledgeContentProjector:
@@ -495,6 +531,7 @@ class ExistingKnowledgeContentProjector:
             knowledge_base_factory=self.knowledge_base_factory,
             work_discovery_factory=self.work_discovery_factory,
             correction_store=self.correction_store,
+            include_retrieval_chunks=True,
         )
         if not hmac.compare_digest(inspected["content_sha256"], admission.content_sha256):
             raise KnowledgeProjectionUnavailable(
@@ -509,6 +546,8 @@ class ExistingKnowledgeContentProjector:
             claim_state=inspected["claim_state"],
             observed_at=inspected["observed_at"],
             verified_at=inspected["verified_at"],
+            retrieval_chunks=inspected["retrieval_chunks"],
+            summary_truncated=inspected["summary_truncated"],
         )
 
     def __call__(

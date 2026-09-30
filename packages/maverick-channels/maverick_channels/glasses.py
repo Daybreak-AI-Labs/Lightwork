@@ -21,9 +21,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 
 from .base import Channel, IncomingMessage, is_allowed, normalize_allowlist
+from .delivery import DeliveryNotSent, DeliveryUnknown, _record_id
+from .transport_worker import TransportWorker
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +52,7 @@ def classify_utterance(text: str) -> str:
 def ack_message(secondary: str | None) -> str:
     """The immediate HUD ack for a long task."""
     where = f" I'll send the result to {secondary}." if secondary else \
-        " I'll send the result when it's done."
+        " Configure a secondary channel to receive the saved result."
     return f"Got it — working on it.{where}"[:_HUD_MAX_CHARS]
 
 
@@ -68,12 +71,14 @@ class GlassesChannel(Channel):
         *,
         deadline_s: float = _DEFAULT_DEADLINE_S,
         secondary_channel: str | None = None,
-        deliver: Callable[[str, str], Awaitable[None]] | None = None,
+        deliver: Callable[[str, str], Awaitable[str | None]] | None = None,
         spawn: Callable[[Awaitable], object] | None = None,
         allowed_user_ids=None,
     ):
         super().__init__(handler)
         self.deadline_s = float(deadline_s)
+        if not 0 < self.deadline_s <= 25:
+            raise ValueError("Glasses response deadline must be between zero and 25 seconds")
         self.secondary_channel = secondary_channel
         # Where a finished long-task result is delivered (the secondary channel).
         self._deliver = deliver
@@ -82,83 +87,132 @@ class GlassesChannel(Channel):
         # may be garbage-collected mid-flight and the user would silently never
         # get the long-task result (the whole point of this channel). Keep them.
         self._background_tasks: set = set()
-        self._spawn = spawn or self._spawn_tracked
+        self._spawn = spawn
+        self._worker = None
+        self._observers = {}
         self.allowed_user_ids = normalize_allowlist(allowed_user_ids, "GLASSES_ALLOWED_USER_IDS")
         if not self.allowed_user_ids:
             raise ValueError("Set GLASSES_ALLOWED_USER_IDS to restrict who can drive the agent")
 
-    def _spawn_tracked(self, coro: Awaitable) -> asyncio.Task:
-        """Schedule a background coroutine and retain a strong reference so the
-        event loop cannot garbage-collect it before delivery completes."""
-        task = asyncio.ensure_future(coro)
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
-        return task
+    def _account(self):
+        return "glasses:" + (self.secondary_channel or "hud")
 
-    async def handle_utterance(self, user_id: str, text: str) -> str:
-        """Process one HUD utterance and return the text to show **now**.
+    def _ensure_worker(self):
+        if self._worker is None or (self._worker.task is not None and self._worker.task.done()):
+            account = self._account()
+            self._worker = TransportWorker(self, account=account, send=self._send_saved,
+                authorize=lambda message: account == self._account() and is_allowed(message.user_id, self.allowed_user_ids))
+        return self._worker
 
-        Quick → the answer (within the deadline; a slow quick answer degrades to
-        an ack-then-run). Long → an immediate ack while the task runs in the
-        background and its result is delivered to the secondary channel.
+    def _start_worker(self, worker):
+        if worker.task is None:
+            worker.start(task_factory=self._spawn)
+            self._background_tasks.add(worker.task)
+            worker.task.add_done_callback(self._background_tasks.discard)
+
+    def _render_result(self, user_id, text, account):
+        if account != self._account() or not is_allowed(user_id, self.allowed_user_ids):
+            raise PermissionError("Glasses response authority changed")
+        return hud_trim(text)
+
+    async def _send_saved(self, message, reply, route):
+        now = asyncio.get_running_loop().time()
+        waiting = [future for future, deadline in self._observers.get(message.message_id, {}).items()
+                   if not future.done() and now <= deadline]
+        if waiting:
+            for future in waiting:
+                future.set_result(reply.text)
+            # The caller can render this projection; there is no HUD receipt.
+            raise DeliveryUnknown("Glasses HUD response acceptance is unconfirmed")
+        if not reply.text:
+            return None
+        if self._deliver is None:
+            raise DeliveryNotSent("Glasses secondary delivery is not configured")
+        result = await self._deliver(message.user_id, reply.text)
+        if result is None:
+            raise DeliveryUnknown("Glasses secondary callback supplied no acceptance receipt")
+        return str(result)
+
+    async def handle_utterance(self, user_id: str, text: str, *, utterance_id: str | None = None) -> str:
+        """Persist before acknowledging; stable bridge IDs deduplicate retries.
+
+        A bridge that omits utterance_id gets a fresh local identity per call
+        and cannot claim external retry deduplication. Text is never an id.
         """
         if not is_allowed(user_id, self.allowed_user_ids):
             return "Sorry, you're not authorized to drive this agent."
-        msg = IncomingMessage(user_id=user_id, text=text, channel=self.name)
-        if classify_utterance(text) == "quick":
-            # Route through dispatch_text (not the raw handler) so a v2 handler
-            # returning a Reply is normalized to text before hud_trim; the raw
-            # handler path would hand hud_trim a Reply object and AttributeError.
-            task = asyncio.create_task(self.dispatch_text(msg))
-            try:
-                reply = await asyncio.wait_for(asyncio.shield(task), timeout=self.deadline_s)
-                return hud_trim(reply)
-            except asyncio.TimeoutError:
-                # Took too long for the HUD: fall back to ack-then-run without
-                # cancelling or re-running the already-started handler.
-                self._spawn(self._deliver_task_result(msg, task))
-                return ack_message(self.secondary_channel)
-        # Long task: ack now, run in the background, deliver the full result.
-        self._spawn(self._run_and_deliver(msg))
-        return ack_message(self.secondary_channel)
-
-    async def _run_and_deliver(self, msg: IncomingMessage) -> None:
+        started = asyncio.get_running_loop().time()
+        identifier = uuid.uuid4().hex if utterance_id is None else utterance_id
+        if not isinstance(identifier, str) or not identifier or len(identifier) > 1024:
+            raise ValueError("Invalid glasses utterance identity")
+        identity = f"{len(user_id)}:{user_id}:{identifier}"
+        message = IncomingMessage(user_id=user_id, sender_id=user_id, text=text, channel=self.name, message_id=identity)
+        worker = self._ensure_worker()
+        existing = await asyncio.to_thread(worker.journal.get, _record_id(self.name, worker.account, identity))
+        route = existing["route"] if existing else {"kind": classify_utterance(text), "secondary": self.secondary_channel}
+        future = None
+        if route["kind"] == "quick" and sum(len(futures) for futures in self._observers.values()) < 32:
+            future = asyncio.get_running_loop().create_future()
+            self._observers.setdefault(identity, {})[future] = started + self.deadline_s
         try:
-            result = await self.dispatch_text(msg)
-        except Exception:  # pragma: no cover -- delivery never crashes the bridge
-            log.exception("glasses: background task failed")
-            return
-        await self._deliver_result(msg, result)
+            receipt = await worker.submit(message, external_id=identity, route=route)
+            self._start_worker(worker)
+            if receipt.get("reply"):
+                return self._render_result(user_id, receipt["reply"]["text"], worker.account)
+            if future is not None:
+                remaining = max(0, self.deadline_s - (asyncio.get_running_loop().time() - started))
+                try:
+                    text = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
+                    return self._render_result(user_id, text, worker.account)
+                except asyncio.TimeoutError:
+                    if future.done() and not future.cancelled():
+                        return self._render_result(user_id, future.result(), worker.account)
+            return ack_message(self.secondary_channel)
+        finally:
+            if future is not None:
+                waiting = self._observers.get(identity, {})
+                waiting.pop(future, None)
+                if not waiting:
+                    self._observers.pop(identity, None)
+                if not future.done():
+                    future.cancel()
 
-    async def _deliver_task_result(self, msg: IncomingMessage, task: asyncio.Task[str]) -> None:
-        try:
-            result = await task
-        except asyncio.CancelledError:  # pragma: no cover -- loop shutdown/channel stop
-            log.warning("glasses: background task was cancelled before delivery")
-            return
-        except Exception:  # pragma: no cover -- delivery never crashes the bridge
-            log.exception("glasses: background task failed")
-            return
-        await self._deliver_result(msg, result)
+    async def get_result(self, user_id: str, utterance_id: str):
+        """Read a saved bridge result under current caller/account authority."""
+        if not is_allowed(user_id, self.allowed_user_ids):
+            raise PermissionError("Glasses caller is no longer authorized")
+        if not isinstance(utterance_id, str) or not utterance_id or len(utterance_id) > 1024:
+            raise ValueError("Invalid glasses utterance identity")
+        worker = self._ensure_worker()
+        if worker.account != self._account():
+            raise PermissionError("Glasses configured account changed")
+        identity = _record_id(self.name, worker.account, f"{len(user_id)}:{user_id}:{utterance_id}")
+        row = await asyncio.to_thread(worker.journal.get, identity)
+        if worker.account != self._account() or not is_allowed(user_id, self.allowed_user_ids):
+            raise PermissionError("Glasses response authority changed")
+        if row is None:
+            return None
+        return {"execution": row["execution"], "delivery": row["delivery"],
+                "text": (row.get("reply") or {}).get("text")}
 
-    async def _deliver_result(self, msg: IncomingMessage, result: str) -> None:
-        if self._deliver is not None and result:
-            try:
-                await self._deliver(msg.user_id, result)
-            except Exception:  # pragma: no cover
-                log.exception("glasses: secondary delivery failed")
-
-    async def start(self) -> None:  # pragma: no cover -- transport fronts /webhook/start
-        raise NotImplementedError(
-            "GlassesChannel is driven by the inbound webhook bridge; it does not "
-            "run its own loop. Front POST /webhook/start with the glasses shim.")
+    async def start(self) -> None:
+        worker = self._ensure_worker()
+        self._start_worker(worker)
+        await asyncio.shield(worker.task)
 
     async def send(self, user_id: str, text: str) -> None:
-        if self._deliver is not None:
-            await self._deliver(user_id, hud_trim(text))
+        if self._deliver is None:
+            raise DeliveryNotSent("Glasses secondary delivery is not configured")
+        return await self._deliver(user_id, hud_trim(text))
 
     async def stop(self) -> None:
-        return None
+        for waiting in self._observers.values():
+            for future in waiting:
+                if not future.done():
+                    future.cancel()
+        self._observers.clear()
+        if self._worker is not None:
+            await self._worker.close()
 
 
 __all__ = ["GlassesChannel", "classify_utterance", "ack_message", "hud_trim"]

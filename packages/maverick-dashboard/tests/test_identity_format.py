@@ -64,3 +64,13 @@ def test_permission_labels():
     assert permission_label("audit") == "Review audit trail"
     assert permission_label("admin") == "Administer"
     assert permission_label("view") == "View"
+
+
+def test_humanize_reads_abbreviations_the_way_people_write_them():
+    from maverick_dashboard.identity_format import humanize
+    assert humanize("pending_review") == "Pending review"
+    assert humanize("ai_act") == "AI act"
+    assert humanize("notice_sha256") == "Notice fingerprint"
+    assert humanize("gdpr-dsar") == "GDPR DSAR"
+    assert humanize("  ") == ""
+    assert humanize(None) == ""

@@ -11,6 +11,7 @@ public struct DashboardConnection: Codable, Equatable {
     }
 
     public func validatedURL() throws -> URL {
+        if address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ConnectionError.missingAddress }
         guard let parts = URLComponents(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
               let host = parts.host?.lowercased(), !host.isEmpty,
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
@@ -25,16 +26,50 @@ public struct DashboardConnection: Codable, Equatable {
 }
 
 public enum ConnectionError: LocalizedError {
-    case invalidAddress, invalidToken, secureStorage(Int32), response(Int)
+    case missingAddress, invalidAddress, invalidToken, secureStorage(Int32), response(Int), unreadable
 
+    // Shown to people as written: plain sentences, no status numbers or codes.
     public var errorDescription: String? {
         switch self {
-        case .invalidAddress: return "Enter a dashboard HTTPS address without sign-in details, a query, or a fragment. HTTP is allowed only on this device."
-        case .invalidToken: return "The access token is too long or contains a line break. Check it and try again."
-        case .secureStorage(let status): return "Secure storage could not be accessed (\(status)). Unlock this device and try again."
-        case .response(let status): return "The dashboard request returned status \(status). Check the address and access token."
+        case .missingAddress:
+            return "Enter your dashboard address. It is the web address you use to open Lightwork on a computer."
+        case .invalidAddress:
+            return "Enter only the dashboard address, starting with https:// (for example https://lightwork.yourcompany.com). Addresses starting with http:// work only for a dashboard on this same device."
+        case .invalidToken:
+            return "The access token doesn't look right: it is too long or has a line break in it. Copy it again from your administrator's message."
+        case .secureStorage:
+            return "Could not open this device's secure storage. Unlock the device, then try again."
+        case .response(let status):
+            switch status {
+            case 401: return "The dashboard did not accept your access token. Check it in Settings or ask your administrator for a new one."
+            case 403: return "Your access token does not allow viewing this information. Ask your administrator to check your access."
+            case 404: return "This dashboard does not offer this information yet. Ask your administrator to update the dashboard."
+            case 429: return "The dashboard is busy. Wait a minute, then try again."
+            case 500...599: return "The dashboard had a problem answering. Try again in a few minutes."
+            default: return "The dashboard could not answer. Check the address and access token in Settings, then try again."
+            }
+        case .unreadable:
+            return "The dashboard sent a reply this app could not read. Update the app, or ask your administrator to check the dashboard."
         }
     }
+}
+
+/// One plain sentence for any failure while talking to the dashboard, so no
+/// system error text or code reaches the screen.
+public func plainMessage(for error: Error) -> String {
+    if let known = error as? ConnectionError, let text = known.errorDescription { return text }
+    if error is DecodingError { return ConnectionError.unreadable.errorDescription ?? "" }
+    if let urlError = error as? URLError, urlError.code == .timedOut {
+        return "The dashboard took too long to answer. Check your network, then try again."
+    }
+    return "Could not reach the dashboard. Check that you are on your organization's network or VPN, then try again."
+}
+
+/// People often type "lightwork.example.com"; assume the secure scheme.
+public func addressWithScheme(_ address: String) -> String {
+    let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty || trimmed.contains("://") { return trimmed }
+    return "https://" + trimmed
 }
 
 public protocol ConnectionStorage {

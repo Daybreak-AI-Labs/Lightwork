@@ -12,14 +12,10 @@ maverick-agent[latex]``; ``render`` needs a TeX engine on PATH in the sandbox.
 """
 from __future__ import annotations
 
-import shutil
-import tempfile
 import xml.etree.ElementTree as ET
-from pathlib import Path
 from typing import Any
 
-from . import Tool, sandbox_run
-from .ffmpeg_tool import _safe_path
+from . import Tool
 
 _SCHEMA = {
     "type": "object",
@@ -56,28 +52,15 @@ def to_mathml(latex: str) -> str:
 
 
 def _render_pdf(latex: str, sandbox, engine: str, out: str) -> str:
+    from .document_processing import run_document_job, workspace_path
+
     eng = engine if engine in ("tectonic", "pdflatex") else "tectonic"
-    # Confine the model-supplied destination to the sandbox workspace; an
-    # invalid destination must be refused before starting the document engine.
-    dest = Path(_safe_path(sandbox, out or "doc.pdf"))
-    with tempfile.TemporaryDirectory(prefix="mvk-latex-") as temporary:
-        workdir = Path(temporary)
-        tex = workdir / "doc.tex"
-        tex.write_text(latex, encoding="utf-8")
-        if eng == "tectonic":
-            argv = ["tectonic", "--outdir", str(workdir), str(tex)]
-        else:
-            argv = ["pdflatex", "-interaction=nonstopmode",
-                    "-output-directory", str(workdir), str(tex)]
-        code, stdout, stderr = sandbox_run(sandbox, argv, timeout=120.0)
-        pdf = workdir / "doc.pdf"
-        if code != 0 or not pdf.exists():
-            tail = (stderr or stdout or "").strip()[-500:]
-            return (f"ERROR: {eng} failed (exit {code}); is it installed in the "
-                    f"sandbox? {tail}")
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(pdf, dest)
-        return f"rendered PDF -> {dest}"
+    destination = out or "doc.pdf"
+    workspace_path(sandbox, destination)
+    result = run_document_job({"operation": "latex", "engine": eng},
+                              latex.encode("utf-8"), sandbox, destination=destination)
+    return result.replace("wrote ", "rendered PDF -> ", 1)
+
 
 
 def _run(args: dict[str, Any], sandbox) -> str:

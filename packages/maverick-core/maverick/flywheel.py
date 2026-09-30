@@ -16,8 +16,8 @@ captured Operating Record that runs the whole loop, grounded in real outcomes.
 
 ``run_once`` is one turn of the flywheel; scheduled between shifts (``maverick
 flywheel`` / a cron / the dashboard) the workforce compounds from its own
-experience. OFF by default: ``maybe_run`` is the safe entry point, a no-op empty
-report unless ``[data_engine]`` is enabled.
+experience. ``[data_engine]`` is ON by default; ``maybe_run`` is the governed
+entry point and returns an empty report when it is disabled.
 
 (This supersedes the earlier standalone ``data_engine_runner``: it composes
 *every* engine, not just triage->mine.)
@@ -81,10 +81,17 @@ def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_sta
         steps, failure_threshold=failure_threshold, min_support=min_support,
         top_k=top_k, outcome_fn=outcome_fn)
 
+    # Learned-state writes are audited like every other learning loop
+    # (dreaming, self-harness): a LEARNING_UPDATE row right after EACH write,
+    # so a later failure cannot leave an earlier write unaudited.
+    from .audit import EventKind, record
+
     rails = negative_knowledge.mine(classes)
     guard_store = guardrails or negative_knowledge.shared()
     check_learning_halt("flywheel", "guardrail_persistence")
     guard_store.update(rails)
+    record(EventKind.LEARNING_UPDATE, agent="flywheel", store="guardrails",
+           episodes=n_eps, written=len(rails))
 
     mem_store = memory or procedural_memory.shared()
     mems = procedural_memory.consolidate(
@@ -92,6 +99,8 @@ def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_sta
         outcome_fn=outcome_fn)
     check_learning_halt("flywheel", "procedural_memory_persistence")
     mem_store.update(mems)
+    record(EventKind.LEARNING_UPDATE, agent="flywheel", store="procedural_memory",
+           episodes=n_eps, written=len(mems))
 
     hyps = operations_scientist.propose(classes, mems, top_k=top_k)
     sims: tuple = ()

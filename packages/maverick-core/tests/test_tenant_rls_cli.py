@@ -35,13 +35,16 @@ def test_preflight_reports_ownership_and_legacy_rows(monkeypatch):
     monkeypatch.setattr(pg_rls, "preflight", lambda conn: {
         "role": "app",
         "tables": {"goals": {"owner": "app", "owned_by_current_role": True,
-                             "null_tenant_rows": 5}},
+                             "null_tenant_rows": 5},
+                   "event_trigger_batches": {"owner": "app", "owned_by_current_role": True,
+                                             "null_tenant_rows": 0, "empty_tenant_rows": 2}},
         "ready": False,
     })
     res = CliRunner().invoke(main, ["tenant", "rls-preflight"])
     assert res.exit_code == 0, res.output
     assert "role: app" in res.output
     assert "goals: owned, 5 legacy NULL-tenant row(s)" in res.output
+    assert "2 legacy empty-tenant event row(s)" in res.output
     assert "NOT READY" in res.output
 
 

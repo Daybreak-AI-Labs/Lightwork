@@ -405,7 +405,9 @@ class ResearchContainerRunner:
     def _control_time(budget: Budget) -> float:
         budget.check()
         remaining = budget.remaining_wall()
-        if not math.isfinite(remaining) or remaining <= 0:
+        # inf is a budget with no wall cap (the sandbox's own limits still
+        # bound every run); only NaN or nothing left is exhausted.
+        if math.isnan(remaining) or remaining <= 0:
             raise ResearchContainerError("research wall budget is exhausted")
         return min(15, remaining)
 
@@ -417,7 +419,7 @@ class ResearchContainerRunner:
         budget.record_tool_call()
         self._initialize(budget=budget)
         remaining = budget.remaining_wall()
-        if not math.isfinite(remaining) or remaining <= 0:
+        if math.isnan(remaining) or remaining <= 0:
             raise ResearchContainerError("research wall budget is exhausted")
         timeout = min(self.limits.timeout_seconds, remaining)
         name = "lightwork-research-" + uuid.uuid4().hex

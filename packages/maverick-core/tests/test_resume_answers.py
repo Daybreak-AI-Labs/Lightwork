@@ -58,6 +58,7 @@ def test_resume_builds_and_passes_a_sandbox(tmp_path: Path, monkeypatch):
 
     def fake_run_goal_sync(llm, world, bud, goal_id, **kwargs):
         captured["sandbox"] = kwargs.get("sandbox")
+        world.set_goal_status(goal_id, "done", "DONE.")
         return "DONE."
 
     monkeypatch.setattr(orch, "run_goal_sync", fake_run_goal_sync)

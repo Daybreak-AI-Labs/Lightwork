@@ -736,7 +736,7 @@ class ConsentScanScheduler:
             worker.start()
             return True
 
-    def stop(self, *, timeout: float = 5.0) -> bool:
+    def stop(self, *, timeout: float = 5.0, wait: bool = True) -> bool:
         """Signal shutdown and wait finitely for any already leased scan."""
 
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
@@ -751,6 +751,8 @@ class ConsentScanScheduler:
         if stop is None or worker is None:
             return False
         stop.set()
+        if not wait:
+            return False
         worker.join(wait_seconds)
         if worker.is_alive():
             return False
@@ -813,14 +815,11 @@ def attach_consent_scan_scheduler(
 
     @asynccontextmanager
     async def lifespan(target: Any):
-        from starlette.concurrency import run_in_threadpool
+        from ._lifecycle import supervised_runtime
 
         async with previous(target):
-            await run_in_threadpool(selected.start)
-            try:
+            async with supervised_runtime(target, "consent_scan", selected):
                 yield
-            finally:
-                await run_in_threadpool(selected.stop)
 
     app.router.lifespan_context = lifespan
     setattr(app.state, marker, selected)

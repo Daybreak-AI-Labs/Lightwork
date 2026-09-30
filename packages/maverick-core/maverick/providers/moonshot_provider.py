@@ -22,13 +22,15 @@ from .openai_provider import OpenAIClient
 class MoonshotClient(OpenAIClient):
     DEFAULT_MODEL = "kimi-k2"
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
-        key = api_key or os.environ.get("MOONSHOT_API_KEY")
-        url = base_url or os.environ.get(
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, *, environment=None):
+        env = os.environ if environment is None else environment
+        key = api_key or env.get("MOONSHOT_API_KEY")
+        url = base_url or env.get(
             "MOONSHOT_BASE_URL", "https://api.moonshot.ai/v1",
         )
         super().__init__(
             api_key=key,
             base_url=url,
             allow_openai_env_fallback=False,
+            environment=environment,
         )

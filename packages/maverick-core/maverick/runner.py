@@ -25,11 +25,13 @@ import concurrent.futures
 import contextvars
 import functools
 import logging
+import math
+import os
 import threading
 import time
 from typing import Any, Protocol
 
-from ._envparse import env_float, env_int
+from ._envparse import env_float
 
 log = logging.getLogger(__name__)
 
@@ -43,12 +45,25 @@ log = logging.getLogger(__name__)
 #     queues anyone. Both are env-overridable.
 #
 # BoundedSemaphore(0) raises ValueError, so clamp to at least 1.
-MAX_CONCURRENT_GOALS = max(1, env_int("MAVERICK_MAX_CONCURRENT_GOALS", 16))
-MAX_CONCURRENT_GOALS_PER_PRINCIPAL = max(
-    1, env_int("MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL", 3))
+# Also settings ([agent] max_concurrent_goals / max_concurrent_goals_per_principal),
+# read once here at startup; the environment still wins.
+def _concurrency_settings() -> tuple[int, int]:
+    from .env_setting import env_or_config_int
+
+    return (
+        max(1, env_or_config_int(
+            "MAVERICK_MAX_CONCURRENT_GOALS", "agent", "max_concurrent_goals", 16)),
+        max(1, env_or_config_int(
+            "MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL", "agent",
+            "max_concurrent_goals_per_principal", 3)),
+    )
+
+
+MAX_CONCURRENT_GOALS, MAX_CONCURRENT_GOALS_PER_PRINCIPAL = _concurrency_settings()
 _run_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_GOALS)
 _inflight_lock = threading.Lock()
 _inflight_count = 0
+_accepting_goals = True
 
 # W1-72: run_goal_in_background_async used to hand the ENTIRE goal run (up to
 # DEFAULT_MAX_WALL_SECONDS, plus up to 2x _ACQUIRE_TIMEOUT of semaphore
@@ -104,10 +119,29 @@ def inflight_goals() -> int:
         return _inflight_count
 
 
-def _mark_inflight_started() -> None:
+def close_goal_admission() -> None:
+    """Atomically refuse new accepted runs before beginning process drain."""
+    global _accepting_goals
+    with _inflight_lock:
+        _accepting_goals = False
+
+
+def open_goal_admission() -> None:
+    """Reopen only after the dashboard has verified its prior workers exited."""
+    global _accepting_goals
+    with _inflight_lock:
+        if _inflight_count:
+            raise RuntimeError("cannot reopen goal admission while prior runs remain")
+        _accepting_goals = True
+
+
+def _mark_inflight_started(*, require_admission: bool = False) -> bool:
     global _inflight_count
     with _inflight_lock:
+        if require_admission and not _accepting_goals:
+            return False
         _inflight_count += 1
+        return True
 
 
 def _mark_inflight_finished() -> None:
@@ -131,14 +165,136 @@ def drain_inflight(timeout: float = 25.0, poll: float = 0.5) -> int:
     Returns the count still in-flight at return (0 = fully drained). Synchronous
     (polls the semaphore) -- call it off the event loop. Never raises."""
     deadline = time.monotonic() + max(0.0, timeout)
-    while inflight_goals() > 0 and time.monotonic() < deadline:
-        time.sleep(max(0.05, poll))
+    while inflight_goals() > 0:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(remaining, max(0.05, poll)))
     return inflight_goals()
 
 
-DEFAULT_MAX_DOLLARS = env_float("MAVERICK_DEFAULT_MAX_DOLLARS", 2.0)
-DEFAULT_MAX_WALL_SECONDS = env_float("MAVERICK_DEFAULT_MAX_WALL_SECONDS", 1800.0)
-DEFAULT_MAX_DEPTH = env_int("MAVERICK_DEFAULT_MAX_DEPTH", 3)
+def _optional_limit(name: str) -> float | None:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    value = float(raw)
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be a finite non-negative limit")
+    return value
+
+
+DEFAULT_MAX_DOLLARS = _optional_limit("MAVERICK_DEFAULT_MAX_DOLLARS")
+DEFAULT_MAX_WALL_SECONDS = _optional_limit("MAVERICK_DEFAULT_MAX_WALL_SECONDS")
+def _default_max_depth_setting() -> int:
+    """``[swarm] default_max_depth`` (env ``MAVERICK_DEFAULT_MAX_DEPTH`` wins)."""
+    from .env_setting import env_or_config_int
+
+    return env_or_config_int("MAVERICK_DEFAULT_MAX_DEPTH", "swarm", "default_max_depth", 3)
+
+
+DEFAULT_MAX_DEPTH = _default_max_depth_setting()
+
+
+class TaskLimitConfigError(ValueError):
+    """The deployment's task-limit configuration is malformed (operator fix)."""
+
+
+def _resolved_cap(field: str, default: float | None) -> float | None:
+    from .budget import resolve_budget_caps
+
+    try:
+        return resolve_budget_caps(defaults={field: default}).get(field)
+    except TaskLimitConfigError:
+        raise
+    except ValueError as exc:
+        raise TaskLimitConfigError(str(exc)) from exc
+
+
+def configured_max_dollars() -> float | None:
+    """The deployment's per-goal spend ceiling, in USD.
+
+    The same precedence a run's budget is built with -- the Settings page's
+    spend cap, else the ``[budget]`` config section, else
+    ``MAVERICK_BUDGET_DOLLARS``, else ``DEFAULT_MAX_DOLLARS`` -- resolved
+    without reserving tenant allowance.  The dashboard clamps requested
+    per-goal limits to this value; ``DEFAULT_MAX_DOLLARS`` alone is only the
+    fallback for a deployment that configured nothing, so using it as the
+    ceiling rejected the very cap the operator had set.
+    """
+    return _resolved_cap("max_dollars", DEFAULT_MAX_DOLLARS)
+
+
+def configured_max_wall_seconds() -> float | None:
+    return _resolved_cap("max_wall_seconds", DEFAULT_MAX_WALL_SECONDS)
+
+
+def clamp_task_limit(requested: float | None, configured: float | None) -> float | None:
+    """An absent task ceiling is not an invented deployment allowance."""
+    if requested is None:
+        return configured
+    return min(requested, configured) if configured is not None else requested
+
+
+def _allowance_admission(world, goal_id: int, budget):
+    """Refuse a known exhausted allowance before entering any goal work.
+
+    Once orchestration starts, any later error remains an ordinary blocked
+    result: this boundary cannot certify that the trajectory had no effects.
+    """
+    from .budget import BudgetExceeded
+    from .orchestrator import _budget_stop_message
+    from .run_outcome import GoalAdmissionRefused
+    from .tenant.provider_admission import OrganizationBudgetExceeded
+
+    goal = world.get_goal(goal_id)
+    if goal is None:
+        return "blocked"
+    if goal.status not in {"pending", "active", "running", "blocked"}:
+        return goal.status
+    try:
+        if reason := getattr(budget, "_tenant_refusal", None):
+            raise OrganizationBudgetExceeded(reason)
+        budget.check()
+    except BudgetExceeded as exc:
+        message = _budget_stop_message(budget, goal_id, exc)
+        if not world.block_goal_admission(goal_id, result=message):
+            # Cancellation/completion may have won after the initial read.
+            # This invocation holds no certificate over that outcome.
+            return _finished_goal_status(world, goal_id) or "blocked"
+        return GoalAdmissionRefused(
+            goal_id,
+            stop_kind=("organization_budget" if isinstance(exc, OrganizationBudgetExceeded) else "budget"),
+            detail=message,
+        )
+    return None
+
+
+def _finished_goal_status(world, goal_id: int) -> str | None:
+    try:
+        goal = world.get_goal(goal_id)
+        return goal.status if goal else None
+    except Exception:  # pragma: no cover -- read-back may fail independently of execution
+        log.exception("run_goal_in_thread: status read-back failed (goal_id=%s)", goal_id)
+        return None
+
+
+def _runner_principal_binding(world, goal, execution_principal):
+    """Bind once, then verify a newly bound identity through durable readback."""
+    from .orchestrator import _bind_goal_execution_principal
+    try:
+        matched = _bind_goal_execution_principal(world, goal, execution_principal)
+    except Exception:
+        log.exception("goal #%s execution-principal binding is unavailable", goal.id)
+        return None
+    if not matched:
+        log.warning("goal #%s execution principal does not match its binding", goal.id)
+        return False
+    if not (getattr(goal, "execution_principal", "") or ""):
+        rebound = world.get_goal(goal.id)
+        if rebound is None or (getattr(rebound, "execution_principal", "") or "") != execution_principal:
+            log.error("goal #%s execution-principal binding was not observable", goal.id)
+            return None
+    return True
 
 
 def run_goal_in_thread(
@@ -154,6 +310,7 @@ def run_goal_in_thread(
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
     acquire_timeout: float | None = None,
+    usage_observer=None,
 ) -> str | None:
     """Synchronously run a goal under the global concurrency semaphore.
 
@@ -203,20 +360,30 @@ def run_goal_in_thread(
             "(goal_id=%s); refusing run", timeout, goal_id,
         )
         return None
-    _mark_inflight_started()
+    if not _mark_inflight_started(require_admission=True):
+        _run_semaphore.release()
+        principal_sem.release()
+        log.info("run_goal_in_thread: shutdown admission is closed (goal_id=%s)", goal_id)
+        return None
     world = None
     sandbox = None
+    budget = None
     try:
         from .budget import budget_from_config
         from .llm import LLM
         from .orchestrator import (
-            _bind_goal_execution_principal,
             _execution_principal,
             run_goal_sync,
         )
         from .sandbox import build_sandbox
         from .world_model import close_world_if_owned, open_world
         world = open_world()  # client/tenant-floored canonical world
+        from .federation_admission import FederationAdmissionRequired, require_execution
+        try:
+            require_execution(world, goal_id, capability=capability,
+                              max_dollars=max_dollars, max_wall_seconds=max_wall_seconds)
+        except FederationAdmissionRequired:
+            return "blocked"
         # Bind/refuse the exact runtime authority before constructing provider
         # or sandbox clients and before trace pinning appends an event. The
         # orchestrator repeats this at its own public boundary; this earlier
@@ -228,43 +395,20 @@ def run_goal_in_thread(
         goal = world.get_goal(goal_id)
         if goal is None:
             return None
-        was_unbound = not bool(
-            getattr(goal, "execution_principal", "") or ""
-        )
-        try:
-            principal_matches = _bind_goal_execution_principal(
-                world,
-                goal,
-                execution_principal,
-            )
-        except Exception:
-            log.exception(
-                "goal #%s execution-principal binding is unavailable",
-                goal_id,
-            )
+        principal_matches = _runner_principal_binding(world, goal, execution_principal)
+        if principal_matches is None:
             return None
         if not principal_matches:
-            log.warning(
-                "goal #%s execution principal does not match its binding",
-                goal_id,
-            )
             # A rejected caller has no authority to change the goal. In
             # particular, it must not interrupt another principal's live run.
             return "blocked"
-        if was_unbound:
-            rebound = world.get_goal(goal_id)
-            if (
-                rebound is None
-                or (getattr(rebound, "execution_principal", "") or "")
-                != execution_principal
-            ):
-                log.error(
-                    "goal #%s execution-principal binding was not observable",
-                    goal_id,
-                )
-                return None
-        llm = LLM()
-        sandbox = build_sandbox()
+        # Director mode (a dashboard start with an autonomy level): its
+        # recorded spending cap can only lower this run's, and its consent
+        # mode and review checkpoints (applied around the run below) can only
+        # tighten the installation's.
+        from .director_mode import recorded_envelope, run_scope, spending_cap
+        director = recorded_envelope(world, goal_id)
+        max_dollars = spending_cap(director, max_dollars)
         # Precedence: explicit caller arg > [budget] config > the
         # background runner's conservative defaults (tighter than the
         # interactive Budget defaults on purpose).
@@ -276,18 +420,24 @@ def run_goal_in_thread(
             max_dollars=max_dollars,
             max_wall_seconds=max_wall_seconds,
         )
+        admission = _allowance_admission(world, goal_id, budget)
+        if admission is not None:
+            return admission
+        llm = LLM()
+        sandbox = build_sandbox()
         # Trace pinning: stamp the run with the workspace's git state so the
         # trace/replay ties to an exact commit. Best-effort, never blocks.
         from .trace_pin import pin_trace
         pin_trace(world, goal_id)
         try:
-            run_goal_sync(
-                llm, world, budget,
-                goal_id, sandbox=sandbox, max_depth=max_depth,
-                conversation_id=conversation_id, channel=channel,
-                user_id=user_id, capability=capability,
-                allowed_suites=allowed_suites, resume=True,
-            )
+            with run_scope(director):
+                run_goal_sync(
+                    llm, world, budget,
+                    goal_id, sandbox=sandbox, max_depth=max_depth,
+                    conversation_id=conversation_id, channel=channel,
+                    user_id=user_id, capability=capability,
+                    allowed_suites=allowed_suites, resume=True,
+                )
         except Exception:
             # If the swarm raises an unexpected exception (anything not
             # caught by run_goal itself), the goal row is still 'active'.
@@ -303,16 +453,18 @@ def run_goal_in_thread(
             # worker re-executes the whole swarm and re-spends budget.
             return "error"
         # Read back the terminal status so the worker can decide retry.
-        try:
-            g = world.get_goal(goal_id)
-            return g.status if g else None
-        except Exception:  # pragma: no cover
-            log.exception("run_goal_in_thread: status read-back failed (goal_id=%s)", goal_id)
-            return None
+        return _finished_goal_status(world, goal_id)
     except Exception:
         log.exception("background goal run failed (goal_id=%s)", goal_id)
         return None
     finally:
+        if usage_observer is not None and budget is not None:
+            # Internal flow accounting observes the completed meter. It cannot
+            # replace the runner's configured spending authority.
+            try:
+                usage_observer(budget.dollars)
+            except Exception:
+                log.exception("goal usage observer failed (goal_id=%s)", goal_id)
         if sandbox is not None:
             close = getattr(sandbox, "close", None)
             if close is not None:

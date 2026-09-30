@@ -256,7 +256,7 @@ def test_history_is_owner_scoped(monkeypatch, tmp_path):
 def test_automations_page_shows_event_section_when_enabled(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/automations").text
-    assert "Event triggers" in t and 'id="auto-event-form"' in t
+    assert "Starts when new items arrive" in t and 'id="auto-event-form"' in t
 
 
 def test_automations_page_hides_event_section_when_disabled(monkeypatch, tmp_path):
@@ -270,26 +270,20 @@ def test_poll_and_fire_attributes_goal_to_trigger_owner(monkeypatch, tmp_path):
     # owned by the trigger's owner, so owner-scoped views see it.
     _isolate(monkeypatch, tmp_path)
     import maverick.automation_events as ev
+    from maverick.world_model import WorldModel
     from maverick_dashboard import event_poll
     from maverick_dashboard import event_triggers_store as s
-    owners = []
-
-    class _FakeWorld:
-        def create_goal(self, title, description, owner=""):
-            owners.append(owner)
-            return len(owners)
-
-        def record_goal_origin(self, gid, kind, name):
-            pass
+    world = WorldModel(tmp_path / "world.db")
 
     box = [{"items": [{"id": "1", "title": "a"}]}]
     monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
     s.set_trigger("feed", "triage", "http_json", owner="user:alice",
                   config={"url": "http://x", "items_path": "items", "id_field": "id"})
-    event_poll.poll_and_fire(_FakeWorld(), [s.get_trigger("feed")], fire=lambda g: None)
+    event_poll.poll_and_fire(world, [s.get_trigger("feed")], fire=lambda g: None)
     box[0] = {"items": [{"id": "2", "title": "b"}, {"id": "1", "title": "a"}]}
-    event_poll.poll_and_fire(_FakeWorld(), [s.get_trigger("feed")], fire=lambda g: None)
-    assert owners == ["user:alice"]
+    event_poll.poll_and_fire(world, [s.get_trigger("feed")], fire=lambda g: None)
+    assert [g.owner for g in world.list_goals()] == ["user:alice"]
+    world.close()
 
 
 def _reset_aq(monkeypatch, aq):
@@ -432,13 +426,18 @@ def test_poll_runs_under_trigger_tenant(monkeypatch, tmp_path):
     s.set_trigger("feed", "triage", "http_json", tenant="tenant:acme",
                   config={"url": "http://x", "items_path": "items", "id_field": "id"})
 
-    class _W:
-        def create_goal(self, *a, **k):
-            return 1
-
-        def record_goal_origin(self, *a, **k):
-            pass
-    event_poll.poll_and_fire(_W(), [s.get_trigger("feed")], fire=lambda g: None)
+    from maverick.world_model import WorldModel
+    opened = []
+    def world_factory():
+        world = WorldModel(tmp_path / "world.db")
+        opened.append(world)
+        return world
+    try:
+        result = event_poll.poll_and_fire(world_factory, [s.get_trigger("feed")], fire=lambda g: None)
+    finally:
+        for world in opened:
+            world.close()
+    assert not result[0]["poll_error"]
     assert seen["tenant"] == "tenant:acme"
 
 
@@ -463,18 +462,24 @@ def test_world_factory_resolves_after_trigger_tenant_is_pinned(monkeypatch, tmp_
     )
     resolved = []
 
-    class _W:
-        pass
-
+    from maverick.world_model import WorldModel
+    opened = []
     def _world_factory():
         resolved.append(current_tenant_id())
-        return _W()
+        world = WorldModel(tmp_path / "world.db")
+        opened.append(world)
+        return world
 
-    event_poll.poll_and_fire(
-        _world_factory,
-        [s.get_trigger("feed", tenant="acme")],
-        fire=lambda _g: None,
-    )
+    try:
+        result = event_poll.poll_and_fire(
+            _world_factory,
+            [s.get_trigger("feed", tenant="acme")],
+            fire=lambda _g: None,
+        )
+    finally:
+        for world in opened:
+            world.close()
+    assert not result[0]["poll_error"]
     assert resolved == ["acme"]
 
 

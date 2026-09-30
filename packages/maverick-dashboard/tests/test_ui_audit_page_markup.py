@@ -28,14 +28,14 @@ def test_audit_div_tags_balanced(monkeypatch, tmp_path):
 
 def test_audit_search_status_is_live_region(monkeypatch, tmp_path):
     r = _audit_page(monkeypatch, tmp_path)
-    assert 'id="audit-search-msg" role="status" aria-live="polite"' in r.text
+    assert 'id="aud-action-result" role="status" aria-live="polite"' in r.text
 
 
 def test_audit_page_exposes_read_only_unified_custody_status(monkeypatch, tmp_path):
     r = _audit_page(monkeypatch, tmp_path)
     assert r.status_code == 200
-    assert "Unified audit custody" in r.text
+    assert "Protect and share the log" in r.text
     assert "/api/v1/audit/unified/status" in r.text
     assert 'id="audit-custody-status" role="status" aria-live="polite"' in r.text
-    assert "Independent production proof" in r.text
+    assert "Refresh protection status" in r.text
     assert "textContent" in r.text

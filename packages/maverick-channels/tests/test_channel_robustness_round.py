@@ -26,6 +26,9 @@ class _FakeStdout:
     async def readline(self):
         return self._lines.pop(0) if self._lines else b""
 
+    async def read(self, size):
+        return await self.readline()
+
 
 class _FakeProc:
     pid = 4242
@@ -33,7 +36,17 @@ class _FakeProc:
 
     def __init__(self, stdout):
         self.stdout = stdout
+        self.stderr = _FakeStdout([])
         self.stdin = None
+
+    def terminate(self):
+        self.returncode = 0
+
+    def kill(self):
+        self.returncode = -1
+
+    async def wait(self):
+        return self.returncode
 
 
 def test_signal_send_failure_does_not_kill_loop(monkeypatch):
@@ -53,7 +66,7 @@ def test_signal_send_failure_does_not_kill_loop(monkeypatch):
         "method": "receive",
         "params": {"envelope": {
             "source": "+12345550100",
-            "dataMessage": {"message": "hello"},
+            "dataMessage": {"message": "hello", "timestamp": 123},
         }},
     }).encode() + b"\n"
 
@@ -73,7 +86,7 @@ def test_signal_send_failure_does_not_kill_loop(monkeypatch):
     async def _reply(_msg):
         return "the reply"
 
-    monkeypatch.setattr(chan, "dispatch_text", _reply)
+    monkeypatch.setattr(chan, "handler", _reply)
 
     # The send raises, but start() must swallow it, keep looping, hit EOF, and
     # return -- not propagate the BrokenPipeError out of the channel.
@@ -97,7 +110,7 @@ def test_voice_handler_error_is_generic_not_leaked(monkeypatch):
     client = TestClient(chan._app)
     resp = client.post(
         "/webhook/voice",
-        json={"message": {"type": "transcript", "role": "user", "transcript": "hi"}},
+        json={"message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1", "call": {"id": "call1"}}},
         headers={"Authorization": "Bearer voice-secret"},
     )
     assert resp.status_code == 200
@@ -130,7 +143,7 @@ def _receive(source: str) -> bytes:
     return json.dumps({
         "method": "receive",
         "params": {"envelope": {
-            "source": source, "dataMessage": {"message": "hello"},
+            "source": source, "dataMessage": {"message": "hello", "timestamp": 123},
         }},
     }).encode() + b"\n"
 
@@ -141,7 +154,7 @@ def test_signal_ignores_its_own_number(monkeypatch):
     # otherwise every reply loops forever.
     chan = _signal_chan(monkeypatch, _receive("+12345550199"))  # == phone_number
     dispatched = []
-    monkeypatch.setattr(chan, "dispatch_text",
+    monkeypatch.setattr(chan, "handler",
                         lambda m: dispatched.append(m) or "x")
     asyncio.run(chan.start())
     assert dispatched == []  # own message never reached the agent
@@ -156,7 +169,7 @@ def test_signal_empty_reply_is_not_sent(monkeypatch):
     async def _empty(_):
         return ""
 
-    monkeypatch.setattr(chan, "dispatch_text", _empty)
+    monkeypatch.setattr(chan, "handler", _empty)
     asyncio.run(chan.start())
     assert sent == []  # action-only goal -> nothing pushed to Signal
 
@@ -166,6 +179,7 @@ def test_matrix_empty_reply_is_not_sent(monkeypatch):
 
     chan = MatrixChannel.__new__(MatrixChannel)  # bypass __init__ (needs nio)
     chan.user_id = "@bot:hs"
+    chan.homeserver = "https://hs"
     chan.allowed_user_ids = {"@user:hs"}
     chan._start_ts_ms = None
     sent = []
@@ -178,11 +192,11 @@ def test_matrix_empty_reply_is_not_sent(monkeypatch):
     async def _empty(_):
         return ""
 
-    chan.dispatch_text = _empty
+    chan.handler = _empty
 
     room = type("R", (), {"room_id": "!r:hs"})()
     event = type("E", (), {
-        "sender": "@user:hs", "body": "hi", "server_timestamp": 1,
+        "sender": "@user:hs", "body": "hi", "server_timestamp": 1, "event_id": "$event1",
     })()
     asyncio.run(chan._on_message(room, event))
     assert sent == []  # blank m.text event never posted to the room

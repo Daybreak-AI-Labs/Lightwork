@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Compliance Scope Actions - Lightwork{% endblock %}
+{% block title %}Compliance Tasks · Lightwork{% endblock %}
 {% block content %}
 <style>
   .csa-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
@@ -15,26 +15,52 @@
   @media (max-width:900px) { .csa-grid { grid-template-columns:1fr; } }
 </style>
 
-<h1>Compliance Scope Actions</h1>
-<p>Turn a finalized compliance scope into control and evidence tasks using an independently approved mapping. Review the reason for each proposed task before applying it.</p>
-<div class="csa-warning">
-  <strong>No licensed framework text, raw evidence, free-text task descriptions,
-    secret values, arbitrary code, built-in provider writes, network I/O, legal
-    or certification determination, or live acceptance.</strong>
-  Scope and assessment facts are resolved server-side from the tenant-local
-  compliance-scoping authority. Apply, reconcile, and rollback are unavailable
-  unless the host configures a closed local callback; that callback can never be
-  selected or supplied by this page.
-</div>
+{% from "_hero.html" import hero %}
+{{ hero('Compliance', 'Turn scope into tasks',
+        subtitle='A to-do list of controls and evidence from your final scope',
+        lede='Pick a final compliance scope and an approved mapping, and Lightwork proposes the controls
+              to put in place and the evidence to collect, with the reason for each one.
+              A second person approves the plan before any task is created.') }}
+<details class="panel">
+  <summary>About this page&rsquo;s safeguards</summary>
+  <ul>
+    <li>Lightwork does not include licensed framework text, store raw evidence, or contact outside services from this page.</li>
+    <li>Scope details are read from your final scope; nobody can type them in.</li>
+    <li>Tasks are only created in your other systems when your administrator has connected a task system. Until then, the plan is a list you can review and download.</li>
+  </ul>
+</details>
 
 {% from "_module_gate.html" import module_gate %}
 {% if not compliance_scope_actions_enabled %}
-{{ module_gate('tech_risk_compliance.scope_actions', 'Compliance scope actions',
-               detail='Turns a finalized compliance scope into reason-coded
-                       control and evidence-task intents through an approved
-                       mapping catalog -- have your compliance owner review the
-                       catalog governance first.') }}
+{{ module_gate('tech_risk_compliance.scope_actions', 'Turning scope into tasks',
+               detail='Turns your approved compliance scope into a to-do list of controls and evidence to collect.',
+               can_activate=can_admin) }}
 {% else %}
+<div id="csa-app" data-can-admin="{{ 'true' if can_admin else 'false' }}" data-can-audit="{{ 'true' if can_audit else 'false' }}">
+  <p id="csa-status" class="muted" role="status" aria-live="polite">Loading your records…</p>
+
+  <div class="section-head"><h2>Final scopes</h2></div>
+  <div class="panel" id="csa-scopes"><p class="muted">Loading…</p></div>
+
+  <div class="section-head"><h2>Task plans</h2></div>
+  <div class="panel" id="csa-plans"><p class="muted">Loading…</p></div>
+  <section class="panel" id="csa-plan-detail" hidden aria-live="polite"></section>
+
+  <div class="section-head"><h2>Reports</h2></div>
+  <div class="panel" id="csa-reports"><p class="muted">Loading…</p></div>
+
+  <div class="section-head"><h2>Mappings</h2>
+    <button type="button" class="btn btn--ghost" id="csa-add-catalog">Add a mapping from a file</button></div>
+  <p class="muted">A mapping says which tasks each control in a scope needs. Your compliance team provides it.</p>
+  <div class="panel" id="csa-catalogs"><p class="muted">Loading…</p></div>
+
+  {% if can_audit %}
+  <div class="panel"><button type="button" class="btn btn--ghost" id="csa-integrity">Check records are intact</button></div>
+  {% endif %}
+</div>
+
+<details class="panel" id="csa-technical">
+<summary>Technical details: advanced operations</summary>
 <p><button class="btn" id="csa-load-status" type="button">Check availability</button></p>
 <div class="csa-grid">
   <section class="panel csa-stack">
@@ -170,5 +196,8 @@
   updateConfirmation();
 }());
 </script>
+</details>
+<script src="/static/lightwork-record-workflows.js" defer></script>
+<script src="/static/lightwork-compliance-scope-actions.js" defer></script>
 {% endif %}
 {% endblock %}

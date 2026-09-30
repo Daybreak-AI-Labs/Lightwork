@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
 from typing import Annotated, Any, Literal
@@ -189,6 +190,85 @@ def _principal(request: Request, tenant_id: str) -> str:
         f"lightwork.no-code-grc-studio.identity.v1:{tenant_id}:{subject}".encode()
     ).hexdigest()
     return f"grc-studio-principal-{digest[:40]}"
+
+
+_ID_RE = re.compile(_ID_PATTERN)
+_DIGEST_RE = re.compile(_DIGEST_PATTERN)
+_MAX_SOURCES = 500
+
+
+def _linked_collectors(rows: object) -> list[dict[str, object]]:
+    """Distinct collectors already linked in this workspace's blueprints.
+
+    People pick one of these instead of copying a collector's name, version
+    and fingerprint by hand; the exact values travel with the choice.
+    """
+    seen: dict[tuple[str, int, str], dict[str, object]] = {}
+    for row in rows if isinstance(rows, (list, tuple)) else ():
+        blueprint = getattr(row, "blueprint", None)
+        if not isinstance(blueprint, Mapping):
+            continue
+        bindings = blueprint.get("collector_bindings")
+        for binding in bindings if isinstance(bindings, (list, tuple)) else ():
+            if not isinstance(binding, Mapping):
+                continue
+            collector = binding.get("collector_id")
+            version = binding.get("collector_version")
+            digest = binding.get("collector_integrity_sha256")
+            if (
+                not isinstance(collector, str)
+                or not _ID_RE.fullmatch(collector)
+                or isinstance(version, bool)
+                or not isinstance(version, int)
+                or version < 1
+                or not isinstance(digest, str)
+                or not _DIGEST_RE.fullmatch(digest)
+            ):
+                continue
+            key = (collector, version, digest)
+            if key not in seen and len(seen) < _MAX_SOURCES:
+                seen[key] = {
+                    "collector_id": collector,
+                    "collector_version": version,
+                    "collector_integrity_sha256": digest,
+                }
+    return sorted(seen.values(), key=lambda item: (item["collector_id"], -item["collector_version"]))
+
+
+def _listed_targets(resolver: object, tenant: str) -> tuple[list[dict[str, object]], bool]:
+    """Destinations the deployment's target adapter chooses to list.
+
+    Listing is optional: an adapter without ``list_targets`` still resolves
+    typed destinations, so the page keeps a by-hand fallback.
+    """
+    lister = getattr(resolver, "list_targets", None)
+    if not callable(lister):
+        return [], False
+    raw = lister(tenant)
+    targets: list[dict[str, object]] = []
+    for item in raw if isinstance(raw, (list, tuple)) else ():
+        if not isinstance(item, Mapping) or len(targets) >= _MAX_SOURCES:
+            continue
+        kind, target, revision = item.get("target_kind"), item.get("target_id"), item.get("target_revision")
+        if (
+            kind not in {"questionnaire", "collector", "report"}
+            or not isinstance(target, str)
+            or not _ID_RE.fullmatch(target)
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or not 1 <= revision <= 2_147_483_647
+        ):
+            continue
+        label = item.get("label")
+        targets.append(
+            {
+                "target_kind": kind,
+                "target_id": target,
+                "target_revision": revision,
+                "label": label.strip()[:120] if isinstance(label, str) and label.strip() else None,
+            }
+        )
+    return targets, True
 
 
 def _dependency(request: Request, name: str, fallback: object) -> object:
@@ -388,6 +468,39 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
             "schema": "lightwork.no-code-grc-version-list.v1",
             "count": len(rows),
             "items": _jsonable(rows),
+        }
+
+    @router.get("/sources")
+    async def list_sources(request: Request, response: Response) -> dict[str, object]:
+        """Read-only choices for the page: collectors already linked in this
+        workspace and, when the deployment's adapter lists them, destinations."""
+        require_permission(request, "view")
+        ops, tenant, store = await composition(request)
+        rows = await call(ops, store.list_versions, tenant, limit=1_000)
+        collectors = _linked_collectors(rows)
+        targets: list[dict[str, object]] = []
+        listed = False
+        resolver_factory = _dependency(
+            request,
+            "grc_studio_target_authority_resolver_factory",
+            deps.target_authority_resolver_factory,
+        )
+        if callable(resolver_factory):
+            try:
+                resolver = await run_in_threadpool(
+                    resolver_factory, tenant_id=tenant, request=request
+                )
+                targets, listed = await run_in_threadpool(_listed_targets, resolver, tenant)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception:  # noqa: BLE001 - a listing failure leaves the typed fallback
+                targets, listed = [], False
+        _secure(response)
+        return {
+            "schema": "lightwork.no-code-grc-sources.v1",
+            "collectors": collectors,
+            "destinations": targets,
+            "destinations_listed": listed,
         }
 
     @router.post("/studios/{studio_id}/versions")
@@ -627,6 +740,23 @@ def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
         result = await call(ops, store.create_recovery_backup, tenant)
         _secure(response)
         return _jsonable(result)  # type: ignore[return-value]
+
+    @router.get("/operations/recovery/backups")
+    async def list_backups(
+        request: Request, response: Response, limit: int = Query(default=50, ge=1, le=500)
+    ) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        lister = getattr(store, "list_recovery_backups", None)
+        if not callable(lister):
+            raise HTTPException(status_code=503, detail="GRC studio backup list is unavailable")
+        rows = await call(ops, lister, tenant, limit=limit)
+        _secure(response)
+        return {
+            "schema": "lightwork.no-code-grc-recovery-list.v1",
+            "count": len(rows),
+            "items": _jsonable(rows),
+        }
 
     @router.get("/operations/recovery/backups/{backup_id}")
     async def verify_backup(

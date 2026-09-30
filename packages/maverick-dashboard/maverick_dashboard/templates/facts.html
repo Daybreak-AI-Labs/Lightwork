@@ -7,13 +7,19 @@
   <section class="panel" aria-labelledby="fact-editor-title">
     <h2 id="fact-editor-title">Add a fact</h2>
     <form id="fact-editor">
-      <label for="fact-name">Name</label>
-      <input class="input" id="fact-name" required maxlength="200" placeholder="Business hours" autocomplete="off">
-      <label for="fact-detail">Detail</label>
-      <textarea class="input" id="fact-detail" required maxlength="20000" rows="3" placeholder="Monday to Friday, 9 am to 5 pm"></textarea>
+      <div class="field">
+        <label for="fact-name">Name</label>
+        <input class="input" id="fact-name" required maxlength="200" placeholder="Business hours" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="fact-detail">Detail</label>
+        <textarea class="input" id="fact-detail" required maxlength="20000" rows="3" placeholder="Monday to Friday, 9 am to 5 pm"></textarea>
+      </div>
       <p class="muted">Facts are shared within this workspace. Keep access keys and other secrets out of these notes.</p>
-      <button class="btn btn--primary" id="fact-save" type="submit">Save fact</button>
-      <button class="btn btn--ghost" id="fact-cancel" type="button" hidden>Cancel edit</button>
+      <div class="mv-row__actions">
+        <button class="btn btn--primary" id="fact-save" type="submit">Save fact</button>
+        <button class="btn btn--ghost" id="fact-cancel" type="button" hidden>Cancel edit</button>
+      </div>
       <p id="fact-status" role="status" aria-live="polite"></p>
     </form>
   </section>
@@ -25,12 +31,12 @@
       <thead><tr><th scope="col">Name</th><th scope="col">Detail</th>{% if can_create_goal %}<th scope="col">Action</th>{% endif %}</tr></thead>
       <tbody>
       {% for k, v in facts.items() %}
-        <tr><td class="fact-key">{{ k }}</td><td class="fact-value" style="white-space:pre-wrap;overflow-wrap:anywhere">{{ v }}</td>{% if can_create_goal %}<td><button class="btn btn--ghost" type="button" data-edit-fact aria-label="Edit {{ k }}">Edit</button></td>{% endif %}</tr>
+        <tr data-key="{{ k }}"><td class="fact-key">{{ k | humanize if ('_' in k and ' ' not in k) else k }}</td><td class="fact-value" style="white-space:pre-wrap;overflow-wrap:anywhere">{{ v }}</td>{% if can_create_goal %}<td class="mv-row__actions"><button class="btn btn--ghost" type="button" data-edit-fact aria-label="Edit {{ k }}">Edit</button><button class="btn btn--ghost btn--danger" type="button" data-remove-fact aria-label="Remove {{ k }}">Remove</button></td>{% endif %}</tr>
       {% endfor %}
       </tbody>
     </table>
     {% else %}
-      <p id="facts-empty" class="muted">No facts yet. Lightwork remembers useful details here as it works.</p>
+      <p id="facts-empty" class="muted">No facts yet. Lightwork remembers useful details here as it works.{% if can_create_goal %} You can also add one with the form above.{% else %} Someone who can start tasks can add facts here.{% endif %}</p>
       <table id="fact-list" hidden><thead><tr><th scope="col">Name</th><th scope="col">Detail</th><th scope="col">Action</th></tr></thead><tbody></tbody></table>
     {% endif %}
   </section>

@@ -43,6 +43,7 @@ GOAL_LINKED_STORES = (
     *SOURCE_EPISODE_STORES,
     "artifacts",
     "attachments",
+    "attachment_submissions",
     "goal_events",
     "goal_origins",
     "messages",

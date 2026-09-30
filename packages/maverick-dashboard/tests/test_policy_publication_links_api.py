@@ -478,3 +478,60 @@ def test_opaque_registry_rejects_cross_tenant_rebinding(tmp_path: Path) -> None:
     with pytest.raises(PublicLinkRegistryError, match="another tenant"):
         registry.bind("PPL-global-link", "tenant-b")
     assert registry.resolve("PPL-global-link") == "tenant-a"
+
+
+def test_lists_are_audit_gated_tenant_scoped_and_secret_free(
+    environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from maverick_dashboard import policy_publication_links_api as api_module
+
+    client, _stores, _registry, _clock, tenant, _tmp = environment
+    _artifact(client, policy_id="four-eyes", approval_mode="four_eyes")
+    _artifact(client)
+    link = _link(client, visibility="private")
+    _publish(client, link["link_id"])
+    current = _ok(client.get(f"{ADMIN}/links/{link['link_id']}"))
+    _ok(
+        client.post(
+            f"{ADMIN}/links/{link['link_id']}/schedules/revocation",
+            json={
+                "scheduled_for": NOW + 3600,
+                "expected_revision": current["revision"],
+                "idempotency_key": "schedule-revoke",
+            },
+        ),
+        201,
+    )
+    permissions: list[str] = []
+    monkeypatch.setattr(
+        api_module,
+        "require_global_permission",
+        lambda _request, permission: permissions.append(permission),
+    )
+
+    artifacts = _ok(client.get(f"{ADMIN}/artifacts"))["items"]
+    by_policy = {item["policy_id"]: item for item in artifacts}
+    assert by_policy["four-eyes"]["required_approvals"] == 2
+    assert by_policy["four-eyes"]["ready_to_publish"] is False
+    assert by_policy["security-policy"]["ready_to_publish"] is True
+
+    links = _ok(client.get(f"{ADMIN}/links"))["items"]
+    assert [item["link_id"] for item in links] == [link["link_id"]]
+    assert links[0]["current_version"] == 1
+    assert links[0]["pointer_revision"] == 1
+    assert links[0]["stable_path"] == f"{PUBLIC}/{link['link_id']}"
+
+    jobs = _ok(client.get(f"{ADMIN}/jobs"))["items"]
+    assert [job["action"] for job in jobs] == ["revoke"]
+    assert jobs[0]["state"] == "pending"
+    for rows in (artifacts, links, jobs):
+        for row in rows:
+            for secret in ("capability_sha256", "private_capability", "lease_token",
+                           "lease_token_sha256", "lease_owner"):
+                assert secret not in row
+    assert permissions == ["audit", "audit", "audit"]
+
+    tenant["value"] = "tenant-b"
+    assert _ok(client.get(f"{ADMIN}/artifacts"))["items"] == []
+    assert _ok(client.get(f"{ADMIN}/links"))["items"] == []
+    assert _ok(client.get(f"{ADMIN}/jobs"))["items"] == []

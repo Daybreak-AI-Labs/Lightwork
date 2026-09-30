@@ -16,13 +16,17 @@ const plain = value => ({ baseUrl: value.baseUrl, token: value.token });
 
 test('fresh installs retain empty-token defaults', async () => {
   const settings = fixture().load();
-  assert.deepEqual(plain(await settings.loadSettings()), { baseUrl: settings.DEFAULT_BASE_URL, token: '' });
+  const loaded = await settings.loadSettings();
+  assert.deepEqual(plain(loaded), { baseUrl: settings.DEFAULT_BASE_URL, token: '' });
+  assert.equal(loaded.needsSetup, true);
 });
 
 test('legacy connection remains readable without migration writes', async () => {
   const f = fixture(legacy);
   f.secure.setItemAsync = async () => assert.fail('reading legacy settings must not write');
-  assert.deepEqual(plain(await f.load().loadSettings()), connection);
+  const loaded = await f.load().loadSettings();
+  assert.deepEqual(plain(loaded), connection);
+  assert.equal(loaded.needsSetup, undefined);
 });
 
 test('failed migration save preserves the complete previous connection', async () => {

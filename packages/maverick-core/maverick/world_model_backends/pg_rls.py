@@ -7,7 +7,8 @@ equality: a row is visible/writable only when its ``tenant_id`` equals the activ
 tenant (``postgres._rls_policy_sql``). That has two sharp edges, so RLS must not
 be flipped on blindly:
 
-  - **Legacy NULL rows vanish.** Pre-tenancy rows carry ``tenant_id IS NULL``;
+  - **Legacy unscoped rows vanish.** Pre-tenancy rows carry ``tenant_id IS NULL``
+    (the event inbox and receipts use the empty string);
     ``NULL = <tenant>`` is never true, so once RLS is *forced* those rows become
     invisible **and** frozen (they also fail the ``WITH CHECK``).
   - **Only the table owner may install the policy.** ``_apply_rls`` runs
@@ -17,13 +18,13 @@ be flipped on blindly:
 This module is the safe on-ramp run *before* enabling RLS:
 
   - :func:`preflight` reports, per tenant-scoped table, whether the current role
-    owns it (can install the policy) and how many legacy NULL rows remain.
-  - :func:`backfill` assigns those NULL rows to a chosen tenant so RLS scopes
+    owns it (can install the policy) and how many legacy unscoped rows remain.
+  - :func:`backfill` assigns those rows to a chosen tenant so RLS scopes
     them to that tenant instead of hiding them. Idempotent.
 
 Exposed as ``maverick tenant rls-preflight`` and ``maverick tenant backfill``.
 
-Table names come from the fixed :data:`postgres._TENANT_TABLES` allow-set -- never
+Table names come from the fixed :data:`_PREFLIGHT_TABLES` allow-set -- never
 user input -- so the f-string interpolation here is injection-free (same
 discipline as the rest of the backend); the tenant id is always a bound param.
 """
@@ -34,6 +35,12 @@ from typing import Any
 
 from .postgres import _TENANT_TABLES
 
+_EMPTY_TENANT_TABLES = ("event_goal_admissions", "event_trigger_batches")
+_PREFLIGHT_TABLES = (*_TENANT_TABLES, "attachment_submissions", *_EMPTY_TENANT_TABLES)
+
+
+def _legacy_scope(table: str) -> str:
+    return "(tenant_id IS NULL OR tenant_id = '')" if table in _EMPTY_TENANT_TABLES else "tenant_id IS NULL"
 
 def resolve_dsn(dsn: str | None = None) -> str:
     """Resolve the Postgres DSN: explicit arg > ``MAVERICK_PG_DSN`` > config
@@ -69,21 +76,22 @@ def preflight(conn) -> dict[str, Any]:
 
     For each tenant-scoped table: its owner, whether the *current* role owns it
     (only the owner can ALTER / CREATE POLICY), and the count of legacy
-    ``tenant_id IS NULL`` rows that RLS would hide. ``ready`` is True only when
-    every table exists, is owned by the current role, and has no NULL rows.
+    NULL-tenant rows and empty-tenant event rows that RLS would hide. ``ready``
+    is True only when every table exists, is owned by the current role, and has
+    no unscoped rows.
     """
     cur = conn.cursor()
     cur.execute("SELECT current_user")
     role = cur.fetchone()[0]
     tables: dict[str, dict[str, Any]] = {}
     ready = True
-    for t in _TENANT_TABLES:
+    for t in _PREFLIGHT_TABLES:
         # to_regclass returns NULL (no error) for a table that isn't there yet,
         # so a pre-migration DB reports cleanly instead of raising.
         cur.execute("SELECT to_regclass(%s)", (t,))
         if cur.fetchone()[0] is None:
             tables[t] = {"owner": None, "owned_by_current_role": False,
-                         "null_tenant_rows": 0, "missing": True}
+                         "null_tenant_rows": 0, "empty_tenant_rows": 0, "missing": True}
             ready = False
             continue
         cur.execute(
@@ -93,41 +101,59 @@ def preflight(conn) -> dict[str, Any]:
         owner = cur.fetchone()[0]
         cur.execute(f"SELECT count(*) FROM {t} WHERE tenant_id IS NULL")
         nulls = int(cur.fetchone()[0])
+        empty = 0
+        if t in _EMPTY_TENANT_TABLES:
+            cur.execute(f"SELECT count(*) FROM {t} WHERE tenant_id = ''")
+            empty = int(cur.fetchone()[0])
         owned = owner == role
         tables[t] = {"owner": owner, "owned_by_current_role": owned,
-                     "null_tenant_rows": nulls}
-        if not owned or nulls:
+                     "null_tenant_rows": nulls, "empty_tenant_rows": empty}
+        if not owned or nulls or empty:
             ready = False
     return {"role": role, "tables": tables, "ready": ready}
 
 
 def backfill(conn, tenant_id: str, *, dry_run: bool = False) -> dict[str, int]:
-    """Assign legacy ``tenant_id IS NULL`` rows to ``tenant_id``.
+    """Assign legacy NULL-tenant rows and empty-tenant event rows to a tenant.
 
     So forcing RLS scopes those pre-tenancy rows to ``tenant_id`` instead of
     hiding them. Idempotent (already-scoped rows are untouched). Returns
     ``{table: rows_assigned}``; ``--dry-run`` counts without writing.
+    A destination-key conflict rolls back the entire migration; observed event
+    batches and receipts are never merged or discarded to make it succeed.
     """
     if not str(tenant_id or "").strip():
         raise ValueError("backfill requires a non-empty tenant id")
+    if not dry_run and getattr(conn, "autocommit", False):
+        raise ValueError("backfill requires a connection with autocommit disabled")
     cur = conn.cursor()
     report: dict[str, int] = {}
-    for t in _TENANT_TABLES:
-        cur.execute("SELECT to_regclass(%s)", (t,))
-        if cur.fetchone()[0] is None:
-            report[t] = 0  # table not migrated yet -- nothing to assign
-            continue
-        if dry_run:
-            cur.execute(f"SELECT count(*) FROM {t} WHERE tenant_id IS NULL")
-            report[t] = int(cur.fetchone()[0])
-        else:
-            cur.execute(
-                f"UPDATE {t} SET tenant_id = %s WHERE tenant_id IS NULL",
-                (tenant_id,),
-            )
-            report[t] = cur.rowcount
-    if not dry_run:
-        conn.commit()
+    try:
+        for t in _PREFLIGHT_TABLES:
+            cur.execute("SELECT to_regclass(%s)", (t,))
+            if cur.fetchone()[0] is None:
+                report[t] = 0  # table not migrated yet -- nothing to assign
+                continue
+            if dry_run:
+                cur.execute(f"SELECT count(*) FROM {t} WHERE {_legacy_scope(t)}")
+                report[t] = int(cur.fetchone()[0])
+            else:
+                cur.execute(
+                    f"UPDATE {t} SET tenant_id = %s WHERE {_legacy_scope(t)}",
+                    (tenant_id,),
+                )
+                report[t] = cur.rowcount
+        if not dry_run:
+            conn.commit()
+    except Exception as exc:
+        if not dry_run:
+            conn.rollback()
+        if getattr(exc, "sqlstate", None) == "23505":
+            raise ValueError(
+                "legacy tenant records conflict with the destination tenant; "
+                "no rows were reassigned; reconcile the conflicting records before retrying"
+            ) from exc
+        raise
     return report
 
 

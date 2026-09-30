@@ -529,7 +529,7 @@ class TrcContinuousEvidenceScheduler:
             self._thread.start()
         return True
 
-    def stop(self, timeout: float = _MAX_STOP_SECONDS) -> None:
+    def stop(self, timeout: float = _MAX_STOP_SECONDS, *, wait: bool = True) -> None:
         if (
             not isinstance(timeout, (int, float))
             or isinstance(timeout, bool)
@@ -540,6 +540,8 @@ class TrcContinuousEvidenceScheduler:
         self._stop.set()
         with self._lock:
             thread = self._thread
+        if not wait:
+            return False
         if thread is not None:
             thread.join(float(timeout))
         with self._lock:
@@ -600,14 +602,11 @@ def attach_trc_continuous_evidence_scheduler(
 
     @asynccontextmanager
     async def lifespan(target: Any):
-        from starlette.concurrency import run_in_threadpool
+        from ._lifecycle import supervised_runtime
 
         async with previous(target):
-            await run_in_threadpool(selected.start)
-            try:
+            async with supervised_runtime(target, "trc_evidence", selected):
                 yield
-            finally:
-                await run_in_threadpool(selected.stop)
 
     app.router.lifespan_context = lifespan
     setattr(app.state, marker, selected)

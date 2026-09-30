@@ -40,7 +40,9 @@ def _default_cache_ttl() -> str:
 
     Explicit MAVERICK_ANTHROPIC_CACHE_TTL always wins.
     """
-    explicit = os.environ.get("MAVERICK_ANTHROPIC_CACHE_TTL")
+    from ..env_setting import env_or_config
+
+    explicit = env_or_config("MAVERICK_ANTHROPIC_CACHE_TTL", "cache", "anthropic_ttl")
     if explicit:
         return explicit
     coding = os.environ.get("MAVERICK_CODING_MODE", "").lower() in ("1", "true", "yes")
@@ -57,8 +59,10 @@ def _adaptive_max_tokens_floor() -> int:
     council value) quadrupled the agent loop's 4096 for roles that never asked
     to think; 8192 keeps generous anti-empty-response headroom at half the
     ceiling. Tune via MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR (min 2048)."""
-    from .._envparse import env_int
-    return max(2048, env_int("MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR", 8192))
+    from ..env_setting import env_or_config_int
+
+    return max(2048, env_or_config_int(
+        "MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR", "thinking", "adaptive_floor", 8192))
 
 
 def _is_opus_adaptive(model_id: str) -> bool:
@@ -237,8 +241,13 @@ def _msg_cache_ttl() -> str:
     re-read lands seconds later on the next turn. 5m (1.25x write) covers
     that; 1h (2x write) buys nothing unless turns stall. An explicit
     operator TTL (either env) still wins."""
+    from ..env_setting import env_or_config
+
     explicit = (os.environ.get("MAVERICK_ANTHROPIC_MSG_CACHE_TTL")
-                or os.environ.get("MAVERICK_ANTHROPIC_CACHE_TTL"))
+                or os.environ.get("MAVERICK_ANTHROPIC_CACHE_TTL")
+                or env_or_config("MAVERICK_ANTHROPIC_MSG_CACHE_TTL", "cache",
+                                 "anthropic_message_ttl")
+                or env_or_config("MAVERICK_ANTHROPIC_CACHE_TTL", "cache", "anthropic_ttl"))
     return explicit or "5m"
 
 
@@ -375,15 +384,24 @@ class AnthropicClient:
     DEFAULT_MODEL = "claude-sonnet-4-6"
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None,
-                 default_headers: dict | None = None):
+                 default_headers: dict | None = None, *, environment=None):
         # May 26 council fix (long-tail audit #1): strip whitespace.
         # `export ANTHROPIC_API_KEY=$(cat key.txt)` is a common source of
         # trailing newline; without strip, every API call 401s and the
         # operator sees "API outage" instead of the real "key has
         # whitespace" issue.
-        key = (api_key or os.environ.get("ANTHROPIC_API_KEY") or "").strip() or None
+        env = os.environ if environment is None else environment
+        key = (api_key or env.get("ANTHROPIC_API_KEY") or "").strip() or None
         from .base import sdk_http_timeout
         kw: dict = {"api_key": key}
+        if environment is not None:
+            token = env.get("ANTHROPIC_AUTH_TOKEN", "")
+            if not key and not token:
+                raise RuntimeError("Anthropic requires a credential in the admitted provider configuration")
+            kw.update(
+                api_key=key or "", auth_token=token,
+                base_url=base_url or env.get("ANTHROPIC_BASE_URL") or "https://api.anthropic.com",
+            )
         # Thread an explicit `[providers.anthropic] base_url` into the SDK so a
         # configured endpoint (proxy / gateway) is honored. ``None`` leaves the
         # SDK's own default base_url (mirrors how OpenAIClient handles base_url).
@@ -395,7 +413,7 @@ class AnthropicClient:
         # (e.g. {"anthropic-region": "eu"}). Empty by default -> no extra headers.
         if default_headers:
             kw["default_headers"] = dict(default_headers)
-        timeout = sdk_http_timeout(anthropic)
+        timeout = sdk_http_timeout(anthropic, environment=environment)
         if timeout is not None:
             kw["timeout"] = timeout
         self.client = anthropic.Anthropic(max_retries=0, **kw)
@@ -425,7 +443,9 @@ class AnthropicClient:
         # tool-use turns hit the cache for the history (40-55% input
         # token cost cut on long trajectories). Toggle via env var so
         # the dashboard can A/B it.
-        if os.environ.get("MAVERICK_CACHE_MESSAGES", "1") != "0":
+        from ..env_setting import env_or_config
+
+        if env_or_config("MAVERICK_CACHE_MESSAGES", "cache", "messages", "1") != "0":
             messages_out = _add_messages_cache_breakpoint(messages)
         else:
             messages_out = messages
@@ -548,7 +568,9 @@ class AnthropicClient:
         from .base import sampling_temperature
         temp = sampling_temperature()
         if temp is None:
-            raw = os.environ.get("MAVERICK_TEMPERATURE")
+            from ..env_setting import env_or_config
+
+            raw = env_or_config("MAVERICK_TEMPERATURE", "agent", "temperature")
             if raw:
                 try:
                     temp = float(raw)
@@ -785,6 +807,7 @@ class AnthropicClient:
         model: str | None = None,
         effort: str | None = None,
         tool_choice: dict | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_request(
             system, messages, tools, max_tokens, thinking_budget, model, effort,
@@ -792,8 +815,16 @@ class AnthropicClient:
         is_fast = kwargs.get("speed") == "fast"
         endpoint = self.aclient.beta.messages if is_fast else self.aclient.messages
         billing_model = model if is_fast else kwargs.get("model")
-        resp = await async_retry(lambda: endpoint.create(**kwargs))
-        return self._parse_response(resp, budget, model=billing_model)
+        if on_delta is None:
+            resp = await async_retry(lambda: endpoint.create(**kwargs))
+            return self._parse_response(resp, budget, model=billing_model)
+        # Streaming mirrors complete(): no retry wrapper, so a mid-stream
+        # failure never replays deltas the caller has already shown.
+        async with endpoint.stream(**kwargs) as stream:
+            async for text in stream.text_stream:
+                on_delta(text)
+            final = await stream.get_final_message()
+        return self._parse_response(final, budget, model=billing_model)
 
     def prewarm(
         self,

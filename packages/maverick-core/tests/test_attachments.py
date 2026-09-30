@@ -5,7 +5,7 @@ import hashlib
 import os
 
 import pytest
-from maverick import file_lock
+from maverick import attachments, file_lock
 from maverick import paths as maverick_paths
 from maverick.attachments import (
     MAX_FILE_BYTES,
@@ -30,7 +30,7 @@ def test_store_text_writes_to_disk(tmp_path):
     assert out.mime == "text/plain"
     assert out.size_bytes == len(data)
     assert out.path.exists()
-    assert out.path.read_bytes() == data
+    assert attachments.read_bytes(out.path) == data  # sealed at rest in the secure posture
     # sha-prefixed dest avoids name collisions.
     assert out.path.name.startswith(out.sha256[:16] + "-")
     assert file_lock.private_path_is_restricted(out.path.parent, 0o700)
@@ -43,23 +43,25 @@ def test_default_attachment_root_resolves_per_tenant_context(tmp_path, monkeypat
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setattr(attachment_module, "DEFAULT_ROOT", None)
 
+    # Each workspace's copy is read back in that workspace: in the secure
+    # posture it is sealed to that workspace's key.
     first_token = maverick_paths.set_tenant("tenant-a")
     try:
         first = store(1, "report.txt", "text/plain", b"tenant a")
+        assert attachments.read_bytes(first.path) == b"tenant a"
     finally:
         maverick_paths.reset_tenant(first_token)
 
     second_token = maverick_paths.set_tenant("tenant-b")
     try:
         second = store(1, "report.txt", "text/plain", b"tenant b")
+        assert attachments.read_bytes(second.path) == b"tenant b"
     finally:
         maverick_paths.reset_tenant(second_token)
 
     assert first.path != second.path
     assert tmp_path / "tenants" / "tenant-a" / "attachments" in first.path.parents
     assert tmp_path / "tenants" / "tenant-b" / "attachments" in second.path.parents
-    assert first.path.read_bytes() == b"tenant a"
-    assert second.path.read_bytes() == b"tenant b"
 
 
 @pytest.mark.parametrize(

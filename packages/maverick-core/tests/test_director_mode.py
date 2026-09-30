@@ -57,7 +57,9 @@ def test_config_profile_override(monkeypatch):
 def test_default_budget_comes_from_config(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     run = direct("outcome", profile="semi")
-    assert run.max_dollars > 0          # configured default x 1.0
+    assert run.max_dollars is None
+    monkeypatch.setattr("maverick.config.get_budget_overrides", lambda: {"max_dollars": 8})
+    assert direct("outcome", profile="semi").max_dollars == 8
 
 
 def test_as_dict_serializable():

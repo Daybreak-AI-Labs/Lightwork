@@ -85,17 +85,17 @@ test('desktop cancellation preserves the ticket from an in-app delivery and perm
   await expect(page.locator('#vo-prepare')).toBeEnabled();
   await page.locator('#vo-prepare').click();
   await expect(page.locator('#vo-approve')).toBeEnabled();
-  await expect(page.locator('#vo-operation')).toContainText('RECOMMENDATION ONLY');
-  await expect(page.locator('#vo-operation')).toContainText('prediction does not grant authority');
-  await expect(page.locator('#vo-operation')).toContainText('Actor:');
-  await expect(page.locator('#vo-operation')).toContainText('Workspace: browser-workspace');
-  await expect(page.locator('#vo-operation')).toContainText('Target: Jira project VEND');
-  await expect(page.locator('#vo-operation')).toContainText('Exact input digest:');
-  await expect(page.locator('#vo-operation')).toContainText('Credential versions:');
-  await expect(page.locator('#vo-operation')).toContainText('Budget:');
-  await expect(page.locator('#vo-operation')).toContainText('KNOWN EFFECTS');
-  await expect(page.locator('#vo-operation')).toContainText('UNRESOLVED ASSUMPTIONS');
-  await expect(page.locator('#vo-operation')).toContainText('FULL REVIEWED JIRA CONTENT');
+  await expect(page.locator('#vo-operation')).toContainText('Lightwork recommends this; nothing happens until you approve it.');
+  // The plain approval card: target, contents, before/after, effects, open
+  // assumptions and who approves until when, then the full reviewed ticket.
+  await expect(page.locator('#vo-operation')).toContainText('in Jira project VEND.');
+  await expect(page.locator('#vo-operation')).toContainText('What the ticket contains:');
+  await expect(page.locator('#vo-operation')).toContainText('Before: ');
+  await expect(page.locator('#vo-operation')).toContainText('After: ');
+  await expect(page.locator('#vo-operation')).toContainText("This can't be undone automatically:");
+  await expect(page.locator('#vo-operation')).toContainText("Things Lightwork couldn't confirm:");
+  await expect(page.locator('#vo-operation')).toContainText("You're approving as browser-reviewer. This approval expires");
+  await expect(page.locator('#vo-operation')).toContainText('THE TICKET');
   await page.locator('#vo-approve').click();
   await expect(page.locator('#vo-execute')).toBeEnabled();
   await page.locator('#vo-execute').click();
@@ -122,9 +122,11 @@ test('failed cancellation preserves the reason and stale state requires a refres
   const reason = 'Preserve this decision through an interrupted request';
   await confirm(page, reason);
   let attempts = 0;
+  // Only a server reason already written as a plain sentence reaches the
+  // person (mvPlainDetail), so the synthetic reason ends with a full stop.
   await page.route('**/cases/' + row.id + '/cancel', async route => {
     if (++attempts === 1) return route.fulfill({status: 503, contentType: 'application/json',
-      body: JSON.stringify({detail: {code: 'fixture_unavailable', message: 'Synthetic connection interruption'}})});
+      body: JSON.stringify({detail: {code: 'fixture_unavailable', message: 'Synthetic connection interruption.'}})});
     return route.continue();
   });
   await page.locator('#vo-cancel').click();
@@ -133,7 +135,7 @@ test('failed cancellation preserves the reason and stale state requires a refres
   await expect(page.locator('#vo-cancellation-confirm')).toBeChecked();
   await ok(await request.post(API + '/' + row.id + '/collect-evidence', {data: {expected_revision: row.revision}}));
   await page.locator('#vo-cancel').click();
-  await expect(page.locator('#vo-message')).toContainText('Current version 2');
+  await expect(page.locator('#vo-message')).toContainText('Someone else updated this request, so the latest version');
   await expect(page.locator('#vo-cancellation-reason')).toHaveValue('');
   await expect(page.locator('#vo-cancellation-confirm')).not.toBeChecked();
   await confirm(page, 'Reviewed the refreshed request; cancel local work');

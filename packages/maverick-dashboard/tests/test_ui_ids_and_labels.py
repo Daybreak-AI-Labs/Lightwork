@@ -53,16 +53,16 @@ def test_overview_goal_input_has_accessible_name(monkeypatch, tmp_path):
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
     r = _client().get("/overview")
-    assert 'aria-label="Describe a goal for Lightwork to run"' in r.text
+    assert 'aria-label="Describe a task for Lightwork to do"' in r.text
 
 
 def test_skill_source_input_has_accessible_name(monkeypatch, tmp_path):
     client, _ = _setup_all(monkeypatch, tmp_path)
     r = client.get("/skills")
-    assert 'aria-label="Skill source: a GitHub repo or URL"' in r.text
+    assert 'aria-label="Web address of the skill"' in r.text
 
 
 def test_audit_search_button_disables_during_search(monkeypatch, tmp_path):
     client, _ = _setup_all(monkeypatch, tmp_path)
     r = client.get("/audit")
-    assert "btn.disabled = true" in r.text
+    assert "b.disabled = true" in r.text

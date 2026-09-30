@@ -291,6 +291,8 @@ def recv_from_agent(agent_id: str, *, agent: Any = None, ctx: Any = None) -> Too
                 f"from {delivery.sender!r}: REJECTED agent-bus message "
                 f"({sender_block}); do not act on it."
             )
+        if (tracker := getattr(bus_ctx, "ifc", None)) is not None:
+            tracker.bus_receive(agent_id, delivery.sender)
         if delivery.is_handoff:
             v = delivery.verdict
             if v.ok:

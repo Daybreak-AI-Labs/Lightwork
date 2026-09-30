@@ -56,6 +56,24 @@ def test_conformance_accepts_var_keyword():
     assert sdk.conformance(Kw) == []
 
 
+@pytest.mark.parametrize("kind", ["positional_timeout", "required_extra", "keyword_command"])
+def test_conformance_rejects_unbindable_execution_shape(kind):
+    class Backend:
+        workdir = "."
+
+    if kind == "positional_timeout":
+        def execute(self, cmd, timeout, /):
+            raise AssertionError("conformance must not execute")
+    elif kind == "required_extra":
+        def execute(self, cmd, extra, timeout=None):
+            raise AssertionError("conformance must not execute")
+    else:
+        def execute(self, *, cmd, timeout=None):
+            raise AssertionError("conformance must not execute")
+    Backend.exec = execute
+    assert any("bind" in problem for problem in sdk.conformance(Backend))
+
+
 def test_conformance_flags_missing_workdir():
     class NoWd:
         def exec(self, cmd, timeout=None):

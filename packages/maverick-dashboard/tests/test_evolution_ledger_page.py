@@ -51,15 +51,16 @@ def test_page_is_audit_gated_csp_hardened_and_copilot_bound(
     assert "'unsafe-inline'" not in csp
     assert "style-src 'self' 'nonce-" in csp
     body = response.text
-    assert "Evolution ledger" in body
-    assert "backdrop-filter:blur" in body
+    assert "Learning history" in body
+    from test_support.plain_language import developer_terms
+    assert developer_terms(body.replace("<main", "<main", 1)) == []
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert f'data-api-base="{page.API_BASE}"' in body
     assert 'data-read-only="true"' in body
     assert page.ASSET_PATH in body
     assert 'id="elv-refresh"' in body
     assert 'id="elv-verify-form"' in body
-    assert 'name="receipt" maxlength="65536"' in body
+    assert 'type="file" id="elv-receipt" name="receipt"' in body
     assert "No private approval material is accepted here." in body
 
 
@@ -91,7 +92,7 @@ def test_nav_registry_and_copilot_use_the_audit_only_page_context() -> None:
     assert "human approval" in " ".join(context.boundaries).lower()
 
 
-def test_liquid_glass_client_is_bounded_and_uses_safe_dom_only() -> None:
+def test_client_is_bounded_and_uses_safe_dom_only() -> None:
     package = Path(page.__file__).parent
     source = (package / "static" / "lightwork-evolution-ledger.js").read_text(encoding="utf-8")
     template = (package / "templates" / "evolution_ledger.html").read_text(encoding="utf-8")

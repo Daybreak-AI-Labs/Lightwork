@@ -106,7 +106,7 @@ def test_question_roi_verdicts_and_rating_impact():
     assert all(r["verdict"] == "unproven" for r in others)
     # The board page carries the panel.
     page = client.get("/privacy/board").text
-    assert "Question ROI" in page and "first-pass acceptance" in page
+    assert "Which questions matter" in page and "Drafts accepted first time" in page
 
 
 # --- audit binder -----------------------------------------------------------
@@ -124,7 +124,7 @@ def test_audit_binder_payload_and_page():
     page = client.get("/audit/binder")
     assert page.status_code == 200
     assert "Audit binder" in page.text
-    assert "Signed audit chain" in page.text
+    assert "Tamper-evident activity log" in page.text
 
 
 # --- partner fleet ----------------------------------------------------------
@@ -151,6 +151,9 @@ def test_partner_registry_check_and_rollup(monkeypatch):
 
     page = client.get("/partner")
     assert page.status_code == 200 and "Partner fleet" in page.text
+    from test_support.plain_language import developer_terms
+    assert developer_terms(page.text) == []
+    assert "mvConfirm(" in page.text          # removing a client asks first
 
     assert client.delete(
         f"/api/v1/partner/tenants/{tid}").json()["deleted"] == tid

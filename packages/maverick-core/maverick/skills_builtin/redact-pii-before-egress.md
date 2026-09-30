@@ -7,18 +7,18 @@ triggers:
   - remove personal data
 tools_needed:
   - read_file
-  - pii_scan
+  - redact
 ---
 # What this skill does
 
-Runs the PII detector over any payload that is about to leave the trust boundary (email, export, third-party API, ticket) and masks personal and special-category data before it egresses. The goal class is "do not leak personal data": catch names, contact details, government ids, financial account numbers, health/biometric and other special-category fields, and mask them deterministically.
+Prepares text using the shipped `redact` detector and requests human review for sensitive context it cannot establish. Its clean result means no residual matches from the configured detectors, not exhaustive detection of names, health information, or every special-category field.
 
 # Steps
 
 1. Read the outbound payload with read_file and identify the destination and its sensitivity tier (internal vs external vs regulated third party).
-2. Run pii_scan over the full payload, including attachments and structured fields, not just the prose body. Treat free-text comment fields as high-risk because PII hides there.
-3. Mask each hit with a stable placeholder (for example [REDACTED:email], [REDACTED:ssn]) so referential structure survives while the value does not. Give special-category data (health, biometric, racial/ethnic, religious, sexual-orientation) stricter handling — prefer dropping over masking when it is not needed for the purpose.
-4. Emit a redaction manifest (counts by category) alongside the cleaned payload and flag for human review if any high-risk category was present, so a person decides whether egress is appropriate at all.
+2. Call `redact` with `op="redact"` and `text` containing the full extracted payload. Extract attachment text using supported document tools first; unreadable attachments remain unreviewed. Treat free-text and structured fields alike.
+3. Use the returned cleaned text and its proof status. Give sensitive context stricter human review and drop unnecessary fields. Do not promise stable identifiers or category counts that the tool did not return.
+4. Call `redact` with `op="verify"` and the cleaned `text`. If residuals remain, stop and report them. Report what text was checked, missing attachments, and detector limits alongside the cleaned draft; a person decides whether to release it.
 
 # Notes
 

@@ -44,20 +44,29 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     assert "'unsafe-inline'" not in response.headers["content-security-policy"]
     assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
     body = response.text
-    assert "Native consent" in body
+    assert "Mobile App Consent" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert page.ASSET_PATH in body
-    assert "backdrop-filter:blur(26px)" in body
+    assert "/static/lightwork-consent-workbench.js" in body
     assert 'data-can-audit="true"' in body
     assert 'data-can-admin="false"' in body
+    # Apps and devices are record lists with row buttons, not typed-ID forms.
+    assert 'id="nca-apps"' in body and 'id="nca-devices"' in body
     assert 'id="nca-register-form"' in body
-    assert 'id="nca-device-rotate-form"' in body
-    assert 'id="nca-device-revoke-form"' in body
+    assert '<select class="select" name="public_client_ref" required>' in body
     assert 'id="nca-integrity" type="button"' in body
     assert f'id="nca-public-key-link" href="{page.PUBLIC_KEYS_BASE}"' in body
-    assert '<fieldset disabled>' in body
+    assert 'fieldset class="cw-form" disabled' in body
+    assert "nca-device-rotate-form" not in body
+    assert "nca-device-revoke-form" not in body
+    for typed in ("Ed25519", "Attestation nonce", "epoch", "Device reference",
+                  "Current device version", "Current directory version"):
+        assert typed not in body
     assert "tenant_id" not in body
     assert "principal_ref" not in body
+    from test_support.plain_language import developer_terms
+
+    assert developer_terms(body) == []
 
 
 def test_page_rejects_unknown_query_parameters(monkeypatch) -> None:
@@ -75,7 +84,7 @@ def test_page_has_nav_and_closed_copilot_context() -> None:
     visibility = next(item for item in ui_visibility.PAGES if item["path"] == page.PAGE_PATH)
     assert visibility == {
         "path": "/consent/native",
-        "label": "Native Consent SDK",
+        "label": "Consent in Your Apps",
         "group": "Consent",
         "icon": "key",
         "floor": "view",
@@ -83,6 +92,6 @@ def test_page_has_nav_and_closed_copilot_context() -> None:
         "in_nav": True,
     }
     context = copilot_context.context_for_page(page.PAGE_PATH)
-    assert context.title == "Native Consent SDK"
+    assert context.title == "Consent in Your Apps"
     assert any("no permissive fallback" in item for item in context.boundaries)
     assert any("live-device" in item for item in context.boundaries)

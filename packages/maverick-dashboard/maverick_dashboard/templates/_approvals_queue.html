@@ -1,75 +1,99 @@
 {# Actionable pending-approval queue. Shared by /approvals and /oversight.
    Context: `approvals` (pending records) and `sources` ({id: label|None}).
    POSTs decisions to /api/v1/approvals/{id}/approve|deny and removes the row. #}
+{% macro _plain_value(value) -%}
+  {%- if value is mapping -%}{% for k, v in value.items() %}{{ k | humanize }}: {{ _plain_value(v) }}{% if not loop.last %}; {% endif %}{% endfor %}
+  {%- elif value is string -%}{{ value | humanize if ('_' in value and ' ' not in value) else value }}
+  {%- else -%}{{ value }}{%- endif -%}
+{%- endmacro %}
+{% macro _budget_text(budget) -%}
+  {%- if budget.get('maximum') is not none and budget.get('maximum') is number -%}
+    Up to {{ '$' if (budget.get('currency') or 'USD') == 'USD' else (budget.get('currency') ~ ' ') }}{{ '%.2f' | format(budget.get('maximum')) }}
+    {%- if budget.get('minutes') %} · {{ budget.get('minutes') }} minutes{% endif %}
+  {%- elif budget.get('state') -%}Checked again when it runs
+  {%- else -%}{% for key, value in budget.items() %}{{ key | humanize }}: {{ _plain_value(value) }}{% if not loop.last %} · {% endif %}{% endfor %}
+  {%- endif -%}
+{%- endmacro %}
 {% if approvals %}
-  <table>
+  <table class="approval-table">
     <thead><tr>
-      <th scope="col">Action</th><th scope="col">Risk</th>
-      <th scope="col">Source</th>
-      <th scope="col">Scope</th><th scope="col">Detail</th>
-      <th scope="col">Decision</th>
+      <th scope="col">Request</th><th scope="col">Risk</th>
+      <th scope="col">From</th>
+      <th scope="col">Applies to</th><th scope="col">Details</th>
+      <th scope="col">Your decision</th>
     </tr></thead>
     <tbody>
     {% for a in approvals %}
       {% set assessment_id = assessment_ids.get(a.id) if assessment_ids else None %}
-      <tr data-id="{{ a.id }}"{% if assessment_id %} data-assessment-id="{{ assessment_id }}"{% endif %} id="approval-{{ a.id }}">
-        <td><code>{{ approval_actions.get(a.id, 'reviewed operation') if approval_actions else 'reviewed operation' }}</code></td>
+      {% set _raw_action = (approval_actions.get(a.id, '') if approval_actions else '') | trim %}
+      {% set action_label = (_raw_action if ' ' in _raw_action else (_raw_action | replace('.', ' ') | humanize)) or 'Reviewed action' %}
+      <tr data-id="{{ a.id }}" data-label="{{ action_label }}"{% if assessment_id %} data-assessment-id="{{ assessment_id }}"{% endif %} id="approval-{{ a.id }}">
+        <td><strong>{{ action_label }}</strong></td>
         <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk | humanize }}</span></td>
         <td>
           {% set _src = sources.get(a.id) if sources else None %}
-          {% if _src %}<span class="badge blocked">{{ _src }}</span>{% else %}<span class="muted">Consent</span>{% endif %}
+          {% if _src %}<span class="badge blocked">{{ _src }}</span>{% else %}<span class="muted">An agent asked for permission</span>{% endif %}
         </td>
-        <td>{{ approval_scopes.get(a.id, 'reviewed target') if approval_scopes else 'reviewed target' }}</td>
+        <td>{{ approval_scopes.get(a.id, '') if approval_scopes and approval_scopes.get(a.id) else 'The item described' }}</td>
         <td class="muted approval-detail">
           {% set card = cards.get(a.id) if cards else None %}
           {% set card_status = card_statuses.get(a.id, 'legacy') if card_statuses else 'legacy' %}
           <p>{{ approval_details.get(a.id, a.detail or '') if approval_details else (a.detail or '') }}</p>
           {% if card %}
-          <section class="approval-card" aria-label="Exact operation review">
-            <p class="approval-authority-note"><strong>Recommendation only.</strong>
-              A prediction does not grant authority. Your decision applies only to the exact operation below.</p>
+          <section class="approval-card" aria-label="What you are approving">
+            <p class="approval-authority-note"><strong>This is Lightwork's suggestion — the decision is yours.</strong>
+              Your decision applies only to exactly what is described here.</p>
             <dl class="approval-card-grid">
-              <div><dt>Target</dt><dd>{{ card.target.label }}<br><code>{{ card.target.sha256 }}</code></dd></div>
-              <div><dt>Actor and workspace</dt><dd>{{ card.authority.actor | identity }} · {{ card.authority.workspace }}<br>Role: {{ card.authority.role | role_label }}</dd></div>
-              <div><dt>Exact input digest</dt><dd><code>{{ card.parameters.sha256 }}</code></dd></div>
-              <div><dt>Expires</dt><dd>{{ card.expires_at | datetime }}{% if card_status == 'expired' %} <span class="badge blocked">expired</span>{% endif %}</dd></div>
-              <div><dt>Credential versions</dt><dd>{% for key, value in card.credentials.items() %}<span><strong>{{ key | humanize }}:</strong> {{ value }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}</dd></div>
-              <div><dt>Budget</dt><dd>{% for key, value in card.budget.items() %}<span><strong>{{ key | humanize }}:</strong> {{ value }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}</dd></div>
+              <div><dt>What it changes</dt><dd>{{ card.target.label }}</dd></div>
+              <div><dt>Requested by</dt><dd>{{ card.authority.actor | identity }} · {{ card.authority.role | role_label }}</dd></div>
+              <div><dt>Decide by</dt><dd>{{ card.expires_at | datetime }}{% if card_status == 'expired' %} <span class="badge blocked">Expired</span>{% endif %}</dd></div>
+              <div><dt>Spending</dt><dd>{{ _budget_text(card.budget) }}</dd></div>
             </dl>
-            <div class="approval-parameters"><strong>Exact parameter summary</strong><ul>{% for item in card.parameters.summary %}<li>{{ item }}</li>{% endfor %}</ul></div>
+            {% if card.parameters.summary %}<div class="approval-parameters"><strong>What it will do</strong><ul>{% for item in card.parameters.summary %}<li>{{ item }}</li>{% endfor %}</ul></div>{% endif %}
             <div class="approval-preview"><div><strong>Before</strong><p>{{ card.preview.before }}</p></div><div><strong>After</strong><p>{{ card.preview.after }}</p></div></div>
             <div class="approval-consequences">
-              <div><strong>Known effects{% if card.consequences.irreversible %} · irreversible or externally persistent{% endif %}</strong><ul>{% for item in card.consequences.known_effects %}<li>{{ item }}</li>{% endfor %}</ul></div>
-              <div><strong>Unresolved assumptions</strong>{% if card.consequences.unresolved_assumptions %}<ul>{% for item in card.consequences.unresolved_assumptions %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p>None recorded.</p>{% endif %}</div>
+              <div><strong>What happens next{% if card.consequences.irreversible %} <span class="badge blocked">Can't be undone</span>{% endif %}</strong><ul>{% for item in card.consequences.known_effects %}<li>{{ item }}</li>{% endfor %}</ul></div>
+              <div><strong>Open questions</strong>{% if card.consequences.unresolved_assumptions %}<ul>{% for item in card.consequences.unresolved_assumptions %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p>None.</p>{% endif %}</div>
             </div>
+            <details class="approval-tech">
+              <summary>Technical details (for auditors)</summary>
+              <dl>
+                <div><dt>Workspace</dt><dd>{{ card.authority.workspace }}</dd></div>
+                <div><dt>Item fingerprint</dt><dd><code>{{ card.target.sha256 }}</code></dd></div>
+                <div><dt>Input fingerprint</dt><dd><code>{{ card.parameters.sha256 }}</code></dd></div>
+                {% for key, value in card.credentials.items() %}<div><dt>{{ key | humanize }}</dt><dd><code>{{ _plain_value(value) }}</code></dd></div>{% endfor %}
+              </dl>
+            </details>
           </section>
           {% elif card_status == 'invalid' %}
-            <p class="approval-card-error" role="alert">Approval is blocked. Ask the requester to prepare a fresh review.</p>
+            <p class="approval-card-error" role="alert">This request can't be approved because its details could not be checked. Reject it and ask for a new request.</p>
           {% elif card_status == 'legacy' %}
-            <p class="approval-card-error" role="alert">This older request has no exact-operation review. Reject it and ask the requester to prepare a fresh review.</p>
+            <p class="approval-card-error" role="alert">This older request is missing the details needed to approve it safely. Reject it and ask for a new request.</p>
           {% endif %}
         </td>
-        <td>
-          <button class="approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A fresh review is required"{% endif %}>Approve exact operation</button>
-          <button class="approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
-          <button class="approval-btn" data-id="{{ a.id }}" data-action="revise">Request revision</button>
+        <td class="approval-actions">
+          <button type="button" class="btn btn--primary approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% endif %}>Approve</button>
+          <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
+          <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 {% else %}
-  <p class="muted">No pending approvals.</p>
+  <div class="approval-empty">
+    <p class="muted">Nothing needs your decision right now.</p>
+    <p><a class="btn btn--ghost" href="/audit">See past decisions</a></p>
+  </div>
 {% endif %}
 
 <p id="approval-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em;"></p>
 
 <style>
-  button.approval-btn { padding: 0.35rem 0.85rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.85rem; margin-right: 0.4rem; }
-  button.approval-btn:hover { border-color: var(--brand); }
-  button.approval-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
-  button.approval-review { display: block; width: 100%; padding: 0.45rem 0.85rem; margin-bottom: 0.45rem; background: var(--brand); color: var(--brand-fg); border: 1px solid transparent; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: var(--font-medium); }
-  button.approval-review:hover { background: var(--brand-hi); }
+  .approval-actions { display: flex; flex-direction: column; gap: var(--space-2); align-items: stretch; min-width: 10rem; }
+  .approval-actions .btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+  .approval-tech { margin-top: var(--space-3); font-size: var(--text-xs); }
+  .approval-tech dl { display: grid; gap: var(--space-2); margin: var(--space-2) 0 0; }
   /* Assessment rows: the wall-of-text detail collapses to one clean line;
      the full context lives in the Review pop-out (and behind a toggle). */
   .approval-detail .adx { color: var(--text); }
@@ -118,12 +142,12 @@
       if (full.length > brief.length) {
         const dts = document.createElement('details');
         const sum = document.createElement('summary');
-        sum.textContent = 'Show raw detail';
+        sum.textContent = 'Show full description';
         dts.append(sum, el('div', 'muted', full));
         summary.insertAdjacentElement('afterend', dts);
       }
       const cell = tr.querySelector('td:last-child');
-      const btn = el('button', 'approval-review', 'Review assessment');
+      const btn = el('button', 'btn btn--primary approval-review', 'Review assessment');
       btn.type = 'button';
       btn.addEventListener('click', function () { window.mvAssessmentReview.open(assessmentId); });
       cell.insertBefore(btn, cell.firstChild);
@@ -145,10 +169,23 @@
 
   (function() {
     const msg = document.getElementById('approval-msg');
+    function plainError(failure, what) {
+      return window.mvErrorText ? window.mvErrorText(failure, what)
+        : 'Could not ' + what + '. Please try again.';
+    }
+    function showEmpty(tbody) {
+      const table = tbody.closest('table');
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = 'Nothing needs your decision right now.';
+      if (table) table.replaceWith(empty);
+    }
     document.querySelectorAll('button.approval-btn').forEach(function(btn) {
       btn.addEventListener('click', async function() {
         const id = btn.dataset.id;
         const action = btn.dataset.action;  // "approve" | "deny" | "revise"
+        const row0 = document.querySelector('tr[data-id="' + id + '"]');
+        const label = (row0 && row0.dataset.label) || 'this request';
         const rowButtons = Array.from(document.querySelectorAll(
           'tr[data-id="' + id + '"] button.approval-btn'));
         const originalDisabled = rowButtons.map(function(b) { return b.disabled; });
@@ -159,17 +196,21 @@
         }
         let revisionRationale = '';
         if (action === 'revise') {
-          revisionRationale = (window.prompt('Why must this request be revised?') || '').trim();
+          const answers = window.mvForm ? await window.mvForm('Send back for changes', [
+            { key: 'rationale', label: 'What should the requester change?', type: 'text', required: true,
+              help: 'The requester sees this note and prepares a new request.' },
+          ], { okText: 'Send back' }) : null;
+          revisionRationale = ((answers && answers.rationale) || '').trim();
           if (!revisionRationale) {
-            msg.style.color = 'var(--danger)';
-            msg.textContent = 'A revision rationale is required.';
+            msg.style.color = 'var(--muted)';
+            msg.textContent = answers ? 'Add a note saying what should change.' : '';
             return;
           }
         }
         rowButtons.forEach(function(b) { b.disabled = true; });
         msg.style.color = 'var(--muted)';
-        msg.textContent = (action === 'approve' ? 'Approving #' :
-          action === 'deny' ? 'Denying #' : 'Requesting revision for #') + id + '…';
+        msg.textContent = (action === 'approve' ? 'Approving ' :
+          action === 'deny' ? 'Rejecting ' : 'Sending back ') + label + '…';
         try {
           const headers = {};
           if (btn.dataset.binding) headers['X-Lightwork-Approval-Binding'] = btn.dataset.binding;
@@ -179,11 +220,10 @@
             body: action === 'revise' ? JSON.stringify({rationale: revisionRationale}) : undefined,
           });
           if (r.status === 202) {
-            const pending = await r.json().catch(function() { return {}; });
             restoreDisabledStates();
             msg.style.color = 'var(--warn)';
-            msg.textContent = '#' + id + ' decision recorded but not yet in effect: ' +
-              'the secure audit record is still being written. It is safe to try again.';
+            msg.textContent = 'Your decision on ' + label + ' is saved but not in effect yet ' +
+              'while Lightwork finishes the record. It is safe to try again.';
           } else if (r.status === 204) {
             const approvalState = r.headers.get('X-Lightwork-Approval-State') || '';
             if (approvalState === 'pending') {
@@ -192,42 +232,38 @@
               // underlying high-risk action is already effective.
               restoreDisabledStates();
               msg.style.color = 'var(--accent)';
-              msg.textContent = '#' + id + ' vote recorded; approval is still pending quorum.';
+              msg.textContent = 'Your approval of ' + label + ' is recorded. More approvers are needed before it goes ahead.';
               return;
             }
             msg.style.color = 'var(--accent)';
-            msg.textContent = '#' + id + (action === 'approve' ? ' approved.' : ' denied.');
+            msg.textContent = label + (action === 'approve' ? ' approved.' : ' rejected.');
             // Mutate in place rather than full-reload (keeps scroll
             // position): the decided item leaves the queue.
             const row = document.querySelector('tr[data-id="' + id + '"]');
             if (row && row.parentElement) {
               const tbody = row.parentElement;
               row.remove();
-              if (!tbody.querySelector('tr')) {
-                const table = tbody.closest('table');
-                const empty = document.createElement('p');
-                empty.className = 'muted';
-                empty.textContent = 'No pending approvals.';
-                if (table) table.replaceWith(empty);
-              }
+              if (!tbody.querySelector('tr')) showEmpty(tbody);
             }
           } else if (r.status === 200 && action === 'revise') {
-            const revised = await r.json().catch(function() { return {}; });
+            await r.json().catch(function() { return {}; });
             msg.style.color = 'var(--accent)';
-            msg.textContent = '#' + id + ' superseded; ' +
-              (revised.next_action || 'the originating producer must submit a fresh review.');
+            msg.textContent = label + ' was sent back. The requester will prepare a new request.';
             const row = document.querySelector('tr[data-id="' + id + '"]');
-            if (row && row.parentElement) row.remove();
+            if (row && row.parentElement) {
+              const tbody = row.parentElement;
+              row.remove();
+              if (!tbody.querySelector('tr')) showEmpty(tbody);
+            }
           } else {
-            const j = await r.json().catch(function() { return {}; });
             restoreDisabledStates();
             msg.style.color = 'var(--danger)';
-            msg.textContent = (j.detail || ('Failed: ' + r.status));
+            msg.textContent = plainError(r, 'record your decision');
           }
         } catch (e) {
           restoreDisabledStates();
           msg.style.color = 'var(--danger)';
-          msg.textContent = String(e);
+          msg.textContent = plainError(e, 'record your decision');
         }
       });
     });

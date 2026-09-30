@@ -31,8 +31,8 @@ def test_404_html_for_browser(monkeypatch, tmp_path):
     client = _client()
     resp = client.get("/this/does/not/exist", headers={"Accept": "text/html"})
     assert resp.status_code == 404
-    assert "404" in resp.text
-    assert "/this/does/not/exist" in resp.text
+    assert "Page not found" in resp.text
+    assert "We couldn't find that page" in resp.text
     assert resp.text.count("<h1") == 1
     # Branded chrome present (nav, halt pill).
     assert "halt-pill" in resp.text
@@ -186,7 +186,7 @@ def test_runtime_policy_error_is_actionable_and_path_safe(monkeypatch):
     )
     assert html.status_code == 503
     assert "Safety settings need attention" in html.text
-    assert "maverick doctor" in html.text
+    assert "Run a health check" in html.text and "maverick doctor" not in html.text
     assert "C:/Users/example" not in html.text
 
     api = client.get(

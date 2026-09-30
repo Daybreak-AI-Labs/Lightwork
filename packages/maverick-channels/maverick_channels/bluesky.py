@@ -15,10 +15,8 @@ which pulls in httpx
 from __future__ import annotations
 
 import asyncio
-import datetime as _dt
 import logging
 import os
-import re
 from collections import deque
 
 from .base import (
@@ -29,14 +27,12 @@ from .base import (
     is_allowed,
     normalize_allowlist,
 )
+from .delivery import DeliveryNotSent, DeliveryUnknown, send_chunk
+from .polling import PollCheckpoint, PollPage
+from .polling import parse_timestamp as _parse_indexed_at
+from .polling import utc_timestamp as _now_iso_z
 
 log = logging.getLogger(__name__)
-
-
-def _now_iso_z() -> str:
-    """Current UTC time as an AT-Protocol timestamp (``...Z``). Uses a
-    timezone-aware now() -- datetime.utcnow() is deprecated in 3.12+."""
-    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 _API_BASE = "https://bsky.social/xrpc"
@@ -44,34 +40,6 @@ _POLL_INTERVAL_SEC = 30.0
 # Bound on the recently-seen notification-uri dedup set (FIFO eviction). The
 # poll window is the 50 newest notifications, so this is generous headroom.
 _MAX_SEEN_URIS = 1000
-
-_FRAC_RE = re.compile(r"\.(\d+)")
-
-
-def _parse_indexed_at(ts: str) -> _dt.datetime | None:
-    """Parse an AT-proto ``indexedAt`` into an aware UTC datetime.
-
-    Tolerant of the varying fractional precision AT-proto emits (``...:00Z``,
-    ``...:00.123Z``, ``...:00.123456789Z``) and of the trailing ``Z`` that
-    ``datetime.fromisoformat`` rejects before Python 3.11. Returns None if the
-    value is empty/unparseable so the caller can fall back to a string compare.
-
-    Why: the startup floor is seeded with 6-digit microseconds, but a raw
-    string ``<=`` compares ``"…:00Z"`` as GREATER than ``"…:00.000000Z"``
-    (``'Z'`` > ``'.'``), so a boundary-second notification with no/short
-    fractional part slips past the "don't backfill history" floor.
-    """
-    s = (ts or "").strip()
-    if not s:
-        return None
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    # Clamp fractional seconds to microseconds; fromisoformat rejects >6 digits.
-    s = _FRAC_RE.sub(lambda m: "." + m.group(1)[:6].ljust(6, "0"), s, count=1)
-    try:
-        return _dt.datetime.fromisoformat(s)
-    except ValueError:
-        return None
 
 
 class BlueskyChannel(Channel):
@@ -141,81 +109,91 @@ class BlueskyChannel(Channel):
             self._session = resp.json()
         return self._session
 
+    def _account(self):
+        did = self._session.get("did")
+        if not isinstance(did, str) or not did:
+            raise ValueError("Bluesky authenticated account identity is unavailable")
+        return _API_BASE + ":" + did
+
     async def _poll_once(self) -> list[dict]:
-        """Fetch any new notifications since last poll."""
-        sess = await self._ensure_session()
-        try:
-            import httpx
-        except ImportError:
-            return []
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{_API_BASE}/app.bsky.notification.listNotifications",
-                headers={"Authorization": f"Bearer {sess['accessJwt']}"},
-                params={"limit": 50},
-            )
-            if resp.status_code == 401:
-                # Session expired; force a re-login on next call.
-                self._session = {}
-                return []
-            resp.raise_for_status()
-            notifs = (resp.json() or {}).get("notifications") or []
-        # Filter: only new mentions / replies. Floor on the startup cursor (no
-        # history backfill), then dedup by uri -- so a notification indexed just
-        # before the newest one (out-of-order/late indexing) is still delivered,
-        # not dropped by a strict timestamp watermark.
-        new: list[dict] = []
-        for n in notifs:
-            reason = n.get("reason")
-            if reason not in ("mention", "reply"):
-                continue
-            ts = n.get("indexedAt", "")
-            floor = self._last_seen_indexed_at
-            if floor and ts:
-                ts_dt = _parse_indexed_at(ts)
-                floor_dt = _parse_indexed_at(floor)
-                if ts_dt is not None and floor_dt is not None:
-                    if ts_dt <= floor_dt:
-                        continue  # at/before startup -> pre-history, skip
-                elif ts <= floor:
-                    continue  # unparseable: conservative lexicographic fallback
-            uri = n.get("uri") or ""
-            if uri and uri in self._seen_uris:
-                continue  # already delivered this exact notification
-            new.append(n)
-        for n in new:
-            uri = n.get("uri") or ""
-            if uri:
+        import httpx
+
+        await self._ensure_session()
+        account = self._account()
+        checkpoint = PollCheckpoint(self.name, account)
+        async def initialize():
+            return {"floor": self._last_seen_indexed_at or _now_iso_z()}
+        row = await checkpoint.load(initialize)
+        self._last_seen_indexed_at = row["floor"]
+        async def fetch(state):
+            params = {"limit": 50}
+            if state["cursor"]:
+                params["cursor"] = state["cursor"]
+            session = await self._ensure_session()
+            if account != self._account():
+                raise PermissionError("Bluesky configured account changed during polling")
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(f"{_API_BASE}/app.bsky.notification.listNotifications",
+                    headers={"Authorization": f"Bearer {session['accessJwt']}"}, params=params)
+                if response.status_code == 401:
+                    self._session = {}
+                response.raise_for_status()
+                payload = response.json() or {}
+            return PollPage(payload.get("notifications") or [], payload.get("cursor") or None)
+        async def admit(item, state):
+            if item.get("reason") not in {"mention", "reply"}:
+                return False
+            timestamp, floor = _parse_indexed_at(item.get("indexedAt", "")), _parse_indexed_at(state["floor"])
+            if timestamp is None or floor is None:
+                raise ValueError("Bluesky notification has no valid history boundary")
+            if timestamp <= floor:
+                return False
+            receipt = await self._admit(item)
+            if receipt is None:
+                return False
+            uri = item["uri"]
+            seen = uri in self._seen_uris
+            if not seen:
                 self._seen_uris.add(uri)
                 self._seen_order.append(uri)
-        # Bound the dedup set (FIFO); the polling window is the last ~50, so a
-        # few hundred entries is ample headroom against re-delivery.
-        while len(self._seen_order) > _MAX_SEEN_URIS:
-            self._seen_uris.discard(self._seen_order.popleft())
-        return new
+            while len(self._seen_order) > _MAX_SEEN_URIS:
+                self._seen_uris.discard(self._seen_order.popleft())
+            return not seen
+        results = await checkpoint.drain(row, fetch, admit)
+        self.poll_status = (await asyncio.to_thread(checkpoint.store.get, checkpoint.record_id))["status"]
+        return results
+
+    def _input(self, notif):
+        author = notif.get("author") or {}
+        sender = author.get("did") or author.get("handle") or "anonymous"
+        if not is_allowed(sender, self.allowed_user_ids) or sender == self._session.get("did"):
+            return None
+        identity = str(notif.get("uri") or "")
+        if not identity or not notif.get("cid"):
+            raise ValueError("Bluesky notification requires a stable identity and reply binding")
+        return IncomingMessage(user_id=sender, sender_id=sender,
+            text=(notif.get("record") or {}).get("text", ""), channel=self.name, message_id=identity)
+
+    async def _admit(self, notif):
+        msg = self._input(notif)
+        if msg is None:
+            return None
+        account = self._account()
+        route = {"uri": notif["uri"], "cid": notif["cid"],
+                 "record": {"reply": (notif.get("record") or {}).get("reply", {})}}
+        return await self.admit_message(msg, external_id=msg.message_id, account=account, route=route,
+            authorize=lambda: account == self._account() and is_allowed(msg.sender_id, self.allowed_user_ids))
 
     async def _dispatch(self, notif: dict) -> None:
-        record = notif.get("record") or {}
-        text = record.get("text", "")
-        author = notif.get("author") or {}
-        user_id = author.get("did") or author.get("handle") or "anonymous"
-        # Shared default-deny helper: normalizes + hard-rejects the "anonymous"
-        # sentinel, matching the other adapters (a raw `not in` let an
-        # unidentifiable sender through if "anonymous" were ever allowlisted).
-        if not is_allowed(user_id, self.allowed_user_ids):
-            log.warning("unauthorized bluesky access: user_id=%s", user_id)
+        receipt = await self._admit(notif)
+        if receipt is None:
             return
-        msg = IncomingMessage(
-            user_id=user_id, text=text,
-            channel=self.name, raw=notif,
-        )
-        try:
-            reply = await self.dispatch_text(msg)
-        except Exception as e:
-            log.exception("bluesky handler raised: %s", e)
-            return
-        if reply:
-            await self._reply(notif, reply)
+        msg, account = self._input(notif), self._account()
+        async def send_saved(reply):
+            if reply.text:
+                return await self._reply(receipt["route"], reply.text)
+        return await self.process_message(msg, external_id=msg.message_id, account=account, receipt=receipt,
+            authorize=lambda: account == self._account() and is_allowed(msg.sender_id, self.allowed_user_ids), send=send_saved)
 
     async def _reply(self, parent_notif: dict, text: str) -> None:
         """Post a reply in-thread to a notification."""
@@ -246,27 +224,25 @@ class BlueskyChannel(Channel):
                 },
             },
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{_API_BASE}/com.atproto.repo.createRecord",
-                headers={"Authorization": f"Bearer {sess['accessJwt']}"},
-                json=body,
-            )
+        async def create():
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(f"{_API_BASE}/com.atproto.repo.createRecord",
+                    headers={"Authorization": f"Bearer {sess['accessJwt']}"}, json=body)
+            if 400 <= resp.status_code < 500 and resp.status_code != 408:
+                raise DeliveryNotSent("Bluesky rejected the reply")
             if resp.status_code >= 400:
-                log.warning("bluesky post failed (%d): %s", resp.status_code, resp.text[:200])
+                raise DeliveryUnknown("Bluesky reply acceptance is unconfirmed")
+            return (resp.json() or {}).get("uri", "")
+        # Timestamp is transport formatting; retry identity covers immutable
+        # content/routing, not a fresh clock value.
+        return await send_chunk("record-0", {"text": text[:300], "route": parent_notif}, create)
 
     async def start(self) -> None:
         self._running = True
-        await self._ensure_session()
-        # Seed the cursor to "now" so the first poll only dispatches
-        # notifications that arrive AFTER startup. Without this, a cold
-        # start (or any restart) re-runs the agent swarm on the last 50
-        # mentions in history — duplicate replies + real LLM spend.
-        if self._last_seen_indexed_at is None:
-            self._last_seen_indexed_at = _now_iso_z()
-        log.info("Bluesky channel started (handle=%s)", self.handle)
         errors = 0
         try:
+            await self._ensure_session()
+            log.info("Bluesky channel started (handle=%s)", self.handle)
             while not self._stop_event.is_set():
                 try:
                     notifs = await self._poll_once()
@@ -276,7 +252,20 @@ class BlueskyChannel(Channel):
                     log.warning("bluesky poll failed: %s", e)
                     notifs = []
                 for n in notifs:
-                    await self._dispatch(n)
+                    try:
+                        await self._dispatch(n)
+                    except Exception:
+                        log.warning("bluesky admitted input requires recovery")
+                if self._session.get("did"):
+                    account = self._account()
+                    async def send_saved(msg, reply, route):
+                        if reply.text:
+                            return await self._reply(route, reply.text)
+                    try:
+                        await self.recover_messages(account=account, send=send_saved,
+                            authorize=lambda msg, account=account: account == self._account() and is_allowed(msg.sender_id, self.allowed_user_ids))
+                    except Exception:
+                        log.warning("bluesky saved delivery recovery remains incomplete")
                 try:
                     await asyncio.wait_for(
                         self._stop_event.wait(),

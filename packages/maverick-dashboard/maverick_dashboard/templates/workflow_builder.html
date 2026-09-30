@@ -139,6 +139,9 @@
   @media (max-width: 560px) {
     .seg { flex-direction: column; }
   }
+  .wf__days { border: 0; padding: 0; margin: 0 0 var(--space-3); display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--text-sm); }
+  .wf__days legend { color: var(--muted); margin-bottom: 4px; }
+  .wf__days label { display: inline-flex; align-items: center; gap: 4px; }
 </style>
 
   <h1 class="page-title">Workflow builder</h1>
@@ -185,7 +188,7 @@
       </div>
       <div class="wf-grid">
         <div class="wf__field" style="flex: 1 1 16rem;">
-          <label for="wf-name">Short name</label>
+          <label for="wf-name">Short name (filled in from the title)</label>
           <input type="text" id="wf-name" class="input" aria-label="Workflow short name" />
         </div>
         <div class="wf__field" style="flex: 2 1 18rem;">
@@ -199,14 +202,14 @@
       </div>
       <div class="wf-grid">
         <div class="wf__field">
-          <label for="wf-params">Ask for these inputs (separate with commas)</label>
+          <label for="wf-params">Information to ask for each time (separate with commas)</label>
           <input type="text" id="wf-params" class="input" placeholder="competitor, timeframe"
                  aria-label="Information to ask for each time" />
         </div>
         <div class="wf__field wf__field--sm">
-          <label for="wf-budget">Budget ($)</label>
-          <input type="number" id="wf-budget" class="input" min="0.5" max="100" step="0.5"
-                 aria-label="Per-run budget in dollars" />
+          <label for="wf-budget">Optional spending limit ($)</label>
+          <input type="number" id="wf-budget" class="input" min="0" step="0.01"
+                 aria-label="Optional per-run budget in dollars" placeholder="No task limit" />
         </div>
       </div>
       <div class="wf__field">
@@ -222,7 +225,7 @@
       </div>
       <div class="wf__row">
         <button type="button" id="wf-save-btn" class="btn btn--primary">Save workflow</button>
-        <span class="wf__hint">Saved workflows appear on <a href="/templates">Templates</a>, runnable from the goal box.</span>
+        <span class="wf__hint">Saved workflows appear on <a href="/templates">Templates</a>, and you can run them from Chat.</span>
       </div>
     </div>
 
@@ -234,15 +237,15 @@
       </div>
       <div class="wf-grid">
         <div class="wf__field" style="flex: 1 1 16rem;">
-          <label for="pb-name">Short name</label>
+          <label for="pb-name">Short name (filled in from the description)</label>
           <input type="text" id="pb-name" class="input" aria-label="Specialist short name" />
         </div>
         <div class="wf__field wf__field--sm">
-          <label for="pb-risk">Max risk</label>
-          <select id="pb-risk" class="input" aria-label="Risk ceiling">
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
+          <label for="pb-risk">Riskiest action allowed</label>
+          <select id="pb-risk" class="input">
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
           </select>
         </div>
       </div>
@@ -261,10 +264,10 @@
           <button type="button" class="btn btn--ghost" data-browse="allow"
                   aria-label="Choose allowed actions">Choose actions…</button>
           <details id="pb-allow-advanced">
-            <summary>Advanced action identifiers</summary>
-            <label for="pb-allow">Allowed tool identifiers (separate with commas)</label>
+            <summary>Technical details: type action names instead</summary>
+            <label for="pb-allow">Allowed action names (separate with commas)</label>
             <input type="text" id="pb-allow" class="input" placeholder="web_search, send_email"
-                   aria-label="Allowed tools" />
+                   aria-label="Allowed action names" />
           </details>
         </div>
         <div class="wf__field">
@@ -273,10 +276,10 @@
           <button type="button" class="btn btn--ghost" data-browse="deny"
                   aria-label="Choose blocked actions">Choose actions…</button>
           <details id="pb-deny-advanced">
-            <summary>Advanced action identifiers</summary>
-            <label for="pb-deny">Blocked tool identifiers (separate with commas)</label>
+            <summary>Technical details: type action names instead</summary>
+            <label for="pb-deny">Blocked action names (separate with commas)</label>
             <input type="text" id="pb-deny" class="input" placeholder="shell, delete_file"
-                   aria-label="Denied tools" />
+                   aria-label="Blocked action names" />
           </details>
         </div>
       </div>
@@ -288,7 +291,7 @@
           <div id="pb-steps"></div>
           <div class="pb-flow__node pb-flow__end" id="pb-flow-end" hidden><span class="dot" aria-hidden="true"></span>Goal complete</div>
         </div>
-        <button type="button" id="pb-add-step" class="btn btn--ghost" style="margin-top: var(--space-4);">+ Add step</button>
+        <button type="button" id="pb-add-step" class="btn btn--ghost" style="margin-top: var(--space-4);">Add a step</button>
       </div>
       <div class="wf__field">
         <label for="pb-refine">Refine with a follow-up</label>
@@ -306,8 +309,8 @@
         <ul id="pb-lint" class="wf__lint"></ul>
       </div>
       <div class="wf__row">
-        <button type="button" id="pb-save-btn" class="btn btn--primary"{% if not pack_editing_allowed %} disabled title="A dashboard admin must validate and save this draft"{% endif %}>Save playbook</button>
-        <span class="wf__hint">{% if pack_editing_allowed %}Saved playbooks become specialists on <a href="/agents">Agents</a>.{% else %}This first pass stays unsaved until a dashboard admin validates and saves it.{% endif %}</span>
+        <button type="button" id="pb-save-btn" class="btn btn--primary"{% if not pack_editing_allowed %} disabled title="An administrator must check and save this draft"{% endif %}>Save playbook</button>
+        <span class="wf__hint">{% if pack_editing_allowed %}Saved playbooks become specialists on <a href="/agents">Agents</a>.{% else %}This draft stays unsaved until an administrator checks and saves it. <button type="button" class="btn btn--ghost" id="pb-copy-draft">Copy the draft to send to an administrator</button>{% endif %}</span>
       </div>
     </div>
 
@@ -322,41 +325,56 @@
       </div>
       <div class="wf__row">
         <a class="btn btn--primary" id="wf-saved-link" href="/templates">Open Templates</a>
-        <a class="btn btn--ghost" href="/chat">Start a goal</a>
+        <a class="btn btn--ghost" id="wf-run-now" href="/chat">Run it now</a>
       </div>
       {% if scheduling_enabled %}
       <details class="wf__sched" id="wf-sched" hidden>
         <summary class="wf__sched-title"><span role="heading" aria-level="3">Run it on a schedule</span></summary>
-        <p class="wf__hint">Lightwork starts this workflow automatically. Schedules run while the Lightwork background worker is on.</p>
+        <p class="wf__hint">Lightwork starts this workflow automatically while it is running. Times are in your time zone.</p>
         <div class="wf-grid">
           <div class="wf__field">
-            <label for="sched-cadence">Cadence</label>
-            <select id="sched-cadence" class="input" aria-label="Schedule cadence">
+            <label for="sched-cadence">How often</label>
+            <select id="sched-cadence" class="input">
               <option value="">Off</option>
               <option value="daily">Every day</option>
-              <option value="weekdays">Weekdays (Mon–Fri)</option>
-              <option value="weekly">Weekly (Monday)</option>
-              <option value="hourly">Every N hours</option>
-              <option value="custom">Advanced (cron)</option>
+              <option value="weekdays">Every weekday (Mon–Fri)</option>
+              <option value="days">On certain days each week</option>
+              <option value="monthly">Once a month</option>
+              <option value="hourly">Every few hours</option>
             </select>
           </div>
           <div class="wf__field wf__field--sm" id="sched-time-wrap">
-            <label for="sched-time">Time (UTC)</label>
-            <input type="time" id="sched-time" class="input" value="09:00" aria-label="Schedule time (UTC)" />
+            <label for="sched-time">At (your time)</label>
+            <input type="time" id="sched-time" class="input" value="09:00" />
           </div>
           <div class="wf__field wf__field--sm" id="sched-interval-wrap" hidden>
-            <label for="sched-interval">Every N hours</label>
-            <input type="number" id="sched-interval" class="input" min="1" max="23" value="6" />
+            <label for="sched-interval">Every</label>
+            <select id="sched-interval" class="input">
+              <option value="1">1 hour</option><option value="2">2 hours</option><option value="3">3 hours</option>
+              <option value="4">4 hours</option><option value="6" selected>6 hours</option><option value="8">8 hours</option>
+              <option value="12">12 hours</option>
+            </select>
+          </div>
+          <div class="wf__field wf__field--sm" id="sched-dom-wrap" hidden>
+            <label for="sched-dom">Day of the month</label>
+            <select id="sched-dom" class="input">
+              {% for d in range(1, 29) %}<option value="{{ d }}">{{ d }}{{ 'st' if d in (1, 21) else ('nd' if d in (2, 22) else ('rd' if d in (3, 23) else 'th')) }}</option>{% endfor %}
+            </select>
           </div>
         </div>
-        <div class="wf__field" id="sched-cron-wrap" hidden>
-          <label for="sched-cron">Cron expression (UTC)</label>
-          <input type="text" id="sched-cron" class="input" placeholder="0 9 * * 1-5" autocomplete="off" spellcheck="false" aria-describedby="sched-cron-help" />
-          <p class="wf__hint" id="sched-cron-help">Five fields: minute hour day month weekday. Validated on save.</p>
-        </div>
+        <fieldset class="wf__days" id="sched-days-wrap" hidden>
+          <legend>On these days</legend>
+          <label><input type="checkbox" value="1" checked /> Mon</label>
+          <label><input type="checkbox" value="2" /> Tue</label>
+          <label><input type="checkbox" value="3" /> Wed</label>
+          <label><input type="checkbox" value="4" /> Thu</label>
+          <label><input type="checkbox" value="5" /> Fri</label>
+          <label><input type="checkbox" value="6" /> Sat</label>
+          <label><input type="checkbox" value="0" /> Sun</label>
+        </fieldset>
         <p class="wf__hint" id="sched-local-hint" hidden></p>
         <div class="wf__field" id="sched-params-wrap" hidden>
-          <label>Parameter values for each run</label>
+          <label>Answers to use each time</label>
           <div id="sched-params"></div>
         </div>
         <div class="wf__row">
@@ -368,33 +386,27 @@
       {% endif %}
       {% if triggers_enabled %}
       <details class="wf__sched" id="wf-trig" hidden>
-        <summary class="wf__sched-title"><span role="heading" aria-level="3">Trigger from a webhook</span></summary>
-        <p class="wf__hint">Run this workflow on demand by POSTing to a URL — wire it to GitHub, Slack, Zapier, or anything that can send a signed webhook.</p>
+        <summary class="wf__sched-title"><span role="heading" aria-level="3">Start it from another app</span></summary>
+        <p class="wf__hint">Let GitHub, Slack, Zapier or another app start this workflow whenever something happens there.</p>
         <div class="wf-grid">
           <div class="wf__field">
-            <label for="trig-name">Trigger name</label>
-            <input type="text" id="trig-name" class="input" placeholder="(defaults to the workflow name)" aria-label="Trigger name" />
+            <label for="trig-name">Name for this start (optional)</label>
+            <input type="text" id="trig-name" class="input" placeholder="Uses the workflow name" />
           </div>
         </div>
         <div class="wf__field" id="trig-params-wrap" hidden>
-          <label>Default parameter values</label>
+          <label>Answers to use each time</label>
           <div id="trig-params"></div>
         </div>
         <div class="wf__row">
-          <button type="button" id="trig-btn" class="btn btn--primary" disabled>Create webhook trigger</button>
-          <span class="wf__hint" id="trig-msg" aria-live="polite"></span>
+          <button type="button" id="trig-btn" class="btn btn--primary" disabled>Let another app start it</button>
+          <span class="wf__hint" id="trig-msg" role="status" aria-live="polite"></span>
         </div>
         <div id="trig-howto" hidden>
-          <p class="wf__hint">Other systems can start this workflow by sending a signed request to this address (your administrator holds the signing secret).<span id="trig-secret-warn" hidden> ⚠ No signing secret is set yet — an administrator must configure one before this address will accept calls.</span></p>
-          <div class="wf__copyrow"><code id="trig-url"></code><button type="button" class="btn btn--ghost" id="trig-url-copy">Copy URL</button></div>
-          <details id="trig-request-advanced">
-          <summary>Advanced integration example</summary>
-          <p class="wf__hint" style="margin: var(--space-3) 0 var(--space-1);">For the administrator connecting your external service:</p>
-          <pre class="wf__curl" id="trig-curl" aria-label="Signed curl example"></pre>
-          <div class="wf__row"><button type="button" class="btn btn--ghost" id="trig-curl-copy">Copy curl</button></div>
-          </details>
+          <p class="wf__hint">In the other app, add a step that sends a web request to this address and names this start. Your administrator can help with the security key.<span id="trig-secret-warn" hidden> ⚠ The security key isn’t set up yet, so the address won’t accept requests. {% if pack_editing_allowed %}<a href="/settings#webhook-secret">Set it up in Settings</a>{% else %}Ask an administrator to set it up in Settings.{% endif %}</span></p>
+          <div class="wf__copyrow"><code id="trig-url"></code><button type="button" class="btn btn--ghost" id="trig-url-copy">Copy address</button><button type="button" class="btn btn--ghost" id="trig-name-copy">Copy start name</button></div>
         </div>
-        <ul class="wf__sched-list" id="trig-list" aria-label="Webhook triggers"></ul>
+        <ul class="wf__sched-list" id="trig-list" aria-label="Starts from other apps"></ul>
       </details>
       {% endif %}
     </div>
@@ -548,7 +560,6 @@
     var schedCadence = document.getElementById('sched-cadence');
     var schedTime = document.getElementById('sched-time');
     var schedInterval = document.getElementById('sched-interval');
-    var schedCronInput = document.getElementById('sched-cron');
     var schedParamsWrap = document.getElementById('sched-params-wrap');
     var schedParams = document.getElementById('sched-params');
     var schedBtn = document.getElementById('sched-btn');
@@ -683,16 +694,40 @@
     // Render an API error detail readably. A 422's `detail` is a Pydantic error
     // ARRAY, not a string — assigning it to textContent would print "[object
     // Object]", so flatten it to "field: message" here.
-    function detailText(data, status) {
+    var FIELD_WORDS = { name: 'the short name', title: 'the title', body: 'the steps', params: 'the information to ask for',
+      budget_dollars: 'the spending limit', budget_wall_seconds: 'the time limit' };
+    function detailText(data, status, what) {
       var d = data && data.detail;
-      if (typeof d === 'string') return d;
-      if (Array.isArray(d)) {
-        return d.map(function (e) {
+      if (Array.isArray(d) && d.length) {
+        var fields = d.map(function (e) {
           var loc = (e && e.loc && e.loc.length) ? e.loc[e.loc.length - 1] : '';
-          return (loc ? loc + ': ' : '') + ((e && e.msg) || 'invalid');
-        }).join('; ') || ('Save failed: ' + status);
+          return FIELD_WORDS[loc] || '';
+        }).filter(Boolean);
+        if (fields.length) return 'Check ' + fields.filter(function (f, i) { return fields.indexOf(f) === i; }).join(' and ') + ', then try again.';
       }
-      return 'Save failed: ' + status;
+      return plainErr({ status: status }, what || 'save the workflow');
+    }
+    function slugName(text) {
+      return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48);
+    }
+    // Fill the short name from the title until someone types their own.
+    var nameTouched = false;
+    elName.addEventListener('input', function () { nameTouched = !!elName.value.trim(); });
+    elTitle.addEventListener('input', function () { if (!nameTouched && !wfEditingName) elName.value = slugName(elTitle.value); });
+    var pbNameTouched = false;
+    pbName.addEventListener('input', function () { pbNameTouched = !!pbName.value.trim(); });
+    pbDesc.addEventListener('input', function () { if (!pbNameTouched && !pbName.value.trim()) pbName.value = slugName(pbDesc.value.split(/\s+/).slice(0, 4).join(' ')); });
+    var copyDraft = document.getElementById('pb-copy-draft');
+    if (copyDraft) copyDraft.addEventListener('click', function () {
+      var pb = collectPlaybook();
+      var lines = ['Specialist: ' + (pbName.value.trim() || '(no name yet)'), 'Description: ' + pb.description, '',
+        'Role and instructions:', pb.persona, '', 'Riskiest action allowed: ' + pb.max_risk,
+        'Allowed actions: ' + (pb.allow_tools.join(', ') || 'none'), 'Blocked actions: ' + (pb.deny_tools.join(', ') || 'none'), '', 'Steps:'];
+      pb.workflow.forEach(function (st, i) { lines.push((i + 1) + '. ' + st.name + (st.instruction ? ' — ' + st.instruction : '') + (st.gate ? ' (' + (GATE_LABEL[st.gate] || st.gate) + ')' : '')); });
+      mvCopy(lines.join('\n'));
+    });
+    function plainErr(failure, what) {
+      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
     }
     function renderDraft(d, shouldScroll) {
       templateWorkspaceStarted = true;
@@ -700,7 +735,7 @@
       elTitle.value = d.title || '';
       elSteps.value = d.body || '';
       elParams.value = (d.params || []).join(', ');
-      elBudget.value = (d.budget_dollars != null) ? d.budget_dollars : 5;
+      elBudget.value = (d.budget_dollars != null) ? d.budget_dollars : '';
       if (recovery) recovery.changed();
       if (d.budget_wall_seconds != null) wfEditWall = d.budget_wall_seconds;
       preview.hidden = false; pbPreview.hidden = true; savedBox.hidden = true;
@@ -722,7 +757,7 @@
     function collectTemplate() {
       var t = {
         name: elName.value.trim(), title: elTitle.value.trim(), body: elSteps.value,
-        params: splitList(elParams.value), budget_dollars: parseFloat(elBudget.value) || 5.0,
+        params: splitList(elParams.value), budget_dollars: elBudget.value.trim() === '' ? null : Number(elBudget.value),
       };
       // Preserve the wall-time cap of an edited template (the form has no field
       // for it) so a save round-trip can't reset it to the server default.
@@ -745,7 +780,8 @@
 
     saveBtn.addEventListener('click', async function () {
       var payload = collectTemplate();
-      if (!payload.name) { setStatus('Give the workflow a name (id).', true); elName.focus(); return; }
+      if (!payload.name && payload.title) { payload.name = slugName(payload.title); elName.value = payload.name; }
+      if (!payload.name) { setStatus('Give the workflow a title.', true); elTitle.focus(); return; }
       saveBtn.disabled = true;
       setStatus('Saving…');
       try {
@@ -774,22 +810,32 @@
         wfEditGeneration = data.generation;
         if (recovery) recovery.changed();
         savedMsg.textContent = 'Saved “' + (data.title || data.name) + '” as a reusable workflow'
-          + ((data.params && data.params.length) ? ' (parameters: ' + data.params.join(', ') + ').' : '.');
+          + ((data.params && data.params.length) ? ' (it asks for: ' + data.params.map(function (p) { return window.mvHuman ? window.mvHuman(p) : p; }).join(', ') + ').' : '.');
+        var runNow = document.getElementById('wf-run-now');
+        if (runNow) runNow.href = '/chat?title=' + encodeURIComponent(data.title || data.name);
         showSaved('/templates', 'Open Templates');
         showScheduling({ name: data.name, params: data.params || [] });
         showTriggers({ name: data.name, params: data.params || [] });
       } catch (e) {
-        setStatus('Could not save the workflow.', true);
+        setStatus(plainErr(e, 'save the workflow'), true);
       } finally {
         saveBtn.disabled = false;
       }
     });
 
     // ---- schedule a saved template to run on a cron (feature-gated) ----
+    // The schedule is chosen in local time and stored as a UTC timetable.
+    // Converting keeps the weekday right when the local day differs from UTC.
+    function toUtc(h, m) {
+      var d = new Date(); d.setHours(h, m, 0, 0);
+      var shift = d.getUTCDay() - d.getDay();
+      if (shift > 1) shift = -1; else if (shift < -1) shift = 1;
+      return { h: d.getUTCHours(), m: d.getUTCMinutes(), shift: shift };
+    }
+    function shiftDays(days, shift) { return days.map(function (x) { return String(((Number(x) + shift) % 7 + 7) % 7); }); }
     function currentCron() {
       var cad = schedCadence.value;
       if (!cad) return null;
-      if (cad === 'custom') return (schedCronInput.value || '').trim() || null;
       if (cad === 'hourly') {
         var n = parseInt(schedInterval.value, 10);
         if (isNaN(n) || n < 1) n = 1; if (n > 23) n = 23;
@@ -799,20 +845,48 @@
       var h = parseInt(parts[0], 10); var m = parseInt(parts[1], 10);
       if (isNaN(h)) h = 9;
       if (isNaN(m)) m = 0;
-      if (cad === 'daily') return m + ' ' + h + ' * * *';
-      if (cad === 'weekdays') return m + ' ' + h + ' * * 1-5';
-      if (cad === 'weekly') return m + ' ' + h + ' * * 1';
+      var u = toUtc(h, m);
+      if (cad === 'daily') return u.m + ' ' + u.h + ' * * *';
+      if (cad === 'weekdays') return u.m + ' ' + u.h + ' * * ' + (u.shift ? shiftDays(['1', '2', '3', '4', '5'], u.shift).join(',') : '1-5');
+      if (cad === 'days') {
+        var days = Array.prototype.filter.call(document.querySelectorAll('#sched-days-wrap input[type=checkbox]'), function (c) { return c.checked; })
+          .map(function (c) { return c.value; });
+        if (!days.length) return null;
+        return u.m + ' ' + u.h + ' * * ' + shiftDays(days, u.shift).join(',');
+      }
+      if (cad === 'monthly') {
+        var dom = parseInt((document.getElementById('sched-dom') || {}).value, 10) || 1;
+        dom = Math.min(28, Math.max(1, dom + u.shift));
+        return u.m + ' ' + u.h + ' ' + dom + ' * *';
+      }
       return null;
+    }
+    // A stored UTC timetable in words, in the viewer's time.
+    var DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    function cronWords(cron) {
+      var f = String(cron || '').trim().split(/\s+/);
+      if (f.length !== 5) return 'On a custom timetable';
+      if (f[0] === '0' && /^\*\/\d+$/.test(f[1]) && f[2] === '*' && f[3] === '*' && f[4] === '*') return 'Every ' + f[1].slice(2) + ' hours';
+      if (!/^\d+$/.test(f[0]) || !/^\d+$/.test(f[1]) || f[3] !== '*') return 'On a custom timetable';
+      var d = new Date(); d.setUTCHours(Number(f[1]), Number(f[0]), 0, 0);
+      var shift = d.getDay() - d.getUTCDay(); if (shift > 1) shift = -1; else if (shift < -1) shift = 1;
+      var at = ' at ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      if (f[2] === '*' && f[4] === '*') return 'Every day' + at;
+      if (f[2] === '*' && /^[0-7](,[0-7])*$|^1-5$/.test(f[4])) {
+        var days = f[4] === '1-5' ? ['1', '2', '3', '4', '5'] : f[4].split(',');
+        days = shiftDays(days, shift).map(Number).sort();
+        if (days.join(',') === '1,2,3,4,5') return 'Weekdays' + at;
+        return 'Every ' + days.map(function (x) { return DAY_NAMES[x % 7]; }).join(', ') + at;
+      }
+      if (/^\d+$/.test(f[2]) && f[4] === '*') return 'Monthly on day ' + (Number(f[2]) + shift) + at;
+      return 'On a custom timetable';
     }
     function syncSchedInputs() {
       // Show only the input(s) the chosen cadence needs.
       var cad = schedCadence.value;
-      var timeWrap = document.getElementById('sched-time-wrap');
-      var intWrap = document.getElementById('sched-interval-wrap');
-      var cronWrap = document.getElementById('sched-cron-wrap');
-      if (timeWrap) timeWrap.hidden = !(cad === 'daily' || cad === 'weekdays' || cad === 'weekly');
-      if (intWrap) intWrap.hidden = cad !== 'hourly';
-      if (cronWrap) cronWrap.hidden = cad !== 'custom';
+      var show = { 'sched-time-wrap': ['daily', 'weekdays', 'days', 'monthly'].indexOf(cad) >= 0,
+        'sched-interval-wrap': cad === 'hourly', 'sched-dom-wrap': cad === 'monthly', 'sched-days-wrap': cad === 'days' };
+      Object.keys(show).forEach(function (id) { var e = document.getElementById(id); if (e) e.hidden = !show[id]; });
     }
     var fmtWhen = window.mvWhen;   // shared timestamp formatter (base.html)
     function renderSchedParams(params) {
@@ -824,7 +898,7 @@
         var label = document.createElement('label');
         label.htmlFor = id;   // associate the visible label with the field
         label.style.cssText = 'display:block; font-size: var(--text-xs); color: var(--muted); margin: var(--space-2) 0 2px;';
-        label.textContent = p;
+        label.textContent = window.mvHuman ? window.mvHuman(p) : p;
         var inp = document.createElement('input');
         inp.id = id;
         inp.className = 'input sched-param';
@@ -846,33 +920,7 @@
       syncSchedInputs();
       var cron = currentCron();
       schedBtn.disabled = !cron || schedParamValues() === null;
-      schedCronPreview.textContent = cron ? ('cron: ' + cron + ' (UTC)') : '';
-      updateSchedLocalHint();
-    }
-    function updateSchedLocalHint() {
-      // Schedules fire in UTC; show what the chosen UTC time is locally so an
-      // operator isn't surprised when "09:00" runs at a different wall-clock hour.
-      // Only meaningful for the clock-time presets (not hourly / raw cron).
-      var hint = document.getElementById('sched-local-hint');
-      if (!hint) return;
-      var cad = schedCadence.value;
-      if (cad !== 'daily' && cad !== 'weekdays' && cad !== 'weekly') { hint.hidden = true; return; }
-      var p = (schedTime.value || '09:00').split(':');
-      var h = parseInt(p[0], 10), m = parseInt(p[1], 10);
-      if (isNaN(h) || isNaN(m)) { hint.hidden = true; return; }
-      var d = new Date(); d.setUTCHours(h, m, 0, 0);
-      var local = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      // Local day can differ from the UTC day (±1, month-wrap safe); and the
-      // mapping drifts across DST, so this is an approximation, not a promise.
-      var delta = d.getDate() - d.getUTCDate();
-      if (delta > 1) delta = -1; else if (delta < -1) delta = 1;
-      var dayLabel = delta === 0 ? '' : (delta > 0 ? ' (next day)' : ' (previous day)');
-      var jan = new Date(d.getFullYear(), 0, 1).getTimezoneOffset();
-      var jul = new Date(d.getFullYear(), 6, 1).getTimezoneOffset();
-      var dst = jan !== jul ? ', and shifts with daylight saving' : '';
-      hint.textContent = ('0' + h).slice(-2) + ':' + ('0' + m).slice(-2) + ' UTC ≈ '
-        + local + dayLabel + ' your time' + dst;
-      hint.hidden = false;
+      schedCronPreview.textContent = cron ? ('Runs: ' + cronWords(cron)) : '';
     }
     function showScheduling(tpl) {
       if (!schedWrap) return;             // no-op when [features] scheduling is off
@@ -891,18 +939,26 @@
       schedBtn.disabled = true;
       schedCronPreview.textContent = 'Scheduling…';
       try {
-        var resp = await fetch('/api/v1/schedules', {
+        // The server builds and checks the timetable in the person's own time zone.
+        var cad = schedCadence.value, zone = 'UTC';
+        try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (e) { zone = 'UTC'; }
+        var days = Array.prototype.filter.call(document.querySelectorAll('#sched-days-wrap input[type=checkbox]'), function (c) { return c.checked; })
+          .map(function (c) { return Number(c.value); });
+        var timetable = { repeat: cad === 'days' ? 'weekly' : cad, at: /^\d{2}:\d{2}$/.test(schedTime.value) ? schedTime.value : '09:00',
+          days: days, day_of_month: parseInt((document.getElementById('sched-dom') || {}).value, 10) || 1,
+          every_hours: Math.min(12, Math.max(1, parseInt(schedInterval && schedInterval.value, 10) || 1)), zone: zone };
+        var resp = await fetch('/api/v1/schedules/add', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cron: cron, template: lastSavedTemplate.name, params: params }),
+          body: JSON.stringify({ what: 'workflow', template: lastSavedTemplate.name, params: params, timetable: timetable }),
         });
         var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { schedCronPreview.textContent = data.detail || ('Failed: ' + resp.status); mvToast(data.detail || 'Could not arm schedule', { error: true }); return; }
+        if (!resp.ok) { schedCronPreview.textContent = plainErr(resp, 'save the schedule'); mvFail(resp, 'save the schedule'); return; }
         schedCadence.value = '';
         schedCronPreview.textContent = 'Scheduled — next run ' + fmtWhen(data.next_run) + '.';
-        mvToast('Schedule armed — next run ' + fmtWhen(data.next_run));
+        mvToast('Schedule saved — next run ' + fmtWhen(data.next_run));
         loadSchedules();
       } catch (e) {
-        schedCronPreview.textContent = 'Could not reach the scheduler.';
+        schedCronPreview.textContent = plainErr(e, 'save the schedule');
       } finally {
         updateSchedBtn();
       }
@@ -923,34 +979,38 @@
         var span = document.createElement('span');
         span.className = 'mv-row__main';
         var title = document.createElement('strong');
-        title.textContent = s.title || '(goal)';
+        title.textContent = s.title || 'Untitled task';
         var when = document.createElement('span');
         when.className = 'wf__sched-when';
-        when.textContent = ' · ' + s.cron + ' · next ' + fmtWhen(s.next_run);
+        when.textContent = ' · ' + (s.zone ? 'Next ' + (fmtWhen(s.next_run) || 'run soon') + ' (' + String(s.zone).replace(/_/g, ' ') + ' time)'
+          : cronWords(s.cron) + (fmtWhen(s.next_run) ? ' · next ' + fmtWhen(s.next_run) : ''));
         span.appendChild(title); span.appendChild(when);
         var rm = document.createElement('button');
         rm.type = 'button';
-        rm.className = 'btn btn--icon';
-        rm.setAttribute('aria-label', 'Cancel this schedule');
-        rm.title = 'Cancel';
-        rm.textContent = '✕';
+        rm.className = 'btn btn--ghost btn--danger';
+        rm.setAttribute('aria-label', 'Delete the schedule for ' + (s.title || 'this task'));
+        rm.textContent = 'Delete';
         rm.addEventListener('click', function () { cancelSchedule(s.id, li); });
         li.appendChild(span); li.appendChild(rm);
         schedList.appendChild(li);
       });
     }
     async function cancelSchedule(id, li) {
-      if (!(await mvConfirm('Delete this schedule? It will stop running.'))) return;
+      if (!(await mvConfirm('Delete this schedule? It will stop running.', { okText: 'Delete' }))) return;
       try {
         var resp = await fetch('/api/v1/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
-        if (resp.ok) { if (li) li.remove(); mvToast('Schedule deleted'); } else { mvToast('Could not delete schedule', { error: true }); }
-      } catch (e) { mvToast('Could not delete schedule', { error: true }); }
+        if (resp.ok) { if (li) li.remove(); mvToast('Schedule deleted'); } else { mvFail(resp, 'delete the schedule'); }
+      } catch (e) { mvFail(e, 'delete the schedule'); }
     }
     if (schedWrap) {
       schedCadence.addEventListener('change', updateSchedBtn);
       schedTime.addEventListener('input', updateSchedBtn);
-      if (schedInterval) schedInterval.addEventListener('input', updateSchedBtn);
-      if (schedCronInput) schedCronInput.addEventListener('input', updateSchedBtn);
+      if (schedInterval) schedInterval.addEventListener('change', updateSchedBtn);
+      var schedDom = document.getElementById('sched-dom');
+      if (schedDom) schedDom.addEventListener('change', updateSchedBtn);
+      Array.prototype.forEach.call(document.querySelectorAll('#sched-days-wrap input[type=checkbox]'), function (c) {
+        c.addEventListener('change', updateSchedBtn);
+      });
       schedBtn.addEventListener('click', scheduleIt);
     }
 
@@ -965,7 +1025,7 @@
         var label = document.createElement('label');
         label.htmlFor = id;   // associate the visible label with the field
         label.style.cssText = 'display:block; font-size: var(--text-xs); color: var(--muted); margin: var(--space-2) 0 2px;';
-        label.textContent = p;
+        label.textContent = window.mvHuman ? window.mvHuman(p) : p;
         var inp = document.createElement('input');
         inp.id = id;
         inp.className = 'input trig-param';
@@ -1006,33 +1066,22 @@
           body: JSON.stringify({ template: trigTpl.name, params: params, name: trigName.value.trim() || null }),
         });
         var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { trigMsg.textContent = data.detail || ('Failed: ' + resp.status); mvToast(data.detail || 'Could not create trigger', { error: true }); return; }
-        trigMsg.textContent = 'Created.';
-        mvToast('Trigger “' + data.name + '” created');
+        if (!resp.ok) { trigMsg.textContent = plainErr(resp, 'set that up'); mvFail(resp, 'set that up'); return; }
+        trigMsg.textContent = 'Ready.';
+        mvToast('“' + data.name + '” can now be started by another app');
         showHowto(data);
         loadTriggers();
       } catch (e) {
-        trigMsg.textContent = 'Could not reach the server.';
+        trigMsg.textContent = plainErr(e, 'set that up');
       } finally {
         updateTrigBtn();
       }
     }
+    var lastTrigName = '';
     function showHowto(data) {
       var url = window.location.origin + (data.webhook_url || '/webhook/run');
-      var body = JSON.stringify({ trigger: data.name });
+      lastTrigName = data.name;
       document.getElementById('trig-url').textContent = url;
-      // A ready-to-run signed request: signs "<timestamp>.<body>" with the
-      // secret exactly as the server verifies it (needs MAVERICK_WEBHOOK_SECRET).
-      document.getElementById('trig-curl').textContent = [
-        "BODY='" + body + "'",
-        "TS=$(date +%s)",
-        "SIG=$(printf '%s.%s' \"$TS\" \"$BODY\" | openssl dgst -sha256 -hmac \"$MAVERICK_WEBHOOK_SECRET\" | sed 's/^.* //')",
-        "curl -X POST '" + url + "' \\",
-        "  -H \"X-Maverick-Timestamp: $TS\" \\",
-        "  -H \"X-Maverick-Signature: sha256=$SIG\" \\",
-        "  -H 'Content-Type: application/json' \\",
-        "  -d \"$BODY\""
-      ].join('\n');
       var warn = document.getElementById('trig-secret-warn');
       if (warn) warn.hidden = !!data.secret_configured;
       trigHowto.hidden = false;
@@ -1057,34 +1106,32 @@
         var sub = document.createElement('span');
         sub.className = 'wf__sched-when';
         var pcount = t.params ? Object.keys(t.params).length : 0;
-        sub.textContent = ' · ' + (t.template || '') + (pcount ? (' · ' + pcount + ' param' + (pcount === 1 ? '' : 's')) : '');
+        sub.textContent = ' · runs ' + (window.mvHuman ? window.mvHuman(t.template || '') : (t.template || '')) + (pcount ? (' · ' + pcount + ' saved answer' + (pcount === 1 ? '' : 's')) : '');
         span.appendChild(title); span.appendChild(sub);
         var rm = document.createElement('button');
         rm.type = 'button';
-        rm.className = 'btn btn--icon';
-        rm.setAttribute('aria-label', 'Delete trigger ' + t.name);
-        rm.title = 'Delete';
-        rm.textContent = '✕';
+        rm.className = 'btn btn--ghost btn--danger';
+        rm.setAttribute('aria-label', 'Delete the start ' + t.name);
+        rm.textContent = 'Delete';
         rm.addEventListener('click', function () { deleteTrigger(t.name, li); });
         li.appendChild(span); li.appendChild(rm);
         trigList.appendChild(li);
       });
     }
     async function deleteTrigger(name, li) {
-      if (!(await mvConfirm('Delete trigger “' + name + '”? Its webhook URL will stop working.'))) return;
+      if (!(await mvConfirm('Delete “' + name + '”? Other apps will no longer be able to start this workflow.', { okText: 'Delete' }))) return;
       try {
         var resp = await fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE' });
         if (resp.ok) {
           if (li) li.remove();
-          mvToast('Trigger deleted');
+          mvToast('Deleted');
           return;
         }
-        var body = await resp.json().catch(function () { return {}; });
-        var detail = body.detail || ('Could not delete trigger (' + resp.status + ').');
+        var detail = plainErr(resp, 'delete it');
         if (trigMsg) trigMsg.textContent = detail;
         mvToast(detail, { error: true });
       } catch (e) {
-        var message = 'Could not delete trigger — check your connection and try again.';
+        var message = plainErr(e, 'delete it');
         if (trigMsg) trigMsg.textContent = message;
         mvToast(message, { error: true });
       }
@@ -1094,12 +1141,12 @@
       trigBtn.addEventListener('click', createTrigger);
       var urlCopy = document.getElementById('trig-url-copy');
       if (urlCopy) urlCopy.addEventListener('click', function () { mvCopy(document.getElementById('trig-url').textContent); });
-      var curlCopy = document.getElementById('trig-curl-copy');
-      if (curlCopy) curlCopy.addEventListener('click', function () { mvCopy(document.getElementById('trig-curl').textContent); });
+      var nameCopy = document.getElementById('trig-name-copy');
+      if (nameCopy) nameCopy.addEventListener('click', function () { mvCopy(lastTrigName); });
     }
 
     // ---- playbook form ----
-    var GATE_LABEL = { review: 'review', approval: 'needs approval' };
+    var GATE_LABEL = { review: 'Someone reviews', approval: 'Someone must approve' };
     function paintGate(row) {
       var gate = row.querySelector('.pb-step__gate').value;
       row.dataset.gate = gate || '';
@@ -1131,21 +1178,21 @@
         '<div class="pb-step__head">'
         + '<span class="pb-step__num"></span>'
         + '<input class="input pb-step__name" placeholder="Step name" aria-label="Step name" />'
-        + '<select class="input pb-step__gate" aria-label="Human gate">'
-        + '<option value="">no gate</option>'
-        + '<option value="review">review</option>'
-        + '<option value="approval">approval</option>'
+        + '<select class="input pb-step__gate" aria-label="Does a person check this step?">'
+        + '<option value="">No check</option>'
+        + '<option value="review">Someone reviews</option>'
+        + '<option value="approval">Someone must approve</option>'
         + '</select>'
         + '<span class="pb-step__move">'
-        + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__up" aria-label="Move step up" title="Move up">↑</button>'
-        + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__down" aria-label="Move step down" title="Move down">↓</button>'
-        + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__rm" aria-label="Remove step" title="Remove">✕</button>'
+        + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__up">Move up</button>'
+        + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__down">Move down</button>'
+        + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__rm">Remove</button>'
         + '</span>'
         + '</div>'
         + '<textarea class="input pb-step__inst" rows="2" placeholder="What the agent does at this step" aria-label="Step instruction"></textarea>'
         + '<div class="pb-step__head" style="margin: 0;">'
-        + '<input class="input pb-step__tools" style="flex: 1 1 auto;" placeholder="tools used here (comma-separated)" aria-label="Step tools" />'
-        + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__browse" title="Browse connectors" aria-label="Browse connectors for this step">Browse…</button>'
+        + '<input class="input pb-step__tools" style="flex: 1 1 auto;" placeholder="Actions used here — choose them with the button" aria-label="Actions used in this step" />'
+        + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__browse">Choose actions…</button>'
         + '<span class="badge pb-gatebadge" hidden></span>'
         + '</div>';
       // assign untrusted values via properties (never string-interpolated into HTML)
@@ -1286,7 +1333,7 @@
         return;
       }
       var name = pbName.value.trim();
-      if (!name) { setStatus('Give the agent a name (id).', true); return; }
+      if (!name) { setStatus('Give the specialist a short name.', true); return; }
       pbSaveBtn.disabled = true;
       setStatus('Saving the playbook…');
       try {
@@ -1295,7 +1342,7 @@
           body: JSON.stringify(playbookPayload()),
         });
         var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { setStatus(data.detail || ('Save failed: ' + resp.status), true); return; }
+        if (!resp.ok) { setStatus(detailText(data, resp.status, 'save the playbook'), true); return; }
         if (data.name !== name || !/^[0-9a-f]{64}$/.test(data.generation || '')) {
           setStatus('The saved agent could not be confirmed. Your edits were kept; reload before another save.', true); return;
         }
@@ -1446,7 +1493,7 @@
           });
         }
         var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { setStatus(data.detail || ('Draft failed: ' + resp.status), true); return; }
+        if (!resp.ok) { setStatus(plainErr(resp, 'draft it'), true); return; }
         var completedStatus;
         var draftStillVisible = mode === draftMode;
         if (draftMode === 'playbook') {
@@ -1502,7 +1549,7 @@
           body: JSON.stringify({ form: form, instruction: instruction, current: current }),
         });
         var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { setStatus(data.detail || ('Refine failed: ' + resp.status), true); return; }
+        if (!resp.ok) { setStatus(plainErr(resp, 'refine it'), true); return; }
         if (isPb) renderPlaybook(data); else renderDraft(data);
         instrEl.value = '';
         setStatus('Refined — review the update, refine again, or save.'

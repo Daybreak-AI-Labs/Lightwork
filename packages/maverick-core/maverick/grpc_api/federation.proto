@@ -104,11 +104,13 @@ message DelegateRequest {
 
 message DelegateResult {
   bool accepted = 1;
-  int64 goal_id = 2;  // set when accepted: the receiver-LOCAL goal id (poll it
-                      // via GoalStatus); 0 otherwise
-  string reason = 3;  // set when refused: "unauthorized: ...", a capability
-                      // denial from boot negotiation, "correlation_id is
-                      // required", ...
+  int64 goal_id = 2;  // receiver-LOCAL goal ID, also set for a pending held
+                      // reservation; 0 means its identity is not known here
+  string reason = 3;  // refusal, pending-audit, or uncertain-execution detail;
+                      // retry a pending/unknown request with the SAME correlation
+  string outcome_state = 4; // rejected|pending|accepted|unknown; never infer refusal from a lost response
+  string audit_state = 5; // pending|accepted|unknown
+  string execution_state = 6; // held|not_started|dispatched|unknown; acceptance is not completed work
 }
 
 message StatusRequest {

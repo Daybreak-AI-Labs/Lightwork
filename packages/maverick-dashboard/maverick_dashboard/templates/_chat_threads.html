@@ -3,9 +3,9 @@
 {% macro chat_threads(threads) %}
 <ul class="cs-list" id="cs-list">
   {% for t in threads %}
-  <li><a href="/chat/goal/{{ t.id }}"{% if t.active %} class="active" aria-current="true"{% endif %} title="{{ t.title }}">{{ t.title }}</a></li>
+  <li><a href="/chat/goal/{{ t.target_id }}"{% if t.active %} class="active" aria-current="true"{% endif %} title="{{ t.title }}">{{ t.title }}</a></li>
   {% else %}
-  <li class="cs-empty">No chats yet</li>
+  <li class="cs-empty">No chats yet. <a href="/chat" style="display:inline; padding:0;">Start a chat</a></li>
   {% endfor %}
 </ul>
 {% endmacro %}

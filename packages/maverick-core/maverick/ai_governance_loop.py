@@ -31,7 +31,7 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -2055,7 +2055,10 @@ class AIGovernanceLoopCoordinator:
         try:
             before = self._read(lease.asset_id)
             after = self._read(lease.asset_id)
-            if before != after:
+            # Both reads independently pass freshness validation in _read.
+            # Their observation times need not be identical; all authority
+            # pins, decisions and limitations must still match exactly.
+            if replace(before, captured_at=after.captured_at) != after:
                 raise AIGovernanceLoopAuthorityDrift("authorities changed during reconciliation")
             result = self.store.commit_reconciliation(lease, after)
         except (KeyboardInterrupt, SystemExit):

@@ -21,15 +21,15 @@ def test_learning_mutations_confirm_targets_and_recover_for_retry():
 
     assert "This changes the deployment-wide learning posture" in source
     assert "sw.label + '” for this deployment? ' + impact" in source
-    assert "Scheduled and triggered workflows may begin running" in source
+    assert "Scheduled and triggered workflows may start running" in source
     assert "Disable automatic rollback of workflow regressions?" in source
     assert "Disable automatic application of workflow improvements?" in source
-    assert "Disable research-only DGM for this deployment?" in source
+    assert "Stop these experiments? Results so far are kept." in source
     assert source.count("if (btn.dataset.inFlight === 'true') return;") >= 5
     assert source.count("btn.setAttribute('aria-busy', 'true')") >= 5
     assert source.count("delete btn.dataset.inFlight") >= 10
-    assert "body.detail || ('Could not update “' + sw.label" in source
-    assert "body.detail || ('Could not turn the flow engine on" in source
+    assert "window.mvErrorText(r, 'change “' + sw.label + '”')" in source
+    assert "window.mvErrorText(r, 'turn on workflows')" in source
     assert "check your connection and try again" in source
 
 
@@ -41,8 +41,10 @@ def test_workforce_deploy_is_single_flight_and_surfaces_response_details():
     assert '"Deploy the " + deptTitle + " team?' in deploy
     assert "btn.disabled = true" in deploy
     assert 'btn.setAttribute("aria-busy", "true")' in deploy
-    assert "res.body.detail" in deploy
-    assert '" team (HTTP " + res.status + "). Try again."' in deploy
+    # Failures read as plain sentences (status mapped by mvErrorText), never
+    # a raw server detail or an HTTP code.
+    assert 'window.mvErrorText(res, "deploy the " + deptTitle + " team")' in deploy
+    assert "HTTP" not in deploy and "res.body.detail" not in deploy
     assert "check your connection and try again" in deploy
     assert "finally" in deploy
     assert "delete btn.dataset.inFlight" in deploy
@@ -53,14 +55,14 @@ def test_agent_factory_deploy_and_reset_mutations_are_guarded():
 
     assert "if (dlgDeploy.dataset.inFlight === 'true') return;" in source
     assert "if (btn.dataset.inFlight === 'true') return;" in source
-    assert source.count("This creates an operational fleet and its specialists") >= 2
+    assert source.count("This adds its specialists so you can give the team work") >= 2
     assert source.count(".finally(function ()") >= 2
     assert "function beginMutation(button)" in source
     assert "if (!beginMutation(saveBtn)) return;" in source
     assert "if (!name || !beginMutation(resetBtn)) return;" in source
-    assert "Its saved authority and workflow become available to operators" in source
-    assert "Custom authority and workflow edits will be removed" in source
-    assert "Could not reach the server — check your connection and try again." in source
+    assert "Its allowed actions and steps take effect for everyone who uses it" in source
+    assert "Your changes to its allowed actions and steps will be removed" in source
+    assert "throw new Error(plainError(error, 'reach Lightwork'))" in source
     assert "finishMutation(saveBtn)" in source
     assert "finishMutation(resetBtn)" in source
 
@@ -72,28 +74,29 @@ def test_other_global_or_executable_deployments_have_the_same_safety_contract():
     roles = _source("roles.html")
 
     assert "let actionInFlight = false" in assurance
-    assert "Activate policy pack “${target}” on the global channel?" in assurance
-    assert "Every subscribed tenant may receive this governed version" in assurance
-    assert "Policy-pack ${action} failed (HTTP ${response.status}). Try again." in assurance
+    assert "Turn on policy pack “${target}” for all workspaces?" in assurance
+    assert "Every workspace that uses this pack may move to this version" in assurance
     assert 'snapshotButton.dataset.inFlight === "true"' in assurance
-    assert "Publish the governed portfolio-risk snapshot" in assurance
-    assert "Snapshot publication failed (HTTP ${response.status}). Try again." in assurance
+    assert "Save the overall AI risk report" in assurance
     assert "Could not reach the server — check your connection and try again." in assurance
+    # Failures are plain sentences, never status codes.
+    assert "(HTTP ${" not in assurance
 
     assert 'if (form.dataset.inFlight === "true") return null;' in governance
     assert 'delete form.dataset.inFlight' in governance
     assert 'policyActivate.dataset.confirmationPending === "true"' in governance
-    assert "Activate policy “${policyId}” version ${version} for this tenant?" in governance
+    assert "Turn on version ${version} of “${title}” for this workspace?" in governance
     assert "Could not reach the server — check your connection and try again." in governance
 
     assert "if (btn.dataset.inFlight === 'true') return;" in store
-    assert "Install skill “' + name + '” into this deployment?" in store
-    assert "Skill installation failed (HTTP ' + r.status + '). Try again." in store
+    assert "Add the skill “' + label + '”?" in store
+    assert "window.mvErrorText(r, 'add the skill')" in store
+    assert "HTTP" not in store
     assert "if (!installed)" in store
 
     assert "function beginMutation(button)" in roles
-    assert "Deploy the authority and model override for role “' + role" in roles
-    assert "Reset role “' + role + '” to its built-in authority and model?" in roles
+    assert "'Save changes to the ' + roleName + ' role?" in roles
+    assert "'Put the ' + roleName + ' role back to its built-in settings?" in roles
     assert "Could not reach the server — check your connection and try again." in roles
     assert "finishMutation(saveBtn)" in roles
     assert "finishMutation(resetBtn)" in roles
@@ -103,17 +106,18 @@ def test_tenant_policy_and_notice_publication_are_confirmed_and_retryable():
     data_use = _source("data_use_governance.html")
     privacy = _source("privacy.html")
 
-    assert "if(f.dataset.inFlight==='true')return" in data_use
-    assert "Activate data-use policy “'+policyId+'” version '+version" in data_use
-    assert "New authorization decisions will use this governed version" in data_use
-    assert "delete f.dataset.inFlight" in data_use
-    assert "Could not reach the server — check your connection and try again." in data_use
-    assert "'HTTP '+response.status+'. Try again.'" in data_use
+    # Switching a rule on is a single-flight row button, confirmed with its
+    # plain consequence first; a stale or same-author 409 is explained.
+    assert "CW.busy(b, function () { return activatePolicy(p); })" in data_use
+    assert "New requests will be decided with it straight away." in data_use
+    assert "expected_revision: policy.revision" in data_use
+    assert "error.status === 409" in data_use
+    assert "Request failed: the server returned an invalid JSON response." in data_use
 
     assert "if (noticeBtn.dataset.inFlight === 'true') return;" in privacy
-    assert "Publish privacy notice version “' + version + '” for this tenant?" in privacy
+    assert "Publish privacy notice version “' + version + '”? It cannot be changed afterwards" in privacy
     assert "noticeBtn.setAttribute('aria-busy', 'true')" in privacy
-    assert "Could not reach the server — check your connection and try again." in privacy
+    assert "errText(e, 'publish the notice')" in privacy
     assert "delete noticeBtn.dataset.inFlight" in privacy
 
 
@@ -121,20 +125,17 @@ def test_consent_lifecycle_mutations_are_targeted_single_flight_actions():
     experiments = _source("consent_experiments.html")
     opt_out = _static("lightwork-consent-global-opt-out.js")
 
-    assert 'if(form.dataset.inFlight==="true")return' in experiments
-    assert 'experiment “"+experimentId+"”?' in experiments
-    assert "Eligible subjects may begin receiving its governed variants" in experiments
-    assert "Future assignments will be forced to the control variant" in experiments
-    assert 'button.setAttribute("aria-busy","true")' in experiments
-    assert "delete form.dataset.inFlight" in experiments
-    assert "Could not reach the server — check your connection and try again." in experiments
-    assert "Purge only expired pseudonymous dedupe tokens for this tenant" in experiments
+    # Each lifecycle action is a row button: single-flight through CW.busy and
+    # confirmed with its plain consequence first.
+    assert "CW.busy(button, async function" in experiments
+    assert "Visitors taking part will begin to see the test versions." in experiments
+    assert "Everyone will see the original from now on." in experiments
+    assert "expected_revision: x.revision" in experiments
+    assert "Delete visitor records that are past their keep-until date?" in experiments
 
-    assert 'button.dataset.inFlight === "true"' in opt_out
-    assert "Activate Global Opt-Out configuration “" in opt_out
-    assert "Revoke Global Opt-Out configuration “" in opt_out
-    assert "Update and rebind Global Opt-Out configuration “" in opt_out
-    assert 'button.setAttribute("aria-busy", "true")' in opt_out
-    assert "delete button.dataset.inFlight" in opt_out
-    assert "Could not reach the server — check your connection and try again." in opt_out
-    assert "Purge expired Global Opt-Out retention records for this tenant?" in opt_out
+    # Opt-out set-ups: single-flight row buttons with plain confirmations.
+    assert "return CW.busy(button, async function" in opt_out
+    assert "Switch on opt-out for " in opt_out
+    assert "Switch off opt-out for " in opt_out
+    assert "expected_revision: item.revision" in opt_out
+    assert "Delete opt-out records that are past their keep-until date?" in opt_out

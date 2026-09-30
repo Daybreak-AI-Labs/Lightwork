@@ -3,136 +3,194 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% from "_integration_readiness.html" import integration_readiness %}
+      {% macro channel_field(c, f) %}
+      <label class="ch-field">
+        <span>{{ f.label }}{% if f.hint %} <span class="muted">· saved ({{ f.hint }})</span>{% endif %}</span>
+        {% if f.secret %}
+        <input class="input" type="password" name="{{ f.key }}" autocomplete="off"
+               placeholder="{% if f.configured %}Leave blank to keep the saved value{% else %}Paste here{% endif %}"
+               aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />
+        {% elif f.type == 'int' %}
+        <input class="input" type="number" name="{{ f.key }}" value="{{ f.value }}" min="1" max="65535"
+               aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />
+        {% elif f.type == 'url' %}
+        <input class="input" type="url" name="{{ f.key }}" value="{{ f.value }}" placeholder="https://"
+               aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />
+        {% else %}
+        <input class="input" type="text" name="{{ f.key }}" value="{{ f.value }}"
+               aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />
+        {% endif %}
+        <span class="muted ch-help" id="ch-{{ c.name }}-{{ f.key }}-help">{{ f.help }}</span>
+      </label>
+      {% endmacro %}
   {% set configured_count = managed | selectattr('configured') | list | length %}
   {% set verified_count = managed | selectattr('readiness.live.status', 'equalto', 'verified') | list | length %}
   {% call hero('Meet people where they work', 'Channels',
                subtitle='Slack, email and more',
-               lede='Connect the places your team already works — Slack,
-                     email, and more — so people can start work and get
-                     results where they are. Connected and managed right on
-                     this page.') %}
+               lede='Connect the chat apps your team already uses, so people can
+                     ask Lightwork for work and get results right there.') %}
     {{ state('Current state',
-             configured_count ~ ' configured; ' ~ verified_count ~ ' live verified',
-             badge='live verified' if verified_count else 'verification unknown',
+             configured_count ~ ' turned on · ' ~ verified_count ~ ' tested and working',
+             badge='Working' if verified_count else 'Not tested yet',
              badge_class='ok' if verified_count else 'idle',
-             copy='Saved credentials and a passing local adapter preflight do
-                   not prove external delivery. Live verification stays unknown
-                   until representative delivery evidence is recorded.') }}
+             copy='Saving your details doesn\'t prove messages get through.
+                   Use Test connection or Send a test message to check.') }}
   {% endcall %}
 
   {% if saved %}
-  <div class="panel" role="status"
-       style="border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4);">
-    <strong>Saved.</strong> {{ saved }}
+  <div class="panel ch-saved{{ ' ch-saved--failed' if saved_failed }}" role="{{ 'alert' if saved_failed else 'status' }}">
+    <strong>{{ 'Not done.' if saved_failed else 'Done.' }}</strong> {{ saved }}
   </div>
   {% endif %}
 
-  <div class="section-head"><h2>How to make it work</h2></div>
+  <div class="section-head"><h2>How to set one up</h2></div>
   <div class="panel">
-    <ol style="margin: 0; padding-left: 1.4rem; display: flex; flex-direction: column; gap: var(--space-2);">
-      <li>
-        <strong>Pick a service below</strong> — Slack, Telegram, Discord,
-        WhatsApp, SMS or email — and tick <strong>Enabled</strong>.
-      </li>
-      <li>
-        <strong>Paste the credentials that service issues</strong> (bot
-        tokens, mail server details, and so on) into its fields. They're
-        stored securely and never shown again — leaving a field blank keeps
-        what's already saved.
-      </li>
-      <li>
-        <strong>Press Save.</strong> The change takes effect the next time
-        the channel service starts. If a channel isn't responding, ask your
-        administrator to check that the channel service is running.
-      </li>
-      <li>
-        <strong>Message the agent from that service.</strong> Requests run
-        through the same governed workforce as goals started here, and
-        replies come back in the same conversation.
-      </li>
+    <ol class="ch-steps">
+      <li><strong>Choose a chat app below</strong> and tick <strong>Turn on</strong>.</li>
+      <li><strong>Paste the details that app gives you.</strong> Each field says where to find it.
+        They're stored securely and never shown again. Leaving a field blank keeps what's saved.</li>
+      <li><strong>Press Save, then Test connection.</strong> Changes take effect the next time Lightwork starts.</li>
+      <li><strong>Message Lightwork from that app.</strong> Requests are handled the same way as tasks started here,
+        and replies come back in the same conversation.</li>
     </ol>
   </div>
 
   {% for c in managed %}
-  <div class="section-head"><h2>{{ c.label }}</h2></div>
+  <div class="section-head"><h2 id="channel-{{ c.name }}">{{ c.label }}</h2></div>
   <div class="panel">
-    <form method="post" action="/channels/save"
-          style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">
+    <form method="post" action="/channels/save" class="ch-form" data-channel="{{ c.name }}">
       <input type="hidden" name="channel" value="{{ c.name }}" />
-      <label style="display: flex; align-items: center; gap: var(--space-2);">
-        <input type="checkbox" name="enabled" {% if c.enabled %}checked{% endif %}
-               style="width: 18px; height: 18px; accent-color: var(--brand);" />
-        <span>Enabled</span>
-        {% if c.via %}<span class="muted" style="font-size: var(--text-sm);">· configured via {{ c.via }}</span>{% endif %}
+      <label class="ch-toggle">
+        <input type="checkbox" name="enabled" {% if c.enabled %}checked{% endif %} aria-describedby="ch-{{ c.name }}-on" />
+        <span>Turn on</span>
       </label>
-      {% for f in c.fields %}
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>{{ f.label }}{% if f.hint %} <span class="muted">· saved {{ f.hint }}</span>{% elif f.configured and not f.secret %}{% endif %}</span>
-        {% if f.secret %}
-        <input class="ctl" type="password" name="{{ f.key }}" autocomplete="off"
-               placeholder="{% if f.configured %}Leave blank to keep current{% else %}Paste value{% endif %}"
-               aria-label="{{ c.label }} {{ f.label }}" />
-        {% elif f.type == 'int' %}
-        <input class="ctl" type="number" name="{{ f.key }}" value="{{ f.value }}"
-               aria-label="{{ c.label }} {{ f.label }}" />
-        {% else %}
-        <input class="ctl" type="text" name="{{ f.key }}" value="{{ f.value }}"
-               aria-label="{{ c.label }} {{ f.label }}" />
-        {% endif %}
+      <p class="muted ch-help" id="ch-{{ c.name }}-on">When on, people can message Lightwork through {{ c.label }}.
+        {% if c.via %}Settings are {{ c.via | source_label }}.{% endif %}
+        {% if c.help_link %}<a href="{{ c.help_link }}" target="_blank" rel="noopener noreferrer">Where do I find these details?</a>{% endif %}</p>
+      {% if c.name == 'email' %}
+      <label class="ch-field">Your email provider
+        <select class="select" data-email-preset>
+          <option value="">Choose to fill in the servers…</option>
+          <option value="gmail">Gmail / Google Workspace</option>
+          <option value="outlook">Outlook / Microsoft 365</option>
+          <option value="other">Other</option>
+        </select>
       </label>
-      {% endfor %}
-      <div style="display: flex; gap: var(--space-3); align-items: center;">
+      {% endif %}
+      {% for f in c.fields if not f.advanced %}{{ channel_field(c, f) }}{% endfor %}
+      {% set advanced = c.fields | selectattr('advanced') | list %}
+      {% if advanced %}
+      <details class="ch-advanced"><summary>Advanced settings</summary>
+        {% for f in advanced %}{{ channel_field(c, f) }}{% endfor %}
+      </details>
+      {% endif %}
+      <div class="ch-actions">
         <button type="submit" class="btn btn--primary">Save {{ c.label }}</button>
       </div>
     </form>
-    <div style="margin-top: var(--space-3);">{{ integration_readiness(c.readiness) }}</div>
-    {% if c.dashboard_set %}
-    <form method="post" action="/channels/clear" style="margin-top: var(--space-3);">
+
+    <div class="ch-status">{{ integration_readiness(c.readiness) }}</div>
+
+    <div class="ch-actions">
+      {% if c.configured %}
+      <form method="post" action="/channels/test">
+        <input type="hidden" name="channel" value="{{ c.name }}" />
+        <button type="submit" class="btn">Test connection</button>
+      </form>
+      {% endif %}
+      {% if c.dashboard_set %}
+      <form method="post" action="/channels/clear"
+            data-channels-confirm="Remove the saved {{ c.label }} settings? Lightwork will stop using {{ c.label }} until you set it up again.">
+        <input type="hidden" name="channel" value="{{ c.name }}" />
+        <button type="submit" class="btn btn--danger">Remove saved settings</button>
+      </form>
+      {% endif %}
+    </div>
+
+    {% if c.configured and c.name in sendable %}
+    <form method="post" action="/channels/send-test" class="ch-send"
+          data-channels-confirm="Send a test message through {{ c.label }}? It goes to the {{ {'email': 'email address', 'sms': 'phone number', 'slack': 'Slack channel'}[c.name] }} you entered.">
       <input type="hidden" name="channel" value="{{ c.name }}" />
-      <button type="submit" class="btn btn--ghost" title="Remove dashboard settings for this channel">Reset {{ c.label }}</button>
+      <label class="ch-field">
+        {% if c.name == 'email' %}Send a test email to
+          <input class="input" type="email" name="to" required placeholder="you@company.com" autocomplete="email" />
+        {% elif c.name == 'sms' %}Send a test text to
+          <input class="input" type="tel" name="to" required placeholder="+15551234567" autocomplete="tel" />
+        {% else %}Send a test message to the Slack channel
+          <input class="input" type="text" name="to" required placeholder="#general" />
+        {% endif %}
+      </label>
+      <button type="submit" class="btn">Send a test message</button>
     </form>
+    {% elif c.configured %}
+    <p class="muted ch-help">To check replies, send a message to your {{ c.label }} bot. Lightwork answers in the same conversation.</p>
     {% endif %}
   </div>
   {% endfor %}
 
-  <div class="section-head"><h2>All configured channels</h2></div>
+  {% if channel_inventory %}
+  <div class="section-head"><h2>Other chat apps set up during installation</h2></div>
   <div class="panel">
-    {% if channel_inventory %}
-      <table>
-        <thead><tr><th scope="col">Name</th><th scope="col">Configuration</th><th scope="col">Readiness</th><th scope="col">Detail</th></tr></thead>
-        <tbody>
-        {% for channel in channel_inventory %}
-          <tr>
-            <td><code>{{ channel.name }}</code></td>
-            <td>
-              {% if channel.configured %}
-                <span class="badge active">configured</span>
-              {% else %}
-                <span class="badge blocked">not configured</span>
-              {% endif %}
-            </td>
-            <td>{{ integration_readiness(channel.readiness) }}</td>
-            <td class="muted" style="font-size: 0.85rem;">
-              {% for k, v in channel.detail.items() if k != 'enabled' %}
-                {{ k }}={% if v is string and v.startswith('${') %}<code>{{ v }}</code>{% else %}{{ v }}{% endif %}{% if not loop.last %}, {% endif %}
-              {% endfor %}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="muted" style="margin: 0;">No channels configured yet. Enable one above.</p>
-    {% endif %}
+    <table>
+      <thead><tr><th scope="col">Chat App</th><th scope="col">Turned On</th><th scope="col">Status</th></tr></thead>
+      <tbody>
+      {% for channel in channel_inventory %}
+        <tr>
+          <td>{{ channel.name | humanize }}</td>
+          <td>{% if channel.configured %}<span class="badge active">Yes</span>{% else %}<span class="badge">No</span>{% endif %}</td>
+          <td>{{ integration_readiness(channel.readiness) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted ch-help">These are changed by whoever installed Lightwork.</p>
   </div>
+  {% endif %}
 
-  <div class="panel">
-    <h3 style="margin-top: 0;">Always listening</h3>
-    <p class="muted" style="margin-bottom: 0;">
-      Channels listen in the background: requests arrive from your chat service
-      and run through the same workforce as goals started here. If a channel
-      isn't responding, ask your administrator to check that the channel
-      service is running.
-    </p>
-  </div>
+  <style>
+    .ch-saved { border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4); }
+    .ch-saved--failed { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+    .ch-steps { margin: 0; padding-left: 1.4rem; display: flex; flex-direction: column; gap: var(--space-2); }
+    .ch-form, .ch-send { display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem; }
+    .ch-send { margin-top: var(--space-3); }
+    .ch-toggle { display: flex; align-items: center; gap: var(--space-2); }
+    .ch-toggle input { width: 18px; height: 18px; accent-color: var(--brand); }
+    .ch-field { display: flex; flex-direction: column; gap: var(--space-1); }
+    .ch-help { font-size: var(--text-sm); margin: 0; }
+    .ch-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; margin-top: var(--space-3); }
+    .ch-status { margin-top: var(--space-3); }
+    .ch-advanced { display: grid; gap: var(--space-3); }
+  </style>
+  <script>
+  (function () {
+    'use strict';
+    document.querySelectorAll('form[data-channels-confirm]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        window.mvConfirm(form.dataset.channelsConfirm, {okText: 'Continue'}).then(function (ok) {
+          if (!ok) return;
+          form.dataset.confirmed = 'true';
+          if (form.requestSubmit) form.requestSubmit(); else form.submit();
+        });
+      });
+    });
+    var presets = {
+      gmail: {imap_host: 'imap.gmail.com', smtp_host: 'smtp.gmail.com', smtp_port: '465'},
+      outlook: {imap_host: 'outlook.office365.com', smtp_host: 'smtp.office365.com', smtp_port: '587'}
+    };
+    document.querySelectorAll('[data-email-preset]').forEach(function (select) {
+      select.addEventListener('change', function () {
+        var values = presets[select.value];
+        if (!values) return;
+        var form = select.closest('form');
+        Object.keys(values).forEach(function (key) {
+          var input = form.querySelector('[name="' + key + '"]');
+          if (input) input.value = values[key];
+        });
+      });
+    });
+  })();
+  </script>
 {% endblock %}

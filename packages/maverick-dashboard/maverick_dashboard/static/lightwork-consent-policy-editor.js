@@ -2,10 +2,18 @@
   "use strict";
 
   var bases = {
-    consent: "Consent", contract: "Contract", legal_obligation: "Legal obligation",
-    vital_interests: "Vital interests", public_task: "Public task",
-    legitimate_interests: "Legitimate interests",
+    consent: "Consent", contract: "Needed for a contract", legal_obligation: "Required by law",
+    vital_interests: "Protects someone\u2019s life", public_task: "Public task",
+    legitimate_interests: "Legitimate business interest",
   };
+
+  // A typed name ("Email marketing") is stored as a short reference
+  // ("email_marketing"); existing references pass through unchanged.
+  function normalize(value) {
+    var text = typeof value === "string" ? value.trim() : "";
+    if (/\s/.test(text)) text = text.toLowerCase().replace(/\s+/g, "_");
+    return text;
+  }
 
   function purposeMap(rows) {
     if (!Array.isArray(rows) || !rows.length || rows.length > 128) {
@@ -13,15 +21,15 @@
     }
     var result = Object.create(null);
     rows.forEach(function (row) {
-      var id = typeof row.id === "string" ? row.id.trim() : "";
+      var id = normalize(row.id);
       if (!/^[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}$/.test(id)) {
-        throw new Error("Each purpose needs an identifier of up to 128 letters, numbers, or supported punctuation.");
+        throw new Error("Give each use a short name made of letters and numbers (up to 128 characters).");
       }
       if (Object.prototype.hasOwnProperty.call(result, id)) {
-        throw new Error("Each purpose must be unique. “" + id + "” appears more than once.");
+        throw new Error("Each use must be unique. “" + id + "” appears more than once.");
       }
       if (!Object.prototype.hasOwnProperty.call(bases, row.basis)) {
-        throw new Error("Choose a lawful basis for “" + id + "”.");
+        throw new Error("Choose a legal reason for “" + id + "”.");
       }
       result[id] = row.basis;
     });
@@ -31,14 +39,15 @@
   function parsePurposes(text) {
     var value;
     try { value = JSON.parse(text); }
-    catch (_error) { throw new Error("Purposes must be valid JSON, or use the labeled fields above."); }
+    catch (_error) { throw new Error("The saved list of uses could not be read (not valid JSON). Use the fields above instead."); }
     if (!value || Array.isArray(value) || typeof value !== "object") {
-      throw new Error("Purposes must map each purpose identifier to its lawful basis.");
+      throw new Error("Each use needs a legal reason.");
     }
     return purposeMap(Object.keys(value).map(function (id) { return { id: id, basis: value[id] }; }));
   }
 
-  function mount(form, doc) {
+  function mount(form, doc, options) {
+    options = options || {};
     var rows = doc.getElementById("cp-purpose-rows");
     var add = doc.getElementById("cp-purpose-add");
     var error = doc.getElementById("cp-purpose-error");
@@ -57,11 +66,13 @@
     }
     function append(id, basis) {
       var row = doc.createElement("div"); row.className = "cp-purpose-row";
-      var idLabel = doc.createElement("label"); idLabel.textContent = "Purpose identifier";
+      var idLabel = doc.createElement("label"); idLabel.textContent = "Use of data";
       var idInput = doc.createElement("input"); idInput.className = "input";
       idInput.value = id; idInput.maxLength = 128; idInput.required = true;
-      idInput.placeholder = "e.g. analytics"; idLabel.appendChild(idInput);
-      var basisLabel = doc.createElement("label"); basisLabel.textContent = "Lawful basis";
+      idInput.placeholder = "For example: analytics";
+      if (options.suggestions && typeof idInput.setAttribute === "function") idInput.setAttribute("list", options.suggestions);
+      idLabel.appendChild(idInput);
+      var basisLabel = doc.createElement("label"); basisLabel.textContent = "Legal reason";
       var basisInput = doc.createElement("select"); basisInput.className = "input";
       Object.keys(bases).forEach(function (key) {
         var option = doc.createElement("option"); option.value = key; option.textContent = bases[key];
@@ -69,7 +80,7 @@
       });
       basisInput.value = basis; basisLabel.appendChild(basisInput);
       var remove = doc.createElement("button"); remove.type = "button"; remove.className = "btn";
-      remove.textContent = "Remove purpose";
+      remove.textContent = "Remove";
       var entry = { id: idInput, basis: basisInput, row: row };
       inputs.push(entry);
       [idInput, basisInput].forEach(function (input) { input.addEventListener("input", syncFields); });
@@ -97,7 +108,8 @@
       append("", "consent").focus(); syncFields();
     });
     raw.addEventListener("input", function () { lastEdit = "json"; });
-    doc.getElementById("cp-purpose-apply").addEventListener("click", function () {
+    var applyButton = doc.getElementById("cp-purpose-apply");
+    if (applyButton) applyButton.addEventListener("click", function () {
       if (applyJson() && inputs.length) inputs[0].id.focus();
     });
     render(parsePurposes(raw.value));
@@ -110,9 +122,13 @@
           return value;
         } catch (failure) {
           error.textContent = failure.message;
-          if (lastEdit === "json") { details.open = true; raw.focus(); }
+          if (lastEdit === "json" && details) { details.open = true; raw.focus(); }
           throw failure;
         }
+      },
+      set: function (value) {
+        render(purposeMap(Object.keys(value || {}).map(function (id) { return { id: id, basis: value[id] }; })));
+        raw.value = JSON.stringify(fieldMap(), null, 2);
       },
     };
   }

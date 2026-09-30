@@ -10,6 +10,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState } from "react";
 
 import type { OfflineBundle, Settings } from "./api";
+import { agoText } from "./format";
 
 const CACHE_KEY_PREFIX = "maverick.offlineBundle.v2.";
 const SCHEMA = "maverick-offline/1";
@@ -69,5 +70,5 @@ export function ageMinutes(entry: CachedBundle, now: number = Date.now()): numbe
 }
 
 export function offlineBanner(entry: CachedBundle): string {
-  return `as of ${ageMinutes(entry)} min ago — offline`;
+  return `You're offline. Showing what was saved ${agoText(ageMinutes(entry))}.`;
 }

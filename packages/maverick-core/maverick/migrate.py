@@ -37,10 +37,22 @@ log = logging.getLogger(__name__)
 # When adding a new config section, add it here or migrate will lint it.
 KNOWN_SECTIONS = frozenset({
     "a2a", "adaptive_compute", "agent", "agent_factory", "agent_trust",
+    # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
+    # on Settings > All settings.
+    "alerts",
+    # [third_party_portal] routing_keyring: the vendor portal link keyring
+    # rotated on the Third-Party Collaboration page (sealed).
+    "third_party_portal",
+    # [consent_publication_signing] keyring: the consent publication signing
+    # key made on the Banner and Preference Center page (sealed).
+    "consent_publication_signing",
     "analytics", "approval", "assessments", "automation_import",
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
     "deployment",
     "benchmark", "billing", "budget", "cache", "calendar", "calibration",
+    # Written by the installer's candidate promotion, governed knowledge and
+    # agent suites steps, and changeable on Settings > All settings.
+    "candidate_promotion", "knowledge_access", "suites",
     "capabilities", "catalogs", "channels", "client", "coding", "compaction",
     "compliance", "computer_use", "connections", "consent_preferences",
     "consequence", "containment", "control_plane",
@@ -54,11 +66,18 @@ KNOWN_SECTIONS = frozenset({
     "kms", "knowledge",
     "langchain", "latency", "license", "limits", "local_first", "local_runtime",
     "logging", "lsp", "mcp_registries", "mcp_servers", "mcp_sidecar", "memory",
+    # [mcp]: the tool server's limits and switches (maverick_mcp.settings),
+    # [replay]: recording run traces (replay/trace.py); both on All settings.
+    "mcp", "replay",
     "model_cost_tiers", "model_proxy", "models", "notifications", "oauth", "observability",
     "paper_review",
     "obsidian", "operations_scientist",
     "perf", "persona", "planning", "plugins", "privacy",
+    # [profile] name: the deployment profile (standard / enterprise), read by
+    # profile.py and enterprise.py.
+    "profile",
     "privacy_automation", "privacy_ops", "provider_failover", "providers", "queue", "quotas",
+    "spending_limits",
     "rate_limits", "reflexion",
     "tech_risk_compliance", "third_party_management",
     "repl", "harness_refine", "session_tree",
@@ -69,6 +88,8 @@ KNOWN_SECTIONS = frozenset({
     "system", "telemetry", "template_registries", "tenancy", "thinking",
     "tools", "tui", "value", "verification", "voice", "webhooks", "workforce",
     "workspace", "world_model", "threat_hunt", "env_hunt",
+    "chat", "connector_limits", "query_limits",
+    "immune", "swarm", "ifc", "codebase",
     "ai_inventory", "evidence_gateway", "evidence_graph",
     "model_risk_assurance", "model_improvement", "policy_packs",
     "agent_topology", "drift_monitoring", "portfolio_risk", "red_team_assurance",

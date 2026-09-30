@@ -46,7 +46,11 @@ def test_quick_query_answered_synchronously():
         return "It's sunny."
 
     ch = _channel(handler)
-    out = asyncio.run(ch.handle_utterance("alice", "what's the weather"))
+    async def run():
+        out = await ch.handle_utterance("alice", "what's the weather")
+        await ch.stop()
+        return out
+    out = asyncio.run(run())
     assert out == "It's sunny."
 
 
@@ -59,12 +63,13 @@ def test_long_task_acks_and_delivers_to_secondary():
     async def deliver(user_id, text):
         delivered.append((user_id, text))
 
-    # Run background tasks inline so the test is deterministic.
+    # The hook must return the actual owned task so lifecycle remains testable.
     spawned = []
 
     def spawn(coro):
-        spawned.append(coro)
-        return coro
+        task = asyncio.create_task(coro)
+        spawned.append(task)
+        return task
 
     ch = _channel(handler, secondary_channel="Telegram", deliver=deliver, spawn=spawn)
 
@@ -72,9 +77,9 @@ def test_long_task_acks_and_delivers_to_secondary():
         ack = await ch.handle_utterance("alice", "write an article about EVs")
         assert "working on it" in ack.lower()
         assert "Telegram" in ack
-        # The background task was scheduled; run it.
-        for coro in spawned:
-            await coro
+        await _wait_until(lambda: bool(delivered))
+        await ch.stop()
+        assert all(task.done() for task in spawned)
 
     asyncio.run(go())
     assert delivered == [("alice", "Here is your 2000-word article.")]
@@ -99,7 +104,7 @@ def test_slow_quick_query_falls_back_to_ack_then_run():
 
     ch = _channel(
         slow_handler, deadline_s=0.01, secondary_channel="Telegram",
-        deliver=deliver, spawn=lambda c: spawned.append(c),
+        deliver=deliver, spawn=lambda coro: spawned.append(asyncio.create_task(coro)) or spawned[-1],
     )
 
     async def go():
@@ -107,9 +112,11 @@ def test_slow_quick_query_falls_back_to_ack_then_run():
         # The quick path timed out -> acked, and a background delivery was scheduled.
         assert "working on it" in out.lower()
         assert len(spawned) == 1
-        assert calls == 1
+        await _wait_until(lambda: calls == 1)
         release.set()
-        await spawned[0]
+        await _wait_until(lambda: bool(delivered))
+        await ch.stop()
+        assert spawned[0].done()
 
     asyncio.run(go())
     assert calls == 1
@@ -160,10 +167,17 @@ def test_default_spawn_retains_strong_reference_to_background_task():
         await started.wait()
         assert len(ch._background_tasks) == 1
         release.set()
-        # Let the tracked task run to completion.
-        await asyncio.gather(*list(ch._background_tasks))
+        await _wait_until(lambda: bool(delivered))
+        await ch.stop()
 
     asyncio.run(go())
     assert delivered == [("alice", "Here is your 2000-word article.")]
     # Done-callback released the reference.
     assert ch._background_tasks == set()
+
+
+async def _wait_until(predicate):
+    async def wait():
+        while not predicate():
+            await asyncio.sleep(0.005)
+    await asyncio.wait_for(wait(), timeout=5)

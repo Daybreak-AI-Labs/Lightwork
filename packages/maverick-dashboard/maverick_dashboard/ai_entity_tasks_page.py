@@ -37,14 +37,11 @@ _HEADERS = {
 }
 
 
-def _tenant_selected() -> None:
+def _tenant_selected() -> bool:
+    """Whether a workspace is selected; every API call still requires one."""
     from maverick.paths import current_tenant_id_strict
 
-    if current_tenant_id_strict() is None:
-        raise HTTPException(
-            status_code=409,
-            detail="select an active tenant before using AI-entity tasks",
-        )
+    return current_tenant_id_strict() is not None
 
 
 def create_ai_entity_tasks_page_router(templates: Jinja2Templates) -> APIRouter:
@@ -59,7 +56,7 @@ def create_ai_entity_tasks_page_router(templates: Jinja2Templates) -> APIRouter:
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
         from .api import module_activation_enabled
-        _tenant_selected()
+        workspace_selected = _tenant_selected() is not False
         if any(
             key not in {"theme", "density", "font", "lang"}
             for key in request.query_params
@@ -74,6 +71,7 @@ def create_ai_entity_tasks_page_router(templates: Jinja2Templates) -> APIRouter:
                 "api_base": API_BASE,
                 "page_path": PAGE_PATH,
                 "csp_style_nonce": style_nonce,
+                "task_workspace_missing": not workspace_selected,
                 "task_can_operate": has_permission(request, "operate"),
                 "task_can_audit": has_global_permission(request, "audit"),
                 "task_can_admin": has_global_permission(request, "admin"),

@@ -75,12 +75,8 @@ def finance_status_cmd(fmt: str, strict: bool) -> None:
 @finance_grp.command("lint-sod")
 def finance_lint_sod_cmd() -> None:
     """Lint the finance roster for segregation-of-duties conflicts (CI gate)."""
-    from ..domain import builtin_dir, load_domains, user_dir
-    from ..finance.sod_linter import lint_roster
-    packs = {n: p for n, p in {**load_domains(builtin_dir()),
-                               **load_domains(user_dir())}.items()
-             if n.startswith("finance_")}
-    conflicts = lint_roster(packs)
+    from ..finance.sod_linter import lint_finance_roster
+    packs, conflicts = lint_finance_roster()
     if not conflicts:
         click.echo(f"OK: {len(packs)} finance packs are segregation-of-duties clean.")
         return
@@ -448,23 +444,16 @@ def forward_cmd(ctx, days: int) -> None:
     so decisions arrive prepared instead of discovered late.
     """
     import time as _time
+
+    from ..forward_ledger import upcoming
     world = open_world(ctx.obj["db"])
     now = _time.time()
-    horizon = now + days * 86400.0
-    rows = []
-    for g in world.list_goals(limit=2000):
-        if g.status not in ("pending", "active"):
-            continue
-        if not g.deadline or g.deadline > horizon:
-            continue
-        qs = world.open_questions(g.id)
-        rows.append((g.deadline, g, len(qs)))
+    rows = upcoming(world, days=days, now=now)
     if not rows:
         click.echo(f"No goal deadlines within {days} day(s). "
                    "(Set deadlines on goals to populate the forward ledger.)")
         return
-    rows.sort(key=lambda r: r[0])
-    for deadline, g, nq in rows:
+    for deadline, g, nq in ((r.deadline, r.goal, r.open_questions) for r in rows):
         delta = (deadline - now) / 86400.0
         when = f"OVERDUE {-delta:.1f}d" if delta < 0 else f"due in {delta:.1f}d"
         title = _strip_terminal_control(g.title)[:70]

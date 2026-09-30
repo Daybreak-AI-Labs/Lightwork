@@ -51,6 +51,10 @@ from . import rbac
 PAGES: tuple[dict, ...] = (
     {"path": "/workflow-readiness", "label": "Workflow readiness", "group": "Observe",
      "icon": "check", "floor": "view", "default": "view"},
+    # Software development: vaulted repositories and swarm-built change
+    # proposals awaiting approval. Read-only; merges run after approval.
+    {"path": "/code", "label": "Code", "group": "Operate", "icon": "tools",
+     "floor": "operate", "default": "operate", "in_nav": True},
     {"path": "/outcome-pilots", "label": "Workflow pilots", "group": "Operate",
      "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
     {"path": "/research", "ready": False, "label": "Research lab", "aliases": "experiments candidates evaluation",
@@ -513,7 +517,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/native",
-        "label": "Native Consent SDK",
+        "label": "Consent in Your Apps",
         "group": "Consent",
         "icon": "key",
         "floor": "view",
@@ -960,6 +964,17 @@ PAGES: tuple[dict, ...] = (
         "default": "audit",
         "in_nav": True,
     },
+    # Read-only immune-layer evidence: composition risk, oversight catch rates,
+    # twin replays and information-flow events. Counts and labels only.
+    {
+        "path": "/immune",
+        "label": "Immune layer",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "audit",
+        "default": "audit",
+        "in_nav": True,
+    },
     # Digest-only lifecycle evidence over the durable promotion authority.
     # It is audit-gated like the source evidence, and has no product mutation.
     {
@@ -1109,6 +1124,14 @@ PAGES: tuple[dict, ...] = (
         "label": "Users",
         "group": "Admin",
         "icon": "users",
+        "floor": "admin",
+        "default": "admin",
+    },
+    {
+        "path": "/spending-limits",
+        "label": "Spending limits",
+        "group": "Admin",
+        "icon": "spend",
         "floor": "admin",
         "default": "admin",
     },

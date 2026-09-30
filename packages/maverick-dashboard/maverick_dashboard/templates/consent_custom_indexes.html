@@ -1,264 +1,92 @@
 {% extends "base.html" %}
-{% block title %}Consent Custom Indexes - Lightwork{% endblock %}
-{% block head_extra %}
-<style nonce="{{ csp_style_nonce }}">
-  .custom-index-shell {
-    --index-glass: color-mix(in srgb, var(--panel, #111827) 76%, transparent);
-    --index-line: color-mix(in srgb, var(--text, #f8fafc) 18%, transparent);
-    --index-glow: color-mix(in srgb, var(--accent, #67e8f9) 24%, transparent);
-    display: grid;
-    gap: 1.2rem;
-  }
-  .custom-index-hero,
-  .custom-index-panel,
-  .custom-index-boundary {
-    background: var(--index-glass);
-    border: 1px solid var(--index-line);
-    border-radius: 1.35rem;
-    box-shadow: 0 1.1rem 3.4rem color-mix(in srgb, #020617 30%, transparent),
-      inset 0 1px 0 color-mix(in srgb, #fff 17%, transparent);
-    -webkit-backdrop-filter: blur(24px) saturate(145%);
-    backdrop-filter: blur(24px) saturate(145%);
-  }
-  .custom-index-hero {
-    display: grid;
-    gap: .8rem;
-    padding: clamp(1.3rem, 3vw, 2.4rem);
-  }
-  .custom-index-hero h1 { margin: 0; max-width: 18ch; }
-  .custom-index-hero p { margin: 0; max-width: 72ch; }
-  .custom-index-boundary,
-  .custom-index-panel { padding: 1.15rem; }
-  .custom-index-boundary { border-inline-start: .32rem solid var(--accent, #67e8f9); }
-  .custom-index-boundary ul { margin-block-end: 0; }
-  .custom-index-status {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
-    gap: 1rem;
-  }
-  .custom-index-status .index-span { grid-column: 1 / -1; }
-  .custom-index-grid {
-    border: 0;
-    display: grid;
-    gap: 1rem;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
-    margin: 0;
-    min-inline-size: 0;
-    padding: 0;
-  }
-  .custom-index-panel { min-inline-size: 0; }
-  .custom-index-panel h2 { margin-block-start: .2rem; }
-  .custom-index-form { display: grid; gap: .8rem; }
-  .custom-index-form fieldset {
-    border: 0;
-    display: grid;
-    gap: .8rem;
-    margin: 0;
-    min-inline-size: 0;
-    padding: 0;
-  }
-  .custom-index-row {
-    display: grid;
-    gap: .8rem;
-    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-  }
-  .custom-index-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
-  .custom-index-output {
-    background: color-mix(in srgb, #020617 46%, transparent);
-    border: 1px solid var(--index-line);
-    border-radius: 1rem;
-    max-block-size: 32rem;
-    min-block-size: 9rem;
-    overflow: auto;
-    padding: 1rem;
-    white-space: pre-wrap;
-  }
-  .custom-index-status-text[data-state="failed"] { color: var(--danger, #fb7185); }
-  .custom-index-status-text[data-state="ready"] { color: var(--success, #4ade80); }
-  .custom-index-shell :focus-visible {
-    outline: .2rem solid var(--accent, #67e8f9);
-    outline-offset: .18rem;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .custom-index-shell *, .custom-index-shell *::before, .custom-index-shell *::after {
-      scroll-behavior: auto !important;
-      transition-duration: .001ms !important;
-    }
-  }
-  @media (forced-colors: active) {
-    .custom-index-hero,
-    .custom-index-panel,
-    .custom-index-boundary,
-    .custom-index-output { border: 1px solid CanvasText; box-shadow: none; }
-  }
-</style>
-{% endblock %}
+{% from "_hero.html" import hero %}
+{% block title %}Find People by Preference · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
-<div class="custom-index-shell" id="custom-index-shell"
-      data-api-base="{{ api_base }}" data-copilot-page="/consent/custom-indexes">
-  <header class="custom-index-hero">
-    <p class="eyebrow">Consent data governance</p>
-    <h1>Custom data-element indexes</h1>
-    <p>
-      Search published consent-profile fields for exact matches without saving the original search values.
-    </p>
-  </header>
+{% set ci_admin = custom_index_can_admin %}
+{% set ci_audit = custom_index_can_audit %}
+<div class="governance-workbench" id="custom-index-shell"
+     data-api-base="{{ api_base }}" data-copilot-page="/consent/custom-indexes"
+     data-can-admin="{{ 'true' if ci_admin else 'false' }}" data-can-audit="{{ 'true' if ci_audit else 'false' }}">
+  {{ hero('Consent data', 'Find People by Preference',
+          lede='Find the people whose saved answer to a preference question matches what you choose, for example everyone who wants monthly emails. What you search for is never saved.') }}
+  {% include "_consent_nav.html" %}
+  {% if module_off %}{% from "_module_gate.html" import module_gate %}{{ module_gate("consent_preferences.profile_data.custom_index", "Find people by preference", detail="Lets administrators find the people whose saved answer to a preference question matches what they choose.") }}{% endif %}
+  <p id="custom-index-runtime-status" class="muted" role="status" aria-live="polite">Checking that searching is available…</p>
+  {% if not ci_admin %}<p class="muted">Only an administrator can search or change which questions are searchable.</p>{% endif %}
 
-  <aside class="custom-index-boundary" aria-labelledby="custom-index-boundary-title">
-    <p class="eyebrow">Trust boundary</p>
-    <h2 id="custom-index-boundary-title">Search limits</h2>
-    <ul>
-      <li>Tenant, operator, key reference, key version, retention, and quotas are resolved by the server.</li>
-      <li>Only exact boolean, opaque value-ID, or unique value-ID-list matches are supported.</li>
-      <li>Source changes make an index stale; search fails closed until an administrator rebuilds it.</li>
-      <li>Profile identifiers returned by search remain governed identifiers, not proof of identity or consent validity outside the pinned source record.</li>
-      <li>Local integrity does not prove live customer-estate completeness or external acceptance.</li>
-    </ul>
-  </aside>
+  <fieldset class="feature-gated-workbench" id="custom-index-operations" disabled>
+    <legend class="sr-only">Find people by preference</legend>
 
-  <section class="custom-index-panel custom-index-status" aria-labelledby="custom-index-status-title">
-    <div>
-      <p class="eyebrow">Availability</p>
-      <h2 id="custom-index-status-title">Service availability</h2>
-      <p id="custom-index-runtime-status" class="custom-index-status-text"
-         role="status" aria-live="polite">Checking server-owned custody and source readiness…</p>
-    </div>
-    <button class="btn" id="custom-index-refresh-status" type="button">Refresh status</button>
-    <details class="index-span">
-      <summary>Readiness evidence</summary>
-      <pre hidden class="custom-index-output" id="custom-index-status-output" tabindex="0"></pre>
-    </details>
-  </section>
+    <section class="panel" aria-labelledby="custom-index-list-title">
+      <div class="section-head">
+        <h2 id="custom-index-list-title">Searchable questions</h2>
+        <button class="btn btn--primary" type="button" id="custom-index-new"{% if not ci_admin %} disabled{% endif %}>Make a question searchable</button>
+      </div>
+      <p class="muted">A question becomes searchable after it is built. When people change their answers it needs rebuilding before you can search again.</p>
+      <div id="custom-index-table"><p class="muted">Loading…</p></div>
+      <button class="btn btn--ghost" type="button" id="custom-index-more" hidden>Show more</button>
 
-  <fieldset class="custom-index-grid" id="custom-index-operations" disabled>
-    <legend class="sr-only">Consent custom-index operations</legend>
-
-    <section class="custom-index-panel" aria-labelledby="custom-index-create-title">
-      <p class="eyebrow">Define</p>
-      <h2 id="custom-index-create-title">Create an index</h2>
-      <p class="help">The data element must exist in a published profile-data catalog. Key version and retention are not browser inputs.</p>
-      <form class="custom-index-form" id="custom-index-create-form" autocomplete="off" novalidate>
-        <fieldset id="custom-index-create-controls"{% if not custom_index_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <label for="custom-index-create-id">Index reference</label>
-          <input class="input" id="custom-index-create-id" name="index_id" maxlength="128" required>
-          <label for="custom-index-element-name">Published element name</label>
-          <input class="input" id="custom-index-element-name" name="element_name" maxlength="128" required>
-          <label for="custom-index-create-operation">Request reference (reuse when retrying)</label>
-          <input class="input" id="custom-index-create-operation" name="idempotency_key" minlength="8" maxlength="192" required>
-          <button class="btn btn--primary" type="submit">Create pending index</button>
-        </fieldset>
-      </form>
-      {% if not custom_index_can_admin %}<p class="help">Administrator permission is required to define an index.</p>{% endif %}
-    </section>
-
-    <section class="custom-index-panel" aria-labelledby="custom-index-inspect-title">
-      <p class="eyebrow">Inspect</p>
-      <h2 id="custom-index-inspect-title">Load governed indexes</h2>
-      <form class="custom-index-form" id="custom-index-load-form" autocomplete="off" novalidate>
-        <fieldset id="custom-index-load-controls"{% if not custom_index_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <label for="custom-index-selected-id">Index reference</label>
-          <input class="input" id="custom-index-selected-id" name="index_id" maxlength="128" required>
-          <div class="custom-index-row">
-            <div>
-              <label for="custom-index-list-limit">Page size</label>
-              <input class="input" id="custom-index-list-limit" name="limit" type="number" min="1" max="500" step="1" value="100" required>
-            </div>
-            <div>
-              <label for="custom-index-list-cursor">After index</label>
-              <input class="input" id="custom-index-list-cursor" name="cursor" maxlength="128">
-            </div>
-          </div>
-          <div class="custom-index-actions">
-            <button class="btn" id="custom-index-list" type="button">List indexes</button>
-            <button class="btn" type="submit">Load selected</button>
+      <form class="cw-editor" id="custom-index-create-form" autocomplete="off" novalidate hidden>
+        <fieldset class="cw-form" id="custom-index-create-controls"{% if not ci_admin %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Make a question searchable</legend>
+          <h3 class="cw-wide">Make a question searchable</h3>
+          <label class="cw-wide" for="custom-index-element-name">Question</label>
+          <select class="select cw-wide" id="custom-index-element-name" name="element_name" required></select>
+          <input type="hidden" id="custom-index-create-id" name="index_id">
+          <input type="hidden" id="custom-index-create-operation" name="idempotency_key" data-auto-reference>
+          <div class="cw-actions">
+            <button class="btn btn--primary" type="submit">Make searchable</button>
+            <button class="btn btn--ghost" type="button" id="custom-index-create-cancel">Cancel</button>
           </div>
         </fieldset>
       </form>
     </section>
 
-    <section class="custom-index-panel" aria-labelledby="custom-index-build-title">
-      <p class="eyebrow">Lifecycle</p>
-      <h2 id="custom-index-build-title">Build or revoke</h2>
-      <p class="help">Both actions require the exact current revision. Revocation removes all searchable projection entries.</p>
-      <form class="custom-index-form" id="custom-index-build-form" autocomplete="off" novalidate>
-        <fieldset id="custom-index-build-controls"{% if not custom_index_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <label for="custom-index-build-revision">Current version</label>
-          <input class="input" id="custom-index-build-revision" name="expected_revision" type="number" min="1" max="1000000" step="1" required>
-          <label for="custom-index-build-operation">Build idempotency key</label>
-          <input class="input" id="custom-index-build-operation" name="idempotency_key" minlength="8" maxlength="192" required>
-          <button class="btn btn--primary" type="submit">Build fresh projection</button>
-        </fieldset>
-      </form>
-      <form class="custom-index-form" id="custom-index-revoke-form" autocomplete="off" novalidate>
-        <fieldset id="custom-index-revoke-controls"{% if not custom_index_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <label for="custom-index-revoke-revision">Current version</label>
-          <input class="input" id="custom-index-revoke-revision" name="expected_revision" type="number" min="1" max="1000000" step="1" required>
-          <label for="custom-index-revoke-operation">Revocation idempotency key</label>
-          <input class="input" id="custom-index-revoke-operation" name="idempotency_key" minlength="8" maxlength="192" required>
-          <label class="confirmation" for="custom-index-revoke-confirmation">
-            <input id="custom-index-revoke-confirmation" type="checkbox" required>
-            <span>I understand that revocation deletes the searchable projection entries.</span>
-          </label>
-          <button class="btn btn--danger" type="submit">Revoke index</button>
-        </fieldset>
-      </form>
-    </section>
-
-    <section class="custom-index-panel" aria-labelledby="custom-index-search-title">
-      <p class="eyebrow">Exact search</p>
-      <h2 id="custom-index-search-title">Search a ready index</h2>
-      <p class="help">Search values are protected during processing and are not saved.</p>
-      <form class="custom-index-form" id="custom-index-search-form" autocomplete="off" novalidate>
-        <fieldset id="custom-index-search-controls"{% if not custom_index_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <label for="custom-index-value-type">Value type</label>
-          <select class="select" id="custom-index-value-type" name="value_type">
-            <option value="opaque">Opaque value ID</option>
-            <option value="boolean">Boolean</option>
-            <option value="list">Comma-separated opaque value IDs</option>
-          </select>
-          <label for="custom-index-search-value">Exact value</label>
-          <input class="input" id="custom-index-search-value" name="value" maxlength="8256" required>
-          <div class="custom-index-row">
-            <div>
-              <label for="custom-index-search-limit">Page size</label>
-              <input class="input" id="custom-index-search-limit" name="limit" type="number" min="1" max="500" step="1" value="100" required>
-            </div>
-            <div>
-              <label for="custom-index-search-cursor">After profile</label>
-              <input class="input" id="custom-index-search-cursor" name="cursor" maxlength="128">
-            </div>
+    <section class="panel cw-editor" id="custom-index-search-panel" hidden aria-labelledby="custom-index-search-title">
+      <h2 id="custom-index-search-title">Search</h2>
+      <form id="custom-index-search-form" autocomplete="off" novalidate>
+        <fieldset class="cw-form" id="custom-index-search-controls"{% if not ci_admin %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Search answers</legend>
+          <input type="hidden" id="custom-index-selected-id" name="index_id">
+          <input type="hidden" id="custom-index-value-type" name="value_type">
+          <input type="hidden" id="custom-index-search-cursor" name="cursor">
+          <div class="cw-wide" id="custom-index-search-value" data-name="value"></div>
+          <div class="cw-actions">
+            <button class="btn btn--primary" type="submit">Find people</button>
+            <button class="btn btn--ghost" type="button" id="custom-index-search-close">Close</button>
           </div>
-          <button class="btn btn--primary" type="submit">Run exact search</button>
         </fieldset>
       </form>
+      <div id="custom-index-results" role="status" aria-live="polite"></div>
+      <button class="btn btn--ghost" type="button" id="custom-index-results-more" hidden>Show more people</button>
     </section>
 
-    <section class="custom-index-panel" aria-labelledby="custom-index-audit-title">
-      <p class="eyebrow">Audit</p>
-      <h2 id="custom-index-audit-title">History and integrity</h2>
-      <fieldset id="custom-index-audit-controls"{% if not custom_index_can_audit %} disabled aria-disabled="true"{% endif %}>
-        <legend class="sr-only">Custom index audit operations</legend>
-        <div class="custom-index-actions">
-          <button class="btn" id="custom-index-history" type="button">Load audit history</button>
-          <button class="btn" id="custom-index-integrity" type="button">Verify integrity</button>
-        </div>
+    <section class="panel" aria-labelledby="custom-index-audit-title">
+      <h2 id="custom-index-audit-title">History</h2>
+      <fieldset id="custom-index-audit-controls" class="cw-actions"{% if not ci_audit %} disabled aria-disabled="true"{% endif %}>
+        <legend class="sr-only">History checks</legend>
+        <button class="btn" id="custom-index-history" type="button">Show history</button>
+        <button class="btn" id="custom-index-integrity" type="button">Check records are intact</button>
       </fieldset>
-      {% if not custom_index_can_audit %}<p class="help">Auditor permission is required for history and integrity checks.</p>{% endif %}
-    </section>
-
-    <section class="custom-index-panel" aria-labelledby="custom-index-output-title">
-      <p class="eyebrow">Governed result</p>
-      <h2 id="custom-index-output-title">Operation output</h2>
-      <p id="custom-index-operation-status" class="custom-index-status-text"
-         role="status" aria-live="polite">No operation has run.</p>
-      <pre class="custom-index-output" id="custom-index-operation-output" tabindex="0"></pre>
+      {% if not ci_audit %}<p class="muted">You need audit access to see the history.</p>{% endif %}
+      <p id="custom-index-operation-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="custom-index-history-table"></div>
+      <details class="governance-details">
+        <summary>About this page’s safeguards</summary>
+        <ul>
+          <li>Searches match answers exactly; nothing is guessed about anyone.</li>
+          <li>Search values are protected while they are processed and are never saved.</li>
+          <li>If answers changed since the last build, searching stops until the question is rebuilt, so results are never out of date.</li>
+          <li>Results list the people who gave an answer; they are not proof of identity or of consent for anything else.</li>
+        </ul>
+      </details>
     </section>
   </fieldset>
-
-  <noscript><p class="custom-index-boundary">Enable JavaScript to use these controls.</p></noscript>
+  <noscript><p class="muted">Turn on JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}
+<script src="/static/lightwork-consent-workbench.js" defer></script>
 <script src="/static/lightwork-consent-custom-index.js" defer></script>
 {% endblock %}

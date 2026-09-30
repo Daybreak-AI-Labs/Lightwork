@@ -8,7 +8,7 @@ test('Goals keeps search failures distinct and its primary task link opens the n
   await page.route('**/api/v1/goals/search?*',r=>r.fulfill({status:503,contentType:'text/html',body:'Synthetic unavailable service'}));
   await page.locator('#run-search-q').fill('Browser search task');await expect(page.locator('#run-search-status')).toContainText('could not be completed');
   await expect(page.locator('#run-list')).toContainText('Browser search task');await expect(page.locator('#run-search-retry')).toBeVisible();await fits(page);
-  await page.unroute('**/api/v1/goals/search?*');await page.locator('#run-search-retry').click();await expect(page.locator('#run-search-status')).toContainText('matching runs');
+  await page.unroute('**/api/v1/goals/search?*');await page.locator('#run-search-retry').click();await expect(page.locator('#run-search-status')).toContainText('1 matching task.');
   const link=page.locator('.g-row__title a',{hasText:'Browser search task'});await link.focus();await page.keyboard.press('Enter');await expect(page).toHaveURL(/\/chat\/goal\/\d+$/);
 });
 
@@ -31,7 +31,7 @@ test('guided business intake saves typed answers, resumes after reload, preserve
   const field=name=>page.locator('[data-field="'+name+'"]');
   await field('use_case_name').locator('input').fill('Browser guided support intake');await page.locator('#abi-save').click();await expect(page.locator('#abi-status')).toContainText('Draft answers saved');
   await expect(page.locator('#abi-submit')).toBeDisabled();await page.reload();await expect(page.locator('#abi-status')).toContainText('Start with what you know');
-  await page.locator('#abi-drafts').selectOption({label:'Browser guided support intake · draft'});await page.locator('#abi-open').click();await expect(field('use_case_name').locator('input')).toHaveValue('Browser guided support intake');
+  await page.locator('#abi-drafts').selectOption({label:'Browser guided support intake · Draft'});await page.locator('#abi-open').click();await expect(field('use_case_name').locator('input')).toHaveValue('Browser guided support intake');
   await field('accountable_owner').locator('input').fill('Synthetic accountable owner');await field('business_unit').locator('input').fill('Support');await field('purpose').locator('textarea').fill('Help staff review public support documents.');
   await field('data_context.categories').locator('input[value="public"]').check();await field('data_context.personal_data').locator('select').selectOption('false');await field('data_context.sensitive_data').locator('select').selectOption('false');
   await field('deployment_context.stage').locator('select').selectOption('pilot');await field('deployment_context.audience').locator('select').selectOption('internal');await field('deployment_context.decision_role').locator('select').selectOption('assistive');
@@ -41,7 +41,8 @@ test('guided business intake saves typed answers, resumes after reload, preserve
   await page.locator('#abi-save').click();await expect(page.locator('#abi-status')).toContainText('answers are kept');await expect(field('purpose').locator('textarea')).toHaveValue('Help staff review public support documents.');await expect(page.locator('#abi-submit')).toBeDisabled();
   await page.unroute('**/ai-business-intake/drafts/ABI-*');const saved=page.waitForRequest(r=>r.method()==='PATCH'&&r.url().includes('/ai-business-intake/drafts/'));await page.locator('#abi-save').click();expect((await saved).postData()).toBe(firstBody);await expect(page.locator('#abi-submit')).toBeEnabled();
   await fits(page);const bounds=await page.locator('#ai-business-intake-panel').evaluate(node=>({right:node.getBoundingClientRect().right,viewport:document.documentElement.clientWidth,scroll:node.scrollWidth,client:node.clientWidth}));expect(bounds.right).toBeLessThanOrEqual(bounds.viewport+1);expect(bounds.scroll).toBeLessThanOrEqual(bounds.client+1);await page.locator('#abi-progress').scrollIntoViewIfNeeded();const narrow=info.outputPath('guided-intake-320.png');await page.screenshot({path:narrow});await info.attach('guided-intake-320',{path:narrow,contentType:'image/png'});
-  await page.locator('#abi-submit').click();await expect(page.locator('#abi-status')).toContainText('Intake routed for independent review');await expect(page.locator('#abi-current')).toContainText('Awaiting independent review');await expect(page.locator('#abi-save')).toBeDisabled();
+  await page.locator('#abi-submit').click();await page.getByRole('dialog',{name:/Submit these saved answers for independent human review/}).getByRole('button',{name:'Submit for review',exact:true}).click();
+  await expect(page.locator('#abi-status')).toContainText('Intake routed for independent review');await expect(page.locator('#abi-current')).toContainText('Awaiting independent review');await expect(page.locator('#abi-save')).toBeDisabled();
   await page.setViewportSize({width:1280,height:1000});await page.locator('#abi-current').scrollIntoViewIfNeeded();await fits(page);const wide=info.outputPath('guided-intake-1280.png');await page.screenshot({path:wide});await info.attach('guided-intake-1280',{path:wide,contentType:'image/png'});
 });
 

@@ -7,6 +7,13 @@
   .cs-mark svg { width: 44px; height: 44px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
   .cs-greet { margin: 0; font-family: var(--font-serif); font-weight: 500; font-size: var(--text-2xl); letter-spacing: -0.01em; color: var(--text); }
   .cs-empty-state .panel { max-width: 32rem; text-align: start; }
+  .cs-viewpoints { width: 100%; box-sizing: border-box; }
+  .cs-viewpoints summary { cursor: pointer; font-weight: 600; }
+  .cs-viewpoints__form { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+  .cs-viewpoints__form .textarea, .cs-viewpoints__form .select { width: 100%; box-sizing: border-box; max-width: 100%; }
+  .cs-viewpoints p, .cs-viewpoints li { overflow-wrap: anywhere; }
+  .cs-viewpoints__sides { display: grid; gap: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
+  .cs-viewpoints__side { border-inline-start: 3px solid var(--border); padding-inline-start: var(--space-3); margin-block: var(--space-3); }
 </style>
 {% endblock %}
 
@@ -20,16 +27,45 @@
   <section class="panel" id="model-route-setup" role="status">
     <h2 style="margin-top:0">Finish connecting AI</h2>
     <p class="muted">This workspace is not ready to start AI work yet. Finish
-      the connection setup and readiness checks before starting a goal.</p>
+      the connection setup and readiness checks before starting a task.</p>
     <a class="btn btn--primary" href="/start">Continue setup</a>
   </section>
   {% endif %}
   <p id="template-draft-notice" class="muted" role="status" hidden></p>
+  {% if model_route_ready %}
+  <details class="panel cs-viewpoints" id="viewpoints">
+    <summary>Weighing up a decision? Get two viewpoints first</summary>
+    <form id="vp-form" class="cs-viewpoints__form" novalidate>
+      <label for="vp-question">Question or decision</label>
+      <textarea id="vp-question" name="question" class="textarea" rows="3" minlength="3" maxlength="2000" required
+                placeholder="For example: Should we move our weekly team meeting to Mondays?"></textarea>
+      <label for="vp-rounds">How thorough</label>
+      <select id="vp-rounds" name="rounds" class="select">
+        <option value="1">Quick: one argument from each side</option>
+        <option value="2" selected>Standard: two arguments from each side</option>
+        <option value="3">Thorough: three arguments from each side</option>
+      </select>
+      <fieldset class="cs-viewpoints__sides">
+        <legend>What each side argues (optional)</legend>
+        <label for="vp-for">The side for argues that…</label>
+        <input id="vp-for" class="input" type="text" maxlength="300" placeholder="Leave blank for: the answer is yes, the idea is sound">
+        <label for="vp-against">The side against argues that…</label>
+        <input id="vp-against" class="input" type="text" maxlength="300" placeholder="Leave blank for: the answer is no, the idea is flawed">
+      </fieldset>
+      <p class="muted">One side argues for, the other argues against, and a neutral judge weighs them up. This uses AI, counts
+        toward your spending limits and costs at most $1.00 each time. Nothing else is started.</p>
+      <button type="submit" class="btn btn--primary" id="vp-run">Get two viewpoints</button>
+    </form>
+    <p id="vp-status" role="status" aria-live="polite" tabindex="-1"></p>
+    <div id="vp-result" hidden></div>
+  </details>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block dock %}
 <form method="post" action="/chat/send" class="composer cs-anim" enctype="multipart/form-data">
+  <input type="hidden" name="submission_key" value="{{ submission_key }}" />
   <fieldset class="composer__controls"{% if not model_route_ready %} disabled{% endif %}>
   <legend class="sr-only">Start governed AI work</legend>
   <input
@@ -38,7 +74,7 @@
     value="{{ prefill_title or '' }}"
     class="composer__field"
     placeholder="Message Lightwork…"
-    aria-label="Describe a goal for Lightwork to run"
+    aria-label="Describe a task for Lightwork to do"
     required
     autofocus
   />
@@ -51,24 +87,35 @@
       aria-label="Extra details for the agent (optional)"
       placeholder="Context, constraints, links, or acceptance criteria."
     >{{ prefill_description or '' }}</textarea>
+    {% if director_profiles %}
+    <label class="composer__director" for="director-profile">How much it may do on its own
+      <select id="director-profile" name="director_profile" class="select" aria-describedby="director-profile-help">
+        <option value="">As usual (your settings decide)</option>
+        {% for p in director_profiles %}
+        <option value="{{ p.value }}">{{ p.label }}: {{ p.summary }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <span id="director-profile-help" class="muted">Director mode plans first and checks in with you as the level says. It never goes above your spending limit or your approval rules.</span>
+    {% endif %}
   </details>
-  <input type="file" name="files" id="attach-input" multiple aria-label="Attach files to this goal" tabindex="-1"
+  <input type="file" name="files" id="attach-input" multiple aria-label="Attach files to this task" tabindex="-1"
          style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
   <div class="composer__bar">
     <button type="button" id="attach-btn" class="composer__icon" aria-label="Attach files">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
     </button>
-    <button type="button" id="mic-btn" class="composer__icon" aria-label="Dictate a goal by voice" aria-pressed="false" hidden>
+    <button type="button" id="mic-btn" class="composer__icon" aria-label="Dictate a task by voice" aria-pressed="false" hidden>
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="6" y="1.5" width="4" height="8" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
     </button>
     <span class="composer__hint" id="composer-hint"></span>
     <label for="authoring-kind" class="sr-only">What should Lightwork create?</label>
     <select id="authoring-kind" name="authoring_kind" class="composer__mode" aria-label="What should Lightwork create?">
-      <option value="goal">Run this goal</option>
+      <option value="goal">Run this task</option>
       <option value="flow">Draft a workflow</option>
       <option value="agent">Draft an agent</option>
     </select>
-    <button type="submit" id="send-btn" class="composer__send" aria-label="Start goal">
+    <button type="submit" id="send-btn" class="composer__send" aria-label="Start task">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
         <path d="M9 14.5V4M9 4l-4.5 4.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
@@ -82,6 +129,7 @@
 {% endblock %}
 
 {% block scripts_extra %}
+{% if model_route_ready %}<script src="/static/lightwork-viewpoints.js" defer></script>{% endif %}
 <script>
   // A prepared template becomes an ordinary draft for review, never a run.
   (async function receiveTemplateDraft() {
@@ -100,7 +148,7 @@
     if (!title || !description || title.value.trim() || description.value.trim()) return;
     var notice = document.getElementById('template-draft-notice');
     if (Array.from(draft.title).length > 200 || Array.from(draft.description).length > 16000) {
-      notice.textContent = 'This template is too long to start as a goal. Return to Templates and shorten the title to 200 characters and details to 16,000 characters.';
+      notice.textContent = 'This template is too long to start as a task. Return to Templates and shorten the title to 200 characters and details to 16,000 characters.';
       notice.hidden = false; return;
     }
     var touched = false;
@@ -113,10 +161,19 @@
       if (touched || title.value.trim() || description.value.trim()) return;
       title.value = draft.title; description.value = draft.description;
       var details = description.closest('details'); if (details) details.open = true;
-      notice.textContent = 'Template ready. Review the goal and details, then choose Start goal when you are ready.'; notice.hidden = false;
+      notice.textContent = 'Template ready. Review the task and details, then choose Start task when you are ready.'; notice.hidden = false;
     } catch (e) {
       notice.textContent = 'The prepared template could not be verified in this workspace. Return to Templates and prepare it again.'; notice.hidden = false;
     } finally { title.removeEventListener('input', markTouched); description.removeEventListener('input', markTouched); }
+  })();
+
+  // The send button names what it will do for the chosen mode.
+  (function () {
+    var mode = document.getElementById('authoring-kind'), send = document.getElementById('send-btn');
+    if (!mode || !send) return;
+    var LABELS = { goal: 'Start task', flow: 'Draft a workflow', agent: 'Draft an agent' };
+    function sync() { send.setAttribute('aria-label', LABELS[mode.value] || 'Send'); }
+    mode.addEventListener('change', sync); sync();
   })();
 
   // Attach button opens the hidden file input; chosen filenames show in the
@@ -212,7 +269,7 @@
       hint.textContent = original;
     }
     function browserFallback() {
-      if (!SpeechRec) { hint.textContent = 'Voice input isn\'t set up on this server yet — ask your administrator to enable it.'; return; }
+      if (!SpeechRec) { hint.textContent = 'Voice input isn\'t set up yet. An administrator can turn it on in Settings under Voice.'; return; }
       var rec = new SpeechRec();
       rec.lang = document.documentElement.lang || 'en';
       rec.interimResults = false;
@@ -230,7 +287,7 @@
         onFallback: browserFallback,
         onResult: fillGoal,
       })
-        .catch(function (err) { hint.textContent = String(err.message || err); })
+        .catch(function () { hint.textContent = 'We couldn\u2019t turn your recording into text. Try again, or type your message.'; })
         .finally(function () { busy = false; });
     }
     btn.addEventListener('click', function () {

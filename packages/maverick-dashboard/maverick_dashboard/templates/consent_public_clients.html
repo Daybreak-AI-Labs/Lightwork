@@ -1,49 +1,232 @@
 {% extends "base.html" %}
-{% block title %}Public Consent Clients · Lightwork{% endblock %}
-{% block content %}
-<style>
-  .pcc-shell{max-width:1350px;margin:0 auto;padding:1.25rem}.pcc-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.pcc-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.pcc-hero h1{margin:.1rem 0}.pcc-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem}.pcc-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:1rem}.pcc-card h2{font-size:1rem;margin:.1rem 0 .75rem}.pcc-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.pcc-form label{display:flex;flex-direction:column;gap:.25rem;color:var(--muted);font-size:.8rem}.pcc-wide,.pcc-actions{grid-column:1/-1}.pcc-actions{display:flex;gap:.5rem;flex-wrap:wrap}.pcc-output{white-space:pre-wrap;word-break:break-word;max-height:34rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem}.pcc-warning{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}@media(max-width:900px){.pcc-grid,.pcc-form{grid-template-columns:1fr}.pcc-wide,.pcc-actions{grid-column:auto}}
-</style>
+{% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% if not consent_public_clients_enabled %}<div class="pcc-shell">{{ module_gate('consent_preferences.public_api', 'Consent public clients', detail='Lets your first-party sites and apps mint public consent clients against the active publication -- review your public edge exposure first.') }}</div>{% endif %}
-<fieldset class="pcc-shell feature-gated-workbench" data-feature-enabled="{{ 'true' if consent_public_clients_enabled else 'false' }}"{% if not consent_public_clients_enabled %} disabled aria-disabled="true"{% endif %}>
-  <legend class="sr-only">Public consent clients workbench</legend>
-  <header class="pcc-hero"><div><div class="pcc-kicker">First-party consent integration</div><h1>Public Consent Clients</h1><p class="muted">Mint exact-origin browser or service clients against the active publication and receipt policy. Raw client credentials are returned once and never stored.</p></div><a class="btn" href="/consent">Back to Consent</a></header>
-  <div class="pcc-warning"><strong>Credential handling:</strong> copy a newly minted client credential immediately into the approved first-party integration. The list view cannot recover it. A browser credential is origin-bound but remains public site configuration, not proof that a caller is a browser.</div>
-  <div id="pcc-status" class="muted" role="status" aria-live="polite"></div>
-  <div class="pcc-grid">
-    <div>
-      <section class="pcc-card"><h2>Mint browser client</h2><form id="pcc-create" class="pcc-form">
-        <label>Property ID<input class="input" name="property_id" value="web-main" required></label><label>Exact browser origin<input class="input" name="browser_origin" placeholder="https://www.example.com" required></label>
-        <label>Jurisdiction<input class="input" name="jurisdiction" value="global" required></label><label>Country code<input class="input" name="country_code" value="US" minlength="2" maxlength="2" required></label>
-        <label>Region code<input class="input" name="region_code"></label><label>Default locale<input class="input" name="default_locale" value="en-US" required></label>
-        <label>Rule group ID<input class="input" name="rule_group_id" value="production" required></label><label>Rule group version<input class="input" name="rule_group_version" type="number" min="1" value="1" required></label>
-        <label>Receipt policy ID<input class="input" name="policy_id" value="public-consent" required></label><label>Receipt policy version<input class="input" name="policy_version" type="number" min="1" value="1" required></label>
-        <div class="pcc-actions"><button class="btn btn--primary" type="submit">Mint once</button><button class="btn" id="pcc-list" type="button">List clients</button><button class="btn" id="pcc-list-profiles" type="button">List safe profile bindings</button></div>
-      </form></section>
-      <section class="pcc-card"><h2>Revoke client or profile capability</h2><form id="pcc-revoke-client" class="pcc-form">
-        <label>Client ID<input class="input" name="credential_id" required></label><label>Current version<input class="input" name="expected_revision" type="number" min="1" value="1" required></label><div class="pcc-actions"><button class="btn" type="submit">Revoke client</button></div>
-      </form><hr><form id="pcc-revoke-profile" class="pcc-form">
-        <label>Property ID<input class="input" name="property_id" value="web-main" required></label><label>Profile reference<input class="input" name="profile_id" required></label><label class="pcc-wide">Review evidence SHA-256<input class="input" name="evidence_sha256" pattern="[0-9a-f]{64}" required></label><div class="pcc-actions"><button class="btn" type="submit">Revoke profile capability</button></div>
-      </form></section>
-    </div>
-    <div>
-      <section class="pcc-card"><h2>SDK integration</h2><p class="muted">Load the inert SDK from <code>/api/v1/public/consent/sdk.js</code>, then construct <code>LightworkConsent</code> with this server’s public endpoint and the one-time client credential. The SDK renders structured text with DOM APIs, stores only a pseudonymous profile capability in first-party storage, and supports GPC/DNT.</p><pre class="pcc-output">&lt;script src="https://YOUR-LIGHTWORK/api/v1/public/consent/sdk.js"&gt;&lt;/script&gt;
-&lt;script&gt;
-const consent = new LightworkConsent({
-  endpoint: "https://YOUR-LIGHTWORK/api/v1/public/consent",
-  clientCredential: "PASTE-ONCE"
-});
-consent.renderBanner(document.querySelector("#consent-root"));
-&lt;/script&gt;</pre></section>
-      <section class="pcc-card"><h2>Authority result</h2><pre id="pcc-output" class="pcc-output">No operation run.</pre></section>
-    </div>
-  </div>
-</fieldset>
+{% block title %}Website and App Keys · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
+{% block content %}
+{% set pc_on = consent_public_clients_enabled %}
+{% set pc_admin = consent_can_admin if consent_can_admin is defined else true %}
+{% set pc_audit = consent_can_audit if consent_can_audit is defined else true %}
+<div class="governance-workbench">
+  {{ hero('Consent integration', 'Website and App Keys',
+          lede='Create a key that lets your website or app show your Lightwork consent banner and save people’s choices.') }}
+  {% include "_consent_nav.html" %}
+  {% if not pc_on %}
+  {{ module_gate('consent_preferences.public_api', 'Consent public clients',
+                 detail='Lets your own websites and apps show your published consent banner. Review which sites should get a key first.') }}
+  {% endif %}
+  <p id="pcc-status" class="muted" role="status" aria-live="polite"></p>
+  <fieldset class="feature-gated-workbench" id="pcc-root" data-can-admin="{{ 'true' if pc_admin else 'false' }}" data-can-audit="{{ 'true' if pc_audit else 'false' }}" data-feature-enabled="{{ 'true' if pc_on else 'false' }}"{% if not pc_on %} disabled aria-disabled="true"{% endif %}>
+    <legend class="sr-only">Website and app keys</legend>
+
+    <section class="panel" aria-labelledby="pcc-keys-heading">
+      <div class="section-head">
+        <h2 id="pcc-keys-heading">Keys</h2>
+        <button class="btn btn--primary" type="button" id="pcc-new"{% if not pc_admin %} disabled{% endif %}>Create a key</button>
+      </div>
+      <p class="muted">A key is shown only once, when you create it. Lightwork keeps no copy, so store it in your website or app right away.</p>
+      <div id="pcc-table"><p class="muted">Loading keys…</p></div>
+
+      <form id="pcc-create" class="cw-editor" hidden novalidate>
+        <fieldset class="cw-form">
+          <legend class="sr-only">Create a key</legend>
+          <h3 class="cw-wide">Create a key</h3>
+          <label>Website or app<select class="select" name="property_id" required></select></label>
+          <fieldset>
+            <legend>Used by</legend>
+            <div class="cw-checks">
+              <label><input type="radio" name="client_kind" value="browser" checked> A website (in the visitor’s browser)</label>
+              <label><input type="radio" name="client_kind" value="service"> An app or server</label>
+            </div>
+          </fieldset>
+          <label data-target="web">Address<select class="select" name="origin"></select></label>
+          <label data-target="mobile" hidden>App<select class="select" name="bundle"></select></label>
+          <label>Region<select class="select" name="jurisdiction"></select></label>
+          <label>Country<select class="select" name="country_code"></select></label>
+          <label>Language<select class="select" name="default_locale"></select></label>
+          <label>Published display rules<select class="select" name="rule_group" required></select></label>
+          <label class="cw-wide">Consent policy<select class="select" name="policy" required></select>
+            <span class="muted">Choose the policy that matches the published banner: the same uses of data and the same privacy notice.</span>
+          </label>
+          <div class="cw-actions">
+            <button class="btn btn--primary" type="submit">Create key</button>
+            <button class="btn btn--ghost" type="button" data-pcc-close="pcc-create">Cancel</button>
+          </div>
+        </fieldset>
+      </form>
+
+      <div id="pcc-secret" class="cw-secret cw-editor" hidden role="status" aria-live="polite">
+        <strong>Your new key (shown once)</strong>
+        <code id="pcc-secret-value"></code>
+        <div class="cw-actions"><button class="btn btn--primary" type="button" id="pcc-copy-key">Copy key</button><button class="btn" type="button" id="pcc-copy-snippet">Copy website code</button></div>
+        <p class="muted">Copy it now. Once you leave or reload this page it cannot be shown again; you would need to create a new key.</p>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="pcc-sdk-heading">
+      <h2 id="pcc-sdk-heading">Add the banner to your website</h2>
+      <p class="muted">Paste this code into your website’s pages. Put your key where it says YOUR-KEY. The banner respects browsers that ask not to be tracked (Global Privacy Control and Do Not Track).</p>
+      <pre class="governance-output cw-snippet" id="pcc-snippet"></pre>
+      <button class="btn" type="button" id="pcc-copy-example">Copy code</button>
+    </section>
+
+    <section class="panel" aria-labelledby="pcc-people-heading">
+      <h2 id="pcc-people-heading">People signed in through your banner</h2>
+      <p class="muted">Each visitor who saves a choice gets private access to their own consent record. You can take that access away, for example if a device was lost.</p>
+      <div id="pcc-profiles"><p class="muted">Loading…</p></div>
+    </section>
+  </fieldset>
+</div>
+<script src="/static/lightwork-consent-workbench.js"></script>
 <script>
-(function(){"use strict";var API="/api/v1/consent/public-clients",status=document.getElementById('pcc-status'),output=document.getElementById('pcc-output');function val(form,name){return form.elements[name].value.trim();}async function call(path,options){var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{})),body;try{body=await response.json();}catch(_error){throw new Error("Request failed: the server returned an invalid JSON response.");}if(!response.ok)throw new Error(body&&typeof body.detail==="string"?body.detail:('HTTP '+response.status));return body;}function show(body,message){output.textContent=JSON.stringify(body,null,2);status.textContent=message;}
-document.getElementById('pcc-create').addEventListener('submit',async function(event){event.preventDefault();var form=event.currentTarget,payload={property_id:val(form,'property_id'),client_kind:'browser',browser_origin:val(form,'browser_origin'),service_client_id:null,target_origin:null,target_bundle_id:null,target_platform:null,jurisdiction:val(form,'jurisdiction'),country_code:val(form,'country_code'),region_code:val(form,'region_code'),default_locale:val(form,'default_locale'),rule_group_id:val(form,'rule_group_id'),rule_group_version:Number(val(form,'rule_group_version')),policy_id:val(form,'policy_id'),policy_version:Number(val(form,'policy_version')),expires_at:null};try{show(await call('',{method:'POST',body:JSON.stringify(payload)}),'Client minted. Copy the credential now; it cannot be recovered.');}catch(error){status.textContent=error.message;}});
-document.getElementById('pcc-list').addEventListener('click',async function(){try{show(await call(''),'Safe client metadata loaded.');}catch(error){status.textContent=error.message;}});document.getElementById('pcc-list-profiles').addEventListener('click',async function(){try{show(await call('/profiles'),'Safe profile selectors and revisions loaded.');}catch(error){status.textContent=error.message;}});document.getElementById('pcc-revoke-client').addEventListener('submit',async function(event){event.preventDefault();var form=event.currentTarget;try{show(await call('/'+encodeURIComponent(val(form,'credential_id'))+'/revoke',{method:'POST',body:JSON.stringify({expected_revision:Number(val(form,'expected_revision'))})}),'Client revoked.');}catch(error){status.textContent=error.message;}});document.getElementById('pcc-revoke-profile').addEventListener('submit',async function(event){event.preventDefault();var form=event.currentTarget;try{show(await call('/profiles/'+encodeURIComponent(val(form,'profile_id'))+'/revoke',{method:'POST',body:JSON.stringify({property_id:val(form,'property_id'),evidence_sha256:val(form,'evidence_sha256')})}),'Profile capability revoked.');}catch(error){status.textContent=error.message;}});
+(function () {
+  "use strict";
+  var API = "/api/v1/consent/public-clients";
+  // The page's JSON client: a non-2xx or malformed response is never success.
+  async function call(path, options) {
+    var opts = Object.assign({cache: "no-store"}, options || {});
+    if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers = {"Content-Type": "application/json"}; delete opts.json; }
+    var response = await fetch(API + path, opts);
+    var body;
+    try { body = await response.json(); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
+    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed."); failure.status = response.status; throw failure; }
+    return body;
+  }
+  var CW = window.LightworkConsentWorkbench;
+  if (CW && document.getElementById("pcc-root")) start();
+
+  function start() {
+    var $ = function (id) { return document.getElementById(id); };
+    var root = $("pcc-root"), status = $("pcc-status");
+    var can = {admin: root.dataset.canAdmin === "true", audit: root.dataset.canAudit === "true"};
+    var state = {properties: [], key: ""};
+    document.querySelectorAll("[data-pcc-close]").forEach(function (b) { b.addEventListener("click", function () { $(b.dataset.pccClose).hidden = true; }); });
+    function snippet(key) {
+      var origin = window.location.origin;
+      return '<div id="consent-root"></div>\n<script src="' + origin + '/api/v1/public/consent/sdk.js"><\/script>\n<script>\n  const consent = new LightworkConsent({\n    endpoint: "' + origin + '/api/v1/public/consent",\n    clientCredential: "' + (key || "YOUR-KEY") + '"\n  });\n  consent.renderBanner(document.querySelector("#consent-root"));\n<\/script>';
+    }
+    $("pcc-snippet").textContent = snippet("");
+    $("pcc-copy-example").addEventListener("click", function () { window.mvCopy(snippet("")); });
+    $("pcc-copy-key").addEventListener("click", function () { window.mvCopy(state.key); });
+    $("pcc-copy-snippet").addEventListener("click", function () { window.mvCopy(snippet(state.key)); });
+
+    async function loadKeys() {
+      if (!can.audit) { $("pcc-table").replaceChildren(CW.el("p", "muted", "You need audit access to see existing keys.")); return; }
+      try {
+        var data = await call("?limit=500");
+        CW.table($("pcc-table"), data.items || [], {
+          label: "Keys", name: function (k) { return CW.human(k.property_id) + " " + (k.browser_origin || k.target_origin || k.target_bundle_id || ""); },
+          columns: [
+            {label: "Website or app", value: function (k) { return CW.human(k.property_id); }},
+            {label: "Used by", value: function (k) { return k.client_kind === "browser" ? "Website" : "App or server"; }},
+            {label: "Address", value: function (k) { return k.browser_origin || k.target_origin || k.target_bundle_id || ""; }},
+            {label: "Language", value: function (k) { return CW.labelFor(CW.LOCALES, k.default_locale); }},
+            {label: "Status", value: function (k) { return k.status === "active" ? CW.badge("Active", "ok") : CW.badge("Revoked", "idle"); }},
+            {label: "Last changed", value: function (k) { return CW.when(k.updated_at); }},
+          ],
+          actions: [{label: "Revoke", kind: "danger", when: function (k) { return can.admin && k.status === "active"; }, run: function (k, b) { revokeKey(k, b); }}],
+          empty: {title: "No keys yet.", body: "Publish your banner, then create a key for each website or app that shows it.", action: can.admin ? {label: "Create a key", run: function () { openCreate(); }} : null},
+        });
+      } catch (error) { $("pcc-table").replaceChildren(); CW.fail(status, error, "load keys"); }
+    }
+    function revokeKey(k, button) {
+      CW.busy(button, async function () {
+        var where = k.browser_origin || k.target_origin || k.target_bundle_id || CW.human(k.property_id);
+        if (!(await CW.confirm("Revoke this key for " + where + "? The banner using it will stop working until you add a new key. This cannot be undone.", "Revoke"))) return;
+        try { await call("/" + encodeURIComponent(k.credential_id) + "/revoke", {method: "POST", json: {expected_revision: k.revision}}); await loadKeys(); CW.say(status, "Key revoked."); }
+        catch (error) { CW.fail(status, error, "revoke the key"); }
+      });
+    }
+
+    var form = $("pcc-create");
+    function chosenProperty() { var id = form.elements.property_id.value; return state.properties.filter(function (p) { return p.property_id === id; })[0]; }
+    function syncTarget() {
+      var p = chosenProperty(), mobile = p && p.kind === "mobile";
+      form.querySelector('[data-target="web"]').hidden = !!mobile; form.querySelector('[data-target="mobile"]').hidden = !mobile;
+      CW.fill(form.elements.origin, p ? (p.origin_allowlist || []) : []);
+      CW.fill(form.elements.bundle, p ? (p.mobile_bundle_ids || []) : []);
+      if (mobile) form.querySelector('[name=client_kind][value="service"]').checked = true;
+    }
+    async function openCreate() {
+      form.reset(); $("pcc-secret").hidden = true;
+      CW.fill(form.elements.jurisdiction, CW.JURISDICTIONS); CW.fill(form.elements.country_code, CW.COUNTRIES); CW.fill(form.elements.default_locale, CW.LOCALES);
+      CW.open(form, "[name=property_id]");
+      try {
+        var publishing = CW.client("/api/v1/consent/publishing");
+        var props = await publishing("/catalog/properties?limit=50"), groups = await publishing("/catalog/rule-groups?limit=50");
+        state.properties = (props.items || []).filter(function (p) { return p.publication_revision > 0; });
+        CW.fill(form.elements.property_id, state.properties.map(function (p) { return {value: p.property_id, label: CW.human(p.property_id)}; }), state.properties.length ? "" : "Publish your banner first");
+        CW.fill(form.elements.rule_group, (groups.items || []).map(function (g) { return {value: g.resource_id + "|" + g.version, label: CW.human(g.resource_id) + " · version " + g.version}; }));
+        syncTarget();
+      } catch (error) { CW.fail(status, error, "load your published websites and apps"); }
+      try {
+        var policies = await CW.client("/api/v1/consent")("/policies?limit=500");
+        CW.fill(form.elements.policy, (policies.policies || []).map(function (p) { return {value: p.policy_id + "|" + p.version, label: CW.human(p.policy_id) + " · version " + p.version}; }), (policies.policies || []).length ? "" : "Publish a consent policy first");
+      } catch (error) { CW.fail(status, error, "load consent policies"); }
+    }
+    $("pcc-new").addEventListener("click", openCreate);
+    form.elements.property_id.addEventListener("change", syncTarget);
+    form.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      var f = form.elements, p = chosenProperty(), kind = form.querySelector("[name=client_kind]:checked").value;
+      var group = f.rule_group.value.split("|"), policy = f.policy.value.split("|");
+      if (!p || !group[0] || !policy[0]) { CW.say(status, "Choose the website or app, its display rules and the consent policy.", true); return; }
+      var body = {property_id: p.property_id, client_kind: kind, browser_origin: null, service_client_id: null, target_origin: null, target_bundle_id: null, target_platform: null,
+        jurisdiction: f.jurisdiction.value, country_code: f.country_code.value, region_code: "", default_locale: f.default_locale.value,
+        rule_group_id: group[0], rule_group_version: Number(group[1]), policy_id: policy[0], policy_version: Number(policy[1]), expires_at: null};
+      if (kind === "browser") body.browser_origin = f.origin.value;
+      else {
+        body.service_client_id = CW.slug(p.property_id + "-" + CW.reference().slice(0, 8), "service");
+        if (p.kind === "mobile") { body.target_bundle_id = f.bundle.value; body.target_platform = p.platform; } else body.target_origin = f.origin.value;
+      }
+      try {
+        var created = await call("", {method: "POST", json: body});
+        state.key = created.client_credential; $("pcc-secret-value").textContent = state.key;
+        form.hidden = true; CW.open($("pcc-secret"), "#pcc-copy-key");
+        $("pcc-snippet").textContent = snippet(state.key);
+        await loadKeys(); CW.say(status, "Key created. Copy it now.");
+      } catch (error) {
+        if (error && error.status === 409) CW.say(status, "Could not create the key. The display rules, consent policy or address you chose do not match what is published for this website or app. Check them and try again.", true);
+        else CW.fail(status, error, "create the key");
+      }
+    });
+
+    var REASONS = [{value: "person-request", label: "The person asked us to"}, {value: "device-lost", label: "A device was lost or stolen"},
+      {value: "suspected-misuse", label: "We suspect misuse"}, {value: "other", label: "Another reason"}];
+    async function loadProfiles() {
+      if (!can.audit) { $("pcc-profiles").replaceChildren(); return; }
+      try {
+        var data = await call("/profiles?limit=500");
+        CW.table($("pcc-profiles"), data.items || [], {
+          label: "People signed in through your banner", name: function (x) { return x.profile_id; },
+          columns: [
+            {label: "Person", value: function (x) { return x.profile_id; }},
+            {label: "Website or app", value: function (x) { return CW.human(x.property_id); }},
+            {label: "Access", value: function (x) { return x.profile_status === "active" ? CW.badge("Active", "ok") : CW.badge("Revoked", "idle"); }},
+            {label: "Since", value: function (x) { return CW.when(x.created_at); }},
+          ],
+          actions: [{label: "Revoke access", kind: "danger", when: function (x) { return can.admin && x.profile_status === "active"; }, run: function (x, b) { revokeProfile(x, b); }}],
+          empty: {title: "No one has signed in through your banner yet."},
+        });
+      } catch (error) { $("pcc-profiles").replaceChildren(); CW.fail(status, error, "load people"); }
+    }
+    async function revokeProfile(x, button) {
+      var answer = await window.mvForm("Revoke access for " + x.profile_id, [{key: "reason", label: "Why", type: "select", options: REASONS, required: true}], {okText: "Continue"});
+      if (!answer) return;
+      CW.busy(button, async function () {
+        if (!(await CW.confirm("Revoke " + x.profile_id + "’s access? Their saved choices are kept, but they will need to make them again on that website or app.", "Revoke access"))) return;
+        try {
+          // The recorded evidence is a fingerprint of the chosen reason for this person.
+          var evidence = await CW.sha256("public-profile-revocation\u0000" + answer.reason + "\u0000" + x.property_id + "\u0000" + x.profile_id);
+          await call("/profiles/" + encodeURIComponent(x.profile_id) + "/revoke", {method: "POST", json: {property_id: x.property_id, evidence_sha256: evidence}});
+          await loadProfiles(); CW.say(status, "Access revoked.");
+        } catch (error) { CW.fail(status, error, "revoke access"); }
+      });
+    }
+
+    if (root.dataset.featureEnabled === "false") { ["pcc-table", "pcc-profiles"].forEach(function (id) { $(id).replaceChildren(CW.el("p", "muted", "Turn this feature on to use it.")); }); return; }
+    loadKeys(); loadProfiles();
+  }
 })();
 </script>
 {% endblock %}

@@ -3,9 +3,9 @@ name = "itgrc_attack_surface"
 compartment = "itgrc_vuln"
 description = "Attack surface & pen-test coordination."
 
-persona = """You are the Attack-Surface specialist: map external attack surface (Censys/Shodan), coordinate pen tests, and threat-model (STRIDE). You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only."""
+persona = """You are the Attack-Surface specialist: map external attack surface (Censys/Shodan), coordinate pen tests, and threat-model (STRIDE). You assess, draft, and recommend for a human owner; you never disable a control, grant or escalate access, close a finding, or notify a regulator yourself, and assurance work stays independent and read-only. Live connectors qualys_read, tenable_read exceed this pack's declared risk ceiling and are not granted. Before their related steps, request a current operator-approved export in the workspace and read it with read_file, recording source and export time. If absent, report the missing prerequisite; do not claim live access."""
 
-allow_tools = ["read_file", "web_search", "knowledge_search", "qualys_read", "tenable_read"]
+allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
 deny_tools = ["shell", "write_file"]
 
@@ -29,7 +29,7 @@ tools = ["read_file", "web_search"]
 [[workflow]]
 name = "Pull scan data"
 instruction = "Read current Qualys and Tenable results to confirm exposed services and known vulnerabilities against the mapped surface."
-tools = ["qualys_read", "tenable_read"]
+tools = ["read_file"]
 [[workflow]]
 name = "Threat model"
 instruction = "Apply STRIDE to the exposed surface to identify likely attack paths and prioritize pen-test focus areas."

@@ -44,11 +44,20 @@ def _strip_terminal_control(text: str) -> str:
     return _TERMINAL_CONTROL_RE.sub("", text)
 
 
-def _default_model() -> str:
-    """Lazy resolver so the click default callback doesn't pull `.llm`
-    (and the anthropic SDK) at module import time."""
-    from ..llm import DEFAULT_MODEL
-    return DEFAULT_MODEL
+def _default_model(role: str = "orchestrator") -> str:
+    """The configured model for ``role`` (kernel rule 2: never a hard-coded
+    model). Resolves through ``model_for_role`` -- per-role overrides, the
+    ``[models]`` config, dashboard pins and the admin allow-list -- the same
+    way the dashboard and the channel server pick the model for the same
+    action. Lazy so importing the CLI doesn't pull ``.llm`` (and the anthropic
+    SDK)."""
+    from ..llm import model_for_role
+    return model_for_role(role)
+
+
+def _cli_model(ctx: click.Context, role: str) -> str:
+    """An explicit ``--model`` wins; otherwise the configured ``role`` model."""
+    return (ctx.obj or {}).get("model") or _default_model(role)
 
 
 def _fact_subject_token(channel: str, user: str) -> str:
@@ -71,7 +80,7 @@ def _model_route_configuration_missing(
     from ..operator_preflight import _route_configuration_missing
     from ..providers import _canonical
 
-    spec = str(model_spec or _default_model()).strip()
+    spec = str(model_spec or _default_model("orchestrator")).strip()
     provider = _canonical(spec.split(":", 1)[0] if ":" in spec else "anthropic")
     return provider, _route_configuration_missing(provider, load_config())
 
@@ -219,12 +228,12 @@ def _kernel():
     import types
 
     from ..budget import Budget
-    from ..llm import DEFAULT_MODEL, LLM
+    from ..llm import LLM
     from ..orchestrator import run_goal_sync
     from ..sandbox import build_sandbox
     from ..secrets import scrub
     return types.SimpleNamespace(
-        Budget=Budget, LLM=LLM, DEFAULT_MODEL=DEFAULT_MODEL,
+        Budget=Budget, LLM=LLM,
         run_goal_sync=run_goal_sync, build_sandbox=build_sandbox, scrub=scrub,
     )
 
@@ -544,59 +553,30 @@ def _install_config_from_file(src: str) -> None:
     """Headless provisioning: validate SRC and install it as config.toml (0600)."""
     from pathlib import Path as _P
 
-    from ..config import config_path
+    from ..config_install import (
+        ConfigInstallError,
+        config_findings,
+        install_config_bytes,
+        parse_config_bytes,
+    )
     src_path = _P(src).expanduser()
     if not src_path.is_file():
         raise click.ClickException(f"no such config file: {src}")
     try:
-        try:
-            import tomllib
-        except ModuleNotFoundError:  # 3.10
-            import tomli as tomllib  # type: ignore
-        with open(src_path, "rb") as f:
-            cfg = tomllib.load(f)
-    except Exception as e:
+        data = src_path.read_bytes()
+        cfg = parse_config_bytes(data)
+    except (ConfigInstallError, OSError) as e:
         raise click.ClickException(f"invalid TOML in {src}: {e}") from e
     # Surface unknown-section / type problems, but don't block (operators may use
     # newer keys than this build knows).
-    try:
-        from ..config_lint import lint_config
-        for finding in lint_config(cfg):
-            click.echo(click.style(f"  ! {finding.section}: {finding.message}",
-                                   fg="yellow"), err=True)
-    except Exception:
-        pass
-    dst = config_path()
-    from ..file_lock import (
-        atomic_write_bytes,
-        ensure_private_directory,
-        ensure_private_file,
-    )
-
-    # A provisioned config may contain inline provider keys. Tighten the
-    # directory with a protected Windows DACL and publish the bytes from a
-    # create-time protected temp; POSIX mode bits passed to os.open do not
-    # provide the equivalent Windows custody boundary.
-    ensure_private_directory(dst.parent)
-    data = src_path.read_bytes()
-    try:
-        installed = dst.read_bytes() if dst.is_file() else b""
-        unchanged = (
-            dst.is_file()
-            and installed.replace(b"\r\n", b"\n")
-            == data.replace(b"\r\n", b"\n")
-        )
-    except OSError:
-        unchanged = False
-    if unchanged:
-        # A retried deployment should be a true no-op: do not rotate the inode,
-        # mtime, or watcher state when the same logical TOML is installed,
-        # including when a cross-platform checkout changed line endings.
-        # Still repair/verify custody in case an older release left wide perms.
-        ensure_private_file(dst, 0o600)
+    for finding in config_findings(cfg):
+        click.echo(click.style(f"  ! {finding.section}: {finding.message}",
+                               fg="yellow"), err=True)
+    result = install_config_bytes(data)
+    dst = result["path"]
+    if result["unchanged"]:
         click.echo(click.style(f"config unchanged -> {dst} (0600)", fg="green"))
         return
-    atomic_write_bytes(dst, data, mode=0o600)
     click.echo(click.style(f"installed config -> {dst} (0600)", fg="green"))
 
 
@@ -649,20 +629,14 @@ def shared_key_digest() -> None:
     is safe to store in IaC. Reads the key from the process environment exactly
     as crypto_at_rest does; run it wherever MAVERICK_ENCRYPTION_KEY is injected.
     """
-    import hashlib
+    from ..installation_info import KeyDigestError, encryption_key_digest
 
-    from ..crypto_at_rest import _KEY_ENV, _decode_injected_key
-
-    raw = os.environ.get(_KEY_ENV, "")
-    if not raw.strip():
-        click.echo(f"{_KEY_ENV} is not set in this environment", err=True)
-        sys.exit(1)
     try:
-        key = _decode_injected_key(raw)
-    except Exception as exc:  # noqa: BLE001
-        click.echo(f"cannot decode {_KEY_ENV}: {exc}", err=True)
+        digest = encryption_key_digest()
+    except KeyDigestError as exc:
+        click.echo(str(exc), err=True)
         sys.exit(1)
-    click.echo("sha256:" + hashlib.sha256(key).hexdigest())
+    click.echo(digest)
 
 
 @main.command("launch-check")
@@ -721,13 +695,12 @@ def license_issue(customer: str, tier: str, edition: str, suites: tuple,
     deployment is entitled to (``set`` is an alias). The signing key comes from
     MAVERICK_LICENSE_PRIVATE_KEY (never config, never the repo) and is never
     echoed."""
-    import json as _json
-
     from ..entitlements import (
         DEFAULT_GRACE_DAYS,
-        _default_license_path,
-        _trusted_pubkeys,
         build_license_payload,
+        install_license,
+        key_trusted,
+        license_text,
         publisher_private_key,
         sign_license,
     )
@@ -754,19 +727,16 @@ def license_issue(customer: str, tier: str, edition: str, suites: tuple,
                    f"that MAVERICK_LICENSE_PRIVATE_KEY is valid Ed25519 hex.",
                    err=True)
         sys.exit(2)
-    text = _json.dumps(doc, indent=2) + "\n"
     if to_stdout:
-        click.echo(text, nl=False)
+        click.echo(license_text(doc), nl=False)
     else:
-        path = Path(out).expanduser() if out else _default_license_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path = install_license(doc, out)
         click.echo(f"wrote signed license -> {path}")
     click.echo(f"  {customer} · tier={tier} · suites={list(suites) or '—'} · "
                f"key_id={doc['key_id'][:16]}…")
     # A license signed by a key the deployment doesn't trust grants nothing, so
     # warn instead of letting the operator think paid features are now on.
-    if doc["key_id"].lower() not in _trusted_pubkeys():
+    if not key_trusted(doc["key_id"]):
         click.echo(
             "  NOTE: this signing key is not in the deployment trust anchor "
             "(MAVERICK_LICENSE_PUBKEYS / [license] publisher_pubkeys); paid "
@@ -821,86 +791,44 @@ def license_keygen() -> None:
 @main.command()
 def version() -> None:
     """Show installed package versions + runtime info."""
-    import importlib.metadata
+    from ..installation_info import package_versions, runtime_facts
 
     click.echo(click.style("Lightwork installed packages", bold=True))
-    # PyPI distribution name for the core is `maverick-agent` (the
-    # `maverick` name was squatted). Fall back to `maverick` if the
-    # squatter ever releases the original name.
-    pkg_names = [
-        ("maverick-agent",     ("maverick-agent", "maverick")),
-        ("maverick-shield",    ("maverick-shield",)),
-        ("maverick-channels",  ("maverick-channels",)),
-        ("maverick-evolve",    ("maverick-evolve",)),
-        ("maverick-dashboard", ("maverick-dashboard",)),
-        ("maverick-mcp-server", ("maverick-mcp-server",)),
-        ("maverick-knowledge", ("maverick-knowledge",)),
-        ("maverick-installer", ("maverick-installer",)),
-    ]
-    for display, candidates in pkg_names:
-        version = None
-        for c in candidates:
-            try:
-                version = importlib.metadata.version(c)
-                break
-            except importlib.metadata.PackageNotFoundError:
-                continue
+    for display, version in package_versions():
         if version:
             click.echo(f"  {display:22s} {version}")
         else:
             click.echo(f"  {display:22s} " + click.style("not installed", fg="yellow"))
     click.echo("")
     click.echo(click.style("Runtime", bold=True))
-    try:
-        from ..world_model import SCHEMA_VERSION
-        click.echo(f"  schema:                v{SCHEMA_VERSION}")
-    except Exception:
-        pass
-    try:
-        from maverick_shield import Shield
-        # warn_if_missing=False: this command prints the backend itself, so the
-        # raw "SDK not installed" log line would just bleed into the table.
-        s = Shield.from_config(warn_if_missing=False)
-        click.echo(f"  shield backend:        {s.backend}")
-    except ImportError:
+    facts = runtime_facts()
+    if facts["schema"] is not None:
+        click.echo(f"  schema:                v{facts['schema']}")
+    if facts["shield_backend"] is not None:
+        click.echo(f"  shield backend:        {facts['shield_backend']}")
+    else:
         click.echo("  shield backend:        (maverick-shield not installed)")
-    try:
-        from ..providers import KNOWN_PROVIDERS
-        click.echo(f"  providers:             {', '.join(KNOWN_PROVIDERS)}")
-    except Exception:
-        pass
-    try:
-        from ..persona import load_persona
-        p = load_persona()
-        if p["name"] or p["style"]:
-            ident = p["name"] or "(unnamed)"
-            style = p["style"] or "(default)"
+    if facts["providers"] is not None:
+        click.echo(f"  providers:             {', '.join(facts['providers'])}")
+    p = facts["persona"]
+    if p is not None:
+        if p.get("name") or p.get("style"):
+            ident = p.get("name") or "(unnamed)"
+            style = p.get("style") or "(default)"
             click.echo(f"  persona:               {ident} ({style})")
         else:
             click.echo("  persona:               (none)")
-    except Exception:
-        pass
-    click.echo(f"  python:                {sys.version.split()[0]}")
-    click.echo(f"  platform:              {sys.platform}")
+    click.echo(f"  python:                {facts['python']}")
+    click.echo(f"  platform:              {facts['platform']}")
 
 
 @main.command("release-runtime-check")
 def release_runtime_check() -> None:
     """Verify packaged providers, parsers, SQL, MathML and metrics offline."""
-    from ..providers import verify_release_runtime
-    from ..release_runtime import (
-        verify_release_database_runtime,
-        verify_release_mathml_runtime,
-        verify_release_metrics_runtime,
-    )
-    from ..tools.document_processing import verify_release_document_runtime
+    from ..release_runtime import libpq_label, verify_full_release_runtime
 
     try:
-        verify_release_runtime()
-        verify_release_document_runtime()
-        libpq_version = verify_release_database_runtime()
-        verify_release_mathml_runtime()
-        verify_release_metrics_runtime()
+        libpq_version = verify_full_release_runtime()
     except Exception as exc:
         raise click.ClickException(
             f"full release runtime is unavailable: {exc}"
@@ -909,7 +837,7 @@ def release_runtime_check() -> None:
         "release runtime ready: Anthropic and OpenAI-compatible provider "
         "SDKs, document parsers and document worker source are available; "
         "offline SQL, bundled PostgreSQL driver "
-        f"(libpq {libpq_version // 10000}.{libpq_version % 10000}), "
+        f"(libpq {libpq_label(libpq_version)}), "
         "MathML and metrics checks passed"
     )
 
@@ -1140,15 +1068,10 @@ def _apply_capability_plan(profile, plan, llm) -> None:
     Records the gaps as factory-learning signals (no-op unless that's on)."""
     if plan is None or plan.is_empty():
         return
-    from ..provision import apply_plan
-    result = apply_plan(plan, approved=True, llm=llm)
+    from ..provision import apply_approved_plan
+    result = apply_approved_plan(profile, plan, llm=llm)
     if result.acquired or result.generated or result.failed:
         click.echo(click.style(f"Provisioning: {result.summary()}", fg="cyan"))
-    try:
-        from .. import factory_learning
-        factory_learning.record_provisioning(profile, plan, result)
-    except Exception:  # pragma: no cover -- learning must never break onboarding
-        pass
 
 
 @main.command()
@@ -1203,38 +1126,16 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
     llm = None
     if not no_llm:
         try:
-            from ..llm import DEFAULT_MODEL, LLM
-            llm = LLM(model=ctx.obj.get("model") or DEFAULT_MODEL)
+            from ..llm import LLM
+
+            # Same role the dashboard's agent drafting uses (intake proposer).
+            llm = LLM(model=_cli_model(ctx, "writer"))
         except Exception as e:  # no provider/key -> deterministic generation
             click.echo(f"(LLM unavailable; using deterministic generation: {e})", err=True)
-    kb = None
-    try:
-        from ..config import get_knowledge
-        from ..workspace import Workspace
-        kcfg = get_knowledge()
-        if kcfg.get("enable"):
-            from maverick_knowledge import KnowledgeBase, build_embedder, build_store
-            # Persist uploads to the active tenant's knowledge store (NOT :memory:,
-            # which discards them on exit) so the run-time KB reads the same store.
-            # An explicit [knowledge] path still wins.
-            if not kcfg.get("path"):
-                kcfg = {**kcfg, "path": str(Workspace.current().knowledge_path)}
-            # Shield-scan documents at ingest: a poisoned upload is dropped at the
-            # door, not only at query time (RAG-poisoning defense).
-            shield = None
-            try:
-                from maverick_shield import Shield
-                shield = Shield.from_config(warn_if_missing=False)
-            except Exception:
-                pass
-            kb = KnowledgeBase(store=build_store(kcfg), embedder=build_embedder(kcfg),
-                               shield=shield)
-            try:  # OCR uploaded diagrams/images when the vision extra is installed
-                from maverick_knowledge.image import build_ocr_describer
-                kb.image_describer = build_ocr_describer()
-            except Exception:
-                pass  # no vision extra -> images are skipped, not read as bytes
-        elif doc_paths:
+    from ..intake import onboarding_knowledge_base
+    kb, kb_problem = onboarding_knowledge_base()
+    if kb is None and doc_paths:
+        if kb_problem == "disabled":
             # The client explicitly attached docs AND the generated persona
             # tells the agent to answer from them -- so a quiet "skipping"
             # aside under-sells that the domain agent ends up with NO document
@@ -1248,9 +1149,8 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
                 "~/.maverick/config.toml, then re-run onboard.",
                 err=True,
             )
-    except Exception as e:  # knowledge layer is optional
-        if doc_paths:
-            click.echo(f"(knowledge unavailable; skipping doc ingestion: {e})", err=True)
+        elif kb_problem is not None:
+            click.echo(f"(knowledge unavailable; skipping doc ingestion: {kb_problem})", err=True)
 
     click.echo("Generating a draft domain agent...")
     profile = run_intake(spec, llm=llm, kb=None)
@@ -1315,8 +1215,10 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
     llm = None
     if not no_llm:
         try:
-            from ..llm import DEFAULT_MODEL, LLM
-            llm = LLM(model=ctx.obj.get("model") or DEFAULT_MODEL)
+            from ..llm import LLM
+
+            # Same role the dashboard's agent drafting uses (intake proposer).
+            llm = LLM(model=_cli_model(ctx, "writer"))
         except Exception as e:  # no provider/key -> deterministic derivation
             click.echo(f"(LLM unavailable; deriving pack from steps: {e})", err=True)
 
@@ -1932,12 +1834,8 @@ def harness_run(model: str | None, all_models: bool, system_prompt_file: Path | 
     if system_prompt_file is not None:
         try:
             with system_prompt_file.open("rb") as prompt_stream:
-                raw = prompt_stream.read(1024 * 1024 + 1)
-            if len(raw) > 1024 * 1024:
-                raise ValueError("system prompt exceeds the 1 MiB limit")
-            evaluation_system = raw.decode("utf-8")
-            if not evaluation_system.strip() or "\x00" in evaluation_system:
-                raise ValueError("system prompt must be non-empty UTF-8 text without NULs")
+                raw = prompt_stream.read(runner.EVALUATION_SYSTEM_LIMIT + 1)
+            evaluation_system = runner.read_evaluation_system(raw)
         except (OSError, UnicodeError, ValueError) as exc:
             raise click.ClickException(
                 f"cannot read deployed system prompt: {exc}") from exc
@@ -2020,83 +1918,34 @@ def harness_migrate_store() -> None:
     Verifies the routed store serves every imported key, then renames the
     files to *.migrated backups. Run once per host that learned locally.
     """
-    import json as _json
-
-    from .. import learning_store
-    from .. import self_harness as sh
-    if sh.settings().get("store") != "world":
-        raise click.ClickException(
-            'set [self_harness] store = "world" first -- the migration '
-            "imports into the configured world database.")
-    src = sh._store_path()
-
-    def _raw(p, keep) -> dict:
-        try:
-            data = _json.loads(p.read_text(encoding="utf-8"))
-        except (FileNotFoundError, ValueError, OSError):
-            return {}
-        return {str(k): v for k, v in data.items() if keep(v)} \
-            if isinstance(data, dict) else {}
-
-    addenda = _raw(src, lambda v: isinstance(v, str) and v.strip())
-    meta = _raw(sh._meta_path(src), lambda v: isinstance(v, dict))
-    tried = {k: float(v) for k, v in
-             _raw(sh._transfer_tried_path(src),
-                  lambda v: isinstance(v, (int, float))).items()}
-    migrated_any = bool(addenda or meta or tried)
-    if migrated_any:
-        _migrate_learning_files(sh, learning_store, src, addenda, meta, tried)
+    from ..learning_store_migration import (
+        MigrationRefused,
+        migrate_corpus,
+        migrate_learning_files,
+        require_world_store,
+    )
+    try:
+        require_world_store()
+        learned = migrate_learning_files()
+    except MigrationRefused as exc:
+        raise click.ClickException(str(exc)) from exc
+    migrated_any = learned is not None
+    if learned is not None:
+        merged = learned["merged"]
+        click.echo(f"imported {learned['addenda']} addenda key(s), "
+                   f"{learned['provenance']} provenance "
+                   f"record(s), {learned['tried']} tried pair(s) into the world store"
+                   + (f" ({merged} conflicting key(s) merged)" if merged else "")
+                   + "; file stores renamed to *.migrated.")
     # Phase 2: the corpus family rides the same migration when configured.
-    cpath = sh.settings().get("eval_corpus")
-    if cpath:
-        from .. import self_harness_eval as ev
-        counts = ev.migrate_corpus_files(cpath)
-        if counts and any(counts.values()):
-            migrated_any = True
-            click.echo(f"corpus: merged {counts['live']} live case(s), "
-                       f"{counts['pending']} pending, {counts['rejected']} "
-                       "rejected goal(s) into the world store.")
+    counts = migrate_corpus()
+    if counts and any(counts.values()):
+        migrated_any = True
+        click.echo(f"corpus: merged {counts['live']} live case(s), "
+                   f"{counts['pending']} pending, {counts['rejected']} "
+                   "rejected goal(s) into the world store.")
     if not migrated_any:
         click.echo("nothing to migrate: no file learning stores on this host.")
-
-
-def _migrate_learning_files(sh, learning_store, src, addenda, meta, tried) -> None:
-    merged = 0
-    with learning_store.rmw_lock():
-        db_add = learning_store.load_addenda_db()
-        for k, block in addenda.items():
-            if k not in db_add:
-                db_add[k] = block
-            elif db_add[k] != block:
-                cur = db_add[k]
-                have = {sh._norm_line(x) for x in sh._bullets(cur)}
-                for ln in sh._bullets(block):
-                    if sh._norm_line(ln) not in have:
-                        cur = sh._compose_addendum(k, cur, ln)
-                db_add[k] = cur
-                merged += 1
-        learning_store.write_addenda_db(db_add)
-        db_meta = learning_store.load_line_meta_db()
-        for lid, rec in meta.items():
-            db_meta.setdefault(lid, rec)
-        learning_store.write_line_meta_db(db_meta)
-        db_tried = learning_store.load_transfer_tried_db()
-        for lid, ts in tried.items():
-            db_tried.setdefault(lid, ts)
-        learning_store.write_transfer_tried_db(db_tried)
-    routed = sh.load_addenda()
-    missing = [k for k in addenda if k not in routed]
-    if missing:
-        raise click.ClickException(
-            f"verification failed -- keys missing after import: {missing[:3]}"
-            " (file stores left untouched)")
-    for p in (src, sh._meta_path(src), sh._transfer_tried_path(src)):
-        if p.exists():
-            p.rename(p.with_name(p.name + ".migrated"))
-    click.echo(f"imported {len(addenda)} addenda key(s), {len(meta)} provenance "
-               f"record(s), {len(tried)} tried pair(s) into the world store"
-               + (f" ({merged} conflicting key(s) merged)" if merged else "")
-               + "; file stores renamed to *.migrated.")
 
 
 @harness.group("corpus")
@@ -3065,7 +2914,26 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
         proxy_kwargs = uvicorn_launch_kwargs()
     except Exception:  # pragma: no cover - never block startup on a config read
         proxy_kwargs = {}
-    uvicorn.run(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
+    config = uvicorn.Config(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
+    if config.reload or config.workers > 1:
+        # uvicorn.run's own refusal for an app object (one control plane per data root).
+        logging.getLogger("uvicorn.error").warning(
+            "You must pass the application as an import string to enable 'reload' or 'workers'.")
+        sys.exit(3)
+    server = uvicorn.Server(config)
+    from maverick_dashboard.dashboard_restart import RESTART_EXIT_CODE, register_server, requested
+    # Settings > Maintenance can ask a supervised copy (systemd, a container
+    # engine, Kubernetes) to restart: the server stops gracefully and this
+    # command exits with a failure code so the supervisor starts it again.
+    register_server(fastapi_app, server)
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
+    if not server.started:
+        sys.exit(3)
+    if requested():
+        sys.exit(RESTART_EXIT_CODE)
 
 
 @main.command()
@@ -3126,9 +2994,9 @@ def tenant() -> None:
 @click.option(
     "--max-daily-dollars",
     type=float,
-    default=5.0,
+    default=0.0,
     show_default=True,
-    help="Per-tenant daily spend cap (USD); explicitly pass 0 for unlimited.",
+    help="Per-tenant daily spend cap (USD); 0 (the default) means no cap.",
 )
 def tenant_create(tenant_id: str, plan: str, display_name: str,
                   max_daily_dollars: float) -> None:
@@ -3181,8 +3049,8 @@ def _dashboard_public_url() -> str:
 @click.option("--plan", default="free", help="Plan name (free/pro/enterprise/...).")
 @click.option("--name", "display_name", default="", help="Human display name.")
 @click.option(
-    "--max-daily-dollars", type=float, default=5.0, show_default=True,
-    help="Per-tenant daily spend cap (USD); explicitly pass 0 for unlimited.")
+    "--max-daily-dollars", type=float, default=0.0, show_default=True,
+    help="Per-tenant daily spend cap (USD); 0 (the default) means no cap.")
 @click.option("--role", default="admin", show_default=True,
               help="RBAC role granted by the invite (admin/operator/auditor/viewer).")
 @click.option("--base-url", "base_url", default=None,
@@ -3227,7 +3095,8 @@ def tenant_onboard(tenant_id: str, admin_email: str, plan: str, display_name: st
         )
         sys.exit(2)
     try:
-        inv, token = invites.create_invite(admin_email, role, created_by="operator")
+        inv, token = invites.create_invite(admin_email, role, created_by="operator",
+                                           tenant=rec.id)
     except ValueError as e:
         click.echo(f"ERROR: tenant created, but the invite was rejected: {e}",
                    err=True)
@@ -3353,7 +3222,7 @@ def tenant_rls_preflight(dsn: str | None) -> None:
     """Check readiness to enable Postgres Row-Level Security.
 
     Reports, per tenant-scoped table, whether this DB role owns it (only the
-    owner can install the RLS policy) and how many legacy NULL-tenant rows remain
+    owner can install the RLS policy) and how many legacy unscoped rows remain
     (which RLS would hide). Assign those rows with `maverick tenant backfill`,
     then set [world_model] rls = true.
     """
@@ -3381,25 +3250,27 @@ def tenant_rls_preflight(dsn: str | None) -> None:
                else f"NOT owned (owner={info['owner']})")
         click.echo(f"  {t}: {own}, {info['null_tenant_rows']} legacy "
                    f"NULL-tenant row(s)")
+        if info.get("empty_tenant_rows"):
+            click.echo(f"    {info['empty_tenant_rows']} legacy empty-tenant event row(s)")
     if rep["ready"]:
         click.echo("READY: set [world_model] rls = true (or MAVERICK_PG_RLS=1) "
                    "to enforce database tenant isolation.")
     else:
-        click.echo("NOT READY: assign NULL rows with `maverick tenant backfill "
+        click.echo("NOT READY: assign unscoped rows with `maverick tenant backfill "
                    "--tenant <id>` and ensure this role owns every table above.")
 
 
 @tenant.command("backfill")
 @click.option("--tenant", "tenant_id", required=True,
-              help="Tenant id to assign legacy NULL-tenant rows to.")
+              help="Tenant id to assign legacy unscoped rows to.")
 @click.option("--dsn", default=None,
               help="Postgres DSN (else MAVERICK_PG_DSN / [world_model] dsn).")
 @click.option("--dry-run", is_flag=True,
               help="Report how many rows would be assigned without writing.")
 def tenant_backfill(tenant_id: str, dsn: str | None, dry_run: bool) -> None:
-    """Assign legacy NULL-tenant rows to a tenant before enabling RLS.
+    """Assign legacy unscoped rows to a tenant before enabling RLS.
 
-    Pre-tenancy rows have a NULL tenant_id and RLS (strict equality) would hide
+    Pre-tenancy rows have a NULL tenant_id (empty for event records) and RLS would hide
     them. This assigns them to --tenant so they stay visible under that tenant.
     Idempotent and safe to re-run. Run `maverick tenant rls-preflight` first.
     """
@@ -3641,22 +3512,19 @@ def billing_stripe_sync(tenant_id: str, since: str | None, until: str | None,
     import json as _json
 
     from ..audit.events import is_valid_day
-    from ..billing import RateCard, generate_invoice
-    from ..billing_stripe import StripeError, bill_metered_usage, sync_tenant
+    from ..billing import RateCard
+    from ..billing_stripe import StripeError, sync_tenant_for_period
     from ..tenant.registry import UnknownTenant
     for _label, _val in (("--since", since), ("--until", until)):
         if _val is not None and not is_valid_day(_val):
             click.echo(f"ERROR: {_label} must be a valid YYYY-MM-DD date (got {_val!r}).",
                        err=True)
             sys.exit(2)
-    invoice = None
-    if bill_metered_usage():
-        invoice = generate_invoice(
+    try:
+        result = sync_tenant_for_period(
             tenant_id, RateCard(markup_pct=markup_pct, minimum_charge=min_charge),
             since=since, until=until,
         )
-    try:
-        result = sync_tenant(tenant_id, invoice=invoice)
     except UnknownTenant:
         click.echo(f"ERROR: no such tenant {tenant_id!r}.", err=True)
         sys.exit(2)
@@ -3725,21 +3593,17 @@ def diag_ratelimits(as_json: bool) -> None:
 @click.argument("goal_id", type=int)
 def diag_health(goal_id: int) -> None:
     """Compute a 0-100 health score for a finished goal from its episode."""
-    from ..health_score import compute_health, render
+    from ..health_score import goal_health, render
     from ..world_model import close_world_if_owned, open_world
     w = open_world()
     try:
-        g = w.get_goal(goal_id)
-        eps = w.list_episodes(goal_id=goal_id, limit=50) if g is not None else []
+        found = goal_health(w, goal_id)
     finally:
         close_world_if_owned(w)
-    if g is None:
+    if found is None:
         click.echo(f"ERROR: no such goal {goal_id}", err=True)
         sys.exit(2)
-    in_tok = sum(getattr(e, "input_tokens", 0) for e in eps)
-    out_tok = sum(getattr(e, "output_tokens", 0) for e in eps)
-    success = g.status == "done"
-    h = compute_health(success=success, in_tok=in_tok, out_tok=out_tok)
+    g, h = found
     click.echo(f"goal #{goal_id} ({g.status}):")
     click.echo(render(h))
 
@@ -3748,7 +3612,7 @@ def diag_health(goal_id: int) -> None:
 @click.argument("trace_file", type=click.Path(exists=True))
 @click.option("--kind", default=None, help="Only show events of this kind.")
 def diag_replay(trace_file: str, kind: str | None) -> None:
-    """Read a replayable run trace (written when MAVERICK_TRACE_DIR is set)."""
+    """Read a replayable run trace (written when MAVERICK_TRACE_DIR or [replay] record is set)."""
     from ..replay.trace import read_trace
     events = read_trace(trace_file)
     shown = 0
@@ -3856,6 +3720,33 @@ def mcp_registry_list(ctx) -> None:
             click.echo(f"  {s.name}  (stdio)  {argstr}")
 
 
+def _apply_director(profile: str, outcome: str, description: str,
+                    max_dollars: float | None) -> tuple[str, str, float | None]:
+    """Director mode for this process's one run (:mod:`maverick.director_mode`).
+
+    The profile's consent mode and review checkpoints apply to this process
+    only (it runs this one goal); its budget multiple is applied to the
+    requested or configured cap and then clamped to the configured cap, so a
+    profile can never raise spending past what the deployment allows.
+    """
+    from ..director_mode import UnknownProfileError, direct
+    from ..runner import clamp_task_limit, configured_max_dollars
+
+    try:
+        run = direct(outcome, profile=profile, base_max_dollars=max_dollars)
+    except (UnknownProfileError, ValueError) as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(2)
+    for name, value in run.env_overrides.items():
+        if value:
+            os.environ[name] = value
+    extra = f"\n\n{description}" if description else ""
+    capped = clamp_task_limit(run.max_dollars, configured_max_dollars())
+    click.echo(f"[director {profile}] consent={run.consent_mode} "
+               f"checkpoint={run.checkpoint} max_dollars={capped}")
+    return run.goal_title, run.goal_description + extra, capped
+
+
 def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
     """Export the coding-mode / best-of-N env flags that ``coding_mode.from_env()``
     reads everywhere. ``--best-of-n`` only takes effect under ``--coding-mode``,
@@ -3906,13 +3797,18 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
                    "the preference pairs DPO needs (pair with [telemetry] "
                    "donate_min_entropy = 0 to capture them). Non-clean runs are "
                    "kept, not fatal, in repeat mode.")
+@click.option("--director", "director_profile", default=None,
+              type=click.Choice(["supervised", "semi", "autonomous"]),
+              help="Director mode: TITLE is an outcome, run plan-first under this "
+                   "autonomy profile (consent, review checkpoints and budget from "
+                   "[director.profiles], clamped to the configured spend cap).")
 @click.pass_context
 @_humane_errors
 def start(
     ctx, title, description, template_name, params,
     max_dollars, max_wall_seconds, max_depth, workdir, sandbox_backend,
     domain, coding_mode, best_of_n, fail_to_pass, pass_to_pass, dry_cost,
-    repeat,
+    repeat, director_profile,
 ) -> None:
     """Start a new goal and run the swarm."""
     # Coding-mode flags propagate via env so coding_mode.from_env()
@@ -3946,12 +3842,15 @@ def start(
         except ValueError as e:
             click.echo(f"ERROR: {e}", err=True)
             sys.exit(2)
-        max_dollars = max_dollars or tpl.budget_dollars
-        max_wall_seconds = max_wall_seconds or tpl.budget_wall_seconds
+        max_dollars = tpl.budget_dollars if max_dollars is None else max_dollars
+        max_wall_seconds = tpl.budget_wall_seconds if max_wall_seconds is None else max_wall_seconds
         click.echo(f"[template {tpl.name}] {title}")
     elif not title:
         click.echo("ERROR: pass TITLE or --template <name>", err=True)
         sys.exit(2)
+    if director_profile:
+        title, description, max_dollars = _apply_director(
+            director_profile, title, description, max_dollars)
 
     if dry_cost:
         # Forecast from past priced runs and exit — no goal created, no run.
@@ -4005,7 +3904,7 @@ def start(
         sys.exit(2)
 
     k = _kernel()
-    llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
+    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     sandbox = k.build_sandbox(workdir=workdir, backend=sandbox_backend)
     import threading
     import types as _types
@@ -4025,7 +3924,6 @@ def start(
         # so config caps were silently ignored). Precedence: built-in defaults
         # < config < explicit CLI flags. A None flag passes through as "unset".
         bud = budget_from_config(
-            defaults={"max_dollars": 5.0, "max_wall_seconds": 3600.0},
             # Learned per-class default cap (default-on, lowest precedence; via
             # [budget] self_tuning). Department runs use their own class so
             # finance runs are sized by finance history.
@@ -4175,7 +4073,7 @@ def _stream_progress(db_path, goal_id: int, stop) -> None:
 
 @main.command()
 @click.option("--max-depth", default=3, type=int)
-@click.option("--max-dollars", default=2.0, type=float)
+@click.option("--max-dollars", default=None, type=float)
 @click.option("--workdir", default=None)
 @click.pass_context
 @_humane_errors
@@ -4188,7 +4086,7 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
     _require_llm_key()
     k = _kernel()
     world = open_world(ctx.obj["db"])
-    llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
+    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     sandbox = k.build_sandbox(workdir=workdir)
     # Thread turns through a conversation scoped to this REPL process.
     # Do not use a fixed (channel, user_id) key here: conversations are
@@ -4223,7 +4121,7 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
                     )
                 except (EOFError, click.exceptions.Abort):
                     click.echo("")
-                    break
+                    return  # canceled input is never a submitted task
                 if nxt.rstrip().endswith('"""'):
                     tail = nxt.rstrip()[:-3].rstrip()
                     if tail:
@@ -4241,7 +4139,7 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
                     ).rstrip()
                 except (EOFError, click.exceptions.Abort):
                     click.echo("")
-                    break
+                    return  # discard the partial buffer on cancellation
                 if nxt.endswith("\\"):
                     buf.append(nxt[:-1].rstrip())
                 else:
@@ -4434,22 +4332,13 @@ def schema_plan_cmd() -> None:
     maintenance window is needed. Exits 1 when the migration table fails its
     structural lint.
     """
-    from ..schema_migrations import plan, render, validate
-    from ..world_model import SCHEMA_VERSION, close_world_if_owned, open_world
-    problems = validate()
+    from ..schema_migrations import current_plan, render
+    problems, _current, _target, steps = current_plan()
     if problems:
         for pb in problems:
             click.echo(f"LINT: {pb}", err=True)
         sys.exit(1)
-    try:
-        w = open_world()
-        try:
-            current = w.schema_version
-        finally:
-            close_world_if_owned(w)
-    except Exception:
-        current = SCHEMA_VERSION  # no DB yet -> nothing pending
-    click.echo(render(plan(int(current), SCHEMA_VERSION)))
+    click.echo(render(steps))
 
 
 @main.command("config-lint")
@@ -4643,8 +4532,40 @@ def queue_failed(limit: int) -> None:
         return
     for j in jobs:
         err = (getattr(j, "last_error", "") or "").strip().replace("\n", " ")[:160]
+        parked = "  <- recurring: `maverick queue reconcile`" if getattr(
+            j, "recurrence_reconcile_required", False) else ""
         click.echo(f"  [{j.id}] kind={j.kind} attempts={getattr(j, 'attempts', '?')} "
-                   f"error={err!r}")
+                   f"error={err!r}{parked}")
+
+
+@queue.command("reconcile")
+@click.argument("job_id", type=int)
+@click.option("--expected-attempts", type=int, required=True,
+              help="The attempt count you inspected (`maverick queue failed`); "
+                   "refused if the job changed since.")
+@click.option("--rearm", is_flag=True, help="Authorize ONE future occurrence.")
+@click.option("--successor", "successor_id", type=int, default=None,
+              help="Link a reviewed, compatible successor job instead.")
+@click.option("--yes", is_flag=True, help="Confirm (required).")
+def queue_reconcile(job_id: int, expected_attempts: int, rearm: bool,
+                    successor_id: int | None, yes: bool) -> None:
+    """Resume a recurring schedule parked for reconciliation.
+
+    A legacy recurring job whose last run cannot be proven to have finished is
+    parked as failed (recurrence_reconcile_required) so its business work is
+    never replayed blind. After inspecting it, either --rearm one future
+    occurrence or link a --successor. The ambiguous run itself stays failed.
+    """
+    from ..job_queue import JobQueue
+    if not yes:
+        raise click.UsageError("reconciliation is an operator decision; pass --yes")
+    try:
+        next_id = JobQueue().reconcile_recurrence(
+            job_id, expected_attempts=expected_attempts, successor_id=successor_id,
+            rearm=rearm, confirm=True)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"job {job_id} reconciled; schedule continues as job {next_id}")
 
 
 @main.group()
@@ -5006,13 +4927,13 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
         click.echo(f"cannot resume goal #{goal_id}: {len(open_qs)} open question(s).")
         for q in open_qs:
             click.echo(f"  #{q.id}: {q.question}")
-        return
+        sys.exit(2)
     # Validate the local resume target before provider readiness. Looking up a
     # goal (including the graceful "nothing to resume" path) needs no LLM and
     # should remain useful while an operator is repairing provider credentials.
     _require_llm_key()
     k = _kernel()
-    llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
+    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     # Honor [budget] config, and let --max-dollars/--max-wall-seconds raise
     # the cap on resume (the budget-halt message tells users to do this).
     from ..budget import budget_from_config
@@ -5030,6 +4951,8 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
                              sandbox=sandbox, max_depth=max_depth,
                              resume=True)
     click.echo(result)
+    if _run_outcome_blocked(world, goal_id):
+        sys.exit(2)
 
 
 @main.command()
@@ -5137,16 +5060,13 @@ def skills_stats() -> None:
     if not items:
         click.echo("no skills yet.")
         return
-    for s in items:
-        st = skill_stats.get(s.name)
-        if st is None or st.uses == 0:
-            click.echo(f"  {s.name}: no usage recorded")
+    for row in skill_stats.usage_rows([s.name for s in items]):
+        if not row["uses"]:
+            click.echo(f"  {row['name']}: no usage recorded")
             continue
-        decided = st.wins + st.losses
-        wr = (st.wins / decided) if decided else 0.0
         click.echo(
-            f"  {s.name}: uses={st.uses} wins={st.wins} losses={st.losses} "
-            f"win_rate={wr:.0%} weight={skill_stats.decay_weight(s.name):.2f}"
+            f"  {row['name']}: uses={row['uses']} wins={row['wins']} losses={row['losses']} "
+            f"win_rate={row['win_rate']:.0%} weight={row['weight']:.2f}"
         )
 
 
@@ -5937,6 +5857,17 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
             "errors": {"verification": verify_error},
         }
 
+    if isinstance(ctx.obj, dict):
+        # An in-process caller (the dashboard) reads the outcome here rather
+        # than parsing this command's output.
+        ctx.obj["erase_outcome"] = {
+            "receipt_id": erasure_id,
+            "durable_proof": bool(durable_erasure_proof),
+            "closure_failures": list(closure_failures),
+            "clean": bool(verification.get("clean")),
+            "residual": dict(verification.get("residual") or {}),
+            "indeterminate": bool(verification.get("indeterminate")),
+        }
     click.echo(
         f"erased {len(convs)} conversation(s), {removed_turns} turn(s), "
         f"{len(goal_ids)} goal(s) and all linked rows, "
@@ -6265,18 +6196,7 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
         )
         click.confirm("Proceed?", abort=True)
 
-    def _prune(world) -> tuple[int, int, int]:
-        convs = world.prune_conversations(idle_for_seconds=days * 24 * 3600)
-        events = world.prune_goal_events(
-            older_than_seconds=events_days * 24 * 3600
-        )
-        # Twilio dedup rows accumulate one-per-webhook forever; reap after
-        # 30 days (the retry window is minutes so this is generous).
-        dedup = world.prune_processed_messages(
-            older_than_seconds=30 * 24 * 3600
-        )
-        return int(convs), int(events), int(dedup)
-
+    from ..records_gc import prune_world, sweep_workspaces
     from ..world_model import close_world_if_owned
     from ..world_model_backends import is_postgres_configured
 
@@ -6284,7 +6204,7 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
     # implicit delete-all authority. Routine GC fans out through each explicit
     # roster tenant; a true global purge requires a separate purpose-built API.
     if is_postgres_configured():
-        from ..paths import current_tenant_id, tenant_scope
+        from ..paths import current_tenant_id
         if current_tenant_id() is None:
             from ..tenant.registry import list_tenants
             try:
@@ -6298,17 +6218,11 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
                     "refusing unbound Postgres GC: bind a tenant or provision "
                     "the tenant roster; global delete is not implicit"
                 )
-            convs = events = dedup = 0
-            for record in tenants:
-                with tenant_scope(tenant=record.id):
-                    world = open_world()
-                    try:
-                        c, e, d = _prune(world)
-                    finally:
-                        close_world_if_owned(world)
-                convs += c
-                events += e
-                dedup += d
+            rows = sweep_workspaces(tenants, days=days, events_days=events_days,
+                                    open_world=open_world)
+            convs = sum(row["conversations"] for row in rows)
+            events = sum(row["activity"] for row in rows)
+            dedup = sum(row["duplicate_checks"] for row in rows)
             click.echo(
                 f"pruned {convs} conversation(s), {events} goal_event row(s), "
                 f"{dedup} processed-message row(s) across {len(tenants)} tenant(s)"
@@ -6317,7 +6231,7 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
 
     world = open_world(ctx.obj["db"])
     try:
-        convs, events, dedup = _prune(world)
+        convs, events, dedup = prune_world(world, days=days, events_days=events_days)
     finally:
         close_world_if_owned(world)
     click.echo(
@@ -6418,7 +6332,7 @@ def watch(ctx, path: str, run: bool, max_dollars: float) -> None:
 
         if run:
             # Don't sys.exit in the watch loop: just skip this marker and continue.
-            selected_model = ctx.obj["model"] or _default_model()
+            selected_model = _cli_model(ctx, "orchestrator")
             try:
                 from ..config import load_config
                 from ..operator_preflight import _routed_configuration_missing
@@ -6491,7 +6405,7 @@ def _require_day_opt(day: str | None) -> None:
 
 
 @audit.command("tail")
-@click.option("-n", "--num", default=50, type=int, help="Lines to tail.")
+@click.option("-n", "--num", default=50, type=click.IntRange(0, 10000), help="Lines to tail (bounded to 10000).")
 @click.option("--day", default=None, help="YYYY-MM-DD (default: today).")
 def audit_tail(num: int, day: str | None) -> None:
     """Print the last N audit events."""
@@ -6499,8 +6413,12 @@ def audit_tail(num: int, day: str | None) -> None:
 
     _require_day_opt(day)
     from ..audit import default_audit_log
-    for ev in default_audit_log().tail(num, day=day):
+    from ..audit.segments import ReadReport
+    report = ReadReport()
+    for ev in default_audit_log().tail(num, day=day, report=report):
         click.echo(_json.dumps(ev, default=str))
+    if report.failures:
+        raise click.ClickException(f"audit tail is {report.state}; this is not complete evidence")
 
 
 @audit.command("grep")
@@ -6885,6 +6803,15 @@ def audit_rotate_key() -> None:
                "'maverick serve' to sign new entries with it.")
 
 
+def _require_safe_audit_destination(path, tenant):
+    from ..audit.export import validate_export_destination
+
+    try:
+        validate_export_destination(path, tenant=tenant)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @audit.command("export")
 @click.option("--format", "fmt", type=click.Choice(["json", "cef"]), default="json",
               help="Output format for SIEM ingestion (default: json).")
@@ -6899,9 +6826,12 @@ def audit_rotate_key() -> None:
               help="Tenant whose audit dir to export (default: active/none).")
 @click.option("-o", "--output", "output", default=None, type=click.Path(),
               help="Write to FILE (mode 0600; may contain PII). Default: stdout.")
+@click.option("--verify", is_flag=True, help="Verify selected segment signatures and chains before export; anchors/checkpoints require audit verify/binder.")
+@click.option("--read-report", default=None, type=click.Path(), help="Write a separate JSON read-coverage receipt; raw event rows are unchanged.")
 def audit_export(
     fmt: str, day: str | None, all_days: bool, since: str | None,
     until: str | None, tenant: str | None, output: str | None,
+    verify: bool = False, read_report: str | None = None,
 ) -> None:
     """Export the audit log as JSONL or ArcSight CEF for a SIEM.
 
@@ -6943,10 +6873,34 @@ def audit_export(
         sys.exit(2)
 
     from ..audit.export import audit_event_paths, iter_audit_events, to_cef, to_jsonl
+    from ..audit.segments import ReadReport
+
+    coverage = ReadReport()
+    source_paths = audit_event_paths(day=day, all_days=all_days, since=since, until=until, tenant=tenant)
+    if read_report:
+        receipt_path = _Path(read_report)
+        _require_safe_audit_destination(receipt_path, tenant)
+        for protected in [*source_paths, *([_Path(output)] if output else [])]:
+            if (receipt_path.resolve(strict=False) == protected.resolve(strict=False)
+                    or (receipt_path.exists() and protected.exists() and _os.path.samefile(receipt_path, protected))):
+                raise click.ClickException("read report must not overwrite an audit source or event export")
+
+    def finish_report():
+        if read_report:
+            import json
+
+            from ..file_lock import atomic_write_text
+            atomic_write_text(_Path(read_report), json.dumps(coverage.as_dict(), sort_keys=True) + "\n")
+        if coverage.failures:
+            click.echo(f"WARNING: audit export is {coverage.state}; {coverage.failures} read/verification failure(s). This is not complete evidence.", err=True)
+            raise click.exceptions.Exit(1)
+        if verify:
+            click.echo(f"audit read: {coverage.state}; segment chains only; anchors/checkpoints not verified", err=True)
 
     render = to_cef if fmt == "cef" else to_jsonl
     lines = (render(ev) for ev in iter_audit_events(
         day=day, all_days=all_days, since=since, until=until, tenant=tenant,
+        report=coverage, verify=verify,
     ))
 
     if output:
@@ -6962,6 +6916,7 @@ def audit_export(
                 raise click.ClickException(
                     "refusing to write audit export over a source audit log file"
                 )
+        _require_safe_audit_destination(output_path, tenant)
 
         # Private from creation on POSIX *and* Windows: os.open(..., 0o600)
         # only adjusts POSIX mode bits and can inherit a broad Windows DACL.
@@ -6979,6 +6934,7 @@ def audit_export(
             click.echo("no audit events to export", err=True)
         else:
             click.echo(f"exported {n} event(s) to {output}", err=True)
+        finish_report()
         return
 
     n = 0
@@ -6987,6 +6943,7 @@ def audit_export(
         n += 1
     if n == 0:
         click.echo("no audit events to export", err=True)
+    finish_report()
 
 
 @audit.command("forward")
@@ -7064,6 +7021,9 @@ def audit_forward(
 
     from ..audit import forwarder
     from ..audit.export import iter_audit_events, to_cef, to_jsonl
+    from ..audit.segments import ReadReport
+
+    coverage = ReadReport()
 
     # Validate the destination up front so a typo fails before we read the log.
     try:
@@ -7075,10 +7035,13 @@ def audit_forward(
     render = to_cef if fmt == "cef" else to_jsonl
     lines = (render(ev) for ev in iter_audit_events(
         day=day, all_days=all_days, since=since, until=until, tenant=tenant,
+        report=coverage,
     ))
 
     if dry_run:
         n = sum(1 for _ in lines)
+        if coverage.failures:
+            raise click.ClickException(f"audit read is {coverage.state}; forwarding would omit unreadable evidence")
         click.echo(f"dry-run: {n} event(s) would ship to {dest}", err=True)
         return
 
@@ -7087,6 +7050,8 @@ def audit_forward(
     except Exception as e:
         click.echo(f"ERROR: SIEM forward failed: {e}", err=True)
         sys.exit(1)
+    if coverage.failures:
+        raise click.ClickException(f"audit read is {coverage.state}; {sent} event(s) sent, but forwarding is incomplete")
     if sent == 0:
         click.echo("no audit events to forward", err=True)
     else:
@@ -7153,25 +7118,44 @@ def audit_worm_verify() -> None:
 
 @main.command()
 @click.option("--reason", default="manual halt", help="Why you're halting.")
-def halt(reason: str) -> None:
-    """Halt all in-flight goals by writing the HALT file."""
-    from ..killswitch import _halt_file_path
+@click.option("--json", "json_output", is_flag=True, help="Return a checked local halt-file acknowledgement.")
+def halt(reason: str, json_output: bool = False) -> None:
+    """Request a local halt at upcoming execution checkpoints."""
+    import json
+
+    from ..killswitch import _halt_file_generation, _halt_file_path
     p = _halt_file_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(reason + "\n")
-    click.echo(f"halt set: {p}")
+    if _halt_file_generation(p) is None:
+        raise click.ClickException("Local halt-file state was not confirmed; review before retrying.")
+    if json_output:
+        click.echo(json.dumps({"command": "halt", "acknowledged": True,
+                               "halt_file_present": True, "scope": "local", "work_stopped": False}))
+    else:
+        click.echo(f"halt set: {p}")
 
 
 @main.command("unhalt")
-def unhalt() -> None:
+@click.option("--json", "json_output", is_flag=True, help="Return a checked local halt-file acknowledgement.")
+def unhalt(json_output: bool = False) -> None:
     """Remove the HALT file to allow goals to run again."""
-    from ..killswitch import _halt_file_path
+    import json
+
+    from ..killswitch import _halt_file_generation, _halt_file_path
     p = _halt_file_path()
     if p.exists():
         p.unlink()
-        click.echo(f"cleared: {p}")
+        message = f"cleared: {p}"
     else:
-        click.echo(f"no halt file at {p}")
+        message = f"no halt file at {p}"
+    if _halt_file_generation(p) is not None:
+        raise click.ClickException("Local halt-file state was not confirmed; review before retrying.")
+    if json_output:
+        click.echo(json.dumps({"command": "unhalt", "acknowledged": True,
+                               "halt_file_present": False, "scope": "local", "work_stopped": False}))
+    else:
+        click.echo(message)
 
 
 # ----- Cost / export / logs --------------------------------------------
@@ -7257,21 +7241,14 @@ def export_goal(ctx, goal_id: int, output: str | None) -> None:
     was logged to events.
     """
     import json as _json
+
+    from ..goal_bundle import build_goal_bundle
     world = open_world(ctx.obj["db"])
     try:
-        goal = world.get_goal(goal_id)
-        if goal is None:
+        bundle = build_goal_bundle(world, goal_id)
+        if bundle is None:
             click.echo(f"goal {goal_id} not found", err=True)
             sys.exit(2)
-        events = world.goal_events(goal_id, limit=10_000)
-        episodes = world.list_episodes(limit=200, goal_id=goal_id)
-        from dataclasses import asdict
-        bundle = {
-            "v": 1,
-            "goal": asdict(goal),
-            "events": [asdict(e) for e in events],
-            "episodes": [asdict(e) for e in episodes],
-        }
     finally:
         world.close()
     out_path = Path(output) if output else Path(f"goal-{goal_id}.json")
@@ -7338,7 +7315,9 @@ def _soc2_posture_ready(evidence) -> bool:
 # so every shared helper and `main` is defined before the submodule decorators
 # run (@main.group/@main.command register onto `main` on import).
 from . import (  # noqa: E402,F401
+    _a2a_groups,
     _agent_control_plane_groups,
+    _code_groups,
     _codec_groups,
     _compliance_groups,
     _connector_groups,
@@ -7346,7 +7325,10 @@ from . import (  # noqa: E402,F401
     _ekko_groups,
     _external_agent_groups,
     _finance_groups,
+    _flow_operator_groups,
+    _flow_recipe_groups,
     _governed_execution_groups,
+    _immune_groups,
     _import_groups,
     _knowledge_groups,
     _learning_groups,
@@ -7356,6 +7338,14 @@ from . import (  # noqa: E402,F401
     _trust_groups,
     _voice_groups,
 )
+
+try:
+    from maverick_channels.maintenance_cli import channel_maintenance
+except ImportError:  # optional channels package
+    pass
+else:
+    main.add_command(channel_maintenance)
+
 
 if __name__ == "__main__":
     main()

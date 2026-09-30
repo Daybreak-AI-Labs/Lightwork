@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Knowledge access · Lightwork{% endblock %}
+{% block title %}Knowledge Access · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-knowledge-access.css">{% endblock %}
 {% block content %}
 <section class="ka-shell" id="knowledge-access"
@@ -10,42 +10,29 @@
       data-can-review="{{ 'true' if knowledge_can_review else 'false' }}">
   <header class="ka-hero">
     <div>
-      <p class="eyebrow">Knowledge governance</p>
-      <h1>Find knowledge you can use now</h1>
-      <p class="ka-lede">Every result rechecks the exact source version, approval, current rights,
-        freshness, consent, and lineage. If one of those checks changes, Lightwork withholds the
-        result from direct reads, cache hits, exports, and queued work.</p>
+      <p class="eyebrow">Knowledge</p>
+      <h1 class="page-title">Find knowledge you can use now</h1>
+      <p class="ka-lede">Only sources you're currently allowed to use appear here. Lightwork checks each one again every time you open it.</p>
     </div>
-    <div class="ka-boundary" aria-label="Use boundary">
+    <div class="ka-boundary" aria-label="What permission covers">
       <strong>Permission stays specific</strong>
-      <span>Access to search, deploy, or export a source does not grant permission to train on it.</span>
+      <span>Being allowed to search, use or download a source does not mean it may be used to train AI models.</span>
     </div>
   </header>
 
   <p class="ka-status" id="ka-status" role="status" aria-live="polite" tabindex="-1">
-    Choose a purpose and search this workspace’s currently eligible sources.
+    Choose what you'll use the information for, then search.
   </p>
 
-  <section class="panel ka-evidence" aria-labelledby="ka-evidence-heading">
-    <div>
-      <p class="eyebrow">Control evidence</p>
-      <h2 id="ka-evidence-heading">Current authority travels with every result</h2>
-      <p class="muted">Search and detail bind the named user, workspace, purpose, requested use,
-        exact registry version, source checksum, and approval evidence. Downloads add a deterministic
-        authority binding for the selected versions.</p>
-    </div>
-    <div class="ka-qualification">
-      <strong>Qualification status</strong>
-      <span>Local control checks run on every request. External store, installed-system, and customer
-        acceptance remain qualification pending until exercised in that environment.</span>
-      <a class="btn" href="/research">Register or review exact source versions</a>
-    </div>
-  </section>
+  <details class="panel">
+    <summary>About this page's safeguards</summary>
+    <p class="muted">Each result is checked against the exact version of its source, its approval, current rights, how fresh it is, consent and where it came from. If any of those change, the result is hidden from searches, downloads and queued work. <a href="/research">Add or review sources</a></p>
+  </details>
 
   <section class="panel" aria-labelledby="ka-search-heading">
     <div class="section-head">
       <h2 id="ka-search-heading">Search current sources</h2>
-      <span class="muted">Eligible versions only</span>
+      <span class="muted">Sources you can use now</span>
     </div>
     <form id="ka-search-form" class="ka-form" autocomplete="off">
       <label class="ka-field ka-field--wide" for="ka-query">
@@ -54,27 +41,25 @@
                placeholder="Policy, customer evidence, or source name">
       </label>
       <label class="ka-field" for="ka-purpose">
-        Intended use
-        <input class="input" id="ka-purpose" name="purpose" maxlength="64"
-               pattern="[a-z][a-z0-9_.\-]{0,63}" value="product_research" required>
+        What you'll use it for
+        <select class="select" id="ka-purpose" name="purpose" required>
+          {% for code in knowledge_purposes %}<option value="{{ code }}"{% if loop.first %} selected{% endif %}>{{ code | humanize }}</option>{% else %}<option value="">No approved uses yet — add sources first</option>{% endfor %}
+        </select>
       </label>
-      <label class="ka-field ka-field--small" for="ka-limit">
-        Results
-        <input class="input" id="ka-limit" name="limit" type="number" min="1" max="50" value="20" required>
-      </label>
+      <input type="hidden" id="ka-limit" name="limit" value="20">
       <div class="ka-actions ka-field--wide">
         <button class="btn btn--primary" id="ka-search" type="submit">Search current sources</button>
-        <button class="btn" id="ka-export" type="button" disabled>Export these results</button>
+        <button class="btn" id="ka-export" type="button" disabled>Download these results</button>
       </div>
     </form>
-    <p class="muted ka-note" id="ka-search-note">No source content is shown until its current use authority passes.</p>
+    <p class="muted ka-note" id="ka-search-note">A source's content is shown only after it passes its current checks.</p>
     <div class="ka-results" id="ka-results" aria-live="polite"></div>
   </section>
 
   <section class="panel ka-detail-panel" id="ka-detail-panel" aria-labelledby="ka-detail-heading" hidden>
     <div class="section-head">
       <h2 id="ka-detail-heading" tabindex="-1">Source detail</h2>
-      <span class="badge approved">Current use eligible</span>
+      <span class="badge approved">You can use this now</span>
     </div>
     <div id="ka-detail"></div>
   </section>
@@ -83,11 +68,11 @@
     <div class="panel">
       <div class="section-head">
         <h2 id="ka-request-heading">Request a correction or removal</h2>
-        <span class="muted">Exact source version</span>
+        <span class="muted">For one source</span>
       </div>
       {% if knowledge_can_review %}
       <form id="ka-request-form" class="ka-form" aria-labelledby="ka-request-heading" autocomplete="off">
-        <p class="ka-selected" id="ka-request-source">Open a source detail to select its exact version.</p>
+        <p class="ka-selected" id="ka-request-source">Open a source with View details, then come back here.</p>
         <label class="ka-field" for="ka-request-type">
           Request
           <select class="input" id="ka-request-type" name="request_type" required>
@@ -106,17 +91,16 @@
         </label>
         <label class="ka-check ka-field--wide">
           <input type="checkbox" name="confirm" required>
-          <span>I reviewed the exact source version and the affected derivative list.</span>
+          <span>I checked this source and the other material that depends on it.</span>
         </label>
         <div class="ka-actions ka-field--wide">
           <button class="btn btn--primary" id="ka-submit-request" type="submit" disabled>Submit request</button>
         </div>
       </form>
       {% else %}
-      <p class="muted" id="ka-request-locked">A named installation administrator can submit and decide source-rights requests for this workspace.</p>
+      <p class="muted" id="ka-request-locked">Only an administrator can send or decide correction and removal requests. Ask your administrator if something needs to change.</p>
       {% endif %}
-      <p class="ka-honesty">Deleting or excluding a raw source does not erase its influence from learned weights.
-        Affected models require a documented retirement or retraining assessment.</p>
+      <p class="ka-honesty">Removing a source does not remove what AI models already learned from it. Those models need to be reviewed for retirement or retraining.</p>
     </div>
 
     <div class="panel">
@@ -127,16 +111,25 @@
       <div id="ka-requests" class="ka-requests" aria-live="polite">
         <p class="muted">Loading current request status…</p>
       </div>
-      <p class="muted">If an approval was interrupted after source retirement began, the applying
-        card provides an exact-replay recovery action. Recovery accepts only the same reviewer and
-        decision-evidence digest.</p>
-      <p class="muted">Deletion requests can carry an evidence-bound retention hold with its own
-        identity, basis, expiry, and recorded release. An active hold keeps the raw record preserved
-        while the exact source version can still be retired from new use.</p>
+      <p class="muted">A deletion request can be put on a legal hold. While the hold lasts, the original record is kept, but the source can still be stopped from new use.</p>
     </div>
+  </section>
+
+  <section class="panel" id="ka-library" aria-labelledby="ka-library-heading" data-can-admin="{{ 'true' if knowledge_can_review else 'false' }}">
+    <div class="section-head">
+      <h2 id="ka-library-heading">Knowledge library</h2>
+      <button class="btn btn--ghost" type="button" id="ka-library-refresh">Refresh</button>
+    </div>
+    <p class="muted" id="ka-library-status" role="status" aria-live="polite">Loading the library…</p>
+    <div class="ka-table"><table><caption class="sr-only">Knowledge collections in this workspace</caption>
+      <thead><tr><th scope="col">Collection</th><th scope="col">Pieces of text</th><th scope="col">Actions</th></tr></thead>
+      <tbody id="ka-library-collections"></tbody></table></div>
+    <h3>Starter content</h3>
+    <p class="muted">Public summaries of regulations (such as GDPR and the EU AI Act) that assistants can cite. Loading again replaces, never duplicates.</p>
+    <ul id="ka-library-starters"></ul>
   </section>
 
   <noscript><p class="panel">JavaScript is required to revalidate and display governed knowledge sources.</p></noscript>
 </section>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-knowledge-access.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-access-state.js" defer></script><script src="/static/lightwork-knowledge-access.js" defer></script><script src="/static/lightwork-knowledge-library.js" defer></script>{% endblock %}

@@ -5,23 +5,23 @@
   {% from "_integration_readiness.html" import integration_readiness %}
   {% set configured_providers = providers | selectattr('configured') | list %}
   {% call hero('Administration', 'Settings',
-               subtitle='Configure Lightwork',
-               lede='Appearance, models, spend, providers, and platform
-                     capabilities — each section saves on its own and applies
-                     on the next run.') %}
+               subtitle='Set up Lightwork',
+               lede='Appearance, AI models, spending, connections and features.
+                     Each section saves on its own and applies to the next task.') %}
     {{ state('Current state',
-             configured_providers | length ~ ' of ' ~ providers | length ~ ' providers configured',
-             badge='configured' if configured_providers else 'add a provider key',
+             configured_providers | length ~ ' of ' ~ providers | length ~ ' AI providers connected',
+             badge='Connected' if configured_providers else 'Add a provider key',
              badge_class='ok' if configured_providers else 'warn',
-             copy='Saved keys still need a successful connection test.
-                   Keys are stored securely and never shown again.') }}
+             copy='Test each connection after saving a key. Keys are stored securely and never shown again.') }}
   {% endcall %}
 
   {% if saved %}
-  <div class="panel" role="status"
-       style="border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4);">
+  <div class="panel settings-saved" role="status">
     <strong>Saved.</strong> {{ saved }}
   </div>
+  {% endif %}
+  {% if notice %}
+  <div class="panel settings-saved" role="status" id="settings-notice">{{ notice }}</div>
   {% endif %}
 
   <section class="settings-index" aria-labelledby="settings-index-title"
@@ -37,44 +37,46 @@
     <div class="settings-tabs" role="tablist" aria-label="Settings sections">
       <button class="btn" type="button" role="tab" data-settings-tab="general">General</button>
       <button class="btn" type="button" role="tab" data-settings-tab="models">Models</button>
-      <button class="btn" type="button" role="tab" data-settings-tab="integrations">Integrations</button>
-      <button class="btn" type="button" role="tab" data-settings-tab="controls">Controls</button>
+      <button class="btn" type="button" role="tab" data-settings-tab="integrations">Connections</button>
+      <button class="btn" type="button" role="tab" data-settings-tab="controls">Features</button>
       <button class="btn" type="button" role="tab" data-settings-tab="access">Access</button>
+      <button class="btn" type="button" role="tab" data-settings-tab="maintenance">Maintenance</button>
     </div>
     <p class="muted" id="settings-filter-status" role="status" aria-live="polite"></p>
+    <p class="settings-all-link">
+      <a class="btn btn--ghost" href="/settings/all">All settings</a>
+      <span class="muted">Every other product setting, from safety and privacy to data retention and alerts.</span>
+    </p>
   </section>
 
   <div id="settings-sections">
   <div class="section-head" data-settings-group="general"><h2>Appearance</h2></div>
   <div class="panel" data-settings-group="general">
-    <p class="muted" style="margin-top: 0;">
-      Theme, density and font for this browser. Applies when you save.
-    </p>
-    <form method="get" action="/settings"
-          style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
+    <p class="muted settings-lead">Theme, density and font for this browser. Applies when you save.</p>
+    <form method="get" action="/settings" class="settings-row-form">
       <input type="hidden" name="saved" value="appearance" />
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
+      <label class="settings-field">
         <span>Theme</span>
-        <select class="ctl" name="theme">
+        <select class="select" name="theme">
           <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
           <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
           <option value="solarized" {% if theme == 'solarized' %}selected{% endif %}>Solarized</option>
           <option value="hicontrast" {% if theme == 'hicontrast' %}selected{% endif %}>High contrast</option>
           {% for name in custom_theme_names %}
-          <option value="{{ name }}" {% if theme == name %}selected{% endif %}>{{ name }}</option>
+          <option value="{{ name }}" {% if theme == name %}selected{% endif %}>{{ name|humanize }}</option>
           {% endfor %}
         </select>
       </label>
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
+      <label class="settings-field">
         <span>Density</span>
-        <select class="ctl" name="density">
+        <select class="select" name="density">
           <option value="comfortable" {% if density == 'comfortable' %}selected{% endif %}>Comfortable</option>
           <option value="compact" {% if density == 'compact' %}selected{% endif %}>Compact</option>
         </select>
       </label>
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
+      <label class="settings-field">
         <span>Font</span>
-        <select class="ctl" name="font">
+        <select class="select" name="font">
           <option value="default" {% if font == 'default' %}selected{% endif %}>{{ t('font.default') }}</option>
           <option value="dyslexic" {% if font == 'dyslexic' %}selected{% endif %}>{{ t('font.dyslexic') }}</option>
         </select>
@@ -85,90 +87,108 @@
 
   <div class="section-head" data-settings-group="models"><h2>Models</h2></div>
   <div class="panel" data-settings-group="models">
-    <p class="muted" style="margin-top: 0;">
-      Lightwork offers every model your saved provider keys can reach. Each
-      configured provider's own model list is read and cached; the shipped
-      catalog fills in the rest. Nothing changes until you save a choice below.
+    <p class="muted settings-lead">
+      Lightwork offers every model your saved provider keys can reach, plus its
+      built-in list. Nothing changes until you save a choice below.
     </p>
     <div class="models-overview" role="group" aria-label="Model availability">
       <div class="stat"><span class="num">{{ configured_count }}</span><span class="muted">provider{{ '' if configured_count == 1 else 's' }} with a key</span></div>
-      <div class="stat"><span class="num">{{ offered_specs|length }}</span><span class="muted">model{{ '' if offered_specs|length == 1 else 's' }} offered</span></div>
-      <div class="stat"><span class="num">{{ live_count }}</span><span class="muted">live list{{ '' if live_count == 1 else 's' }}{% if last_refresh_ago %} · refreshed {{ last_refresh_ago }}{% endif %}</span></div>
+      <div class="stat"><span class="num">{{ offered_specs|length }}</span><span class="muted">model{{ '' if offered_specs|length == 1 else 's' }} available</span></div>
+      <div class="stat"><span class="num">{{ live_count }}</span><span class="muted">up-to-date list{{ '' if live_count == 1 else 's' }}{% if last_refresh_ago %} · refreshed {{ last_refresh_ago }}{% endif %}</span></div>
       <form method="post" action="/settings/models/discover" class="models-overview-action">
         <button type="submit" class="btn btn--primary"{% if not discovery_enabled or not configured_count %} disabled aria-disabled="true"{% endif %}>Refresh model lists</button>
       </form>
     </div>
     {% if not discovery_enabled %}
-    <p class="muted">Live model discovery is switched off (<code>[models] discovery</code> or <code>MAVERICK_MODEL_DISCOVERY</code>), so the pickers show the shipped catalog only. Any model id can still be typed.</p>
+    <div class="settings-callout" data-settings-search-item>
+      <p>Automatic model lists are turned off, so only Lightwork's built-in model list is shown.</p>
+      {% if discovery_locked %}
+      <p class="muted">This is controlled by your installation. Ask whoever installed Lightwork to change it.</p>
+      {% else %}
+      <form method="post" action="/settings/models/discovery">
+        <input type="hidden" name="enabled" value="on" />
+        <button type="submit" class="btn btn--primary">Turn on automatic model lists</button>
+      </form>
+      {% endif %}
+    </div>
     {% elif not configured_count %}
     <p class="muted">No provider key is saved yet. Add one under <a href="#settings-integrations" data-settings-jump="integrations">Provider keys</a> and its models will appear here.</p>
     {% endif %}
+    {% set status_words = {'live': 'Up to date', 'unavailable': 'Could not check', 'unconfigured': 'No key', 'pending': 'Not checked yet', 'disabled': 'Built-in list', 'unsupported': 'Built-in list', 'catalog': 'Added by your installation'} %}
     <ul class="models-status" aria-label="Model list status by provider">
       {% for g in model_groups if g.name != 'custom' %}
       <li data-settings-search-item>
         <span class="models-status-label">{{ g.label }}</span>
-        <span class="badge {{ 'active' if g.status == 'live' else ('blocked' if g.status == 'unavailable' else '') }}">{{ {'live': 'live', 'unavailable': 'failed', 'unconfigured': 'no key', 'pending': 'not checked', 'disabled': 'off', 'unsupported': 'catalog'}[g.status] }}</span>
-        <span class="muted">{{ g.detail }}{% if g.fetched_ago %} · refreshed {{ g.fetched_ago }}{% endif %}{% if g.stale %} · stale, refresh to update{% endif %}</span>
+        <span class="badge {{ 'active' if g.status == 'live' else ('blocked' if g.status == 'unavailable' else '') }}">{{ status_words.get(g.status, 'Built-in list') }}</span>
+        <span class="muted">
+          {%- if g.status == 'live' %}{{ g.live_count }} model{{ '' if g.live_count == 1 else 's' }} available with your key
+          {%- elif g.status == 'unavailable' %}The provider did not answer. Try refreshing later.
+          {%- elif g.status == 'unconfigured' %}Add a key under Provider keys to use this provider.
+          {%- elif g.status == 'pending' %}Refresh to see the models this key can reach.
+          {%- else %}Showing Lightwork's built-in list for this provider.{% endif %}
+          {%- if g.fetched_ago %} · refreshed {{ g.fetched_ago }}{% endif %}{% if g.stale %} · out of date, refresh to update{% endif %}</span>
       </li>
       {% endfor %}
     </ul>
+    {% if discovery_enabled and not discovery_locked %}
+    <form method="post" action="/settings/models/discovery" class="settings-inline-form">
+      <input type="hidden" name="enabled" value="off" />
+      <button type="submit" class="btn btn--ghost">Turn off automatic model lists</button>
+    </form>
+    {% endif %}
   </div>
 
   <div class="section-head" data-settings-group="models"><h2>Default model</h2></div>
   <div class="panel" data-settings-group="models">
-    <p class="muted" style="margin-top: 0;">
-      Used by every role unless a role below overrides it. Pick from the models
-      your keys reach, or choose "Type a model id" for anything else — e.g.
-      <code>openai:gpt-5.4</code>, <code>ollama:llama-4-maverick</code>. Changes
-      apply on the next run.
+    <p class="muted settings-lead">
+      Used by every role unless a role below has its own model. Changes apply to
+      the next task. If a model is missing, refresh the model lists above.
     </p>
     {% if allowed_models %}
-    <p class="muted" style="margin-top: 0;">
-      An admin allow-list is active — pickers are limited to the
-      {{ allowed_models|length }} model(s) approved below.
+    <p class="muted settings-lead">
+      Only approved models are offered: {{ allowed_models|length }} model(s) approved below.
     </p>
     {% endif %}
     {% set pinned_typed = pinned_model and pinned_model not in offered_specs %}
     <form method="post" action="/settings/models" class="model-pick-form">
       <label class="model-pick">
         <span>Default model</span>
-        <select class="ctl" name="model" data-model-picker="default-model-custom" aria-label="Default model">
-          <option value=""{% if not pinned_model %} selected{% endif %}>Use server default</option>
+        <select class="select" name="model" data-model-picker="default-model-custom" aria-label="Default model">
+          <option value=""{% if not pinned_model %} selected{% endif %}>Lightwork's recommended model</option>
           {% for pg in picker_groups %}
           <optgroup label="{{ pg.label }}">
             {% for m in pg.options %}
-            <option value="{{ m.spec }}"{% if pinned_model == m.spec %} selected{% endif %}>{{ m.spec }}{% if m.live %} · live{% endif %}</option>
+            <option value="{{ m.spec }}"{% if pinned_model == m.spec %} selected{% endif %}>{{ m.spec|model_label }}{% if m.live %} · up to date{% endif %}</option>
             {% endfor %}
           </optgroup>
           {% endfor %}
-          <option value="{{ custom_marker }}"{% if pinned_typed %} selected{% endif %}>Type a model id…</option>
+          <option value="{{ custom_marker }}"{% if pinned_typed %} selected{% endif %}>Other model (advanced)…</option>
         </select>
       </label>
       <label class="model-pick" id="default-model-custom"{% if not pinned_typed %} hidden{% endif %}>
-        <span>Model id</span>
-        <input class="ctl" type="text" name="model_custom" value="{{ pinned_model if pinned_typed else '' }}" placeholder="provider:model-id" aria-label="Default model id" />
+        <span>Model name, exactly as your provider lists it</span>
+        <input class="input" type="text" name="model_custom" value="{{ pinned_model if pinned_typed else '' }}" aria-label="Default model name" />
       </label>
       <button type="submit" class="btn btn--primary">Save default</button>
     </form>
     {% if pinned_model %}
-    <p class="muted" style="margin-bottom: 0;">Currently pinned: <code>{{ pinned_model }}</code>. Choose "Use server default" and save to clear it.</p>
+    <p class="muted settings-foot">Current default: <strong>{{ pinned_model|model_label }}</strong>. Choose "Lightwork's recommended model" and save to go back.</p>
     {% endif %}
   </div>
 
-  <div class="section-head" data-settings-group="models"><h2>Per-role models</h2></div>
+  <div class="section-head" data-settings-group="models"><h2>Models for each role</h2></div>
   <div class="panel" data-settings-group="models">
-    <p class="muted" style="margin-top: 0;">
-      Give a role its own model — a strong model for the orchestrator, a cheap
-      one for the summarizer. "Use default" follows the default model above,
-      then the platform default. The Effective column is what each role will
-      actually use on the next run.
+    <p class="muted settings-lead">
+      Give a role its own model, for example a strong model for planning and a
+      cheaper one for summaries. "Use default" follows the default model above.
+      The last column shows what each role will use on the next task.
     </p>
     <form method="post" action="/settings/models/roles">
       <table>
         <thead><tr>
           <th scope="col">Role</th>
-          <th scope="col">Model override</th>
-          <th scope="col">Effective</th>
+          <th scope="col">Model</th>
+          <th scope="col">Will Use</th>
         </tr></thead>
         <tbody>
           {% for label, role, effective, override in role_models %}
@@ -177,46 +197,44 @@
             <td>{{ label }}</td>
             <td>
               <div class="model-pick-row">
-                <select class="ctl" name="{{ role }}" data-model-picker="{{ role }}-model-custom" aria-label="Model for {{ label }}">
+                <select class="select" name="{{ role }}" data-model-picker="{{ role }}-model-custom" aria-label="Model for {{ label }}">
                   <option value=""{% if not override %} selected{% endif %}>Use default</option>
                   {% for pg in picker_groups %}
                   <optgroup label="{{ pg.label }}">
                     {% for m in pg.options %}
-                    <option value="{{ m.spec }}"{% if override == m.spec %} selected{% endif %}>{{ m.spec }}{% if m.live %} · live{% endif %}</option>
+                    <option value="{{ m.spec }}"{% if override == m.spec %} selected{% endif %}>{{ m.spec|model_label }}{% if m.live %} · up to date{% endif %}</option>
                     {% endfor %}
                   </optgroup>
                   {% endfor %}
-                  <option value="{{ custom_marker }}"{% if typed %} selected{% endif %}>Type a model id…</option>
+                  <option value="{{ custom_marker }}"{% if typed %} selected{% endif %}>Other model (advanced)…</option>
                 </select>
-                <input class="ctl" type="text" id="{{ role }}-model-custom" name="{{ role }}_custom" value="{{ override if typed else '' }}" placeholder="provider:model-id" aria-label="Typed model id for {{ label }}"{% if not typed %} hidden{% endif %} />
+                <input class="input" type="text" id="{{ role }}-model-custom" name="{{ role }}_custom" value="{{ override if typed else '' }}" aria-label="Model name for {{ label }}, exactly as your provider lists it"{% if not typed %} hidden{% endif %} />
               </div>
             </td>
-            <td><code>{{ effective }}</code></td>
+            <td>{{ effective|model_label }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
-      <button type="submit" class="btn btn--primary" style="margin-top: var(--space-3);">Save per-role models</button>
+      <button type="submit" class="btn btn--primary settings-submit">Save role models</button>
     </form>
   </div>
 
-  <div class="section-head" data-settings-group="models"><h2>Allowed models</h2></div>
+  <div class="section-head" data-settings-group="models"><h2>Approved models</h2></div>
   <div class="panel" data-settings-group="models">
-    <p class="muted" style="margin-top: 0;">
-      Restrict which models anyone may use. Tick the ones you approve and save:
-      the pickers above then offer only those, and <strong>every agent is
-      hard-capped to them</strong> — a model pinned anywhere else cannot run
-      outside this list. Leave every box unticked to allow all models. Models
-      marked <span class="badge active">live</span> were reported by the
-      provider for your key; the rest come from the shipped catalog. Changes
-      apply on the next run.
+    <p class="muted settings-lead">
+      Limit which models anyone may use. Tick the ones you approve and save:
+      the pickers above then offer only those, and <strong>no task can use a
+      model outside this list</strong>. Leave every box unticked to allow all
+      models. Models marked <span class="badge active">Up to date</span> were
+      confirmed by the provider for your key.
     </p>
     <form method="post" action="/settings/models/allowed">
       {% for g in model_groups %}
       <details data-model-group="{{ g.name }}"{% if g.configured %} open{% endif %} class="model-group">
         <summary>
-          <span class="model-group-title">{{ g.label }}</span>
-          <span class="muted">{{ g.models|length }} model{{ '' if g.models|length == 1 else 's' }}{% if g.live_count %} · {{ g.live_count }} live{% endif %}{% if not g.configured and g.name != 'custom' %} · no key{% endif %}</span>
+          <span class="model-group-title">{{ 'Added by your installation' if g.name == 'custom' else g.label }}</span>
+          <span class="muted">{{ g.models|length }} model{{ '' if g.models|length == 1 else 's' }}{% if g.live_count %} · {{ g.live_count }} up to date{% endif %}{% if not g.configured and g.name != 'custom' %} · no key{% endif %}</span>
         </summary>
         {% if g.models %}
         <div class="model-group-actions">
@@ -226,218 +244,235 @@
         {% endif %}
         {% for m in g.models %}
         <label class="model-row" data-settings-search-item data-model-source="{{ 'live' if m.live else 'catalog' }}">
-          <span><code>{{ m.spec }}</code>{% if m.live %} <span class="badge active">live</span>{% endif %}</span>
+          <span>{{ m.spec|model_label }}{% if m.live %} <span class="badge active">Up to date</span>{% endif %}</span>
           <input type="checkbox" name="models" value="{{ m.spec }}"{% if m.spec in allowed_models %} checked{% endif %} />
         </label>
         {% endfor %}
         {% if not g.models %}<p class="muted">No models known for this provider yet.</p>{% endif %}
       </details>
       {% endfor %}
-      <p style="margin-bottom: 0; margin-top: var(--space-3);">
-        <button type="submit" class="btn btn--primary">Save allowed models</button>
-        {% if allowed_models %}<span class="muted" style="margin-left: var(--space-3);">{{ allowed_models|length }} model(s) allowed. Untick all and save to allow every model.</span>{% endif %}
+      <p class="settings-foot">
+        <button type="submit" class="btn btn--primary">Save approved models</button>
+        {% if allowed_models %}<span class="muted">{{ allowed_models|length }} model(s) approved. Untick all and save to allow every model.</span>{% endif %}
       </p>
     </form>
   </div>
 
-  <div class="section-head" data-settings-group="models"><h2 id="voice-model-setup">Optional local voice</h2></div>
+  <div class="section-head" data-settings-group="models"><h2 id="voice-model-setup">Voice dictation on this computer</h2></div>
   <section class="panel voice-setup" data-settings-group="models" aria-labelledby="voice-model-setup" data-draft-recovery="off">
-    <p>Prepare voice dictation on the computer running Lightwork. Model files are shared across its workspaces. Your speech-provider preference stays the same.</p>
+    <p>Get voice dictation ready on the computer running Lightwork. The voice model is shared by all its workspaces. Your speech-provider choice stays the same.</p>
     <p id="voice-setup-policy" class="muted"></p>
-    <p><strong>Configured speech-to-text model:</strong> <span id="voice-setup-model">Checking…</span></p>
+    <p><strong>Voice model:</strong> <span id="voice-setup-model">Checking…</span></p>
     <p id="voice-setup-model-details"></p>
-    <details><summary>Download details</summary><p id="voice-setup-technical"></p></details>
+    <details><summary>Technical details (for your IT team)</summary><p id="voice-setup-technical"></p></details>
     <p id="voice-setup-readiness" class="muted"></p>
-    <label class="voice-setup-confirm" for="voice-setup-confirm"><input id="voice-setup-confirm" type="checkbox" aria-describedby="voice-setup-model-details" disabled> I authorize checking the existing model file or downloading it from the stated source if needed, using the stated disk space.</label>
+    <label class="voice-setup-confirm" for="voice-setup-confirm"><input id="voice-setup-confirm" type="checkbox" aria-describedby="voice-setup-model-details" disabled> I agree to check the voice model already on this computer, or download it from the source shown, using the disk space shown.</label>
     <div class="voice-setup-actions">
-      <button class="btn btn--primary" id="voice-setup-start" type="button" disabled>Check or download model</button>
-      <button class="btn" id="voice-setup-cancel" type="button" disabled>Cancel download</button>
-      <button class="btn" id="voice-setup-refresh" type="button">Refresh setup status</button>
+      <button class="btn btn--primary" id="voice-setup-start" type="button" disabled>Check or download voice model</button>
+      <button class="btn" id="voice-setup-cancel" type="button" disabled>Stop download</button>
+      <button class="btn" id="voice-setup-refresh" type="button">Refresh status</button>
     </div>
     <progress id="voice-setup-progress" aria-label="Voice model download progress" hidden></progress>
     <p id="voice-setup-progress-text" class="muted"></p>
-    <p id="voice-setup-status" role="status" aria-live="polite">Checking local voice setup…</p>
+    <p id="voice-setup-status" role="status" aria-live="polite">Checking voice setup…</p>
     <p><a class="btn" id="voice-setup-try" href="/chat" hidden>Try dictation in Chat</a></p>
-    <p class="muted">You can leave Settings and return to check progress. Lightwork verifies the downloaded file before use.</p>
+    <p class="muted">You can leave Settings and come back to check progress. Lightwork checks the downloaded file before using it.</p>
+    <p><a href="/settings/voice-unlock">Voice unlock: record your voice so spoken requests are checked against it</a></p>
   </section>
 
-  <div class="section-head" data-settings-group="general"><h2>Spend cap</h2></div>
+  <div class="section-head" data-settings-group="general"><h2>Spending per task</h2></div>
   <div class="panel" data-settings-group="general">
-    <p class="muted" style="margin-top: 0;">
-      The most a single goal may spend before Lightwork stops it. Changes
-      apply on the next run. Default is ${{ '%.2f'|format(default_budget) }}
-      per goal.
+    <p class="muted settings-lead">
+      Choose whether Lightwork stops a single task that goes over a set amount.
+      To limit what the whole workspace or each person spends per day or month, use
+      <a href="/spending-limits">Spending limits</a>.
     </p>
-    <form method="post" action="/settings/budget"
-          style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
-      <label style="display: flex; flex-direction: column; gap: var(--space-1); min-width: 14rem;">
-        <span>Max spend per goal (USD)</span>
-        <input class="ctl" type="number" name="max_dollars" min="0.01" step="0.5"
-               value="{% if budget is not none %}{{ '%.2f'|format(budget) }}{% endif %}"
-               placeholder="{{ '%.2f'|format(default_budget) }}" />
-      </label>
-      <button type="submit" class="btn btn--primary">Save cap</button>
+    {% set limit_mode = 'off' if not task_limits_enabled else ('amount' if budget is not none else 'default') %}
+    <form method="post" action="/settings/budget" class="settings-stack-form">
+      <fieldset class="settings-choice">
+        <legend>Stop tasks that go over a limit</legend>
+        <label><input type="radio" name="mode" value="disabled"{% if limit_mode == 'off' %} checked{% endif %} /> No limit for each task</label>
+        <label><input type="radio" name="mode" value="default"{% if limit_mode == 'default' %} checked{% endif %} /> Use your installation's standard limits</label>
+        <label><input type="radio" name="mode" value="configured"{% if limit_mode == 'amount' %} checked{% endif %} /> Stop a task when it has spent</label>
+        <label class="settings-field settings-amount">
+          <span>Amount per task (US dollars)</span>
+          <input class="input" type="number" name="max_dollars" min="0.01" step="0.5" inputmode="decimal"
+                 value="{% if budget is not none %}{{ '%.2f'|format(budget) }}{% endif %}"
+                 aria-describedby="task-limit-help" />
+        </label>
+      </fieldset>
+      <p class="muted" id="task-limit-help">
+        Turning the limit off keeps your saved amount for later. Workspace spending limits,
+        cancelling a task and the safety checks on each action still apply.
+      </p>
+      <p class="settings-foot"><button type="submit" class="btn btn--primary">Save task limit</button></p>
     </form>
-    {% if budget is not none %}
-    <p class="muted" style="margin-bottom: 0;">
-      Current cap: <code>${{ '%.2f'|format(budget) }}</code> per goal. Clear the field and save to use the default.
-    </p>
-    {% endif %}
+    <p class="muted settings-foot" role="note">Right now:
+      {% if limit_mode == 'off' %}tasks have no spending limit of their own.
+      {% elif limit_mode == 'amount' %}each task stops after spending ${{ '%.2f'|format(budget) }}.
+      {% else %}each task follows your installation's standard limits.{% endif %}</p>
   </div>
 
   <div class="section-head" data-settings-group="integrations"><h2>Provider keys</h2></div>
   <div class="panel" data-settings-group="integrations">
-    <p class="muted" style="margin-top: 0;">
-      Set an API key for at least one provider to run goals. Keys are sealed
-      on this server and never shown again. Each provider shows where its key
-      comes from; a key set at a higher level (workspace or operator) must be
-      changed there. Leave a field blank to keep the current value.
+    <p class="muted settings-lead">
+      Add a key from your AI provider's account page. You need at least one to
+      run tasks. Keys are stored securely and never shown again. Leave the field
+      blank to keep the key you already saved.
     </p>
     {% for p in providers %}
-    <div data-settings-search-item style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
-      <div style="min-width: 13rem; flex: 1 1 13rem;">
-        <div style="font-weight: var(--font-medium);">{{ p.label }}</div>
-        <div class="muted" style="font-size: var(--text-sm);">
-          {% if p.configured %}<span class="badge active">Configured</span> via {{ p.via }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
-          {% else %}not set — paste a key to enable this provider{% endif %}
-          {% if p.source_errors %}<div><span class="badge blocked">configuration source unreadable</span></div>{% endif %}
-          {% if not p.dashboard_can_set_api_key %}<div>The API key is managed elsewhere ({{ p.api_key_source }}); update it there.</div>{% endif %}
-          {% if p.base_url_field and not p.dashboard_can_set_base_url %}<div>The base URL is managed elsewhere ({{ p.base_url_source }}); update it there.</div>{% endif %}
+    <div class="provider-row" data-settings-search-item id="provider-{{ p.name }}">
+      <div class="provider-row__about">
+        <div class="provider-row__name">{{ p.label }}</div>
+        <div class="muted provider-row__meta">
+          {% if p.configured %}<span class="badge active">Key saved</span> {{ p.via|source_label }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
+          {% else %}No key yet. Paste one to use this provider.{% endif %}
+          {% if p.source_errors %}<div><span class="badge blocked">Settings could not be read</span></div>{% endif %}
+          {% if not p.dashboard_can_set_api_key %}<div>This key is {{ p.api_key_source|source_label }}, so it can't be changed here.</div>{% endif %}
+          {% if p.base_url_field and not p.dashboard_can_set_base_url %}<div>The server address is {{ p.base_url_source|source_label }}, so it can't be changed here.</div>{% endif %}
+          {% if p.key_help %}<div><a href="{{ p.key_help }}" target="_blank" rel="noopener noreferrer">Where do I get a key?</a></div>{% endif %}
         </div>
-        <div style="margin-top: var(--space-2);">{{ integration_readiness(p.readiness) }}</div>
-        {% if p.discovery %}
-        <div class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">
+        <div class="provider-row__readiness">{{ integration_readiness(p.readiness) }}</div>
+        {% if p.discovery and p.configured %}
+        <div class="muted provider-row__meta">
           Models:
-          {% if p.discovery.status == 'live' %}<span class="badge active">{{ p.discovery.live_count }} reachable</span>{% if p.discovery.fetched_ago %} refreshed {{ p.discovery.fetched_ago }}{% endif %}
-          {% elif p.discovery.status == 'unavailable' %}<span class="badge blocked">list failed</span> {{ p.discovery.detail }}
-          {% else %}{{ p.discovery.detail }}{% endif %}
+          {% if p.discovery.status == 'live' %}<span class="badge active">{{ p.discovery.live_count }} available</span>{% if p.discovery.fetched_ago %} refreshed {{ p.discovery.fetched_ago }}{% endif %}
+          {% elif p.discovery.status == 'unavailable' %}<span class="badge blocked">Could not check</span> The provider did not answer. Try refreshing later.
+          {% else %}Showing Lightwork's built-in list.{% endif %}
         </div>
         {% endif %}
       </div>
-      <form method="post" action="/settings/providers" style="display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-end;">
-        <input type="hidden" name="provider" value="{{ p.name }}" />
-        {% if p.base_url_field %}
-        <input class="ctl" type="text" name="base_url" value="{{ p.base_url }}"
-               placeholder="Base URL" aria-label="{{ p.label }} base URL" autocomplete="off"
-               {% if not p.dashboard_can_set_base_url %}disabled{% endif %} />
-        {% endif %}
-        <input class="ctl" type="password" name="api_key"
-               placeholder="Paste API key" aria-label="{{ p.label }} API key" autocomplete="off"
-               {% if not p.dashboard_can_set_api_key %}disabled{% endif %} />
-        <button type="submit" class="btn btn--primary"
-                {% if (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save</button>
-      </form>
-      {% if p.dashboard_set %}
-      <form method="post" action="/settings/providers/clear">
-        <input type="hidden" name="provider" value="{{ p.name }}" />
-        <button type="submit" class="btn">Clear</button>
-      </form>
-      {% endif %}
-      {% if p.configured %}
-      <form method="post" action="/settings/providers/test">
-        <input type="hidden" name="provider" value="{{ p.name }}" />
-        <button type="submit" class="btn btn--ghost">Test live readiness</button>
-      </form>
-      {% endif %}
-      {% if p.configured and p.discovery and p.discovery.supported and discovery_enabled %}
-      <form method="post" action="/settings/models/discover">
-        <input type="hidden" name="provider" value="{{ p.name }}" />
-        <button type="submit" class="btn btn--ghost">Refresh models</button>
-      </form>
-      {% endif %}
+      <div class="provider-row__actions">
+        <form method="post" action="/settings/providers" class="settings-row-form">
+          <input type="hidden" name="provider" value="{{ p.name }}" />
+          {% if p.base_url_field %}
+          <label class="settings-field">
+            <span>Server address (only for self-hosted models)</span>
+            <input class="input" type="url" name="base_url" value="{{ p.base_url }}"
+                   placeholder="http://localhost:11434" autocomplete="off"
+                   {% if not p.dashboard_can_set_base_url %}disabled{% endif %} />
+          </label>
+          {% endif %}
+          <label class="settings-field">
+            <span>{{ p.label }} key</span>
+            <input class="input" type="password" name="api_key"
+                   placeholder="Paste your key" autocomplete="off"
+                   {% if not p.dashboard_can_set_api_key %}disabled{% endif %} />
+          </label>
+          <button type="submit" class="btn btn--primary"
+                  {% if (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save</button>
+        </form>
+        <div class="settings-row-form">
+          {% if p.configured %}
+          <form method="post" action="/settings/providers/test">
+            <input type="hidden" name="provider" value="{{ p.name }}" />
+            <button type="submit" class="btn">Test connection</button>
+          </form>
+          {% endif %}
+          {% if p.configured and p.discovery and p.discovery.supported and discovery_enabled %}
+          <form method="post" action="/settings/models/discover">
+            <input type="hidden" name="provider" value="{{ p.name }}" />
+            <button type="submit" class="btn btn--ghost">Refresh models</button>
+          </form>
+          {% endif %}
+          {% if p.dashboard_set %}
+          <form method="post" action="/settings/providers/clear" data-confirm="Remove the saved {{ p.label }} key? Tasks will stop using this provider until you add a key again." data-confirm-ok="Remove key">
+            <input type="hidden" name="provider" value="{{ p.name }}" />
+            <button type="submit" class="btn btn--danger">Remove key</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
     </div>
     {% endfor %}
   </div>
 
-  <div class="section-head" data-settings-group="integrations"><h2>Automation webhooks</h2></div>
-  <div class="panel" data-settings-group="integrations">
-    <p class="muted" style="margin-top: 0;">
-      The signing secret that lets other systems securely start your workflows
-      (used by webhook triggers on the <a href="/automations">Automations</a>
-      page). Status:
-      {% if webhook_configured %}<span class="badge active">configured</span>
-      {% else %}<span class="badge blocked">not set — webhook triggers won't fire</span>{% endif %}
-    </p>
-    <form method="post" action="/settings/webhooks" style="display: flex; gap: var(--space-2); align-items: end; flex-wrap: wrap;">
-      <label style="flex: 1 1 18rem;">New signing secret <span class="muted">(leave blank and save to clear)</span>
-        <input class="input" type="password" name="secret" autocomplete="new-password" placeholder="paste a long random value">
-      </label>
-      <button type="submit" class="btn btn--primary">Save secret</button>
+  <div class="section-head" data-settings-group="integrations"><h2>Secure connected automations</h2></div>
+  <section class="panel" data-settings-group="integrations" id="webhook-settings" aria-label="Secure connected automations">
+    <p>A signing secret is a shared connection credential that lets other systems securely start your workflows. It can also verify outgoing workflow notifications. Review which secret is active before changing it, and update the connected systems to match.</p>
+    <p id="wh-state" role="status" aria-live="polite" tabindex="-1">{% if webhook_configured is sameas true %}Secret set{% elif webhook_configured is sameas false %}Signing secret not set{% else %}Checking the active signing secret…{% endif %}</p>
+    <p id="wh-ownership"></p>
+    <p id="wh-external" hidden>Your installation administrator must arrange any transfer of control from the external secret service or deployment settings. Lightwork cannot make that transfer here. Refresh status after the administrator completes it.</p>
+    <button type="button" class="btn" id="wh-refresh">Refresh status</button>
+    <form id="wh-form" data-settings-local="true" data-draft-recovery="off" autocomplete="off">
+      <label for="wh-action">Change to make</label>
+      <select class="input" id="wh-action" disabled><option value="set">Save a new signing secret</option><option value="remove">Remove the app's saved copy</option></select>
+      <div id="wh-secret-field"><label for="wh-secret">New signing secret</label>
+        <input class="input" id="wh-secret" type="password" autocomplete="new-password" maxlength="4096" disabled aria-describedby="wh-help"></div>
+      <p id="wh-help">Use a long, random value. Lightwork encrypts it and never displays it again.</p>
+      <p id="wh-consequence"></p>
+      <label style="display:flex;gap:var(--space-2);align-items:flex-start"><input type="checkbox" id="wh-confirm" disabled> I reviewed this change and want to apply it to this installation.</label>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-3)"><button type="submit" class="btn btn--primary" id="wh-save" disabled>Apply change</button><button type="button" class="btn" id="wh-cancel">Cancel</button></div>
     </form>
-    <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">
-      The secret is sealed once saved and never displayed again — rotate it by
-      saving a new value here.
-    </p>
-  </div>
+    <noscript>Enable browser scripting to check the active secret and review a change safely.</noscript>
+  </section>
+  <style>#webhook-settings .input{box-sizing:border-box;width:100%;max-width:100%;min-width:0}#webhook-settings label{margin-block:var(--space-2)}#webhook-settings p,#webhook-settings button{overflow-wrap:anywhere}#webhook-settings form{margin-top:var(--space-3)}</style>
+  <script src="{{ asset('lightwork-webhook-settings.js') }}" defer></script>
 
-  <div class="section-head" data-settings-group="controls"><h2>Capabilities</h2></div>
+  <div class="section-head" data-settings-group="controls"><h2>What agents can do</h2></div>
   <div class="panel" data-settings-group="controls">
-    <p class="muted" style="margin-top: 0;">High-impact tools, off by default. Changes apply on the next run.</p>
+    <p class="muted settings-lead">Powerful abilities, off until you turn them on. Changes apply to the next task.</p>
     <form method="post" action="/settings/capabilities">
       {% for c in capabilities %}
-      <label data-settings-search-item style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline);">
-        <span style="flex: 1;">{{ c.name|replace('_', ' ')|capitalize }}
-          {% if c.info %}<br><span class="muted" style="font-size: var(--text-sm); font-weight: normal;">{{ c.info }}</span>{% endif %}</span>
-        <input type="checkbox" name="{{ c.name }}"{% if c.enabled %} checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0;" />
+      <label class="settings-toggle" data-settings-search-item>
+        <span class="settings-toggle__text">{{ c.name|capability_label }}
+          {% if c.info %}<br><span class="muted settings-toggle__help">{{ c.info }}</span>{% endif %}</span>
+        <input type="checkbox" name="{{ c.name }}"{% if c.enabled %} checked{% endif %} />
       </label>
       {% endfor %}
-      <p style="margin-bottom: 0;"><button type="submit" class="btn btn--primary">Save capabilities</button></p>
+      <p class="settings-foot"><button type="submit" class="btn btn--primary">Save abilities</button></p>
     </form>
   </div>
 
   <div class="section-head" data-settings-group="controls"><h2>Features</h2></div>
-  <div class="panel" data-settings-group="controls">
-    <p class="muted" style="margin-top: 0;">Agent behaviours that are otherwise on by default.</p>
+  <div class="panel" data-settings-group="controls" id="settings-features">
+    <p class="muted settings-lead">Parts of Lightwork you can switch on or off for everyone.</p>
     <form method="post" action="/settings/features">
       {% for f in features %}
-      <label data-settings-search-item style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline);">
-        <span style="flex: 1;">{{ f.name|replace('_', ' ')|capitalize }}
-          {% if f.info %}<br><span class="muted" style="font-size: var(--text-sm); font-weight: normal;">{{ f.info }}</span>{% endif %}</span>
-        <input type="checkbox" name="{{ f.name }}"{% if f.enabled %} checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--brand);" />
+      <label class="settings-toggle" data-settings-search-item id="feature-{{ f.name }}">
+        <span class="settings-toggle__text">{{ f.name|feature_label }}
+          {% if f.info %}<br><span class="muted settings-toggle__help">{{ f.info }}</span>{% endif %}</span>
+        <input type="checkbox" name="{{ f.name }}"{% if f.enabled %} checked{% endif %} />
       </label>
       {% endfor %}
-      <p style="margin-bottom: 0;"><button type="submit" class="btn btn--primary">Save features</button></p>
+      <p class="settings-foot"><button type="submit" class="btn btn--primary">Save features</button></p>
     </form>
   </div>
 
-  <div class="section-head" data-settings-group="access"><h2 id="ui-visibility">Page visibility by role</h2></div>
+  <div class="section-head" data-settings-group="access"><h2 id="ui-visibility">Pages each role can see</h2></div>
   <div class="panel" data-settings-group="access">
-    <p class="muted" style="margin-top: 0;">
-      Choose which pages each role sees. Unchecking a box removes the page from
-      that role's navigation <em>and</em> blocks direct access to it. A dash
-      means the role's permissions can't reach that page at all (visibility can
-      never grant more than a role's permissions allow — change the user's role
-      on the <a href="/users">Users</a> page instead). Admins always keep
+    <p class="muted settings-lead">
+      Choose which pages each role sees. Unticking a box removes the page from
+      that role's menu <em>and</em> stops them opening it. A dash means that
+      role can't use the page at all; to give someone more access, change their
+      role on the <a href="/users">Users</a> page. Administrators always keep
       Settings and Users, so you can't lock yourself out. Roles only apply when
-      sign-in is configured; in local single-user mode everyone sees everything.
+      people sign in; if you use Lightwork on your own, you see everything.
     </p>
     <form method="post" action="/settings/ui-visibility">
       <table>
         <thead><tr>
           <th scope="col">Page</th>
-          {% for r in visibility_roles %}<th scope="col">{{ r|capitalize }}</th>{% endfor %}
+          {% for r in visibility_roles %}<th scope="col">{{ r|role_label }}</th>{% endfor %}
         </tr></thead>
         <tbody>
           {% for grp in visibility_matrix %}
-          <tr><th colspan="{{ 1 + visibility_roles|length }}" scope="colgroup"
-                  style="padding-top: var(--space-4);">{{ grp.label }}</th></tr>
+          <tr><th colspan="{{ 1 + visibility_roles|length }}" scope="colgroup" class="settings-group-row">{{ grp.label }}</th></tr>
           {% for pg in grp.pages %}
           <tr data-settings-search-item>
-            <td>{{ pg.label }} <span class="muted mono" style="font-size: var(--text-xs);">{{ pg.path }}</span>{% if not pg.in_nav %} <span class="muted" style="font-size: var(--text-xs);">· linked from other pages, not in the sidebar</span>{% endif %}</td>
+            <td>{{ pg.label }}{% if not pg.in_nav %} <span class="muted settings-note">· opened from other pages, not the menu</span>{% endif %}</td>
             {% for cell in pg.cells %}
             <td>
               {% if cell.locked %}
               <input type="checkbox" checked disabled
-                     aria-label="{{ pg.label }} is always visible to admins"
-                     title="Always available to admins (lockout protection)"
-                     style="width: 18px; height: 18px; accent-color: var(--brand);" />
+                     aria-label="{{ pg.label }} is always visible to administrators"
+                     title="Always available to administrators" />
               {% elif not cell.eligible %}
-              <span class="muted" title="Not available to this role (needs the {{ pg.floor }} permission)" aria-label="{{ pg.label }} is not available to the {{ cell.role }} role">—</span>
+              <span class="muted" title="This role can't open this page. Change the person's role on the Users page." aria-label="{{ pg.label }} is not available to the {{ cell.role|role_label }} role">—</span>
               {% else %}
               <input type="checkbox" name="cell" value="{{ cell.role }}:{{ pg.path }}"
                      {% if cell.visible %}checked{% endif %}
-                     aria-label="Show {{ pg.label }} to the {{ cell.role }} role"
-                     style="width: 18px; height: 18px; accent-color: var(--brand);" />
+                     aria-label="Show {{ pg.label }} to the {{ cell.role|role_label }} role" />
               {% endif %}
             </td>
             {% endfor %}
@@ -446,20 +481,198 @@
           {% endfor %}
         </tbody>
       </table>
-      <p style="margin-bottom: 0; margin-top: var(--space-3);">
+      <p class="settings-foot">
         <button type="submit" class="btn btn--primary">Save page visibility</button>
       </p>
     </form>
-    <form method="post" action="/settings/ui-visibility/reset" style="margin-top: var(--space-2);">
-      <button type="submit" class="btn">Reset to defaults</button>
+    <form method="post" action="/settings/ui-visibility/reset" class="settings-inline-form"
+          data-confirm="Put every role's pages back to the standard set? Your changes on this table will be lost." data-confirm-ok="Reset">
+      <button type="submit" class="btn">Reset to standard</button>
     </form>
-    <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">
+    <p class="muted settings-foot">
       This controls what each role <em>sees</em>; the permission checks on
-      every page still apply regardless.
+      every page still apply.
     </p>
   </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2>Ready to go live?</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="readiness">
+    <p class="muted settings-lead">Checks the switches that should be on before your whole team relies on Lightwork.</p>
+    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="readiness">Check readiness</button></p>
+    <p class="muted" role="status" aria-live="polite" data-maintenance-status="readiness"></p>
+    <ul class="maintenance-list" data-maintenance-out="readiness"></ul>
+  </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2>Installation health check</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="health">
+    <p class="muted settings-lead">Checks that Lightwork is installed correctly and can reach the services it needs. It may contact your AI provider.</p>
+    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="health">Run health check</button></p>
+    <p class="muted" role="status" aria-live="polite" data-maintenance-status="health"></p>
+    <details class="settings-details" data-maintenance-details="health" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-out="health"></ul></details>
+  </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2>Installation settings check</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="settings">
+    <p class="muted settings-lead">Looks for mistakes in the settings chosen when Lightwork was installed.</p>
+    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="settings">Check installation settings</button></p>
+    <p class="muted" role="status" aria-live="polite" data-maintenance-status="settings"></p>
+    <details class="settings-details" data-maintenance-details="settings" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-out="settings"></ul></details>
+  </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2 id="maintenance-license">License</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="license">
+    <p class="muted settings-lead">Your plan and the paid features it includes.</p>
+    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="license">Show license</button>
+      <a class="btn" href="/settings/license">Install or change the license</a></p>
+    <p class="muted" role="status" aria-live="polite" data-maintenance-status="license"></p>
+    <div data-maintenance-out="license"></div>
+  </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2>Background work</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="queue">
+    <p class="muted settings-lead">Scheduled and background jobs, and any that stopped because of a problem.</p>
+    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="queue">Show background work</button></p>
+    <p class="muted" role="status" aria-live="polite" data-maintenance-status="queue"></p>
+    <div data-maintenance-out="queue"></div>
+  </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2 id="maintenance-encryption">Encryption</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="encryption">
+    <p class="muted settings-lead">Whether saved records are encrypted on this computer, and tools to keep them protected.</p>
+    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="encryption">Check encryption</button></p>
+    <p class="muted" role="status" aria-live="polite" data-maintenance-status="encryption"></p>
+    <div data-maintenance-out="encryption"></div>
+  </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2>Live service status</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="diagnostics">
+    <p class="muted settings-lead">Which AI services Lightwork is calling right now, and any it has paused after repeated errors.</p>
+    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="diagnostics">Check services</button>
+      <a class="btn btn--ghost" href="/support">Prepare a support report</a></p>
+    <p class="muted" role="status" aria-live="polite" data-maintenance-status="diagnostics"></p>
+    <div data-maintenance-out="diagnostics"></div>
+  </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2>Safety checks for this installation</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="checks">
+    <p class="muted settings-lead">One-button checks your IT or compliance team may ask for. Each one only looks; nothing is changed.</p>
+    <ul class="maintenance-list maintenance-checks">
+      <li><span class="maintenance-label">Regulated deployment</span>
+        <span class="muted">Tries each protection a regulated business relies on and reports which ones hold.</span>
+        <button type="button" class="btn" data-maintenance-run="enterprise">Check protections</button></li>
+      <li><span class="maintenance-label">No outside connections</span>
+        <span class="muted">Checks whether any setting would let data leave this computer.</span>
+        <button type="button" class="btn" data-maintenance-run="offline">Check connections</button></li>
+      <li><span class="maintenance-label">Hardware memory protection</span>
+        <span class="muted">Checks whether this computer encrypts Lightwork's memory in hardware.</span>
+        <button type="button" class="btn" data-maintenance-run="hardware">Check hardware</button></li>
+      <li><span class="maintenance-label">Add-on versions</span>
+        <span class="muted">Compares installed add-ons with the approved versions.</span>
+        <button type="button" class="btn" data-maintenance-run="plugins">Check add-ons</button></li>
+    </ul>
+    <div class="maintenance-result">
+      <p class="muted" role="status" aria-live="polite" data-maintenance-status="enterprise"></p>
+      <ul class="maintenance-list" data-maintenance-out="enterprise"></ul>
+      <details class="settings-details" data-maintenance-details="enterprise" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-technical="enterprise"></ul></details>
+    </div>
+    <div class="maintenance-result">
+      <p class="muted" role="status" aria-live="polite" data-maintenance-status="offline"></p>
+      <ul class="maintenance-list" data-maintenance-out="offline"></ul>
+      <details class="settings-details" data-maintenance-details="offline" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-technical="offline"></ul></details>
+    </div>
+    <div class="maintenance-result">
+      <p class="muted" role="status" aria-live="polite" data-maintenance-status="hardware"></p>
+      <ul class="maintenance-list" data-maintenance-out="hardware"></ul>
+      <details class="settings-details" data-maintenance-details="hardware" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-technical="hardware"></ul></details>
+    </div>
+    <div class="maintenance-result">
+      <p class="muted" role="status" aria-live="polite" data-maintenance-status="plugins"></p>
+      <ul class="maintenance-list" data-maintenance-out="plugins"></ul>
+      <details class="settings-details" data-maintenance-details="plugins" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-technical="plugins"></ul></details>
+    </div>
+  </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2 id="maintenance-client">Your organisation's data</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="client">
+    <p class="muted settings-lead">Download everything this installation holds, for example when someone asks for a copy of their data, or erase it all when an organisation leaves.</p>
+    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="client">Show data status</button></p>
+    <p class="muted" role="status" aria-live="polite" data-maintenance-status="client"></p>
+    <div data-maintenance-out="client"></div>
+    <details class="settings-details" data-maintenance-details="client" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-technical="client"></ul></details>
+  </div>
+
+  <div class="section-head" data-settings-group="maintenance"><h2>Tidy up old records</h2></div>
+  <div class="panel" data-settings-group="maintenance" data-maintenance="cleanup">
+    <p class="muted settings-lead">Removes old chat conversations and the step-by-step activity of old tasks in this workspace, so they are not kept forever. Finished tasks and their results stay.</p>
+    <form class="settings-row-form" data-maintenance-cleanup>
+      <label class="settings-field"><span>Remove conversations not used for</span>
+        <select class="select" name="days">
+          <option value="30">30 days</option>
+          <option value="60">60 days</option>
+          <option value="90" selected>90 days</option>
+          <option value="180">180 days</option>
+          <option value="365">365 days</option>
+        </select></label>
+      <label class="settings-field"><span>Remove task activity older than</span>
+        <select class="select" name="activity_days">
+          <option value="7">7 days</option>
+          <option value="30" selected>30 days</option>
+          <option value="60">60 days</option>
+          <option value="90">90 days</option>
+          <option value="180">180 days</option>
+          <option value="365">365 days</option>
+        </select></label>
+      <button type="submit" class="btn btn--primary">See what would be removed</button>
+    </form>
+    <p class="muted" role="status" aria-live="polite" data-maintenance-status="cleanup"></p>
+    <div data-maintenance-out="cleanup"></div>
+    <div data-ops-cleanup-all>
+      <h3 id="cleanup-all-title">Every workspace at once</h3>
+      <p class="muted">Tidies up every workspace on this installation with the time periods chosen above, one workspace at a time. For installation administrators.</p>
+      <p class="settings-row-form">
+        <button type="button" class="btn" data-ops-run="cleanup-all">See what would be removed in every workspace</button>
+        <button type="button" class="btn btn--danger" data-ops-run="cleanup-all-go" hidden>Remove from every workspace</button>
+      </p>
+      <p class="muted" role="status" aria-live="polite" data-ops-status="cleanup-all"></p>
+      <div data-ops-out="cleanup-all"></div>
+    </div>
+  </div>
+  {% include "_maintenance_ops.html" %}
   </div>
   <style>
+    .settings-saved { border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4); }
+    .settings-lead { margin-top: 0; }
+    .settings-foot { margin-bottom: 0; margin-top: var(--space-3); display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+    .settings-submit { margin-top: var(--space-3); }
+    .settings-row-form { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+    .settings-stack-form { display: grid; gap: var(--space-2); }
+    .settings-inline-form { margin-top: var(--space-2); }
+    .settings-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: min(100%, 14rem); }
+    .settings-grow { flex: 1 1 18rem; }
+    .settings-choice { border: 0; padding: 0; margin: 0; display: grid; gap: var(--space-2); }
+    .settings-choice legend { font-weight: var(--font-medium); margin-bottom: var(--space-2); }
+    .settings-choice > label:not(.settings-field) { display: flex; gap: var(--space-2); align-items: center; }
+    .settings-amount { max-width: 16rem; margin-left: var(--space-6, 1.5rem); }
+    .settings-callout { border: 1px solid var(--hairline); border-radius: var(--radius-md, 8px); padding: var(--space-3); margin: var(--space-3) 0; }
+    .settings-callout p { margin: 0 0 var(--space-2); }
+    .settings-details { margin-top: var(--space-3); }
+    .maintenance-checks li { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+    .maintenance-checks li .muted { flex: 1 1 16rem; }
+    .maintenance-result { margin-top: var(--space-2); }
+    .settings-toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline); }
+    .settings-toggle__text { flex: 1; }
+    .settings-toggle__help { font-size: var(--text-sm); font-weight: normal; }
+    .settings-toggle input, #settings-sections td input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0; }
+    .settings-group-row { padding-top: var(--space-4); }
+    .settings-note { font-size: var(--text-xs); }
+    .provider-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-start; padding: var(--space-3) 0; border-top: 1px solid var(--hairline); }
+    .provider-row__about { min-width: 13rem; flex: 1 1 16rem; display: grid; gap: var(--space-2); }
+    .provider-row__name { font-weight: var(--font-medium); }
+    .provider-row__meta { font-size: var(--text-sm); }
+    .provider-row__actions { flex: 1 1 20rem; display: grid; gap: var(--space-2); }
+    .maintenance-list { list-style: none; padding: 0; margin: var(--space-2) 0 0; display: grid; gap: var(--space-2); }
+    .maintenance-list li { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; padding-top: var(--space-2); border-top: 1px solid var(--hairline); }
+    .maintenance-list .maintenance-label { min-width: 14rem; font-weight: var(--font-medium); }
     .voice-setup { min-width: 0; overflow-wrap: anywhere; }
     .voice-setup > label:not(.voice-setup-confirm) { display: block; margin-bottom: var(--space-2); }
     .voice-setup .ctl, .voice-setup progress { display: block; width: 100%; max-width: 100%; min-width: 0; }
@@ -489,6 +702,7 @@
     .settings-tabs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); }
     .settings-tabs [aria-selected="true"] { background: var(--brand); color: var(--on-brand, white); border-color: var(--brand); }
     #settings-filter-status { grid-column: 1 / -1; min-height: 1.3em; }
+    .settings-all-link { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
     @media (max-width: 720px) { .settings-index { grid-template-columns: 1fr; } }
     @media (prefers-reduced-transparency: reduce) { .settings-index { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--panel); } }
   </style>
@@ -500,8 +714,8 @@
     var grouped = Array.prototype.slice.call(document.querySelectorAll('[data-settings-group]'));
     var search = document.getElementById('settings-search');
     var filterStatus = document.getElementById('settings-filter-status');
-    var groups = ['general', 'models', 'integrations', 'controls', 'access'];
-    var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access', voice: 'models'};
+    var groups = ['general', 'models', 'integrations', 'controls', 'access', 'maintenance'];
+    var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access', voice: 'models', discovery: 'models', connections: 'integrations', system: 'maintenance'};
     var active = (index && index.dataset.initialGroup) || 'general';
     var hash = String(window.location.hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
     if (aliases[hash]) hash = aliases[hash];
@@ -571,11 +785,11 @@
         var heading = node.querySelector && node.querySelector('.section-head h2, h2');
         if (heading && heading.textContent.trim()) return heading.textContent.trim();
       }
-      return form.action || 'another section';
+      return 'another section';
     }
     function markDirty(event) { dirty.add(event.currentTarget); }
 
-    forms.forEach(function (form) {
+    forms.filter(function (form) { return form.dataset.settingsLocal !== 'true'; }).forEach(function (form) {
       form.addEventListener('input', markDirty);
       form.addEventListener('change', markDirty);
       form.addEventListener('submit', function (event) {
@@ -598,10 +812,7 @@
         });
         var prompt = 'Saving this section reloads Settings and will discard unsaved changes in '
           + sections.join(', ') + '. Continue?';
-        var confirmation = window.mvConfirm
-          ? window.mvConfirm(prompt, { okText: 'Discard others and save' })
-          : Promise.resolve(window.confirm(prompt));
-        confirmation.then(function (approved) {
+        window.mvConfirm(prompt, { okText: 'Discard others and save' }).then(function (approved) {
           if (!approved) return;
           dirty.clear();
           form.dataset.settingsSubmitApproved = 'true';
@@ -648,4 +859,5 @@
   })();
   </script>
   <script src="/static/lightwork-voice-setup.js" defer></script>
+  <script src="/static/lightwork-settings-admin.js" defer></script>
 {% endblock %}

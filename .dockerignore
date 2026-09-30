@@ -46,6 +46,11 @@
 !scripts/
 !scripts/install_release_cohort.py
 
+# Runtime entrypoint is an exact additional input, not the full deployment tree.
+!deploy/
+!deploy/docker/
+!deploy/docker/entrypoint.sh
+
 # Final high-precedence exclusions apply even inside the package allowlist.
 # Never send nested VCS metadata, credentials, private keys, or runtime state
 # to a remote BuildKit cache.

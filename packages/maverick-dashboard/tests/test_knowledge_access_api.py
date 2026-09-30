@@ -193,13 +193,75 @@ def _ref(reference):
     return asdict(reference)
 
 
+def test_search_continuation_uses_current_context_and_exact_query(customer):
+    client, _service, registry, rights = customer
+    for asset in ("policy-a", "policy-b"):
+        _dataset(registry, rights, "knowledge-a", asset)
+    request = {"context": _context(client), "query": "policy", "purpose": PURPOSE, "limit": 1}
+    first = client.post(BASE + "/search", json=request)
+    assert first.status_code == 200, first.text
+    page = first.json()
+    assert page["status"] == "incomplete"
+    assert page["next_cursor"]
+    second = client.post(BASE + "/search", json=request | {"cursor": page["next_cursor"]})
+    assert second.status_code == 200, second.text
+    assert second.json()["complete"] is True
+    assert second.json()["items"][0]["reference"] != page["items"][0]["reference"]
+    changed_query = client.post(BASE + "/search", json=request | {
+        "query": "invoices", "cursor": page["next_cursor"],
+    })
+    assert changed_query.status_code == 422
+    _select(client, "knowledge-b")
+    stale = client.post(BASE + "/search", json=request | {"cursor": page["next_cursor"]})
+    assert stale.status_code == 409
+    assert "Private knowledge-a" not in stale.text
+
+
+def test_search_api_preserves_full_chunk_excerpt_and_partial_coverage_flags(customer):
+    """Transport contract; exact source reconstruction is covered in core tests."""
+    from dataclasses import replace
+
+    client, service, registry, rights = customer
+    _dataset(registry, rights, "knowledge-a", "long-policy")
+    original = service.content_resolver
+
+    def content(tenant, reference, admission):
+        return replace(original(tenant, reference, admission), summary="ordinary " * 800,
+                       retrieval_chunks=("ordinary " * 800, "quasardeadline: seventeen days"),
+                       summary_truncated=True)
+
+    service.content_resolver = content
+    request = {"context": _context(client), "query": "quasardeadline", "purpose": PURPOSE}
+    response = client.post(BASE + "/search", json=request)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["complete"] is True
+    assert "quasardeadline" in result["items"][0]["summary"]
+    assert result["items"][0]["summary_truncated"] is True
+    assert "_retrieval_chunks" not in result["items"][0]
+    service.content_resolver = lambda *args: replace(content(*args), search_coverage_complete=False)
+    partial = client.post(BASE + "/search", json=request | {"query": "absent-clause"})
+    assert partial.status_code == 200, partial.text
+    assert partial.json()["complete"] is False
+    assert "partial_source_coverage" in partial.json()["incomplete_reasons"]
+
+
 def test_page_assets_navigation_and_customer_language(customer):
     client, _service, _registry, _rights = customer
     page = client.get("/knowledge-access")
     assert page.status_code == 200, page.text
     assert "Find knowledge you can use now" in page.text
-    assert "does not grant permission to train" in page.text
-    assert "does not erase its influence from learned weights" in page.text
+    assert "does not mean it may be used to train AI models" in page.text
+    assert "does not remove what AI models already learned from it" in page.text
+    assert 'id="ka-purpose"' in page.text and "<select" in page.text
+    assert client.get("/static/lightwork-knowledge-library.js").status_code == 200
+    main = page.text.split('<main id="content"', 1)[1].split("</main>", 1)[0]
+    visible = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>|<[^>]+>", " ", main)
+    assert not re.search(
+        r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|idempoten\w*|json)\b|/api/v1",
+        visible,
+        re.IGNORECASE,
+    ), visible
     assert 'data-tenant="knowledge-a"' in page.text
     assert f'data-actor="{OWNER}"' in page.text
     assert re.search(r"style-src 'self' 'nonce-[A-Za-z0-9_-]+'", page.headers["content-security-policy"])
@@ -478,3 +540,13 @@ def test_feature_gate_and_request_byte_boundary_fail_closed(customer, monkeypatc
     )
     assert disabled.status_code == 404
     assert "bounded-source" not in disabled.text
+
+
+def test_purpose_picker_lists_only_this_workspaces_approved_uses(customer):
+    client, _service, registry, rights = customer
+    _dataset(registry, rights, "knowledge-a", "policy-handbook")
+    listed = client.get(BASE + "/purposes")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"] == [{"code": PURPOSE}]
+    _select(client, "knowledge-b")
+    assert client.get(BASE + "/purposes").json()["items"] == []

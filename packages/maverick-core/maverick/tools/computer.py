@@ -37,6 +37,7 @@ import tempfile
 import time
 from typing import Any
 
+from ..env_setting import env_or_config as _env_or_config
 from ..safety.action_evidence import seal_bracketed
 from ..safety.action_gate import (
     ActionPermit,
@@ -82,6 +83,14 @@ _COMPUTER_USE_INPUT_SCHEMA: dict[str, Any] = {
         "duration": {
             "type": "number",
             "description": "Seconds for 'wait' or drag duration.",
+        },
+        "target": {
+            "type": "string",
+            "description": (
+                "Instead of a coordinate, for *_click and mouse_move: describe the "
+                "item, e.g. 'the Save button'. It is found by looking at the screen "
+                "and refused when not found with enough certainty."
+            ),
         },
     },
     "required": ["action"],
@@ -145,7 +154,9 @@ def _maybe_seal_capture(b64: str) -> None:
 
 
 def _ocr_enabled() -> bool:
-    return os.environ.get("MAVERICK_COMPUTER_OCR", "").lower() in (
+    from ..env_setting import env_or_config
+
+    return (env_or_config("MAVERICK_COMPUTER_OCR", "computer_use", "ocr") or "").lower() in (
         "1", "true", "yes", "on",
     )
 
@@ -407,7 +418,10 @@ def _host_guard_required() -> bool:
     enterprise mode. With neither set this is False and the guard is a no-op, so
     default behavior is unchanged (kernel rule 1: fail open).
     """
-    if os.environ.get("MAVERICK_COMPUTER_REQUIRE_SANDBOX", "").strip().lower() in _TRUTHY:
+    from ..env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_COMPUTER_REQUIRE_SANDBOX", "computer_use", "require_sandbox")
+            or "").strip().lower() in _TRUTHY:
         return True
     try:
         from ..enterprise import enterprise_enabled
@@ -426,7 +440,10 @@ def _host_drive_allowed() -> bool:
     Lightwork-specific variable is not enough because screenshot and input
     backends read the real ``DISPLAY`` environment variable.
     """
-    if os.environ.get("MAVERICK_COMPUTER_ALLOW_HOST", "").strip().lower() in _TRUTHY:
+    from ..env_setting import env_or_config
+
+    if (env_or_config("MAVERICK_COMPUTER_ALLOW_HOST", "computer_use", "allow_host")
+            or "").strip().lower() in _TRUTHY:
         return True
     display = (os.environ.get("DISPLAY") or "").strip()
     configured_display = (os.environ.get("MAVERICK_COMPUTER_DISPLAY") or "").strip()
@@ -454,6 +471,82 @@ def _host_safety_error() -> str | None:
         "or, only if you intend to "
         "drive this machine, set MAVERICK_COMPUTER_ALLOW_HOST=1."
     )
+
+
+# Pointer actions that may name a described target instead of a coordinate.
+_TARGET_ACTIONS = frozenset({
+    "mouse_move", "left_click", "right_click", "middle_click", "double_click",
+})
+
+_LOCATE_SYSTEM = (
+    "You locate one item on a screenshot. Reply with JSON only, no prose: "
+    '{"x": <pixel column of its centre>, "y": <pixel row of its centre>, '
+    '"confidence": <0 to 1, how sure you are it is the item described>}. '
+    "If the item is not visible, reply with confidence 0."
+)
+
+
+def _vision_locator(budget):
+    """``vision(image_bytes, description) -> {"x", "y", "confidence"}`` using
+    the vision role's model, charged to the running task's budget."""
+    import json
+    import re
+
+    def locate(image: bytes, description: str) -> dict[str, Any]:
+        from ..llm import LLM, model_for_role
+
+        model = model_for_role("vision")
+        resp = LLM(model=model).complete(
+            system=_LOCATE_SYSTEM,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": "image/png",
+                    "data": base64.b64encode(image).decode("ascii")}},
+                {"type": "text", "text": f"Item: {description}"},
+            ]}],
+            budget=budget, max_tokens=200, model=model,
+        )
+        found = re.search(r"\{.*\}", getattr(resp, "text", "") or "", re.DOTALL)
+        if not found:
+            raise ValueError("the vision model gave no location")
+        return json.loads(found.group(0))
+
+    return locate
+
+
+def _resolve_target(args: dict[str, Any]) -> str | None:
+    """Fill ``args["coordinate"]`` from ``args["target"]``; an ERROR string
+    when the item can't be found surely enough (``[computer_use]
+    vision_min_confidence``), else None."""
+    target = " ".join(str(args.get("target") or "").split())[:200]
+    if not target or args.get("coordinate") or args.get("action") not in _TARGET_ACTIONS:
+        return None
+    from ..budget import BudgetExceeded
+    from ..tenant.provider_admission import current_budget
+    from ..vision_click import LowConfidenceError, resolve_click
+
+    budget = current_budget()
+    if budget is None:
+        return ("ERROR: finding an item on the screen needs a running task; "
+                "give coordinate=[x, y] instead")
+    try:
+        image = base64.b64decode(_screenshot_png_b64())
+    except ImportError as e:
+        return f"ERROR: {e}"
+    try:
+        hit = resolve_click(target, app="desktop", screen="primary", image=image,
+                            vision=_vision_locator(budget))
+    except LowConfidenceError as e:
+        return (f"ERROR: {e}. Describe the item more precisely, or give "
+                "coordinate=[x, y]")
+    except BudgetExceeded:
+        raise
+    except Exception as e:  # noqa: BLE001 -- a failed look is a plain refusal
+        return (f"ERROR: could not find {_redact_computer_text(target)!r} on the "
+                f"screen ({type(e).__name__}); give coordinate=[x, y] instead")
+    args["coordinate"] = [hit.x, hit.y]
+    log.info("computer.target -> (%d, %d) confidence=%.2f", hit.x, hit.y, hit.confidence)
+    return None
 
 
 def _foreground_window_identity() -> dict[str, Any]:
@@ -501,7 +594,7 @@ def _computer_approval_context(args: dict[str, Any] | None = None) -> dict[str, 
             os.environ.get("MAVERICK_COMPUTER_DISPLAY") or ""
         ).strip(),
         "host_override": (
-            os.environ.get("MAVERICK_COMPUTER_ALLOW_HOST") or ""
+            _env_or_config("MAVERICK_COMPUTER_ALLOW_HOST", "computer_use", "allow_host") or ""
         ).strip().lower(),
     }
     identity = _foreground_window_identity()
@@ -548,6 +641,12 @@ def _run_computer_action(args: dict[str, Any]) -> str:
     host_error = _host_safety_error()
     if host_error is not None:
         return host_error
+
+    # A described target is turned into a coordinate before the approval gate,
+    # so the approval shows (and binds) the exact point that will be clicked.
+    target_error = _resolve_target(args)
+    if target_error is not None:
+        return target_error
 
     # Per-action approval gate for every input mutation, including pointer moves
     # and scrolls. Silent auto approval and standing consent grants are

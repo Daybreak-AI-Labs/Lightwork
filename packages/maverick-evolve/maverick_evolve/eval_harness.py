@@ -13,9 +13,20 @@ freeze evolution when the judge drifts.
 """
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from hashlib import sha256
+from typing import Literal
+
+from maverick.budget import BudgetExceeded, UsageAccountingError
+from maverick.killswitch import Halted, HaltGenerationChanged
+
+log = logging.getLogger(__name__)
+EXECUTION_STOPS = (BudgetExceeded, UsageAccountingError, Halted, HaltGenerationChanged)
 
 
 @dataclass
@@ -31,11 +42,49 @@ class EvalReport:
     n: int
     passed: float          # weighted sum of per-case scores
     total_weight: float
+    observations: tuple[EvalObservation, ...] = ()
 
     @property
     def score(self) -> float:
         """Weighted pass rate in [0,1]."""
         return self.passed / self.total_weight if self.total_weight > 0 else 0.0
+
+
+@dataclass(frozen=True)
+class EvalObservation:
+    """One exposure, with execution failure kept separate from answer quality.
+
+    IDs bind visible case data and the declared evaluator, not an introspected
+    version of arbitrary Python check code. An unversioned custom evaluator is
+    explicitly labeled. No prompt, answer, exception text or sealed grade is
+    included in operational logs.
+    """
+
+    case_id: str
+    evaluator_id: str
+    exposure_id: str
+    execution_status: Literal[
+        "succeeded", "failed", "timed_out", "cancelled", "stopped", "invalid_output"]
+    grade: float | None
+    diagnostic: str = "none"
+
+    @property
+    def score(self) -> float:
+        """Compatibility fitness: an ungraded execution contributes zero."""
+        return self.grade if self.grade is not None else 0.0
+
+
+def _identity(value: str) -> str:
+    return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _record(observation: EvalObservation) -> EvalObservation:
+    log.info(
+        "eval_observation case=%s evaluator=%s exposure=%s execution=%s diagnostic=%s",
+        observation.case_id, observation.evaluator_id, observation.exposure_id,
+        observation.execution_status, observation.diagnostic,
+    )
+    return observation
 
 
 def _contains_scorer(output: str, reference: str) -> float:
@@ -50,6 +99,7 @@ async def evaluate(
     cases: list[EvalCase],
     *,
     scorer: Callable[[str, str], float] | None = None,
+    evaluator_id: str | None = None,
 ) -> EvalReport:
     """Run ``agent`` over ``cases`` and return a weighted fitness report.
 
@@ -57,7 +107,6 @@ async def evaluate(
     scored against ``reference`` via ``scorer`` (default substring containment).
     An agent that raises on a case scores 0 for that case (robustness counts).
     """
-    scorer = scorer or _contains_scorer
     weights: list[float] = []
     for case in cases:
         raw_weight = case.weight
@@ -74,11 +123,16 @@ async def evaluate(
             "evaluation cases must have finite positive total weight")
     passed = 0.0
     total_weight = 0.0
+    observations: list[EvalObservation] = []
     for case, weight in zip(cases, weights, strict=True):
         total_weight += weight
-        score = await evaluate_case(agent, case, scorer=scorer)
-        passed += weight * score
-    return EvalReport(n=len(cases), passed=passed, total_weight=total_weight)
+        observation = await observe_case(
+            agent, case, scorer=scorer, evaluator_id=evaluator_id)
+        observations.append(observation)
+        passed += weight * observation.score
+    return EvalReport(
+        n=len(cases), passed=passed, total_weight=total_weight,
+        observations=tuple(observations))
 
 
 async def evaluate_case(
@@ -94,11 +148,68 @@ async def evaluate_case(
     per sealed case, while alternating order avoids giving one arm every cold or
     every warm evaluator/provider position.
     """
-    scorer = scorer or _contains_scorer
+    return (await observe_case(agent, case, scorer=scorer)).score
+
+
+async def observe_case(
+    agent: Callable[[str], Awaitable[str]],
+    case: EvalCase,
+    *,
+    scorer: Callable[[str, str], float] | None = None,
+    evaluator_id: str | None = None,
+    exposure_id: str = "",
+) -> EvalObservation:
+    """Run once; grade successful strings only, including legitimate abstention.
+
+    Ordinary agent failures return ungraded observations. Cancellation, budget
+    and halt signals are recorded then propagated unchanged. Evaluator failures
+    are also recorded and propagated, retaining the existing fail-closed API.
+    The caller owns deadlines; this function never retries or creates a budget.
+    """
+    case_id = _identity(json.dumps({
+        "prompt": case.prompt, "reference": case.reference,
+        "weight": case.weight, "uses_callable_check": case.check is not None,
+    }, sort_keys=True, ensure_ascii=False, allow_nan=False))
+    evaluator = evaluator_id or (
+        "unversioned-check" if case.check is not None else
+        "unversioned-scorer" if scorer is not None else "contains-v1")
+    # Only bounded digests enter logs, even if caller-supplied labels contain
+    # sensitive data. A versioned evaluator's declared digest is preserved.
+    evaluator = (evaluator if evaluator in {
+        "unversioned-check", "unversioned-scorer", "contains-v1"} or len(evaluator) == 64
+                 and all(ch in "0123456789abcdef" for ch in evaluator)
+                 else _identity(evaluator))
+    exposure = _identity(exposure_id) if exposure_id else "unbound-development"
+
+    def result(status, grade=None, diagnostic="none") -> EvalObservation:
+        return _record(EvalObservation(
+            case_id, evaluator, exposure, status, grade, diagnostic))
+
     try:
         out = await agent(case.prompt)
+    except asyncio.CancelledError:
+        result("cancelled", diagnostic="task_cancelled")
+        raise
+    except EXECUTION_STOPS:
+        result("stopped", diagnostic="execution_stop")
+        raise
+    except (TimeoutError, asyncio.TimeoutError):
+        return result("timed_out", diagnostic="agent_timeout")
     except Exception:
-        out = ""
+        return result("failed", diagnostic="agent_exception")
+    if not isinstance(out, str):
+        return result("invalid_output", diagnostic="non_string_output")
+    try:
+        grade = _grade_output(out, case, scorer or _contains_scorer)
+    except BaseException:
+        result("succeeded", diagnostic="evaluator_exception")
+        raise
+    return result("succeeded", grade)
+
+
+def _grade_output(
+    out: str, case: EvalCase, scorer: Callable[[str, str], float],
+) -> float:
     if case.check is not None:
         checked = case.check(out)
         if not isinstance(checked, bool):
@@ -120,4 +231,7 @@ async def evaluate_case(
     return 0.0
 
 
-__all__ = ["EvalCase", "EvalReport", "evaluate", "evaluate_case"]
+__all__ = [
+    "EvalCase", "EvalReport", "EvalObservation", "evaluate", "evaluate_case",
+    "observe_case",
+]

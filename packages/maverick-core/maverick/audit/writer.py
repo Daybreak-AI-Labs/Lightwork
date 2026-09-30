@@ -217,6 +217,7 @@ def _audit_idempotency_identity(
         EventKind.THREAT_HUNT_RECORD_CHANGED: "event_id",
         EventKind.ENV_HUNT_RECORD_CHANGED: "event_id",
         EventKind.UNIFIED_AUDIT_PROJECTION: "projection_event_id",
+        EventKind.FEDERATION_DELEGATE: "event_id",
     }
     field = field_by_kind.get(payload.get("kind"))
     if field is None:
@@ -562,7 +563,8 @@ class AuditLog:
         appending the governed identity, refuses an unsigned prior duplicate,
         and raises :class:`AuditWriteRefused` when signing is unavailable.
         ``True`` therefore means this logical event is present as a signed row;
-        ``False`` means validation or the signed append failed without a row.
+        ``False`` means the signed append was not confirmed. A failure after
+        bytes were written does not prove that the row is absent.
         """
         with self._lock:
             path = self._rotate_if_needed()
@@ -626,9 +628,7 @@ class AuditLog:
                                 "audit destination chain is not verifiable "
                                 f"({first.reason})"
                             )
-                        return bool(
-                            signer.write(payload, idempotency_identity=None)
-                        )
+                        return signer.write(payload, idempotency_identity=None) is True
             except AuditRefused:
                 raise
             except (OSError, TypeError, ValueError) as error:
@@ -798,29 +798,13 @@ class AuditLog:
                     total += n
             return total
 
-    def tail(self, n: int = 50, day: str | None = None) -> list[dict[str, Any]]:
+    def tail(self, n: int = 50, day: str | None = None, *, report=None) -> list[dict[str, Any]]:
         """Return the last ``n`` events from ``day`` (default today)."""
         if day is None:
             day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = self._path_for(day)
-        if not path.exists():
-            return []
-        # Route through segment_text so a sealed (closed, at-rest-encrypted)
-        # past day decrypts transparently. Reading it as raw UTF-8 would hit
-        # UnicodeDecodeError on the ciphertext -- not an OSError, so it would
-        # escape the guard and crash the caller.
-        from .sealing import segment_text
-        lines = segment_text(path).splitlines()
-        out: list[dict[str, Any]] = []
-        for line in lines[-n:]:
-            try:
-                out.append(json.loads(line))
-            except (json.JSONDecodeError, RecursionError):
-                # RecursionError: a line nested past the json recursion limit
-                # (>=1000) must skip that line, not crash tail() for the whole
-                # day-file (user-testing finding).
-                continue
-        return out
+        from .reader import tail_events
+        return tail_events(path, n, report=report)
 
     def grep(self, pattern: str, day: str | None = None) -> list[dict[str, Any]]:
         """Crude regex grep over the day's events."""
@@ -835,16 +819,20 @@ class AuditLog:
         path = self._path_for(day)
         if not path.exists():
             return []
-        # See tail(): segment_text decrypts a sealed past day transparently and
-        # fail-softs, so grep over a closed/sealed segment can't crash.
-        from .sealing import segment_text
+        from .segments import ReadReport, SegmentSnapshot
         out: list[dict[str, Any]] = []
-        for line in segment_text(path).splitlines():
-            if rx.search(line):
-                try:
-                    out.append(json.loads(line))
-                except (json.JSONDecodeError, RecursionError):
-                    continue
+        try:
+            with SegmentSnapshot(path, ReadReport()) as snapshot:
+                for line in snapshot.lines():
+                    if rx.search(line):
+                        try:
+                            event = json.loads(line)
+                            if isinstance(event, dict):
+                                out.append(event)
+                        except (json.JSONDecodeError, RecursionError):
+                            continue
+        except (OSError, ValueError, RuntimeError) as error:
+            log.warning("audit grep incomplete: %s (%s)", path.name, type(error).__name__)
         return out
 
 
@@ -958,6 +946,7 @@ def record(
     *,
     agent: str = "system",
     goal_id: int | None = None,
+    _require_signed: bool = False,
     **payload: Any,
 ) -> bool:
     """Module-level shortcut for the default audit log.
@@ -965,7 +954,13 @@ def record(
     When ``goal_id`` is not given, falls back to the goal bound by the run loop
     (:func:`set_goal_context`) so consent/approval and other deep events still
     attribute to the active run. An explicit ``goal_id`` always wins.
+
+    ``_require_signed=True`` requires the same tenant-selected writer to use
+    its strict signed path. It does not enable disabled signing or change the
+    policy for ordinary callers. This reserved boolean option is not payload.
     """
+    if type(_require_signed) is not bool:
+        raise TypeError("_require_signed must be a bool")
     if goal_id is None:
         goal_id = _current_goal.get()
     event = AuditEvent(
@@ -975,7 +970,8 @@ def record(
         goal_id=goal_id,
         payload=payload,
     )
-    return default_audit_log().record(event)
+    sink = default_audit_log()
+    return sink.record_strict_signed(event) if _require_signed else sink.record(event)
 
 
 def record_global(

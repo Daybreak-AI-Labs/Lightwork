@@ -1,83 +1,70 @@
 {% extends "base.html" %}
-{% block title %}Platform Threat Hunter - Lightwork{% endblock %}
+{% block title %}Lightwork threat check · Lightwork{% endblock %}
 {% block content %}
 <style>
-  .hunt-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--space-3); }
-  .hunt-wide { grid-column:1 / -1; }
-  .hunt-evidence { font-family:var(--font-mono,monospace); font-size:var(--text-xs); overflow-wrap:anywhere; }
-  @media(max-width:900px){.hunt-grid{grid-template-columns:1fr}.hunt-wide{grid-column:auto}}
+  .hunt-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--space-3); margin-bottom:var(--space-4); }
+  .hunt-actions { display:flex; flex-wrap:wrap; gap:.4rem; }
+  .hunt-links { display:flex; gap:.5rem; flex-wrap:wrap; margin:0 0 var(--space-4); }
+  .hunt-scroll { overflow-x:auto; }
+  @media(max-width:900px){.hunt-grid{grid-template-columns:1fr}}
 </style>
 {% from "_hero.html" import hero, state %}
-{% call hero('Defensive operations', 'Platform Threat Hunter',
-             subtitle='Signed-telemetry hunting',
-             lede="Deterministic, MITRE ATT&amp;CK-tagged hunting over
-                   Lightwork's signed audit trail, shield events, tools,
-                   approvals, budgets, and goal timelines. Every finding cites
-                   the events that triggered it. Containment is proposed to the
-                   human approval queue; this hunter has no autonomous
-                   production-response path.") %}
+{% call hero('Security', 'Lightwork threat check',
+             subtitle='Lightwork’s own activity',
+             lede='Looks for suspicious activity in Lightwork’s own records (what its assistants did, blocked
+                   actions, approvals and spending) and labels each finding with the kind of attack it resembles.
+                   Any containment is sent to the approvals queue; nothing is stopped automatically.') %}
   {% if enabled %}
-  {{ state('Current state', 'Hunting on signed telemetry',
-           badge='enabled', badge_class='ok',
-           copy='Stored findings and investigations load below; run a fresh
-                 hunt at any time. The audit-chain check runs before every
-                 hunt.') }}
+  {{ state('Current state', 'Checking Lightwork’s own records', badge='On', badge_class='ok',
+           copy='Run a check at any time. The activity log is checked for tampering first.') }}
   {% else %}
-  {{ state('Current state', 'Hunter is switched off',
-           badge='opt-in', badge_class='idle',
-           copy='No platform telemetry is being processed. An administrator
-                 can switch this hunter on from Security &amp; GRC.') }}
+  {{ state('Current state', 'Turned off', badge='Off', badge_class='idle',
+           copy='Lightwork’s own records are not being checked.') }}
   {% endif %}
 {% endcall %}
-<div style="display:flex; gap:var(--space-2); flex-wrap:wrap; margin-bottom:var(--space-4);">
-  <a class="btn" href="/security">Security &amp; GRC</a>
-  <a class="btn" href="/security/soc">Environment hunter</a>
-  {% if enabled %}<button class="btn btn--primary" id="hunt-run" type="button">Run a hunt now</button>{% endif %}
+<div class="hunt-links">
+  <a class="btn btn--ghost" href="/security">Security &amp; GRC</a>
+  <a class="btn btn--ghost" href="/security/soc">Your own systems</a>
+  <a class="btn btn--ghost" href="/approvals">Approvals</a>
+  {% if enabled %}<button class="btn btn--primary" id="hunt-run" type="button">Run a check now</button>{% endif %}
 </div>
+{% include "_ops_security.html" %}
 {% if not enabled %}
-<div class="panel"><h2>Platform hunting is off</h2>
-  <p>This hunter is opt-in so existing deployments never start processing
-    telemetry silently. An administrator can switch it on under
-    <a href="/security">Security &amp; GRC &rarr; Defensive hunters</a>;
-    findings and investigations will appear here immediately.</p></div>
+<section class="panel">
+  <h2>The Lightwork threat check is off</h2>
+  <p>Turn it on to have Lightwork look through its own records for signs of misuse.</p>
+  {% if can_global_admin %}
+  <button type="button" class="btn btn--primary" id="hunt-turn-on" data-section="threat_hunt">Turn on the threat check</button>
+  {% else %}
+  <p class="muted">Ask an administrator to turn this on.</p>
+  {% endif %}
+  <p id="hunt-turn-on-msg" role="status" aria-live="polite" class="muted"></p>
+</section>
 {% else %}
+<div id="hunt-root" data-hunt="platform" data-api="/api/v1/security/threats">
 <div class="hunt-grid">
-  <div class="stat"><div class="num" id="hunt-open">-</div><div class="label">open findings</div></div>
-  <div class="stat"><div class="num" id="hunt-investigations">-</div><div class="label">investigations</div></div>
-  <div class="stat"><div class="num" id="hunt-chain">-</div><div class="label">audit-chain integrity</div></div>
-  <section class="panel hunt-wide">
-    <div class="section-head"><h2>Findings</h2><span id="hunt-status" class="muted" role="status"></span></div>
-    <div style="overflow-x:auto"><table><thead><tr><th>severity</th><th>finding</th><th>ATT&amp;CK</th><th>score</th><th>cited evidence</th></tr></thead><tbody id="hunt-findings"></tbody></table></div>
-  </section>
-  <section class="panel hunt-wide">
-    <h2>Investigation queue</h2>
-    <div style="overflow-x:auto"><table><thead><tr><th>investigation</th><th>status</th><th>assignee</th><th>findings</th><th>containment</th></tr></thead><tbody id="hunt-investigation-rows"></tbody></table></div>
-  </section>
+  <div class="stat"><div class="num" id="hunt-open">—</div><div class="label">Findings to look at</div></div>
+  <div class="stat"><div class="num" id="hunt-investigations">—</div><div class="label">Investigations</div></div>
+  <div class="stat"><div class="num" id="hunt-chain">—</div><div class="label">Activity log</div></div>
 </div>
-<script>
-(function(){
-  'use strict';
-  function text(value){return value === null || value === undefined ? '' : String(value);}
-  function cell(row,value,cls){var td=document.createElement('td');td.textContent=text(value);if(cls)td.className=cls;row.appendChild(td);}
-  async function load(){
-    var status=document.getElementById('hunt-status'); status.textContent='Loading...';
-    try{
-      var response=await fetch('/api/v1/security/threats/summary');
-      var body=await response.json(); if(!response.ok)throw new Error(body.detail||('HTTP '+response.status));
-      document.getElementById('hunt-open').textContent=body.open_findings||0;
-      document.getElementById('hunt-investigations').textContent=(body.investigations||[]).length;
-      document.getElementById('hunt-chain').textContent=body.chain_status ? (body.chain_status.intact?'intact':'BROKEN') : 'not checked';
-      var tbody=document.getElementById('hunt-findings');tbody.innerHTML='';
-      (body.findings||[]).forEach(function(f){var tr=document.createElement('tr');cell(tr,f.severity);cell(tr,f.title);cell(tr,(f.mitre_techniques||[]).join(', '));cell(tr,f.score);cell(tr,(f.evidence||[]).map(function(e){return e.source+':'+e.event_id;}).join(', '),'hunt-evidence');tbody.appendChild(tr);});
-      if(!(body.findings||[]).length){var tr=document.createElement('tr');var td=document.createElement('td');td.colSpan=5;td.className='muted';td.textContent='No findings stored.';tr.appendChild(td);tbody.appendChild(tr);}
-      var iq=document.getElementById('hunt-investigation-rows');iq.innerHTML='';
-      (body.investigations||[]).forEach(function(i){var tr=document.createElement('tr');cell(tr,i.title||i.investigation_id);cell(tr,i.status);cell(tr,i.assignee||'-');cell(tr,(i.finding_ids||[]).length);cell(tr,i.containment ? i.containment.action : 'not proposed');iq.appendChild(tr);});
-      status.textContent='';
-    }catch(error){status.textContent=error.message;}
-  }
-  document.getElementById('hunt-run').addEventListener('click',async function(){var button=this;button.disabled=true;document.getElementById('hunt-status').textContent='Verifying chain and scanning...';try{var response=await fetch('/api/v1/security/threats/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});var body=await response.json();if(!response.ok)throw new Error(body.detail||('HTTP '+response.status));await load();}catch(error){document.getElementById('hunt-status').textContent=error.message;}finally{button.disabled=false;}});
-  load();
-})();
-</script>
+<p class="muted" id="hunt-status" role="status" aria-live="polite"></p>
+<p class="danger-text" id="hunt-error" role="alert" aria-live="assertive"></p>
+<section class="panel" aria-labelledby="hunt-findings-title">
+  <div class="section-head"><h2 id="hunt-findings-title">Findings</h2></div>
+  <div class="hunt-scroll"><table><caption class="sr-only">Findings, newest first</caption>
+    <thead><tr><th scope="col">Choose</th><th scope="col">How serious</th><th scope="col">What was found</th><th scope="col">Attack type</th><th scope="col">How sure</th><th scope="col">Evidence</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+    <tbody id="hunt-findings"></tbody></table></div>
+  <button type="button" class="btn btn--ghost" id="hunt-investigate">Start an investigation from the chosen findings</button>
+</section>
+<section class="panel" aria-labelledby="hunt-inv-title">
+  <h2 id="hunt-inv-title">Investigations</h2>
+  <div class="hunt-scroll"><table><caption class="sr-only">Investigations</caption>
+    <thead><tr><th scope="col">Investigation</th><th scope="col">Status</th><th scope="col">Assigned to</th><th scope="col">Findings</th><th scope="col">Containment</th><th scope="col">Actions</th></tr></thead>
+    <tbody id="hunt-investigations-rows"></tbody></table></div>
+  <div id="hunt-detail" aria-live="polite"></div>
+</section>
+</div>
+<script type="application/json" id="hunt-people">{{ people | tojson }}</script>
 {% endif %}
+<script src="/static/lightwork-security-hunt.js"></script>
 {% endblock %}

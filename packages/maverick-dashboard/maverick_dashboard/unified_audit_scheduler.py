@@ -396,7 +396,7 @@ class UnifiedAuditScheduler:
             self._thread.start()
         return True
 
-    def stop(self, timeout: float = 5.0) -> bool:
+    def stop(self, timeout: float = 5.0, *, wait: bool = True) -> bool:
         if (
             not isinstance(timeout, (int, float))
             or isinstance(timeout, bool)
@@ -407,6 +407,8 @@ class UnifiedAuditScheduler:
         self._stop.set()
         with self._lock:
             thread = self._thread
+        if not wait:
+            return False
         if thread is not None:
             thread.join(float(timeout))
         stopped = thread is None or not thread.is_alive()
@@ -463,14 +465,11 @@ def attach_unified_audit_scheduler(
 
     @asynccontextmanager
     async def lifespan(target: Any):
-        from starlette.concurrency import run_in_threadpool
+        from ._lifecycle import supervised_runtime
 
         async with previous(target):
-            await run_in_threadpool(selected.start)
-            try:
+            async with supervised_runtime(target, "unified_audit", selected):
                 yield
-            finally:
-                await run_in_threadpool(selected.stop)
 
     app.router.lifespan_context = lifespan
     setattr(state, marker, selected)

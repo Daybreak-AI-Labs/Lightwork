@@ -1,53 +1,98 @@
 {% extends "base.html" %}
-{% block title %}Native Consent - Lightwork{% endblock %}
-{% block head_extra %}
-<style nonce="{{ csp_style_nonce }}">
-  .nca-shell{--nca-glass:color-mix(in srgb,var(--panel) 66%,transparent);--nca-soft:color-mix(in srgb,var(--panel) 45%,transparent);--nca-edge:color-mix(in srgb,var(--text) 14%,transparent);display:grid;gap:var(--space-5);isolation:isolate;position:relative}
-  .nca-shell::before{background:radial-gradient(circle at 8% 10%,color-mix(in srgb,#38bdf8 18%,transparent),transparent 31rem),radial-gradient(circle at 91% 13%,color-mix(in srgb,#a78bfa 18%,transparent),transparent 34rem),radial-gradient(circle at 52% 93%,color-mix(in srgb,#2dd4bf 13%,transparent),transparent 29rem);content:"";inset:0;pointer-events:none;position:fixed;z-index:-1}
-  .nca-glass{background:var(--nca-glass);border:1px solid var(--nca-edge);box-shadow:0 18px 52px color-mix(in srgb,#000 22%,transparent),inset 0 1px 0 color-mix(in srgb,#fff 13%,transparent);-webkit-backdrop-filter:blur(26px) saturate(155%);backdrop-filter:blur(26px) saturate(155%)}
-  .nca-hero{align-items:center;border-radius:1.65rem;display:grid;gap:var(--space-5);grid-template-columns:minmax(0,1fr) minmax(18rem,27rem);overflow:hidden;padding:clamp(1.4rem,3vw,2.8rem)}
-  .nca-kicker{color:var(--accent);font-size:.73rem;font-weight:850;letter-spacing:.13em;margin:0 0 .5rem;text-transform:uppercase}.nca-title{font-size:clamp(2.2rem,6vw,4.5rem);letter-spacing:-.055em;line-height:.95;margin:0;max-width:14ch}.nca-lede{color:var(--text-muted);line-height:1.65;margin:1rem 0 0;max-width:72ch}
-  .nca-health{background:var(--nca-soft);border-radius:1.2rem;display:grid;gap:.8rem;padding:1.1rem}.nca-row,.nca-actions,.nca-card-head{align-items:center;display:flex;flex-wrap:wrap;gap:.7rem;justify-content:space-between}.nca-mark{align-items:center;background:var(--nca-soft);border:1px solid var(--nca-edge);border-radius:999px;display:inline-flex;font-size:.72rem;font-weight:850;gap:.42rem;padding:.34rem .68rem;text-transform:uppercase}.nca-mark::before{background:currentColor;border-radius:50%;content:"";height:.55rem;width:.55rem}.nca-mark[data-state=ready]{color:var(--success,#45c786)}.nca-mark[data-state=partial]{color:var(--warn)}.nca-mark[data-state=failed]{color:var(--danger,#f06b75)}
-  .nca-metrics{display:grid;gap:.7rem;grid-template-columns:repeat(2,minmax(0,1fr))}.nca-metric{background:var(--nca-soft);border:1px solid var(--nca-edge);border-radius:1rem;padding:.9rem}.nca-metric strong{display:block;font-size:1.35rem}.nca-metric span,.nca-help{color:var(--text-muted);font-size:.78rem;line-height:1.5}
-  .nca-boundary{border-left:.3rem solid var(--accent);border-radius:1.15rem;padding:1.1rem 1.35rem}.nca-boundary h2,.nca-card h2{margin:0 0 .55rem}.nca-boundary p{color:var(--text-muted);line-height:1.55;margin:.35rem 0}
-  .nca-grid{display:grid;gap:var(--space-4);grid-template-columns:repeat(12,minmax(0,1fr))}.nca-card{border-radius:1.2rem;grid-column:span 6;min-width:0;padding:clamp(1rem,2vw,1.45rem)}.nca-card--wide{grid-column:1/-1}
-  .nca-form{display:grid;gap:.85rem}.nca-fields{display:grid;gap:.75rem;grid-template-columns:repeat(2,minmax(0,1fr))}.nca-field-wide{grid-column:1/-1}.nca-form label{color:var(--text-muted);display:grid;font-size:.82rem;font-weight:700;gap:.35rem}.nca-form :where(.input,.select,textarea){background:color-mix(in srgb,var(--bg) 55%,transparent);border-color:var(--nca-edge);min-width:0;width:100%}.nca-form textarea{border-radius:.65rem;color:var(--text);font:inherit;min-height:5rem;padding:.65rem;resize:vertical}
-  .nca-output{background:color-mix(in srgb,#020617 77%,transparent);border:1px solid var(--nca-edge);border-radius:1rem;color:#dbeafe;max-height:32rem;min-height:10rem;overflow:auto;padding:1rem;white-space:pre-wrap;word-break:break-word}.nca-table{border-collapse:collapse;font-size:.8rem;width:100%}.nca-table th,.nca-table td{border-bottom:1px solid var(--nca-edge);padding:.55rem;text-align:left;vertical-align:top}.nca-table td{color:var(--text-muted);word-break:break-all}.nca-table-wrap{overflow:auto}.nca-reasons{color:var(--text-muted);font-size:.8rem;margin:.2rem 0;padding-left:1.2rem}.nca-link{font-size:.78rem;overflow-wrap:anywhere}.nca-admin-note{background:var(--nca-soft);border:1px solid var(--nca-edge);border-radius:.8rem;color:var(--text-muted);font-size:.78rem;padding:.7rem}.nca-form fieldset{border:0;display:grid;gap:.85rem;margin:0;min-inline-size:0;padding:0}.nca-form fieldset:disabled{opacity:.58}
-  @media(max-width:900px){.nca-hero{grid-template-columns:1fr}.nca-card{grid-column:1/-1}}
-  @media(max-width:560px){.nca-fields,.nca-metrics{grid-template-columns:1fr}.nca-field-wide{grid-column:auto}}
-</style>
-{% endblock %}
-{% block content %}
+{% from "_hero.html" import hero, state %}
 {% from "_module_gate.html" import module_gate %}
-{% if not native_module_enabled %}
-{{ module_gate('consent_preferences.native_sdk', 'Native consent SDK',
-               detail='Activates the native-consent control plane; receipt-signing custody, attestation and required callbacks must still pass readiness.',
-               can_activate=native_can_admin) }}
-{% endif %}
-<div class="nca-shell" id="nca-root" data-admin-api-base="{{ admin_api_base }}" data-public-keys-base="{{ public_keys_base }}" data-copilot-page="{{ page_path }}" data-can-audit="{{ 'true' if native_can_audit else 'false' }}" data-can-admin="{{ 'true' if native_can_admin else 'false' }}">
-  <section class="nca-hero nca-glass" aria-labelledby="nca-title">
-    <div><p class="nca-kicker">Attested devices · exact publications · offline-verifiable receipts</p><h1 class="nca-title" id="nca-title">Native consent</h1><p class="nca-lede">Manage consent for mobile apps and connected TVs. Lightwork verifies the application, device, publication, and your permissions before accepting changes.</p></div>
-    <div class="nca-health"><div class="nca-row"><span class="nca-mark" data-state="partial" id="nca-state">Checking</span><button class="btn" id="nca-refresh" type="button">Refresh readiness</button></div><strong id="nca-health-title">Resolving native authorities</strong><span class="nca-help" id="nca-health-detail">Readiness fails closed until custody, attestation, publications, registries and configured callbacks are available.</span><div class="nca-metrics"><div class="nca-metric"><strong id="nca-applications">—</strong><span>Registered applications</span></div><div class="nca-metric"><strong id="nca-callbacks">—</strong><span>Required callback classes</span></div></div><ul class="nca-reasons" id="nca-reasons"><li>Readiness has not loaded.</li></ul></div>
+{% block title %}Mobile App Consent · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
+{% block content %}
+<div class="governance-workbench" id="nca-root" data-admin-api-base="{{ admin_api_base }}" data-public-keys-base="{{ public_keys_base }}" data-copilot-page="{{ page_path }}" data-can-audit="{{ 'true' if native_can_audit else 'false' }}" data-can-admin="{{ 'true' if native_can_admin else 'false' }}">
+  {% call hero('Consent integration', 'Mobile App Consent',
+               lede='Show your consent banner inside your mobile and TV apps, see which devices are connected, and remove a device’s access when you need to.') %}
+    {{ state('Readiness', 'Checking…', badge='Checking', badge_class='idle') }}
+  {% endcall %}
+  {% include "_consent_nav.html" %}
+  {% if not native_module_enabled %}
+  {{ module_gate('consent_preferences.native_sdk', 'Mobile app consent',
+                 detail='Lets your mobile and TV apps show your published consent banner and save people’s choices.',
+                 can_activate=native_can_admin) }}
+  {% endif %}
+  <p id="nca-status" class="muted" role="status" aria-live="polite"></p>
+
+  <section class="panel" aria-labelledby="nca-ready-heading">
+    <div class="section-head">
+      <h2 id="nca-ready-heading">What still needs setting up</h2>
+      <button class="btn btn--ghost" id="nca-refresh" type="button">Check again</button>
+    </div>
+    <ul id="nca-reasons"><li class="muted">Checking…</li></ul>
   </section>
 
-  <section class="nca-boundary nca-glass"><h2>Production evidence boundary</h2><p>Device enrollment, refresh, and key rotation require an independently configured verifier. The required profile, privacy-rights, and consent-standard integrations must also be ready. Local checks do not establish app-store, device, accessibility, conformance, customer, or regulator acceptance.</p></section>
+  <section class="panel" aria-labelledby="nca-apps-heading">
+    <div class="section-head">
+      <h2 id="nca-apps-heading">Your apps</h2>
+      <button class="btn btn--primary" type="button" id="nca-new"{% if not native_can_admin %} disabled{% endif %}>Add an app</button>
+    </div>
+    {% if not native_can_admin %}<p class="muted">Only an administrator can add apps or change their settings.</p>{% endif %}
+    <div id="nca-apps"><p class="muted">Loading apps…</p></div>
 
-  <div class="nca-grid">
-    <section class="nca-card nca-glass"><div class="nca-card-head"><div><p class="nca-kicker">Create-only application authority</p><h2>Register application</h2></div><span class="nca-help">Creates a new application record</span></div><form class="nca-form" id="nca-register-form" autocomplete="off"><fieldset{% if not native_can_admin %} disabled{% endif %}><div class="nca-fields"><label>Public service-client reference<input class="input" name="public_client_ref" maxlength="128" required></label><label>Minimum SDK version<input class="input" name="minimum_sdk_version" type="number" min="1" max="1000000" value="1" required></label></div><p class="nca-admin-note">Application publication or policy authority is never accepted here. The server resolves the active service client and exact published bundle. Authority changes require a new globally unique application reference.</p><button class="btn btn--primary" type="submit">Register application</button></fieldset></form></section>
+    <form id="nca-register-form" class="cw-editor" hidden novalidate autocomplete="off">
+      <fieldset class="cw-form"{% if not native_can_admin %} disabled{% endif %}>
+        <legend class="sr-only">Add an app</legend>
+        <h3 class="cw-wide">Add an app</h3>
+        <label class="cw-wide">App key<select class="select" name="public_client_ref" required></select>
+          <span class="muted">Choose the key you created for this app on the Website and App Keys page. The app’s banner, languages and consent policy come from that key.</span>
+        </label>
+        <details class="cw-wide">
+          <summary>More options</summary>
+          <label>Oldest app release allowed
+            <select class="select" name="minimum_sdk_version">
+              <option value="1" selected>Any release</option>
+              <option value="2">Release 2 or later</option>
+              <option value="3">Release 3 or later</option>
+              <option value="4">Release 4 or later</option>
+              <option value="5">Release 5 or later</option>
+            </select>
+          </label>
+        </details>
+        <div class="cw-actions">
+          <button class="btn btn--primary" type="submit">Add app</button>
+          <button class="btn btn--ghost" type="button" data-nca-close="nca-register-form">Cancel</button>
+        </div>
+      </fieldset>
+    </form>
+  </section>
 
-    <section class="nca-card nca-glass"><div class="nca-card-head"><div><p class="nca-kicker">Offline receipt verification</p><h2>Public receipt keys</h2></div><button class="btn" id="nca-load-keys" type="button">Load keys</button></div><form class="nca-form" id="nca-keys-form" autocomplete="off"><label>Application reference<input class="input" name="application_ref" maxlength="128" required></label></form><p class="nca-link"><a id="nca-public-key-link" href="{{ public_keys_base }}" rel="noopener noreferrer" target="_blank">Public key discovery endpoint</a></p><div class="nca-table-wrap"><table class="nca-table"><thead><tr><th>Key ID</th><th>Revision</th><th>Public key</th><th>Current</th></tr></thead><tbody id="nca-key-rows"><tr><td colspan="4">No receipt keys loaded.</td></tr></tbody></table></div></section>
+  <section class="panel" aria-labelledby="nca-devices-heading" id="nca-devices-panel" hidden>
+    <div class="section-head">
+      <h2 id="nca-devices-heading">Devices</h2>
+      <button class="btn btn--ghost" type="button" data-nca-close="nca-devices-panel">Close</button>
+    </div>
+    <p class="muted">Each phone or TV that installed your app and passed the genuine-device check appears here. Devices renew their own security keys automatically.</p>
+    <div id="nca-devices"></div>
+  </section>
 
-    <section class="nca-card nca-glass"><p class="nca-kicker">Receipt verification keys</p><h2>Complete receipt-key rotation</h2><form class="nca-form" id="nca-receipt-rotate-form" autocomplete="off"><fieldset{% if not native_can_admin %} disabled{% endif %}><div class="nca-fields"><label>Application reference<input class="input" name="application_ref" maxlength="128" required></label><label>Current directory version<input class="input" name="expected_directory_revision" type="number" min="1" max="2147483647" required></label></div><p class="nca-admin-note">The new key is supplied by this workspace's signing configuration. Earlier public keys remain available to verify historical receipts.</p><button class="btn btn--primary" type="submit">Rotate configured receipt key</button></fieldset></form></section>
+  <section class="panel" aria-labelledby="nca-keys-heading" id="nca-keys-panel" hidden>
+    <div class="section-head">
+      <h2 id="nca-keys-heading">Receipt checking keys</h2>
+      <button class="btn btn--ghost" type="button" data-nca-close="nca-keys-panel">Close</button>
+    </div>
+    <p class="muted">Anyone can use these public keys to confirm that a consent receipt from your app really came from Lightwork. Older keys stay listed so older receipts can still be checked.</p>
+    <div id="nca-keys"></div>
+    <p><a class="btn btn--ghost" id="nca-public-key-link" href="{{ public_keys_base }}" rel="noopener noreferrer" target="_blank">Open the public key list</a></p>
+  </section>
 
-    <section class="nca-card nca-glass"><div class="nca-card-head"><div><p class="nca-kicker">Audit and registry health</p><h2>Verify integrity</h2></div><button class="btn" id="nca-integrity" type="button"{% if not native_can_audit %} disabled data-role-disabled="true"{% endif %}>Run integrity check</button></div><p class="nca-help">Verifies the tenant-private device registry, its immutable event chain, the global selector directory, and every application-bound receipt-key history visible to this tenant.</p></section>
+  <section class="panel" aria-labelledby="nca-check-heading">
+    <div class="section-head">
+      <h2 id="nca-check-heading">Check records</h2>
+      <button class="btn" id="nca-integrity" type="button"{% if not native_can_audit %} disabled data-role-disabled="true"{% endif %}>Check that records are intact</button>
+    </div>
+    <p class="muted">Confirms that the device list and its history have not been changed outside Lightwork.{% if not native_can_audit %} You need audit access to run this check.{% endif %}</p>
+    <div id="nca-integrity-result" class="cw-result" role="status" aria-live="polite"></div>
+  </section>
 
-    <section class="nca-card nca-card--wide nca-glass"><p class="nca-kicker">Verify the device before changing its key</p><h2>Rotate a device key</h2><form class="nca-form" id="nca-device-rotate-form" autocomplete="off"><fieldset{% if not native_can_admin %} disabled{% endif %}><div class="nca-fields"><label>Application reference<input class="input" name="application_ref" maxlength="128" required></label><label>Device reference<input class="input" name="device_id" maxlength="128" required></label><label>Current device version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label><label>New Ed25519 public key (hex)<input class="input" name="public_key_hex" minlength="64" maxlength="64" required></label><label>Attestation nonce<input class="input" name="attestation_nonce" maxlength="128" required></label><label>Attestation evidence SHA-256<input class="input" name="attestation_evidence_sha256" minlength="64" maxlength="64" required></label><label>Issued at (integer epoch second)<input class="input" name="issued_at" type="number" min="1" max="99999999999" step="1" required></label><label>Expires at (integer epoch second)<input class="input" name="expires_at" type="number" min="1" max="99999999999" step="1" required></label><label class="nca-field-wide">Attestation material (unpadded base64url)<textarea name="attestation_material_b64url" minlength="1" maxlength="87384" required></textarea></label></div><button class="btn btn--primary" type="submit">Verify and rotate device key</button></fieldset></form></section>
-
-    <section class="nca-card nca-card--wide nca-glass"><p class="nca-kicker">Irreversible authority removal</p><h2>Revoke a device</h2><form class="nca-form" id="nca-device-revoke-form" autocomplete="off"><fieldset{% if not native_can_admin %} disabled{% endif %}><div class="nca-fields"><label>Application reference<input class="input" name="application_ref" maxlength="128" required></label><label>Device reference<input class="input" name="device_id" maxlength="128" required></label><label>Current device version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label><label>Revocation evidence SHA-256<input class="input" name="evidence_sha256" minlength="64" maxlength="64" required></label></div><button class="btn btn--danger" type="submit">Revoke device access</button></fieldset></form></section>
-
-    <section class="nca-card nca-card--wide nca-glass"><div class="nca-card-head"><div><p class="nca-kicker">Governed output</p><h2>Current operation</h2></div><span class="nca-help" id="nca-operation-state" role="status" aria-live="polite">No operation has run.</span></div><pre class="nca-output" id="nca-output" tabindex="0"></pre></section>
-  </div>
-  <noscript><p class="nca-boundary nca-glass">Enable JavaScript to use these administration controls.</p></noscript>
+  <details class="panel">
+    <summary>About this page’s safeguards</summary>
+    <p class="muted">A device can only connect after an independent service confirms it is a genuine copy of your app. Removing a device’s access cannot be undone; the device has to be set up again. Every change is recorded with who made it.</p>
+  </details>
+  <noscript><p class="panel">Turn on JavaScript to use this page.</p></noscript>
 </div>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-consent-native-admin.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-consent-workbench.js" defer></script><script src="/static/lightwork-consent-native-admin.js" defer></script>{% endblock %}

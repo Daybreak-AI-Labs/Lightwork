@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -47,7 +46,9 @@ class SkillStat:
 
 
 def _enabled() -> bool:
-    return os.environ.get("MAVERICK_SKILL_DECAY", "1") != "0"
+    from ..env_setting import env_or_config
+
+    return env_or_config("MAVERICK_SKILL_DECAY", "skills", "decay", "1") != "0"
 
 
 def _resolve(path: Path | None) -> Path:
@@ -246,6 +247,35 @@ def evictable(
     return out
 
 
+def usage_rows(names: list[str], *, path: Path | None = None) -> list[dict]:
+    """Each named skill's track record, in ``names`` order, from one read.
+
+    ``{name, uses, wins, losses, win_rate, weight, last_used}``: ``win_rate``
+    is wins over decided runs (``None`` until a run was decided, ``0.0`` when
+    used but undecided -- the ``skills stats`` reading) and ``weight`` is the
+    recall multiplier :func:`decay_weight` applies. A skill with no recorded
+    use has ``uses == 0``. Shared by ``maverick skills stats`` and the Skills
+    page so both read the same numbers."""
+    try:
+        with _lock:
+            stats = _load(_resolve(path))
+    except Exception:  # pragma: no cover -- stats never block a read-out
+        stats = {}
+    rows: list[dict] = []
+    for name in names:
+        st = stats.get(name)
+        if st is None or st.uses == 0:
+            rows.append({"name": name, "uses": 0, "wins": 0, "losses": 0,
+                         "win_rate": None, "weight": 1.0, "last_used": 0.0})
+            continue
+        decided = st.wins + st.losses
+        weight = _weight_from_stat(st, 3, 0.5) if _enabled() else 1.0
+        rows.append({"name": name, "uses": st.uses, "wins": st.wins, "losses": st.losses,
+                     "win_rate": (st.wins / decided) if decided else 0.0,
+                     "weight": weight, "last_used": st.last_used})
+    return rows
+
+
 def get(name: str, path: Path | None = None) -> SkillStat | None:
     """Return the stored stat for ``name``, or None."""
     try:
@@ -264,4 +294,5 @@ __all__ = [
     "decay_weights",
     "evictable",
     "get",
+    "usage_rows",
 ]

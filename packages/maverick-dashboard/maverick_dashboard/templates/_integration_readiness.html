@@ -1,65 +1,41 @@
+{# One plain status for a provider, channel or tool-server connection, with
+   the individual checks kept inside a collapsed "Technical details".
+   `r` is the readiness contract from integration_readiness.contract(). #}
 {% macro integration_readiness(r) %}
-  <div style="display: grid; gap: var(--space-1); min-width: 15rem; font-size: var(--text-sm);">
-    <div>
-      <span class="muted">Setup:</span>
-      <span class="badge {{ 'active' if r.configured else 'blocked' }}">
-        {{ 'configured' if r.configured else 'not configured' }}
-      </span>
-    </div>
-    <div>
-      <span class="muted">Policy:</span>
-      {% if r.policy_allowed is sameas true %}
-        <span class="badge active">allowed</span>
-      {% elif r.policy_allowed is sameas false %}
-        <span class="badge blocked">denied</span>
-      {% else %}
-        <span class="badge">unknown</span>
-      {% endif %}
-    </div>
-    <div>
-      <span class="muted">Required software:</span>
-      <span class="badge {{ 'active' if r.dependency.status == 'passed' else ('blocked' if r.dependency.status == 'failed' else '') }}">
-        {{ r.dependency.status | replace('_', ' ') }}
-      </span>
-    </div>
-    <div>
-      <span class="muted">Local check:</span>
-      <span class="badge {{ 'active' if r.runtime.status == 'passed' else ('blocked' if r.runtime.status == 'failed' else '') }}">
-        {{ r.runtime.status | replace('_', ' ') }}
-      </span>
-    </div>
-    <div>
-      <span class="muted">Connection test:</span>
-      <span class="badge {{ 'active' if r.live.status == 'verified' else ('blocked' if r.live.status == 'failed' else '') }}">
-        {{ r.live.status }}
-      </span>
-    </div>
-    <p class="muted" style="margin: 0;">
-      {% if r.policy_allowed is sameas false %}
-        Your organization's policy does not allow this connection.
-      {% elif r.runtime.status == 'failed' or r.dependency.status == 'failed' %}
-        Setup needs attention before this connection can be used.
-      {% elif r.live.status == 'failed' %}
-        The connection test failed. Review the details before retrying.
-      {% elif r.live.status == 'verified' %}
-        The latest connection test passed.
-      {% else %}
-        A successful live connection has not been verified.
-      {% endif %}
-    </p>
+  {% set step_words = {'passed': 'Passed', 'failed': 'Failed', 'unknown': 'Not checked yet', 'not_applicable': 'Not needed', 'verified': 'Passed'} %}
+  {% if r.policy_allowed is sameas false %}
+    {% set overall, cls, sentence = 'Blocked', 'blocked', "Your organization's rules don't allow this connection." %}
+  {% elif not r.configured %}
+    {% set overall, cls, sentence = 'Not set up', '', 'Add the details to set up this connection.' %}
+  {% elif r.dependency.status == 'failed' %}
+    {% set overall, cls, sentence = 'Needs attention', 'blocked', 'Something this connection needs is missing on the computer running Lightwork. Share the technical details with whoever installed it.' %}
+  {% elif r.runtime.status == 'failed' %}
+    {% set overall, cls, sentence = 'Needs attention', 'blocked', 'Some details are missing or wrong. Check them and save again.' %}
+  {% elif r.live.status == 'failed' %}
+    {% set overall, cls, sentence = 'Test failed', 'blocked', 'The last test did not work. Check the details and test again.' %}
+  {% elif r.live.status == 'verified' %}
+    {% set overall, cls, sentence = 'Working', 'active', 'The last test worked.' %}
+  {% else %}
+    {% set overall, cls, sentence = 'Not tested yet', 'warn', 'Saved, but not tested yet. Test it to make sure it works.' %}
+  {% endif %}
+  <div class="integration-readiness" style="display: grid; gap: var(--space-1); min-width: min(100%, 15rem); font-size: var(--text-sm);">
+    <div><span class="muted">Status:</span> <span class="badge {{ cls }}">{{ overall }}</span></div>
+    <p class="muted integration-readiness__copy" style="margin: 0;">{{ sentence }}</p>
     <details>
-      <summary>Connection details</summary>
-      <div class="muted">
-      {% if r.policy_allowed is sameas false %}
-        {{ r.policy_detail }}
-      {% elif r.runtime.status == 'failed' %}
-        {{ r.runtime.detail }}
-      {% elif r.dependency.status == 'failed' %}
-        {{ r.dependency.detail }}
-      {% else %}
-        {{ r.live.detail }}
-      {% endif %}
-      </div>
+      <summary>Technical details</summary>
+      <ul class="muted integration-readiness__steps" style="margin: var(--space-1) 0; padding-left: var(--space-4);">
+        <li>Set up: {{ 'Yes' if r.configured else 'No' }}</li>
+        <li>Organization rules: {% if r.policy_allowed is sameas true %}Allowed{% elif r.policy_allowed is sameas false %}Not allowed{% else %}Not checked yet{% endif %}</li>
+        <li>Required software: {{ step_words.get(r.dependency.status, 'Not checked yet') }}</li>
+        <li>Local check: {{ step_words.get(r.runtime.status, 'Not checked yet') }}</li>
+        <li>Connection test: {{ step_words.get(r.live.status, 'Not checked yet') }}</li>
+      </ul>
+      <p class="muted integration-readiness__copy" style="margin: 0;">
+      {% if r.policy_allowed is sameas false %}{{ r.policy_detail }}
+      {% elif r.runtime.status == 'failed' %}{{ r.runtime.detail }}
+      {% elif r.dependency.status == 'failed' %}{{ r.dependency.detail }}
+      {% else %}{{ r.live.detail }}{% endif %}
+      </p>
     </details>
   </div>
 {% endmacro %}

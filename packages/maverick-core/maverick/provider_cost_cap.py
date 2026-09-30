@@ -59,7 +59,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -625,6 +625,8 @@ class Reservation:
     projected: float
     path: Path | None = field(repr=False)
     shared: object = field(default=None, repr=False, compare=False)
+    # The tenant whose organization admission this call holds, if any.
+    organization_tenant: str | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -1016,7 +1018,7 @@ def check(provider: str, *, now: float | None = None,
         raise ProviderAccountingUnavailable from exc
 
 
-def reserve(
+def _reserve_provider(
     provider: str,
     projected_dollars: float,
     *,
@@ -1030,6 +1032,7 @@ def reserve(
     attempt_no: int | None = None,
     service: str | None = None,
     projection_known: bool = True,
+    force_receipt: bool = False,
 ) -> Reservation | None:
     """Durably encumber capacity before each physical call, including hedges.
 
@@ -1047,7 +1050,7 @@ def reserve(
     # Preserve the uncapped, unattributed library path. An attributed platform
     # call still receives a durable cost receipt even when no spending ceiling
     # is configured, which is required for complete per-work accounting.
-    if cap is None and work_item is None:
+    if cap is None and work_item is None and not force_receipt:
         return None
     projected = _amount(projected_dollars)
     identity = request_id or uuid.uuid4().hex
@@ -1120,7 +1123,60 @@ def reserve(
     return Reservation(name, period, identity, projected, ledger, shared)
 
 
-def settle(
+def reserve(
+    provider: str, projected_dollars: float, *, now=None, path=None,
+    request_id: str | None = None, work_item_id: str | None = None,
+    operation_id: str | None = None, category: str | None = None,
+    parent_category: str | None = None, attempt_no: int | None = None,
+    service: str | None = None, projection_known: bool = True,
+    organization_budget=None,
+) -> Reservation | None:
+    """Admit both organization and provider authorities before one dispatch."""
+    from . import spending_limits
+    from .budget import BudgetExceeded
+    from .tenant import provider_admission as organization
+
+    identity = request_id or uuid.uuid4().hex
+    name = _canon(provider)
+    if not name or not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,192}", identity):
+        raise ProviderAccountingUnavailable
+    # Administrator-set workspace and per-person limits (none by default).
+    spending_limits.admit(organization_budget or organization.current_budget(),
+                          projected_dollars)
+    try:
+        handle = organization.reserve_call(name, identity, _amount(projected_dollars),
+                                           projection_known=projection_known,
+                                           budget=organization_budget)
+    except BudgetExceeded:
+        raise
+    except Exception as exc:
+        raise ProviderAccountingUnavailable from exc
+    hold = None
+    try:
+        hold = _reserve_provider(
+            name, projected_dollars, now=now, path=path, request_id=identity,
+            work_item_id=work_item_id, operation_id=operation_id, category=category,
+            parent_category=parent_category, attempt_no=attempt_no, service=service,
+            projection_known=projection_known, force_receipt=handle is not None,
+        )
+        if handle is not None:
+            organization.attach_reference(handle, reservation_reference(hold))
+            if hold is not None:
+                hold = replace(hold, organization_tenant=handle[0])
+        return hold
+    except BaseException:
+        # Neither authority has released dispatch to the caller. Failure here
+        # is known not to have spent externally; no TTL or crash inference.
+        try:
+            if hold is not None:
+                _settle_provider(hold, 0.0)
+            organization.cancel_before_dispatch(handle)
+        except Exception as exc:
+            raise ProviderAccountingUnavailable from exc
+        raise
+
+
+def _settle_provider(
     reservation: Reservation,
     actual_dollars: float | None,
     *,
@@ -1215,6 +1271,24 @@ def settle(
     return _snapshot(
         reservation.provider, reservation.period, reservation.request_id, row,
     )
+
+
+def settle(
+    reservation: Reservation, actual_dollars: float | None, *,
+    cost_basis: str | None = None, pricing_evidence: dict[str, object] | None = None,
+    attempt_state: str | None = None,
+) -> ReservationSnapshot:
+    snapshot = _settle_provider(reservation, actual_dollars, cost_basis=cost_basis,
+                                pricing_evidence=pricing_evidence, attempt_state=attempt_state)
+    try:
+        from .tenant.provider_admission import settle_call
+        settle_call(reservation.provider, reservation.request_id, snapshot.reference, snapshot.actual,
+                    tenant=reservation.organization_tenant)
+    except Exception as exc:
+        # The provider receipt remains durable; do not convert a failed second
+        # acknowledgement into permission to retry another paid request.
+        raise ProviderAccountingUnavailable from exc
+    return snapshot
 
 
 def _failed_attempt_state(error: BaseException) -> str:

@@ -1,4 +1,4 @@
-/* Glance — the at-a-glance fleet summary, polled every 15s.
+/* Overview (was "Glance") — the at-a-glance summary, polled every 15s.
  *
  * Online path composes two real read-only endpoints:
  *   GET /api/v1/oversight/active  (active runs + latest activity)
@@ -7,7 +7,7 @@
  * GET /api/v1/offline/bundle when the dashboard serves it (404 on older
  * dashboards is fine — the cache just isn't refreshed). When everything is
  * unreachable, renders the cached bundle with an offline banner. */
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import {
@@ -18,68 +18,91 @@ import {
   getActive,
   getOfflineBundle,
   getSpend,
+  isAccessDenied,
 } from "../api";
 import { offlineBanner, saveBundle, useCachedBundle } from "../offlineCache";
 import { ConnectionNotice } from "../components/ConnectionNotice";
+import { Banner, EmptyState } from "../components/ui";
+import { activityText, money, plural, taskTitle } from "../format";
 import { usePolling } from "../poll";
+import { theme } from "../theme";
 
 type GlanceData = { active: ActiveGoal[]; spend: SpendTotal | null };
 
-export function GlanceScreen(props: { settings: Settings }): React.JSX.Element {
-  const { settings } = props;
+export function GlanceScreen(props: { settings: Settings; onOpenSettings?: () => void }): React.JSX.Element {
+  const { settings, onOpenSettings } = props;
 
-  const fetcher = useCallback(async (): Promise<GlanceData> => {
+  const fetcher = useCallback(async (signal: AbortSignal): Promise<GlanceData> => {
     const [activeRes, spendRes] = await Promise.all([
-      getActive(settings),
-      getSpend(settings).catch(() => null),
+      getActive(settings, signal),
+      getSpend(settings, signal).catch(error => { if (isAccessDenied(error)) throw error; return null; }),
     ]);
-    // Best-effort cache refresh; endpoint may not exist on older dashboards.
-    getOfflineBundle(settings).then((b) => saveBundle(b, settings.baseUrl, settings.cacheScope)).catch(() => undefined);
     return { active: activeRes.goals, spend: spendRes ? spendRes.total : null };
   }, [settings]);
 
-  const { data, error } = usePolling<GlanceData>(fetcher, 15_000);
+  const { data, error, accessDenied, unsupported, refresh } = usePolling<GlanceData>(fetcher, 15_000);
+  // Optional cache refresh has its own lifecycle and deadline; it neither
+  // holds the glance response nor outlives the connection generation.
+  const bundleFetcher = useCallback((signal: AbortSignal) => getOfflineBundle(settings, signal), [settings]);
+  const bundle = usePolling(bundleFetcher, 60_000);
+  useEffect(() => {
+    if (bundle.data) void saveBundle(bundle.data, settings.baseUrl, settings.cacheScope).catch(() => undefined);
+  }, [bundle.data, settings]);
 
-  const cached = useCachedBundle(settings, Boolean(error && !data));
+  const cached = useCachedBundle(settings, Boolean(error && !data && !accessDenied && !unsupported && !bundle.accessDenied && !bundle.unsupported));
 
   if (!data && cached) {
     const g = cached.bundle.glance;
     return (
       <ScrollView style={styles.fill}>
-        <Text style={styles.banner}>{offlineBanner(cached)}</Text>
-        <Stat label="active runs" value={String(g.counts.active)} />
-        <Stat label="pending approvals" value={String(g.counts.pending_approvals)} />
-        <Stat label="open questions" value={String(g.counts.open_questions)} />
-        <Stat label="total spend" value={`$${g.spend.dollars.toFixed(2)}`} />
-        <Text style={styles.section}>Active (cached)</Text>
+        <Text style={styles.heading} accessibilityRole="header">Overview</Text>
+        <Banner text={offlineBanner(cached)} />
+        <View style={styles.stats}>
+          <Stat label="Tasks in progress" value={String(g.counts.active)} />
+          <Stat label="Waiting for approval" value={String(g.counts.pending_approvals)} />
+          <Stat label="Questions for you" value={String(g.counts.open_questions)} />
+          <Stat label="Total spend" value={money(g.spend.dollars)} />
+        </View>
+        <Text style={styles.section} accessibilityRole="header">In progress (saved)</Text>
+        {g.active.length === 0 ? <Text style={styles.row}>Nothing was running.</Text> : null}
         {g.active.map((a: Glance["active"][number]) => (
-          <Text key={a.id} style={styles.row} numberOfLines={1}>
-            #{a.id} {a.title}
-          </Text>
+          <Text key={a.id} style={styles.row} numberOfLines={1}>{taskTitle(a.title)}</Text>
         ))}
+        <Text style={styles.note}>Approvals and questions are answered on the dashboard.</Text>
       </ScrollView>
     );
   }
 
   return (
     <ScrollView style={styles.fill}>
-      {error ? <ConnectionNotice message={error} /> : null}
-      <Stat label="active runs" value={data ? String(data.active.length) : "…"} />
-      <Stat
-        label="total spend"
-        value={data?.spend ? `$${data.spend.dollars.toFixed(2)} over ${data.spend.runs} runs` : "…"}
-      />
-      <Text style={styles.section}>Active now</Text>
+      <Text style={styles.heading} accessibilityRole="header">Overview</Text>
+      {error ? (
+        <ConnectionNotice message={error} accessDenied={accessDenied} unsupported={unsupported}
+          onRetry={refresh} onOpenSettings={accessDenied ? onOpenSettings : undefined} />
+      ) : null}
+      {error && data ? <Banner text="These numbers may be out of date." /> : null}
+      <View style={styles.stats}>
+        <Stat label="Tasks in progress" value={data ? String(data.active.length) : "…"} />
+        <Stat
+          label="Total spend"
+          value={data?.spend ? money(data.spend.dollars) : "…"}
+          detail={data?.spend ? `Across ${plural(data.spend.runs, "task", "tasks")}` : undefined}
+        />
+      </View>
+      <Text style={styles.section} accessibilityRole="header">In progress now</Text>
       {data && data.active.length === 0 ? (
-        <Text style={styles.row}>Nothing running.</Text>
+        <EmptyState
+          title="Nothing is running"
+          body="When a task starts on the dashboard, you'll see it here with its latest step."
+          actionLabel="Refresh now"
+          onAction={refresh}
+        />
       ) : null}
       {(data ? data.active : []).map((a) => (
         <View key={a.id} style={styles.card}>
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            #{a.id} {a.title}
-          </Text>
+          <Text style={styles.cardTitle} numberOfLines={2}>{taskTitle(a.title)}</Text>
           {a.activity ? (
-            <Text style={styles.cardSub} numberOfLines={2}>{a.activity}</Text>
+            <Text style={styles.cardSub} numberOfLines={2}>Latest step: {activityText(a.activity)}</Text>
           ) : null}
         </View>
       ))}
@@ -87,34 +110,37 @@ export function GlanceScreen(props: { settings: Settings }): React.JSX.Element {
   );
 }
 
-function Stat(props: { label: string; value: string }): React.JSX.Element {
+function Stat(props: { label: string; value: string; detail?: string }): React.JSX.Element {
   return (
-    <View style={styles.stat}>
+    <View style={styles.stat} accessible accessibilityLabel={`${props.label}: ${props.value}${props.detail ? `, ${props.detail}` : ""}`}>
       <Text style={styles.statValue}>{props.value}</Text>
       <Text style={styles.statLabel}>{props.label}</Text>
+      {props.detail ? <Text style={styles.statLabel}>{props.detail}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  banner: {
-    backgroundColor: "#fff8c5", color: "#4d2d00",
-    padding: 8, textAlign: "center", fontSize: 13,
+  heading: { fontSize: 22, fontWeight: "700", color: theme.text, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  stats: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8 },
+  stat: {
+    width: "46%", margin: "2%", padding: 12, borderRadius: 8,
+    backgroundColor: theme.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border,
   },
-  stat: { paddingHorizontal: 16, paddingVertical: 10 },
-  statValue: { fontSize: 22, fontWeight: "700" },
-  statLabel: { fontSize: 13, color: "#57606a" },
+  statValue: { fontSize: 22, fontWeight: "700", color: theme.text },
+  statLabel: { fontSize: 13, color: theme.muted },
   section: {
-    fontSize: 13, fontWeight: "700", color: "#57606a",
-    textTransform: "uppercase", paddingHorizontal: 16, paddingTop: 16,
+    fontSize: 15, fontWeight: "700", color: theme.text,
+    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4,
   },
-  row: { paddingHorizontal: 16, paddingVertical: 6, fontSize: 14 },
+  row: { paddingHorizontal: 16, paddingVertical: 6, fontSize: 14, color: theme.text },
+  note: { paddingHorizontal: 16, paddingVertical: 12, fontSize: 13, color: theme.muted },
   card: {
     marginHorizontal: 14, marginVertical: 6, padding: 12,
     borderRadius: 8, borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#d0d7de",
+    borderColor: theme.border,
   },
-  cardTitle: { fontSize: 15, fontWeight: "600" },
-  cardSub: { fontSize: 13, color: "#57606a", marginTop: 4 },
+  cardTitle: { fontSize: 15, fontWeight: "600", color: theme.text },
+  cardSub: { fontSize: 13, color: theme.muted, marginTop: 4 },
 });

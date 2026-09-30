@@ -9,8 +9,10 @@ templates.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from . import auth
@@ -35,6 +37,13 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     Lightwork uses by default. Appearance is applied via the existing
     persist_theme middleware (the form GETs back here with the params); the
     model choice is saved to the dashboard-owned runtime overlay."""
+    return _settings_response(request, saved)
+
+
+def _settings_response(request: Request, saved: str = "", *, notice: str = "",
+                       status_code: int = 200) -> HTMLResponse:
+    """The settings page; ``notice`` is a message shown instead of "Saved"
+    (a change waiting for other administrators' approval)."""
     # Every form on this page changes deployment-wide process configuration.
     # A tenant-local admin must not see an apparently actionable console whose
     # POSTs all fail the correct global gate.
@@ -48,6 +57,7 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         budget_override,
         default_model_override,
         role_model_override,
+        task_limits_override,
     )
     roles = [
         ("Orchestrator", "orchestrator"), ("Coder", "coder"),
@@ -107,18 +117,23 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     from maverick_dashboard import model_pickers
     pickers = model_pickers.build(cfg_state["providers"], allow)
     groups_by_name = {g["name"]: g for g in pickers["model_groups"]}
+    from maverick_dashboard import plain_labels
     for provider in cfg_state["providers"]:
         provider["discovery"] = groups_by_name.get(provider["name"])
+        provider["key_help"] = plain_labels.PROVIDER_KEY_HELP.get(provider["name"], "")
+    for feature in cfg_state["features"]:
+        feature["info"] = plain_labels.feature_help(feature["name"], feature.get("info") or "")
     saved_msg = {
         "appearance": "Appearance updated.",
         "models": "Default model updated.",
-        "roles": "Per-role models updated.",
-        "budget": "Spend cap updated.",
-        "allowed": "Allowed models updated.",
-        "discover": "Model lists refreshed from the provider keys.",
+        "roles": "Role models updated.",
+        "budget": "Task spending limit updated.",
+        "allowed": "Approved models updated.",
+        "discover": "Model lists refreshed from your provider keys.",
         "providers": "Provider keys updated.",
-        "provider_test": "Provider readiness check finished.",
-        "webhooks": "Webhook signing secret updated.",
+        "provider_test": "Connection test finished. The result is shown next to the provider.",
+        "webhooks": "Secret for other apps updated.",
+        "discovery": "Automatic model lists updated.",
         "capabilities": "Capabilities updated.",
         "features": "Features updated.",
         "visibility": "Page visibility updated.",
@@ -131,6 +146,7 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "roles": "models",
         "allowed": "models",
         "discover": "models",
+        "discovery": "models",
         "providers": "integrations",
         "provider_test": "integrations",
         "webhooks": "integrations",
@@ -140,6 +156,19 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "visibility_reset": "access",
     }.get(saved, "")
     from maverick_dashboard import rbac, ui_visibility
+
+    from .webhook_settings import WebhookSettingsConflict, WebhookSettingsUnavailable
+    from .webhook_settings import state as webhook_state
+
+    # Render only the safe current state; the browser obtains a fresh reviewed
+    # generation before it can submit any change.
+    try:
+        webhook_configured = webhook_state(
+            principal=auth.caller_principal(request) or "local-operator",
+            authorize=lambda: auth.require_global_permission(request, "admin"),
+        )["configured"]
+    except (WebhookSettingsConflict, WebhookSettingsUnavailable):
+        webhook_configured = None
     return _app().templates.TemplateResponse(request, "settings.html", {
         "visibility_matrix": ui_visibility.matrix(),
         "visibility_roles": list(rbac.known_roles()),
@@ -154,10 +183,14 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "features": cfg_state["features"],
         "budget": budget_override(),
         "default_budget": DEFAULT_MAX_DOLLARS,
-        "webhook_configured": _webhook_secret_configured(),
+        "task_limits_enabled": (task_limits_override() if task_limits_override() is not None
+                                else (load_config().get("budget") or {}).get("task_limits_enabled", True)),
+        "discovery_locked": bool(__import__("os").environ.get("MAVERICK_MODEL_DISCOVERY", "").strip()),
+        "webhook_configured": webhook_configured,
         "saved": saved_msg,
         "saved_section": saved_section,
-    })
+        "notice": notice,
+    }, status_code=status_code)
 
 
 @router.post("/settings/models")
@@ -192,24 +225,98 @@ async def settings_set_model(request: Request) -> RedirectResponse:
 
 
 @router.post("/settings/budget")
-def settings_set_budget(request: Request, max_dollars: str = Form("")) -> RedirectResponse:
+def settings_set_budget(request: Request, max_dollars: str = Form(""),
+                        mode: str = Form("configured")) -> Response:
     """Set (or clear) the dashboard's per-goal spend cap via the runtime
     overlay. An empty value clears it, reverting to config.toml / defaults.
     config.toml is never written."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick.runtime_overrides import clear_budget, set_budget
+    from maverick.runtime_overrides import clear_budget, set_budget, set_task_limits
     val = (max_dollars or "").strip()
     try:
-        if val:
-            set_budget(float(val))
-        else:
-            clear_budget()
+        wanted = _budget_choice(mode, val)
     except ValueError as exc:
         raise HTTPException(
             status_code=400, detail="spend cap must be a positive number",
         ) from exc
+    # [safety] quorum_required: the per-task spending limit is a protected
+    # setting by default, so a change waits for other administrators'
+    # approval exactly as on All settings (settings_quorum).
+    approved = None
+    current = _budget_now()
+    if wanted != current:
+        from . import settings_quorum
+
+        actor = auth.caller_principal(request) or "local administrator"
+        change = [{"setting": _BUDGET_SETTING, "old": current, "new": wanted}]
+        hold, approved = settings_quorum.review(change, actor, lambda _s, value: value)
+        if hold is not None:
+            return _held(request, hold)
+    try:
+        if mode == "disabled":
+            set_task_limits(False)
+        elif mode == "configured" and val:
+            set_budget(float(val))
+        else:
+            # "default" is the page's "use your installation's standard
+            # limits" choice: drop the Settings amount, keep limits on.
+            clear_budget()
+            set_task_limits(True)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="spend cap must be a positive number",
+        ) from exc
+    if approved is not None:
+        from . import settings_quorum
+
+        settings_quorum.settle(approved)
     return RedirectResponse("/settings?saved=budget", status_code=303)
+
+
+# The per-task spending limit as the quorum sees it: one protected setting
+# (``budget.max_dollars`` in [safety] quorum_protected_keys), whatever the
+# form's mode, so switching limits off is protected too.
+_BUDGET_SETTING = SimpleNamespace(id="budget.max_dollars", label="Spending limit per task")
+
+
+def _budget_choice(mode: str, amount: str) -> str:
+    """What the form asks for, in the words approvers see."""
+    if mode == "disabled":
+        return "No limit for each task"
+    if mode == "configured" and amount:
+        value = float(amount)
+        if not 0 < value < float("inf"):
+            raise ValueError("spend cap must be positive")
+        return f"Stop a task after ${value:,.2f}"
+    if mode in ("configured", "default"):
+        return "Your installation's standard limits"
+    raise ValueError("unknown task limit policy")
+
+
+def _budget_now() -> str:
+    from maverick.config import load_config
+    from maverick.runtime_overrides import budget_override, task_limits_override
+
+    enabled = task_limits_override()
+    if enabled is None:
+        enabled = (load_config().get("budget") or {}).get("task_limits_enabled", True)
+    if not enabled:
+        return "No limit for each task"
+    amount = budget_override()
+    return (f"Stop a task after ${amount:,.2f}" if amount is not None
+            else "Your installation's standard limits")
+
+
+def _held(request: Request, hold: dict):
+    """202: the change waits for approval. JSON for scripts, the settings
+    page with the message for the browser form."""
+    from fastapi.responses import JSONResponse
+
+    if "application/json" in (request.headers.get("accept") or ""):
+        return JSONResponse({"changed": [], "quorum": hold, "message": hold["message"]},
+                            status_code=202, headers={"Cache-Control": "no-store"})
+    return _settings_response(request, notice=hold["message"], status_code=202)
 
 
 @router.post("/settings/models/roles")
@@ -278,31 +385,71 @@ def _refresh_models_quietly(provider: str) -> None:
         pass
 
 
-def _webhook_secret_configured() -> bool:
-    """Whether inbound webhooks currently have a signing secret (env, config,
-    or the dashboard overlay) -- reported as a boolean only, never the value."""
+def _webhook_operation(request: Request, operation):
+    from .webhook_settings import WebhookSettingsConflict, WebhookSettingsUnavailable
+
+    auth.require_global_permission(request, "admin")
+    principal = auth.caller_principal(request) or "local-operator"
     try:
-        from maverick.webhooks import inbound_secret
-        return bool(inbound_secret())
-    except Exception:  # pragma: no cover -- never break the settings page
-        return False
+        return operation(principal, lambda: auth.require_global_permission(request, "admin"))
+    except WebhookSettingsConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WebhookSettingsUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/settings/webhooks")
+def settings_get_webhooks(request: Request) -> dict:
+    """Current effective ownership and an opaque, caller-bound review token."""
+    from .webhook_settings import state
+    return _webhook_operation(request, lambda principal, authorize:
+        state(principal=principal, authorize=authorize))
 
 
 @router.post("/settings/webhooks")
 def settings_set_webhooks(
     request: Request,
     secret: str = Form(""),
-) -> RedirectResponse:
-    """Set or clear the webhook signing secret from the settings page (admin).
-    Saved to the dashboard config overlay (0600), never the operator's config
-    file; an env-provided secret still wins. Global-admin gated: this HMAC
-    secret guards every auth-exempt inbound webhook endpoint deployment-wide,
-    so a tenant-scoped admin must not be able to set/rotate it."""
+    expected_generation: str = Form(""),
+    action: str = Form("set"),
+) -> dict:
+    """Confirm a reviewed rotation against the actual runtime secret resolver."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
-    settings_store.set_webhooks_secret(secret)
-    return RedirectResponse("/settings?saved=webhooks", status_code=303)
+    return _webhook_operation(request, lambda principal, authorize:
+        settings_store.set_webhooks_secret(secret, action=action,
+            expected_generation=expected_generation, principal=principal, authorize=authorize))
+
+
+@router.post("/settings/models/discovery")
+def settings_set_model_discovery(request: Request, enabled: str = Form("on")) -> RedirectResponse:
+    """Turn automatic model lists on or off from the Models section (admin)."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    import os as _os
+
+    from maverick_dashboard import settings_store
+    if _os.environ.get("MAVERICK_MODEL_DISCOVERY", "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail="Automatic model lists are controlled by your installation, so this can't be changed here.",
+        )
+    try:
+        settings_store.set_model_discovery(enabled == "on")
+    except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Settings are unavailable. Retry after storage is restored.",
+        ) from exc
+    try:
+        from maverick import config as _config
+        _config.reset_config_cache()
+    except Exception:  # pragma: no cover -- cache reset is best effort
+        pass
+    return RedirectResponse("/settings?saved=discovery", status_code=303)
 
 
 @router.post("/settings/providers")
@@ -358,7 +505,7 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
 
 @router.post("/settings/providers/test")
 async def settings_test_provider(
-    request: Request, provider: str = Form(...)
+    request: Request, provider: str = Form(...), next: str = Form("")
 ) -> RedirectResponse:
     """Run a bounded live provider probe and bind its receipt to this config."""
     _app()._require_same_origin(request)
@@ -376,6 +523,8 @@ async def settings_test_provider(
         raise HTTPException(status_code=409, detail="provider is not configured")
     await run_in_threadpool(test_provider, name)
     await run_in_threadpool(_refresh_models_quietly, name)
+    if next == "providers":  # the Providers page's own Test connection button
+        return RedirectResponse("/providers?tested=1", status_code=303)
     return RedirectResponse("/settings?saved=provider_test", status_code=303)
 
 
@@ -405,10 +554,15 @@ async def settings_set_features(request: Request) -> RedirectResponse:
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     form = await request.form()
+    selected = {name: name in form for name in settings_store.FEATURE_DEFAULTS}
     try:
-        await run_in_threadpool(settings_store.set_toggles, "features", {
-            name: name in form for name in settings_store.FEATURE_DEFAULTS
-        })
+        await run_in_threadpool(settings_store.set_toggles, "features", selected)
+        await run_in_threadpool(
+            settings_store.assert_effective_copilot_operations,
+            selected["copilot_operations"],
+        )
+    except settings_store.FeatureSettingNotEffective as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
         raise HTTPException(
             status_code=503,
@@ -486,6 +640,43 @@ def _workspace_options(request: Request) -> tuple[list[dict], str]:
     return options, start
 
 
+def _signed_in_principals(limit: int = 200) -> list[str]:
+    """People who have signed in with company sign-in, most recent first."""
+    try:
+        from . import subject_directory
+        index = subject_directory.load_index()
+    except Exception:
+        return []
+    latest: dict[str, float] = {}
+    for entry in index.values():
+        sub = str(entry.get("sub") or "").strip()
+        if sub:
+            latest[sub] = max(latest.get(sub, 0.0), float(entry.get("ts") or 0.0))
+    ordered = sorted(latest, key=lambda sub: latest[sub], reverse=True)[:limit]
+    return [sub if sub.startswith("user:") else f"user:{sub}" for sub in ordered]
+
+
+def _people(users: dict, labels: dict, extra) -> list[dict]:
+    """Everyone the roster knows about, as choices for the people pickers.
+
+    Sources: explicit role holders, accepted invites, department grants,
+    installation administrators and people who have signed in. Each entry
+    carries a readable label; the exact sign-in identity is only the value."""
+    from .identity_format import humanize_principal
+    seen: dict[str, dict] = {}
+    for principal in [*users, *labels, *extra]:
+        principal = str(principal or "").strip()
+        if not principal.startswith("user:") or principal in seen:
+            continue
+        ident = humanize_principal(principal)
+        name = labels.get(principal) or ident.name
+        detail = "" if labels.get(principal) else ident.detail
+        seen[principal] = {"principal": principal,
+                           "label": f"{name} ({detail})" if detail and detail != "Email" else name,
+                           "role": users.get(principal)}
+    return sorted(seen.values(), key=lambda p: p["label"].lower())
+
+
 def _users_context(request: Request) -> dict:
     """Template context for the /users page (shared with the invite handler)."""
     import os as _os
@@ -527,8 +718,21 @@ def _users_context(request: Request) -> dict:
     except Exception:
         all_invites = []
     workspace_options, wm_tenant = _workspace_options(request)
+    role_map = rbac.list_users()
+    labels = _invite_labels(all_invites)
+    grants = suite_grants.list_grants()
+    people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
+    from .identity_format import role_label
+    defaults = set(default_suites) if default_suites is not None else None
     return {
-        "users": sorted(rbac.list_users().items()),
+        "people": people,
+        "people_labels": {p["principal"]: p["label"] for p in people},
+        "role_labels": {r: role_label(r) for r in rbac.known_roles()},
+        "grant_can_use_default": {
+            principal: defaults is not None and defaults.issubset(set(suites))
+            for principal, suites in grants.items()
+        },
+        "users": sorted(role_map.items()),
         "roles": rbac.known_roles(),
         "builtin_roles": rbac.ROLES,
         "custom_roles": custom_roles,
@@ -538,7 +742,7 @@ def _users_context(request: Request) -> dict:
         "auth_on": auth_on,
         "you": auth.caller_principal(request),
         "saved": saved,
-        "suite_grants": sorted(suite_grants.list_grants().items()),
+        "suite_grants": sorted(grants.items()),
         "all_suites": sorted(((k, department_title(k))
                               for k in suite_grants.known_suites()),
                              key=lambda kv: kv[1]),
@@ -546,7 +750,7 @@ def _users_context(request: Request) -> dict:
                            if default_suites is not None else None),
         "invites_on": invites.invites_enabled(),
         "pending_invites": [i for i in all_invites if i.pending],
-        "invite_labels": _invite_labels(all_invites),
+        "invite_labels": labels,
         "workspace_options": workspace_options,
         "wm_tenant": wm_tenant,
     }
@@ -608,9 +812,17 @@ def users_save_custom_role(
     from . import rbac
     atoms = {str(p).strip() for p in permissions if str(p).strip()}
     atoms.add("view")
+    # People type a role name ("Privacy officer"); the stored key is derived
+    # from it (privacy-officer), so saving the same name again updates it.
+    from .plain_labels import slugify
+    key = slugify(name, max_len=32)
+    if key and not key[0].isalpha():
+        key = ("role-" + key)[:32]
+    if len(key) < 2:
+        raise HTTPException(status_code=400, detail="Give the role a name of at least two letters.")
     try:
         rbac.set_custom_role(
-            name.strip(),
+            key,
             sorted(atoms),
             description.strip(),
             actor=auth.caller_principal(request) or "local",
@@ -718,3 +930,123 @@ def users_remove_suites(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RedirectResponse("/users?saved=suites_removed", status_code=303)
 
+
+
+# -- Spending limits ---------------------------------------------------------
+
+_LIMIT_SAVED = {
+    "workspace": "Workspace limit saved.",
+    "workspace_cleared": "The workspace no longer has a spending limit.",
+    "default": "Limit for everyone saved.",
+    "default_cleared": "People without their own limit can now spend without a limit.",
+    "person": "Personal limit saved.",
+    "person_cleared": "Personal limit removed.",
+}
+_LIMIT_ERRORS = {
+    "amount": "Enter the limit as an amount in dollars, more than $0.",
+    "period": "Choose how often the limit resets.",
+    "person": "Choose a person.",
+    "full": "There are too many personal limits to add another.",
+    "unreadable": "The saved spending limits could not be read. Please try again.",
+}
+
+
+@router.get("/spending-limits", response_class=HTMLResponse)
+def spending_limits_page(request: Request, saved: str = "", error: str = "") -> HTMLResponse:
+    """Admin: workspace and per-person spending limits (none by default)."""
+    auth.require_permission(request, "admin")
+    from maverick import spending_limits
+    from maverick.paths import current_tenant_id
+    from maverick.quotas import UsageLedger
+
+    from . import rbac
+    people = set(rbac.list_users())
+    try:
+        people |= set(UsageLedger()._load())
+    except Exception:  # noqa: BLE001 -- spend history is a convenience here
+        pass
+    people.discard("")
+    load_error = ""
+    try:
+        view = spending_limits.overview(sorted(people))
+    except Exception:  # noqa: BLE001 -- show a plain message, never a trace
+        load_error = ("The saved spending limits could not be read, so paid work is "
+                      "paused. Save the limits below again to repair them.")
+        view = {"workspace": None, "default": None, "people": [],
+                "workspace_today": 0.0, "workspace_month": 0.0}
+    organization_cap = 0.0
+    try:
+        from maverick.tenant.registry import get_tenant
+        record = get_tenant(current_tenant_id() or "")
+        organization_cap = float(record.max_daily_dollars) if record else 0.0
+    except Exception:  # noqa: BLE001 -- the organization cap is informational here
+        pass
+    return _app().templates.TemplateResponse(request, "spending_limits.html", {
+        "view": view,
+        "periods": [(p, spending_limits.PERIOD_LABELS[p]) for p in spending_limits.PERIODS],
+        "workspace_periods": [(p, spending_limits.PERIOD_LABELS[p])
+                              for p in spending_limits.WORKSPACE_PERIODS],
+        "period_labels": spending_limits.PERIOD_LABELS,
+        "organization_cap": organization_cap,
+        "saved": _LIMIT_SAVED.get(saved, ""),
+        "error": _LIMIT_ERRORS.get(error, ""),
+        "load_error": load_error,
+    })
+
+
+def _limit_redirect(saved: str = "", error: str = "") -> RedirectResponse:
+    from urllib.parse import urlencode
+    query = urlencode({"saved": saved} if saved else {"error": error})
+    return RedirectResponse(f"/spending-limits?{query}", status_code=303)
+
+
+@router.post("/spending-limits/workspace")
+def spending_limits_workspace(request: Request, choice: str = Form("none"),
+                              amount: str = Form(""), period: str = Form("month")) -> RedirectResponse:
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from maverick import spending_limits
+    actor = auth.caller_principal(request) or "local"
+    try:
+        if choice == "none":
+            spending_limits.clear_workspace_limit(actor=actor)
+            return _limit_redirect("workspace_cleared")
+        spending_limits.set_workspace_limit(amount, period, actor=actor)
+    except spending_limits.SpendingLimitError as exc:
+        return _limit_redirect(error=exc.code)
+    return _limit_redirect("workspace")
+
+
+@router.post("/spending-limits/default")
+def spending_limits_default(request: Request, choice: str = Form("none"),
+                            amount: str = Form(""), period: str = Form("month")) -> RedirectResponse:
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from maverick import spending_limits
+    actor = auth.caller_principal(request) or "local"
+    try:
+        if choice == "none":
+            spending_limits.clear_default_limit(actor=actor)
+            return _limit_redirect("default_cleared")
+        spending_limits.set_default_limit(amount, period, actor=actor)
+    except spending_limits.SpendingLimitError as exc:
+        return _limit_redirect(error=exc.code)
+    return _limit_redirect("default")
+
+
+@router.post("/spending-limits/person")
+def spending_limits_person(request: Request, principal: str = Form(""),
+                           amount: str = Form(""), period: str = Form("month"),
+                           action: str = Form("save")) -> RedirectResponse:
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from maverick import spending_limits
+    actor = auth.caller_principal(request) or "local"
+    try:
+        if action == "remove":
+            spending_limits.clear_user_limit(principal, actor=actor)
+            return _limit_redirect("person_cleared")
+        spending_limits.set_user_limit(principal, amount, period, actor=actor)
+    except spending_limits.SpendingLimitError as exc:
+        return _limit_redirect(error=exc.code)
+    return _limit_redirect("person")

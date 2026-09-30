@@ -31,6 +31,7 @@ from pathlib import Path
 from statistics import NormalDist
 from typing import Any, Protocol
 
+from . import consent_storage
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -550,20 +551,23 @@ class ConsentExperimentAuthority:
 
     @contextlib.contextmanager
     def _connect(self):
-        ensure_private_directory(self.path.parent)
-        if not self.path.exists():
-            try:
-                descriptor = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:
-                pass
-            else:
-                os.close(descriptor)
-        ensure_private_file(self.path, 0o600)
-        connection = sqlite3.connect(
-            str(self.path),
-            timeout=10.0,
-            isolation_level=None,
-        )
+        if consent_storage.shared():
+            connection = consent_storage.connect(self.path, timeout=10.0)
+        else:
+            ensure_private_directory(self.path.parent)
+            if not self.path.exists():
+                try:
+                    descriptor = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(descriptor)
+            ensure_private_file(self.path, 0o600)
+            connection = sqlite3.connect(
+                str(self.path),
+                timeout=10.0,
+                isolation_level=None,
+            )
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA busy_timeout=10000")
@@ -1226,6 +1230,28 @@ class ConsentExperimentAuthority:
         with self._connect() as connection:
             row, definition = self._load_experiment(connection, tenant, experiment, key)
             return self._project(row, definition)
+
+    def list_experiments(self, tenant_id: str, *, limit: int = 100) -> dict[str, Any]:
+        """List one tenant's integrity-checked experiments, newest first."""
+
+        self._require_enabled()
+        tenant = _tenant_id(tenant_id)
+        bounded = _integer(limit, "limit", 1, 500)
+        key = self._key(tenant, "integrity")
+        with self._connect() as connection:
+            ids = [
+                str(row["experiment_id"])
+                for row in connection.execute(
+                    "SELECT experiment_id FROM consent_experiments WHERE tenant = ? "
+                    "ORDER BY created_at DESC, experiment_id LIMIT ?",
+                    (tenant, bounded + 1),
+                ).fetchall()
+            ]
+            items = []
+            for experiment in ids[:bounded]:
+                row, definition = self._load_experiment(connection, tenant, experiment, key)
+                items.append(self._project(row, definition))
+        return {"items": items, "truncated": len(ids) > bounded}
 
     def _transition(
         self,

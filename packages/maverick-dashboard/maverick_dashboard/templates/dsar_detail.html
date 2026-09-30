@@ -1,93 +1,160 @@
 {% extends "base.html" %}
-{% block title %}{{ dsar.id }} · Lightwork{% endblock %}
+{% block title %}Privacy request · Lightwork{% endblock %}
 {% block content %}
-  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Privacy workspace</a></p>
-  <h1 class="page-title">{{ dsar.kind | capitalize }} request {{ dsar.id }}</h1>
+{% set kind_labels = {
+  'access': 'Copy of their data',
+  'portability': 'Move their data',
+  'erasure': 'Delete their data',
+  'rectification': 'Correct their data',
+  'objection': 'Stop using their data',
+  'restriction': 'Limit use of their data',
+} %}
+{% set status_labels = {
+  'open': 'Open',
+  'awaiting_erasure': 'Waiting for deletion',
+  'fulfilled': 'Answered',
+  'closed': 'Closed',
+} %}
+{% set method_labels = {
+  'account_login': 'Signed in to their account',
+  'document_check': 'Checked an ID document',
+  'email_challenge': 'Confirmed by email',
+  'in_person': 'Checked in person',
+  'verified_by_processor': 'Checked by a service provider',
+  'other': 'Another way',
+} %}
+{% set source_labels = {
+  'graph:outlook_mail': 'Outlook mailbox',
+  'graph:onedrive_files': 'OneDrive files',
+} %}
+{% set kind_label = kind_labels.get(dsar.kind, dsar.kind | humanize) %}
+<style>
+  .dsar-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
+  .dsar-link { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .dsar-link input { flex: 1 1 24rem; }
+  .dsar-list { margin: .5rem 0 0; padding-left: 1.2rem; }
+</style>
+<div id="dsar-page"
+     data-request-id="{{ dsar.id }}"
+     data-subject="{{ dsar.subject_id }}"
+     data-channel="{{ dsar.channel or '' }}"
+     data-kind="{{ dsar.kind }}"
+     {% if fulfillment %}data-fulfillment-id="{{ fulfillment.id }}" data-revision="{{ fulfillment.revision }}"{% endif %}>
+  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Back to Privacy</a></p>
+  <h1 class="page-title">{{ kind_label }}: request from {{ dsar.subject_id }}</h1>
   <p class="page-subtitle">
-    <span class="badge {{ 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status == 'awaiting_erasure' else 'info' if dsar.status == 'open' else '' }}">{{ dsar.status | replace('_', ' ') }}</span>
-    · subject {{ dsar.subject_id }}
+    <span class="badge {{ 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status == 'awaiting_erasure' else 'info' if dsar.status == 'open' else '' }}">{{ status_labels.get(dsar.status, dsar.status | humanize) }}</span>
     {% if dsar.status in ('open', 'awaiting_erasure') %}
       · <span {% if dsar.overdue %}class="pw-due-warn"{% endif %}>{{ (dsar.days_left ~ ' days left') if not dsar.overdue else ((dsar.days_left | abs) ~ ' days overdue') }}</span>
     {% endif %}
+    · <span class="muted">Reference {{ dsar.id }}</span>
   </p>
 
   <div class="panel">
     <p class="muted" style="margin: 0;">
-      Opened {{ dsar.created_date or '—' }} by {{ dsar.opened_by or '—' }}
-      {% if dsar.channel %} · via {{ dsar.channel }}{% endif %}
-      · due {{ dsar.due_date or '—' }}
+      Opened {{ dsar.created_date or 'on an unknown date' }}{% if dsar.opened_by %} by {{ dsar.opened_by | identity }}{% endif %}
+      {% if dsar.channel %} · received by {{ dsar.channel | humanize }}{% endif %}
+      · answer due {{ dsar.due_date or 'date not set' }}
     </p>
     {% if dsar.intake %}
       <p class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;">
-        Opened from message intake — matched: {{ dsar.intake.signals | join('; ') }}</p>
+        Created automatically from an incoming message that looked like a privacy request.</p>
     {% endif %}
+    <div class="dsar-actions">
+      <button type="button" class="btn btn--ghost" id="dsar-worksheet">Where to search</button>
+      {% if dsar.status == 'open' %}
+        <button type="button" class="btn btn--primary" id="dsar-fulfill">
+          {% if dsar.kind in ('access', 'portability') %}Collect their data and mark answered{% else %}Mark ready for deletion{% endif %}
+        </button>
+      {% endif %}
+      {% if dsar.kind == 'erasure' and dsar.status in ('open', 'awaiting_erasure') and can_admin %}
+        <button type="button" class="btn btn--danger" id="dsar-erase">Erase their data now</button>
+      {% endif %}
+      {% if dsar.status != 'closed' %}
+        <button type="button" class="btn btn--ghost" id="dsar-close">Close request</button>
+      {% endif %}
+    </div>
+    <div id="dsar-status" role="status" aria-live="polite" class="muted"></div>
+    <div id="dsar-worksheet-result"></div>
   </div>
 
-  <div class="section-head"><h2>Fulfillment</h2></div>
+  <div class="section-head"><h2>Answering the request</h2></div>
   {% if fulfillment %}
     <div class="panel">
-      <h3 style="margin-top: 0;">Identity</h3>
+      <h3 style="margin-top: 0;">1. Confirm who they are</h3>
       {% if fulfillment.identity.status == 'verified' %}
-        <p><span class="badge done">verified</span>
-          via <code>{{ fulfillment.identity.method }}</code>
-          by {{ fulfillment.identity.verified_by }}
-          — reference: {{ fulfillment.identity.reference }}</p>
+        <p><span class="badge done">Confirmed</span>
+          {{ method_labels.get(fulfillment.identity.method, fulfillment.identity.method | humanize) }}
+          by {{ fulfillment.identity.verified_by | identity }}
+          — {{ fulfillment.identity.reference }}</p>
       {% else %}
-        <p><span class="badge warn">unverified</span>
-          <span class="muted">No response link can be minted until a named
-            operator records how this requester proved who they are.</span></p>
+        <p><span class="badge warn">Not confirmed yet</span>
+          <span class="muted">You can&rsquo;t send them their data until someone confirms who they are.</span></p>
+        <button type="button" class="btn btn--primary" id="dsar-identity">Confirm identity</button>
       {% endif %}
     </div>
 
-    <div class="panel{% if not fulfillment.sources %} empty{% endif %}">
-      <h3 style="margin-top: 0;">Collection sources</h3>
+    <div class="panel">
+      <h3 style="margin-top: 0;">2. Record where their data was found</h3>
       {% if fulfillment.sources %}
         <table>
-          <thead><tr><th scope="col">source</th><th scope="col">reference</th>
-            <th scope="col">items</th><th scope="col">by</th></tr></thead>
+          <thead><tr><th scope="col">System</th><th scope="col">Details</th>
+            <th scope="col">Records found</th><th scope="col">Added by</th></tr></thead>
           <tbody>
           {% for s in fulfillment.sources %}
             <tr>
-              <td><code>{{ s.source }}</code></td>
+              <td>{{ source_labels.get(s.source, s.source) }}</td>
               <td>{{ s.reference }}</td>
               <td>{{ s.items }}</td>
-              <td class="muted">{{ s.recorded_by }}</td>
+              <td class="muted">{{ (s.collected_by or s.recorded_by or '') | identity }}</td>
             </tr>
           {% endfor %}
           </tbody>
         </table>
       {% else %}
-        <p class="muted">No collection sources logged yet.</p>
+        <p class="muted">Nothing recorded yet. Add each system you searched, even if nothing was found.</p>
       {% endif %}
+      <div class="dsar-actions">
+        <button type="button" class="btn btn--ghost" id="dsar-source">Add a system</button>
+        <button type="button" class="btn btn--ghost" id="dsar-m365">Check Microsoft 365</button>
+      </div>
     </div>
 
     <div class="panel">
-      <h3 style="margin-top: 0;">Response link</h3>
+      <h3 style="margin-top: 0;">3. Send them a secure link</h3>
       {% if fulfillment.response %}
         <p>
-          <span class="badge {{ 'done' if fulfillment.response.delivered_at else 'info' }}">{{ 'delivered' if fulfillment.response.delivered_at else 'minted' }}</span>
-          expires {{ fulfillment.response.expires_date or '—' }}
+          <span class="badge {{ 'done' if fulfillment.response.delivered_at else 'info' }}">{{ 'Opened by the requester' if fulfillment.response.delivered_at else 'Link created' }}</span>
+          expires {{ fulfillment.response.expires_date or 'at an unknown time' }}
           {% if fulfillment.response.max_reads %}
-            · reads {{ fulfillment.response.reads_used or 0 }}/{{ fulfillment.response.max_reads }}
+            · opened {{ fulfillment.response.reads_used or 0 }}/{{ fulfillment.response.max_reads }} times
           {% endif %}
         </p>
-        <p class="muted" style="font-size: var(--text-sm);">The token was shown
-          once at mint time and only its hash is stored — it cannot be
-          recovered from here.</p>
+        <p class="muted" style="font-size: var(--text-sm);">For security the link was only shown once. Create a new link if the requester lost it.</p>
       {% else %}
-        <p class="muted">No response link minted yet.</p>
+        <p class="muted">No secure link sent yet.</p>
       {% endif %}
+      {% if fulfillment.identity.status == 'verified' %}
+        <button type="button" class="btn btn--primary" id="dsar-link">{{ 'Create a new link' if fulfillment.response else 'Create secure link' }}</button>
+      {% endif %}
+      <div id="dsar-link-box" class="dsar-link" hidden>
+        <label for="dsar-link-url" class="sr-only">Secure link</label>
+        <input id="dsar-link-url" class="input" readonly>
+        <button type="button" class="btn btn--ghost" id="dsar-link-copy">Copy link</button>
+        <p class="muted" style="flex-basis: 100%;">This link is shown once. Copy it now and send it to the requester.</p>
+      </div>
     </div>
   {% elif fulfillment_enabled %}
     <div class="panel empty">
-      <p class="muted">No fulfillment record opened for this request yet.</p>
+      <p class="muted">Start here to confirm the requester&rsquo;s identity, record where you found their data and send them a secure link.</p>
+      <button type="button" class="btn btn--primary" id="dsar-start">Start answering</button>
     </div>
   {% else %}
     {% from "_module_gate.html" import module_gate %}
-    {{ module_gate('dsar_fulfillment', 'DSAR fulfillment',
-                   detail='Tracks identity verification, collection, and
-                           token-gated response delivery for this request --
-                           agree on who verifies identities before turning it
-                           on.') }}
+    {{ module_gate('dsar_fulfillment', 'Answering data requests',
+                   detail='Track identity checks, where the data was found, and send the requester a secure download link.',
+                   can_activate=can_admin) }}
   {% endif %}
+</div>
+<script src="/static/lightwork-dsar-detail.js" defer></script>
 {% endblock %}

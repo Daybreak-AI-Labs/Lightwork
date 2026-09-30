@@ -213,23 +213,36 @@
   if (typeof document === "undefined") return;
   const shell = document.getElementById("publish-settings-shell");
   if (!shell) return;
+  const CW = global.LightworkConsentWorkbench;
   const apiBase = shell.dataset.apiBase || "";
+  const canAdmin = shell.dataset.canAdmin === "true";
+  const canAudit = shell.dataset.canAudit === "true";
   const operations = document.getElementById("publish-settings-operations");
   const runtimeStatus = document.getElementById("publish-settings-runtime-status");
-  const statusOutput = document.getElementById("publish-settings-status-output");
   const operationStatus = document.getElementById("publish-settings-operation-status");
-  const operationOutput = document.getElementById("publish-settings-operation-output");
+  const state = { head: null, versions: [], properties: [] };
+  const EVENTS = { created: "New settings saved", activated: "Settings switched on", rolled_back: "Went back to earlier settings",
+    withdrawn: "Settings turned off", retention_purged: "Old settings deleted" };
+  const REGIONS = [["US", "United States"], ["US-CA", "California"], ["CA", "Canada"], ["CA-QC", "Quebec"], ["GB", "United Kingdom"],
+    ["FR", "France"], ["DE", "Germany"], ["ES", "Spain"], ["IT", "Italy"], ["NL", "Netherlands"], ["BR", "Brazil"], ["AU", "Australia"], ["JP", "Japan"]]
+    .map(([value, label]) => ({ value, label }));
+  const DAYS = [["90", "3 months"], ["180", "6 months"], ["365", "1 year"], ["730", "2 years"]].map(([value, label]) => ({ value, label }));
 
   function element(id) { return document.getElementById(id); }
-  function field(id) { return element(id).value.trim(); }
-  function checked(id) { return element(id).checked; }
-  function setStatus(target, message, failed) {
-    target.textContent = message;
-    target.dataset.state = failed ? "failed" : "ready";
+  function say(target, message, failed) {
+    if (CW) CW.say(target, message, failed);
+    else { target.textContent = message; target.dataset.state = failed ? "failed" : "ready"; }
   }
-  function render(target, payload) { target.textContent = JSON.stringify(payload, null, 2); }
-  function propertyPath() { return encodeURIComponent(opaque(field("publish-settings-property-id"), "Property reference")); }
-  function selectedVersion() { return encodeURIComponent(opaque(field("publish-settings-version-id"), "Version reference")); }
+  // Plain sentences only; a local validation failure has no status code.
+  function explain(target, error, action) {
+    if (error && error.code === "field_invalid") return say(target, "Some settings need fixing. Check the choices and try again.", true);
+    if (error && error.status === 409) return say(target, "These settings changed since you opened the page, or the published banner changed. Refresh and try again.", true);
+    return say(target, CW ? CW.errorText(error, action) : "Could not " + action + ".", true);
+  }
+  function human(value) { return CW ? CW.human(value) : String(value); }
+  function when(value) { return CW ? CW.when(value) : ""; }
+  function propertyId() { return element("publish-settings-property-id").value; }
+  function propertyPath() { return encodeURIComponent(opaque(propertyId(), "Website")); }
 
   async function request(path, options) {
     const response = await fetch(`${apiBase}${path}`, {
@@ -245,101 +258,190 @@
   function post(path, payload) {
     return request(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: boundedBody(payload) });
   }
-  function hydrate(payload) {
-    if (!payload || typeof payload !== "object") return;
-    if (typeof payload.version_id === "string") element("publish-settings-version-id").value = payload.version_id;
-    if (Number.isSafeInteger(payload.head_revision) && payload.head_revision > 0) {
-      element("publish-settings-lifecycle-revision").value = payload.head_revision;
-      element("publish-settings-expected-revision").value = payload.head_revision;
-    }
-    if (Number.isSafeInteger(payload.revision) && payload.revision > 0) {
-      element("publish-settings-lifecycle-revision").value = payload.revision;
-      element("publish-settings-expected-revision").value = payload.revision;
-    }
-  }
-  async function run(label, callback) {
-    setStatus(operationStatus, `${label}…`, false);
-    operationOutput.textContent = "";
-    try {
-      const payload = await callback();
-      render(operationOutput, payload);
-      hydrate(payload);
-      setStatus(operationStatus, `${label} completed.`, false);
-      return payload;
-    } catch (error) {
-      setStatus(operationStatus, `${label} failed: ${error.message}`, true);
-      throw error;
-    }
-  }
+  function reference() { return CW ? CW.reference() : String(Date.now()) + "-settings"; }
+
   async function refreshStatus() {
     operations.disabled = true;
-    setStatus(runtimeStatus, "Checking the server-owned publishing authority…", false);
-    statusOutput.textContent = "";
+    say(runtimeStatus, "Checking that website banner settings are available…", false);
     try {
       const payload = await request("/status");
-      render(statusOutput, payload);
       if (payload.ready === true) {
         operations.disabled = false;
-        setStatus(runtimeStatus, "Website publish-settings authority is ready.", false);
+        say(runtimeStatus, "", false);
+        await loadProperties();
       } else if (payload.enabled === true) {
-        setStatus(runtimeStatus, "Enabled, but the publishing authority is not ready.", true);
+        say(runtimeStatus, "Website banner settings are turned on but not ready yet. Publish your banner first, then refresh this page.", true);
       } else {
-        setStatus(runtimeStatus, "Website publish settings are disabled for this workspace.", true);
+        say(runtimeStatus, "Website banner settings are not turned on for this workspace. Ask an administrator to turn them on.", true);
       }
-    } catch (error) { setStatus(runtimeStatus, `Status unavailable: ${error.message}`, true); }
+    } catch (error) { explain(runtimeStatus, error, "check availability"); }
   }
 
-  element("publish-settings-refresh-status").addEventListener("click", refreshStatus);
-  element("publish-settings-create-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
+  async function loadProperties() {
+    const select = element("publish-settings-property-id");
     try {
-      const trackers = [...document.querySelectorAll('input[name="common_trackers"]:checked')].map((item) => item.value);
-      const payload = buildCreatePayload({
-        expected_head_revision: field("publish-settings-expected-revision"),
-        idempotency_key: field("publish-settings-idempotency"),
-        sdk_version: field("publish-settings-sdk-version"),
-        geolocation_reconsent: element("publish-settings-geolocation").value,
-        analytics_tracking_enabled: checked("publish-settings-analytics-enabled"),
-        analytics_category_assignments: element("publish-settings-assignments").value,
-        common_trackers: trackers,
-        cookie_same_site: field("publish-settings-same-site"),
-        cookie_domain_separation: field("publish-settings-domain-separation"),
-        spa_reload_on_route_change: checked("publish-settings-spa-reload"),
-        csp_nonce_required: checked("publish-settings-csp-required"),
-        automatic_refresh_seconds: field("publish-settings-refresh-seconds"),
-      });
-      await run("Creating settings version", () => post(`/properties/${propertyPath()}/versions`, payload));
-    } catch (_error) { /* The bounded status region already reports the failure. */ }
-  });
-  element("publish-settings-load").addEventListener("click", async () => {
-    try { await run("Loading settings head", () => request(`/properties/${propertyPath()}`)); } catch (_error) { /* rendered */ }
-  });
-  function revisionPayload() {
-    return buildRevisionPayload({
-      expected_head_revision: field("publish-settings-lifecycle-revision"),
-      idempotency_key: field("publish-settings-lifecycle-idempotency"),
+      const catalog = CW.client("/api/v1/consent/publishing");
+      const data = await catalog("/catalog/properties?limit=50");
+      state.properties = (data.items || []).filter((item) => item.kind === "web");
+      CW.fill(select, state.properties.map((item) => ({ value: item.property_id, label: human(item.property_id) })),
+        state.properties.length ? "" : "Add a website on the Banner and preference center page first");
+      if (state.properties.length) await loadVersions();
+    } catch (error) { explain(runtimeStatus, error, "load your websites"); }
+  }
+
+  function statusOf(version) {
+    const head = state.head;
+    if (head && head.active_version_id === version.version_id && head.state === "active") return ["Live", "ok"];
+    if (head && head.latest_version_id === version.version_id) return ["Newest, not live", "warn"];
+    return ["Earlier version", "idle"];
+  }
+  function summary(settings) {
+    const trackers = (settings.common_trackers || []).map(human).join(", ") || "No trackers";
+    const again = (settings.geolocation_reconsent || []).map((item) => item.jurisdiction + " every " + item.reconsent_after_days + " days").join(", ");
+    return trackers + (again ? "; asks again: " + again : "");
+  }
+  async function loadVersions() {
+    const host = element("publish-settings-versions-table");
+    state.head = null; state.versions = [];
+    try {
+      try { state.head = await request(`/properties/${propertyPath()}`); }
+      catch (error) { if (error.status !== 404) throw error; }
+      if (state.head) state.versions = (await request(`/properties/${propertyPath()}/versions?limit=100`)).items || [];
+    } catch (error) { host.replaceChildren(); explain(element("publish-settings-head"), error, "load the settings"); return; }
+    const head = state.head;
+    say(element("publish-settings-head"), !head ? "This website has no settings yet." : head.state === "active" ? "Settings are live on this website." :
+      head.state === "withdrawn" ? "Settings are turned off for this website." : "Settings are saved but none is live yet.", false);
+    element("publish-settings-withdraw").hidden = !(head && head.state === "active" && canAdmin);
+    CW.table(host, state.versions, {
+      label: "Settings versions", name: (v) => "version " + v.version_number,
+      columns: [
+        { label: "Version", value: (v) => v.version_number },
+        { label: "Status", value: (v) => { const s = statusOf(v); return CW.badge(s[0], s[1]); } },
+        { label: "What it does", value: (v) => summary(v.settings || {}) },
+        { label: "Saved", value: (v) => when(v.created_at) },
+      ],
+      actions: [
+        { label: "Make live", when: (v) => canAdmin && head && head.state !== "active" && head.latest_version_id === v.version_id, run: (v, b) => activate(v, b) },
+        { label: "Go back to this", when: (v) => canAdmin && head && head.state === "active" && head.active_version_id !== v.version_id, run: (v, b) => rollback(v, b) },
+      ],
+      empty: { title: "No settings yet.", body: "Create the first settings for this website.", action: canAdmin ? { label: "New settings", run: openCreate } : null },
+    });
+    if (canAudit) loadHistory();
+  }
+  async function lifecycle(button, message, okText, label, path, payload) {
+    return CW.busy(button, async () => {
+      if (!(await CW.confirm(message, okText))) return;
+      try { await post(path, payload); await loadVersions(); say(operationStatus, label, false); }
+      catch (error) { explain(operationStatus, error, "change the settings"); }
     });
   }
-  element("publish-settings-activate").addEventListener("click", async () => {
-    try { await run("Activating settings", () => post(`/properties/${propertyPath()}/versions/${selectedVersion()}/activate`, revisionPayload())); } catch (_error) { /* rendered */ }
+  function revision() { return buildRevisionPayload({ expected_head_revision: state.head.revision, idempotency_key: reference() }); }
+  function activate(version, button) {
+    return lifecycle(button, "Make version " + version.version_number + " live on " + human(propertyId()) + "? The banner will use these settings right away.", "Make live",
+      "Version " + version.version_number + " is now live.", `/properties/${propertyPath()}/versions/${encodeURIComponent(opaque(version.version_id, "Version"))}/activate`, revision());
+  }
+  function rollback(version, button) {
+    return lifecycle(button, "Go back to version " + version.version_number + " on " + human(propertyId()) + "? It replaces the live settings right away.", "Go back",
+      "Version " + version.version_number + " is live again.", `/properties/${propertyPath()}/rollback`, { ...revision(), target_version_id: opaque(version.version_id, "Version") });
+  }
+  element("publish-settings-withdraw").addEventListener("click", (event) => lifecycle(event.currentTarget,
+    "Turn off the banner settings on " + human(propertyId()) + "? The banner falls back to its default behaviour. The history is kept.", "Turn off",
+    "Settings turned off.", `/properties/${propertyPath()}/withdraw`, revision()));
+  element("publish-settings-property-id").addEventListener("change", loadVersions);
+
+  // New settings
+  const createPanel = element("publish-settings-create-panel");
+  function geoRow(region, days) {
+    const row = CW.el("div", "cw-row");
+    const where = CW.el("label", "", "Region"), whereSelect = CW.fill(CW.el("select", "select"), REGIONS);
+    whereSelect.name = "geolocation_reconsent"; whereSelect.value = region || "US"; where.appendChild(whereSelect);
+    const after = CW.el("label", "", "Ask again after"), afterSelect = CW.fill(CW.el("select", "select"), DAYS);
+    afterSelect.name = "geolocation_reconsent_days"; afterSelect.value = days || "365"; after.appendChild(afterSelect);
+    const remove = CW.el("button", "btn btn--ghost", "Remove"); remove.type = "button"; remove.addEventListener("click", () => row.remove());
+    row.append(where, after, remove);
+    return row;
+  }
+  function openCreate() {
+    element("publish-settings-create-form").reset();
+    const versions = new Set([shell.dataset.sdkVersion || "1.0.0"]);
+    state.versions.forEach((v) => v.settings && versions.add(v.settings.sdk_version));
+    CW.fill(element("publish-settings-sdk-version"), [...versions].map((v, index) => ({ value: v, label: index === 0 ? "Current (" + v + ")" : "Earlier (" + v + ")" })));
+    element("publish-settings-geolocation").replaceChildren();
+    const live = state.versions.find((v) => state.head && v.version_id === (state.head.active_version_id || state.head.latest_version_id));
+    if (live && live.settings) {
+      const s = live.settings;
+      (s.common_trackers || []).forEach((t) => { const box = document.querySelector(`input[name="common_trackers"][value="${t}"]`); if (box) box.checked = true; });
+      (s.analytics_category_assignments || []).forEach((a) => { const sel = document.querySelector(`select[data-tracker="${a.tracker}"]`); if (sel) sel.value = a.category; });
+      (s.geolocation_reconsent || []).forEach((g) => element("publish-settings-geolocation").appendChild(geoRow(g.jurisdiction, String(g.reconsent_after_days))));
+      element("publish-settings-analytics-enabled").checked = !!s.analytics_tracking_enabled;
+      element("publish-settings-spa-reload").checked = !!s.spa_reload_on_route_change;
+      element("publish-settings-csp-required").checked = !!s.csp_nonce_required;
+      element("publish-settings-same-site").value = s.cookie_same_site;
+      element("publish-settings-domain-separation").value = s.cookie_domain_separation;
+      element("publish-settings-refresh-seconds").value = s.automatic_refresh_seconds ? String(s.automatic_refresh_seconds) : "";
+    }
+    element("publish-settings-expected-revision").value = String(state.head ? state.head.revision : 0);
+    CW.open(createPanel, "#publish-settings-sdk-version");
+  }
+  element("publish-settings-new").addEventListener("click", openCreate);
+  element("publish-settings-cancel").addEventListener("click", () => { createPanel.hidden = true; });
+  element("publish-settings-geo-add").addEventListener("click", () => element("publish-settings-geolocation").appendChild(geoRow()));
+  element("publish-settings-create-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = element("publish-settings-operation-status");
+    try {
+      const trackers = [...document.querySelectorAll('input[name="common_trackers"]:checked')].map((item) => item.value);
+      const assignments = trackers.map((tracker) => ({ tracker, category: document.querySelector(`select[data-tracker="${tracker}"]`).value }))
+        .filter((item) => item.category);
+      const geo = [...document.querySelectorAll("#publish-settings-geolocation .cw-row")].map((row) => ({
+        jurisdiction: row.querySelector('[name="geolocation_reconsent"]').value,
+        reconsent_after_days: row.querySelector('[name="geolocation_reconsent_days"]').value,
+      }));
+      if (new Set(geo.map((g) => g.jurisdiction)).size !== geo.length) { say(status, "Each region can appear only once.", true); return; }
+      const payload = buildCreatePayload({
+        expected_head_revision: element("publish-settings-expected-revision").value,
+        idempotency_key: element("publish-settings-idempotency").value || reference(),
+        sdk_version: element("publish-settings-sdk-version").value,
+        geolocation_reconsent: geo,
+        analytics_tracking_enabled: element("publish-settings-analytics-enabled").checked,
+        analytics_category_assignments: assignments,
+        common_trackers: trackers,
+        cookie_same_site: element("publish-settings-same-site").value,
+        cookie_domain_separation: element("publish-settings-domain-separation").value,
+        spa_reload_on_route_change: element("publish-settings-spa-reload").checked,
+        csp_nonce_required: element("publish-settings-csp-required").checked,
+        automatic_refresh_seconds: element("publish-settings-refresh-seconds").value,
+      });
+      await post(`/properties/${propertyPath()}/versions`, payload);
+      createPanel.hidden = true; await loadVersions();
+      say(status, "New settings saved. Use “Make live” to switch them on.", false);
+    } catch (error) { explain(status, error, "save the settings"); }
   });
-  element("publish-settings-rollback").addEventListener("click", async () => {
-    try { await run("Rolling back settings", () => post(`/properties/${propertyPath()}/rollback`, { ...revisionPayload(), target_version_id: opaque(field("publish-settings-version-id"), "Version reference") })); } catch (_error) { /* rendered */ }
-  });
-  element("publish-settings-withdraw").addEventListener("click", async () => {
-    try { await run("Withdrawing settings", () => post(`/properties/${propertyPath()}/withdraw`, revisionPayload())); } catch (_error) { /* rendered */ }
-  });
-  element("publish-settings-versions").addEventListener("click", async () => {
-    try { await run("Listing versions", () => request(`/properties/${propertyPath()}/versions?limit=100`)); } catch (_error) { /* rendered */ }
-  });
-  element("publish-settings-history").addEventListener("click", async () => {
-    try { await run("Loading audit history", () => request(`/operations/history?property_id=${propertyPath()}&limit=100`)); } catch (_error) { /* rendered */ }
-  });
-  element("publish-settings-integrity").addEventListener("click", async () => {
-    try { await run("Verifying integrity", () => request("/operations/integrity")); } catch (_error) { /* rendered */ }
-  });
-  element("publish-settings-recovery").addEventListener("click", async () => {
-    try { await run("Checking recovery readiness", () => request("/operations/recovery")); } catch (_error) { /* rendered */ }
-  });
+
+  // History and checks
+  async function loadHistory() {
+    try {
+      const events = await request(`/operations/history?property_id=${propertyPath()}&limit=100`);
+      CW.table(element("publish-settings-history-table"), Array.isArray(events) ? events : (events.items || []), {
+        label: "Settings history",
+        columns: [
+          { label: "When", value: (e) => when(e.occurred_at) },
+          { label: "What happened", value: (e) => EVENTS[e.event_type] || human(e.event_type) },
+        ],
+        empty: { title: "No changes recorded yet." },
+      });
+    } catch (error) { explain(operationStatus, error, "load the history"); }
+  }
+  element("publish-settings-integrity").addEventListener("click", (event) => CW.busy(event.currentTarget, async () => {
+    try { const r = await request("/operations/integrity"); say(operationStatus, r.valid === false ? "The settings history failed its check. Contact support." : "The settings history is intact.", r.valid === false); }
+    catch (error) { explain(operationStatus, error, "check the history"); }
+  }));
+  element("publish-settings-recovery").addEventListener("click", (event) => CW.busy(event.currentTarget, async () => {
+    try { const r = await request("/operations/recovery"); say(operationStatus, r.ready ? "Settings records are healthy and ready to back up." : "Settings records need attention before a backup. Contact support.", !r.ready); }
+    catch (error) { explain(operationStatus, error, "check backups"); }
+  }));
+
+  if (!CW) { say(runtimeStatus, "This page could not finish loading. Reload the page.", true); return; }
+  operations.disabled = true;
   refreshStatus();
 })(typeof window === "undefined" ? globalThis : window);

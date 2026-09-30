@@ -91,9 +91,7 @@ class BedrockClient(AnthropicClient):
         # The dispatcher hands over an admitted environment snapshot so a
         # region/auth rotation cannot pair old and new values; direct callers
         # get the live environment.
-        env: dict[str, str] = dict(os.environ)
-        if environment:
-            env.update({k: v for k, v in environment.items() if v is not None})
+        env = dict(os.environ if environment is None else environment)
 
         region = _first(env, "AWS_REGION", "AWS_DEFAULT_REGION")
         if not region:
@@ -131,16 +129,47 @@ class BedrockClient(AnthropicClient):
         kw: dict[str, Any] = {"aws_region": region, "max_retries": 0}
         if key:
             kw["api_key"] = key
-        if base_url:
-            kw["base_url"] = base_url
+        endpoint_env = "ANTHROPIC_BEDROCK_MANTLE_BASE_URL" if endpoint == "mantle" else "ANTHROPIC_BEDROCK_BASE_URL"
+        default_url = f"https://bedrock-mantle.{region}.api.aws/anthropic" if endpoint == "mantle" else f"https://bedrock-runtime.{region}.amazonaws.com"
+        kw["base_url"] = base_url or _first(env, endpoint_env) or default_url
         if default_headers:
             kw["default_headers"] = dict(default_headers)
-        timeout = sdk_http_timeout(anthropic)
+        timeout = sdk_http_timeout(anthropic, environment=environment)
         if timeout is not None:
             kw["timeout"] = timeout
         sync_cls, async_cls = _sdk_clients(endpoint)
         self.client = sync_cls(**kw)
-        self.aclient = async_cls(**kw)
+        self.aclient = None
+        # SDKs have their own ambient bearer-token fallback. Admission cannot
+        # claim IAM while the SDK selected a different authority. Refuse before
+        # any request, rather than mutating private signing state or env vars.
+        def confirm(client):
+            if mode == "iam":
+                if not hasattr(client, "api_key") or client.api_key is not None or (
+                    endpoint == "mantle" and getattr(client, "_use_sigv4", None) is not True
+                ):
+                    raise RuntimeError(
+                        "Bedrock IAM configuration conflicts with the installed SDK's authentication; "
+                        "remove ambient Bedrock bearer tokens or explicitly configure auth_mode=api_key"
+                    )
+        try:
+            confirm(self.client)
+            self.aclient = async_cls(**kw)
+            confirm(self.aclient)
+        except BaseException as error:
+            import inspect
+
+            from ..owned_process import run_sync
+            for client in (self.client, self.aclient):
+                close = getattr(client, "close", None)
+                if close is not None:
+                    try:
+                        result = close()
+                        if inspect.isawaitable(result):
+                            run_sync(lambda owned=result: owned)
+                    except BaseException:
+                        error.cleanup_incomplete = True
+            raise
         self.auth_mode = mode
         self.endpoint = endpoint
         self.region = region

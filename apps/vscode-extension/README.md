@@ -40,3 +40,5 @@ Next iterations of the extension (from `docs/ROADMAP.md`):
 ## License
 
 Proprietary — same as the main project; see [`LICENSE`](../../LICENSE).
+
+See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

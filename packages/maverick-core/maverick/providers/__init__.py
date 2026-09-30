@@ -53,6 +53,7 @@ def get_provider_client(
     name: str, api_key: str | None = None, base_url: str | None = None,
     default_headers: dict | None = None,
     environment: Mapping[str, str] | None = None,
+    provider_options: Mapping[str, Any] | None = None,
 ) -> Any:
     """Lazy-import and instantiate the named provider client.
 
@@ -69,41 +70,53 @@ def get_provider_client(
     ``default_headers`` (from ``[providers.<name>] default_headers``) is a
     data-residency / ZDR control: extra HTTP headers attached to every request
     so a compliance gateway can enforce region pinning / no-retention. Threaded
-    to the two primary cloud clients (anthropic, openai) today.
+    to anthropic, openai, azure and bedrock. Other adapters explicitly reject
+    nonempty headers before construction; they do not silently discard them.
     """
     canon = _canonical(name)
+    from .configuration import canonical_headers, validate_fields
+    if provider_options:
+        if canon != "codex_cli" or set(provider_options) - {"binary", "sandbox_mode", "cwd", "timeout_seconds"}:
+            raise ValueError(f"providers.{canon}.provider_options contains unsupported adapter options")
+    headers = canonical_headers(default_headers)
+    validate_fields(canon, {
+        "api_key": api_key, "base_url": base_url, "default_headers": dict(headers),
+        **dict(provider_options or {}),
+    })
+    default_headers = dict(headers) if headers else None
+    extra = {"environment": dict(environment)} if environment is not None else {}
     if canon == "anthropic":
         from .anthropic_provider import AnthropicClient
         return AnthropicClient(api_key=api_key, base_url=base_url,
-                               default_headers=default_headers)
+                               default_headers=default_headers, **extra)
     if canon == "openai":
         from .openai_provider import OpenAIClient
         return OpenAIClient(api_key=api_key, base_url=base_url,
-                            default_headers=default_headers)
+                            default_headers=default_headers, **extra)
     if canon == "openrouter":
         from .openrouter_provider import OpenRouterClient
-        return OpenRouterClient(api_key=api_key, base_url=base_url)
+        return OpenRouterClient(api_key=api_key, base_url=base_url, **extra)
     if canon == "ollama":
         from .ollama_provider import OllamaClient
-        return OllamaClient(api_key=api_key, base_url=base_url)
+        return OllamaClient(api_key=api_key, base_url=base_url, **extra)
     if canon == "gemini":
         from .gemini_provider import GeminiClient
-        return GeminiClient(api_key=api_key, base_url=base_url)
+        return GeminiClient(api_key=api_key, base_url=base_url, **extra)
     if canon == "moonshot":
         from .moonshot_provider import MoonshotClient
-        return MoonshotClient(api_key=api_key, base_url=base_url)
+        return MoonshotClient(api_key=api_key, base_url=base_url, **extra)
     if canon == "deepseek":
         from .deepseek_provider import DeepSeekClient
-        return DeepSeekClient(api_key=api_key, base_url=base_url)
+        return DeepSeekClient(api_key=api_key, base_url=base_url, **extra)
     if canon == "xai":
         from .xai_provider import XaiClient
-        return XaiClient(api_key=api_key, base_url=base_url)
+        return XaiClient(api_key=api_key, base_url=base_url, **extra)
     if canon == "tgi":
         from .tgi_provider import TGIClient
-        return TGIClient(api_key=api_key, base_url=base_url)
+        return TGIClient(api_key=api_key, base_url=base_url, **extra)
     if canon == "vllm":
         from .vllm_provider import VLLMClient
-        return VLLMClient(api_key=api_key, base_url=base_url)
+        return VLLMClient(api_key=api_key, base_url=base_url, **extra)
     if canon == "azure":
         from .azure_openai_provider import AzureOpenAIClient
         return AzureOpenAIClient(
@@ -124,10 +137,12 @@ def get_provider_client(
         )
     if canon == "openai_compatible":
         from .openai_compatible_provider import OpenAICompatibleClient
-        return OpenAICompatibleClient(api_key=api_key, base_url=base_url)
+        return OpenAICompatibleClient(api_key=api_key, base_url=base_url, **extra)
     if canon == "codex_cli":
         from .codex_cli_provider import CodexCLIClient
-        return CodexCLIClient(api_key=api_key, base_url=base_url)
+        if provider_options is not None:
+            extra["provider_options"] = dict(provider_options)
+        return CodexCLIClient(api_key=api_key, base_url=base_url, **extra)
     raise ValueError(
         f"unknown provider {name!r}. Available: "
         + ", ".join(KNOWN_PROVIDERS)

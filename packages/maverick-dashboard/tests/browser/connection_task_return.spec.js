@@ -20,7 +20,7 @@ async function beginTask({page,request},width){
   await page.setViewportSize({width,height:950});const fixture=await(await request.get('/__browser_fixture')).json();
   const original=await(await request.get('/api/v1/vendor-onboarding/cases/'+fixture.case_id)).json();
   await page.goto('/third-party/vendor-onboarding?case='+fixture.case_id);
-  await expect(page.locator('#vo-case-reference')).toContainText(fixture.case_id);
+  await expect(page.locator('#vo-case-reference a')).toHaveAttribute('href',new RegExp('[?&]case='+fixture.case_id+'(?:&|$)'));
   await page.locator('#vs-panel').getByRole('link',{name:'Connections',exact:true}).click();await expect(page.locator('#cs-task-return')).toBeVisible();
   if(await page.locator('#cs-enable').isVisible()){
     await page.locator('#cs-enable-confirm').check();await page.locator('#cs-enable-button').click();
@@ -44,7 +44,7 @@ test('denied sign-in returns to the same saved request without a credential or w
   await expect(page).toHaveURL(/\/connections$/);await expect(page.locator('#cs-status')).toContainText('denied');await expect(page.locator('#cs-name')).toHaveValue('denied-task-drive');
   await expect(page.locator('#cs-authorize-confirm')).not.toBeChecked();await expect(page.locator('#cs-task-return')).toBeVisible();
   await info.attach('denied-connection',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
-  await page.locator('#cs-task-link').click();await expect(page.locator('#vo-case-reference')).toContainText(fixture.case_id);
+  await page.locator('#cs-task-link').click();await expect(page.locator('#vo-case-reference a')).toHaveAttribute('href',new RegExp('[?&]case='+fixture.case_id+'(?:&|$)'));
   const after=await(await request.get('/api/v1/vendor-onboarding/cases/'+fixture.case_id)).json();expectUnchangedCase(after,original);
   const stateAfter=await(await request.get('/__browser_fixture')).json();expect(stateAfter.connection_exchanges).toBe(fixture.connection_exchanges);expect(stateAfter.ticket_creates).toBe(fixture.ticket_creates);
 });
@@ -59,6 +59,6 @@ test('unavailable renewal gives a usable reconnect choice and a failed refresh k
   unavailable=false;await page.locator('#cs-refresh').click();await expect(page.locator('#cs-name')).toHaveValue('renewal-unavailable');await expect(page.locator('#cs-authorize-confirm')).not.toBeChecked();
   const bounds=await page.locator('#connection-setup').evaluate(node=>({scroll:node.scrollWidth,client:node.clientWidth}));expect(bounds.scroll).toBeLessThanOrEqual(bounds.client+1);
   await info.attach('renewal-recovery-mobile',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
-  await page.locator('#cs-task-link').click();await expect(page.locator('#vo-case-reference')).toContainText(fixture.case_id);
+  await page.locator('#cs-task-link').click();await expect(page.locator('#vo-case-reference a')).toHaveAttribute('href',new RegExp('[?&]case='+fixture.case_id+'(?:&|$)'));
   expectUnchangedCase(await(await request.get('/api/v1/vendor-onboarding/cases/'+fixture.case_id)).json(),original);
 });

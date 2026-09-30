@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 
+import httpx
 import pytest
 from maverick.safety.tool_risk import tool_risk
 from maverick.tools._rest_connector import make_rest_tool
@@ -32,14 +33,6 @@ def _tools() -> dict:
 
 # --- captured-request harness (no network) ----------------------------------
 
-class _FakeResp:
-    status_code = 200
-    text = "{}"
-
-    def json(self):
-        return {"ok": True}
-
-
 @pytest.fixture()
 def capture(monkeypatch):
     """Patch the SSRF-safe client + egress gate; capture the outbound request."""
@@ -55,13 +48,16 @@ def capture(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def request(self, method, url, headers=None, params=None, json=None):
+        @contextlib.contextmanager
+        def stream(self, method, url, headers=None, params=None, json=None):
             seen.update(method=method, url=url, headers=headers or {},
                         params=params or {}, json=json)
-            return _FakeResp()
+            with contextlib.closing(httpx.Response(200, headers={"content-type": "application/json"},
+                                                  stream=httpx.ByteStream(b'{"ok": true}'))) as response:
+                yield response
 
     @contextlib.contextmanager
-    def _safe_client(url, timeout=30.0):
+    def _safe_client(url, **kwargs):
         yield _Client()
 
     import maverick.enterprise as ent

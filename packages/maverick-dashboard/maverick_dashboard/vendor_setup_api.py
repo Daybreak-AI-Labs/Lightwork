@@ -1,6 +1,7 @@
 """Reviewed in-app activation and workspace connection binding, without probes."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import json
@@ -145,4 +146,53 @@ def bind(request: Request, response: Response, payload: BindingIn):
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(503, "Vendor setup was not confirmed. Reload before retrying.") from exc
+    return overview(request, response)
+
+
+def _reviewed_turn_off(request, response, payload):
+    """The checks ``_authority`` makes for a change, without requiring a
+    supported deployment profile: turning the workflow off must stay possible
+    exactly when the deployment needs attention."""
+    actor, fingerprint, _ = _authority(request, response)
+    from .app import _require_same_origin
+    _require_same_origin(request)
+    if payload.confirm is not True:
+        raise HTTPException(422, "Review and confirm the setup change.")
+    if not hmac.compare_digest(payload.context, context_for(request)) or not hmac.compare_digest(payload.configuration, fingerprint):
+        raise HTTPException(409, "Account, workspace or settings changed. Reload and review setup.")
+    return actor
+
+
+@router.post("/disable")
+def disable(request: Request, response: Response, payload: Reviewed):
+    """Turn vendor onboarding off for this installation. Nobody can start or
+    continue a vendor request until it is turned on again; saved requests, the
+    workspace setup and connections are kept, and the vendor, risk and evidence
+    features turned on with it stay on (each has its own module switch)."""
+    _reviewed_turn_off(request, response, payload)
+    from maverick.audit import AuditRefused, EventKind, audit_event
+    with settings_store._locked(strict=True):
+        actor = _reviewed_turn_off(request, response, payload)
+        was_on = (config.load_global_config().get("vendor_onboarding") or {}).get("enable") is True
+        before = settings_store._load_overlay_for_update()
+        data = copy.deepcopy(before)
+        table = data.setdefault("vendor_onboarding", {})
+        if not isinstance(table, dict):
+            raise HTTPException(503, "Configuration is unavailable. No setup settings were changed.")
+        table["enable"] = False
+        settings_store._write(data)
+        config.reset_config_cache()
+        if (config.load_config().get("vendor_onboarding") or {}).get("enable") is True:
+            settings_store._write(before)
+            config.reset_config_cache()
+            raise HTTPException(409, "Higher-precedence deployment settings keep vendor onboarding on. Nothing was changed.")
+        if was_on:
+            try:
+                audit_event(EventKind.SETTING_CHANGED, agent="dashboard", _global=True, actor=actor,
+                            section="vendor_onboarding", key="enable", old=True, new=False,
+                            confirmed=True)
+            except AuditRefused as exc:
+                settings_store._write(before)
+                config.reset_config_cache()
+                raise HTTPException(503, "The change could not be recorded, so it was undone.") from exc
     return overview(request, response)

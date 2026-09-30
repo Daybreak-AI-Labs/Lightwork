@@ -252,8 +252,8 @@ def test_drain_noop_without_capability(monkeypatch):
 def test_run_loop_elicits_then_resumes_in_one_call(monkeypatch):
     """End-to-end over the stdio loop: initialize (with elicitation) ->
     tools/call(maverick_start) parks a question -> server emits
-    elicitation/create -> the client's response (already queued on stdin) is
-    consumed by the nested read -> resume -> single tools/call result."""
+    elicitation/create -> client replies through the single reader -> resume
+    -> single tools/call result. The reply follows the server request on wire."""
     fake = _FakeWorld([_Q(1, 5, "Which branch?")])
     monkeypatch.setattr("maverick.world_model.WorldModel", lambda *a, **k: fake)
 
@@ -270,7 +270,18 @@ def test_run_loop_elicits_then_resumes_in_one_call(monkeypatch):
     monkeypatch.setattr(s, "_tool_start", fake_start)
     monkeypatch.setattr(s, "_tool_resume", fake_resume)
 
-    monkeypatch.setattr(sys, "stdin", _stdin(
+    import threading
+
+    invited = threading.Event()
+    original_send = s._send
+
+    def send(message):
+        original_send(message)
+        if message.get("method") == "elicitation/create":
+            invited.set()
+
+    s._send = send
+    source = _stdin(
         {"jsonrpc": "2.0", "id": 1, "method": "initialize",
          "params": {"protocolVersion": "2025-11-25",
                     "capabilities": {"elicitation": {}}}},
@@ -278,7 +289,16 @@ def test_run_loop_elicits_then_resumes_in_one_call(monkeypatch):
          "params": {"name": "maverick_start", "arguments": {"title": "ship it"}}},
         {"jsonrpc": "2.0", "id": "elicit-1",
          "result": {"action": "accept", "content": {"answer": "main"}}},
-    ))
+    )
+
+    class InteractiveInput:
+        def readline(self):
+            line = source.readline()
+            if '"id": "elicit-1"' in line:
+                assert invited.wait(2), "server did not issue elicitation"
+            return line
+
+    monkeypatch.setattr(sys, "stdin", InteractiveInput())
     out = io.StringIO()
     monkeypatch.setattr(sys, "stdout", out)
 

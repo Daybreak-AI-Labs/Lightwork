@@ -353,11 +353,11 @@ def test_matrix_save_cannot_lock_admins_out(monkeypatch, tmp_path):
 def test_settings_page_renders_matrix(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     body = c.get("/settings").text
-    assert "Page visibility by role" in body
+    assert "Pages each role can see" in body
     assert 'action="/settings/ui-visibility"' in body
     assert 'value="operator:/flows/analytics"' in body
     # locked admin cells render disabled, not as editable inputs.
-    assert "Always available to admins" in body
+    assert "Always available to administrators" in body
 
 
 def test_nav_and_matrix_groups_are_unique():

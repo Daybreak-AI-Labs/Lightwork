@@ -11,6 +11,17 @@ except ModuleNotFoundError:  # pragma: no cover -- Py 3.10 CI matrix
 
 # ---------- pick_mode ----------
 
+
+def test_new_install_budget_defaults_are_optional_and_explicit_choices_survive(monkeypatch):
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **kw: kw["default"])
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **kw: kw["default"])
+    assert wizard._consumer_budget() == {}
+    assert wizard.pick_budget() == {"strict_pricing": True}
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_kw: "$5")
+    assert wizard._consumer_budget() == {"max_dollars": 5.0}
+
 def test_pick_mode_default_is_consumer(monkeypatch):
     from maverick_installer import wizard
     captured = {}

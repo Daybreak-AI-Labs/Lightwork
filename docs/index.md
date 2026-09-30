@@ -63,7 +63,7 @@ maverick start "review my latest commit"
 Or skip the prompts:
 
 ```bash
-maverick init --fast         # defaults: Anthropic + local sandbox + $5 cap
+maverick init --fast         # defaults: Anthropic + local sandbox; no generated task cap
 ```
 
 ## Watch it work

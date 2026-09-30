@@ -8,28 +8,27 @@
   <div class="wf-step" style="border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem; margin: 0.5rem 0;">
     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end;">
       <label style="flex: 1; min-width: min(100%, 12rem);">Step name<br>
-        <input type="text" class="wf-name" style="width: 100%;" value="{{ s.name if s else '' }}">
+        <input type="text" class="input wf-name" style="width: 100%;" value="{{ s.name if s else '' }}">
       </label>
-      <label style="min-width: min(100%, 9rem);">Gate<br>
-        <select class="wf-gate" style="width: 100%;">
-          <option value="">(none)</option>
-          {% for g in ['approval', 'review'] %}
-          <option value="{{ g }}"{% if s and s.gate == g %} selected{% endif %}>{{ g }}</option>
+      <label style="min-width: min(100%, 9rem);">Does a person check it?<br>
+        <select class="input wf-gate" style="width: 100%;">
+          <option value="">No check</option>
+          {% for g, label in [('approval', 'Someone must approve'), ('review', 'Someone reviews')] %}
+          <option value="{{ g }}"{% if s and s.gate == g %} selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </label>
       <div style="display: flex; gap: 0.25rem;">
-        <button type="button" class="wf-up" aria-label="Move step up">↑</button>
-        <button type="button" class="wf-down" aria-label="Move step down">↓</button>
-        <button type="button" class="wf-del" aria-label="Remove step">✕</button>
+        <button type="button" class="btn btn--ghost wf-up">Move up</button>
+        <button type="button" class="btn btn--ghost wf-down">Move down</button>
+        <button type="button" class="btn btn--ghost btn--danger wf-del">Remove</button>
       </div>
     </div>
-    <label style="display: block; margin-top: 0.4rem;">Instruction
-      <textarea class="wf-instruction" rows="2" style="width: 100%;">{{ s.instruction if s else '' }}</textarea>
+    <label style="display: block; margin-top: 0.4rem;">What to do in this step
+      <textarea class="input wf-instruction" rows="2" style="width: 100%;">{{ s.instruction if s else '' }}</textarea>
     </label>
-    <label style="display: block; margin-top: 0.4rem;">Tools <span class="muted">(space-separated)</span>
-      <input type="text" class="wf-tools" style="width: 100%;" value="{{ (s.tools | join(' ')) if s else '' }}">
-    </label>
+    <input type="hidden" class="wf-tools" value="{{ (s.tools | join(' ')) if s else '' }}">
+    <div class="wf-tool-chips af-toolpick" data-target=".wf-tools" style="margin-top: 0.4rem;" aria-label="Actions used in this step"></div>
   </div>
 {% endmacro %}
 
@@ -202,6 +201,36 @@
     </div>
   </details>
 
+  {% if editable %}
+  <details class="af-card" id="biz-setup" style="margin-bottom: var(--space-4);">
+    <summary style="cursor: pointer; font-weight: 600;">Set up a specialist for your business
+      <span class="muted" style="font-weight: 400;">— describe what you do, review the draft, then add it with your documents</span>
+    </summary>
+    <form id="biz-form" style="margin-top: 0.8rem;" novalidate>
+      <div class="fld"><label for="biz-name">Business name</label>
+        <input id="biz-name" class="input" type="text" maxlength="120" required></div>
+      <div class="fld"><label for="biz-what">What does the business do?</label>
+        <textarea id="biz-what" class="textarea" rows="4" maxlength="4000"></textarea></div>
+      <div class="fld"><label for="biz-industry">Industry (optional)</label>
+        <input id="biz-industry" class="input" type="text" maxlength="120"></div>
+      <div class="fld"><label for="biz-ai">How to draft it</label>
+        <select id="biz-ai" class="select">
+          <option value="ai">Draft it with AI (counts toward your spending limits, at most $0.50)</option>
+          <option value="plain">Draft it from a standard outline (no AI)</option>
+        </select></div>
+      <button type="submit" class="btn btn--primary" id="biz-draft">Draft the specialist</button>
+    </form>
+    <p id="biz-status" role="status" aria-live="polite" tabindex="-1" class="muted"></p>
+    <div id="biz-review" hidden>
+      <div id="biz-summary"></div>
+      <div class="fld"><label for="biz-docs">Documents it should know (optional, up to 10)</label>
+        <input id="biz-docs" type="file" multiple accept=".txt,.md,.pdf,.docx,.doc,.odt,.csv,.png,.jpg,.jpeg"></div>
+      <button type="button" class="btn btn--primary" id="biz-approve">Add this specialist</button>
+      <button type="button" class="btn btn--ghost" id="biz-discard">Discard the draft</button>
+    </div>
+  </details>
+  {% endif %}
+
   <div class="af-grid">
     <!-- ============ LEFT: build a specialist ============ -->
     <div class="af-card">
@@ -218,16 +247,16 @@
           {# A searchable picker, not a 2,000-option dropdown: type to filter,
              pick to open. Navigation happens only on an exact match. #}
           <input id="agent-picker" list="agent-picker-list" type="text" autocomplete="off"
-                 spellcheck="false" style="flex:1;"
+                 spellcheck="false" style="flex:1;" class="input"
                  aria-label="Choose a specialist to tailor"
-                 placeholder="e.g. finance_forecasting, hr_onboarding…"
-                 value="{{ selected.name if selected else '' }}"
-                 onchange="if(this.value && document.querySelector('#agent-picker-list option[value=&quot;' + CSS.escape(this.value) + '&quot;]')) location.href='/agents?name=' + encodeURIComponent(this.value)">
+                 placeholder="Type to search, for example “forecasting” or “onboarding”"
+                 value="{{ ((selected.description or (selected.name | humanize)) if selected else '') }}">
           <datalist id="agent-picker-list">
             {% for a in agents %}
-            <option value="{{ a.name }}"{% if a.is_override %} label="{{ a.name }} (custom)"{% endif %}></option>
+            <option value="{{ (a.description or (a.name | humanize)) }}{% if a.is_override %} (custom){% endif %}" data-name="{{ a.name }}"></option>
             {% endfor %}
           </datalist>
+          <button type="button" class="btn" id="agent-picker-open">Open</button>
           {% if editable %}
           <span class="sub">or</span>
           <a class="btn{% if creating %} btn--primary{% endif %}" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
@@ -249,8 +278,8 @@
       <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}">
         {% if creating %}
         <div class="fld">
-          <label for="f-new-id">Short name <span class="sub">— choose a unique name for this specialist</span></label>
-          <input id="f-new-id" type="text" placeholder="onboarding assistant" autocomplete="off" spellcheck="false">
+          <label for="f-new-id">Short name <span class="sub">— filled in from the name below; change it if you like</span></label>
+          <input id="f-new-id" type="text" class="input" placeholder="onboarding assistant" autocomplete="off" spellcheck="false">
         </div>
         {% endif %}
         <div class="fld">
@@ -301,20 +330,21 @@
         </div>
 
         <details class="advanced">
-          <summary>Advanced — denied tools &amp; the step-by-step playbook
+          <summary>More — blocked actions and the step-by-step playbook
             <svg class="advanced__caret" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </summary>
           <div class="advanced__body">
             <div class="fld">
-              <label for="f-deny">Denied tools <span class="sub">— space-separated; always blocked</span></label>
-              <input id="f-deny" name="deny_tools" type="text" value="{{ selected.deny_tools|join(' ') if selected else '' }}">
+              <label>Actions it may never use</label>
+              <input id="f-deny" name="deny_tools" type="hidden" value="{{ selected.deny_tools|join(' ') if selected else '' }}">
+              <div class="af-toolpick" id="deny-chips" data-target="#f-deny" aria-label="Actions it may never use"></div>
             </div>
             <fieldset style="border: 1px solid var(--border); border-radius: 6px; margin: 0.5rem 0; padding: 0.6rem 0.8rem;">
               <legend>Workflow playbook <span class="muted">— ordered steps the agent follows</span></legend>
               <div id="wf-steps">
                 {% if selected %}{% for s in selected.workflow %}{{ wf_row(s) }}{% endfor %}{% endif %}
               </div>
-              {% if editable %}<button type="button" id="wf-add">+ Add step</button>{% endif %}
+              {% if editable %}<button type="button" class="btn btn--ghost" id="wf-add">Add a step</button>{% endif %}
             </fieldset>
             {% if editable and selected and selected.workflow %}
             <p><a class="btn btn--ghost" href="/workflow-builder?edit_agent={{ selected.name | urlencode }}">Edit playbook in builder</a></p>
@@ -384,6 +414,95 @@
   {% endif %}
 
   <script>
+    // ---- shared page helpers: plain errors, readable names, action pickers ----
+    function plainError(failure, what) {
+      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    }
+    function humanName(v) {
+      if (window.mvHuman) return window.mvHuman(v);
+      v = String(v || '').replace(/[_.-]+/g, ' ').trim();
+      return v.charAt(0).toUpperCase() + v.slice(1);
+    }
+    var afToolList = null;
+    function toolChoices() {
+      if (!afToolList) {
+        afToolList = fetch('/api/v1/tools').then(function (r) { return r.ok ? r.json() : { tools: [] }; })
+          .then(function (j) {
+            return (j.tools || []).map(function (t) { return { value: t.name, label: humanName(t.name) }; })
+              .sort(function (a, b) { return a.label.localeCompare(b.label); });
+          }).catch(function () { return []; });
+      }
+      return afToolList;
+    }
+    // An action picker: the chosen actions as removable chips plus a dropdown
+    // to add one, kept in step with a hidden space-separated input.
+    function mountToolPick(box) {
+      if (!box || box.dataset.mounted) return;
+      box.dataset.mounted = '1';
+      var target = box.dataset.target || '';
+      var hidden = target.charAt(0) === '#' ? document.querySelector(target)
+        : (box.closest('.wf-step') || document).querySelector(target);
+      if (!hidden) return;
+      var readOnly = !document.getElementById('btn-save');
+      function current() { return (hidden.value || '').split(/\s+/).filter(Boolean); }
+      function paint() {
+        box.textContent = '';
+        var chosen = current();
+        var chips = document.createElement('div'); chips.className = 'chips';
+        chosen.forEach(function (name) {
+          var chip = document.createElement('button'); chip.type = 'button'; chip.className = 'chip on';
+          chip.textContent = humanName(name) + (readOnly ? '' : ' — remove');
+          chip.setAttribute('aria-label', 'Remove ' + humanName(name));
+          if (readOnly) chip.disabled = true;
+          chip.addEventListener('click', function () {
+            hidden.value = current().filter(function (x) { return x !== name; }).join(' '); paint();
+          });
+          chips.appendChild(chip);
+        });
+        if (!chosen.length) { var none = document.createElement('span'); none.className = 'sub'; none.textContent = 'None chosen.'; chips.appendChild(none); }
+        box.appendChild(chips);
+        if (readOnly) return;
+        var sel = document.createElement('select'); sel.className = 'input';
+        sel.setAttribute('aria-label', box.getAttribute('aria-label') ? 'Add to: ' + box.getAttribute('aria-label') : 'Add an action');
+        var first = document.createElement('option'); first.value = ''; first.textContent = 'Add an action…'; sel.appendChild(first);
+        toolChoices().then(function (list) {
+          list.forEach(function (t) {
+            if (chosen.indexOf(t.value) !== -1) return;
+            var o = document.createElement('option'); o.value = t.value; o.textContent = t.label; sel.appendChild(o);
+          });
+        });
+        sel.addEventListener('change', function () {
+          if (!sel.value) return;
+          var next = current(); if (next.indexOf(sel.value) === -1) next.push(sel.value);
+          hidden.value = next.join(' '); paint();
+        });
+        box.appendChild(sel);
+      }
+      paint();
+    }
+    function mountToolPicks() { document.querySelectorAll('.af-toolpick').forEach(mountToolPick); }
+
+    // Open the chosen prebuilt specialist from the search box.
+    (function () {
+      var picker = document.getElementById('agent-picker');
+      if (!picker) return;
+      function go() {
+        var v = picker.value.trim(); if (!v) return;
+        var match = Array.prototype.find.call(document.querySelectorAll('#agent-picker-list option'), function (o) {
+          return o.value.toLowerCase() === v.toLowerCase() || o.dataset.name === v;
+        });
+        if (match) location.href = '/agents?name=' + encodeURIComponent(match.dataset.name);
+      }
+      picker.addEventListener('change', go);
+      var open = document.getElementById('agent-picker-open');
+      if (open) open.addEventListener('click', function () {
+        go();
+        if (!Array.prototype.some.call(document.querySelectorAll('#agent-picker-list option'), function (o) { return o.value.toLowerCase() === picker.value.trim().toLowerCase(); })) {
+          mvToast('Choose a specialist from the list as you type.', { error: true });
+        }
+      });
+    })();
+
     // ---- JD hiring: match the roster / draft a new specialist from a JD ----
     // Runs BEFORE the chips/risk initializers below so a drafted pack stashed in
     // sessionStorage can prefill the form inputs those initializers read.
@@ -440,7 +559,7 @@
           });
         }
         var m = document.getElementById('agent-msg');
-        if (m) m.textContent = 'Drafted from the job description — review the envelope and playbook, then save.';
+        if (m) m.textContent = 'Drafted from the job description — review its limits and steps, then save.';
       })();
 
       if (!matchBtn) return;
@@ -457,11 +576,11 @@
             + '<div style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;">'
             + '<strong><a href="/agents?name=' + encodeURIComponent(m.name) + '">' + esc(m.name) + '</a></strong>'
             + (m.department ? '<span class="muted">' + esc(m.department) + '</span>' : '')
-            + '<span class="muted" style="margin-left: auto;">fit ' + pct + '%</span>'
+            + '<span class="muted" style="margin-left: auto;">' + pct + '% match</span>'
             + '<button type="button" class="btn jd-hire-btn" data-pack="' + esc(m.name) + '">Add to team…</button>'
             + '</div>'
             + '<div class="muted" style="font-size: var(--text-sm);">' + esc(m.description || '') + '</div>'
-            + (terms ? '<div class="muted" style="font-size: var(--text-xs);">matches: ' + esc(terms) + '</div>' : '')
+            + (terms ? '<div class="muted" style="font-size: var(--text-xs);">Matched on: ' + esc(terms) + '</div>' : '')
             + '</div>';
         }).join('');
         results.innerHTML = '<p class="muted" style="margin-top: 0.6rem;">Specialists already on your roster, best fit first:</p>' + rows;
@@ -486,63 +605,67 @@
           say('Paste a job description or choose a file first.', false);
           return;
         }
-        req.then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        req.then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check.'); }).then(function (j) { return { ok: r.ok, r: r, j: j }; }); })
           .then(function (res) {
-            if (!res.ok) { say((res.j && res.j.detail) || 'Matching failed.', false); return; }
+            if (!res.ok) { say(plainError(res.r, 'match the job description'), false); return; }
             say('', true);
             renderMatches(res.j.matches || []);
           })
-          .catch(function () { say('Matching failed — check your connection.', false); });
+          .catch(function (e) { say(plainError(e, 'match the job description'), false); });
       });
 
       results.addEventListener('click', function (e) {
         var btn = e.target.closest('.jd-hire-btn');
         if (!btn) return;
         var pack = btn.dataset.pack;
-        var ask = window.mvForm
-          ? mvForm('Add ' + pack + ' to a team', [
-              { key: 'team', label: 'Team (fleet) name', type: 'text', required: true,
-                placeholder: 'e.g. finance-team' },
-            ], { okText: 'Add' })
-          : Promise.resolve({ team: window.prompt('Team (fleet) name, e.g. finance-team') });
+        var ask = fetch('/api/v1/fleets').then(function (r) { return r.ok ? r.json() : { fleets: [] }; })
+          .catch(function () { return { fleets: [] }; })
+          .then(function (data) {
+            var teams = (data.fleets || []).map(function (f) { return f.name; }).filter(Boolean);
+            var fields = [];
+            if (teams.length) fields.push({ key: 'existing', label: 'Team', type: 'select',
+              options: [{ value: '', label: 'Create a new team…' }].concat(teams.map(function (t) { return { value: t, label: t }; })),
+              default: teams[0] });
+            fields.push({ key: 'team', label: teams.length ? 'New team name (only if creating one)' : 'New team name',
+              type: 'text', required: !teams.length, placeholder: 'Finance team' });
+            return mvForm('Add ' + humanName(pack) + ' to a team', fields, { okText: 'Add' });
+          });
         ask.then(function (vals) {
-          var team = vals && (vals.team || '').trim();
+          var team = vals && ((vals.existing || '').trim() || (vals.team || '').trim());
           if (!team) return;
           fetch('/api/v1/fleets/' + encodeURIComponent(team) + '/agents', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pack: pack }),
-          }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          }).then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check.'); }).then(function (j) { return { ok: r.ok, r: r, j: j }; }); })
             .then(function (res) {
-              if (res.ok) say(pack + ' added to team "' + team + '".', true);
-              else say((res.j && res.j.detail) || 'Could not add to the team.', false);
+              if (res.ok) say(humanName(pack) + ' added to the team “' + team + '”.', true);
+              else say(plainError(res.r, 'add it to the team'), false);
             })
-            .catch(function () { say('Could not add to the team — check your connection.', false); });
+            .catch(function (e) { say(plainError(e, 'add it to the team'), false); });
         });
       });
 
       if (draftBtn) draftBtn.addEventListener('click', function () {
         var text = (jdText.value || '').trim();
         if (!text) { say('Paste the job description first — the draft is built from it.', false); return; }
-        var ask = window.mvForm
-          ? mvForm('Draft a new specialist', [
+        var ask = mvForm('Draft a new specialist', [
               { key: 'title', label: 'Role title', type: 'text', required: true,
                 placeholder: 'e.g. Accounts Payable Specialist' },
-            ], { okText: 'Draft' })
-          : Promise.resolve({ title: window.prompt('Role title, e.g. Accounts Payable Specialist') });
+            ], { okText: 'Draft' });
         ask.then(function (vals) {
           var title = vals && (vals.title || '').trim();
           if (!title) return;
-          say('Drafting a clamped specialist from the JD…', true);
+          say('Drafting a new specialist from the job description…', true);
           fetch('/api/v1/agents/jd/draft', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role_title: title, jd_text: text }),
-          }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          }).then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check.'); }).then(function (j) { return { ok: r.ok, r: r, j: j }; }); })
             .then(function (res) {
-              if (!res.ok) { say((res.j && res.j.detail) || 'Drafting failed.', false); return; }
+              if (!res.ok) { say(plainError(res.r, 'draft the specialist'), false); return; }
               sessionStorage.setItem('jd-draft', JSON.stringify(res.j.draft || {}));
               location.href = '/agents?new=1#agent-form';
             })
-            .catch(function () { say('Drafting failed — check your connection.', false); });
+            .catch(function (e) { say(plainError(e, 'draft the specialist'), false); });
         });
       });
     })();
@@ -562,12 +685,14 @@
         sel.forEach(function (t) { seen[t] = 1; addChip(t, true); });
         SUGGEST.forEach(function (t) { if (!seen[t]) addChip(t, false); });
         var add = document.createElement('button');
-        add.type = 'button'; add.className = 'chip add'; add.textContent = '+ Add custom action';
+        add.type = 'button'; add.className = 'chip add'; add.textContent = '+ Add another action';
         add.addEventListener('click', async function () {
-          var vals = await mvForm('Advanced: add an action by its identifier', [
-            { key: 'name', label: 'Action identifier', type: 'text', required: true,
-              placeholder: 'e.g. slack_bot' },
-          ], { okText: 'Add' });
+          var tools = await toolChoices();
+          if (!tools.length) { mvToast('The list of actions could not be loaded. Try again in a moment.', { error: true }); return; }
+          var vals = await mvForm('Allow another action', [
+            { key: 'name', label: 'Action', type: 'select', required: true,
+              options: tools.filter(function (t) { return sel.indexOf(t.value) === -1; }) },
+          ], { okText: 'Allow' });
           if (vals === null) return;
           var name = (vals.name || '').trim();
           if (name && sel.indexOf(name) === -1) { sel.push(name); sync(); render(); }
@@ -580,8 +705,7 @@
         if (on) { var t = document.createElement('span'); t.className = 'tick'; t.textContent = '✓'; b.appendChild(t); }
         var labels = { web_search: 'Search the web', email: 'Email', browser: 'Browse websites',
           code: 'Write code', shell: 'Run commands', files: 'Work with files' };
-        b.appendChild(document.createTextNode(labels[tool] || tool.replace(/_/g, ' ')));
-        b.title = tool;
+        b.appendChild(document.createTextNode(labels[tool] || humanName(tool)));
         b.setAttribute('aria-pressed', String(on));
         b.addEventListener('click', function () {
           var i = sel.indexOf(tool);
@@ -724,7 +848,7 @@
         dlgDeploy.dataset.inFlight = 'true';
         var title = (byKey[dlgKey] && byKey[dlgKey].title) || dlgKey;
         if (!(await mvConfirm(
-          'Deploy the ' + title + ' team? This creates an operational fleet and its specialists.',
+          'Set up the ' + title + ' team? This adds its specialists so you can give the team work.',
           { okText: 'Deploy team' }
         ))) { delete dlgDeploy.dataset.inFlight; return; }
         var msg = document.getElementById('dept-dlg-msg');
@@ -733,16 +857,16 @@
         msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…';
         fetch('/api/v1/departments/' + encodeURIComponent(dlgKey) + '/deploy',
               { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-          .then(function (r) { return r.json().catch(function () { throw new Error('Request failed: the server returned an invalid JSON response.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
+          .then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
           .then(function (res) {
-            if (res.ok) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team deployed as a fleet.'; }
-            else { msg.style.color = 'var(--danger)'; msg.textContent = (res.j && res.j.detail) || ('Could not deploy (' + res.status + ').'); }
+            if (res.ok) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team set up. Give it work from the Teams page.'; }
+            else { msg.style.color = 'var(--danger)'; msg.textContent = plainError(res, 'set up the team'); }
           })
           .catch(function (error) {
             msg.style.color = 'var(--danger)';
             msg.textContent = error && error.name !== 'TypeError' && error.message
               ? error.message
-              : 'Could not deploy — check your connection and try again.';
+              : plainError(error, 'set up the team');
           })
           .finally(function () {
             delete dlgDeploy.dataset.inFlight;
@@ -760,24 +884,24 @@
         var msg = card && card.querySelector('.dep-msg');
         var title = (byKey[btn.dataset.key] && byKey[btn.dataset.key].title) || btn.dataset.key;
         if (!(await mvConfirm(
-          'Deploy the ' + title + ' team? This creates an operational fleet and its specialists.',
+          'Set up the ' + title + ' team? This adds its specialists so you can give the team work.',
           { okText: 'Deploy team' }
         ))) { delete btn.dataset.inFlight; return; }
         btn.disabled = true; btn.setAttribute('aria-busy', 'true');
         if (msg) { msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…'; }
         fetch('/api/v1/departments/' + encodeURIComponent(btn.dataset.key) + '/deploy',
               { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-          .then(function (r) { return r.json().catch(function () { throw new Error('Request failed: the server returned an invalid JSON response.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
+          .then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
           .then(function (res) {
-            if (res.ok) { if (msg) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team deployed as a fleet.'; } }
-            else if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = (res.j && res.j.detail) || ('Could not deploy (' + res.status + ').'); }
+            if (res.ok) { if (msg) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team set up. Give it work from the Teams page.'; } }
+            else if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = plainError(res, 'set up the team'); }
           })
           .catch(function (error) {
             if (msg) {
               msg.style.color = 'var(--danger)';
               msg.textContent = error && error.name !== 'TypeError' && error.message
                 ? error.message
-                : 'Could not deploy — check your connection and try again.';
+                : plainError(error, 'set up the team');
             }
           })
           .finally(function () {
@@ -787,6 +911,7 @@
           });
       });
     })();
+    mountToolPicks();
   </script>
 
   {% if (selected or creating) and editable %}
@@ -811,6 +936,15 @@
       const addBtn = document.getElementById('wf-add');
       if (addBtn) addBtn.addEventListener('click', () => {
         stepsEl.appendChild(document.getElementById('wf-row-tpl').content.cloneNode(true));
+        mountToolPicks();
+      });
+      mountToolPicks();
+      // The short name follows the specialist's name until someone edits it.
+      const descInput = document.getElementById('f-description');
+      let idTouched = false;
+      if (idInput) idInput.addEventListener('input', () => { idTouched = !!idInput.value.trim(); });
+      if (idInput && descInput) descInput.addEventListener('input', () => {
+        if (!idTouched) idInput.value = descInput.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').slice(0, 4).join(' ');
       });
       if (stepsEl) stepsEl.addEventListener('click', (e) => {
         const btn = e.target.closest('button'); if (!btn) return;
@@ -870,22 +1004,20 @@
         if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
         let r;
         try { r = await fetch(path, opts); }
-        catch (error) { throw new Error('Could not reach the server — check your connection and try again.'); }
+        catch (error) { throw new Error(plainError(error, 'reach Lightwork')); }
+        if (!r.ok) throw new Error(plainError(r, 'save these settings'));
         let data;
         try { data = await r.json(); }
-        catch (e) { throw new Error('Request failed: the server returned an invalid JSON response.'); }
-        if (!r.ok) {
-          throw new Error(data && typeof data.detail === 'string' ? data.detail : ('HTTP ' + r.status));
-        }
+        catch (e) { throw new Error('The result could not be confirmed. Refresh the page to check.'); }
         return { status: r.status, data };
       }
       document.getElementById('btn-validate').addEventListener('click', async () => {
         try {
           const name = targetName();
-          if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
+          if (!name) { show('Give your specialist a name first.', false); return; }
           const { data } = await call('POST', `/api/v1/agents/${name}/validate`, payload());
-          if (data.errors && data.errors.length) show('Invalid: ' + data.errors.join('; '), false);
-          else if (data.warnings && data.warnings.length) show('OK, with warnings: ' + data.warnings.join('; '), true);
+          if (data.errors && data.errors.length) show('Needs changes: ' + data.errors.join('; '), false);
+          else if (data.warnings && data.warnings.length) show('Looks good, with notes: ' + data.warnings.join('; '), true);
           else show('Looks good.', true);
         } catch (error) {
           show(error instanceof Error ? error.message : 'Request failed.', false);
@@ -894,11 +1026,11 @@
       const saveBtn = document.getElementById('btn-save');
       saveBtn.addEventListener('click', async () => {
         const name = targetName();
-        if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
+        if (!name) { show('Give your specialist a name first.', false); return; }
         if (!beginMutation(saveBtn)) return;
         try {
           if (!(await mvConfirm(
-            (creating ? 'Create custom agent “' : 'Deploy specialist “') + name + '”? Its saved authority and workflow become available to operators.',
+            (creating ? 'Create the specialist “' : 'Save the specialist “') + name + '”? Its allowed actions and steps take effect for everyone who uses it.',
             { okText: creating ? 'Create agent' : 'Deploy specialist' }
           ))) return;
           await call('POST', `/api/v1/agents/${name}/override`, payload());
@@ -916,11 +1048,11 @@
         if (!name || !beginMutation(resetBtn)) return;
         try {
           if (!(await mvConfirm(
-            'Reset specialist “' + name + '” to its built-in definition? Custom authority and workflow edits will be removed.',
+            'Reset “' + name + '” to how it came? Your changes to its allowed actions and steps will be removed.',
             { okText: 'Reset specialist' }
           ))) return;
           await call('DELETE', `/api/v1/agents/${name}/override?expected_generation=${encodeURIComponent(form.dataset.generation)}`);
-          show('Reverted to built-in.', true);
+          show('Reset to how it came.', true);
           window.location.search = '?name=' + encodeURIComponent(name);
         } catch (error) {
           show(error instanceof Error ? error.message : 'Request failed.', false);
@@ -983,17 +1115,17 @@
           <h2 id="jc-name">…</h2>
           <div class="jc-role" id="jc-role"></div>
         </div>
-        <button type="button" class="jc-close" id="jc-close" aria-label="Close">✕</button>
+        <button type="button" class="btn btn--ghost jc-close" id="jc-close">Close</button>
       </div>
       <div class="jc-cards" id="jc-stats"></div>
-      <div class="jc-sec"><h3>Cost tier</h3>
+      <div class="jc-sec"><h3>Cost level</h3>
         <div class="jc-tier">
           <span class="jc-band" id="jc-band"></span>
           <span class="sub" id="jc-model"></span>
           <span style="margin-inline-start:auto;"></span>
-          <label class="sub" for="jc-band-set">Set band</label>
+          <label class="sub" for="jc-band-set">Cost level</label>
           <select id="jc-band-set" class="ctl">
-            <option value="">— derived —</option>
+            <option value="">Automatic</option>
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>
@@ -1037,10 +1169,10 @@
       (jd.responsibilities||[]).forEach(function(w){
         var li=document.createElement('li'); li.textContent=w.name?(w.name+' — '+(w.instruction||'')):String(w); resp.appendChild(li);
       });
-      if(!(jd.responsibilities||[]).length){ resp.innerHTML='<li class="sub">no playbook steps declared</li>'; }
+      if(!(jd.responsibilities||[]).length){ resp.innerHTML='<li class="sub">No steps listed yet.</li>'; }
       el('jc-deliver').textContent=(jd.deliverable||'—')+
-        (jd.cadence?(' · '+jd.cadence):'')+(jd.gate?(' · gate: '+jd.gate):'');
-      chips(el('jc-tools'), jd.tools);
+        (jd.cadence?(' · '+jd.cadence):'')+(jd.gate?(' · needs '+(jd.gate==='approval'?'someone to approve':'someone to review')):'');
+      chips(el('jc-tools'), (jd.tools||[]).map(function(t){ return window.mvHuman?mvHuman(t):t; }));
       chips(el('jc-guard'), jd.guardrails, 'deny');
       el('jc-stats').innerHTML =
         stat(money(sc.value), 'Value delivered') +
@@ -1049,8 +1181,8 @@
         stat(sc.success_rate!=null?(sc.success_rate+'%'):'—', 'Success rate');
       var band=ct.band||'medium';
       var b=el('jc-band'); b.className='jc-band '+band; b.textContent=(ct.label||band)+' cost';
-      el('jc-model').textContent=(ct.model||'')+(ct.overridden?' (set)':'')+
-        (ct.blended_rate!=null?(' · $'+ct.blended_rate.toFixed(1)+'/Mtok'):'');
+      el('jc-model').textContent=(ct.overridden?'Set by hand':'Chosen automatically')+
+        (ct.blended_rate!=null?(' · about $'+ct.blended_rate.toFixed(1)+' per million words'):'');
       el('jc-band-set').value=ct.overridden?band:'';
       el('jc-band-set').dataset.model=ct.model||'';
     }
@@ -1059,7 +1191,7 @@
       el('jc-name').textContent='Loading…';
       fetch('/api/v1/agents/'+encodeURIComponent(NAME)+'/jobcard')
         .then(function(r){ return r.json(); }).then(render)
-        .catch(function(){ el('jc-name').textContent='Could not load the job card.'; });
+        .catch(function(){ el('jc-name').textContent='Could not load the job card. Close it and try again.'; });
     }
     var btn=el('btn-jobcard'); if(btn) btn.addEventListener('click', open);
     el('jc-close').addEventListener('click', function(){ dlg.close(); });
@@ -1070,15 +1202,16 @@
       fetch('/api/v1/model-cost-tiers', {method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({model:model, band:band})})
-        .then(function(r){ if(r.ok) return r.json(); throw new Error('HTTP '+r.status); })
+        .then(function(r){ if(r.ok) return r.json(); throw r; })
         .then(function(ct){
           var b=el('jc-band'); b.className='jc-band '+ct.band; b.textContent=(ct.label||ct.band)+' cost';
-          el('jc-model').textContent=(ct.model||'')+(ct.overridden?' (set)':'')+
-            (ct.blended_rate!=null?(' · $'+ct.blended_rate.toFixed(1)+'/Mtok'):'');
+          el('jc-model').textContent=(ct.overridden?'Set by hand':'Chosen automatically')+
+            (ct.blended_rate!=null?(' · about $'+ct.blended_rate.toFixed(1)+' per million words'):'');
         })
-        .catch(function(){ /* admin-gated; leave the derived band shown */ });
+        .catch(function(e){ window.mvFail ? mvFail(e, 'change the cost level') : null; });
     });
   })();
   </script>
   {% endif %}
+<script src="/static/lightwork-business-agent.js" defer></script>
 {% endblock %}

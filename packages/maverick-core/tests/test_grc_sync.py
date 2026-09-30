@@ -403,6 +403,7 @@ def test_uncertain_writer_exception_is_held_instead_of_recreated(monkeypatch):
     "ERROR: servicenow request failed (ReadTimeout)",
     "ERROR: connector configuration or request failed (RuntimeError)",
     "ERROR: post (503): upstream request failed",
+    "INDETERMINATE: connector request may have executed; reconcile before retrying.",
     None,
 ])
 def test_uncertain_connector_response_is_held_instead_of_recreated(monkeypatch, response):
@@ -428,7 +429,7 @@ def test_actual_rest_writer_lost_response_cannot_create_twice(monkeypatch):
     calls = []
 
     class Client:
-        def request(self, *args, **kwargs):
+        def stream(self, *args, **kwargs):
             calls.append(args)
             raise httpx.ReadTimeout("synthetic response lost after remote create")
 
@@ -442,6 +443,7 @@ def test_actual_rest_writer_lost_response_cannot_create_twice(monkeypatch):
     assert len(calls) == 1
     assert first["blocked_count"] == second["blocked_count"] == 1
     assert first["delivered_count"] == 0
+    assert grc_sync.list_outbound()[0]["status"] == "dispatch_unconfirmed"
 
 
 def test_lost_local_delivery_receipt_keeps_remote_create_claimed(monkeypatch):

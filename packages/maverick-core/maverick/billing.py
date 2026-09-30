@@ -64,12 +64,14 @@ class LineItem:
     in_tokens: int
     out_tokens: int
     charge: float
+    kind: str = "usage"
 
     def to_dict(self) -> dict:
         return {
             "principal": self.principal, "day": self.day, "dollars": self.dollars,
             "in_tokens": self.in_tokens, "out_tokens": self.out_tokens,
             "charge": self.charge,
+            "kind": self.kind,
         }
 
 
@@ -159,6 +161,12 @@ def rate_ledger(
     subtotal = round(sum(li.charge for li in items), 6)
     total = round(max(subtotal, card.minimum_charge), 6)
     period_start, period_end = since or "", until or ""
+    if total > subtotal:
+        items.append(LineItem(
+            principal="invoice:minimum", day=period_end,
+            dollars=0.0, in_tokens=0, out_tokens=0,
+            charge=round(total - subtotal, 6), kind="minimum_adjustment",
+        ))
     return Invoice(
         tenant=tenant, period_start=period_start, period_end=period_end,
         line_items=items, subtotal=subtotal, total=total, currency=card.currency,

@@ -45,7 +45,7 @@ def reset_sampling_temperature(token: contextvars.Token) -> None:
         _sampling_temperature.set(None)
 
 
-def llm_http_timeout() -> Any | None:
+def llm_http_timeout(*, environment=None) -> Any | None:
     """Bounded HTTP timeout for provider SDK clients.
 
     Without this the anthropic/openai SDKs use a ~10-min per-request
@@ -59,15 +59,22 @@ def llm_http_timeout() -> Any | None:
         import httpx
 
         from .._envparse import env_float
+        def value(name, default):
+            if environment is None:
+                return env_float(name, default)
+            try:
+                return float(environment.get(name, default))
+            except (ValueError, TypeError):
+                return default
         return httpx.Timeout(
-            env_float("MAVERICK_LLM_READ_TIMEOUT", 120.0),
-            connect=env_float("MAVERICK_LLM_CONNECT_TIMEOUT", 15.0),
+            value("MAVERICK_LLM_READ_TIMEOUT", 120.0),
+            connect=value("MAVERICK_LLM_CONNECT_TIMEOUT", 15.0),
         )
     except Exception:
         return None
 
 
-def sdk_http_timeout(sdk: Any) -> Any | None:
+def sdk_http_timeout(sdk: Any, *, environment=None) -> Any | None:
     """Return the configured timeout in the provider SDK's native type.
 
     Current OpenAI and Anthropic releases use ``httpx2`` internally while
@@ -78,7 +85,7 @@ def sdk_http_timeout(sdk: Any) -> Any | None:
     the installed SDK; older SDKs without that export receive the read timeout
     as a supported scalar.
     """
-    timeout = llm_http_timeout()
+    timeout = llm_http_timeout(environment=environment) if environment is not None else llm_http_timeout()
     if timeout is None:
         return None
     sdk_timeout = getattr(sdk, "Timeout", None)

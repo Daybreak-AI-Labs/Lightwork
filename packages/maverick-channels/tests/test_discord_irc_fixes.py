@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from maverick_channels import discord as dmod
 from maverick_channels.irc import IRCChannel, format_privmsg
@@ -22,6 +23,7 @@ class _Chan:
     async def send(self, chunk, allowed_mentions=None):
         self.sent.append(chunk)
         self.mentions.append(allowed_mentions)
+        return SimpleNamespace(id=len(self.sent))
 
 
 class _Msg:
@@ -29,6 +31,15 @@ class _Msg:
         self.author = _Author(author_id)
         self.content = text
         self.channel = chan
+        self.id = 777
+
+
+def _adapter(handler):
+    channel = dmod.DiscordChannel.__new__(dmod.DiscordChannel)
+    channel.handler = handler
+    channel.allowed_user_ids = {"123"}
+    channel._client = SimpleNamespace(user=SimpleNamespace(id=456))
+    return channel
 
 
 def test_discord_invokes_agent_via_passed_dispatch_text():
@@ -40,8 +51,8 @@ def test_discord_invokes_agent_via_passed_dispatch_text():
         return "world"
 
     asyncio.run(dmod._handle_discord_message(
-        _Msg("123", "hello", chan), bot_user=object(),
-        allowed_user_ids={"123"}, dispatch_text=fake_dispatch))
+        _Msg("123", "hello", chan), bot_user=SimpleNamespace(id=456),
+        channel=_adapter(fake_dispatch)))
 
     assert seen == ["hello"]      # the agent WAS invoked (no AttributeError)
     assert chan.sent == ["world"]  # reply delivered
@@ -56,8 +67,8 @@ def test_discord_gates_unauthorized_author():
         return "x"
 
     asyncio.run(dmod._handle_discord_message(
-        _Msg("999", "hi", chan), bot_user=object(),
-        allowed_user_ids={"123"}, dispatch_text=fake_dispatch))
+        _Msg("999", "hi", chan), bot_user=SimpleNamespace(id=456),
+        channel=_adapter(fake_dispatch)))
 
     assert called == [] and chan.sent == []
 
@@ -72,8 +83,8 @@ def test_discord_empty_reply_is_not_sent():
         return ""
 
     asyncio.run(dmod._handle_discord_message(
-        _Msg("123", "hi", chan), bot_user=object(),
-        allowed_user_ids={"123"}, dispatch_text=empty))
+        _Msg("123", "hi", chan), bot_user=SimpleNamespace(id=456),
+        channel=_adapter(empty)))
 
     assert chan.sent == []  # nothing sent, no empty-message API error
 
@@ -89,8 +100,8 @@ def test_discord_suppresses_mention_amplification(monkeypatch):
         return "@everyone free nitro"
 
     asyncio.run(dmod._handle_discord_message(
-        _Msg("123", "hi", chan), bot_user=object(),
-        allowed_user_ids={"123"}, dispatch_text=echo))
+        _Msg("123", "hi", chan), bot_user=SimpleNamespace(id=456),
+        channel=_adapter(echo)))
 
     assert chan.sent == ["@everyone free nitro"]   # text still delivered
     assert chan.mentions == ["SUPPRESSED"]          # ...with mentions suppressed
@@ -103,10 +114,10 @@ def test_discord_handler_error_does_not_leak_internals():
         raise RuntimeError("secret internal detail")
 
     asyncio.run(dmod._handle_discord_message(
-        _Msg("123", "hi", chan), bot_user=object(),
-        allowed_user_ids={"123"}, dispatch_text=boom))
+        _Msg("123", "hi", chan), bot_user=SimpleNamespace(id=456),
+        channel=_adapter(boom)))
 
-    assert chan.sent == ["⚠ error handling your message"]
+    assert chan.sent == ["⚠ An internal error occurred."]
     assert "secret internal detail" not in chan.sent[0]
 
 

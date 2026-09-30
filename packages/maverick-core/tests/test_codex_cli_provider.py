@@ -1,7 +1,7 @@
 """Codex CLI provider: registry wiring, auth gating, subprocess hygiene.
 
 No real ``codex`` binary and no network: ``shutil.which`` and
-``subprocess.run`` are monkeypatched. The security-critical assertions --
+the owned subprocess adapter are monkeypatched. Actual process ownership is tested separately. The security-critical assertions --
 the access token never appears on argv or in error text, argv is a list
 (never ``shell=True``), the prompt travels on STDIN -- live here.
 """
@@ -39,7 +39,7 @@ def _write_auth(tmp_path: Path) -> None:
 
 
 class _FakeRun:
-    """Records every subprocess.run call; plays a scripted codex exec."""
+    """Records every owned subprocess call; plays a scripted codex exec."""
 
     def __init__(self, *, text="hello from codex", usage=None, returncode=0,
                  stderr=""):
@@ -50,7 +50,7 @@ class _FakeRun:
         self.returncode = returncode
         self.stderr = stderr
 
-    def __call__(self, cmd, **kwargs):
+    async def __call__(self, cmd, **kwargs):
         self.calls.append({"cmd": list(cmd), **kwargs})
         if "login" in cmd:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -142,18 +142,18 @@ class TestLaunchPrefix:
         return CodexCLIClient()
 
     def test_posix_exe_launched_directly(self, monkeypatch, tmp_path):
+        client = self._client(monkeypatch, tmp_path, "/usr/local/bin/codex")
         monkeypatch.setattr(
             "maverick.providers.codex_cli_provider.os.name", "posix")
-        client = self._client(monkeypatch, tmp_path, "/usr/local/bin/codex")
         assert client._binary_path == "/usr/local/bin/codex"
         assert client._launch_prefix() == ["/usr/local/bin/codex"]
 
     def test_windows_cmd_shim_routed_through_comspec(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(
-            "maverick.providers.codex_cli_provider.os.name", "nt")
         monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
         shim = r"C:\Users\me\AppData\Roaming\npm\codex.cmd"
         client = self._client(monkeypatch, tmp_path, shim)
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.os.name", "nt")
         assert client._launch_prefix() == [
             r"C:\Windows\System32\cmd.exe", "/d", "/s", "/c", f'"{shim}"',
         ]
@@ -166,22 +166,65 @@ class TestLaunchPrefix:
     def test_windows_real_exe_launched_directly(self, monkeypatch, tmp_path):
         # An operator pointing [providers.codex_cli] binary straight at the
         # bundled codex.exe skips the interpreter hop.
-        monkeypatch.setattr(
-            "maverick.providers.codex_cli_provider.os.name", "nt")
         exe = r"C:\...\codex-win32-x64\vendor\x86_64-pc-windows-msvc\codex.exe"
         client = self._client(monkeypatch, tmp_path, exe)
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.os.name", "nt")
         assert client._launch_prefix() == [exe]
 
     def test_windows_bat_shim_routed(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(
-            "maverick.providers.codex_cli_provider.os.name", "nt")
         monkeypatch.delenv("COMSPEC", raising=False)  # falls back to cmd.exe
         shim = r"C:\tools\codex.bat"
         client = self._client(monkeypatch, tmp_path, shim)
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.os.name", "nt")
         assert client._launch_prefix() == ["cmd.exe", "/d", "/s", "/c", f'"{shim}"']
 
 
 class TestAuthGating:
+    @pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
+    def test_timeout_must_be_finite_and_positive(self, codex_env, monkeypatch, timeout):
+        monkeypatch.setattr(CodexCLIClient, "_provider_config", staticmethod(lambda: {"timeout_seconds": timeout}))
+        with pytest.raises(ValueError, match="finite and positive"):
+            CodexCLIClient()
+
+    @pytest.mark.asyncio
+    async def test_failed_login_is_not_cached_as_success(self, codex_env, monkeypatch):
+        fake = _FakeRun()
+        logins = 0
+
+        async def fail_first(cmd, **kwargs):
+            nonlocal logins
+            if "login" in cmd:
+                logins += 1
+                if logins == 1:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="failed")
+            return await fake(cmd, **kwargs)
+
+        monkeypatch.setattr("maverick.providers.codex_cli_provider.run_owned", fail_first)
+        client = CodexCLIClient()
+        with pytest.raises(RuntimeError, match="login.*failed"):
+            await client.complete_async("s", [])
+        assert not client._login_lock.locked()
+        await client.complete_async("s", [])
+        assert logins == 2
+
+    @pytest.mark.asyncio
+    async def test_login_lock_deadline_does_not_start_process(self, codex_env, monkeypatch):
+        from maverick.providers import codex_cli_provider as provider
+
+        fake = _FakeRun()
+        monkeypatch.setattr(provider, "run_owned", fake)
+        client = CodexCLIClient()
+        client.timeout_seconds = .03
+        client._login_lock.acquire()
+        try:
+            with pytest.raises(TimeoutError):
+                await client.complete_async("s", [])
+            assert not fake.calls
+        finally:
+            client._login_lock.release()
+
     def test_refuses_without_token_or_login(self, monkeypatch, tmp_path):
         monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
         monkeypatch.setenv("CODEX_HOME", str(tmp_path / "empty"))
@@ -215,21 +258,20 @@ class TestAuthGating:
     def test_auto_login_feeds_token_on_stdin_only(self, codex_env, monkeypatch):
         fake = _FakeRun()
         monkeypatch.setattr(
-            "maverick.providers.codex_cli_provider.subprocess.run", fake)
+            "maverick.providers.codex_cli_provider.run_owned", fake)
         client = CodexCLIClient()
         client.complete("sys", [{"role": "user", "content": "hi"}])
         login = next(c for c in fake.calls if "login" in c["cmd"])
         assert login["cmd"][0] == client._binary_path
         assert login["cmd"][:2] == [client._binary_path, "login"]
         assert login["input"] == FAKE_TOKEN          # STDIN carries the token
-        assert login.get("encoding") == "utf-8"      # UTF-8 pinned here too
         assert FAKE_TOKEN not in " ".join(login["cmd"])  # argv never does
 
     def test_no_login_when_auth_json_present(self, codex_env, monkeypatch):
         _write_auth(codex_env)
         fake = _FakeRun()
         monkeypatch.setattr(
-            "maverick.providers.codex_cli_provider.subprocess.run", fake)
+            "maverick.providers.codex_cli_provider.run_owned", fake)
         CodexCLIClient().complete("sys", [{"role": "user", "content": "hi"}])
         assert not any("login" in c["cmd"] for c in fake.calls)
 
@@ -238,7 +280,7 @@ class TestExec:
     def _client(self, codex_env, monkeypatch, fake):
         _write_auth(codex_env)  # skip the login round-trip
         monkeypatch.setattr(
-            "maverick.providers.codex_cli_provider.subprocess.run", fake)
+            "maverick.providers.codex_cli_provider.run_owned", fake)
         return CodexCLIClient()
 
     def test_complete_basic(self, codex_env, monkeypatch):
@@ -262,10 +304,7 @@ class TestExec:
         assert "You are terse." in call["input"]   # system reached the prompt
         assert "2+2?" in call["input"]
         assert call.get("shell") is None           # list argv, never shell=True
-        # UTF-8 pinned so a "→" in the prompt/reply doesn't UnicodeEncodeError
-        # under Windows' cp1252 locale default.
-        assert call.get("encoding") == "utf-8"
-        assert call.get("errors") == "replace"
+        # Actual UTF-8 byte behavior is covered by test_owned_process.py.
         assert FAKE_TOKEN not in " ".join(cmd)
 
     def test_exec_gets_sanitized_environment(self, codex_env, monkeypatch):
@@ -285,7 +324,7 @@ class TestExec:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret")
         fake = _FakeRun()
         monkeypatch.setattr(
-            "maverick.providers.codex_cli_provider.subprocess.run", fake)
+            "maverick.providers.codex_cli_provider.run_owned", fake)
         CodexCLIClient().complete("sys", [{"role": "user", "content": "hi"}])
         login = next(c for c in fake.calls if "login" in c["cmd"])
         assert "CODEX_ACCESS_TOKEN" not in login["env"]

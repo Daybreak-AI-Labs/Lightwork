@@ -869,6 +869,70 @@ class PrivacyNoticeGovernanceStore:
             )
         return self._release(definition, state, definition_digest, state_digest)
 
+    def list_records(self, tenant_id: str, *, limit: int = 200) -> dict[str, tuple]:
+        """Read-only listing of approval policies, releases (newest version
+        first), approvals, update proposals, exports and publication-queue
+        items for one tenant, each loaded through the integrity-checked
+        readers. Lease tokens are never part of the listing."""
+
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, _MAX_LIST)
+        self._actor()
+        with self._connect() as connection:
+            def rows(sql: str) -> list[sqlite3.Row]:
+                return connection.execute(sql, (tenant, bounded)).fetchall()
+
+            policies = tuple(
+                self._policy(self._payload(row, "approval policy", tenant), row["integrity_sha256"])
+                for row in rows(
+                    "SELECT * FROM notice_approval_policies WHERE tenant_id=? "
+                    "ORDER BY policy_id LIMIT ?"
+                )
+            )
+            releases = tuple(
+                self._get_release(connection, tenant, row["notice_id"], int(row["version"]))
+                for row in rows(
+                    "SELECT notice_id, version FROM notice_release_definitions "
+                    "WHERE tenant_id=? ORDER BY notice_id, version DESC LIMIT ?"
+                )
+            )
+            approvals = tuple(
+                self._approval(self._payload(row, "notice approval", tenant), row["integrity_sha256"])
+                for row in rows(
+                    "SELECT * FROM notice_approvals WHERE tenant_id=? "
+                    "ORDER BY notice_id, release_version, role LIMIT ?"
+                )
+            )
+            proposals = tuple(
+                self._proposal(self._payload(row, "update proposal", tenant), row["integrity_sha256"])
+                for row in rows(
+                    "SELECT * FROM notice_update_proposals WHERE tenant_id=? "
+                    "ORDER BY rowid DESC LIMIT ?"
+                )
+            )
+            exports = tuple(
+                self._export(self._payload(row, "notice export", tenant), row["integrity_sha256"])
+                for row in rows(
+                    "SELECT * FROM notice_exports WHERE tenant_id=? ORDER BY rowid DESC LIMIT ?"
+                )
+            )
+            queue = {
+                str(state): int(count)
+                for state, count in connection.execute(
+                    "SELECT state, COUNT(*) FROM notice_publication_intents "
+                    "WHERE tenant_id=? GROUP BY state",
+                    (tenant,),
+                ).fetchall()
+            }
+        return {
+            "policies": policies,
+            "releases": releases,
+            "approvals": approvals,
+            "proposals": proposals,
+            "exports": exports,
+            "queue": queue,
+        }
+
     def set_approval_policy(
         self,
         tenant_id: str,
@@ -1777,6 +1841,24 @@ class PrivacyNoticeGovernanceStore:
                         or not self._ready(release, approvals)
                         or not release.effective_from <= now < release.effective_until
                     ):
+                        # Persist progress through rejected candidates. Otherwise
+                        # the same bounded prefix can hide due work forever.
+                        expired = now >= release.effective_until
+                        deferred = dict(raw)
+                        state = "dead_letter" if expired else "pending"
+                        next_attempt = max(now + 60, release.effective_from)
+                        error_code = "release_expired" if expired else "release_not_ready"
+                        deferred.update(state=state, next_attempt_at=next_attempt,
+                                        lease_owner=None, lease_token=None, lease_until=None,
+                                        last_error_code=error_code, revision=current.revision + 1,
+                                        updated_at=now)
+                        self._write(connection, "notice_publication_intents", tenant,
+                                    "intent_id", current.intent_id, deferred,
+                                    index_updates={"state": state, "next_attempt_at": next_attempt,
+                                                   "lease_until": None})
+                        self._audit(connection, tenant, "publication_intent_failed",
+                                    current.intent_id, actor,
+                                    {"state": state, "error_code": error_code, "attempts": current.attempts}, now)
                         continue
                 token = _id(self._token_factory(), "lease_token", _OP_RE)
                 payload = dict(raw)

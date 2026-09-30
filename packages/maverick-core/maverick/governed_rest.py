@@ -205,8 +205,34 @@ def configured_governed_actions() -> tuple[GovernedActions, dict[str, tuple[str,
     return ga, register_rest_connectors(ga, cfg["connectors"])
 
 
+def placeholder_params(spec) -> dict:
+    """A minimal typed-valid param dict for an action spec, so its approval
+    requirement can be probed without real inputs (simulate has no side
+    effects)."""
+    sample = {str: "x", dict: {}, int: 0, float: 0.0, bool: False}
+    return {k: sample.get(t, "x") for k, t in spec.params.items()}
+
+
+def connector_rows(ga: GovernedActions, registered: dict[str, tuple[str, str]]) -> list[dict]:
+    """One row per registered governed connector: its read and write actions,
+    the write's risk tier, and whether committing a write needs an approver.
+    Shared by ``maverick connectors list`` and the Connections page."""
+    rows = []
+    for name, (read_action, write_action) in sorted(registered.items()):
+        write_spec = ga.get(write_action)
+        rows.append({
+            "connector": name,
+            "read_action": read_action,
+            "write_action": write_action,
+            "write_risk": write_spec.risk,
+            "write_requires_approval": ga.simulate(
+                write_action, placeholder_params(write_spec)).requires_approval,
+        })
+    return rows
+
+
 __all__ = [
     "RestConnector", "WRITE_OPS", "salesforce_connector", "servicenow_connector",
     "GOVERNED_REST_FACTORIES", "available_rest_connectors", "register_rest_connectors",
-    "configured_governed_actions",
+    "configured_governed_actions", "connector_rows", "placeholder_params",
 ]

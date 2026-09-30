@@ -124,10 +124,14 @@ def test_timeout_returns_error(fake_cmd):
     assert "timed out" in out
 
 
-def test_crashed_child_restarted_once(fake_cmd):
+def test_crashed_child_is_not_replayed(fake_cmd):
     by_name = _by_name(load_ts_plugin(fake_cmd))
-    # First request kills the child before it replies; the host restarts the
-    # child and retries, and the fresh child (sentinel now present) succeeds.
+    # The first call changed the sentinel, then died without a response.
+    # Restarting is allowed only for a separate, deliberate new invocation.
+    first = by_name["flaky"].fn({})
+    assert "outcome unknown" in first
+    assert first.attempt.outcome_unknown
+    assert not first.attempt.retryable
     assert by_name["flaky"].fn({}) == "recovered"
 
 
@@ -168,6 +172,22 @@ def test_load_configured_ts_plugins(fake_cmd, monkeypatch):
     assert by_name["echo"].fn({"text": "cfg"}) == "echo:cfg"
 
 
+def test_load_configured_ts_plugins_reads_the_dashboard_form(fake_cmd, monkeypatch):
+    """The dashboard writes each plugin as a program, a file and extra words."""
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda *a, **k: {"plugins": {"ts": [
+            {"program": fake_cmd[0], "file": fake_cmd[1], "args": fake_cmd[2:]},
+            {"program": "", "file": "x"},        # malformed: no program
+            {"program": fake_cmd[0], "args": [1]},  # malformed: words must be text
+        ]}},
+    )
+    by_name = _by_name(load_configured_ts_plugins())
+    assert by_name["echo"].fn({"text": "form"}) == "echo:form"
+    assert plugin_host._entry_command({"program": "/bin/node", "file": "", "args": []}) == \
+        ["/bin/node"]
+
+
 def test_load_configured_ts_plugins_default_empty(monkeypatch):
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
     assert load_configured_ts_plugins() == []
@@ -182,3 +202,23 @@ def test_plugin_file_change_after_manifest_is_blocked(fake_cmd):
     out = by_name["echo"].fn({"text": "hi"})
     assert out.startswith("ERROR:")
     assert "changed after manifest discovery" in out
+
+
+
+def test_a_cleanup_failure_is_a_tool_error_not_an_exception(monkeypatch):
+    """A child whose descendant outlives cleanup is reported with its dispatch
+    state, never raised out of the tool."""
+    from maverick import ts_plugin_host as host
+    from maverick.owned_process import ProcessCleanupError
+
+    child = host._PluginChild.__new__(host._PluginChild)
+    child.call_timeout, child._lock, child._buffer, child._proc = 5.0, __import__("threading").Lock(), bytearray(), None
+    child.protocol = "v1"
+
+    def failed_cleanup(*a, **k):
+        raise ProcessCleanupError("owned child cleanup incomplete")
+    monkeypatch.setattr(child, "_ensure_started", failed_cleanup, raising=False)
+    monkeypatch.setattr(child, "close", failed_cleanup)
+    result = child.call("tool", {})
+    text = result if isinstance(result, str) else str(getattr(result, "text", result))
+    assert "ERROR" in text and "not dispatched" in text

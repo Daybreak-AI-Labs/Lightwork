@@ -64,7 +64,14 @@ def insecure_channel_allowed(address: str) -> bool:
     return _is_loopback_address(address) or _insecure_grpc_allowed()
 
 
+# The config tables whose TLS keys this module reads: the goal/worker service
+# and its dispatcher ("grpc") and linked Lightwork servers ("federation").
+TLS_SECTIONS = ("grpc", "federation")
+
+
 def _section(name: str) -> dict:
+    if name not in TLS_SECTIONS:
+        return {}  # an unknown surface never borrows another table's material
     try:
         from .config import load_config
         return (load_config() or {}).get(name) or {}
