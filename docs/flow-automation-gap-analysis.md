@@ -32,7 +32,8 @@ truth. Closed since the audit:
 - **Chat copilot (G2)** — a conversational designer assistant that edits the
   canvas via validated patches and diagnoses "why did this fail?".
 - **Engine/production** — per-node **retry backoff** (+ hard-exception retries),
-  per-flow **concurrency cap** (singleton), `{{secret('NAME')}}` from the vault,
+  per-flow **concurrency cap** (singleton), scoped native connector credentials
+  ([legacy secret-expression migration](./flow-credential-migration.md)),
   **typed manual-run inputs** (validated form + run idempotency key), and
   **sub-flow argument passing / isolation** (`subflow_inputs`).
 - **Self-learning moat** — the self-rewrite loop now **infers the tool** a

@@ -2234,9 +2234,9 @@ here.
   tenant-scoped indexed metadata history and cursor-paged due-run recovery,
   with data threading, safe expression rendering (`{{fn(...)}}` incl. arithmetic,
   list ops, `and`/`or` conditions with numeric-or-lexical ordering so date/string
-  comparisons work; action params may additionally use `{{secret('NAME')}}` to
-  pull a connector credential from the governed vault at run time so the raw
-  value never enters the flow definition or persisted run data), a whole-flow wall-clock deadline
+  comparisons work; legacy `secret(...)` action expressions are refused before
+  effects, while authorized native connectors resolve their scoped accounts
+  internally; see [credential migration](./flow-credential-migration.md)), a whole-flow wall-clock deadline
   (`Flow.max_seconds`), a per-run **aggregate agent-spend ceiling**
   (`Flow.max_dollars`, enforced in `execution.py` so a wide parallel / long
   foreach can't fan out unbounded cost), a per-flow **concurrency cap**

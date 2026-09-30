@@ -2,8 +2,9 @@
 (foreach max-iterations + early _break)."""
 from __future__ import annotations
 
+import pytest
 from maverick.flow import Flow, FlowNode
-from maverick.flow.runner import eval_condition, render, run_flow
+from maverick.flow.runner import FlowCredentialRefused, eval_condition, render, run_flow
 
 
 class TestArithmeticAndLists:
@@ -153,18 +154,18 @@ class TestOrderingComparisons:
 
 
 class TestSecretFunction:
-    def test_secret_is_only_available_when_explicitly_allowed(self, monkeypatch):
+    def test_legacy_allow_flag_never_grants_deployment_secret_access(self, monkeypatch):
         monkeypatch.setenv("STRIPE_KEY", "sk_test_123")
         assert render("{{secret('STRIPE_KEY')}}", {}) == "{{secret('STRIPE_KEY')}}"
-        assert render("{{secret('STRIPE_KEY')}}", {}, allow_secrets=True) == "sk_test_123"
+        with pytest.raises(FlowCredentialRefused, match="Connections"):
+            render("{{secret('STRIPE_KEY')}}", {}, allow_secrets=True)
 
-    def test_missing_secret_is_empty_not_the_key_when_allowed(self, monkeypatch):
+    def test_missing_secret_also_requires_explicit_migration(self, monkeypatch):
         monkeypatch.delenv("NO_SUCH_SECRET", raising=False)
-        assert render("{{secret('NO_SUCH_SECRET')}}", {}, allow_secrets=True) == ""
+        with pytest.raises(FlowCredentialRefused, match="no credential or grant was migrated"):
+            render("{{secret('NO_SUCH_SECRET')}}", {}, allow_secrets=True)
 
-    def test_secret_in_an_action_param_is_not_persisted_in_run_data(self, monkeypatch):
-        # The whole point: the connector gets the resolved secret, but it never
-        # lands in the flow's persisted data (only the transient rendered param).
+    def test_secret_in_action_params_refuses_before_any_executor(self, monkeypatch):
         monkeypatch.setenv("API_KEY", "s3kret-value")
         seen = {}
 
@@ -175,8 +176,9 @@ class TestSecretFunction:
                  nodes={"a": FlowNode(id="a", kind="action", tool="t",
                                       params={"key": "{{secret('API_KEY')}}"}, output="r")})
         res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
-        assert seen["params"]["key"] == "s3kret-value"   # connector receives it
-        assert "s3kret-value" not in str(res.data)        # but flow data doesn't carry it
+        assert res.status == "failed" and "Connections" in res.error
+        assert seen == {}
+        assert "s3kret-value" not in str(res)
 
     def test_secret_in_setvar_is_not_resolved_or_persisted(self, monkeypatch):
         monkeypatch.setenv("API_KEY", "s3kret-value")

@@ -11,6 +11,7 @@ from string import Formatter
 
 from markupsafe import Markup, escape
 
+from .i18n_flow_credentials import ROWS as FLOW_CREDENTIAL_ROWS
 from .i18n_journey_budget import ROWS as BUDGET_ROWS
 from .i18n_journey_common import ROWS as COMMON_ROWS
 from .i18n_journey_composer_files import ROWS as COMPOSER_FILE_ROWS
@@ -28,7 +29,7 @@ from .i18n_journey_task_controls import ROWS as TASK_CONTROL_ROWS
 from .i18n_journey_voice_controls import ROWS as VOICE_CONTROL_ROWS
 from .i18n_journey_workflow import ROWS as WORKFLOW_ROWS
 
-ROWS = [*BUDGET_ROWS, *COMMON_ROWS, *EMPLOYEE_ROWS, *REVIEW_ROWS, *WORKFLOW_ROWS, *CONVERSATION_ROWS,
+ROWS = [*FLOW_CREDENTIAL_ROWS, *BUDGET_ROWS, *COMMON_ROWS, *EMPLOYEE_ROWS, *REVIEW_ROWS, *WORKFLOW_ROWS, *CONVERSATION_ROWS,
         *RECEIPT_ROWS, *RECOVERY_CONTROL_ROWS, *RESUME_ROWS, *SHELL_ROWS, *TASK_CONTROL_ROWS,
         *LIVE_CHAT_ROWS, *PREFERENCE_ROWS, *VOICE_CONTROL_ROWS, *COMPOSER_FILE_ROWS, *CONNECTION_ROWS]
 

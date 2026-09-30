@@ -96,9 +96,10 @@ def render(text: str, data: dict, *, allow_secrets: bool = False) -> str:
     key stays literal (unchanged); a function always resolves (missing args are
     empty).
 
-    Secret resolution is opt-in and reserved for transient action parameters.
-    Other render sites feed persisted flow data, prompts, or scoped inputs, so
-    ``{{secret(...)}}`` must remain unavailable there.
+    ``allow_secrets`` is retained for caller compatibility, but never grants
+    deployment-secret access. Legacy secret expressions in action parameters
+    are refused. Native connectors resolve their own scoped credentials after
+    authorization, without putting raw credentials in arbitrary parameters.
     """
     src = str(text)
     out: list[str] = []
@@ -269,17 +270,23 @@ def _add_days(value: Any, n: Any) -> str:
         return ""
 
 
+class FlowCredentialRefused(ValueError):
+    """Legacy credential interpolation needs an explicit reviewed migration."""
+
+
+_CREDENTIAL_REPAIR = (
+    "This flow uses legacy secret expressions. No action was authorized by this expression. "
+    "Open Connections to review an account for the intended service, then replace the step "
+    "with its authorized connector action and review a new flow version. "
+    "Server secrets cannot be used as flow parameters; no credential or grant was migrated."
+)
+
+
 def _resolve_secret(name: Any) -> str:
-    """Resolve a named secret from the governed provider (file vault / env) at
-    render time -- so a connector credential can be `{{secret('STRIPE_KEY')}}` in
-    an action param WITHOUT the raw value living in the flow definition or the
-    persisted run data (it only ever materializes in the transient rendered call).
-    Missing -> '' (never raises, never the literal key)."""
-    try:
-        from ..secret_provider import get_secret
-        return get_secret(str(name)) or ""
-    except Exception:  # pragma: no cover -- a secret lookup must never break a render
-        return ""
+    # This is the shared sink for literal, computed, nested and direct render
+    # callers. Never consult the deployment provider, even for missing names.
+    del name
+    raise FlowCredentialRefused(_CREDENTIAL_REPAIR)
 
 
 # Safe transform functions usable inside {{ }} -- no eval, pure string/collection/
@@ -372,7 +379,7 @@ def _arg_value(tok: str, data: dict, *, allow_secrets: bool = False) -> Any:
 def _funcs(*, allow_secrets: bool = False) -> dict[str, Callable[[list], Any]]:
     if not allow_secrets:
         return _FUNCS
-    return {**_FUNCS, "secret": lambda a: _resolve_secret(a[0]) if a else ""}
+    return {**_FUNCS, "secret": lambda a: _resolve_secret(a[0] if a else None)}
 
 
 def _eval_expr(expr: str, data: dict, *, allow_secrets: bool = False) -> Any:
@@ -385,6 +392,8 @@ def _eval_expr(expr: str, data: dict, *, allow_secrets: bool = False) -> Any:
         args = [_arg_value(a, data, allow_secrets=allow_secrets) for a in _split_args(m.group(2))]
         try:
             return funcs[m.group(1)](args)
+        except FlowCredentialRefused:
+            raise
         except Exception:  # a bad transform never breaks rendering
             return ""
     return _dig(data, expr.strip())
@@ -621,9 +630,80 @@ class _Ctx:
                     execution_owner=self.execution_owner)
 
 
+def _secret_expression(expression: str) -> bool:
+    """Inspect call/quoted-argument structure, not raw keywords.
+
+    An unknown wrapper around a secret call is conservatively migration-bound,
+    even though today's evaluator would leave that unknown expression inert.
+    """
+    pending = [expression.strip()]
+    while pending:
+        part = pending.pop()
+        if len(part) >= 2 and part[0] in "'\"" and part[-1] == part[0]:
+            continue  # A quoted example is data, never a nested function call.
+        call = _FN_CALL.match(part)
+        if call:
+            if call.group(1) == "secret":
+                return True
+            pending.extend(_split_args(call.group(2)))
+    return False
+
+
+def _check_action_credentials(value) -> None:
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, (list, tuple)):
+            pending.extend(item)
+        elif isinstance(item, str):
+            position = 0
+            while (start := item.find("{{", position)) >= 0:
+                end = item.find("}}", start + 2)
+                if end < 0:
+                    break
+                if _secret_expression(item[start + 2:end]):
+                    raise FlowCredentialRefused(_CREDENTIAL_REPAIR)
+                position = end + 2
+
+
+def _credential_review(flow: Flow, resolve_flow):
+    """Check the entire graph before any effect; freeze saved subflow lookups.
+
+    This also runs on persisted continuation/approval resumes. The resolver's
+    reviewed copies are used at execution, so a second lookup cannot swap in
+    an unchecked graph after a harmless prefix has already executed.
+    """
+    pending, seen, resolved = [flow], set(), {}
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        for node in current.nodes.values():
+            if node.kind == NODE_ACTION:
+                _check_action_credentials(node.params)
+            if node.body is not None:
+                pending.append(node.body)
+            pending.extend(node.branches or [])
+            if node.kind == NODE_SUBFLOW and resolve_flow:
+                if node.flow_ref not in resolved:
+                    resolved[node.flow_ref] = copy.deepcopy(resolve_flow(node.flow_ref))
+                if resolved[node.flow_ref] is not None:
+                    pending.append(resolved[node.flow_ref])
+    return (lambda reference: resolved.get(reference)) if resolve_flow else None
+
+
 def _render_params(node: FlowNode, data: dict) -> dict:
-    return {k: render(v, data, allow_secrets=True) if isinstance(v, str) else v
-            for k, v in (node.params or {}).items()}
+    _check_action_credentials(node.params)
+    values = {k: render(v, data, allow_secrets=True) if isinstance(v, str) else v
+              for k, v in (node.params or {}).items()}
+    # A data-key substitution must not silently hand an unresolved legacy
+    # expression to a connector either. No second template evaluation occurs.
+    _check_action_credentials(values)
+    return values
 
 
 def _learned_agent_result(node: FlowNode, data: dict, *, flow_id: str, run_id: str) -> tuple[bool, Any]:
@@ -950,7 +1030,7 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         try:
             result, outcome = _invoke_work(node, data, ctx)
             last_exc = None
-        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused):
+        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused):
             raise
         except Exception as e:   # a raising executor is a retryable failure, not instant death
             last_exc, outcome = e, 0.0
@@ -1573,7 +1653,7 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
                         following, data, ctx, following.recipe_step, record=False,
                     )
             cursor = _run_node(node, data, ctx)
-        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused) as exc:
+        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused) as exc:
             ctx.control_stop.append(exc)
             raise
         except (_Pause, _Reject, _NodeError, _Indeterminate):
@@ -1650,6 +1730,17 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
     flow = copy.deepcopy(flow)
     data = copy.deepcopy(data)
     resume = copy.deepcopy(resume)
+    try:
+        resolve_flow = _credential_review(flow, resolve_flow)
+    except FlowCredentialRefused as exc:
+        return FlowRunResult(status=STATUS_FAILED, data=dict((resume or {}).get("data") or data or {}), error=str(exc))
+    except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused):
+        raise
+    except Exception as exc:
+        # A failed saved-subflow read is still a failed run, never an escaped
+        # interpreter exception or permission to execute an unchecked prefix.
+        return FlowRunResult(status=STATUS_FAILED, data=dict((resume or {}).get("data") or data or {}),
+                             error=_safe_error_text(exc, limit=2000))
     _now = now or time.time
     ctx = _Ctx(agent_fn, action_fn, approve_fn, on_node or (lambda *_: None),
                _now, allow_pause=True, resolve_flow=resolve_flow,
@@ -1751,6 +1842,10 @@ def _execute_chain_result(flow: Flow, data: dict, ctx: _Ctx, start: str | None) 
             error=_safe_error_text(e, limit=2000),
             continuation={"version": 1, "frame": ctx.frame},
         )
+    except FlowCredentialRefused as exc:
+        # A policy refusal is not a retryable business failure or a catchable
+        # scope error. Keep the saved definition/data for explicit migration.
+        return FlowRunResult(status=STATUS_FAILED, data=data, error=str(exc))
     except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused):
         raise
     except Exception as e:  # a node executor blew up -> surface, don't crash the caller

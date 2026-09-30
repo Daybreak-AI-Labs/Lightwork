@@ -173,7 +173,7 @@ def _assert_safe_definition(payload: dict) -> None:
     if contains_secret(payload):
         raise ValueError(
             "flow definitions may not contain raw credentials; "
-            "use {{secret('NAME')}} instead"
+            "review the account in Connections and use its authorized native connector action instead"
         )
 
 

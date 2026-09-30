@@ -201,6 +201,15 @@ def test_flows_gated_off_by_default(monkeypatch, tmp_path):
     assert _client().get("/api/v1/flows").status_code == 403
 
 
+def test_flow_designer_explains_credential_migration_and_links_native_accounts(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    response = _client().get("/flows/designer")
+    assert response.status_code == 200, response.text
+    assert "Connector credentials belong in Connections." in response.text
+    assert "saved definitions and grants are not changed automatically" in response.text
+    assert 'href="/connections"' in response.text
+
+
 _INPUT_FLOW = {
     "id": "typed", "name": "Typed", "start": "a",
     "nodes": [{"id": "a", "kind": "agent", "brief": "process {{amount}}"}],
