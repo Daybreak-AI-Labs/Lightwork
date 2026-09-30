@@ -5790,7 +5790,7 @@ def _global_audit_tail(request: Request, audit_log, n: int, day: str | None) -> 
         from maverick.audit import global_audit_log
 
         global_log = global_audit_log()
-        if getattr(global_log, "path", None) == getattr(audit_log, "path", None) or global_log is audit_log:
+        if global_log is audit_log or getattr(global_log, "audit_dir", None) == getattr(audit_log, "audit_dir", None):
             return []
         rows = global_log.tail(n, day=day)
     except Exception:  # pragma: no cover -- the workspace chain still renders
