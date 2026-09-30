@@ -513,6 +513,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "ott_ctv_rights",
         "drop_management",
         "notice_governance",
+        "public_rights_form",
     },
     "tech_risk_compliance": {
         "enable",
@@ -1123,6 +1124,15 @@ _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
     },
     ("privacy_automation", "regulatory_intelligence"): {
         "enable",
+    },
+    ("privacy_automation", "public_rights_form"): {
+        "enable",
+        "verification_ttl_hours",
+        "status_ttl_days",
+        "requests_per_ip_per_hour",
+        "requests_per_email_per_day",
+        "internal_target_days",
+        "max_message_chars",
     },
     ("privacy_automation", "rights_orchestration"): {
         "enable",

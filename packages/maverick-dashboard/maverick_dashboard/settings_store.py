@@ -1354,6 +1354,7 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "privacy_automation",
     "privacy_automation.data_discovery",
     "privacy_automation.notice_governance",
+    "privacy_automation.public_rights_form",
     "privacy_automation.regulatory_intelligence",
     "privacy_automation.rights_consumer_delivery",
     "privacy_automation.rights_orchestration",

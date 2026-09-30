@@ -4201,13 +4201,17 @@ async def assessment_question_roi(request: Request, type: str) -> dict:
 async def open_dsar_request(request: Request, body: DsarIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    return await run_in_threadpool(
-        ops.open_dsar,
-        body.subject_id,
-        body.kind,
-        channel=body.channel,
-        opened_by=_request_actor(request),
-    )
+    try:
+        return await run_in_threadpool(
+            ops.open_dsar,
+            body.subject_id,
+            body.kind,
+            channel=body.channel,
+            jurisdiction=body.jurisdiction,
+            opened_by=_request_actor(request),
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/privacy/dsar/from-message", status_code=201)
@@ -11228,6 +11232,10 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Privacy-rights orchestration",
         "requires": ("privacy_automation",),
     },
+    "privacy_automation.public_rights_form": {
+        "label": "Rights request form",
+        "requires": ("privacy_automation",),
+    },
     "privacy_automation.rights_consumer_delivery": {
         "label": "Privacy-rights consumer delivery",
         "requires": (
@@ -15373,6 +15381,7 @@ from .consent_global_opt_out_api import (  # noqa: E402
 from .consent_preferences_api import router as consent_preferences_router  # noqa: E402
 from .consent_profile_data_api import router as consent_profile_data_router  # noqa: E402
 from .consent_public_admin_api import router as consent_public_admin_router  # noqa: E402
+from .public_rights_admin_api import router as public_rights_admin_router  # noqa: E402
 from .consent_publication_signing_api import (  # noqa: E402
     router as consent_publication_signing_router,
 )
@@ -15490,6 +15499,7 @@ router.include_router(consent_custom_index_router)
 router.include_router(consent_bulk_jobs_router)
 router.include_router(consent_global_opt_out_router)
 router.include_router(consent_public_admin_router)
+router.include_router(public_rights_admin_router)
 router.include_router(consent_delivery_router)
 router.include_router(consent_delivery_destinations_router)
 router.include_router(consent_experiments_router)

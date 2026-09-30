@@ -45,6 +45,65 @@
     { value: 'other', label: 'Another way' },
   ];
 
+  on('dsar-acknowledge', function () {
+    call('POST', base + encodeURIComponent(requestId) + '/acknowledge').then(function () {
+      say('Receipt marked as confirmed.'); reloadSoon();
+    }).catch(function (f) { fail(f, 'mark receipt confirmed'); });
+  });
+
+  on('dsar-extend', function () {
+    form('Record an extension', [
+      { key: 'reason', label: 'Why do you need more time?', type: 'text', required: true,
+        placeholder: 'For example: many systems to search', help: 'This reason goes into the notice you send.' },
+      { key: 'days', label: 'Extra days (leave empty for the full two months under GDPR)', type: 'text',
+        placeholder: '45' },
+    ], 'Record').then(function (values) {
+      if (!values) return;
+      var body = { reason: values.reason };
+      if (values.days) body.days = parseInt(values.days, 10);
+      return call('POST', base + encodeURIComponent(requestId) + '/extend', body).then(function () {
+        say('Extension recorded. Now send the extension notice.'); reloadSoon();
+      });
+    }).catch(function (f) { fail(f, 'record the extension'); });
+  });
+
+  on('dsar-verify-manual', function () {
+    form('Confirm identity another way', [
+      { key: 'method', label: 'How did you confirm it?', type: 'select',
+        options: METHODS.filter(function (m) { return m.value !== 'email_challenge'; }), default: 'document_check', required: true },
+      { key: 'reference', label: 'Where is the proof kept?', type: 'text', required: true,
+        placeholder: 'For example: support ticket 4521' },
+    ], 'Confirm').then(function (values) {
+      if (!values) return;
+      return call('POST', base + encodeURIComponent(requestId) + '/verify', values).then(function () {
+        say('Identity confirmed; the request is now open.'); reloadSoon();
+      });
+    }).catch(function (f) { fail(f, 'confirm identity'); });
+  });
+
+  doc.querySelectorAll('.dsar-send').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var kind = btn.getAttribute('data-kind');
+      var fields = [];
+      if (kind === 'refusal') {
+        fields.push({ key: 'lawful_basis', label: 'Lawful basis for refusing (goes to the requester)', type: 'text', required: true });
+      }
+      if (kind === 'completion') {
+        fields.push({ key: 'secure_link', label: 'Secure link (create it in step 3 first)', type: 'text', required: true, placeholder: 'https://…/dsar/response/…' });
+        fields.push({ key: 'secure_link_expires', label: 'Link expires on (YYYY-MM-DD)', type: 'text', required: true });
+      }
+      var ready = fields.length ? form('Send: ' + human(kind), fields, 'Send') : ask('Send the "' + human(kind) + '" notice to the requester now?', 'Send');
+      ready.then(function (values) {
+        if (!values) return;
+        var body = { kind: kind };
+        if (typeof values === 'object') Object.keys(values).forEach(function (k) { body[k] = values[k]; });
+        return call('POST', base + encodeURIComponent(requestId) + '/send', body).then(function (out) {
+          say(out.sent ? 'Notice sent.' : 'Notice not sent: ' + out.reason); reloadSoon();
+        });
+      }).catch(function (f) { fail(f, 'send the notice'); });
+    });
+  });
+
   on('dsar-start', function () {
     call('POST', base + encodeURIComponent(requestId) + '/fulfillment').then(function () {
       say('Started. Next, confirm who they are.'); reloadSoon();

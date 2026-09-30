@@ -1,0 +1,23 @@
+{% extends "public_base.html" %}
+{% block title %}{{ t.status_title }}{% endblock %}
+{% block content %}
+<section class="panel" style="max-width: 40rem; margin: 0 auto;">
+  <h1>{{ t.status_title }}</h1>
+  {% if view %}
+    {% if just_verified %}<p role="status">{{ t.verify_button }} — done. Thank you.</p>{% endif %}
+    <dl>
+      <dt>{{ t.status_reference }}</dt><dd>{{ view.reference }}</dd>
+      <dt>{{ t.status_type }}</dt><dd>{{ view.request_type_label | capitalize }}</dd>
+      <dt>{{ t.status_law }}</dt><dd>{{ view.jurisdiction_name }}</dd>
+      <dt>{{ t.status_state }}</dt><dd>{{ view.status_label }}</dd>
+      <dt>{{ t.status_received }}</dt><dd>{{ view.received_date }}</dd>
+      <dt>{{ t.status_due }}</dt><dd>{{ view.due_date }}</dd>
+    </dl>
+    {% if view.status == 'unverified' %}<p class="muted">{{ t.status_unverified }}</p>{% endif %}
+    {% if view.extended %}<p class="muted">{{ t.status_extended }}</p>{% endif %}
+    <p class="muted" style="font-size: var(--text-xs);">{{ t.non_legal_advice }}</p>
+  {% else %}
+    <p role="alert">{{ t.verify_invalid if invalid == 'verify' else t.status_invalid }}</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -770,6 +770,42 @@ def _automation_rows(S) -> tuple:
           "How long one worker keeps a job before another may take it over.", "number", _P,
           60, rr, subgroup=sched, minimum=1, maximum=3600, integer=True, unit="seconds"),
         *_drop_and_notice_rows(S),
+        *_public_rights_form_rows(S),
+    )
+
+
+def _public_rights_form_rows(S) -> tuple:
+    group = _sub("Privacy automation", "rights request form")
+    reader = "maverick.public_rights_form"
+    section = f"{_PA}.public_rights_form"
+    return (
+        S(section, "verification_ttl_hours", "Confirmation link works for",
+          "How long the email link that confirms a requester's address stays valid.",
+          "number", _P, 24, reader, subgroup=group, minimum=1, maximum=168, integer=True,
+          unit="hours", weaker="higher",
+          warning="A link that stays valid longer can be used by someone who finds it later."),
+        S(section, "status_ttl_days", "Progress link works for",
+          "How long the link a requester uses to follow their request stays valid.",
+          "number", _P, 90, reader, subgroup=group, minimum=1, maximum=730, integer=True,
+          unit="days", weaker="higher",
+          warning="A progress link that stays valid longer can be used by someone who finds it later."),
+        S(section, "requests_per_ip_per_hour", "Requests per connection per hour",
+          "How many submissions one internet address may make in an hour before it is asked "
+          "to wait.", "number", _P, 5, reader, subgroup=group, minimum=1, maximum=1000,
+          integer=True, weaker="higher",
+          warning="A higher limit lets one connection submit more, including automated abuse."),
+        S(section, "requests_per_email_per_day", "Requests per email address per day",
+          "How many submissions one email address may make in a day.", "number", _P, 3,
+          reader, subgroup=group, minimum=1, maximum=100, integer=True, weaker="higher",
+          warning="A higher limit lets one address be flooded with confirmation emails."),
+        S(section, "internal_target_days", "Target when the law sets no deadline",
+          "Used for laws that require an answer 'without delay' but fix no number of days "
+          "(for example Japan). Shown to the team as an internal target, never as a legal "
+          "deadline.", "number", _P, 30, reader, subgroup=group, minimum=1, maximum=365,
+          integer=True, unit="days"),
+        S(section, "max_message_chars", "Longest message a requester may write",
+          "The size of the free-text box on the public form.", "number", _P, 4000, reader,
+          subgroup=group, minimum=200, maximum=20000, integer=True, unit="characters"),
     )
 
 
