@@ -86,6 +86,15 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
+        "path": "/companion",
+        "label": "My companion",
+        "aliases": "personal employee companion task status",
+        "group": "Work",
+        "icon": "chat",
+        "floor": "view",
+        "default": "view",
+    },
+    {
         "path": "/goals",
         "label": "Tasks",
         "aliases": "goals work tasks",
@@ -1118,6 +1127,16 @@ PAGES: tuple[dict, ...] = (
         "icon": "settings",
         "floor": "admin",
         "default": "admin",
+    },
+    {
+        "path": "/companion/admin",
+        "label": "Employee companions",
+        "aliases": "enrollment companion policy retention",
+        "group": "Admin",
+        "icon": "agents",
+        "floor": "admin",
+        "default": "admin",
+        "scope": "workspace",
     },
     {
         "path": "/users",

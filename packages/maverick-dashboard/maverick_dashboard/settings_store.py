@@ -114,6 +114,7 @@ CAPABILITY_DEFAULTS = {
     "mobile_tools": False, "ros": False, "code_exec": False,
 }
 FEATURE_DEFAULTS = {
+    "employee_companions": False,
     "workflow_readiness": True,
     "project_reviews": False,
     "outcome_measurement": False,
@@ -153,6 +154,13 @@ CAPABILITY_INFO = {
                  "before shell commands run.",
 }
 FEATURE_INFO = {
+    "employee_companions": (
+        "Let workspace administrators enroll employees for a personal companion "
+        "that reads only their own task status. Administrators control access "
+        "and conversation retention, and see policy and audit metadata without "
+        "private companion history. AI answers, external connections and "
+        "task actions are not included."
+    ),
     "copilot_operations": "Let Copilot show the current learning example and open its reviewed stop-use control. You confirm the decision in a protected form. Other product actions are not included; the page's own controls remain available when this is off.",
     "support_center": "Allow installation administrators to prepare, review and download redacted diagnostics in Help. Reports are never sent automatically.",
     "workflow_readiness": "Show available workflows, their supported boundaries, and the live or platform validation still required. Enablement never establishes customer acceptance.",
@@ -1091,6 +1099,17 @@ def assert_effective_copilot_operations(enabled: bool) -> None:
     if config.get_features().get("copilot_operations") is not bool(enabled):
         raise FeatureSettingNotEffective(
             "Copilot actions are controlled by another setting. The requested change is not active."
+        )
+
+
+def assert_effective_employee_companions(enabled: bool) -> None:
+    """Report when a saved opt-in differs from the effective deployment policy."""
+    from maverick import config
+
+    if config.get_features().get("employee_companions") is not bool(enabled):
+        raise FeatureSettingNotEffective(
+            "Employee companions are controlled by another setting. "
+            "The requested change is not active."
         )
 
 

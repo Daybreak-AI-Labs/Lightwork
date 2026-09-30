@@ -4642,6 +4642,14 @@ def pick_advanced() -> dict[str, Any]:
             "Assigned workspace reviewers cannot execute or sign off the live task.",
             default=False,
         ),
+        "allow_employee_companions": _q_confirm(
+            "Enable personal companions for employees enrolled by a workspace "
+            "administrator? This first version shows only each person's own task "
+            "status. Administrators manage policy and audit metadata, without "
+            "access to private companion history. AI answers and actions are "
+            "not included.",
+            default=False,
+        ),
         "allow_outcome_measurement": _q_confirm(
             "Enable measured workflow pilots with paired baseline observations "
             "and explicit accepted outcomes? No savings are assumed.", default=False,
@@ -8167,6 +8175,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("workflow_readiness = false")
     if advanced.get("allow_project_reviews") is True:
         _feature_locks.append("project_reviews = true")
+    if advanced.get("allow_employee_companions") is True:
+        _feature_locks.append("employee_companions = true")
     if advanced.get("allow_outcome_measurement") is True:
         _feature_locks.append("outcome_measurement = true")
     if advanced.get("allow_workspace_recovery") is True:

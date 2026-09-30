@@ -1403,6 +1403,9 @@ from .privacy_notice_publication_targets_api import (  # noqa: E402
 from .settings_all_page import router as settings_all_router  # noqa: E402
 
 app.include_router(settings_all_router)
+from .employee_companion_api import router as employee_companion_router  # noqa: E402
+
+app.include_router(employee_companion_router)
 # Settings > License (/settings/license + its install, sign and key-pair API).
 from .license_ops_api import router as license_ops_router  # noqa: E402
 

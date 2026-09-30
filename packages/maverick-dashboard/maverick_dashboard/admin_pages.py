@@ -561,6 +561,10 @@ async def settings_set_features(request: Request) -> RedirectResponse:
             settings_store.assert_effective_copilot_operations,
             selected["copilot_operations"],
         )
+        await run_in_threadpool(
+            settings_store.assert_effective_employee_companions,
+            selected["employee_companions"],
+        )
     except settings_store.FeatureSettingNotEffective as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:

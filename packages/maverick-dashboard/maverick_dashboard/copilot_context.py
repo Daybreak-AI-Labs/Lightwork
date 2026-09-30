@@ -86,6 +86,65 @@ _CONTEXTS = tuple(
     _ensure_read_only(context)
     for context in (
         CopilotPageContext(
+            path="/companion/admin",
+            title="Employee companions",
+            summary=(
+                "Workspace administrators enroll employees and set the policy "
+                "for a bounded personal task-status companion."
+            ),
+            capabilities=(
+                "Enroll or disable a specific employee using the page's controls.",
+                "Allow access to the employee's own task status and choose conversation retention.",
+                "Review policy and audit metadata for companions in this workspace.",
+            ),
+            boundaries=(
+                "Companion policy requires administrator authority in the current workspace and current employee membership.",
+                "Companion administration does not grant access to private companion history.",
+                "This version does not use AI providers, connected sources, shared memory or task actions.",
+                "Copilot can explain these controls but cannot enroll employees or change companion policy.",
+            ),
+            next_steps=(
+                "Check whether employee companions are enabled in Settings.",
+                "Select an employee and review the allowed task access and retention before saving.",
+                "Refresh the policy after a conflict before making another change.",
+            ),
+            suggested_questions=(
+                "What can an employee companion access?",
+                "Can administrators read companion conversations?",
+                "How do I change an employee's companion policy?",
+            ),
+        ),
+        CopilotPageContext(
+            path="/companion",
+            title="My companion",
+            summary=(
+                "Check your own task status alongside a personal conversation "
+                "without waiting for a running task to finish."
+            ),
+            capabilities=(
+                "Read the status of your own tasks when your workspace policy allows it.",
+                "View your current companion policy and conversation retention.",
+                "Clear your retained companion conversation using the page's controls.",
+            ),
+            boundaries=(
+                "A workspace administrator must enroll you before you use a companion.",
+                "The companion returns bounded task-status replies, not general AI answers or actions.",
+                "It cannot read another employee's tasks, connected sources or shared memory.",
+                "Companion administration exposes policy and audit metadata, not private companion history.",
+                "Copilot explains this page; it cannot read or clear your companion conversation.",
+            ),
+            next_steps=(
+                "Review your access and retention policy before sending a message.",
+                "Ask about your task status and refresh to see later changes.",
+                "If access is unavailable, ask your workspace administrator to review enrollment and policy.",
+            ),
+            suggested_questions=(
+                "What can my companion do today?",
+                "Who can see my companion conversation?",
+                "How do I clear my conversation history?",
+            ),
+        ),
+        CopilotPageContext(
             path="/assurance/cloud-agents",
             title="Cloud Agent Governance",
             summary=(

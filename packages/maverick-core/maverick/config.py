@@ -1025,7 +1025,9 @@ def get_features() -> dict:
 
     Draft recovery, record search, Action Center, guided onboarding and workflow
     readiness default on. Workspace recovery, project reviews and outcome
-    measurement require explicit opt-in. The older switches default on.
+    measurement and employee companions require explicit opt-in. The older
+    switches default on. Employee companions expose only the enrolled person's
+    task status and private companion history controls; they do not enable agent work.
     """
     cfg = load_config().get("features", {}) or {}
     return {
@@ -1044,6 +1046,9 @@ def get_features() -> dict:
         "workflow_readiness": cfg.get("workflow_readiness", True) is True,
         "project_reviews": cfg.get("project_reviews", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
+        "employee_companions": (
+            not config_source_errors() and cfg.get("employee_companions", False) is True
+        ),
         "copilot_operations": (not config_source_errors() and cfg.get("copilot_operations", False) is True),
         "scheduling": bool(cfg.get("scheduling", True)),
         "triggers": bool(cfg.get("triggers", True)),

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_hero.html" import hero %}
+{% block title %}Your companion · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ asset('lightwork-employee-companion.css') }}">{% endblock %}
+{% block content %}
+<div class="ec-shell" id="ec-root" data-mode="employee" data-draft-recovery="off" data-companion-context="{{ companion_context | default('') }}">
+  {% call hero('Your workspace', 'Your companion', lede='A private place to check on your work while it continues.') %}
+    <div class="hero-statebox">
+      <div class="hero-statebox__label">Read-only preview</div>
+      <div class="hero-statebox__row"><strong id="ec-policy-label">Checking availability</strong><span class="badge idle" id="ec-badge">Loading</span></div>
+      <p class="hero-statebox__copy" id="ec-policy-summary">Loading your companion policy.</p>
+      <button class="btn btn--ghost" id="ec-refresh" type="button">Refresh</button>
+    </div>
+  {% endcall %}
+  <p class="ec-status" id="ec-status" role="status" aria-live="polite" aria-atomic="true">Loading your companion.</p>
+  <div class="ec-columns">
+    <section class="panel ec-conversation" aria-labelledby="ec-conversation-title">
+      <div class="section-head"><h2 id="ec-conversation-title">Your conversation</h2><button class="btn btn--ghost" id="ec-clear" type="button" disabled>Clear history</button></div>
+      <div class="ec-clear-confirm" id="ec-clear-confirm" hidden>
+        <p id="ec-clear-description">Clear your saved companion conversation and the messages shown here? Your tasks and policy will stay in place. Activity records are kept separately.</p>
+        <div class="ec-actions"><button class="btn btn--danger" id="ec-clear-yes" type="button" aria-describedby="ec-clear-description">Clear conversation</button><button class="btn btn--ghost" id="ec-clear-no" type="button">Keep conversation</button></div>
+      </div>
+      <p class="muted ec-help">Your most recent 50 exchanges. The latest answer can include source links and the time each source was checked.</p>
+      <div class="ec-messages" id="ec-messages" role="log" aria-label="Companion conversation" aria-live="polite" aria-relevant="additions text"><p class="muted">Loading your conversation.</p></div>
+      <form class="ec-form" id="ec-message-form" autocomplete="off">
+        <label for="ec-message">Ask about your work</label>
+        <textarea class="input" id="ec-message" name="message" rows="3" maxlength="2000" placeholder="What is running?" aria-describedby="ec-message-help ec-status" disabled required></textarea>
+        <p class="muted ec-help" id="ec-message-help">This preview understands task-status questions. It does not call an AI model or start, change or cancel work.</p>
+        <div class="ec-actions"><button class="btn btn--primary" id="ec-send" type="submit" disabled>Ask companion</button><button class="btn btn--ghost" type="button" data-question="What is running?" disabled>What is running?</button><button class="btn btn--ghost" type="button" data-question="What needs attention?" disabled>What needs attention?</button></div>
+      </form>
+    </section>
+    <aside class="ec-sidebar">
+      <section class="panel" aria-labelledby="ec-tasks-title"><div class="section-head"><h2 id="ec-tasks-title">Your active tasks</h2></div><p class="muted ec-help">A snapshot of your own work. Open a task for its latest details.</p><ul class="ec-task-list" id="ec-tasks"><li>Loading your tasks.</li></ul></section>
+      <section class="panel" aria-labelledby="ec-boundaries-title"><div class="section-head"><h2 id="ec-boundaries-title">Your boundaries</h2></div><p>Your administrator controls availability, task access and conversation retention. Companion administration shows policy and activity metadata, without conversation text.</p><p>This preview has no connected documents, external actions or learned memory. Your saved messages are conversation history, not learned preferences.</p><p class="muted" id="ec-retention">Checking how long conversation history is kept.</p></section>
+    </aside>
+  </div>
+  <noscript><p class="panel">Turn on JavaScript to use your companion.</p></noscript>
+</div>
+{% endblock %}
+{% block scripts_extra %}<script src="{{ asset('lightwork-employee-companion.js') }}" defer></script>{% endblock %}

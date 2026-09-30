@@ -112,6 +112,7 @@ CAPABILITY_LABELS = {
 }
 
 FEATURE_LABELS = {
+    "employee_companions": "Employee companions",
     "workflow_readiness": "Workflow catalog",
     "project_reviews": "Project reviews",
     "outcome_measurement": "Outcome measurement",

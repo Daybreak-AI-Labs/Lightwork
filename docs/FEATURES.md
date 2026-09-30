@@ -19,6 +19,15 @@ here.
 
 ## Agent kernel & orchestration
 
+- **Employee companion preview** - default-off `[features] employee_companions`
+  adds an explicitly enrolled employee's private, read-only task-status
+  conversation and workspace-admin policy/metadata page. It uses current owned
+  task records and the existing supervision grammar without starting models or
+  agents. History retention is optional and encrypted; connector retrieval,
+  learned memory, actions and voice are unavailable. This increment is untested
+  and does not change legacy administrator access to ordinary task/chat content.
+  See [scope and qualification gaps](employee-companions.md).
+
 - **Guided restored-connection review** — recovery uses ordinary outcome,
   evidence and date controls instead of editing a data object. Recovery Copilot
   hosts the same current-authority form locally. Interrupted recording can
