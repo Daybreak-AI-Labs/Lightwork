@@ -668,7 +668,7 @@ def test_pick_notifications_skipped(monkeypatch):
     _StubQ(monkeypatch)
     from maverick_installer.wizard import pick_notifications
     cfg, envs = pick_notifications()
-    assert cfg == {}
+    assert cfg == {"personal_alerts": False, "personal_critical_bypass": False, "personal_background": False}
     assert envs == []
 
 
@@ -1326,7 +1326,9 @@ def test_pick_notifications_writes_the_keys_the_kernel_reads(monkeypatch):
     monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_k: next(answers))
     monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_k: "my-alerts")
     cfg, _ = wizard.pick_notifications()
-    assert cfg == {"backend": "ntfy", "ntfy_topic": "my-alerts"}
+    assert cfg == {"backend": "ntfy", "ntfy_topic": "my-alerts", "delivery_receipts": True,
+                   "personal_alerts": True, "personal_critical_bypass": True, "personal_background": True,
+                   "personal_external": True, "personal_dashboard_url": "my-alerts"}
     for choice, key in (("slack     - incoming webhook", "slack_webhook"),
                         ("discord   - webhook URL", "discord_webhook")):
         monkeypatch.setattr(wizard, "_q_select", lambda *_a, choice=choice, **_k: choice)

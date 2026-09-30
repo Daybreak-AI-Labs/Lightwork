@@ -10,7 +10,6 @@ Offline (no live LLM): the actual swarm run is monkeypatched out.
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 from click.testing import CliRunner
 
@@ -68,7 +67,7 @@ def test_capability_for_role_default_principal(monkeypatch):
 
 # --- runner threads capability into the SwarmContext -----------------------
 
-def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
+def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch, tmp_path):
     """The capability handed to the runner reaches SwarmContext.capability,
     so the root agent runs least-privileged under it (no real LLM runs)."""
     from maverick import budget as budget_mod
@@ -80,23 +79,18 @@ def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
 
     captured: dict = {}
 
-    class FakeWorld:
-        def get_goal(self, goal_id):
-            return SimpleNamespace(
-                id=goal_id,
-                status="done" if captured else "pending",
-                execution_principal="agent:acme.bob",
-            )
-
-        def close(self):
-            pass
+    db = tmp_path / "world.db"
+    world = world_model.WorldModel(db)
+    goal_id = world.create_goal("fixture task", owner="agent:acme.bob", execution_principal="agent:acme.bob")
+    world.close()
 
     def fake_run_goal_sync(*args, **kwargs):
+        args[1].set_goal_status(args[3], "done")
         # Build the ctx exactly as run_goal would and assert the seam carries
         # the capability through. Keeps the test offline (no agent.run()).
         ctx = SwarmContext(
             llm=kwargs.get("llm") or args[0],
-            world=FakeWorld(),
+            world=args[1],
             budget=args[2],
             blackboard=object(),
             sandbox=object(),
@@ -108,14 +102,14 @@ def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
         captured["user_id"] = ctx.user_id
         return "DONE."
 
-    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
+    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: world_model.WorldModel(db))
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: object())
     monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", fake_run_goal_sync)
 
     cap = Capability(principal="agent:acme.bob", allow_tools=frozenset({"read_file"}))
-    status = runner.run_goal_in_thread(7, capability=cap, user_id="agent:acme.bob")
+    status = runner.run_goal_in_thread(goal_id, capability=cap, user_id="agent:acme.bob")
     assert status == "done"
     assert captured["cap"] is cap
     assert captured["cap"].principal == "agent:acme.bob"
@@ -123,7 +117,7 @@ def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
 
 
 
-def test_run_goal_in_thread_closes_sandbox(monkeypatch):
+def test_run_goal_in_thread_closes_sandbox(monkeypatch, tmp_path):
     from maverick import budget as budget_mod
     from maverick import llm as llm_mod
     from maverick import orchestrator, runner, world_model
@@ -132,31 +126,34 @@ def test_run_goal_in_thread_closes_sandbox(monkeypatch):
     closed = {"sandbox": False, "world": False}
     completed = []
 
-    class FakeWorld:
-        def get_goal(self, goal_id):
-            return SimpleNamespace(
-                id=goal_id,
-                status="done" if completed else "pending",
-                execution_principal="user:local",
-            )
-
-        def close(self):
-            closed["world"] = True
+    db = tmp_path / "world.db"
+    world = world_model.WorldModel(db)
+    goal_id = world.create_goal("fixture task", owner="user:local", execution_principal="user:local")
+    world.close()
 
     class FakeSandbox:
         def close(self):
             closed["sandbox"] = True
 
-    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
+    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: world_model.WorldModel(db))
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: FakeSandbox())
     monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
-    monkeypatch.setattr(orchestrator, "run_goal_sync", lambda *args, **kwargs: completed.append(True))
+    def complete(_llm, world, _budget, goal_id, **_kwargs):
+        world.set_goal_status(goal_id, "done")
+        completed.append(True)
 
-    assert runner.run_goal_in_thread(7) == "done"
+    def close_world(world):
+        world.close()
+        closed["world"] = True
+
+    monkeypatch.setattr(world_model, "close_world_if_owned", close_world)
+    monkeypatch.setattr(orchestrator, "run_goal_sync", complete)
+
+    assert runner.run_goal_in_thread(goal_id) == "done"
     assert closed == {"sandbox": True, "world": True}
 
-def test_run_goal_in_thread_default_capability_is_none(monkeypatch):
+def test_run_goal_in_thread_default_capability_is_none(monkeypatch, tmp_path):
     """Default None == zero behaviour change: no capability reaches the run."""
     from maverick import budget as budget_mod
     from maverick import llm as llm_mod
@@ -165,28 +162,23 @@ def test_run_goal_in_thread_default_capability_is_none(monkeypatch):
 
     captured: dict = {}
 
-    class FakeWorld:
-        def get_goal(self, goal_id):
-            return SimpleNamespace(
-                id=goal_id,
-                status="done" if captured else "pending",
-                execution_principal="user:local",
-            )
-
-        def close(self):
-            pass
+    db = tmp_path / "world.db"
+    world = world_model.WorldModel(db)
+    goal_id = world.create_goal("fixture task", owner="user:local", execution_principal="user:local")
+    world.close()
 
     def fake_run_goal_sync(*args, **kwargs):
+        args[1].set_goal_status(args[3], "done")
         captured["cap"] = kwargs.get("capability", "MISSING")
         return "DONE."
 
-    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
+    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: world_model.WorldModel(db))
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: object())
     monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", fake_run_goal_sync)
 
-    runner.run_goal_in_thread(7)
+    runner.run_goal_in_thread(goal_id)
     assert captured["cap"] is None
 
 

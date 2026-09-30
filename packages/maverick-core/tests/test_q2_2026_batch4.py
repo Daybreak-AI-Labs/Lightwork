@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -213,24 +214,30 @@ def dashboard_client(tmp_path, monkeypatch):
     w.close()
 
 
+def _body_classes(html):
+    body = re.search(r'<body\b[^>]*\bclass="([^"]*)"', html)
+    assert body is not None
+    return body.group(1).split()
+
+
 def test_dashboard_default_theme_is_dark(dashboard_client):
     resp = dashboard_client.get("/")
     assert resp.status_code == 200
-    assert 'class="theme-dark' in resp.text
+    assert "theme-dark" in _body_classes(resp.text)
 
 
 @pytest.mark.parametrize("theme", ["dark", "light", "solarized", "hicontrast"])
 def test_dashboard_theme_query_param(dashboard_client, theme):
     resp = dashboard_client.get(f"/?theme={theme}")
     assert resp.status_code == 200
-    assert f'class="theme-{theme}' in resp.text
+    assert f"theme-{theme}" in _body_classes(resp.text)
 
 
 def test_dashboard_invalid_theme_falls_back(dashboard_client):
     resp = dashboard_client.get("/?theme=garbage-not-a-theme")
     assert resp.status_code == 200
     # Falls back to dark (the default).
-    assert 'class="theme-dark' in resp.text
+    assert "theme-dark" in _body_classes(resp.text)
 
 
 def test_dashboard_theme_cookie_persists(dashboard_client):
@@ -244,7 +251,7 @@ def test_dashboard_theme_cookie_persists(dashboard_client):
     # request; passing per-request cookies is deprecated and bypasses that
     # persistence behavior.
     resp2 = dashboard_client.get("/overview")
-    assert 'class="theme-light' in resp2.text
+    assert "theme-light" in _body_classes(resp2.text)
 
 
 def test_dashboard_theme_switcher_options_in_header(dashboard_client):
@@ -308,7 +315,8 @@ def test_postgres_recall_candidates_are_tenant_scoped(monkeypatch):
     sql, params = cursor.calls[-1]
     assert "FROM goals WHERE" in sql
     assert "tenant_id = %s" in sql
-    assert params == ("tenant-a", 7)
+    assert "owner = %s" in sql
+    assert params == ("", "tenant-a", 7)
 
 
 def test_postgres_spend_reads_join_tenant_scoped_goals(monkeypatch):

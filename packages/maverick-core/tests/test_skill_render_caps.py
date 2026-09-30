@@ -14,7 +14,7 @@ from maverick.skills import render_for_prompt
 
 
 def _skill(name: str, body: str):
-    return SimpleNamespace(name=name, body=body)
+    return SimpleNamespace(name=name, body=body, source="builtin")
 
 
 class TestRenderCaps:

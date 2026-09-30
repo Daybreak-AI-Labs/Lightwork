@@ -31,42 +31,21 @@ def test_principal_semaphore_is_per_principal():
     assert runner._principal_semaphore(None) is runner._principal_semaphore("")
 
 
-def _stub_run(monkeypatch, *, gate: threading.Event, started: dict):
+def _stub_run(monkeypatch, tmp_path, *, gate: threading.Event, started: dict):
     """Stub run_goal_in_thread's heavy deps; run_goal_sync blocks on ``gate``."""
-    class _Goal:
-        def __init__(self, goal_id):
-            self.id = goal_id
-            self.status = "pending"
-            self.execution_principal = ""
+    from maverick.world_model import WorldModel
 
-    class _World:
-        def __init__(self):
-            self.goals = {}
-
-        def get_goal(self, gid):
-            return self.goals.setdefault(gid, _Goal(gid))
-
-        def bind_goal_execution_principal(self, gid, principal):
-            goal = self.get_goal(gid)
-            if (
-                goal.execution_principal
-                and goal.execution_principal != principal
-            ):
-                return False
-            goal.execution_principal = principal
-            return True
-
-        def set_goal_status(self, *a, **k):
-            pass
-
-        def close(self):
-            pass
+    db = tmp_path / "world.db"
+    world = WorldModel(db)
+    for owner in ("user:alice", "user:alice", "user:alice", "user:bob"):
+        world.create_goal("fixture task", owner=owner, execution_principal=owner)
+    world.close()
 
     class _Sandbox:
         def close(self):
             pass
 
-    monkeypatch.setattr("maverick.world_model.open_world", lambda *a, **k: _World())
+    monkeypatch.setattr("maverick.world_model.open_world", lambda *a, **k: WorldModel(db))
     monkeypatch.setattr("maverick.llm.LLM", lambda *a, **k: object())
     monkeypatch.setattr("maverick.sandbox.build_sandbox", lambda *a, **k: _Sandbox())
     monkeypatch.setattr("maverick.budget.budget_from_config",
@@ -76,37 +55,45 @@ def _stub_run(monkeypatch, *, gate: threading.Event, started: dict):
     def _blocking_run(llm, world, budget, goal_id, **kw):
         started.setdefault(kw.get("user_id"), []).append(goal_id)
         gate.wait(timeout=5.0)
-        world.get_goal(goal_id).status = "done"
+        world.set_goal_status(goal_id, "done")
 
     monkeypatch.setattr("maverick.orchestrator.run_goal_sync", _blocking_run)
 
 
-def test_one_user_full_lane_does_not_block_another(monkeypatch):
+def test_one_user_full_lane_does_not_block_another(monkeypatch, tmp_path):
     gate = threading.Event()
     started: dict = {}
-    _stub_run(monkeypatch, gate=gate, started=started)
+    _stub_run(monkeypatch, tmp_path, gate=gate, started=started)
+
+    threads = []
 
     def fire(user_id, goal_id):
-        threading.Thread(
+        thread = threading.Thread(
             target=runner.run_goal_in_thread,
             args=(goal_id,), kwargs={"user_id": user_id}, daemon=True,
-        ).start()
+        )
+        threads.append(thread)
+        thread.start()
 
     # Alice fills her lane (2) and queues a 3rd that must wait on HER lane.
-    fire("user:alice", 1)
-    fire("user:alice", 2)
-    fire("user:alice", 3)
-    # Bob fires once — he must start despite Alice's lane being full.
-    fire("user:bob", 99)
-
-    deadline = time.monotonic() + 3.0
-    while time.monotonic() < deadline and "user:bob" not in started:
-        time.sleep(0.02)
-
+    fire("alice", 1)
+    fire("alice", 2)
     try:
-        assert started.get("user:bob") == [99], "Bob waited behind Alice — not fair"
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and len(started.get("alice", [])) < 2:
+            time.sleep(0.02)
+        assert len(started.get("alice", [])) == 2
+        fire("alice", 3)
+        # Bob must start while Alice's admitted workers still hold their lanes.
+        fire("bob", 4)
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and "bob" not in started:
+            time.sleep(0.02)
+        assert started.get("bob") == [4], "Bob waited behind Alice — not fair"
         # Alice has exactly 2 running; her 3rd is parked on her own lane.
-        assert len(started.get("user:alice", [])) == 2
+        assert len(started.get("alice", [])) == 2
     finally:
         gate.set()  # let every blocked run finish and release its permits
-        time.sleep(0.2)
+        for thread in threads:
+            thread.join(timeout=10)
+            assert not thread.is_alive()

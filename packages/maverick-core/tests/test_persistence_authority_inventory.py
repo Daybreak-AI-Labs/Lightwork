@@ -5,7 +5,7 @@ import ast
 import json
 from pathlib import Path
 
-from maverick.recovery_authorities import authority_policy
+from maverick.recovery_authorities import NON_AUTHORIZING_GOVERNED_NAMESPACES, authority_policy
 
 ROOT = Path(__file__).parents[3]
 INVENTORY = ROOT / "docs/operations/persistence-authorities.json"
@@ -79,6 +79,9 @@ def test_all_governed_store_declarations_have_semantic_owner_and_recovery_dispos
                     assert entries[relative]["contract"] == "preferences"
                     assert policy is None  # Read/snooze UI preferences cannot authorize the source work.
                     seen_preferences = True
+                elif namespace in NON_AUTHORIZING_GOVERNED_NAMESPACES:
+                    assert policy is None
+                    assert entries[relative]["contract"] in {"preferences", "mixed_api"}
                 else:
                     assert policy is not None, f"Missing restore disposition: {namespace}"
                 assert declared[namespace]["recovery_policy"] == policy

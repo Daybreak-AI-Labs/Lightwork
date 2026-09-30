@@ -111,10 +111,13 @@ def test_memory_root_follows_tenant(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_MEMORY_DIR", raising=False)
     from maverick.tools.memory import _memory_root
 
-    assert _memory_root() == tmp_path / ".maverick" / "memory"  # legacy default
+    shared = _memory_root()
+    assert shared.parent == paths.data_dir("memory") / "owned"
+    assert len(shared.name) == 64
     tok = set_tenant("acme")
     try:
-        assert _memory_root() == tmp_path / ".maverick" / "tenants" / "acme" / "memory"
+        assert _memory_root().parent == paths.data_dir("memory") / "owned"
+        assert _memory_root() != shared
     finally:
         reset_tenant(tok)
 
@@ -124,7 +127,8 @@ def test_explicit_memory_dir_override_wins(monkeypatch, tmp_path):
     tok = set_tenant("acme")
     try:
         from maverick.tools.memory import _memory_root
-        assert _memory_root() == tmp_path / "mem"  # override ignores tenant
+        assert _memory_root().parent == tmp_path / "mem" / "owned"
+        assert len(_memory_root().name) == 64
     finally:
         reset_tenant(tok)
 
@@ -160,7 +164,6 @@ def test_memory_isolated_across_tenants(monkeypatch, tmp_path):
 
 
 def test_memory_store_cannot_be_reopened_through_case_alias(monkeypatch, tmp_path):
-    from maverick.paths import TenantNamespaceCollision
     from maverick.tools.memory import _run
 
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -175,8 +178,9 @@ def test_memory_store_cannot_be_reopened_through_case_alias(monkeypatch, tmp_pat
 
     alias = set_tenant("acme")
     try:
-        with pytest.raises(TenantNamespaceCollision):
-            _run({"command": "view", "path": "private.md"})
+        result = _run({"command": "view", "path": "private.md"})
+        assert result == "ERROR: Current memory ownership could not be verified."
+        assert "secret" not in result
     finally:
         reset_tenant(alias)
 
@@ -271,8 +275,9 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
             self.conversation_key = (channel, user_id)
             return type("Conversation", (), {"id": 1})()
 
-        def append_turn(self, conversation_id, role, text):
+        def append_turn(self, conversation_id, role, text, *, goal_id=None):
             self.seen_tenants.append(current_tenant())
+            self.turn_goal_id = goal_id
             return None
 
         def create_goal(
@@ -321,6 +326,7 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
         "hello", "hello", "user:slack:UALICE", "user:slack:UALICE",
     )
     assert world.seen_tenants == ["slack%3AUALICE"] * 4
+    assert world.turn_goal_id == 7
     assert current_tenant() is None
 
 
@@ -345,8 +351,9 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
             self.seen_tenants.append(("conversation", current_tenant()))
             return type("Conversation", (), {"id": 1})()
 
-        def append_turn(self, conversation_id, role, text):
+        def append_turn(self, conversation_id, role, text, *, goal_id=None):
             self.seen_tenants.append(("turn", current_tenant()))
+            self.turn_goal_id = goal_id
 
         def create_goal(
             self, title, text, *, owner="", execution_principal="",
@@ -388,10 +395,11 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
     expected_tenant = "slack%3AUALICE"
     assert world.seen_tenants == [
         ("conversation", expected_tenant),
-        ("turn", expected_tenant),
         ("goal", expected_tenant),
+        ("turn", expected_tenant),
         ("result", expected_tenant),
     ]
+    assert world.turn_goal_id == 7
     assert world.created_goal == (
         "hello", "hello", "user:slack:UALICE", "user:slack:UALICE",
     )

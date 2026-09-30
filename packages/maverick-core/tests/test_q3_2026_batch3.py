@@ -279,7 +279,7 @@ def test_notify_sanitizes_priority(monkeypatch):
     monkeypatch.setattr("maverick.notifications.notify", fake_notify)
     from maverick.tools.notify import notify_tool
     out = notify_tool().fn({"title": "hi", "priority": "BOGUS"})
-    assert "sent" in out
+    assert out == "queued; delivery not yet confirmed (1 backend)"
     assert captured["prio"] == "default"
     # Title is forwarded as a distinct field, not jammed into the body.
     assert captured["title"] == "hi"
@@ -306,7 +306,7 @@ def test_notify_reports_count(monkeypatch):
     )
     from maverick.tools.notify import notify_tool
     out = notify_tool().fn({"title": "hello", "body": "body"})
-    assert "sent (2 backends)" in out
+    assert out == "queued; delivery not yet confirmed (2 backends)"
 
 
 def test_notify_urgent_maps_to_max(monkeypatch):

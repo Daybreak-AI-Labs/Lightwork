@@ -22,6 +22,11 @@ def test_get_features_defaults_preserve_opt_in_customer_workflows(monkeypatch, t
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     from maverick.config import get_features
     assert get_features() == {
+        "personal_preferences": True, "configuration_profiles": True,
+        "employee_task_diagnostics": True, "employee_activation": True,
+        "deliverable_bundles": False, "project_workspaces": False, "task_handoffs": False,
+        "employee_companions": False, "employee_content_access_requests": False,
+        "permission_access_requests": False, "employee_departures": False, "personal_data_controls": False,
         "skills": True, "world_model": True, "streaming": True,
         "pack_editing": True, "role_editing": True, "scheduling": True,
         "triggers": True, "action_center": True, "draft_recovery": True,
@@ -46,6 +51,11 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     from maverick.config import get_features
     assert get_features() == {
+        "personal_preferences": True, "configuration_profiles": True,
+        "employee_task_diagnostics": True, "employee_activation": True,
+        "deliverable_bundles": False, "project_workspaces": False, "task_handoffs": False,
+        "employee_companions": False, "employee_content_access_requests": False,
+        "permission_access_requests": False, "employee_departures": False, "personal_data_controls": False,
         "skills": False, "world_model": False, "streaming": False,
         "pack_editing": False, "role_editing": False, "scheduling": False,
         "triggers": False, "action_center": False, "draft_recovery": False,

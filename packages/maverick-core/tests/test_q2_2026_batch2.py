@@ -130,7 +130,7 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
             c = C()
             c.id = self._cid
             return c
-        def append_turn(self, conversation_id, role, text):
+        def append_turn(self, conversation_id, role, text, *, goal_id=None):
             return None
         def create_goal(
             self, title, text, *, owner="", execution_principal="",

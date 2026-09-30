@@ -35,8 +35,12 @@ def test_pick_budget_defaults_to_strict_pricing(monkeypatch):
             "  Strict pricing? Fail closed if a model has no verified price "
             "(recommended; choose No only for estimate-only custom gateways)",
             True,
-        )
+        ),
+        ("  Show known budget headroom before work? This never changes execution limits.", True),
+        ("  Show in-product warnings as tasks approach their limits?", True),
     ]
+    assert budget["guidance"] is True and budget["warnings"] is True
+    assert budget["warning_thresholds"] == [0.8, 0.95, 1.0]
 
 
 def test_pick_budget_preserves_explicit_legacy_estimate_opt_out(monkeypatch):
