@@ -419,15 +419,17 @@
     if (schedCount) schedCount.textContent=items.length+(items.length===1 ? ' schedule' : ' schedules');
     if (schedEmpty) schedEmpty.hidden=items.length>0;
     items.forEach(function (s) {
-      var li = el('li', 'mv-row');
+      var li = el('li', 'mv-row'); li.dataset.schedule=JSON.stringify(s);
       var main = el('div', 'mv-row__main');
       main.appendChild(el('div', 'mv-row__title', s.title || 'Untitled task'));
       main.appendChild(el('div', 'mv-row__sub', cronText(s.cron) + (s.zone ? ' (' + String(s.zone).replace(/_/g, ' ') + ' time)' : '') + (fmtWhen(s.next_run) ? ' · next run ' + fmtWhen(s.next_run) : '')));
       if (s.schedule_id) { var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('schedule', s.schedule_id, runs); }
       li.appendChild(main);
-      li.appendChild(delBtn('Delete schedule ' + (s.title || s.id), function () { delSchedule(s.id); }));
+      main.appendChild(el('div','mv-row__sub',(s.state || 'active') + (s.running ? ' · a run is in progress' : '')));
+      if (!s.definition_id) li.appendChild(delBtn('Delete schedule ' + (s.title || s.id), function () { delSchedule(s.id); }));
       schedList.appendChild(li);
     });
+    document.dispatchEvent(new CustomEvent('lightwork:schedules-rendered'));
   }
   document.addEventListener('lightwork:schedules-changed', function () { loadSchedules(); });
   function refocus(id) {   // re-home focus after a row is removed (it held focus)
@@ -1407,4 +1409,5 @@
 })();
 </script>
 <script src="/static/lightwork-schedule-picker.js" defer></script>
+<script src="/static/lightwork-schedule-management.js" defer></script>
 {% endblock %}

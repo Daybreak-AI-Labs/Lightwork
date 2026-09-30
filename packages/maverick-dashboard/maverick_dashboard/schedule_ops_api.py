@@ -186,3 +186,119 @@ async def schedule_add(request: Request, body: ScheduleAddIn) -> dict:
     job_id, run_at = schedule_cron(JobQueue(), cron, "run_goal", job_payload)
     return {"id": job_id, "cron": cron, "kind": "run_goal", "title": title, "next_run": run_at,
             "schedule_id": schedule_id, "zone": zone}
+
+
+class ScheduleChangeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1, strict=True)
+    state: Literal["active", "paused", "retired"]
+    title: str | None = Field(None, min_length=1, max_length=200)
+    timetable: TimetableIn | None = None
+    confirm: bool = False
+
+
+class RecurrenceRecoveryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_attempts: int = Field(ge=0, strict=True)
+    expected_evidence: str = Field(pattern=r"^[a-f0-9]{64}$")
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    successor_id: int | None = Field(None, ge=1, strict=True)
+    rearm: bool = False
+    rationale: str = Field(min_length=5, max_length=1000)
+    confirm: bool = False
+
+
+@router.post("/api/v1/schedules/definitions/{identity}")
+def change_schedule(request: Request, identity: str, body: ScheduleChangeIn) -> dict:
+    from maverick.job_queue import JobQueue
+    from maverick.schedule_definitions import change_definition
+
+    from .api import _require_scheduling
+    from .app import _require_same_origin
+
+    require_permission(request, "operate")
+    _require_same_origin(request)
+    _require_scheduling()
+    if not body.confirm:
+        raise HTTPException(422, "Review the effect on future runs and confirm the change.")
+    changes = {}
+    if body.timetable:
+        cron, zone, _ = _cron(body.timetable)
+        changes.update(cron=cron, zone=zone)
+    try:
+        return change_definition(JobQueue(), identity, expected_revision=body.expected_revision,
+                                 state=body.state, title=body.title, owner=goal_owner_filter(request),
+                                 actor=caller_principal(request) or "local", **changes)
+    except KeyError as exc:
+        raise HTTPException(404, "Schedule is unavailable.") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/api/v1/schedules/recovery/{job_id}")
+def recurrence_recovery_review(request: Request, job_id: int) -> dict:
+    from maverick.job_queue import JobQueue
+    from maverick.schedule_definitions import recovery_evidence
+
+    from .draft_api import context_for
+    from .queue_status_api import redacted_error
+
+    require_permission(request, "admin")
+    queue = JobQueue()
+    with queue._conn() as connection:
+        row = connection.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None or not row["recurrence_reconcile_required"]:
+            raise HTTPException(409, "This occurrence no longer needs recurrence recovery. Refresh schedules.")
+        candidates = connection.execute(
+            "SELECT id,status,scheduled_at FROM jobs WHERE id>? AND kind=? AND recurrence_payload=? ORDER BY id",
+            (job_id, row["kind"], row["recurrence_payload"]),
+        ).fetchall()
+        evidence = recovery_evidence(connection, row)
+        return {"job_id": job_id, "attempts": row["attempts"], "context": context_for(request),
+                "expected_evidence": evidence, "scheduled_at": row["scheduled_at"],
+                "status": row["status"], "problem": redacted_error(row["last_error"]),
+                "external_outcome": "unknown", "successors": [dict(item) for item in candidates],
+                "consequence": "Only future recurrence is repaired. The historical action is never replayed. Confirm old workers are stopped before continuing."}
+
+
+@router.post("/api/v1/schedules/recovery/{job_id}")
+def recurrence_recovery_apply(request: Request, job_id: int, body: RecurrenceRecoveryIn) -> dict:
+    import hmac
+
+    from maverick.job_queue import JobQueue
+
+    from .app import _require_same_origin
+    from .draft_api import context_for
+
+    require_permission(request, "admin")
+    _require_same_origin(request)
+    if not hmac.compare_digest(body.context, context_for(request)):
+        raise HTTPException(409, "Account or workspace changed. Review recovery again.")
+    try:
+        successor = JobQueue().reconcile_recurrence(job_id, expected_attempts=body.expected_attempts,
+            successor_id=body.successor_id, rearm=body.rearm, confirm=body.confirm,
+            expected_evidence=body.expected_evidence, actor=caller_principal(request) or "local",
+            rationale=body.rationale)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"repaired": True, "job_id": job_id, "successor_id": successor,
+            "historical_replayed": False, "external_outcome": "unknown"}
+
+
+@router.get("/api/v1/schedules/definitions/{identity}/history")
+def schedule_history(request: Request, identity: str) -> dict:
+    from maverick.job_queue import JobQueue
+    from maverick.schedule_definitions import list_definitions
+
+    require_permission(request, "view")
+    queue = JobQueue()
+    selected = next((item for item in list_definitions(queue, owner=goal_owner_filter(request)) if item["definition_id"] == identity), None)
+    if selected is None:
+        raise HTTPException(404, "Schedule is unavailable.")
+    with queue._conn() as connection:
+        versions = connection.execute(
+            "SELECT revision,state,actor,rationale,created_at FROM schedule_definition_versions WHERE id=? ORDER BY revision",
+            (identity,),
+        ).fetchall()
+    return {"schedule": selected, "versions": [dict(item) for item in versions],
+            "historical_execution_replay": "never performed by schedule management"}

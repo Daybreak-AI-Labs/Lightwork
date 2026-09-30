@@ -9958,22 +9958,15 @@ def _schedule_out(job) -> ScheduleOut:
 
 @router.get("/schedules")
 async def list_schedules(request: Request) -> dict:
-    """Armed recurring schedules: pending cron jobs in the worker queue.
-
-    Owner-scoped like ``delete_schedule``: an authenticated non-admin sees only
-    the schedules stamped with their own principal (``create_schedule`` records
-    it in ``payload['owner']``), so one tenant can't enumerate another's
-    schedule titles. Admin / auth-off callers see all."""
+    """Durable schedule definitions remain visible during runs and while paused."""
     from maverick.job_queue import JobQueue
+    from maverick.schedule_definitions import list_definitions
 
-    owner = goal_owner_filter(request)
-    jobs = [j for j in JobQueue().list(status="pending") if (j.payload or {}).get("__cron__")]
-    if owner is not None:
-        jobs = [j for j in jobs if (j.payload or {}).get("owner") == owner]
-    jobs.sort(key=lambda j: j.run_at)
     from .draft_api import context_for
 
-    return {"schedules": [_schedule_out(j).model_dump() for j in jobs], "context": context_for(request)}
+    require_permission(request, "view")
+    return {"schedules": list_definitions(JobQueue(), owner=goal_owner_filter(request)),
+            "context": context_for(request)}
 
 
 @router.post("/schedules", response_model=ScheduleOut, status_code=201)
@@ -10023,6 +10016,10 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
 
     schedule_id = uuid4().hex
     job_payload = {"text": text, "title": title, "__cron__": cron, "schedule_id": schedule_id}
+    if payload.template:
+        job_payload["template_name"] = tpl.name
+        job_payload["template_generation"] = tpl.generation
+
     if tz:
         job_payload["__tz__"] = tz
     owner = caller_principal(request) or ""
@@ -10071,6 +10068,9 @@ async def delete_schedule(request: Request, job_id: int) -> dict:
         job = q.get(job_id)
         if job is None or (job.payload or {}).get("owner") != owner:
             raise HTTPException(status_code=404, detail="no pending schedule with that id")
+    job = q.get(job_id)
+    if job is not None and job.recurrence_id:
+        raise HTTPException(status_code=409, detail="This is a durable schedule. Review its current version in Automations and choose Retire.")
     if not q.cancel(job_id):
         raise HTTPException(status_code=404, detail="no pending schedule with that id")
     return {"cancelled": job_id}
@@ -14481,7 +14481,7 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
                     source_text=payload.source_text,
                     available_tools=_playbook_available_tools(channel=channel, user_id=user_id),
                 )
-            return drafter(brief, source_text=payload.source_text)
+            return drafter(brief, **({"source_text": payload.source_text} if payload.source_text else {}))
 
         return await run_in_threadpool(_draft)
     except Exception as e:

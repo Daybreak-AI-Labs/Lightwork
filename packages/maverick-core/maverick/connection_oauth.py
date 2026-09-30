@@ -714,6 +714,9 @@ def finish(actor, *, state, code, context, redirect_uri, return_profile="browser
             workspace = {"provider_id": cloud_id,
                          "name": _identity_text(matches[0].get("name"), maximum=512),
                          "url": consent["site_url"]}
+        _authority(actor)
+        if consent.get("self_connect"):
+            _self_connect_allowed(consent["profile"])
         records[consent["name"]] = {"name": consent["name"], "connector": selected["connector"], "base_url": selected["origin"], "token": access,
             "created": (previous or {}).get("created", time.time()), "owner": actor,
             "access": (previous or {}).get("access", "owner"), "allowed_principals": (previous or {}).get("allowed_principals", []),
@@ -861,6 +864,8 @@ def _renew_owned(record, *, actor):
             bound_app = _bound_application(_load(), latest["owner"], selected["provider"], latest["oauth"])
             if not bound_app or _refresh_binding(bound_app) != app_binding:
                 raise connections.ConnectionVersionConflict("App registration changed during renewal.")
+            if latest["oauth"].get("self_connect"):
+                _self_connect_allowed(latest["oauth"].get("profile"))
             latest["token"] = access
             latest["oauth"].update(refresh_token=refresh, expires_at=expires, refresh_state="ready",
                                    identity=identity, workspace=workspace,
