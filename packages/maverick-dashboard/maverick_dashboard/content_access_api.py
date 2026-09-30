@@ -8,12 +8,22 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from maverick.authority_effects import authority_effect_fence
+from maverick.privacy_ops import RecordConflict
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import auth, content_access
 
 router = APIRouter(tags=["employee-content-access"])
+
+
+async def _call(operation):
+    try:
+        return await run_in_threadpool(operation)
+    except RecordConflict as exc:
+        raise HTTPException(409, "This request changed. Refresh and review its current state.") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(503, "The request could not be confirmed. Refresh its saved status before trying again.") from exc
 
 
 class AccessIn(BaseModel):
@@ -45,7 +55,7 @@ def _public(record, actor, is_admin):
     row = {key: record.get(key) for key in ("id", "revision", "requester", "owner", "resource_kind",
            "resource_id", "label", "purpose", "minutes", "status", "reviewed_by", "expires_at")}
     row["audit_pending"] = bool(record.get("_audit_pending"))
-    row["can_review"] = actor != record["requester"] and (actor == record["owner"] or is_admin)
+    row["can_review"] = content_access._reviewer_current({**record, "reviewed_by": actor})
     row["can_revoke"] = actor in {record["requester"], record["owner"]} or is_admin
     row["expired"] = record.get("expires_at", 0) <= time.time() if record.get("status") == "approved" else False
     return row
@@ -84,7 +94,7 @@ async def access_status(request: Request):
         return {"enabled": content_access.enabled(), "can_request": is_admin,
                 "records": records, "resources": _resources() if is_admin else [],
                 "resource_window": "The latest 500 tasks and up to 500 chat identities in the current workspace are listed. Task text is private."}
-    return await run_in_threadpool(read)
+    return await _call(read)
 
 
 @router.post("/api/v1/content-access")
@@ -114,7 +124,7 @@ async def request_access(request: Request, body: AccessIn):
                 "purpose": body.purpose, "minutes": body.minutes, "status": "requested"},
                 action="request", actor=actor, max_records=10000)
             return _public(row, actor, True)
-    return await run_in_threadpool(create)
+    return await _call(create)
 
 
 @router.post("/api/v1/content-access/{request_id}/decision")
@@ -122,11 +132,12 @@ async def decide_access(request: Request, request_id: str, body: DecisionIn):
     actor = _actor(request, write=True)
     def decide():
         with authority_effect_fence():
+            _actor(request, write=True)
             is_admin = auth.has_global_permission(request, "admin")
             def mutate(row):
                 if row.get("tenant") != content_access.tenant():
                     raise HTTPException(404, "No such content-access request.")
-                reviewer = actor != row["requester"] and (actor == row["owner"] or is_admin)
+                reviewer = content_access._reviewer_current({**row, "reviewed_by": actor})
                 if body.decision in {"approve", "deny"}:
                     if not reviewer:
                         raise HTTPException(403, "A different administrator or the content owner must review this request.")
@@ -148,4 +159,4 @@ async def decide_access(request: Request, request_id: str, body: DecisionIn):
             if row is None:
                 raise HTTPException(404, "No such content-access request.")
             return _public(row, actor, is_admin)
-    return await run_in_threadpool(decide)
+    return await _call(decide)

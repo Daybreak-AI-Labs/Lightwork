@@ -27,8 +27,11 @@ must be requested again. Revocation and audit-retry controls stay available.
 Audit tail, literal search and download/forward projections omit prompts, tool
 inputs, responses and task titles before matching and rendering. A projected
 download is not the original signed byte stream. Integrity checks continue to
-operate on original storage. Named employee privacy does not convert explicit
-single-operator/static-token mode into a multi-user identity system.
+operate on original storage. Auth-off or shared installation credentials identify
+no employee and can access only genuinely unowned local work. They cannot read
+named employees' tasks. Existing named owners remain unchanged. An owner who
+approves a request must retain viewing membership in that request's workspace;
+removing that membership immediately invalidates the approval.
 
 Remaining integration review must cover every task/chat export, attachment,
 search, audit page and model-recall path, including additions in sibling slices.

@@ -116,6 +116,8 @@ def purge_audit_files(
                 continue
 
             removed.append(path.name)
+            if not tip:
+                marker_failed = True  # Destroyed bytes cannot be attested without their signed tip.
             purged.append(
                 {"day": path.stem, "tip_hash": tip, "row_count": count}
             )

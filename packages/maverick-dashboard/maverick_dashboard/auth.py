@@ -661,21 +661,20 @@ def goal_owner_filter(request: Request) -> str | None:
 
     Every named account, including an administrator, lists its own content.
     A separately reviewed read opens a specific record; it never broadens a
-    list. Explicit local single-operator mode keeps its historical scope.
+    list. Unidentified local/installation credentials list only unowned work.
     """
     principal = _authorization_principal(request)
-    return principal
+    return principal or ""
 
 
 def can_access_goal_principal(principal: str | None, goal) -> bool:
     """Whether ``principal`` may read/mutate ``goal``.
 
-    ``None`` means auth is off and preserves the dashboard's historical
-    single-user behavior. Authenticated non-admin callers may access only goals
-    stamped with their exact owner principal.
+    ``None`` identifies no employee and may access only unowned local work.
+    Named callers, including administrators, need exact ownership.
     """
     if principal is None:
-        return True
+        return not getattr(goal, "owner", "")
     return getattr(goal, "owner", "") == principal
 
 

@@ -35,7 +35,11 @@ def _reviewer_current(record: dict) -> bool:
         return False
     if scim_groups.active_for_principal(reviewer) is False:
         return False
-    return reviewer == record.get("owner") or "admin" in rbac.permissions_for(auth.global_role_for_principal(reviewer))
+    if reviewer == record.get("owner"):
+        scope = record.get("tenant")
+        role = rbac.get_tenant_role(scope, reviewer) if scope else auth.global_role_for_principal(reviewer)
+        return "view" in rbac.permissions_for(role) if role else False
+    return "admin" in rbac.permissions_for(auth.global_role_for_principal(reviewer))
 
 
 def may_read_employee_content(request, owner: str, *, resource_kind: str, resource_id: str) -> bool:
@@ -45,7 +49,9 @@ def may_read_employee_content(request, owner: str, *, resource_kind: str, resour
 
     actor = auth._authorization_principal(request)
     if actor is None:
-        return True  # Existing explicit single-operator credential/auth-off mode.
+        # An installation credential identifies no employee. It can still open
+        # genuinely unowned local work, but never bypass named-owner privacy.
+        return not owner
     if owner and actor == owner:
         return True
     if not enabled() or not auth.has_global_permission(request, "admin"):

@@ -10229,7 +10229,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         {
             "goal": g,
             "submission_key": secrets.token_urlsafe(24),
-            "can_operate": has_permission(request, "operate"),
+            "can_operate": has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), g),
             "submission": SubmissionStore(w).for_goal(goal_id),
             "spend_ceiling": spend_ceiling,
             "spend_ceiling_text": (
@@ -10237,7 +10237,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             ),
             "thread_title": root.title,
             "latest_chat_goal_id": ChatThreads(w).latest(g.id),
-            "thread_turns": _thread_turns(w, g) if caller_principal(request) in {None, g.owner} else [],
+            "thread_turns": _thread_turns(w, g) if can_access_goal_principal(caller_principal(request), g) else [],
             "threads": _chat_threads(request, w, active_root=root_id),
             "run_open": g.status not in TERMINAL_RUN_STATUSES and g.status != "draft",
             "can_recover_task_files": bool(g.owner and g.owner.startswith("user:") and caller_principal(request) == g.owner),
@@ -10261,10 +10261,10 @@ def chat_goal_permissions(request: Request, goal_id: int) -> dict:
     if goal is None:
         raise HTTPException(404, "no such goal")
     assert_goal_access(request, goal)
-    allowed = has_permission(request, "operate")
+    allowed = has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), goal)
     return {"can_operate": allowed, "reason": "" if allowed else (
-        "Your current workspace role allows viewing only. Ask a workspace administrator "
-        "for permission to change tasks. Your draft has not been submitted.")}
+        "Your current access allows viewing this task only. A reviewed content read does not grant changes. "
+        "Ask a workspace administrator about your role. Your draft has not been submitted.")}
 
 
 def _voice_only_mode() -> bool:
@@ -10565,7 +10565,7 @@ def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
         request,
         "trajectory.html",
         {"goal": g, "events": events, "fork_enabled": fork_enabled,
-         "can_operate": has_permission(request, "operate")},
+         "can_operate": has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), g)},
     )
 
 

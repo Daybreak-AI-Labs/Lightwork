@@ -62,3 +62,22 @@ def test_metadata_projection_removes_content_before_search():
     projected = content_access.audit_metadata(event)
     assert projected["payload"] == {"actor": "user:employee", "cost_usd": 0.1}
     assert "secret" not in str(projected) and "private" not in str(projected)
+
+
+def test_installation_credential_is_not_employee_identity(monkeypatch):
+    request = SimpleNamespace(method="GET")
+    monkeypatch.setattr(auth, "_authorization_principal", lambda _: None)
+    assert auth.goal_owner_filter(request) == ""
+    assert not auth.can_access_goal_principal(None, SimpleNamespace(owner="user:employee"))
+    assert auth.can_access_goal_principal(None, SimpleNamespace(owner=""))
+    assert not content_access.may_read_employee_content(request, "user:employee", resource_kind="goal", resource_id="12")
+
+
+def test_owner_approval_requires_current_workspace_membership(monkeypatch):
+    from maverick_dashboard import rbac, scim_groups
+    monkeypatch.setattr(scim_groups, "active_for_principal", lambda _: True)
+    monkeypatch.setattr(rbac, "get_tenant_role", lambda *_: None)
+    row = grant(reviewed_by="user:employee")
+    assert not content_access._reviewer_current(row)
+    monkeypatch.setattr(rbac, "get_tenant_role", lambda *_: "viewer")
+    assert content_access._reviewer_current(row)
