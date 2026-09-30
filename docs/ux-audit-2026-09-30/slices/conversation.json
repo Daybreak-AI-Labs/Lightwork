@@ -78,10 +78,18 @@
   },
   {
     "id": "LW-012",
-    "status": "planned",
-    "implementation_evidence": "Resume preserves safe server detail instead of always blaming spending limit.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Complete structured business error contract and supported remedy links across budget/unfinished/signoff/stale/auth/admission actions."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Shared product_errors.py business error envelope carries authored message, bounded field errors and caller-authorized same-origin next action.",
+      "Native resume/share/sign-off distinguish budget ceiling, unfinished task, required sign-off, stale result and outcome-pilot admission hold.",
+      "lightwork-ui.js renders structured remedies as text with validated local links; resume/sign-off/sharing preserve the composer and show actual remedies; expired authentication retains explicit sign-in wording."
+    ],
+    "validation": [
+      "Python AST, JavaScript syntax and git diff whitespace checks; authored test_product_errors.py and test_product_errors_client.js, not executed."
+    ],
+    "remaining": [
+      "Run authored regressions and authenticated acceptance for each business failure, preserved drafts, field associations and authorized destinations."
+    ]
   },
   {
     "id": "LW-013",

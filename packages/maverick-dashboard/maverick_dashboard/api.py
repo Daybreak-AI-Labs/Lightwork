@@ -203,6 +203,8 @@ from .auth import (
 
 log = logging.getLogger(__name__)
 
+from .product_errors import next_action, product_error
+
 router = APIRouter(prefix="/api/v1", tags=["v1"])
 
 # Keep exact edit grading for normal-sized deliverables, but never feed the
@@ -9611,10 +9613,8 @@ def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
     if _goal_gate(g.domain) is None:
         raise HTTPException(status_code=400, detail="this deliverable has no sign-off gate")
     if g.status != "done":
-        raise HTTPException(
-            status_code=409,
-            detail="the deliverable must be finished before it can be signed off",
-        )
+        raise product_error(409, "task_unfinished", "This task must finish before its result can be signed off.",
+                            next_action=next_action("Review task progress", f"/chat/goal/{goal_id}"))
     who = _supervisor(request)
     try:
         changed = w.record_signoff(
@@ -9627,7 +9627,8 @@ def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
     except ValueError as exc:
         # Optimistic version binding: a concurrent edit/rerun means the human
         # reviewed stale bytes. Reload and require a fresh decision.
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise product_error(409, "stale_version", "The result changed after you reviewed it. Review the current result before deciding.",
+                            next_action=next_action("Review the current result", f"/chat/goal/{goal_id}")) from exc
     # Feed the human's certify/reject verdict back into the learning loop as a
     # GROUNDED outcome: a person judging the actual deliverable is the cleanest
     # ground-truth signal in the system, and it lands as exactly the
@@ -9893,13 +9894,15 @@ def _share_goal(request, goal_id):
 def _share_prerequisites(world, goal):
     from maverick.domain import available_domains
     if goal.status != "done" or not (goal.result or "").strip():
-        raise HTTPException(409, "Finish this task with a saved result before creating a public link.")
+        raise product_error(409, "task_unfinished", "Finish this task with a saved result before creating a public link.",
+                            next_action=next_action("Review task progress", f"/chat/goal/{goal.id}"))
     if goal.domain and goal.domain not in available_domains():
         raise HTTPException(409, "This task's release policy is unavailable. Ask an administrator to restore its department before sharing.")
     gate = _goal_gate(goal.domain)
     signoff = world.signoff_for(goal.id)
     if gate is not None and (signoff is None or signoff.get("decision") != "approved"):
-        raise HTTPException(409, f"{gate} sign-off is required for the current result. Review and sign off before sharing.")
+        raise product_error(409, "signoff_required", "The current result needs human sign-off before it can be shared.",
+                            next_action=next_action("Review the sign-off", f"/chat/goal/{goal.id}#signoff"))
 
 
 @router.post("/goals/{goal_id}/share/preview")
@@ -9930,7 +9933,8 @@ def create_goal_share(request: Request, goal_id: int, body: ShareLinkIn) -> dict
         raise HTTPException(409, "Review the audience and choose an allowed lifetime before confirming.")
     source = snapshot(world, goal)
     if not hmac.compare_digest(source["sha256"], body.source_sha256):
-        raise HTTPException(409, "The result changed after your preview. Review the new version before creating a link.")
+        raise product_error(409, "stale_version", "The result changed after your preview. Review the new version before creating a link.",
+                            next_action=next_action("Review the current result", f"/chat/goal/{goal.id}"))
     link_id, token = world.create_share_link(goal_id, created_by=caller_principal(request) or "",
                                             ttl_seconds=body.lifetime_seconds, token_prefix="r1_")
     try:
@@ -15018,20 +15022,14 @@ def resume_goal(
     assert_goal_access(request, g)
     # Block resuming things that have no parked work.
     if g.status not in ("blocked", "cancelled", "failed"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"goal is {g.status!r}; only blocked/cancelled/failed goals can resume",
-        )
+        raise product_error(409, "restart_unavailable", "This task is not paused or stopped. Review its current progress before starting more work.",
+                            next_action=next_action("Review task progress", f"/chat/goal/{goal_id}"))
     max_dollars = payload.max_dollars if payload is not None else None
     spend_ceiling = configured_max_dollars()
     if max_dollars is not None and spend_ceiling is not None and max_dollars > spend_ceiling:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "The spending limit for this attempt cannot exceed "
-                f"${spend_ceiling:,.2f}, this deployment's spend cap."
-            ),
-        )
+        raise product_error(400, "budget_ceiling", "The requested spending limit is above the workspace limit. Choose a lower amount.",
+                            field_errors={"max_dollars": f"Choose an amount no greater than ${spend_ceiling:,.2f}."},
+                            next_action=next_action("Review this task's spending limit", f"/chat/goal/{goal_id}#halt-resume-form"))
     _requeue_goal(request, bg, goal_id, max_dollars=max_dollars)
 
 
@@ -15044,19 +15042,9 @@ def _require_goal_restart_admission(goal_id: int) -> None:
     try:
         require_work_item_admission("goal", str(goal_id))
     except OutcomePilotAdmissionRequired as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "schema": "lightwork.error.v1",
-                "code": exc.code,
-                "message": str(exc),
-                "retryable": True,
-                "next_action": (
-                    "Open the outcome pilot in the app and retry its admission "
-                    "recovery before starting this task."
-                ),
-            },
-        ) from exc
+        raise product_error(409, "admission_hold", "This task is waiting for its outcome pilot's admission recovery. Recover the pilot before starting the task.",
+                            next_action=next_action("Open outcome pilots", "/outcome-pilots"),
+                            retryable=True) from exc
 
 
 def _requeue_goal(

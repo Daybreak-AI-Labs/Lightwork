@@ -295,11 +295,54 @@
         if (text != null) e.textContent = text;
         return e;
       };
+      // Only the business-error envelope carries trusted, authored display copy.
+      // Legacy detail strings continue through the restrictive plain-copy filter.
+      window.mvBusinessError = function (value) {
+        var d = value && (value.detail || value);
+        if (!d || d.schema !== 'lightwork.error.v1' || typeof d.code !== 'string' ||
+            !/^[a-z][a-z0-9_.-]{0,79}$/.test(d.code) || typeof d.message !== 'string' ||
+            !d.message.trim() || d.message.length > 1200 || /[\x00-\x1f]/.test(d.message)) return null;
+        return d;
+      };
+      window.mvErrorResponse = async function (response) {
+        var payload = {};
+        try { payload = await response.clone().json(); } catch (_) {}
+        return {status: response.status, detail: payload.detail};
+      };
+      window.mvRenderError = function (element, failure, action, payload) {
+        var detail = window.mvBusinessError(payload || failure);
+        var legacy = payload && window.mvPlainDetail(payload.detail);
+        element.replaceChildren(document.createTextNode(detail ? detail.message :
+          (legacy || window.mvErrorText(failure, action))));
+        if (!detail) return;
+        var fields = detail.field_errors;
+        if (fields && typeof fields === 'object') Object.keys(fields).slice(0, 30).forEach(function (name) {
+          if (!/^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(name) || typeof fields[name] !== 'string' || fields[name].length > 400) return;
+          var copy = document.createElement('span'); copy.className = 'business-field-error';
+          copy.textContent = ' ' + fields[name]; element.appendChild(copy);
+          var form = element.closest('form');
+          if (form) Array.from(form.elements).forEach(function (input) {
+            if (input.name === name) { input.setAttribute('aria-invalid', 'true');
+              if (element.id) input.setAttribute('aria-describedby', element.id); }
+          });
+        });
+        var next = detail.next_action;
+        if (!next || typeof next.href !== 'string' || typeof next.label !== 'string' || next.label.length > 120) return;
+        try {
+          var decoded = decodeURIComponent(next.href), url = new URL(next.href, location.href);
+          if (next.href[0] !== '/' || /^\/\//.test(decoded) || /[\\\x00-\x1f]/.test(decoded) || url.origin !== location.origin) return;
+          var link = document.createElement('a'); link.href = url.pathname + url.search + url.hash;
+          link.textContent = next.label; link.className = 'business-next-action';
+          element.appendChild(document.createTextNode(' ')); element.appendChild(link);
+        } catch (_) {}
+      };
       // Plain-language error text for a failed request. Pass the fetch
       // Response (or a thrown error) and, optionally, what the person was
       // trying to do ("save the policy"). Never shows HTTP codes, exception
       // class names or server internals.
       window.mvErrorText = function (failure, action) {
+        var business = window.mvBusinessError(failure);
+        if (business) return business.message;
         var what = action ? ('Could not ' + action + '. ') : '';
         var status = failure && typeof failure.status === 'number' ? failure.status : 0;
         if (!status) {

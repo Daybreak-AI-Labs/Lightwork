@@ -1178,7 +1178,7 @@
           .then(function (r) {
             if (r.ok || r.status === 204) { location.reload(); return null; }
             return r.json().catch(function () { return {}; }).then(function (j) {
-              msg.textContent = (window.mvPlainDetail && window.mvPlainDetail(j.detail && (j.detail.message || j.detail))) || cgErr(r, 'continue the task');
+              window.mvRenderError(msg, r, 'continue the task', j);
               btn.disabled = false;
             });
           })
@@ -1222,7 +1222,7 @@
           if (r.ok) { location.reload(); return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
-            msg.textContent = cgErr(r, 'record the sign-off');
+            window.mvRenderError(msg, r, 'record the sign-off', j);
             btns.forEach(function (b) { if (b) b.disabled = false; });
           });
         }).catch(function (e) {

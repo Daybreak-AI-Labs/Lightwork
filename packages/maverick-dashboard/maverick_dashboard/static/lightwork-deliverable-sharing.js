@@ -15,7 +15,7 @@
         list.replaceChildren(); review.replaceChildren(); review.hidden = true; preview = null; output.value = ''; output.style.display = 'none';
         throw new Error('Your access changed. Reload and sign in before managing this task.');
       }
-      if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'The link operation could not be confirmed. Review the current link list before trying again.');
+      if (!response.ok) { var error = new Error(window.mvErrorText({status: response.status, detail: body.detail}, 'manage this link')); error.status = response.status; error.detail = body.detail; throw error; }
       return body;
     } finally { clearTimeout(timer); }
   }
@@ -58,12 +58,13 @@
           preview = null; review.hidden = true; review.replaceChildren(); await refresh();
         } catch (error) {
           preview = null; review.hidden = true; review.replaceChildren();
-          status.textContent = error.message + ' A lost response may still have created a link. Check the list and revoke any unwanted link before creating another.';
+          window.mvRenderError(status, error, 'create this link');
+          if (!error.status || error.status >= 500) status.append(document.createTextNode(' A lost response may still have created a link. Check the list and revoke any unwanted link before creating another.'));
           try { await refresh(); } catch (_) { /* Keep the original recovery message. */ }
         }
       });
       review.append(labelText, label, lifetimeText, lifetime, confirm, cancel); review.hidden = false; label.focus(); status.textContent = 'No link has been created. Review the content, audience and lifetime above.';
-    } catch (error) { status.textContent = error.message; }
+    } catch (error) { window.mvRenderError(status, error, 'review this public link'); }
     finally { create.disabled = false; }
   });
   list.addEventListener('click', async function (event) {
@@ -71,7 +72,7 @@
     if (!(await mvConfirm('Stop future access through this link? Downloaded and forwarded copies cannot be recalled.', {okText: 'Revoke link'}))) return;
     button.disabled = true;
     try { await request('/' + button.dataset.id + '/revoke', {method: 'POST', body: '{}'}); await refresh(); status.textContent = 'Link revoked. Existing downloaded copies remain outside Lightwork.'; }
-    catch (error) { status.textContent = error.message; button.disabled = false; }
+    catch (error) { window.mvRenderError(status, error, 'revoke this link'); button.disabled = false; }
   });
   refresh().catch(function () { status.textContent = 'Link status could not be loaded. Reload to check expiry and revocation before creating another.'; });
 }());
