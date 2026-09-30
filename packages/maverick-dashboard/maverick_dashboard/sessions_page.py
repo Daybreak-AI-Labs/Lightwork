@@ -79,8 +79,14 @@ def _rows_for(request: Request, principal_filter: str | None, *, everyone: bool)
     except session_registry.SessionStoreError as exc:
         raise HTTPException(status_code=503,
                             detail="The session record cannot be read right now.") from exc
+    from .session_revocation import is_revoked
+
     out = []
     for row in rows:
+        # A SCIM deprovision or "log out everywhere" bumps the epoch without
+        # touching these rows: hide what the epoch already ended.
+        if is_revoked(row.principal.removeprefix("user:"), row.issued_at):
+            continue
         item = row.as_dict()
         item["current"] = bool(current) and row.sid == current
         item["method"] = _method_label(row.via)
