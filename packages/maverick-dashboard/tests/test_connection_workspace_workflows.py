@@ -179,7 +179,10 @@ def test_authenticated_disconnect_requires_current_reviewed_revision(customer, r
     assert denied.status_code == (422 if review == "missing" else 409), denied.text
     with tenant_scope(tenant="workspace-a"):
         assert connections.get_connection("reviewed-account")["revision"] == current["revision"]
-    deleted = client.delete(path, params={"expected_revision": current["revision"]})
+    reviewed = client.get(path + "/impact")
+    assert reviewed.status_code == 200, reviewed.text
+    impact = reviewed.json()
+    deleted = client.delete(path, params={"expected_revision": current["revision"], "context": impact["context"], "impact_version": impact["impact_version"]})
     assert deleted.status_code == 200, deleted.text
     with tenant_scope(tenant="workspace-a"):
         assert connections.get_connection("reviewed-account") is None
@@ -291,7 +294,10 @@ def test_real_approved_vendor_action_rechecks_reconnected_or_revoked_account(cus
         assert replacement.status_code == 200, replacement.text
         assert replacement.json()["connection"]["revision"] != credential["revision"]
     elif change == "revoke":
-        revoked = client.delete("/api/v1/connections/reviewed-account", params={"expected_revision": credential["revision"]})
+        reviewed = client.get("/api/v1/connections/reviewed-account/impact")
+        assert reviewed.status_code == 200, reviewed.text
+        impact = reviewed.json()
+        revoked = client.delete("/api/v1/connections/reviewed-account", params={"expected_revision": credential["revision"], "context": impact["context"], "impact_version": impact["impact_version"]})
         assert revoked.status_code == 200, revoked.text
     response = client.post(f"{CASES}/{row['id']}/execute", json={"confirm": True, "expected_revision": row["revision"]})
     if change == "unchanged":

@@ -1310,14 +1310,24 @@ def clear_overrides() -> None:
         _write({})
 
 
+def _permission(page: dict, kind: str) -> str:
+    # Self-service opens only the page shell. Native APIs still enforce own
+    # account, approved fixed scopes and admin-only application management.
+    if page["path"] == "/connections":
+        from maverick.connection_oauth import self_connect_profiles
+        if self_connect_profiles():
+            return "operate"
+    return page[kind]
+
+
 def eligible(page: dict, role: str) -> bool:
     """Whether ``role``'s permissions reach the page's security floor at all."""
-    return page["floor"] in rbac.permissions_for(role)
+    return _permission(page, "floor") in rbac.permissions_for(role)
 
 
 def default_visible(page: dict, role: str) -> bool:
     """The page's out-of-the-box visibility for ``role`` (no overrides)."""
-    return page["default"] in rbac.permissions_for(role)
+    return _permission(page, "default") in rbac.permissions_for(role)
 
 
 def is_visible(page: dict, role: str | None) -> bool:
@@ -1515,7 +1525,7 @@ def matrix() -> list[dict]:
             {
                 "path": page["path"],
                 "label": page["label"],
-                "floor": page["floor"],
+                "floor": _permission(page, "floor"),
                 "in_nav": page.get("in_nav", True),
                 "cells": cells,
             }

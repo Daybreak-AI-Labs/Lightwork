@@ -370,3 +370,21 @@ def test_nav_and_matrix_groups_are_unique():
         assert len(labels) == len(set(labels)), f"duplicate nav groups for {role}: {labels}"
     mlabels = [g["label"] for g in ui_visibility.matrix()]
     assert len(mlabels) == len(set(mlabels)), f"duplicate matrix groups: {mlabels}"
+
+
+def test_approved_self_connect_keeps_page_overrides_and_native_admin_floor(monkeypatch, tmp_path):
+    from maverick import connection_oauth
+    from maverick_dashboard import ui_visibility
+
+    monkeypatch.setattr(ui_visibility, "store_path", lambda: tmp_path / "visibility.json")
+    page = ui_visibility.page_for("/connections")
+    monkeypatch.setattr(connection_oauth, "self_connect_profiles", lambda: frozenset())
+    assert not ui_visibility.is_visible(page, "operator")
+    monkeypatch.setattr(connection_oauth, "self_connect_profiles", lambda: frozenset({"google-drive"}))
+    assert ui_visibility.is_visible(page, "operator")
+    assert not ui_visibility.is_visible(page, "viewer")
+    assert any(link["href"] == "/connections" for group in ui_visibility.finder_pages("operator") for link in group["links"])
+    ui_visibility.set_visibility("/connections", "operator", False)
+    assert not ui_visibility.is_visible(page, "operator")
+    assert ui_visibility.is_visible(page, "admin")
+    assert not ui_visibility.is_visible(ui_visibility.page_for("/settings"), "operator")
