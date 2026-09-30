@@ -50,6 +50,25 @@ async def test_answer_uses_native_receipt_and_recovery_never_dispatches_twice(se
     assert not world.list_attachments(goal_id)
 
 
+def test_text_answer_effect_stays_on_authority_fence_owner_thread(setup, monkeypatch):
+    import threading
+
+    world, goal_id, request, selection = setup
+    question = world.ask("Which period?", goal_id=goal_id)
+    world.set_goal_status(goal_id, "blocked")
+    monkeypatch.setattr(api, "_dispatch_requeued_goal", lambda *args, **kwargs: None)
+    original = clarification_submission._accept
+    owner_thread = threading.get_ident()
+    def accept(*args, **kwargs):
+        assert threading.get_ident() == owner_thread
+        return original(*args, **kwargs)
+    monkeypatch.setattr(clarification_submission, "_accept", accept)
+    args = {"question": str(question), "answer": "Use September."}
+    preview = actions.answer_preview(request, selection, args)
+    result = actions.answer_execute(request, selection, args, preview.native, "same-thread-operation")
+    assert result.status == "queued"
+
+
 def test_edit_uses_native_cas_and_exact_receipt_after_later_revision(setup):
     world, goal_id, request, selection = setup
     world.set_goal_status(goal_id, "done", result="First result")

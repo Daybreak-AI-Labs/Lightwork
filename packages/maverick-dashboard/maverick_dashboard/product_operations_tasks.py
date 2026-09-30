@@ -5,7 +5,6 @@ from dataclasses import replace
 from functools import partial
 from typing import Literal
 
-import anyio
 from fastapi import BackgroundTasks, HTTPException
 from maverick.governed_operations import digest
 from pydantic import Field
@@ -115,14 +114,16 @@ def _answer_outcome(result, *, background=None):
 
 def answer_execute(request, selection, args, native, operation_id):
     from . import api
+    from .clarification_submission import submit_text
 
-    _world, goal = _task(request, selection, write=True)
+    world, goal = _task(request, selection, write=True)
     background = BackgroundTasks()
-    result = anyio.from_thread.run(partial(
-        api.answer_question_with_files, request, goal.id, background,
+    result = submit_text(request, world, goal.id,
         question_id=native["question_id"], answer=args["answer"],
         expected_question=native["expected_question"], operation_id=operation_id,
-        expected_context=native["expected_context"], files=[]))
+        expected_context=native["expected_context"])
+    if result["admitted"] and not result["replayed"]:
+        api._dispatch_requeued_goal(request, background, goal.id, conversation_id=result["conversation_id"])
     return _answer_outcome(result, background=background)
 
 

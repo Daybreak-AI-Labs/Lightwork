@@ -116,7 +116,7 @@ def _accept(request, world, goal_id, question_id, answer, expected_question, ope
         raise
 
 
-async def submit(request, world, goal_id, *, question_id, answer, expected_question, operation_id, files, expected_context):
+def _validate_answer(request, world, goal_id, answer, expected_question, operation_id, expected_context):
     from .app import _require_same_origin
 
     _require_same_origin(request)
@@ -129,6 +129,32 @@ async def submit(request, world, goal_id, *, question_id, answer, expected_quest
         raise product_error(400, "answer_required", "Enter an answer of at most 100,000 characters.", field_errors={"message": "Review the length of your answer."})
     if not re.fullmatch(r"[A-Za-z0-9_-]{12,100}", operation_id) or not re.fullmatch(r"[a-f0-9]{64}", expected_question):
         raise product_error(409, "question_stale", "Refresh the current question before answering. Your draft has been kept.")
+    return actor, answer
+
+
+def submit_text(request, world, goal_id, *, question_id, answer, expected_question, operation_id, expected_context):
+    """Native text-only admission on the current authority-fence owner thread.
+
+    The multipart entry point stages/extracts files asynchronously. Product
+    operations already run in a worker thread under an authority fence; moving
+    its effect to another thread would deadlock that fence. Both paths use the
+    same input checks and atomic admission/receipt implementation.
+    """
+    _actor, answer = _validate_answer(request, world, goal_id, answer, expected_question, operation_id, expected_context)
+    digest = hashlib.sha256(json.dumps([question_id, expected_question, answer, manifest([])],
+                                      sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    try:
+        return _accept(request, world, goal_id, question_id, answer, expected_question, operation_id, [], digest)
+    except (SubmissionConflict, GoalMutationConflict) as exc:
+        raise product_error(409, "question_stale", "The question or task changed. Your answer is preserved; review the current question before retrying.") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise product_error(503, "answer_unconfirmed", "The answer receipt could not be confirmed. Keep your draft and retry the same submission to check whether it was accepted.", retryable=True) from exc
+
+
+async def submit(request, world, goal_id, *, question_id, answer, expected_question, operation_id, files, expected_context):
+    actor, answer = _validate_answer(request, world, goal_id, answer, expected_question, operation_id, expected_context)
     try:
         async with stage_uploads(files) as records:
             selected = sum(bool(upload and (upload.filename or "").strip()) for upload in files)

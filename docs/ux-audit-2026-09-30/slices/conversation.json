@@ -25,7 +25,8 @@
       "Multipart /answer-with-files stages and validates the complete batch; native local document extraction must finish before admission. Concurrent answers refuse before publication; transaction failures roll back metadata and clean attempt-exclusive unreferenced files when commit state is known.",
       "Composer snapshots text/files before locking controls, preserves work on failures and uncertain responses, checks durable answer receipts, and replays the same operation without a second restart. Context mismatch clears private composer state; a changed question requires renewed review.",
       "Question projection includes current question version and latest accepted answer receipt for reload recovery.",
-      "Question-file policy is explicit before selection: documents/PDFs/images/text are admitted; audio/video requires a separately reviewed transcription task, preventing automatic paid transcription or retry. Existing optional attachment S3 mirror semantics are preserved."
+      "Question-file policy is explicit before selection: documents/PDFs/images/text are admitted; audio/video requires a separately reviewed transcription task, preventing automatic paid transcription or retry. Existing optional attachment S3 mirror semantics are preserved.",
+      "submit_text shares native answer validation and atomic receipt admission on the current worker thread, so registry authority fencing does not cross threads or weaken its exclusion boundary."
     ],
     "validation": [
       "Python AST for 8 changed/new units, 7 JavaScript syntax units and git whitespace passed. Native atomic-race/upload/replay/permission/context regression tests authored.",
@@ -200,14 +201,15 @@
   },
   {
     "id": "LW-130",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "deliverable_bundles.py captures exact selected artifact versions, original evidence bytes and optional result with one named recipient, expiring current-membership ACL, human acceptance separate from integrity, stale source checks, CAS response and exact duplicate receipt.",
       "deliverable_bundle_export.py preserves selected original native files, editable Markdown/complete-table formula-safe CSV, escaped HTML, review record and offline browser SHA-256 manifest checker; ZIP entries verified before release and no prior bundle changed on failure.",
-      "Native /deliverable-bundles UI, per-file/export authorization, feature knob, settings labels, installer question and source-task link implemented. Copilot artifact share/accept/revoke/download adapters use same service."
+      "Native /deliverable-bundles UI, per-file/export authorization, feature knob, settings labels, installer question and source-task link implemented. Copilot artifact share/accept/revoke/download adapters use same service.",
+      "Root confirmed shared catalog multiselect typed arrays and safe local href links implemented for bundle create/download and pending integration commit."
     ],
     "validation": "Ruff, Python AST, Jinja syntax and JavaScript syntax/whitespace checks. Native selection/replay/revocation/source-change/ZIP-integrity/render-safety/export-failure tests authored, pending root-coordinated local run. No provider calls or installed-browser/PostgreSQL qualification.",
-    "remaining": "Root integration must add shared Copilot UI multiselect fields and local href review links (requested); then complete local/native/browser acceptance. Native bundle journey is implemented; do not count required Copilot UI extension as finished until integrated."
+    "remaining": "Root must preserve shared catalog multiselect/local-link additions during integration. Local native/browser/PostgreSQL acceptance still required; offline consistency is not source authenticity, factual validation or external filing."
   },
   {
     "id": "LW-131",
