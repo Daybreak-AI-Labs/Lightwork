@@ -153,7 +153,8 @@ _SECRETS = {
     "world_model.dsn": "postgres://lw:pw@db.example.com:5432/lightwork",  # pragma: allowlist secret
 }
 _THEME = {"bg": "#101020", "panel": "#181830", "text": "#e0e0f0", "accent": "#7aa2f7"}
-_NUMBERS = {"audit.unified.custody.max_retry_backoff_seconds": 7200}
+_NUMBERS = {"audit.unified.custody.max_retry_backoff_seconds": 7200,
+            "governed_records.pool_min_size": 2}  # minimum + 1 is its default
 # Rows whose kernel reader refuses them alone: saved together with these.
 _WITH = {
     "dashboard.require_auth": [{"id": "dashboard.invites", "value": True}],
