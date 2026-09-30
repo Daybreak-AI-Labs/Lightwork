@@ -6637,6 +6637,14 @@ def list_flow_runs_endpoint(request: Request, flow_id: str = "", limit: int = 50
 
     owner = goal_owner_filter(request)
     runs = store.list_run_metadata(flow_id=flow_id or None, owner=owner, limit=max(1, min(500, limit)))
+    if owner == "":
+        from .auth import anonymous_local_access_allowed
+        if caller_principal(request) is None and anonymous_local_access_allowed():
+            for label in ("operator", "local:dashboard"):
+                candidates = store.list_run_metadata(flow_id=flow_id or None, owner=label, limit=max(1, min(500, limit)))
+                runs.extend(run for run in candidates if _legacy_local_flow_run(request, run))
+            runs.sort(key=lambda run: (run.updated, run.run_id), reverse=True)
+            runs = runs[:max(1, min(500, limit))]
     return {"runs": [_run_out(r) for r in runs]}
 
 
@@ -6740,6 +6748,27 @@ def _run_out(run) -> dict:
     return d
 
 
+def _legacy_local_flow_run(request: Request, run) -> bool:
+    """Recognize only demonstrably unowned pre-ownership local checkpoints."""
+    from maverick.flow import store
+
+    from .auth import anonymous_local_access_allowed
+
+    if (caller_principal(request) is not None or not anonymous_local_access_allowed()
+            or run is None or run.owner not in {"operator", "local:dashboard"}
+            or run.execution_user_id or run.execution_channel
+            or not run.definition_digest):
+        return False
+    try:
+        definition = store.load_flow_snapshot(run.definition_digest)
+        if definition.id != run.flow_id or definition.owner:
+            return False
+        store.validate_snapshot_bundle_owners(definition, run.subflow_digests)
+        return all(run.subflow_digests.values())
+    except (store.FlowSnapshotError, OSError, ValueError):
+        return False
+
+
 def _load_owned_run(request: Request, run_id: str):
     """A flow run the caller may see, or a 404 (indistinguishable from missing,
     so a run's existence isn't leaked across owners)."""
@@ -6747,6 +6776,16 @@ def _load_owned_run(request: Request, run_id: str):
 
     owner = goal_owner_filter(request)
     run = store.load_run(run_id, owner=owner)
+    if run is None and owner == "":
+        # The reserved labels were attribution defaults, not employee owners.
+        # Never open arbitrary named records or use this under token/SSO auth.
+        from .auth import anonymous_local_access_allowed
+        if caller_principal(request) is None and anonymous_local_access_allowed():
+            for label in ("operator", "local:dashboard"):
+                candidate = store.load_run(run_id, owner=label)
+                if _legacy_local_flow_run(request, candidate):
+                    run = candidate
+                    break
     if run is None:
         raise HTTPException(status_code=404, detail="no such run")
     return run
@@ -6773,7 +6812,6 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
     require_permission(request, "operate")
     _require_flows()
     _load_owned_run(request, run_id)  # 404 before holding a stream slot
-    from maverick.flow import store as flow_store
     from maverick.flow.payloads import FlowPayloadError
 
     from ._event_stream import LeasedStreamingResponse, StreamCadence, StreamLease
@@ -6789,7 +6827,6 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
     await sem.acquire()
 
     lease = StreamLease(sem)
-    owner = goal_owner_filter(request)
     # completed/failed/rejected are final; a run parked on a human or an
     # external event won't change until someone acts -- close the stream and
     # let the page's actions (approve / resume) drive the next one.
@@ -6818,7 +6855,8 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
                 # timing -- matches the goal-events stream.
                 if await request.is_disconnected():
                     return
-                run = await run_in_threadpool(flow_store.load_run, run_id, owner=owner)
+                require_permission(request, "operate")
+                run = await run_in_threadpool(_load_owned_run, request, run_id)
                 if run is None:
                     yield 'event: error\ndata: {"detail": "run vanished"}\n\n'
                     return
@@ -6836,6 +6874,9 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
                     cadence.sent(clock())
                 cadence.backoff(changed)
                 await _asyncio.sleep(cadence.delay(clock()))
+        except HTTPException:
+            yield 'event: error\ndata: {"detail": "Current workflow access is unavailable. Reopen the run.", "code": "permission_denied"}\n\n'
+            return
         except FlowPayloadError:
             yield (
                 'event: error\ndata: {"detail": "complete workflow data is unavailable; '
@@ -7539,7 +7580,8 @@ def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dic
             status_code=409,
             detail="published flow release changed since preview; review it before running",
         )
-    owner = _supervisor(request)
+    # Ownership is the employee principal, distinct from audit actor labels.
+    owner = caller_principal(request) or ""
     # Validate/coerce the payload against the flow's declared inputs (a no-op when
     # the flow declares none): reject a missing required input or a bad number/date
     # up front, and coerce number/bool/date so a node's condition sees typed values.

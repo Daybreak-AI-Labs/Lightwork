@@ -1,4 +1,4 @@
-<button class="{{ 'cs-item cs-item--button' if copilot_chat_shell else 'mv-copilot__fab' }}" id="mv-copilot-fab" type="button"
+<button class="{{ 'cs-item cs-item--button' if copilot_chat_shell|default(false) else 'mv-copilot__fab' }}" id="mv-copilot-fab" type="button"
         aria-expanded="false" aria-controls="mv-copilot"
         aria-label="Open Lightwork Copilot" title="Copilot — need a hand?">
   <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-chat"></use></svg>

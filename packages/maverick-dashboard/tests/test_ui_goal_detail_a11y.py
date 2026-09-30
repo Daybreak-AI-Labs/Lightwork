@@ -32,7 +32,8 @@ def test_goal_action_errors_are_inline_not_alert(monkeypatch, tmp_path):
     # The two native alert() calls were replaced with the inline region.
     assert "alert(" not in r.text
     # ...and the failure path explains itself in plain words.
-    assert "cgErr(r, 'send your answer')" in r.text
+    assert "cgErr(response, 'send your message')" in r.text
+    assert "actionMsg.textContent" in r.text
 
 
 def test_answer_input_has_accessible_name(monkeypatch, tmp_path):

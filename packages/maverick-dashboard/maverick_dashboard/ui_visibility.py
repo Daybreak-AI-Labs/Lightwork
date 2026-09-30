@@ -49,6 +49,12 @@ from . import rbac
 # not in the Settings visibility matrix. Flip it back to ready when the page
 # speaks to a non-technical user.
 PAGES: tuple[dict, ...] = (
+    {"path": "/my-data", "label": "My data", "group": "Operate",
+     "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/account", "label": "Account", "group": "Operate",
+     "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/content-access", "label": "Reviewed content access", "group": "Observe",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/preferences", "label": "Your preferences", "group": "Operate", "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/today", "label": "Today", "group": "Operate", "icon": "check", "floor": "view", "default": "view", "in_nav": True},
     {"path": "/workflow-readiness", "label": "Workflow readiness", "group": "Observe",
