@@ -22,8 +22,8 @@
       "tasks.resume uses shared reviewed_resume/goal_resume reserve transaction and native runner lease, with native UI separate review/confirmation, exact admitted-restart receipt replay and opaque reload receipt lookup; no automatic retry or duplicate dispatch.",
       "schedules.repair uses native recurrence_recovery_apply/JobQueue.reconcile_recurrence with exact evidence, stopped-worker confirmation and actor-bound atomic durable recovery receipt; previous historical work is not replayed."
     ],
-    "validation": "39 focused Python lifecycle tests passed, including native restart/readiness, schedule definitions and typed repair; four restart-controller jsdom regressions passed. Prior native task/handoff/bundle tests and shared registry tests are recorded by their owning checkpoints. Ruff/AST/Jinja/JS/whitespace passed. Root integrated and installed-browser/PostgreSQL qualification remains separate.",
-    "remaining": "Integrate companion LW001 native service/catalog checkpoint and final UI snapshot contract alongside lifecycle changes, then run root shared catalog and broader local suites. No universal arbitrary UI automation or unregistered operation is implied.",
+    "validation": "test_product_operations.py (9), test_product_operations_tasks.py (6), test_product_operations_handoffs.py (3) and test_copilot_context.py (294) passed; copilot_operations.test.js and copilot_draft_recovery.test.js passed. The earlier reviewed restart/schedule-repair checkpoint passed 39 native and four controller cases; current task-resume controller and 15 budget/resume native cases also passed. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "The matrix traces the closed native operation set including integrated Facts, knowledge feedback, personal data, historical discovery and reviewed task-map controls. Arbitrary UI automation is not promised. Dedicated backend and installed-browser qualification remain separate from deterministic local passes.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -39,14 +39,8 @@
       "Question-file policy is explicit before selection: documents/PDFs/images/text are admitted; audio/video requires a separately reviewed transcription task, preventing automatic paid transcription or retry. Existing optional attachment S3 mirror semantics are preserved.",
       "submit_text shares native answer validation and atomic receipt admission on the current worker thread, so registry authority fencing does not cross threads or weaken its exclusion boundary."
     ],
-    "validation": [
-      "Python AST for 8 changed/new units, 7 JavaScript syntax units and git whitespace passed. Native atomic-race/upload/replay/permission/context regression tests authored.",
-      "User has now authorized local suites after all requested implementation; root coordinates those suites. No suites or provider calls executed in this checkpoint."
-    ],
-    "remaining": [
-      "Run native SQLite/PostgreSQL admission/concurrency, authenticated browser retained-file and account-switch cases, and installed attachment readiness checks.",
-      "Verify configured multi-host attachment mirroring separately; existing mirror remains best-effort. A process crash with indeterminate database availability retains private evidence instead of risking deletion of committed files."
-    ],
+    "validation": "test_clarification_submission.py (4), core test_clarification_evidence.py (4), test_attachment_submission.py (10), core test_attachment_submission_store.py (8) and SQLite chat transaction regressions passed. Inbox/draft/file-selection/ordinary-follow-up controllers passed in the 139-case group; no provider calls. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Dedicated PostgreSQL atomic admission, installed authenticated PDF/file recovery and configured multi-host attachment storage remain to qualify. Indeterminate storage outcomes retain private evidence rather than deleting possibly committed files.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -57,8 +51,8 @@
     "implementation_evidence": [
       "my_work_api.py /my-work projects exact-owner tasks and saved outcomes, schedule occurrences, authorized immutable flow definitions and owner connection dependencies; explicit partial/unavailable coverage, status truth, fresh request context, paused bounded polling, native-control links from conversation. Reuses schedule_definitions and connection_dependencies from the connections slice."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit.",
+    "validation": "test_my_work.py (2) and current-source/permission projections in test_copilot_context.py passed. Source inspection confirms exact owner and suite checks before names/counts and explicit unavailable coverage. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed browser and deployment-specific multi-source availability/performance qualification remain; partial coverage is deliberately visible.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -69,8 +63,8 @@
     "implementation_evidence": [
       "action_center.py adds one versioned task-attention row per owned blocked/failed task, current question identity, rejected signoffs, owner changes-requested/stale review packets and exact-owner connection dependencies; explicit adapter coverage and existing private version-bound snooze/read preferences. Approval projections now require can_read_approval; task rows require current goal and suite authority."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit.",
+    "validation": "test_action_center.py (43), action_center.test.js, project_reviews.test.js and the native project-review suite passed; current question/source fingerprint, private read/snooze state, coverage and permission filtering remain authoritative. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed browser notification/read-state qualification remains. Snooze cannot hide mandatory blockers or change due dates.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -81,8 +75,8 @@
     "implementation_evidence": [
       "lightwork-copilot.js retains failed text, blocks in-flight prompt replacement, reuses visible retry row, rejects late generation replies and fresh-checks server-bound account/workspace context before sending and publishing. Transient operation-source failures preserve drafts; auth/scope changes clear private state. Copilot endpoint validates current context before a model call."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit.",
+    "validation": "copilot_draft_recovery.test.js and copilot_operations.test.js passed in the 139-case group; test_copilot_context.py (294) and shared registry tests (9) passed with current context/permission checks. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed authenticated account/workspace switch and proxy interruption qualification remain; no live model call was used.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -93,8 +87,8 @@
     "implementation_evidence": [
       "chat_goal syncComposer keeps Stop for pending/running/blocked; ChatThreads.answer refuses terminal tasks inside the restart transaction."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "Core test_goal_stop.py (5), test_goal_stop_boundaries.py (21) and SQLite chat transaction tests passed; lightwork_ui_halt.test.js and task_authority.test.js passed. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed keyboard/screen-reader and distributed-runner timing qualification remain; Stop cannot undo completed external effects.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -105,8 +99,8 @@
     "implementation_evidence": [
       "chat_goal renderHalted mounts retry for initial and streamed failed/cancelled states; existing governed resume and budget form retained."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "test_goal_resume_budget.py (15) and task_resume.test.js passed: reviewed spending, stale review refusal, unknown receipt recovery, current authority and no automatic dispatch retry. Halt/controller cases also passed. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Dedicated PostgreSQL/distributed runner lease and installed browser qualification remain; recorded unknown outcomes require explicit recovery.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -117,8 +111,8 @@
     "implementation_evidence": [
       "chat_goal stream errors expose stale/unknown state and last refresh, switch CONNECTING to bounded polling, offer reconnect and clear denied content."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "test_chat_streaming.py (9) and test_event_stream_machine.py (7) passed; halt/controller cases retain truthful reconnect/recovery state. Transport interruption remains separate from task outcome. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed reverse-proxy/offline/auth-expiry qualification remains. Local tests do not certify a particular customer proxy configuration.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -129,8 +123,8 @@
     "implementation_evidence": [
       "chat_goal question reads have a 12-second deadline, explicit retry, malformed-response handling and stale-question submission fence."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "Local halt and ordinary-follow-up controllers passed; direct source review confirms the 12-second question AbortController, malformed-response refusal, stale question submission fence and explicit retry. Installed proxy/offline timing remains qualification, not a claim from static source alone. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed disconnected/auth-expired browser and assistive-technology qualification remains; source-level timeout/freshness behavior is implemented.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -141,8 +135,8 @@
     "implementation_evidence": [
       "chat_goal cancellation immediately reports requested/cleanup-unknown state and polls authoritative state; concurrent completion is explained without rollback promises."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "Core Stop and execution-boundary suites passed 26 cases; native status and halt/restart controllers passed, preserving requested versus confirmed cancellation and the concurrent-completion distinction. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Distributed runner cleanup and installed browser qualification remain; no completed external action is represented as undone.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -155,12 +149,8 @@
       "Native resume/share/sign-off distinguish budget ceiling, unfinished task, required sign-off, stale result and outcome-pilot admission hold.",
       "lightwork-ui.js renders structured remedies as text with validated local links; resume/sign-off/sharing preserve the composer and show actual remedies; expired authentication retains explicit sign-in wording."
     ],
-    "validation": [
-      "Python AST, JavaScript syntax and git diff whitespace checks; authored test_product_errors.py and test_product_errors_client.js, not executed."
-    ],
-    "remaining": [
-      "Run authored regressions and authenticated acceptance for each business failure, preserved drafts, field associations and authorized destinations."
-    ],
+    "validation": "test_product_errors.py (8), test_goal_resume_budget.py (15), share-link service (9), signoff (22) and ordinary-follow-up error controller passed. Exact safe local remedies and preserved draft behavior remain separate from provider error bodies. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed browser validation/assistive-technology qualification remains; live provider error messages were not exercised.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -171,8 +161,8 @@
     "implementation_evidence": [
       "ChatThreads.history uses owner/tenant-bound keyset pagination relative to the selected goal; thread-history API and progressive retryable history UI."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "SQLite test_chat_threads.py includes the passing >200-turn history pagination around an early selected goal, stable ordering and duplicate exclusion. Twelve configured PostgreSQL variants across that file were skipped without a dedicated DSN. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Dedicated PostgreSQL pagination/concurrency is skipped without MAVERICK_PG_DSN; installed long-thread performance remains to qualify.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -183,8 +173,8 @@
     "implementation_evidence": [
       "lightwork-file-selection.js provides named type/size chips, individual removal, clear-all, duplicate indicators and batch-count notice for new and follow-up composers."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "audit_file_selection.test.js and ordinary chat handoff/controller tests passed; admitted attachment and malformed batch tests passed. Source retains keyboard-named individual removal and concrete incompatible-mode recovery. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed keyboard, screen-reader and mobile paste/file-picker qualification remains. Native controls and deterministic local cases are implemented.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -193,10 +183,11 @@
     "category": "Conversation and background work",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "chat_goal attachments panel now retains empty state and Add file, explaining current-task scope and unconfirmed runner consumption."
+      "chat_goal attachments panel now retains empty state and Add file, explaining current-task scope and unconfirmed runner consumption.",
+      "Attachment projection now refreshes on terminal/artifact events and visibility, bounds reads, clears private state on access loss and ignores late responses."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "test_chat_attachments.py (5), test_goal_attachments_download.py (5), test_attachment_submission.py (10) and new attachment_lifecycle.test.js (5) passed; empty-task access, late completion, access denial and bounded metadata reads are covered. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed browser/file-picker and deployment-specific attachment storage qualification remain. Added files target this task and do not prove runner consumption.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -205,10 +196,11 @@
     "category": "Conversation and background work",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "chat_goal attachments retain per-file states and File objects for selective retry; publish_batch/SubmissionStore.admit already deduplicate exact file identities."
+      "chat_goal attachments retain per-file states and File objects for selective retry; publish_batch/SubmissionStore.admit already deduplicate exact file identities.",
+      "Attachment upload retains each current File until acknowledged, aborts at a bounded deadline, retries only explicit failed entries and prevents stale acknowledgement after revocation."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "New attachment_lifecycle.test.js proves success/failed/pending states concurrently and retries only the failed file without losing text; test_attachment_submission.py verifies exact HTTP retry deduplication and core submission/companion tests pass. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Optional real-DOCX extraction and Windows symlink behavior were skipped (missing python-docx and unavailable symlink creation); native deduplication/partial retry cases pass. Multi-host companion preparation remains deployment qualification.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -219,8 +211,8 @@
     "implementation_evidence": [
       "conversation_organization.py stores names/pins/archive in one owner/workspace-private governed CAS document keyed by immutable root identity. Replayed operations reuse receipts, conflicting windows refuse, explicit undo restores prior organization. All turns read root metadata; current authorized pins appear in sidebar, archive preserves history and explains retention. /conversations searches stored user/assistant content across bounded keyset pages with truthful remaining-history scope; root ownership and suite permission checked before matching or projection."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored but intentionally unrun. Authenticated/browser/native PostgreSQL and cross-client runtime acceptance remain for the later testing phase. Product bounds are visible: 20 active pins, 10000 organized conversations; message search excludes attachments/external records.",
+    "validation": "test_conversation_organization.py (4) and SQLite history pagination passed: durable root-scoped organization, revision conflict/receipt behavior, private source filtering and non-destructive history. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Dedicated PostgreSQL and installed cross-window/browser qualification remain. Bounds remain visible: 20 active pins, 10,000 organized conversations; body search excludes attachments/external records.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -231,8 +223,8 @@
     "implementation_evidence": [
       "plan_tree has abort deadline, bounded backoff, auth-denial clearing, hidden-tab pause, freshness time and explicit refresh without overlapping requests."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "test_plan_tree_viz.py (5) and test_plan_tree_3d.py (3) passed. Static lifecycle review confirms timeout/backoff, hidden-tab pause, single in-flight fetch and denial clearing; installed disconnected-browser timing remains explicit qualification. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed never-resolving/offline proxy and assistive-technology qualification remains. UI timeout/backoff/visibility behavior is implemented; a failed source is not shown as current.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -316,8 +308,8 @@
       "Complements settings6eaca67: chat_goal.html snapshots ordinary follow-up FormData before disabling every field, restores prior disabled states on refusal, awaits encrypted recovery clear and emits composer-sent(recoveryCleared:true) only after an acknowledged same-origin task redirect. Sign-in redirects preserve draft.",
       "Clarification submit locks fields before network request; acknowledged native receipt clears recovery only when the exact text/question/file signature remains unchanged, retaining any newer draft. Settings lightwork-chat-drafts.js owns scoped encrypted recovery, navigation warning and explicit file reselection copy."
     ],
-    "validation": "Static source review of complementary integration; existing draft and clarification regression cases authored. Root-coordinated local recovery/navigation/authentication browser qualification pending.",
-    "remaining": "Verify reload/sign-in/account-switch recovery, revision conflict and file reselection in authenticated browser; no live provider calls needed.",
+    "validation": "draft_recovery.test.js, conversation_inbox.test.js and ordinary follow-up controller tests passed in the 139-case group. Source review verifies FormData snapshot before lock, awaited recovery clear after durable same-origin receipt, and draft preservation on sign-in or uncertain outcomes. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed browser storage/sign-in/account-switch qualification remains; ordinary draft recovery still requires explicit re-selection of browser File objects after reload.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -846,12 +838,13 @@
       "71c1142: lightwork-template-library.js composes query/suggested/all mode, ordering, counts and errors; js/in_app_forms.test.js added cases."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Local JS input/library/workflow controls and editor recovery passed (picker-js-03 cohort:53). Focused rerun after connected-input additions:37 passed. Search/mode composition, schedule stale/error state and authoring/handoff contracts retain explicit assertions."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-068",
@@ -883,12 +876,14 @@
       "532e5c0: workflow_versions.py immutable content snapshots, clone/restore, rendering-only sample checks and named publication; workflow_versions_api.py impact review; builder controls and settings/installer; schedules pin rendered publication."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Local JS input/library/workflow controls and editor recovery passed (picker-js-03 cohort:53). Focused rerun after connected-input additions:37 passed. Search/mode composition, schedule stale/error state and authoring/handoff contracts retain explicit assertions.",
+      "test_template_parameters:7 and test_workflow_versions:4 passed in recorded ordinary cohort; typed/version tests also passed in picker-core-03. Native published-version schedule admission passed in picker-http-05."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-070",
@@ -899,12 +894,14 @@
       "71c1142: /workflows/extract-source supports bounded PDF/DOCX/text extraction and explicit source review; workflow_builder sends source_text separately from author instructions."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Local JS input/library/workflow controls and editor recovery passed (picker-js-03 cohort:53). Focused rerun after connected-input additions:37 passed. Search/mode composition, schedule stale/error state and authoring/handoff contracts retain explicit assertions.",
+      "55 test_workflow_builder cases passed in qualification-b0a7eea-ordinary.xml, including bounded office-source extraction and source-vs-author instruction separation. This subset passed; the broader initial run had unrelated failures."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-071",
@@ -915,12 +912,13 @@
       "71c1142/f3c7716: automations schedule list preserves stale last-good rows, validates response shape/context, ignores obsolete loads and exposes keyboard retry."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Local JS input/library/workflow controls and editor recovery passed (picker-js-03 cohort:53). Focused rerun after connected-input additions:37 passed. Search/mode composition, schedule stale/error state and authoring/handoff contracts retain explicit assertions."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-072",
@@ -931,12 +929,13 @@
       "f3c7716: schedule_definitions.py durable identity/history/revision; worker admission fences paused/retired future work; edits cancel only unattempted future occurrences and preserve admitted work; schedule-management UI uses timetable preview."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Native schedule-definition5 and timezone6 tests passed in the ordinary cohort; schedule-contract-regressions.xml includes six schedule and three Copilot repair tests with no failures. Later lifecycle work provides native exact-receipt recurrence repair."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-073",
@@ -944,15 +943,17 @@
     "category": "Workflow templates and schedules",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "f3c7716: admin recovery routes bind exact queue row, attempts, candidate successors, definition/context digest and rationale; future-only rearm or reviewed successor link; history export."
+      "f3c7716: admin recovery routes bind exact queue row, attempts, candidate successors, definition/context digest and rationale; future-only rearm or reviewed successor link; history export.",
+      "Integrated lifecycle product_operations_connections schedules.repair calls the same native JobQueue recovery receipt service; duplicate operation recovers its exact result without replaying historical business work."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Native schedule-definition5 and timezone6 tests passed in the ordinary cohort; schedule-contract-regressions.xml includes six schedule and three Copilot repair tests with no failures. Later lifecycle work provides native exact-receipt recurrence repair."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-074",
@@ -960,15 +961,17 @@
     "category": "Workflow templates and schedules",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "template_outcomes_api.py projects authorized pilot reports with all planned cases, correction coverage, complete-only reported costs and explicit content-version bindings; template cards provide reviewed attribution, stale marking, exceptions and sample draft preparation; tests/test_template_outcomes.py authored unrun."
+      "template_outcomes_api.py projects authorized pilot reports with all planned cases, correction coverage, complete-only reported costs and explicit content-version bindings; template cards provide reviewed attribution, stale marking, exceptions and sample draft preparation; tests/test_template_outcomes.py locally passed."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Both test_template_outcomes cases passed in the recorded ordinary cohort; installed local browser pilot review covers exact ContentAccess approval rather than ambient administrator access. See browser-qualification.md."
     ],
     "remaining": [
-      "Execute acceptance tests later; associations are explicitly attributed rather than independent execution provenance, and provider invoices remain unverified."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Provider invoices and generalized business ROI remain unverified; product displays reported attribution, complete-case denominators and explicit unknowns."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-075",
@@ -979,12 +982,13 @@
       "71c1142: Connections separates unavailable/stale/empty/access-disabled states with bounded fetch, serial/context checks and disabled stale writes."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-076",
@@ -995,12 +999,14 @@
       "71c1142: test receipts bind revision, outcome, scope and timestamp; stale and changed-generation receipts do not claim current task authorization."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Approved live-provider consent/read-capability/renewal/revocation checks are unrun; synthetic tests and saved credentials do not establish live readiness."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-077",
@@ -1012,12 +1018,15 @@
       "e5421ea: configured own-account authorization also governs Connections page floor/default and finder; explicit admin visibility override still wins. Native provider-application controls remain global-admin-only."
     ],
     "validation": [
-      "Installed local Chrome enterprise journey: actual invited employee completes approved own Google Drive authorization with synthetic local token exchange and cannot register provider application; colleague cannot see the connection. One page-policy unit test and all ten real workspace/connection workflow regressions pass."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9.",
+      "Expanded installed Chrome enterprise lifecycle passed in browser-connected-template-04: invited operator consents only its approved own Drive, cannot register the application or expose it to a colleague; tokens are synthetic local responses."
     ],
     "remaining": [
-      "Live provider consent/refresh/revocation qualification requires approved sandbox accounts; no provider contacted."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Approved live-provider consent/read-capability/renewal/revocation checks are unrun; synthetic tests and saved credentials do not establish live readiness."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-078",
@@ -1025,16 +1034,19 @@
     "category": "Connections and extensibility",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142 already corrects local removal vs provider revocation copy; connection_dependencies.py owner-only attention adapter in progress.",
-      "connection_dependencies.py and connection_review_api.py: scoped pre-change impact digests; active-task rotation guard; staged two-record key switch, exact source CAS rebinding, retained receipts, and provider-consent handoff; Connections Used by/repair UI."
+      "71c1142 already corrects local removal vs provider revocation copy; connection_dependencies.py implemented owner-only attention adapter.",
+      "connection_dependencies.py and connection_review_api.py: scoped pre-change impact digests; active-task rotation guard; staged two-record key switch, exact source CAS rebinding, retained receipts, and provider-consent handoff; Connections Used by/repair UI.",
+      "Exact connected-input references are recognized by the dependency walker. Saved schedule selections retain original generations and require explicit reselection after rotation; active-task guard never reauthorizes old effects."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute authored and acceptance tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Approved live-provider consent/read-capability/renewal/revocation checks are unrun; synthetic tests and saved credentials do not establish live readiness."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-079",
@@ -1042,16 +1054,16 @@
     "category": "Connections and extensibility",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing OAuth callback/policy and Windows recovery foundations retained; no native or provider qualification run.",
-      "connection_review_api.py qualification matrix plus shared account inventory explicitly separate synthetic/native/live evidence and show every unobserved combination as not qualified; native/provider acceptance remains unexecuted by user instruction."
+      "connection_review_api.py and shared account inventory expose exact provider/browser/native qualification combinations and leave every unobserved combination unqualified. Synthetic, local native primitive and live service evidence remain distinct.",
+      "Native-platform qualification now records local Windows custody/path/listener-related contracts; this does not imply a signed installed distributable or approved provider-application qualification."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "See browser-qualification.md, connection_review_api.py qualification matrix, native-platform-qualification.json and native-client-qualification evidence. Local Chrome and synthetic callback/workspace/late-return contracts ran; no live provider was contacted."
     ],
     "remaining": [
-      "Qualification intentionally not claimed: installed Windows/native and live-provider checks require signed distributable build, registered application, approved provider accounts and the user-authorized testing phase."
+      "Signed installed Windows distribution with its registered provider application, native return-listener/browser handoff and each approved live-provider consent/renewal/revocation/scope/account/blocked-host combination require controlled environment qualification. Product correctly reports them as unobserved; local fixtures cannot supply this evidence."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-080",
@@ -1059,17 +1071,19 @@
     "category": "Connections and extensibility",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142 exposes catalog auth/prerequisites and readiness coverage limits; exact job capability work remains.",
-      "connection_capabilities.py fixed bounded public-provider GET manifest, exact resource identity verification, declared minimum scopes, revision-scoped receipts, explicit no-write/no-replay; Used by repair links return to saved work."
+      "71c1142 exposes catalog auth/prerequisites and readiness coverage limits; exact job capability checks implemented by the fixed manifest.",
+      "connection_capabilities.py fixed bounded public-provider GET manifest, exact resource identity verification, declared minimum scopes, revision-scoped receipts, explicit no-write/no-replay; Used by repair links return to saved work.",
+      "Integrated employee activation/job-card workflow (LW146) stores a durable exact blocked intent and explicit reviewed connection-return draft. Repair never automatically executes or duplicates it; read checks do not qualify writes."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute authored and acceptance tests during the user-authorized testing phase.",
-      "Exact intent resume uses operation recovery (LW-146); connection repair itself never starts or replays blocked work. No write capability is qualified by a read check."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Approved live-provider consent/read-capability/renewal/revocation checks are unrun; synthetic tests and saved credentials do not establish live readiness."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-081",
@@ -1093,7 +1107,7 @@
       "Connection-only gRPC servers and arbitrary multi-file/argument-heavy Node or gRPC launchers need an exact reviewed bundled local entry before qualification; they are explicitly blocked rather than represented as a verified version.",
       "Publication records whether timeout/cancellation interrupted dispatch or the exact result finished first; fast completion is never claimed as observed interruption. Customer acceptance should include a deliberately slow synthetic sample where the plugin supports one."
     ],
-    "evidence_slice": "slices/plugin-adapters.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-082",
@@ -1104,12 +1118,13 @@
       "71c1142: editing snapshot retains original revision; conflict displays draft/current public data; only explicit reload adopts new record; JS two-tab test authored."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-083",
@@ -1121,12 +1136,13 @@
       "lightwork-connections.js now makes unknown/retired adapters unsaveable and explains reviewed replacement; catalog completion can safely unlock a recognized preserved adapter."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute long-tail and unknown-adapter interaction acceptance tests later."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-084",
@@ -1137,12 +1153,14 @@
       "71c1142: public-200 invalid-credential control remains conservative; persisted outcomes separate auth refusal, policy, unknown reachability and service failure."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Approved live-provider consent/read-capability/renewal/revocation checks are unrun; synthetic tests and saved credentials do not establish live readiness."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-085",
@@ -1153,12 +1171,13 @@
       "71c1142: synchronous busy guard, bounded waits, unknown mutation reconciliation by explicit refresh, credential clearing, serial/context response rejection."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-086",
@@ -1170,12 +1189,14 @@
       "shared account inventory renders distinct account domain/name/owner/identity/workspace/site/grants/renewal and dependent-work review links; exact owner/context filtering; unknown legacy identity/grants/usage coverage is visible."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute authored and acceptance tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Approved live-provider consent/read-capability/renewal/revocation checks are unrun; synthetic tests and saved credentials do not establish live readiness."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-087",
@@ -1186,12 +1207,14 @@
       "71c1142: docs/connectors.md and catalog UI give product-first preset/long-tail setup and honest saved/check distinctions."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Approved live-provider consent/read-capability/renewal/revocation checks are unrun; synthetic tests and saved credentials do not establish live readiness."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-088",
@@ -1202,12 +1225,14 @@
       "71c1142: free validated AWS region entry plus suggestions; credential preservation on grant-only edit; backend region validation and explicit partition qualification caveat."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Recorded ordinary local subsets: core Connections34, OAuth30, OAuth registration12 and dashboard Connections20 all passed. Browser/DOM error, two-tab CAS, adapter preservation and context isolation are covered by audit_connections/discovery_connections and browser-qualification.md; root recorded all1594JS passing on qualification-d822db9."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "AWS partition/endpoint/egress support is separately unqualified; accepting a syntactically supported region does not establish live partition access. No AWS credentials or root account were used."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-089",
@@ -1218,12 +1243,14 @@
       "71c1142: extension points to Settings, required token explained before submission, policy endpoint reports effective deployment state and administrator recovery."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Local extension static8 and CORS14 cases passed in qualification-b0a7eea-ordinary.xml. Existing extension popup/source contracts preserve independent capture categories, required-token preflight, fresh policy binding and no-goal cancellation."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Installed browser-extension packaging, authenticated browser-host integration and assistive-technology traversal remain deployment/device qualification; fixtures do not prove those combinations."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-090",
@@ -1234,12 +1261,14 @@
       "71c1142: independently removable URL/selection/structure/form-value categories, exact pre-submit preview, fresh policy binding, form values default off, downstream processing disclosure and cancellation without goal admission."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Final acceptance review reread all source criteria and current implementation. Static Python/JS checks and local regression results are evidence of the reviewed checkout, not live service qualification.",
+      "Local extension static8 and CORS14 cases passed in qualification-b0a7eea-ordinary.xml. Existing extension popup/source contracts preserve independent capture categories, required-token preflight, fresh policy binding and no-goal cancellation."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Final merged-cohort regression qualification remains parent-owned; no implementation decision is pending.",
+      "Installed browser-extension packaging, authenticated browser-host integration and assistive-technology traversal remain deployment/device qualification; fixtures do not prove those combinations."
     ],
-    "evidence_slice": "slices/connections.json"
+    "evidence_slice": "slices/connections-final.json"
   },
   {
     "id": "LW-091",
@@ -1801,8 +1830,8 @@
     "implementation_evidence": [
       "api feedback/edit return separate saved/learning_observation/training_completed fields; optional grounding exceptions are contained; editor/feedback copy no longer claims training."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "Shared task operation tests exercise saved-result CAS and receipt recovery; test_signoff.py passed including separate explicit learning observations and Stop-not-dislike cases. Current answer-panel controller tests passed. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "No remaining implementation gap identified; configured external training/provider outcome qualification is separate and no training completion is inferred from saving.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1825,8 +1854,8 @@
     "implementation_evidence": [
       "ProjectReviews.revision_draft creates an idempotent owner-private unstarted task from the exact packet/comments using durable native admission. Review UI opens its spending/start review, then links a changed result to the predecessor with required change summary and fresh reviewer/team/source checks. New packet identity/status cannot inherit prior acceptance; source and packet reads remain freshly authorized."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit.",
+    "validation": "Core test_project_reviews.py (18), test_project_reviews_api.py (5), native review adapter tests and project_reviews.test.js passed: fixed packet/source revisions, current reviewer rights and distinct revision/acceptance behavior. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Dedicated backend and installed authenticated multi-reviewer qualification remain; reviewed copies do not confer execution rights.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1837,8 +1866,8 @@
     "implementation_evidence": [
       "approval decisions return received/required counts; UI renders progress, restores own recorded-vote state after reload and prevents repeated Approve."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "Core test_quorum.py (28) passed. Queue implementation retains recorded-vote state and received/required counts; current action-card fingerprints still gate decisions. Whole-application queue/browser qualification is owned by the root run. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed multi-reviewer keyboard/refresh qualification remains; independent reviewer identity and changed-action binding are still enforced natively.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1849,8 +1878,8 @@
     "implementation_evidence": [
       "GET /approvals/history filters requested_by plus currently accessible attached task, keyset pages exact requester records without global audit atom, uses integrity-checked/redacted approval cards and separate authorization versus current execution fields. _approvals_queue now links this history and deadline/retry controller."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit.",
+    "validation": "Four new test_requested_approval_history.py cases pass against real SQLite approval records: requester-only visibility without global audit, current task permission revocation, cursor continuation through filtered pages, and secret redaction with no implied execution. Detailed run provenance: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed ordinary-operator and independently reviewed-content browser qualification remains; owner/requester history never substitutes for global audit permission.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1861,8 +1890,8 @@
     "implementation_evidence": [
       "Project-review captured-result outcome timeline labels acceptance, pending/changes/withdrawal and next owner separately from task execution, final signoff and external verification. Approval queue and private history independently label recorded authorization versus unconfirmed execution; no packet approval signs off or runs a task."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit.",
+    "validation": "Core/API project review suites (23 combined), project_reviews.test.js and signoff tests passed; review acceptance remains independent of execution, release signoff and external verification. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed multi-person workflow qualification remains; execution, review, signoff, publication and external verification intentionally remain separate states.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1876,8 +1905,8 @@
       "Common runner and chat follow-up/restart gates reject closed source work; persistent successor spending ceiling can only tighten runtime budget. Credentials, connections, source bindings, learned memory and project memberships are not transferred.",
       "Native /task-handoffs review/receipt UI, feature/settings/installer controls and tasks.offer_handoff/respond_handoff Copilot adapters use same service. Distinct continuation link requires explicit start; no automatic provider or external messaging."
     ],
-    "validation": "25 focused local Python handoff/bundle/typed-operation tests passed (13 handoff, nine bundle, three operation cases), plus 10 task-operation/answer-projection tests and six jsdom answer/handoff controller tests. Static Python/JS/Jinja/Ruff/whitespace checked. No live provider calls.",
-    "remaining": "Qualify native PostgreSQL/distributed session leases and installed authenticated browser. Accepted/downloaded copies cannot be recalled. Root-coordinated full integrated suite remains required.",
+    "validation": "Core test_task_handoffs.py (13), test_deliverable_bundles.py (9), product_operations_handoffs.py (3) and handoff controller tests passed. New native rendered-projection test plus live controller test verifies accepted source closure becomes visible without replacing the follow-up draft. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Dedicated PostgreSQL/distributed execution-lease qualification remains. Original history stays private; accepted/downloaded selected copies cannot be recalled; the successor needs explicit spending/start review.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1889,10 +1918,10 @@
       "deliverable_bundles.py captures exact selected artifact versions, original evidence bytes and optional result with one named recipient, expiring current-membership ACL, human acceptance separate from integrity, stale source checks, CAS response and exact duplicate receipt.",
       "deliverable_bundle_export.py preserves selected original native files, editable Markdown/complete-table formula-safe CSV, escaped HTML, review record and offline browser SHA-256 manifest checker; ZIP entries verified before release and no prior bundle changed on failure.",
       "Native /deliverable-bundles UI, per-file/export authorization, feature knob, settings labels, installer question and source-task link implemented. Copilot artifact share/accept/revoke/download adapters use same service.",
-      "Root confirmed shared catalog multiselect typed arrays and safe local href links implemented for bundle create/download and pending integration commit."
+      "Integrated shared catalog multiselect typed arrays and safe local href links support bundle create/download."
     ],
-    "validation": "Nine bundle cases within 21 passing native SQLite bundle/handoff tests. Added online safe preview routes map captured originals to authorized file endpoints; supplemental CSV/manifest/verifier links retrieve complete ZIP. Python/JS/Jinja/Ruff and whitespace reviewed; full PostgreSQL/installed browser acceptance pending.",
-    "remaining": "Root must preserve shared catalog multiselect/local-link additions during integration. Local native/browser/PostgreSQL acceptance still required; offline consistency is not source authenticity, factual validation or external filing.",
+    "validation": "Core test_deliverable_bundles.py (9), task handoffs (13) and typed handoff operations (3) passed, including stale source/ACL/receipt boundaries and selected export. Current shared catalog has typed multiselect and authorized local download links. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed exported-file rendering and independent offline-browser qualification remain; manifest integrity does not prove factual truth, source authenticity or external filing. Shared catalog/UI integration is present.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1905,15 +1934,11 @@
       "GET /chat/goal/{goal_id}/answer-panel revalidates exact content authority and source twice; no-store context-bound projection refuses concurrent source changes.",
       "lightwork-answer-panel.js updates on terminal/artifact events, focus and bounded polling; preserves composer/focus/scroll, defers replacement of unsaved edits/review notes, provides retry and clears private content on access/context changes.",
       "Migrated root integrated deliverable CAS controller into idempotent panel lifecycle; preserved operation receipt, dirty edit, explicit conflict compare and no reload.",
-      "Independent overlapping implementation, reviewed against separate PR2529 at SHA 326402bf115a6d6de2adc255e3a1cc9d75fd37a9; that PR was neither imported, modified nor closed."
+      "Independent overlapping implementation, reviewed against separate PR2529 at SHA 326402bf115a6d6de2adc255e3a1cc9d75fd37a9; that PR was neither imported, modified nor closed.",
+      "Accepted-handoff explanation now lives inside#answer-panel, so live source closure and read-only controls update together; terminal events also refresh late-produced attachments."
     ],
-    "validation": [
-      "Python AST, JavaScript syntax, Jinja parser when available and git whitespace checks. Authored test_answer_projection.py and js/answer_panel.test.js; not executed."
-    ],
-    "remaining": [
-      "Run authenticated running-to-completed parity, current permissions, sign-off/artifact freshness, keyboard focus, read-aloud lifecycle and narrow layout acceptance.",
-      "Root integration must preserve accessibility read-aloud lifecycle commit 5f84f082fcc763444e174981ca933b170e9df67b and merged identity gate."
-    ],
+    "validation": "test_answer_projection.py now passes five cases, including closure changing source version and the production notice inside the replaceable section. answer_panel.test.js (4), attachment_lifecycle.test.js (5) and the broader 139-case controller group pass: real running-to-done event, saved artifacts/signoff once, unchanged composer focus/text/scroll, permission clearing and late attachment refresh. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md. The four audit_accessibility.test.js cases also pass, including aborting pending read-aloud on answer replacement and binding the new result once without autoplay.",
+    "remaining": "Installed keyboard/screen-reader/narrow-layout qualification remains. No remaining running-to-completed or handoff-closure implementation gap identified in this review; current i18n and read-aloud lifecycle hooks are preserved.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1922,10 +1947,11 @@
     "category": "Review deliverables and collaboration",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Explicit POST share/preview returns exact title/result/latest artifacts, anyone-with-link scope and allowed 1-hour/1-day/7-day lifetimes under the existing seven-day ceiling. Create requires confirmation plus matching source SHA; governed metadata stores label and reviewed version. New r1_ tokens fail closed until metadata exists and after any result/artifact change; public page preserves live release gates. Management shows expiry, revoked/stale state and uncertain-response recovery; legacy tokens retain existing release checks."
+      "Explicit POST share/preview returns exact title/result/latest artifacts, anyone-with-link scope and allowed 1-hour/1-day/7-day lifetimes under the existing seven-day ceiling. Create requires confirmation plus matching source SHA; governed metadata stores label and reviewed version. New r1_ tokens fail closed until metadata exists and after any result/artifact change; public page preserves live release gates. Management shows expiry, revoked/stale state and uncertain-response recovery; legacy tokens retain existing release checks.",
+      "Sharing controller clears links, one-time token and exact preview on401/403/404/shared access loss, aborts in-flight work and rejects late private responses; informed native create remains unchanged."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Regression tests authored and pending the now-authorized root-coordinated local run; authenticated browser and PostgreSQL integration qualification remain explicit.",
+    "validation": "test_share_links_service.py (9) and new deliverable_sharing_lifecycle.test.js (3) passed: informed preview before create, current source release gates, revocation/expiry, 404 clearing and ignored late private previews after permission loss. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed browser/real deployment-origin qualification remains. Downloaded/forwarded copies cannot be recalled; new result/artifact versions require new informed release.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1936,8 +1962,8 @@
     "implementation_evidence": [
       "goal_share_previews persists encrypted attempt before dispatch, suppresses resend on unknown outcome, lists prior attempts across reload and reconciles via read-only GitHub lookup."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "test_goal_share_previews.py (5) passed with local injected provider responses, including uncertain post-dispatch failure, durable attempt receipts, no blind resend and bounded reconciliation. No real GitHub request was made. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Actual GitHub network/permission behavior was not called. Reconciliation of an absent item in the bounded latest 100 list cannot prove non-disclosure; user must inspect original destination.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1948,8 +1974,8 @@
     "implementation_evidence": [
       "run_share.MissingGitHubToken and ReplayEvidenceError receive distinct remedies; evidence preparation precedes upload; confirmed 4xx rejection differs from uncertainty."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "Core test_run_share.py (3) plus goal-share preview cases passed with local injected provider seams; missing connection/evidence preparation failure/rejected response remain distinct, and evidence failure precedes any upload. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Live provider behavior remains untested by design; local fault injection verifies remedy classification and zero upload on evidence preparation failure.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1960,8 +1986,8 @@
     "implementation_evidence": [
       "cancel_goal no longer submits value 0.0 learning feedback; explicit ratings continue through existing policy."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "test_signoff.py includes two passing StopDoesNotJudgeQuality cases and three explicit learning-grounding cases. Eligible observation inspection/withdrawal is supplied by the integrated My Data and existing governed learning-operation services. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Configured external learning pipelines/models remain separate from recorded feedback and withdrawal; no completed model training is undone by Stop or promised by save.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1972,8 +1998,8 @@
     "implementation_evidence": [
       "GitHub sharing prepares exact canonical outbound JSON, identifies destination account, previews scope/content and binds confirmation to encrypted context/digest/connection; unknown outcomes retained."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "Local goal-share preview tests (5) and core run-share tests (3) passed; exact serialized outbound payload/hash/context/account/connection are reviewed and persisted before any provider dispatch. Tests use injected provider responses only. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Actual GitHub disclosure was not performed; approved snapshot semantics remain explicit and do not promise universal business-content redaction.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1984,8 +2010,8 @@
     "implementation_evidence": [
       "Downloaded standalone offline archive viewer opens schema-v1 bundles locally without network/actions, displays provenance and explicit legacy-completeness caveat, refuses invalid/newer/oversized files."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "Core test_offline_bundle.py (12) passed: independently read archive compatibility, local schema/checksum validation and useful invalid/newer/oversized refusals. Viewer is read-only; current task execution never inherits imported authority. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed offline WebCrypto/file-picker/browser qualification remains. Archive viewing is implemented; resumable cross-installation execution is intentionally not implied.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -1999,13 +2025,8 @@
       "HTTP archive streams the completed private temporary file in 64 KiB chunks, rechecks current content authority and source ownership before release, and closes temporary storage on completion/cancellation.",
       "Compatible v1 goal/events/episodes body retains canonical SHA-256; manifest records exact counts, scope and consistent snapshot. Offline viewer verifies counts and raw canonical payload checksum using local WebCrypto, or explicitly reports inability to verify."
     ],
-    "validation": [
-      "Python AST, JavaScript syntax, Ruff on new archive/service modules and git whitespace checks passed. Native oversized/snapshot-concurrency/bounded-stream/checksum regression cases authored.",
-      "User authorized local suites after implementation; root coordinates integrated qualification. No suites or provider calls run in this checkpoint."
-    ],
-    "remaining": [
-      "Run native SQLite and PostgreSQL snapshot/concurrency qualification, authorized streaming/cancelled-download tests and offline browser checksum cases."
-    ],
+    "validation": "Core test_goal_bundle_completeness.py (5) and test_offline_bundle.py (12) passed. Oversized event/episode counts fail before bytes are released; manifest counts, total-byte bound and snapshot-concurrency checks run locally on SQLite. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Dedicated PostgreSQL repeatable-read and installed cancelled-download/large-file memory qualification remain. Current product explicitly refuses beyond 10,000 events, 200 episodes or 20 MiB instead of silently exporting incomplete history.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -2016,8 +2037,8 @@
     "implementation_evidence": [
       "Authorized handoff.html produces escaped readable objective/outcome/versioned artifacts/source URLs/questions/permissions/completeness, separate from unsanitized technical archive."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and pending the now-authorized root-coordinated local run. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Local acceptance is now authorized after implementation and will be run by the integration owner. No test suite or live provider call was run for this checkpoint.",
+    "validation": "Core test_deliverable_handoff.py (4) and offline archive tests (12) passed. Readable escaped handoff contains provenance/completeness and remains a separate authorized output from the warned technical archive. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "remaining": "Installed assistive-technology/print-layout qualification remains. Technical archive may contain internal/tool details and is never described as universally scrubbed.",
     "evidence_slice": "slices/conversation.json"
   },
   {
