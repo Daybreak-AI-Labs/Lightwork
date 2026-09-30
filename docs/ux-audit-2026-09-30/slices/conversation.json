@@ -9,9 +9,13 @@
   {
     "id": "LW-002",
     "status": "planned",
-    "implementation_evidence": "Existing typed learning-example operations remain preserved.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Expand shared typed operation catalog to task/clarification/review/schedule/connection/artifact operations and carry freshness across interfaces."
+    "implementation_evidence": [
+      "Shared typed operation catalog foundation/settings adapter supplied by settings worker 5b22e3b.",
+      "product_operations_tasks.py registers native current task projection, text clarification admission/receipt recovery, CAS saved-result edit and fixed project-review responses. Explicit human confirmation, current owner/membership, source revision and exact native receipt replay remain shared with UI.",
+      "docs/ux-audit-2026-09-30/conversation-operation-matrix.md tracks actual behavior and limits."
+    ],
+    "validation": "Ruff, AST and whitespace checks passed. Native regression tests authored; root coordinates full local suites after implementation per latest user authorization. No provider calls.",
+    "remaining": "Family coverage and remaining stop/restart, accepted transfer and selected bundle native adapters still in progress; do not count catalog infrastructure alone as full product parity."
   },
   {
     "id": "LW-003",
@@ -157,7 +161,7 @@
     "status": "planned",
     "implementation_evidence": "Existing project ownership and packet boundary preserved.",
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Outcome/acceptance metadata, authorized context bundles, milestones/dependencies/latest accepted deliverable and freshness remain."
+    "remaining": "Project workspace implementation ownership transferred to settings_integrity worker; no duplicate edits here. Root must integrate their complete per-ID evidence."
   },
   {
     "id": "LW-125",
