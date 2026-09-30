@@ -1,104 +1,147 @@
 # Starter goals
 
-Ten curated, runnable goals to bootstrap new users. Each is ~3 minutes
-of agent runtime on Claude Sonnet 4.6 with a sensible budget.
+Eight first tasks, one per business team. Each runs a real specialist on
+bundled sample data for a made-up company (Northwind Fixtures) and hands
+the result to you for review. Nothing is paid, sent, provisioned or changed
+without your sign-off.
 
-Use any of these via `maverick start "<paste-the-goal>"`.
+Everything a sample task produces is marked as sample data and never counts
+as real evidence.
+
+## How to run one
+
+- **Setup wizard:** the last question in `maverick init` asks which team
+  will try Lightwork first. The wizard creates the team's sample workspace
+  under your work folder (`sample-outcomes/<team>/`) and prints the command
+  to run.
+- **Dashboard:** open Get started and use "Run your first task on sample
+  data". Pick the team and click Run. If no AI service is connected yet, the
+  page says so and links to Settings.
+- **Command line:** copy the command under the team below. No `--model`
+  flag is needed; the specialist and your configured models decide.
+
+The sample files live in the installed package under
+`maverick/sample_outcomes/<team>/`. Each folder has a `README.md` that says
+what a correct result contains, so you can check the answer yourself.
 
 ---
 
-## 1. Code review
+## 1. Finance: accounts payable three-way match
+
+Specialist: `finance_ap`. Result waits in **Approvals** (a payment batch
+is staged, never released).
 
 ```
-Review the most recent commit on this branch. Identify any logic bugs,
-missing edge cases, or style issues. Output a numbered list of findings,
-each with file:line references. Don't change any code.
+maverick start "Sample: Match this month's invoices to purchase orders and receipts, and list every exception before anything is paid." --domain finance_ap
 ```
 
-## 2. Bug repro from issue text
+Sample data: six invoices, five purchase orders, five goods receipts and a
+vendor master. A correct result flags INV-1043 as a duplicate of INV-1041,
+INV-1044 as a price mismatch against PO-2203, and INV-1045 (Sunrise Facility
+Services) as a vendor not on the master, and clears the other three.
+
+## 2. Privacy & compliance: a rights request against the data map
+
+Specialist: `privacy_compliance`. Result waits in **Results**.
 
 ```
-We have a bug report: "<paste user-reported behavior>". Reproduce it
-by writing the smallest failing test, then propose a fix. Don't apply
-the fix yet -- show me the diff.
+maverick start "Sample: Work out which systems hold this customer's data and what we must tell them to answer their rights request." --domain privacy_compliance
 ```
 
-## 3. Refactor a function
+Sample data: a five-row data map and one customer access-and-objection
+request. A correct result names the three systems holding the customer's
+data, excludes payroll, lists the recipients to disclose, treats the
+newsletter removal as a consent withdrawal, and states the one-month
+deadline.
+
+## 3. Security: phishing triage
+
+Specialist: `sec_phishing`. Result waits in **Approvals** (containment
+steps need the on-call person's approval).
 
 ```
-Refactor <path/to/file.py>::<function_name> into smaller, testable
-units. Preserve behavior. Add tests covering each split. Run the test
-suite to verify nothing regressed.
+maverick start "Sample: Check these reported emails, tell me which ones are phishing and who needs warning, and propose containment steps." --domain sec_phishing
 ```
 
-## 4. Add a feature
+Sample data: a five-message mailbox export and the company's known sender
+list. A correct result marks MSG-7002 (look-alike helpdesk domain with a
+sign-in link) and MSG-7003 (misspelled vendor domain asking to change bank
+details) as suspicious and clears the rest.
+
+## 4. Legal: NDA desk
+
+Specialist: `legal_nda_desk`. Result waits in **Results**.
 
 ```
-Add a `--<flag>` option to `<command>` that <describe behavior>.
-Update the CLI help text. Write a test that exercises the new flag.
-Don't merge to main -- leave the change uncommitted.
+maverick start "Sample: Review these three NDAs against our playbook and tell me which ones counsel needs to look at and why." --domain legal_nda_desk
 ```
 
-## 5. Write tests for uncovered code
+Sample data: a seven-point playbook and three short NDAs. A correct result
+clears Harbor Supply Co, flags Pinecrest Labs (7-year term and a
+non-solicitation clause) and flags Summit Retail Group (residual knowledge
+clause) while accepting its Delaware governing law.
+
+## 5. HR: new-hire onboarding plan
+
+Specialist: `hr_onboarding`. Result waits in **Results**.
 
 ```
-Find a file in this repo with low test coverage (use coverage.py to
-identify candidates). Write tests covering the missing branches. Aim
-to push coverage on that file to >=80%.
+maverick start "Sample: Build the day-one plan for our new warehouse coordinator from the hire record and the provisioning checklist." --domain hr_onboarding
 ```
 
-## 6. Research a library
+Sample data: one new-hire record and the day-one checklist. A correct
+result lists the standard and warehouse-specific items, confirms payroll
+can be enrolled, flags the missing emergency contact form, and leaves out
+the forklift check.
+
+## 6. Procurement: overdue purchase orders
+
+Specialist: `proc_po_chaser`. Result waits in **Results**.
 
 ```
-We're considering adopting <library-name>. Read its docs, identify
-its license, last release date, GitHub stars, and any unresolved
-critical bugs. Compare it to <alternative>. Output a 1-page summary
-with a recommendation.
+maverick start "Sample: Which open purchase orders are overdue, which ones put us closest to a stockout, and who should chase them?" --domain proc_po_chaser
 ```
 
-## 7. Migrate dependency
+Sample data: five open POs and a supplier contact list (today is
+2026-09-24 in the sample). A correct result names PO-2305 and PO-2302 as
+overdue, ranks PO-2305 first (3 days of stock), and notes PO-2303 has never
+been acknowledged.
+
+## 7. Customer support: ticket insights
+
+Specialist: `cx_ticket_insights`. Result waits in **Results**.
 
 ```
-We're on <library-name>==<old-version>. The latest is <new-version>.
-Read the changelog, identify breaking changes, plan the migration as
-a checklist, and apply non-breaking changes now. Stop and ask before
-any breaking change.
+maverick start "Sample: Tell me what is driving this month's support tickets, which ones are still open, and where we need more coverage." --domain cx_ticket_insights
 ```
 
-## 8. Triage and label issues
+Sample data: twelve September tickets. A correct result names delivery as
+the largest driver (six tickets), shows all four open tickets are email
+delivery tickets with slow first responses, and flags label printers as a
+smaller recurring theme.
+
+## 8. Tax: notice response
+
+Specialist: `tax_irs_notice`. Result waits in **Results**.
 
 ```
-Read the last 20 open issues in this repo. For each, propose a label
-(`bug`/`feature`/`docs`/`question`/`good-first-issue`) and a one-line
-status summary (needs-repro / clear-action / waiting-for-user / etc).
-Don't apply labels -- output the list.
+maverick start "Sample: Read this tax notice, tie the proposed adjustment to our workpapers, and draft a response for the preparer." --domain tax_irs_notice
 ```
 
-## 9. Draft a release post
-
-```
-Read the last 30 commits. Group them into themes (features / fixes /
-internal). Draft a release blog post (~400 words) suitable for the
-Lightwork newsletter. Include a "What's next" section based on
-docs/ROADMAP.md.
-```
-
-## 10. Investigate a failing test
-
-```
-Run the test suite (or just `pytest <failing-test>`). For each failure,
-inspect the source, identify the root cause, and propose the minimal
-fix. Don't apply yet -- summarize each failure with a recommended
-action.
-```
+Sample data: a mock notice proposing a 22,500.00 income adjustment and the
+preparer's workpaper summary. A correct result ties the difference to
+18,300.00 of refunds and 4,200.00 of sales tax, concludes no additional tax
+is owed, and drafts the response for the preparer to sign.
 
 ---
 
 ## Adding your own
 
-Submit starter goals as a PR to this file. Criteria:
+Submit starter goals as a PR to `maverick/sample_outcomes/` and this file.
+Criteria:
 
-- Self-contained (works against any reasonable repo / project).
-- Bounded scope (one focused task, not a multi-day project).
-- Safe by default (no destructive ops without `ask first`).
-- Honest about what success looks like.
+- One team, one specialist that already exists, one concrete question a
+  business user would ask.
+- Small, clearly made-up sample data (a few KB), with a `README.md` that
+  says what a correct result contains.
+- Safe by default: the result waits for a person in Approvals or Results.

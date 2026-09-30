@@ -21,6 +21,37 @@
       window.location.reload();
     } catch (error) { message.textContent = error && error.plain ? error.message : errText(error, 'save the initial settings'); button.disabled = false; }
   });
+  var outcomeForm = document.getElementById('first-outcome-form');
+  if (outcomeForm) {
+    var select = document.getElementById('first-outcome-department');
+    var goalLine = document.getElementById('first-outcome-goal');
+    var showGoal = function () {
+      var option = select.options[select.selectedIndex];
+      if (option && goalLine) goalLine.textContent = 'The task: "' + option.getAttribute('data-goal') + '" The result waits in ' + option.getAttribute('data-lands-in') + '.';
+    };
+    select.addEventListener('change', showGoal); showGoal();
+    outcomeForm.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      var button = document.getElementById('first-outcome-run');
+      var message = document.getElementById('first-outcome-message');
+      if (button.disabled) return;
+      button.disabled = true; message.textContent = 'Creating the sample workspace and starting the task…';
+      try {
+        var response = await fetch('/api/v1/first-outcome/run', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({department:select.value})});
+        var result = null;
+        try { result = await response.json(); } catch (ignored) { result = null; }
+        if (response.status === 409 && result && result.detail && result.detail.ready === false) {
+          message.textContent = result.detail.detail + ' ';
+          var link = document.createElement('a'); link.href = result.detail.href; link.textContent = 'Connect an AI service'; message.appendChild(link);
+          return;
+        }
+        if (!response.ok || !result || !result.href) throw plainError(errText(response, 'start the sample task'));
+        message.textContent = 'The sample task is running. Its result will wait in ' + result.lands_in + '. Opening it…';
+        window.location.assign(result.href);
+      } catch (error) { message.textContent = error && error.plain ? error.message : errText(error, 'start the sample task'); }
+      finally { button.disabled = false; }
+    });
+  }
   var download = document.getElementById('setup-download');
   if (download) download.addEventListener('click', async function () {
     if (download.disabled) return;

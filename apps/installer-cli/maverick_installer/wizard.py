@@ -8949,6 +8949,7 @@ def write_config(
     license_cfg: dict[str, Any] | None = None,
     governance_profile: str | None = None,
     per_tenant_keys: bool = False,
+    first_outcome: dict[str, Any] | None = None,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     sandbox = _prepare_wizard_workspace(sandbox)
@@ -9114,6 +9115,7 @@ def write_config(
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)
     lines += _cfg_table("a2a", a2a)
+    lines += _cfg_table("first_outcome", first_outcome)
 
     # SECURITY: config.toml is NOT secret-free. Unlike API keys (which live in
     # ~/.maverick/.env and are referenced via ${VAR}), the OIDC browser-login
@@ -9289,8 +9291,51 @@ def run_fast() -> int:
     return 0
 
 
-CONSUMER_DEMO_GOAL = "Write me a haiku about Tuesday."
-CONSUMER_DEMO_MODEL = "anthropic:claude-haiku-4-5"
+def first_outcome_choices() -> list[str]:
+    """Menu labels for the department picker, from the kernel's list."""
+    from maverick.sample_outcomes import departments
+
+    return [row["label"] for row in departments()]
+
+
+def pick_first_outcome() -> str:
+    """Final consumer question: which team tries Lightwork first?
+
+    Returns the department slug for :mod:`maverick.sample_outcomes`. Falls
+    back to the default department on anything it doesn't recognise, so an
+    <Enter> or a stubbed answer never lands outside the eight choices.
+    """
+    from maverick.sample_outcomes import DEFAULT_DEPARTMENT, get, resolve_department
+
+    console.print()
+    console.print(
+        "[dim]Your first task runs a real specialist on bundled sample data "
+        "(a made-up company). Everything it produces is marked as sample "
+        "data and never counts as real evidence.[/dim]"
+    )
+    pick = _q_select(
+        "Which team will try Lightwork first?",
+        first_outcome_choices(),
+        default=get(DEFAULT_DEPARTMENT).label,
+    )
+    return resolve_department(pick) or DEFAULT_DEPARTMENT
+
+
+def prepare_first_outcome(department: str, workdir: str) -> dict[str, Any]:
+    """Create the department's sample workspace under ``workdir``.
+
+    Returns the ``[first_outcome]`` table to record: the chosen department
+    and whether the sample workspace was actually created (a copy failure
+    is recorded as ``false``, never hidden).
+    """
+    from maverick.sample_outcomes import create_sample_workspace
+
+    created = True
+    try:
+        create_sample_workspace(department, workdir)
+    except OSError:
+        created = False
+    return {"department": department, "sample_workspace_created": created}
 
 
 def pick_mode() -> str:
@@ -9383,6 +9428,7 @@ def write_consumer_config(
     workdir: str,
     budget: dict[str, float],
     profile: str | None = None,
+    first_outcome: str | None = None,
 ) -> None:
     """Write a consumer-mode config with the safety-seat safe defaults.
 
@@ -9392,8 +9438,10 @@ def write_consumer_config(
     ``profile`` is the governance level from :data:`GOVERNANCE_PROFILES`
     (unknown values fall back to the default) -- it layers the learning
     lifecycle + governance posture on top of the safety-seat base, which
-    is identical at every level. Creates the workspace dir. Raises on
-    write failure (caller renders the branded error).
+    is identical at every level. Creates the workspace dir, and the sample
+    workspace for ``first_outcome`` (a department slug from
+    :mod:`maverick.sample_outcomes`) when one was picked. Raises on write
+    failure (caller renders the branded error).
     """
     preset = GOVERNANCE_PROFILES.get(profile or "")
     if preset is None:
@@ -9402,6 +9450,10 @@ def write_consumer_config(
             GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE],
         )
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
+    first_outcome_table = (
+        prepare_first_outcome(first_outcome, str(Path(workdir).expanduser()))
+        if first_outcome else None
+    )
     backend = "docker" if _docker_available() else "local"
     # Computer + browser always require explicit opt-in (consumer is
     # never asked). When there's no Docker sandbox to contain it, also
@@ -9443,6 +9495,7 @@ def write_consumer_config(
         persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
         web_search_enabled=True,
         governance_profile=profile,
+        first_outcome=first_outcome_table,
     )
 
 
@@ -9482,6 +9535,8 @@ def run_consumer() -> int:
 
     budget = _consumer_budget()
 
+    department = pick_first_outcome()
+
     try:
         write_consumer_config(
             user_name=user_name,
@@ -9489,23 +9544,27 @@ def run_consumer() -> int:
             workdir=workdir,
             budget=budget,
             profile=profile,
+            first_outcome=department,
         )
     except Exception as e:
         show_install_failure(e)
         return 1
 
-    # First-goal nudge. Don't run the goal here (the kernel doesn't
+    # First-outcome nudge. Don't run the task here (the kernel doesn't
     # stream into a wizard window today, and shelling out from inside
-    # the installer is ugly); print the one-liner instead. The Haiku
-    # model keeps the demo under $0.01 and finishes in a couple of
-    # seconds even on cold connections.
+    # the installer is ugly); print the one-liner instead. No model flag:
+    # the pack and the configured role models pick the model.
+    from maverick.sample_outcomes import cli_command
+    from maverick.sample_outcomes import get as first_outcome_for
+
+    outcome = first_outcome_for(department)
     console.print()
     if keys:
         console.print(
             Panel.fit(
                 f"[bold green]Setup complete, {user_name}.[/bold green]\n\n"
-                "Try your first goal:\n"
-                f'  [bold]maverick start "{CONSUMER_DEMO_GOAL}" --model {CONSUMER_DEMO_MODEL}[/bold]\n\n'
+                f"Your first task ({outcome.label}, on sample data, waits in {outcome.lands_in}):\n"
+                f"  [bold]{cli_command(department)}[/bold]\n\n"
                 "Then:\n"
                 "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
                 "[dim]The maverick command is also available as lightwork.[/dim]",

@@ -1050,6 +1050,18 @@ def get_features() -> dict:
     }
 
 
+def get_first_outcome() -> dict:
+    """Return the ``[first_outcome]`` section written by setup: which
+    department's sample first task the user picked and whether its sample
+    workspace was created. Absent = nothing picked yet."""
+    cfg = load_config().get("first_outcome", {}) or {}
+    department = cfg.get("department")
+    return {
+        "department": str(department) if department else None,
+        "sample_workspace_created": cfg.get("sample_workspace_created", False) is True,
+    }
+
+
 def get_safety() -> dict:
     """Return safety section with sensible defaults filled in."""
     cfg = load_config().get("safety", {})
