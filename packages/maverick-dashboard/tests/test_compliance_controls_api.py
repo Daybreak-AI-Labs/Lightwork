@@ -3,6 +3,7 @@ data (export / erase), auditor downloads, the AI Act self-check and the
 control finder."""
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -47,11 +48,47 @@ def _seed_person():
     return conv
 
 
+def _retention_review():
+    response = client.post("/api/v1/compliance/retention/preview")
+    assert response.status_code == 200, response.text
+    return {"review_id": response.json()["id"], "confirm_no_holds": True}
+
+
+def _reviewed_export(monkeypatch):
+    """Exercise the native, independent grant before reading channel content."""
+    from maverick_dashboard import auth, content_access, rbac
+
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    actor = ["user:privacy-requester"]
+    for name in (actor[0], "user:privacy-reviewer"):
+        rbac.set_role(name, "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda _: actor[0])
+    body = {"channel": "slack", "user": "U123"}
+    assert client.post("/api/v1/compliance/people/export", json=body).status_code == 403
+    request = client.post("/api/v1/content-access", json={
+        "resource_kind": "subject_data", "resource_id": json.dumps(["slack", "U123"], separators=(",", ":")),
+        "purpose": "rights_request", "minutes": 5,
+    })
+    assert request.status_code == 200, request.text
+    row = request.json()
+    decision = {"expected_revision": row["revision"], "decision": "approve"}
+    endpoint = f"/api/v1/content-access/{row['id']}/decision"
+    assert client.post(endpoint, json=decision).status_code == 403
+    actor[0] = "user:privacy-reviewer"
+    reviewed = client.post(endpoint, json=decision)
+    assert reviewed.status_code == 200, reviewed.text
+    actor[0] = "user:privacy-requester"
+    return body
+
+
 def test_viewer_cannot_use_any_mutating_button(monkeypatch):
     _as_viewer(monkeypatch)
     assert client.post("/api/v1/compliance/switches/signed_audit").status_code == 403
     assert client.post("/api/v1/compliance/retention", json={"audit_days": 30}).status_code == 403
-    assert client.post("/api/v1/compliance/retention/apply").status_code == 403
+    assert client.post("/api/v1/compliance/retention/preview").status_code == 403
+    assert client.post("/api/v1/compliance/retention/apply", json={
+        "review_id": "0" * 32, "confirm_no_holds": True,
+    }).status_code == 403
     assert client.get("/api/v1/compliance/people").status_code == 403
     body = {"channel": "slack", "user": "U123"}
     assert client.post("/api/v1/compliance/people/export", json=body).status_code == 403
@@ -85,18 +122,29 @@ def test_retention_periods_save_and_apply(monkeypatch):
     assert {f["key"]: f["days"] for f in fields}["messages_days"] == 365
     import maverick.audit.retention as retention
 
-    monkeypatch.setattr(retention, "enforce", lambda: {"messages": {"deleted": 4}})
-    applied = client.post("/api/v1/compliance/retention/apply").json()
+    calls = []
+
+    def enforce(**kwargs):
+        calls.append(kwargs)
+        return {"messages": {"deleted": 4}, "marker": {"messages_deleted": 4}}
+
+    monkeypatch.setattr(retention, "enforce", enforce)
+    review = _retention_review()
+    applied = client.post("/api/v1/compliance/retention/apply", json=review).json()
     assert applied["removed"] == 4 and "4 old record" in applied["message"]
+    assert calls[0]["dry_run"] is True and not calls[1].get("dry_run")
+    assert calls[0]["now"] == calls[1]["now"]  # deletion uses the reviewed cutoff
+    assert calls[1]["config"] == {"messages_days": 365}
+    assert applied["receipt"]["status"] == "completed"
 
 
-def test_people_list_export_and_erase_are_workspace_scoped():
+def test_people_list_export_and_erase_are_workspace_scoped(monkeypatch):
     _seed_person()
     people = client.get("/api/v1/compliance/people").json()["people"]
     assert [(p["channel"], p["user"], p["channel_label"]) for p in people] == [
         ("slack", "U123", "Slack")
     ]
-    body = {"channel": "slack", "user": "U123"}
+    body = _reviewed_export(monkeypatch)
     export = client.post("/api/v1/compliance/people/export", json=body)
     assert export.status_code == 200
     assert "attachment" in export.headers["content-disposition"]
@@ -169,17 +217,23 @@ def test_protection_and_retention_changes_are_recorded_with_who_made_them(monkey
     assert client.post("/api/v1/compliance/switches/anonymous_logs").status_code == 200
     assert client.post("/api/v1/compliance/retention", json={"audit_days": 30}).status_code == 200
     import maverick.audit.retention as retention
-    monkeypatch.setattr(retention, "enforce", lambda: {"deleted_events": 0})
-    assert client.post("/api/v1/compliance/retention/apply").json()["applied"] is True
+    monkeypatch.setattr(retention, "enforce", lambda **_: {"audit": {"deleted": 0}})
+    response = client.post("/api/v1/compliance/retention/apply", json=_retention_review())
+    assert response.status_code == 200, response.text
+    assert response.json()["applied"] is True
     changed = [(kw["section"], kw["key"], kw["old"], kw["new"]) for kind, kw in rows
                if kw.get("source") == "compliance" and "section" in kw]
     assert changed == [("privacy", "anonymous", None, True), ("retention", "audit_days", None, 30)]
     assert [kw["actor"] for _, kw in rows]  # every row names who did it
-    assert any(kind == "retention_applied" for kind, _ in rows)
+    assert any(kind == "retention_review_accepted" for kind, _ in rows)
 
 
 def test_a_refused_record_undoes_the_change_and_removes_nothing(monkeypatch):
     import maverick.audit as audit
+
+    _seed_person()
+    export_body = _reviewed_export(monkeypatch)
+    review = _retention_review()
 
     def refuse(*args, **kwargs):
         raise audit.AuditRefused("strict audit refused")
@@ -192,19 +246,19 @@ def test_a_refused_record_undoes_the_change_and_removes_nothing(monkeypatch):
     assert (settings_store.load_overlay().get("retention") or {}).get("audit_days") is None
     import maverick.audit.retention as retention
     ran = []
-    monkeypatch.setattr(retention, "enforce", lambda: ran.append(1) or {})
-    assert client.post("/api/v1/compliance/retention/apply").status_code == 503
+    monkeypatch.setattr(retention, "enforce", lambda **_: ran.append(1) or {})
+    assert client.post("/api/v1/compliance/retention/apply", json=review).status_code == 503
     assert ran == []
-    _seed_person()
-    exported = client.post("/api/v1/compliance/people/export", json={"channel": "slack", "user": "U123"})
+    exported = client.post("/api/v1/compliance/people/export", json=export_body)
     assert exported.status_code == 503
 
 
 def test_a_person_data_download_is_recorded_without_the_person(monkeypatch):
     _seed_person()
+    body = _reviewed_export(monkeypatch)
     rows = _capture_audit(monkeypatch)
     assert client.post("/api/v1/compliance/people/export",
-                       json={"channel": "slack", "user": "U123"}).status_code == 200
+                       json=body).status_code == 200
     assert [kind for kind, _ in rows] == ["person_data_exported"]
     assert "U123" not in repr(rows)
 

@@ -165,6 +165,8 @@ CAPABILITY_INFO = {
                  "before shell commands run.",
 }
 FEATURE_INFO = {
+    "personal_preferences": "Let people choose their own display, response and workflow defaults within organization policy. Locked settings and permission limits still take precedence.",
+    "configuration_profiles": "Review and apply portable preference or settings profiles with a preview of each change. Profiles never transfer credentials or grant permissions.",
     "employee_content_access_requests": "Allow named administrators to request an employee task or subject export, and named operators to request an exact approval-card read. Another administrator or the content owner must approve; reads expire within one hour and are recorded. Reading a card grants no voting authority. Turning this off revokes use of existing grants. Private content remains owner-only by default.",
     "personal_data_controls": "Allow named workspace members to inspect and correct their personal memory, narrow local learning, review My Data and verify channel identity links. Linking alone shares nothing; optional cross-channel preferences never grant roles or tools. Disabling stops linked recall; previously saved channel recall restrictions remain enforced.",
     "permission_access_requests": "Let named employees request review of a blocked permission or tool by its actual policy owner. Requests share the employee-provided business reason with reviewers and never grant permissions automatically; completion rechecks the effective policy.",

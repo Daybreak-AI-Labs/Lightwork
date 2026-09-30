@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import html as _html
 import json
+import os
 import re
 
 import pytest
@@ -297,7 +298,7 @@ def test_checkpoint_settings_are_for_installation_administrators(client, monkeyp
 def test_a_chosen_folder_is_checked_on_the_server_and_confirmed(client, monkeypatch, tmp_path):
     allowed = tmp_path / "allowed"
     (allowed / "worm").mkdir(parents=True)
-    monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", f"{allowed}:{tmp_path / 'mh'}")
+    monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", os.pathsep.join((str(allowed), str(tmp_path / "mh"))))
     _write_day()
     check = client.post(f"{SETTINGS}/folder/check", json={"folder": str(allowed / "worm")})
     assert check.status_code == 200 and check.json()["ok"] is True
