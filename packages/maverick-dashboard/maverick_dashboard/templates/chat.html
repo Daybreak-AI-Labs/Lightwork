@@ -136,6 +136,8 @@
 <script src="/static/lightwork-file-selection.js" defer></script>
 {% if model_route_ready %}<script src="/static/lightwork-viewpoints.js" defer></script>{% endif %}
 <script>
+  function chatCopy(node, source, values) { if (window.LightworkI18n) window.LightworkI18n.set(node, source, values); else node.textContent = source.replace(/\{(\w+)\}/g, function (_, key) { return (values || {})[key] === undefined ? '{' + key + '}' : values[key]; }); }
+  function chatText(source) { return window.LightworkI18n ? window.LightworkI18n.text(source) : source; }
   // A prepared template becomes an ordinary draft for review, never a run.
   (async function receiveTemplateDraft() {
     var raw;
@@ -149,11 +151,11 @@
         !Number.isFinite(draft.created_at) || Date.now() - draft.created_at < 0 || Date.now() - draft.created_at > 600000) return;
     var form = document.querySelector('form.composer');
     if (!form) return;
-    var title = form.querySelector('input[lang="und" dir="auto" data-user-content name="title"]'), description = form.querySelector('textarea[name="description"]');
+    var title = form.querySelector('input[name="title"]'), description = form.querySelector('textarea[name="description"]');
     if (!title || !description || title.value.trim() || description.value.trim()) return;
     var notice = document.getElementById('template-draft-notice');
     if (Array.from(draft.title).length > 200 || Array.from(draft.description).length > 16000) {
-      notice.textContent = 'This template is too long to start as a task. Return to Templates and shorten the title to 200 characters and details to 16,000 characters.';
+      chatCopy(notice, 'This template is too long to start as a task. Return to Templates and shorten the title to 200 characters and details to 16,000 characters.');
       notice.hidden = false; return;
     }
     var touched = false;
@@ -166,9 +168,9 @@
       if (touched || title.value.trim() || description.value.trim()) return;
       title.value = draft.title; description.value = draft.description;
       var details = description.closest('details'); if (details) details.open = true;
-      notice.textContent = 'Template ready. Review the task and details, then choose Start task when you are ready.'; notice.hidden = false;
+      chatCopy(notice, 'Template ready. Review the task and details, then choose Start task when you are ready.'); notice.hidden = false;
     } catch (e) {
-      notice.textContent = 'The prepared template could not be verified in this workspace. Return to Templates and prepare it again.'; notice.hidden = false;
+      chatCopy(notice, 'The prepared template could not be verified in this workspace. Return to Templates and prepare it again.'); notice.hidden = false;
     } finally { title.removeEventListener('input', markTouched); description.removeEventListener('input', markTouched); }
   })();
 
@@ -177,7 +179,7 @@
     var mode = document.getElementById('authoring-kind'), send = document.getElementById('send-btn');
     if (!mode || !send) return;
     var LABELS = { goal: 'Start task', flow: 'Draft a workflow', agent: 'Draft an agent' };
-    function sync() { send.setAttribute('aria-label', LABELS[mode.value] || 'Send'); }
+    function sync() { var source = LABELS[mode.value] || 'Send'; send.setAttribute('aria-label', chatText(source)); send.lang = window.LightworkI18n ? window.LightworkI18n.languageFor(source) : 'en'; }
     mode.addEventListener('change', sync); sync();
   })();
 
@@ -190,10 +192,11 @@
     var hint = document.getElementById('composer-hint');
     var form = document.querySelector('form.composer');
     if (!btn || !input || !hint) return;
-    var original = hint.textContent;
+    var original = Array.from(hint.childNodes).map(function (node) { return node.cloneNode(true); });
+    function restoreHint() { hint.replaceChildren.apply(hint, original.map(function (node) { return node.cloneNode(true); })); }
     function showNames() {
       var names = Array.prototype.map.call(input.files, function (f) { return f.name; });
-      hint.textContent = names.length ? ('Attached: ' + names.join(', ')) : original;
+      if (names.length) chatCopy(hint, 'Attached: {files}', {files: names.join(', ')}); else restoreHint();
     }
     function addFiles(files) {
       if (!files || !files.length) return;
@@ -251,48 +254,49 @@
     if (!canRecord && !SpeechRec) return; // no voice path: keep the button hidden
     btn.hidden = false;
 
-    var original = hint.textContent;
+    var original = Array.from(hint.childNodes).map(function (node) { return node.cloneNode(true); });
+    function restoreHint() { hint.replaceChildren.apply(hint, original.map(function (node) { return node.cloneNode(true); })); }
     var recorder = null, chunks = [], stream = null, busy = false;
 
     function setRecording(on) {
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       btn.style.color = on ? 'var(--danger)' : '';
       btn.style.borderColor = on ? 'var(--danger)' : '';
-      hint.textContent = on ? 'Listening… click the mic again to stop.' : original;
+      if (on) chatCopy(hint, 'Listening… click the mic again to stop.'); else restoreHint();
     }
     function fillGoal(text) {
       text = (text || '').trim();
-      if (!text) { hint.textContent = 'Heard nothing — try again closer to the mic.'; return; }
+      if (!text) { chatCopy(hint, 'Heard nothing — try again closer to the mic.'); return; }
       var form = btn.form || document.getElementById('send-btn').form;
-      var title = form.querySelector('input[lang="und" dir="auto" data-user-content name="title"]');
+      var title = form.querySelector('input[name="title"]');
       var details = form.querySelector('textarea[name="description"]');
       if (title && !title.value.trim()) { title.value = text; title.focus(); }
       else if (details) {
         details.value = (details.value ? details.value.trim() + '\n' : '') + text;
         details.closest('details').open = true; details.focus();
       }
-      hint.textContent = original;
+      restoreHint();
     }
     function browserFallback() {
-      if (!SpeechRec) { hint.textContent = 'Voice input isn\'t set up yet. An administrator can turn it on in Settings under Voice.'; return; }
+      if (!SpeechRec) { chatCopy(hint, 'Voice input isn\'t set up yet. An administrator can turn it on in Settings under Voice.'); return; }
       var rec = new SpeechRec();
-      rec.lang = document.documentElement.lang || 'en';
+      rec.lang = window.LightworkI18n ? window.LightworkI18n.locale : document.documentElement.lang || 'en';
       rec.interimResults = false;
       setRecording(true);
       rec.onresult = function (e) { fillGoal(e.results[0][0].transcript); };
-      rec.onerror = function () { hint.textContent = 'Speech recognition failed — try again.'; };
+      rec.onerror = function () { chatCopy(hint, 'Speech recognition failed — try again.'); };
       rec.onend = function () { setRecording(false); };
       rec.start();
     }
     function upload(blob) {
       busy = true;
-      hint.textContent = 'Transcribing…';
+      chatCopy(hint, 'Transcribing…');
       lwVoiceUpload(blob, {
-        onStatus: function (m) { hint.textContent = m; },
+        onStatus: function (m) { chatCopy(hint, m); },
         onFallback: browserFallback,
         onResult: fillGoal,
       })
-        .catch(function () { hint.textContent = 'We couldn\u2019t turn your recording into text. Try again, or type your message.'; })
+        .catch(function () { chatCopy(hint, 'We couldn\u2019t turn your recording into text. Try again, or type your message.'); })
         .finally(function () { busy = false; });
     }
     btn.addEventListener('click', function () {

@@ -13,6 +13,8 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 
+from jinja2 import Environment, nodes
+
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "packages/maverick-dashboard/maverick_dashboard"
 JOURNEYS = ("employee_activation.html", "preferences.html", "_display_preferences.html",
@@ -62,12 +64,18 @@ def report():
         stripped = re.sub(r"\{(?:\{.*?\}|%.*?%|#.*?#)\}", lambda match: "__DYNAMIC__" + "\n" * match[0].count("\n"), source, flags=re.DOTALL)
         parser = CopyParser()
         parser.feed(stripped)
-        bindings = re.findall(r"\b(?:ui|ut)\(([\"'])(.*?)\1\)", source)
+        tree = Environment().parse(source)
+        bindings = [call.args[0].value for call in tree.find_all(nodes.Call)
+                    if isinstance(call.node, nodes.Name) and call.node.name in {"ui", "ut"}
+                    and call.args and isinstance(call.args[0], nodes.Const)
+                    and isinstance(call.args[0].value, str)]
+        missing = sorted({value for value in bindings if value not in catalog})
         pages[name] = {"literal_bindings": len(bindings), "remaining_literal_fragments": len(parser.rows),
+                       "bound_sources_missing_catalog": missing,
                        "remaining": [{**row, "catalog_available": row["source"] in catalog} for row in parser.rows]}
     return {"catalog_sources": len(catalog), "draft_languages": ["fr", "de", "ja", "zh"],
             "qualified_complete_body_languages": ["en"], "arabic_seed_unchanged": True,
-            "method": "Literal HTML text and label attributes outside script/style/pre/code/textarea and Jinja expressions. Counts are occurrences, not unique strings. Dynamic labels, includes, browser/API copy, linguistic review and visual/assistive-technology review are not measured.",
+            "method": "Literal HTML text and label attributes outside script/style/pre/code/textarea and Jinja expressions, plus catalog availability for literal ui/ut arguments parsed from Jinja. Counts are occurrences, not unique strings. Dynamic labels, includes, browser/API copy, linguistic review and visual/assistive-technology review are not measured.",
             "pages": pages}
 
 

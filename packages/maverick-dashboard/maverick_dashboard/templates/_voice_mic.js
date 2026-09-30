@@ -55,7 +55,7 @@ function lwVoiceUpload(blob, opts) {
       .then(function (r) {
         if (r.status === 503 && r.headers.get('Retry-After') && attempts < 3) {
           attempts += 1;
-          if (opts.onStatus) opts.onStatus('Setting up voice (first use)…');
+          if (opts.onStatus) opts.onStatus(window.LightworkI18n ? window.LightworkI18n.text('Setting up voice (first use)…') : 'Setting up voice (first use)…');
           return new Promise(function (res) { setTimeout(res, 4000); })
             .then(function () { return post(body, filename); });
         }
