@@ -91,7 +91,7 @@
       </div>
     </form>
 
-    <div class="ch-status" data-ch-status="{{ c.name }}">{{ integration_readiness(c.readiness) }}</div>
+    <div class="ch-status" data-ch-status="{{ c.name }}" data-ch-on="{{ '1' if c.configured else '0' }}">{{ integration_readiness(c.readiness) }}</div>
 
     <div class="ch-actions">
       {% if c.configured %}
@@ -193,6 +193,7 @@
     function summarize() {
       var working = 0, failed = 0, on = 0;
       document.querySelectorAll('[data-ch-status]').forEach(function (block) {
+        if (block.getAttribute('data-ch-on') !== '1') return;
         on += 1;
         var badge = block.querySelector('.badge');
         var text = badge ? badge.textContent.trim() : '';
