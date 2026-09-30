@@ -1414,344 +1414,344 @@
   },
   {
     "id": "LW-158",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Support a verified repair option during network/update-feed outages",
+    "category": "Installation and desktop maintenance",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-159",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Source-bootstrap cancellation still needs a nontechnical partial-install recovery journey",
+    "category": "Installation and desktop maintenance",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-160",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Monthly billing silently omits records beyond 10,000",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-161",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Savings report both truncates volume and treats unreadable history as zero",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-162",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Savings mixes selected currency with dollar costs",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-163",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Spend's “never estimated” claim contradicts pricing modes",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-164",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Stripe execution is not bound to the preview",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-165",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Stripe failure claims nothing changed after possible external mutations",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-166",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Invoice display rounds each line independently of total",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-167",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Single-day audit search filters only the latest page",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-168",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Invalid audit range dates silently alter the requested search",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-169",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Shared dashboard allows stale requests to overwrite current range",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-170",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Spend outcome chart quietly samples only 200 episodes",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-171",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Spend time range affects only some of the visible report",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-172",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Embedded analytics presents a latest-100 snapshot as task status totals",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-173",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Oversight failures render as healthy/empty state",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-174",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Make cross-ledger cost differences understandable",
+    "category": "Data reporting and observability",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-175",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "External-agent sample acts before approval",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-176",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "External-agent sample reports success after halt",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-177",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "REST polling example loses history and can poll forever",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-178",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Apple clients retain private view after denial",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-179",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "VS Code allows remote HTTP bearer after generic consent",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-180",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Watch Today can be yesterday's snapshot",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-181",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "visionOS selection masks error and stays stale",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-182",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "visionOS has no accessible alternate tree/size controls",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-183",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Apple fetch unbounded and refresh not owned",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-184",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Distribution/native qualification unfinished",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-185",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Pairing and contextual handoff opportunity",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-186",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "VS Code CLI lifecycle weaker than SSE",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-187",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "VS Code first-workspace and numeric-ID friction",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-188",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "VS Code bearer in normal settings",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-189",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "JetBrains env-only setup and silent invalid input",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-190",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Editor budgets and stop scope need direct controls",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-191",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Synchronous editor controls may block UI",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-192",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Main API start guide omits existing receipt recovery",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-193",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "External TS helper lacks timeout/typed recovery",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-194",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "SDK schema declaration isn't argument validation",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   },
   {
     "id": "LW-195",
-    "title": "Awaiting complete source row",
-    "category": "Awaiting source",
-    "status": "blocked-source",
+    "title": "Capability/build metadata drift",
+    "category": "Native clients and developer integrations",
+    "status": "planned",
     "implementation_evidence": [],
     "validation": "No tests executed; user deferred tests.",
-    "remaining": "Library text extraction truncated; full row requested."
+    "remaining": "Implementation review pending."
   }
 ]

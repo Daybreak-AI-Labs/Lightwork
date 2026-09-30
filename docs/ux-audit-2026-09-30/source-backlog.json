@@ -1,6 +1,5 @@
 [
   {
-    "index": "0",
     "ID": "LW-001",
     "Category": "Conversation and background work",
     "Title": "Keep conversation responsive while governed tasks run",
@@ -27,7 +26,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "1",
     "ID": "LW-002",
     "Category": "Conversation and background work",
     "Title": "Graduate page-help Copilot into a shared product operation interface",
@@ -54,7 +52,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "2",
     "ID": "LW-003",
     "Category": "Conversation and background work",
     "Title": "Stop silently dropping attachments on clarification answers",
@@ -81,7 +78,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "3",
     "ID": "LW-004",
     "Category": "Conversation and background work",
     "Title": "Give each employee a private background-work control center",
@@ -108,7 +104,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "4",
     "ID": "LW-005",
     "Category": "Conversation and background work",
     "Title": "Join Action Center and task questions into one actionable inbox",
@@ -135,7 +130,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "5",
     "ID": "LW-006",
     "Category": "Conversation and background work",
     "Title": "Preserve failed Copilot questions and context safely",
@@ -162,7 +156,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "6",
     "ID": "LW-007",
     "Category": "Conversation and background work",
     "Title": "Stop disappears while a task waits for the user",
@@ -189,7 +182,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "7",
     "ID": "LW-008",
     "Category": "Conversation and background work",
     "Title": "Failed and cancelled tasks cannot reach their existing restart control",
@@ -216,7 +208,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "8",
     "ID": "LW-009",
     "Category": "Conversation and background work",
     "Title": "Reconnecting live streams can fail silently forever",
@@ -243,7 +234,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "9",
     "ID": "LW-010",
     "Category": "Conversation and background work",
     "Title": "Clarification fetch failures silently remove the useful next step",
@@ -270,7 +260,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "10",
     "ID": "LW-011",
     "Category": "Conversation and background work",
     "Title": "Accepted cancellation has no acknowledgement or cleanup state",
@@ -297,7 +286,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "11",
     "ID": "LW-012",
     "Category": "Conversation and background work",
     "Title": "Generic error wording hides the actual remedy",
@@ -324,7 +312,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "12",
     "ID": "LW-013",
     "Category": "Conversation and background work",
     "Title": "Long conversation history disappears without an explanation",
@@ -351,7 +338,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "13",
     "ID": "LW-014",
     "Category": "Conversation and background work",
     "Title": "File selections have no remove/review controls",
@@ -378,7 +364,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "14",
     "ID": "LW-015",
     "Category": "Conversation and background work",
     "Title": "Adding a file to an initially fileless task is hidden",
@@ -405,7 +390,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "15",
     "ID": "LW-016",
     "Category": "Conversation and background work",
     "Title": "Partial multi-file upload failures have no selective retry",
@@ -432,7 +416,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "16",
     "ID": "LW-017",
     "Category": "Conversation and background work",
     "Title": "Add conversation organization without deleting audit evidence",
@@ -459,7 +442,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "17",
     "ID": "LW-018",
     "Category": "Conversation and background work",
     "Title": "Give live plan polling a bounded lifetime and truthful access/retry state",
@@ -486,7 +468,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "18",
     "ID": "LW-019",
     "Category": "Save integrity and draft protection",
     "Title": "Add conflict-safe deliverable revisions",
@@ -513,7 +494,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "19",
     "ID": "LW-020",
     "Category": "Save integrity and draft protection",
     "Title": "Prevent stale and concurrent settings overwrites",
@@ -540,7 +520,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "20",
     "ID": "LW-021",
     "Category": "Save integrity and draft protection",
     "Title": "Protect unsaved All Settings edits",
@@ -567,7 +546,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "21",
     "ID": "LW-022",
     "Category": "Save integrity and draft protection",
     "Title": "Do not erase edits typed while saving",
@@ -594,7 +572,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "22",
     "ID": "LW-023",
     "Category": "Save integrity and draft protection",
     "Title": "Save main Settings sections without discarding other sections",
@@ -621,7 +598,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "23",
     "ID": "LW-024",
     "Category": "Save integrity and draft protection",
     "Title": "Make preference changes previewable without navigation",
@@ -648,7 +624,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "24",
     "ID": "LW-025",
     "Category": "Save integrity and draft protection",
     "Title": "Chat drafts lack the recovery offered to other editors",
@@ -675,7 +650,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "25",
     "ID": "LW-026",
     "Category": "Save integrity and draft protection",
     "Title": "Settings-file check and install are not bound to one reviewed change",
@@ -702,7 +676,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "26",
     "ID": "LW-027",
     "Category": "Save integrity and draft protection",
     "Title": "Settings-file activity claims installation before the write succeeds",
@@ -729,7 +702,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "27",
     "ID": "LW-028",
     "Category": "Save integrity and draft protection",
     "Title": "Fence duplicate child-task creation in the task map",
@@ -756,7 +728,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "28",
     "ID": "LW-029",
     "Category": "Save integrity and draft protection",
     "Title": "Protect task-map edits from overwriting another user's current state",
@@ -783,7 +754,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "29",
     "ID": "LW-030",
     "Category": "Personalization and settings",
     "Title": "Define personal workspace and organization preference scopes",
@@ -810,7 +780,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "30",
     "ID": "LW-031",
     "Category": "Personalization and settings",
     "Title": "Expose all supported persona styles consistently",
@@ -837,7 +806,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "31",
     "ID": "LW-032",
     "Category": "Personalization and settings",
     "Title": "Add personal and per-conversation custom output styles",
@@ -864,7 +832,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "32",
     "ID": "LW-033",
     "Category": "Personalization and settings",
     "Title": "Make the preferred user name truly per-user",
@@ -891,7 +858,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "33",
     "ID": "LW-034",
     "Category": "Personalization and settings",
     "Title": "Sync safe display preferences across devices",
@@ -918,7 +884,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "34",
     "ID": "LW-035",
     "Category": "Personalization and settings",
     "Title": "Unify settings discovery across dedicated pages",
@@ -945,7 +910,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "35",
     "ID": "LW-036",
     "Category": "Personalization and settings",
     "Title": "Show effective changes and runtime impact before saving",
@@ -972,7 +936,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "36",
     "ID": "LW-037",
     "Category": "Personalization and settings",
     "Title": "Distinguish restore product default from inherit configuration",
@@ -999,7 +962,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "37",
     "ID": "LW-038",
     "Category": "Personalization and settings",
     "Title": "Portable configuration profiles without secrets",
@@ -1026,7 +988,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "38",
     "ID": "LW-039",
     "Category": "Personalization and settings",
     "Title": "Expose settings history and safe selective rollback",
@@ -1053,7 +1014,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "39",
     "ID": "LW-040",
     "Category": "Personalization and settings",
     "Title": "Save and compare outcome-oriented configuration presets",
@@ -1080,7 +1040,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "40",
     "ID": "LW-041",
     "Category": "Personalization and settings",
     "Title": "Personal favorites and saved navigation views",
@@ -1107,7 +1066,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "41",
     "ID": "LW-042",
     "Category": "Personalization and settings",
     "Title": "Create a configurable daily work home from existing projections",
@@ -1134,7 +1092,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "42",
     "ID": "LW-043",
     "Category": "Accessibility language and mobile",
     "Title": "Localize complete employee journeys",
@@ -1161,7 +1118,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "43",
     "ID": "LW-044",
     "Category": "Accessibility language and mobile",
     "Title": "Add follow-system appearance and readable text scaling",
@@ -1188,7 +1144,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "44",
     "ID": "LW-045",
     "Category": "Accessibility language and mobile",
     "Title": "Make custom themes accessible before applying them",
@@ -1215,7 +1170,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "45",
     "ID": "LW-046",
     "Category": "Accessibility language and mobile",
     "Title": "Make read-aloud complete and reliably stoppable",
@@ -1242,7 +1196,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "46",
     "ID": "LW-047",
     "Category": "Accessibility language and mobile",
     "Title": "Bind mobile connection test feedback to the tested inputs",
@@ -1269,7 +1222,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "47",
     "ID": "LW-048",
     "Category": "Accessibility language and mobile",
     "Title": "Multiple named mobile connections and safe preference parity",
@@ -1296,7 +1248,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "48",
     "ID": "LW-049",
     "Category": "Accessibility language and mobile",
     "Title": "Evolve mobile from read-only oversight to a least-privilege decision companion",
@@ -1323,7 +1274,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "49",
     "ID": "LW-050",
     "Category": "Accessibility language and mobile",
     "Title": "Every question poll steals keyboard focus",
@@ -1350,7 +1300,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "50",
     "ID": "LW-051",
     "Category": "Accessibility language and mobile",
     "Title": "Corrupt saved connection has no UI reset",
@@ -1377,7 +1326,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "51",
     "ID": "LW-052",
     "Category": "Accessibility language and mobile",
     "Title": "Older tasks unreachable",
@@ -1404,7 +1352,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "52",
     "ID": "LW-053",
     "Category": "Accessibility language and mobile",
     "Title": "Event explanation clipped without expand",
@@ -1431,7 +1378,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "53",
     "ID": "LW-054",
     "Category": "Accessibility language and mobile",
     "Title": "Online overview omits offline attention counts",
@@ -1458,7 +1404,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "54",
     "ID": "LW-055",
     "Category": "Accessibility language and mobile",
     "Title": "Offline readiness depends on Overview; detail ignores cache",
@@ -1485,7 +1430,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "55",
     "ID": "LW-056",
     "Category": "Accessibility language and mobile",
     "Title": "No sign-out/cache purge/retention controls",
@@ -1512,7 +1456,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "56",
     "ID": "LW-057",
     "Category": "Accessibility language and mobile",
     "Title": "Native streaming transport not qualified",
@@ -1539,7 +1482,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "57",
     "ID": "LW-058",
     "Category": "Accessibility language and mobile",
     "Title": "Native preferences/large-text/targets need qualification",
@@ -1566,7 +1508,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "58",
     "ID": "LW-059",
     "Category": "Accessibility language and mobile",
     "Title": "Android Back/background lifecycle not modeled",
@@ -1593,7 +1534,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "59",
     "ID": "LW-060",
     "Category": "Accessibility language and mobile",
     "Title": "Mobile docs use wrong default port",
@@ -1620,7 +1560,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "60",
     "ID": "LW-061",
     "Category": "Accessibility language and mobile",
     "Title": "Restore a visible Close menu control on phone chat",
@@ -1647,7 +1586,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "61",
     "ID": "LW-062",
     "Category": "Accessibility language and mobile",
     "Title": "Keep focus out of obscured chat content while its mobile drawer is open",
@@ -1674,7 +1612,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "62",
     "ID": "LW-063",
     "Category": "Accessibility language and mobile",
     "Title": "Make the task-plan text alternative work with scripts enabled and graph dependencies unavailable",
@@ -1701,7 +1638,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "63",
     "ID": "LW-064",
     "Category": "Accessibility language and mobile",
     "Title": "Keep the embeddable widget within narrow viewports",
@@ -1728,7 +1664,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "64",
     "ID": "LW-065",
     "Category": "Accessibility language and mobile",
     "Title": "Bring widget interaction and announcements to the dashboard's accessibility baseline",
@@ -1755,7 +1690,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "65",
     "ID": "LW-066",
     "Category": "Accessibility language and mobile",
     "Title": "Honor reduced-motion preferences for programmatic scrolling",
@@ -1782,7 +1716,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "66",
     "ID": "LW-067",
     "Category": "Workflow templates and schedules",
     "Title": "Compose template search and suggested filters",
@@ -1809,7 +1742,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "67",
     "ID": "LW-068",
     "Category": "Workflow templates and schedules",
     "Title": "Typed workflow-template inputs",
@@ -1836,7 +1768,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "68",
     "ID": "LW-069",
     "Category": "Workflow templates and schedules",
     "Title": "Promote workflows through draft, test, version and publish",
@@ -1863,7 +1794,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "69",
     "ID": "LW-070",
     "Category": "Workflow templates and schedules",
     "Title": "Accept ordinary office documents when drafting workflows",
@@ -1890,7 +1820,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "70",
     "ID": "LW-071",
     "Category": "Workflow templates and schedules",
     "Title": "Make schedule-list failures visible and preserve last good state",
@@ -1917,7 +1846,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "71",
     "ID": "LW-072",
     "Category": "Workflow templates and schedules",
     "Title": "Promote schedules from pending queue entries to durable managed objects",
@@ -1944,7 +1872,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "72",
     "ID": "LW-073",
     "Category": "Workflow templates and schedules",
     "Title": "Complete in-app recurring-job recovery without unsafe replay",
@@ -1971,7 +1898,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "73",
     "ID": "LW-074",
     "Category": "Workflow templates and schedules",
     "Title": "Make workflow templates earn trust through measured outcomes",
@@ -1998,7 +1924,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "74",
     "ID": "LW-075",
     "Category": "Connections and extensibility",
     "Title": "Do not render Connections outages as an empty vault",
@@ -2025,7 +1950,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "75",
     "ID": "LW-076",
     "Category": "Connections and extensibility",
     "Title": "Show connection test freshness and coverage",
@@ -2052,7 +1976,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "76",
     "ID": "LW-077",
     "Category": "Connections and extensibility",
     "Title": "Allow employees to connect approved own accounts",
@@ -2079,7 +2002,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "77",
     "ID": "LW-078",
     "Category": "Connections and extensibility",
     "Title": "Preview connection dependencies and guide safe rebinding",
@@ -2106,7 +2028,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "78",
     "ID": "LW-079",
     "Category": "Connections and extensibility",
     "Title": "Publish a qualified OAuth/platform support matrix",
@@ -2133,7 +2054,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "79",
     "ID": "LW-080",
     "Category": "Connections and extensibility",
     "Title": "Guide connection setup by the job and required capabilities",
@@ -2160,7 +2080,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "80",
     "ID": "LW-081",
     "Category": "Connections and extensibility",
     "Title": "Add a governed extension qualification workbench",
@@ -2187,7 +2106,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "81",
     "ID": "LW-082",
     "Category": "Connections and extensibility",
     "Title": "Conflict recovery can overwrite another administrator's connection edits",
@@ -2214,7 +2132,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "82",
     "ID": "LW-083",
     "Category": "Connections and extensibility",
     "Title": "Editing a saved non-preset connector can erase its tool binding",
@@ -2241,7 +2158,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "83",
     "ID": "LW-084",
     "Category": "Connections and extensibility",
     "Title": "“Not working” conflates bad credentials with unproven or unreachable readiness",
@@ -2268,7 +2184,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "84",
     "ID": "LW-085",
     "Category": "Connections and extensibility",
     "Title": "Key connection requests allow duplicate submissions and have no bounded waiting state",
@@ -2295,7 +2210,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "85",
     "ID": "LW-086",
     "Category": "Connections and extensibility",
     "Title": "Account management is fragmented across Connections and Automations",
@@ -2322,7 +2236,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "86",
     "ID": "LW-087",
     "Category": "Connections and extensibility",
     "Title": "Connector help still directs normal setup to terminal/environment editing",
@@ -2349,7 +2262,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "87",
     "ID": "LW-088",
     "Category": "Connections and extensibility",
     "Title": "AWS connection region picker excludes backend-admitted regions without an escape path",
@@ -2376,7 +2288,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "88",
     "ID": "LW-089",
     "Category": "Connections and extensibility",
     "Title": "Replace extension setup's configuration-file instructions with the existing in-product setting",
@@ -2403,7 +2314,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "89",
     "ID": "LW-090",
     "Category": "Connections and extensibility",
     "Title": "Show and explain exactly what “Send this page” will share",
@@ -2430,7 +2340,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "90",
     "ID": "LW-091",
     "Category": "Identity administration and privacy",
     "Title": "Make new role grants least-privileged",
@@ -2457,7 +2366,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "91",
     "ID": "LW-092",
     "Category": "Identity administration and privacy",
     "Title": "Separate resetting role from removing access",
@@ -2484,7 +2392,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "92",
     "ID": "LW-093",
     "Category": "Identity administration and privacy",
     "Title": "Scope Users page to tenant admin authority",
@@ -2511,7 +2418,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "93",
     "ID": "LW-094",
     "Category": "Identity administration and privacy",
     "Title": "Create complete employee departure workflow",
@@ -2538,7 +2444,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "94",
     "ID": "LW-095",
     "Category": "Identity administration and privacy",
     "Title": "Define and enforce admin audit-metadata-only default",
@@ -2565,7 +2470,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "95",
     "ID": "LW-096",
     "Category": "Identity administration and privacy",
     "Title": "Explain effective permissions and their owner",
@@ -2592,7 +2496,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "96",
     "ID": "LW-097",
     "Category": "Identity administration and privacy",
     "Title": "Make enterprise first-login defaults explicit",
@@ -2619,7 +2522,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "97",
     "ID": "LW-098",
     "Category": "Identity administration and privacy",
     "Title": "Show effective posture, not just profile name",
@@ -2646,7 +2548,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "98",
     "ID": "LW-099",
     "Category": "Identity administration and privacy",
     "Title": "Make multi-tab workspace switches explicit",
@@ -2673,7 +2574,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "99",
     "ID": "LW-100",
     "Category": "Identity administration and privacy",
     "Title": "View-only users receive active mutation controls",
@@ -2700,7 +2600,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "100",
     "ID": "LW-101",
     "Category": "Identity administration and privacy",
     "Title": "Failed SSO ends at a plain-text “login failed” dead end",
@@ -2727,7 +2626,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "101",
     "ID": "LW-102",
     "Category": "Identity administration and privacy",
     "Title": "“Keep until I choose” cannot disable an existing retention period",
@@ -2754,7 +2652,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "102",
     "ID": "LW-103",
     "Category": "Identity administration and privacy",
     "Title": "Retention deletion needs an impact preview tied to saved effective policy",
@@ -2781,7 +2678,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "103",
     "ID": "LW-104",
     "Category": "Identity administration and privacy",
     "Title": "Retention result hides skipped records and partial execution",
@@ -2808,7 +2704,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "104",
     "ID": "LW-105",
     "Category": "Memory knowledge and search",
     "Title": "Stop coworkers' activity evicting personal memory",
@@ -2835,7 +2730,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "105",
     "ID": "LW-106",
     "Category": "Memory knowledge and search",
     "Title": "Resolve contradictory and retracted preferences",
@@ -2862,7 +2756,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "106",
     "ID": "LW-107",
     "Category": "Memory knowledge and search",
     "Title": "Let employees inspect and correct remembered preferences",
@@ -2889,7 +2782,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "107",
     "ID": "LW-108",
     "Category": "Memory knowledge and search",
     "Title": "Offer explicit cross-channel personal preference scope",
@@ -2916,7 +2808,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "108",
     "ID": "LW-109",
     "Category": "Memory knowledge and search",
     "Title": "Separate remembering, organizational reuse and training controls",
@@ -2943,7 +2834,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "109",
     "ID": "LW-110",
     "Category": "Memory knowledge and search",
     "Title": "Let employees report knowledge errors without deletion power",
@@ -2970,7 +2860,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "110",
     "ID": "LW-111",
     "Category": "Memory knowledge and search",
     "Title": "Bring source confidence and freshness into reused answers",
@@ -2997,7 +2886,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "111",
     "ID": "LW-112",
     "Category": "Memory knowledge and search",
     "Title": "Unify my-data export, retention and deletion status",
@@ -3024,7 +2912,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "112",
     "ID": "LW-113",
     "Category": "Memory knowledge and search",
     "Title": "Unify discovery across business metadata and governed knowledge",
@@ -3051,7 +2938,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "113",
     "ID": "LW-114",
     "Category": "Memory knowledge and search",
     "Title": "Make search scale limits useful to employees",
@@ -3078,7 +2964,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "114",
     "ID": "LW-115",
     "Category": "Memory knowledge and search",
     "Title": "Connect governed knowledge selection directly to task context",
@@ -3105,7 +2990,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "115",
     "ID": "LW-116",
     "Category": "Memory knowledge and search",
     "Title": "“Search chats” searches only 25 recent titles",
@@ -3132,7 +3016,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "116",
     "ID": "LW-117",
     "Category": "Memory knowledge and search",
     "Title": "Shared facts can overwrite a newer edit or delete a changed fact",
@@ -3159,7 +3042,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "117",
     "ID": "LW-118",
     "Category": "Memory knowledge and search",
     "Title": "Facts hide provenance, age, history and retention consequences",
@@ -3186,7 +3068,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "118",
     "ID": "LW-119",
     "Category": "Memory knowledge and search",
     "Title": "Facts page does not scale to a large business memory",
@@ -3213,7 +3094,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "119",
     "ID": "LW-120",
     "Category": "Memory knowledge and search",
     "Title": "Knowledge purpose picker only inspects 250 registered datasets",
@@ -3240,7 +3120,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "120",
     "ID": "LW-121",
     "Category": "Memory knowledge and search",
     "Title": "Knowledge picker backend failure masquerades as no approved uses",
@@ -3267,7 +3146,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "121",
     "ID": "LW-122",
     "Category": "Memory knowledge and search",
     "Title": "Knowledge reindex lacks bounded job supervision",
@@ -3294,7 +3172,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "122",
     "ID": "LW-123",
     "Category": "Review deliverables and collaboration",
     "Title": "Tell the truth about feedback and learning",
@@ -3321,7 +3198,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "123",
     "ID": "LW-124",
     "Category": "Review deliverables and collaboration",
     "Title": "Make projects useful workspaces, not only task groupings",
@@ -3348,7 +3224,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "124",
     "ID": "LW-125",
     "Category": "Review deliverables and collaboration",
     "Title": "Turn team review into a complete revise-and-resubmit loop",
@@ -3375,7 +3250,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "125",
     "ID": "LW-126",
     "Category": "Review deliverables and collaboration",
     "Title": "Make approval quorum progress actionable",
@@ -3402,7 +3276,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "126",
     "ID": "LW-127",
     "Category": "Review deliverables and collaboration",
     "Title": "Provide requester-scoped decision history",
@@ -3429,7 +3302,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "127",
     "ID": "LW-128",
     "Category": "Review deliverables and collaboration",
     "Title": "Clarify different kinds of approved/completed",
@@ -3456,7 +3328,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "128",
     "ID": "LW-129",
     "Category": "Review deliverables and collaboration",
     "Title": "Transfer tasks with selected evidence and explicit acceptance",
@@ -3483,7 +3354,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "129",
     "ID": "LW-130",
     "Category": "Review deliverables and collaboration",
     "Title": "Package reviewed artifacts for the recipient's actual job",
@@ -3510,7 +3380,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "130",
     "ID": "LW-131",
     "Category": "Review deliverables and collaboration",
     "Title": "Live completion omits result actions, sign-off and newly produced artifacts",
@@ -3537,7 +3406,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "131",
     "ID": "LW-132",
     "Category": "Review deliverables and collaboration",
     "Title": "Share-link audience, prerequisites and expiry are not visible before creation",
@@ -3564,7 +3432,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "132",
     "ID": "LW-133",
     "Category": "Review deliverables and collaboration",
     "Title": "Gist failures incorrectly promise nothing was shared",
@@ -3591,7 +3458,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "133",
     "ID": "LW-134",
     "Category": "Review deliverables and collaboration",
     "Title": "Gist evidence errors are misreported as missing credentials",
@@ -3618,7 +3484,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "134",
     "ID": "LW-135",
     "Category": "Review deliverables and collaboration",
     "Title": "Separate stopping a task from rating its quality",
@@ -3645,7 +3510,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "135",
     "ID": "LW-136",
     "Category": "Review deliverables and collaboration",
     "Title": "Preview the exact history payload before uploading it",
@@ -3672,7 +3536,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "136",
     "ID": "LW-137",
     "Category": "Review deliverables and collaboration",
     "Title": "Qualify the promised receiving journey for portable task history",
@@ -3699,7 +3562,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "137",
     "ID": "LW-138",
     "Category": "Review deliverables and collaboration",
     "Title": "“Download full history” is silently partial",
@@ -3726,7 +3588,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "138",
     "ID": "LW-139",
     "Category": "Review deliverables and collaboration",
     "Title": "Data export needs a readable business handoff alongside technical bundles",
@@ -3753,7 +3614,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "139",
     "ID": "LW-140",
     "Category": "Notifications models and costs",
     "Title": "Help users choose models by capability and tradeoff",
@@ -3780,7 +3640,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "140",
     "ID": "LW-141",
     "Category": "Notifications models and costs",
     "Title": "Add personal notification preferences and quiet hours",
@@ -3807,7 +3666,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "141",
     "ID": "LW-142",
     "Category": "Notifications models and costs",
     "Title": "Show notification delivery health and test results",
@@ -3834,7 +3692,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "142",
     "ID": "LW-143",
     "Category": "Notifications models and costs",
     "Title": "Show usable budget headroom before work starts",
@@ -3861,7 +3718,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "143",
     "ID": "LW-144",
     "Category": "Notifications models and costs",
     "Title": "Warn before budgets pause important schedules",
@@ -3888,7 +3744,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "144",
     "ID": "LW-145",
     "Category": "Notifications models and costs",
     "Title": "Route provider accounting blocks to responsible admin",
@@ -3915,7 +3770,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "145",
     "ID": "LW-146",
     "Category": "Onboarding support and qualification",
     "Title": "Add job-specific employee activation paths",
@@ -3942,7 +3796,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "146",
     "ID": "LW-147",
     "Category": "Onboarding support and qualification",
     "Title": "Give employees safe task-level diagnostics",
@@ -3969,7 +3822,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "147",
     "ID": "LW-148",
     "Category": "Onboarding support and qualification",
     "Title": "Replace recovery offsets with source lookup",
@@ -3996,7 +3848,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "148",
     "ID": "LW-149",
     "Category": "Onboarding support and qualification",
     "Title": "Qualify actual enterprise employee journeys",
@@ -4023,7 +3874,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "149",
     "ID": "LW-150",
     "Category": "Onboarding support and qualification",
     "Title": "Failure pages need a support reference tied to the actual failure",
@@ -4050,7 +3900,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "150",
     "ID": "LW-151",
     "Category": "Onboarding support and qualification",
     "Title": "Review support-report content locally before it leaves Lightwork",
@@ -4077,7 +3926,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "151",
     "ID": "LW-152",
     "Category": "Onboarding support and qualification",
     "Title": "Make older failed tasks selectable in Help",
@@ -4104,7 +3952,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "152",
     "ID": "LW-153",
     "Category": "Installation and desktop maintenance",
     "Title": "A different service on the desktop port is treated as Lightwork",
@@ -4131,7 +3978,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "153",
     "ID": "LW-154",
     "Category": "Installation and desktop maintenance",
     "Title": "Establish customer-release evidence for the Windows installer candidate",
@@ -4158,7 +4004,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "154",
     "ID": "LW-155",
     "Category": "Installation and desktop maintenance",
     "Title": "Define and complete the supported non-Windows customer installation journey",
@@ -4185,7 +4030,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "155",
     "ID": "LW-156",
     "Category": "Installation and desktop maintenance",
     "Title": "Replace manual maintenance authorization transfer with a protected handoff",
@@ -4212,7 +4056,6 @@
     "Implementation status": "Recommendation; not implemented by this audit"
   },
   {
-    "index": "156",
     "ID": "LW-157",
     "Category": "Installation and desktop maintenance",
     "Title": "Add a supported coordinated recovery path when protected rollback is refused",
@@ -4236,6 +4079,994 @@
     "Review date": "2026-09-30",
     "Source entry IDs": "IS-013",
     "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-158",
+    "Category": "Installation and desktop maintenance",
+    "Title": "Support a verified repair option during network/update-feed outages",
+    "Priority": "P2",
+    "Evidence status": "proposal",
+    "Effort estimate": "M–L",
+    "Affected persona": "Desktop installation owner",
+    "Finding type": "Product improvement proposal",
+    "Problem": "A customer whose application is damaged may also lack connectivity; retaining a repair application is insufficient if repair still requires hosted artifacts.",
+    "Evidence statement": "Candidate retains source MSI and recovery runtime, but exact version manifest and package must remain hosted; guide explicitly disclaims offline repair (apps/installer-msi/CUSTOMER.md:28-39).",
+    "Recommended change": "Offer a locally retained, integrity-checked repair package or authorized file selection with the same exact version/publisher/product identity checks. Show prerequisites/storage costs before depending on it.",
+    "Verification scope": "Static source review",
+    "Verification performed": "Static source and documented capability review only; the item’s runtime acceptance checks were not executed. The earlier audit also reported 31 passing desktop splash/lifecycle/maintenance/recovery controller tests using synthetic IPC/fetch/timers. Those checks did not launch installed Tauri/MSI and do not establish this item’s native acceptance.",
+    "Acceptance criteria": "1. Disconnect network, damage the primary runtime, launch recovery copy and repair from an explicitly admitted exact package; tampered/wrong-version/wrong-publisher packages refuse; workspace data remains intact. Missing local material produces an actionable retrieval path.",
+    "Dependencies": "Trust verification, cache lifecycle, disk requirements and OS installer behavior. Offline mode must not bypass authenticity or downgrade protections.",
+    "Validation approach": "Proposed remaining checks: Run the acceptance criteria in an authorized controlled application environment, including relevant permission, error, concurrency and accessibility states.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "The candidate retains a source MSI and recovery runtime but documents its dependence on hosted exact-version manifest and package availability.",
+    "Source references": "apps/installer-msi/CUSTOMER.md:28-39: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/installer-msi/CUSTOMER.md#L28-L39",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "IS-014",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-159",
+    "Category": "Installation and desktop maintenance",
+    "Title": "Source-bootstrap cancellation still needs a nontechnical partial-install recovery journey",
+    "Priority": "P2",
+    "Evidence status": "test-needed",
+    "Effort estimate": "M–L",
+    "Affected persona": "Desktop installation owner",
+    "Finding type": "Qualification or behavior to verify",
+    "Problem": "Cancellation can leave package-manager/elevation work beyond the ordinary process ownership boundary, requiring terminal repair/uninstall instructions or ambiguous retry.",
+    "Evidence statement": "apps/installer-desktop/README.md:69-75 documents owned process groups/Job Object cleanup, elevated/package-manager boundary and possible partial dependency installs. App.svelte:231-268 distinguishes cancel/cleanup failure and force exit; cancellation must not be described as rollback.",
+    "Recommended change": "Preflight/safe resume that inventories installation phases, identifies partial dependencies, and offers platform-authorized repair or guided OS handoff with verified return. Keep the existing distinction between cancellation confirmed and cleanup uncertain.",
+    "Verification scope": "Documented qualification boundary and source review",
+    "Verification performed": "Static source and documented capability review only; the item’s runtime acceptance checks were not executed.",
+    "Acceptance criteria": "1. Disposable native matrix cancels each download/package/elevation phase, relaunches and reaches a verified usable or explicitly repairable state. No unowned process is killed and no “fully removed” claim is made without evidence.",
+    "Dependencies": "OS/package-manager integration; relevant to engineering-source distribution until self-contained customer installers replace it.",
+    "Validation approach": "Proposed remaining checks: Use disposable native environments to cancel every install phase, including package-manager and elevation boundaries, then verify resume/repair.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "The bootstrap already owns process groups or a Job Object and differentiates confirmed cancellation, cleanup failure and force exit. Elevated/package-manager boundaries are documented.",
+    "Source references": "apps/installer-desktop/README.md:69-75: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/installer-desktop/README.md#L69-L75\napps/installer-desktop/src/App.svelte:231-268: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/installer-desktop/src/App.svelte#L231-L268",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "IS-019",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-160",
+    "Category": "Data reporting and observability",
+    "Title": "Monthly billing silently omits records beyond 10,000",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Finance and high-volume workspace administrators",
+    "Finding type": "Code-supported finding; Confirmed; mock reproduced",
+    "Problem": "Finance or a high-volume workspace exports an apparently complete monthly statement whose older usage is missing.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/app.py:5577` loads the latest 10,000 episodes before month grouping (`:5579`) and CSV filtering (`:5618`). No total-count or truncation field is surfaced. The separate `/api/v1/cost.csv` already streams SQL-filtered records (`packages/maverick-dashboard/maverick_dashboard/app.py:10531`); do not duplicate its former fixed cap claim.",
+    "Recommended change": "Share a bounded-memory complete period query between statement and export; expose source and reconciliation status.",
+    "Verification scope": "Synthetic source or controller reproduction",
+    "Verification performed": "Existing audit executed the extracted billing_page function with 10,001 synthetic same-month episodes: monthly CSV exported 10,000 rows rather than 10,001.",
+    "Acceptance criteria": "1. 10,001 or more in-period runs and older historical periods return all authorized records and totals.\n2. Statement, download and streaming export agree on their explicitly defined population.",
+    "Dependencies": "World read model and finance semantics; preserve owner/tenant restrictions and distinguish episodes from rated usage ledger.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: 10,001 or more in-period runs and older historical periods return all authorized records and totals. Statement, download and streaming export agree on their explicitly defined population. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Monthly statements and CSV already exist. Separate /api/v1/cost.csv streams SQL-filtered records and does not have the former fixed cap; the finding is specific to statement population. Rated usage ledger remains distinct from episode records.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/app.py:5577-5579: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/app.py#L5577-L5579\npackages/maverick-dashboard/maverick_dashboard/app.py:5618: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/app.py#L5618\npackages/maverick-dashboard/maverick_dashboard/app.py:10531: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/app.py#L10531",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-001",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-161",
+    "Category": "Data reporting and observability",
+    "Title": "Savings report both truncates volume and treats unreadable history as zero",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Managers and operations analysts",
+    "Finding type": "Code-supported finding; Confirmed; failure-as-zero mock reproduced",
+    "Problem": "Managers see reduced or zero activity/savings when the store is unavailable or the window contains over 5,000 episodes.",
+    "Evidence statement": "`packages/maverick-core/maverick/workforce_value.py:108` defaults `episode_limit=5000`; `:138` applies it before window filtering; `:139-141` turns read failures into `episodes=[]`. `packages/maverick-core/maverick/savings.py:89` consumes this without completeness/error metadata.",
+    "Recommended change": "Complete aggregate queries with explicit unavailable/partial states; injected read failure must show unavailable, and 5,001+ rows must reconcile. Preserve last good report with freshness where useful.",
+    "Verification scope": "Synthetic source or controller reproduction",
+    "Verification performed": "Existing audit executed the extracted workforce computation with auxiliary sources stubbed and a history store raising OSError: returned deliverables=0, agent_cost=0.0 and no error field. The greater-than-5,000 completeness case was source-reviewed, not executed.",
+    "Acceptance criteria": "1. An injected history read failure shows unavailable, not zero activity or savings.\n2. More than 5,000 rows reconcile through complete aggregate queries or disclose partial coverage.\n3. Where useful, preserve the last good report with freshness; never conflate no history with inaccessible history or estimated with realized savings.",
+    "Dependencies": "Value aggregation schema; avoid conflating no history with inaccessible history or overstating realized savings.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: An injected history read failure shows unavailable, not zero activity or savings. More than 5,000 rows reconcile through complete aggregate queries or disclose partial coverage. Where useful, preserve the last good report with freshness; never conflate no history with inaccessible history or estimated with realized savings. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Editable global/department value assumptions, tenant-precedence explanations, honest estimated-value wording and workflow pilots already exist. Missing or unreadable underlying history is not repaired by estimate labels.",
+    "Source references": "packages/maverick-core/maverick/workforce_value.py:108-145: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/workforce_value.py#L108-L145\npackages/maverick-core/maverick/savings.py:89-118: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/savings.py#L89-L118",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-002",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-162",
+    "Category": "Data reporting and observability",
+    "Title": "Savings mixes selected currency with dollar costs",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Finance and managers using non-USD assumptions",
+    "Finding type": "Code-supported finding; Confirmed",
+    "Problem": "Selecting EUR, GBP or JPY gives a misleading financial comparison.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/templates/savings.html` currency selector and `amount` macro allow many currencies; `packages/maverick-core/maverick/savings.py:99-114` carries selected currency but copies `wv.agent_cost` unchanged; `DepartmentSavings.saved` subtracts it directly. Episode input is `cost_dollars` (`packages/maverick-core/maverick/workforce_value.py:145`). `packages/maverick-dashboard/maverick_dashboard/static/board.js:34-36` always displays `$` even on Savings charts.",
+    "Recommended change": "Either constrain assumptions to USD with explicit explanation or convert using dated user-reviewable rates. Table, hero, chart and export must share currency and conversion basis; non-USD fixtures must reconcile.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. Either constrain assumptions to USD with explicit explanation or convert using dated, user-reviewable rates.\n2. Table, hero, chart and export share currency and conversion basis; non-USD fixtures reconcile.\n3. Never silently relabel USD costs as the selected currency.",
+    "Dependencies": "Currency metadata and rate policy; never silently relabel USD.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Either constrain assumptions to USD with explicit explanation or convert using dated, user-reviewable rates. Table, hero, chart and export share currency and conversion basis; non-USD fixtures reconcile. Never silently relabel USD costs as the selected currency. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Currency customization exists, but the inspected calculation does not convert recorded dollar costs before subtracting them from non-USD assumptions.",
+    "Source references": "packages/maverick-core/maverick/savings.py:44-50: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/savings.py#L44-L50\npackages/maverick-core/maverick/savings.py:65-67: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/savings.py#L65-L67\npackages/maverick-dashboard/maverick_dashboard/templates/savings.html:17-19: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/savings.html#L17-L19\npackages/maverick-dashboard/maverick_dashboard/templates/savings.html:102-108: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/savings.html#L102-L108\npackages/maverick-core/maverick/savings.py:89-118: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/savings.py#L89-L118\npackages/maverick-core/maverick/workforce_value.py:145: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/workforce_value.py#L145\npackages/maverick-dashboard/maverick_dashboard/static/board.js:34-36: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/static/board.js#L34-L36",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-003",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-163",
+    "Category": "Data reporting and observability",
+    "Title": "Spend's “never estimated” claim contradicts pricing modes",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Buyers and finance reviewers",
+    "Finding type": "Code-supported finding; Confirmed wording/data-contract gap",
+    "Problem": "A buyer may treat recorded model costs as provider-invoiced charges.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/templates/spend.html:16-18` says costs are “never estimated”; `docs/pricing-governance.md` documents conservative ceilings, compatibility estimates, and excluded self-hosted/subscription costs. `packages/maverick-core/maverick/providers/bedrock_provider.py:35-37` explicitly describes estimate accounting when strict pricing is disabled.",
+    "Recommended change": "Display recorded/estimated/ceiling/reconciled states and excluded cost categories, preserving provenance through exports. A strict-pricing-off fixture must never appear invoice-verified.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. Display recorded, estimated, ceiling and reconciled states and excluded cost categories.\n2. Preserve cost provenance through exports; a strict-pricing-off fixture must never appear invoice-verified.\n3. Unknown costs do not appear free and strict billing protections remain intact.",
+    "Dependencies": "Budget/episode provenance; do not make unknown values look free or weaken strict billing.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Display recorded, estimated, ceiling and reconciled states and excluded cost categories. Preserve cost provenance through exports; a strict-pricing-off fixture must never appear invoice-verified. Unknown costs do not appear free and strict billing protections remain intact. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Versioned pricing evidence, strict defaults and honest Savings copy already exist; ordinary Spend/billing views need equivalent confidence and excluded-cost explanations.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/templates/spend.html:16-18: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/spend.html#L16-L18\ndocs/pricing-governance.md:3-34: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/pricing-governance.md#L3-L34\ndocs/pricing-governance.md:58-61: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/pricing-governance.md#L58-L61\npackages/maverick-core/maverick/providers/bedrock_provider.py:35-37: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/providers/bedrock_provider.py#L35-L37",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-004",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-164",
+    "Category": "Data reporting and observability",
+    "Title": "Stripe execution is not bound to the preview",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Billing administrators",
+    "Finding type": "Code-supported finding; Confirmed",
+    "Problem": "Admin previews one amount, changes date/markup/workspace, then sends materially different instructions under the still-visible preview.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/static/lightwork-billing-ops.js` preview submit exposes Sync; Sync handler calls `fields()` afresh, with no change invalidation or reviewed token. `packages/maverick-dashboard/maverick_dashboard/billing_ops_api.py:_preview` returns a summary, while `_sync` regenerates from current values. `packages/maverick-core/maverick/billing_stripe.py:625-626` rates again.",
+    "Recommended change": "Seal a short-lived preview against normalized fields, current plan/settings and rated contents; edits invalidate it. Tests must reject stale plan/rate/period/workspace changes and require re-review.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. Seal a short-lived preview against normalized fields, current plan/settings and rated contents.\n2. Field edits invalidate the preview; stale plan, rate, period or workspace changes are rejected and require re-review.\n3. Preserve native receipt, idempotency and overlapping-period protections.",
+    "Dependencies": "Shared billing action contract; preserve native receipt and overlapping-period protections.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Seal a short-lived preview against normalized fields, current plan/settings and rated contents. Field edits invalidate the preview; stale plan, rate, period or workspace changes are rejected and require re-review. Preserve native receipt, idempotency and overlapping-period protections. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Explicit human confirmation, administrator permissions, audit-before-send, durable native receipts, idempotency and overlapping-period defenses exist; those do not bind the reviewed amount, period or plan.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/static/lightwork-billing-ops.js:64-109: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/static/lightwork-billing-ops.js#L64-L109\npackages/maverick-dashboard/maverick_dashboard/billing_ops_api.py:141-184: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/billing_ops_api.py#L141-L184\npackages/maverick-core/maverick/billing_stripe.py:625-626: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/billing_stripe.py#L625-L626",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-005",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-165",
+    "Category": "Data reporting and observability",
+    "Title": "Stripe failure claims nothing changed after possible external mutations",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Finance and billing administrators",
+    "Finding type": "Code-supported finding; Confirmed error-contract defect; real processor path not exercised",
+    "Problem": "Finance may retry believing no customer, subscription or usage item was created.",
+    "Evidence statement": "`packages/maverick-core/maverick/billing_stripe.py:607-611` ensures customer/subscription before pushing usage; `packages/maverick-dashboard/maverick_dashboard/billing_ops_api.py` StripeError handler says “Nothing else was changed.” Failure/timeout can occur after earlier steps or dispatch. Existing core receipt uncertainty is documented in `docs/billing.md`.",
+    "Recommended change": "Return per-stage confirmed/pending/unknown state, link retained receipt and reconciliation, and never claim no change without evidence. Mock failures after each stage and after dispatch must preserve uncertainty and safe resume.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. Return per-stage confirmed, pending or unknown state, with retained receipt and reconciliation links.\n2. Failures after each stage and after dispatch preserve uncertainty and allow safe resume.\n3. Never claim no change without evidence or create a new invoice identity to bypass an uncertain outcome.",
+    "Dependencies": "Collection receipt projection and provider lookup; retries must not create a new invoice identity to bypass uncertainty.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Return per-stage confirmed, pending or unknown state, with retained receipt and reconciliation links. Failures after each stage and after dispatch preserve uncertainty and allow safe resume. Never claim no change without evidence or create a new invoice identity to bypass an uncertain outcome. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Core collection receipts retain uncertainty and safe retry identity, as documented in billing.md; the dashboard error message does not expose that staged outcome. The real processor path was not exercised.",
+    "Source references": "packages/maverick-core/maverick/billing_stripe.py:607-611: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/billing_stripe.py#L607-L611\npackages/maverick-dashboard/maverick_dashboard/billing_ops_api.py:194-212: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/billing_ops_api.py#L194-L212\ndocs/billing.md:58-78: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/billing.md#L58-L78",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-006",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-166",
+    "Category": "Data reporting and observability",
+    "Title": "Invoice display rounds each line independently of total",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Finance and spreadsheet recipients",
+    "Finding type": "Code-supported finding; Confirmed presentation issue",
+    "Problem": "Downloaded spreadsheet's visible line amounts need not add to its total.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/billing_invoice_api.py:50-54` independently rounds each charge to cents; `:74-77` formats each CSV line to two decimals, then separately formats total. Core invoice retains six decimal amounts (`packages/maverick-core/maverick/billing.py:162`). Core Stripe allocation has already addressed rounded-line reconciliation; the dashboard invoice adapter does not use that allocation.",
+    "Recommended change": "Use currency-aware exact allocations or retain sufficient precision plus explicit rounding adjustment; fixtures containing three half-cent-scale lines, minimum adjustments and zero-decimal currencies reconcile exactly.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. Use currency-aware exact allocation, or sufficient precision with an explicit rounding adjustment.\n2. Three half-cent-scale lines, minimum adjustments and zero-decimal currencies reconcile exactly.\n3. Do not alter immutable collected contents or double-count an existing minimum adjustment.",
+    "Dependencies": "Shared invoice presentation contract; avoid changing immutable collected contents or double-counting the existing minimum adjustment.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Use currency-aware exact allocation, or sufficient precision with an explicit rounding adjustment. Three half-cent-scale lines, minimum adjustments and zero-decimal currencies reconcile exactly. Do not alter immutable collected contents or double-count an existing minimum adjustment. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Core invoices retain six-decimal amounts and the Stripe allocator already reconciles rounded lines. The dashboard invoice adapter does not use that allocation.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/billing_invoice_api.py:50-54: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/billing_invoice_api.py#L50-L54\npackages/maverick-dashboard/maverick_dashboard/billing_invoice_api.py:74-77: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/billing_invoice_api.py#L74-L77\npackages/maverick-core/maverick/billing.py:162: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/billing.py#L162\ndocs/billing.md:68-71: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/billing.md#L68-L71",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-007",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-167",
+    "Category": "Data reporting and observability",
+    "Title": "Single-day audit search filters only the latest page",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Audit reviewers and administrators",
+    "Finding type": "Code-supported finding; Confirmed",
+    "Problem": "Selecting a person/event/text returns no results although matching activity exists earlier that day.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/app.py:5828-5831` tails `n` first, filters second; unlike the range path (`:5807-5826`), it does not search the day for matching rows or disclose incompleteness.",
+    "Recommended change": "Apply filters before paging with stable continuation and matched-count/completeness metadata. Matching event before newest 200/1,000 must be discoverable without manually guessing smaller date windows.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. A matching event before the newest 200 or 1,000 entries is discoverable without guessing smaller date windows.\n2. Apply filters before paging with stable continuation and matched-count or completeness metadata.\n3. Preserve signed/sealed readers, existing read-failure disclosure and authorization.",
+    "Dependencies": "Signed/sealed audit readers; preserve existing read-failure disclosure and authorization.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: A matching event before the newest 200 or 1,000 entries is discoverable without guessing smaller date windows. Apply filters before paging with stable continuation and matched-count or completeness metadata. Preserve signed/sealed readers, existing read-failure disclosure and authorization. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Audit supports day/range/text/person/type filtering, range scan-limit warnings, verification, sealing and proof exports. Single-day filtering differs from the more complete range path.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/app.py:5807-5831: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/app.py#L5807-L5831",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-020",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-168",
+    "Category": "Data reporting and observability",
+    "Title": "Invalid audit range dates silently alter the requested search",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "Audit reviewers and administrators",
+    "Finding type": "Code-supported finding; Confirmed",
+    "Problem": "A malformed From/To URL or imported filter is silently replaced by an unbounded/default search.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/app.py:5771-5776` validates explicit day and raises 400; `:5777-5778` converts invalid since/until to `None` without equivalent validation.",
+    "Recommended change": "Validate each supplied range field and ordering; readable inline errors preserve valid fields and text. Malformed dates and end-before-start must not render a misleading normal result set.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. Validate each supplied range date and date ordering on the server.\n2. Malformed dates and end-before-start produce readable errors preserving valid fields and search text.\n3. Invalid scope never renders a misleading normal result set; browser date controls are not the only validation.",
+    "Dependencies": "Shared date filter contract; browser date inputs help ordinary use but do not replace server correctness.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Validate each supplied range date and date ordering on the server. Malformed dates and end-before-start produce readable errors preserving valid fields and search text. Invalid scope never renders a misleading normal result set; browser date controls are not the only validation. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Explicit day validation already raises HTTP 400, while invalid since/until values silently become None.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/app.py:5771-5778: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/app.py#L5771-L5778",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-021",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-169",
+    "Category": "Data reporting and observability",
+    "Title": "Shared dashboard allows stale requests to overwrite current range",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "Dashboard users and managers",
+    "Finding type": "Code-supported finding; Confirmed; mock reproduced with actual JS",
+    "Problem": "User selects 30 days but sees a slower older 90-day response under the selected 30-day button.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/static/board.js:422-447` performs independent fetches and always renders their response; no generation check, abort or stale-result guard. Mock execution completed responses in order 30 then 90 and reproduced display mismatch.",
+    "Recommended change": "Request generation/abort scoped to board and selection, pending feedback, and current data stamp. Out-of-order results, rapid selection, poll overlap and navigation must never overwrite the latest selection.",
+    "Verification scope": "Synthetic source or controller reproduction",
+    "Verification performed": "Existing audit executed the actual shared-board JavaScript with isolated fetch stubs: requested 90 days then 30 days, completed responses 30 then 90, rendered [30,90], and ended with selectedDays=30 but displayedDays=90.",
+    "Acceptance criteria": "1. Out-of-order responses, rapid selection, poll overlap and navigation cannot overwrite the newest selected range.\n2. Use board/selection-scoped request generation or cancellation with pending feedback and current data stamp.\n3. Transient failure preserves last-good charts where useful.",
+    "Dependencies": "Shared board consumers; avoid losing last good chart on transient failure.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Out-of-order responses, rapid selection, poll overlap and navigation cannot overwrite the newest selected range. Use board/selection-scoped request generation or cancellation with pending feedback and current data stamp. Transient failure preserves last-good charts where useful. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Overview, Spend, Workforce, Savings and Oversight use shared charts and visible-minute refresh, with reduced-motion support. Response ordering is not guarded.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/static/board.js:422-447: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/static/board.js#L422-L447",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-022",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-170",
+    "Category": "Data reporting and observability",
+    "Title": "Spend outcome chart quietly samples only 200 episodes",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Spend reviewers and finance",
+    "Finding type": "Code-supported finding; Confirmed",
+    "Problem": "Outcome proportions disagree with the period's finished-task count for active workspaces.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/api.py:646-665` calculates totals from SQL over the period, while `:666-676` calculates outcomes from latest 200 episodes. `packages/maverick-dashboard/maverick_dashboard/templates/spend.html:44-46` labels outcomes as tasks in this period without sample disclosure.",
+    "Recommended change": "Aggregate outcomes over the same authorized interval/population as totals or explicitly label a sample; >200 mixed-outcome fixtures reconcile. Define running versus finished denominators clearly.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. More than 200 mixed-outcome fixtures reconcile with totals for the same authorized interval and population, or clearly disclose sample coverage.\n2. Define running versus finished denominators and distinguish goal tasks from episode attempts.",
+    "Dependencies": "Common reporting semantics; preserve distinction between task goals and episode attempts.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: More than 200 mixed-outcome fixtures reconcile with totals for the same authorized interval and population, or clearly disclose sample coverage. Define running versus finished denominators and distinguish goal tasks from episode attempts. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Spend SQL daily totals and period reporting exist, but the outcome portion uses the latest 200 episodes.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/api.py:646-676: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/api.py#L646-L676\npackages/maverick-dashboard/maverick_dashboard/templates/spend.html:44-46: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/spend.html#L44-L46",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-023",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-171",
+    "Category": "Data reporting and observability",
+    "Title": "Spend time range affects only some of the visible report",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Spend reviewers and finance",
+    "Finding type": "Code-supported finding; Confirmed interaction gap",
+    "Problem": "Choosing 30 days leaves all-time hero, server-rendered recent table, insight cards and CSV month selection on independent scopes, inviting inconsistent comparisons.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/app.py:3607,3627` server-renders 50 latest episodes and lifetime total; `packages/maverick-dashboard/maverick_dashboard/templates/spend.html:26-35` range buttons drive shared board only; `packages/maverick-dashboard/maverick_dashboard/templates/_spend_insights.html` has independent knobs; CSV link uses month, not board range (`spend.html:221-225`).",
+    "Recommended change": "One visible report scope applied to dependent modules/downloads, or explicit per-section “all time/latest 50/selected period” labels. Changing range must update compatible totals/export and disclose any independent scope.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. Changing the range updates compatible totals and export or explicitly labels independent all-time, latest-50 and selected-period sections.\n2. Expose one visible report scope across dependent modules and downloads where their semantics allow it.\n3. Fixed billing periods are not retroactively redefined.",
+    "Dependencies": "Reporting endpoint filters and CSV contracts; don't retroactively redefine fixed billing periods.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Changing the range updates compatible totals and export or explicitly labels independent all-time, latest-50 and selected-period sections. Expose one visible report scope across dependent modules and downloads where their semantics allow it. Fixed billing periods are not retroactively redefined. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Spend offers range-controlled shared charts, server-rendered totals/recent tasks, analytics controls and monthly CSV export, but their scopes are independent.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/app.py:3607: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/app.py#L3607\npackages/maverick-dashboard/maverick_dashboard/app.py:3627: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/app.py#L3627\npackages/maverick-dashboard/maverick_dashboard/templates/spend.html:26-35: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/spend.html#L26-L35\npackages/maverick-dashboard/maverick_dashboard/templates/_spend_insights.html:3-29: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/_spend_insights.html#L3-L29\npackages/maverick-dashboard/maverick_dashboard/templates/spend.html:221-225: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/spend.html#L221-L225",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-024",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-172",
+    "Category": "Data reporting and observability",
+    "Title": "Embedded analytics presents a latest-100 snapshot as task status totals",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S-M",
+    "Affected persona": "Managers using embedded analytics",
+    "Finding type": "Code-supported finding; Confirmed",
+    "Problem": "An embedded management view appears complete and live but reflects at most 100 goals from initial connection.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/static/lightwork-analytics.js:119-144` fetches `/api/v1/goals?limit=100`, counts client-side, and has no refresh loop or visible last-updated/sample annotation; headings say “Tasks by status.”",
+    "Recommended change": "Use aggregate read API or label sample, display freshness, safe manual/periodic refresh and defined scope. 101+ goals must either count fully or show clear sample coverage.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. With more than 100 goals, the embed either counts the full authorized population or clearly reports sample coverage.\n2. Show freshness, scope and safe manual or periodic refresh.\n3. Preserve embed-specific permissions and do not encourage broadly privileged tokens in shared HTML.",
+    "Dependencies": "Embed-specific permission contract; never encourage broadly privileged tokens in shared HTML.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: With more than 100 goals, the embed either counts the full authorized population or clearly reports sample coverage. Show freshness, scope and safe manual or periodic refresh. Preserve embed-specific permissions and do not encourage broadly privileged tokens in shared HTML. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "The same-origin analytics component and documentation already disclose CORS and broad-token exposure. The defect is latest-100 snapshot and freshness presentation, not an undisclosed token warning.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/static/lightwork-analytics.js:119-144: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/static/lightwork-analytics.js#L119-L144",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-025",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-173",
+    "Category": "Data reporting and observability",
+    "Title": "Oversight failures render as healthy/empty state",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Supervisors and oversight reviewers",
+    "Finding type": "Code-supported finding; Confirmed",
+    "Problem": "Supervisors can see no pending approvals or no halt when those state reads failed.",
+    "Evidence statement": "`packages/maverick-dashboard/maverick_dashboard/api.py:_board_oversight` at `:931` documents empty-board fail-soft; `:962-969` defaults approval-read exceptions to `0` and halt-read exceptions to `False`; `:948` breaks after 100,000 scanned events without a returned completeness field.",
+    "Recommended change": "Explicit unknown/degraded signals per source, preserved last-known status with freshness, no green/healthy badge when required inputs fail. Mock failures in audit, approval and halt sources must each be visible and link to repair.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. Synthetic audit, approval and halt source failures are each visible and link to repair.\n2. Show explicit unknown or degraded state per required input and preserved last-known state with freshness.\n3. No green or healthy badge appears when required reads fail; scanning completeness is disclosed and emergency-stop enforcement is unaffected.",
+    "Dependencies": "Oversight payload and common empty-state components; fail-visible must not interfere with actual emergency-stop enforcement.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Synthetic audit, approval and halt source failures are each visible and link to repair. Show explicit unknown or degraded state per required input and preserved last-known state with freshness. No green or healthy badge appears when required reads fail; scanning completeness is disclosed and emergency-stop enforcement is unaffected. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Oversight surfaces audit, approval and halt signals with a fail-soft design; fail-soft defaults can look healthy when source reads fail.",
+    "Source references": "packages/maverick-dashboard/maverick_dashboard/api.py:931-969: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/api.py#L931-L969",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-026",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-174",
+    "Category": "Data reporting and observability",
+    "Title": "Make cross-ledger cost differences understandable",
+    "Priority": "P2",
+    "Evidence status": "proposal",
+    "Effort estimate": "L",
+    "Affected persona": "Finance and operations analysts",
+    "Finding type": "Product improvement proposal; Feature",
+    "Problem": "Finance must reconcile task episode charges, quota ledger invoices, provider reservations, platform subscriptions and measured pilot costs across different pages without a joined explanation.",
+    "Evidence statement": "`docs/billing.md` explicitly distinguishes visual statement from rated AR invoice; `packages/maverick-dashboard/maverick_dashboard/templates/billing.html` says adjustments are separate from statements/provider bill; `packages/maverick-dashboard/maverick_dashboard/templates/provider_spending.html:6-8` distinguishes confirmed and set-aside money; `packages/maverick-dashboard/maverick_dashboard/templates/savings.html` excludes provider-invoice verification.",
+    "Recommended change": "Add a reconciliation view with source-of-truth labels, period/currency, confirmed/reserved/estimated amounts, included/excluded fees and drill-through differences. A mock interrupted task and provider receipt must explain why each ledger differs without equating them or double-counting.",
+    "Verification scope": "Static source review",
+    "Verification performed": "The existing audit documented static review of the pinned implementation; no executed reproduction is claimed for this entry.",
+    "Acceptance criteria": "1. Show source-of-truth labels, period and currency, confirmed/reserved/estimated amounts, included and excluded fees, and drill-through differences.\n2. A synthetic interrupted task and provider receipt explain why ledgers differ without equating or double-counting them.\n3. An initial local reconciliation view does not require live provider access.",
+    "Dependencies": "LW-160/003/004 and stable receipt identities; no live provider access required for an initial local view.",
+    "Validation approach": "Proposed controlled acceptance checks, not yet completed: Show source-of-truth labels, period and currency, confirmed/reserved/estimated amounts, included and excluded fees, and drill-through differences. A synthetic interrupted task and provider receipt explain why ledgers differ without equating or double-counting them. An initial local reconciliation view does not require live provider access. Use synthetic tenants and fake provider/Stripe/GitHub adapters only; no live external writes. Authenticated installed-app acceptance, real browser rendering, PostgreSQL behavior and processor integrations remain unqualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Billing documentation explicitly distinguishes the visual statement from rated AR invoices; provider spending distinguishes confirmed and reserved money; adjustments and Savings already warn about their accounting scope.",
+    "Source references": "docs/billing.md:11-38: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/billing.md#L11-L38\npackages/maverick-dashboard/maverick_dashboard/templates/billing.html:215-218: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/billing.html#L215-L218\npackages/maverick-dashboard/maverick_dashboard/templates/provider_spending.html:6-8: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/provider_spending.html#L6-L8\npackages/maverick-dashboard/maverick_dashboard/templates/savings.html:22-33: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/templates/savings.html#L22-L33",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "DO-029",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-175",
+    "Category": "Native clients and developer integrations",
+    "Title": "External-agent sample acts before approval",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "Integration author and employee affected by external actions",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Integration author copies official loop and performs email while governance is waiting for approval.",
+    "Evidence statement": "docs/clients/external-agent-quickstart.md:48-52 returns approval-required verdict without throwing; prose docs/clients/external-agent-quickstart.md:85-94 correctly says wait/poll binding. Loop docs/clients/external-agent-quickstart.md:213-215 ignores verdict and immediately calls send_email.",
+    "Recommended change": "Branch allow/pending/deny, poll bound approvals, prefer governed execution when enforcement required; executable mock-doc contracts.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Pending/denied/expired/stale mock approvals cause zero email calls.\n2. only authorized current input executes.",
+    "Dependencies": "Gateway approval binding; advisory screen must not be described as enforced write. No external action executed here.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Pending/denied/expired/stale mock approvals cause zero email calls; only authorized current input executes.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Approval system exists; copyable example bypasses its own documented waiting step.",
+    "Source references": "docs/clients/external-agent-quickstart.md:48-52: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/clients/external-agent-quickstart.md#L48-L52\ndocs/clients/external-agent-quickstart.md:85-94: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/clients/external-agent-quickstart.md#L85-L94\ndocs/clients/external-agent-quickstart.md:213-215: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/clients/external-agent-quickstart.md#L213-L215",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-01",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-176",
+    "Category": "Native clients and developer integrations",
+    "Title": "External-agent sample reports success after halt",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "External-agent operator",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Operator sees success for interrupted work.",
+    "Evidence statement": "Same quickstart docs/clients/external-agent-quickstart.md:221-225: false heartbeat breaks then unconditional finish(success).",
+    "Recommended change": "Preserve completion/halted/denied/error reason and finalize truthfully.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Halt/exception mock never records success.\n2. normal completion reports once.",
+    "Dependencies": "Supported external outcome vocabulary; don't invent status strings.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Halt/exception mock never records success; normal completion reports once.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Heartbeat/finish exist; loop loses exit reason.",
+    "Source references": "docs/clients/external-agent-quickstart.md:221-225: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/clients/external-agent-quickstart.md#L221-L225",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-02",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-177",
+    "Category": "Native clients and developer integrations",
+    "Title": "REST polling example loses history and can poll forever",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "REST API integration author",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Integrators miss terminal events or never stop on failed/cancelled tasks.",
+    "Evidence statement": "docs/api.md:114-129 stops only done/blocked plus one tail page, ignoring has_more/terminal; packages/maverick-dashboard/maverick_dashboard/api.py:1599-1609 correctly sets terminal only after backlog; packages/maverick-dashboard/maverick_dashboard/_event_stream.py:11 includes completed/failed/cancelled/error. docs/client-request-lifecycle.md:10-16 already states correct behavior.",
+    "Recommended change": "Drain pages, stop on server terminal, handle errors/cursors/cancellation.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. >2-page terminal backlog delivered exactly once.\n2. all terminal states stop.\n3. 401 stops with remedy.",
+    "Dependencies": "Shared replay contract; never infer contiguous IDs or completion solely from status.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: >2-page terminal backlog delivered exactly once; all terminal states stop; 401 stops with remedy.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "REST event pagination, scoped search, backlog-aware terminal acknowledgement and the shared client-request lifecycle contract already exist.",
+    "Source references": "docs/api.md:114-129: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/api.md#L114-L129\npackages/maverick-dashboard/maverick_dashboard/api.py:1599-1609: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/api.py#L1599-L1609\npackages/maverick-dashboard/maverick_dashboard/_event_stream.py:11: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/_event_stream.py#L11\ndocs/client-request-lifecycle.md:10-16: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/client-request-lifecycle.md#L10-L16",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-03",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-178",
+    "Category": "Native clients and developer integrations",
+    "Title": "Apple clients retain private view after denial",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Employee using watchOS or visionOS companions",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Revoked employee token leaves prior private task data visible.",
+    "Evidence statement": "apps/watch-glance/MaverickGlance/GlanceModel.swift:31-44 and apps/visionos-plan-tree/MaverickPlanTree/PlanTreeModel.swift:44-57 catch only sets error; data clears only on changed connection. Typed 401/403 errors exist in apps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionStore.swift:42-45,179-180.",
+    "Recommended change": "Clear models/selections on 401/403; retain explicitly stale same-identity snapshots only on eligible transient errors.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Seed mock private data then deny: no previous titles/results/tree.\n2. transient 503 may retain dated data.",
+    "Dependencies": "Typed error classification/view invalidation; preserve safe offline usefulness.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Seed mock private data then deny: no previous titles/results/tree; transient 503 may retain dated data.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Error explanation/identity switching exist; transient vs denial invalidation absent. Mobile already clears denied state (apps/mobile-companion/src/poll.ts:62-70).",
+    "Source references": "apps/watch-glance/MaverickGlance/GlanceModel.swift:31-44: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/watch-glance/MaverickGlance/GlanceModel.swift#L31-L44\napps/visionos-plan-tree/MaverickPlanTree/PlanTreeModel.swift:44-57: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/MaverickPlanTree/PlanTreeModel.swift#L44-L57\napps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionStore.swift:42-45: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionStore.swift#L42-L45\napps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionStore.swift:179-180: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionStore.swift#L179-L180\napps/mobile-companion/src/poll.ts:62-70: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/mobile-companion/src/poll.ts#L62-L70",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-04",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-179",
+    "Category": "Native clients and developer integrations",
+    "Title": "VS Code allows remote HTTP bearer after generic consent",
+    "Priority": "P1",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "VS Code user connecting to a remote dashboard",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "User trusts destination without realizing transport is cleartext.",
+    "Evidence statement": "apps/vscode-extension/src/extension.ts:269-278 asks generic origin trust; apps/vscode-extension/src/extension.ts:291-299 accepts HTTP/HTTPS then selects http.get; apps/vscode-extension/src/eventWatch.ts:44-58 lacks HTTPS-or-loopback bearer check. Mobile/Apple/JetBrains have that policy.",
+    "Recommended change": "Enforce common transport rule before token attachment; explain address correction.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Mock remote HTTP+token makes zero requests.\n2. safe HTTPS/loopback remain supported.\n3. consent cannot override rule.",
+    "Dependencies": "Shared transport policy; source-confirmed protection gap, not an exploitation test.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Mock remote HTTP+token makes zero requests; safe HTTPS/loopback remain supported; consent cannot override rule.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "VS Code has origin confirmation and streaming support; mobile, Apple and JetBrains implement the HTTPS-or-loopback bearer policy.",
+    "Source references": "apps/vscode-extension/src/extension.ts:269-278: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L269-L278\napps/vscode-extension/src/extension.ts:291-299: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L291-L299\napps/vscode-extension/src/eventWatch.ts:44-58: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/eventWatch.ts#L44-L58",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-06",
+    "Suggested sequence": "2 Establish shared experience foundations",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-180",
+    "Category": "Native clients and developer integrations",
+    "Title": "Watch Today can be yesterday's snapshot",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "Watch user reviewing daily work and spending",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Retained counts/spend mistaken for current after failed refresh/date change.",
+    "Evidence statement": "apps/watch-glance/MaverickGlance/GlanceModel.swift:12 decodes as_of; apps/watch-glance/MaverickGlance/GlanceView.swift:12-24 renders Today/spent today without timestamp; catch retains data.",
+    "Recommended change": "Source time/age, stale treatment, date-aware wording and busy state.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. When shown today, a yesterday-dated mock explicitly displays its actual yesterday source date.\n2. failed update doesn't imply current counts.\n3. denials follow NAPI-04.",
+    "Dependencies": "Server/user day/timezone definitions.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: When shown today, a yesterday-dated mock explicitly displays its actual yesterday source date; failed update doesn't imply current counts; denials follow NAPI-04.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "The glance payload includes as_of and the watch provides counts, spending, last result, settings and refresh.",
+    "Source references": "apps/watch-glance/MaverickGlance/GlanceModel.swift:12: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/watch-glance/MaverickGlance/GlanceModel.swift#L12\napps/watch-glance/MaverickGlance/GlanceModel.swift:31-44: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/watch-glance/MaverickGlance/GlanceModel.swift#L31-L44\napps/watch-glance/MaverickGlance/GlanceView.swift:12-24: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/watch-glance/MaverickGlance/GlanceView.swift#L12-L24",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-17",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-181",
+    "Category": "Native clients and developer integrations",
+    "Title": "visionOS selection masks error and stays stale",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "visionOS user inspecting a selected task",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Selected task hides refresh failure or old status remains after graph updates.",
+    "Evidence statement": "apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:52-55 stores node snapshot; apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:77-85 selected branch wins over error; only settings save clears selected apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:67.",
+    "Recommended change": "Store ID and derive selection from latest forest; show errors independently.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Running→done updates selected card.\n2. deleted/revoked node clears.\n3. error visible during selection.",
+    "Dependencies": "Stable identities/authorized freshness.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Running→done updates selected card; deleted/revoked node clears; error visible during selection.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "visionOS has selectable graph nodes, title/status cards, refresh, settings, empty states and errors; selection synchronization is missing.",
+    "Source references": "apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:52-55: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift#L52-L55\napps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:77-85: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift#L77-L85\napps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:67: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift#L67",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-18",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-182",
+    "Category": "Native clients and developer integrations",
+    "Title": "visionOS has no accessible alternate tree/size controls",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "visionOS user relying on assistive navigation or inspecting a large plan",
+    "Finding type": "Code-supported gap with native qualification still required",
+    "Problem": "Precision gaze/pinch and color-coded spatial UI excludes some people/large trees.",
+    "Evidence statement": "apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:10-11,27-43,52-56 fixed geometry, spheres named numeric IDs, no alternate list/accessibility labels; README apps/visionos-plan-tree/README.md:31-35 explicitly unverified hardware geometry.",
+    "Recommended change": "Searchable text hierarchy/status, alternate accessible list/tree, fit/zoom/reset.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. All nodes reachable without color/precision gesture.\n2. 1/100/1000-node mock fit or paginate.\n3. assistive selection announces task.",
+    "Dependencies": "RealityKit accessibility, comfort/performance qualification.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: All nodes reachable without color/precision gesture; 1/100/1000-node mock fit or paginate; assistive selection announces task.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "A selectable spatial goal graph exists; the reviewed native visionOS surface has no alternate semantic list or tree.",
+    "Source references": "apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:10-11: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift#L10-L11\napps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:27-43: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift#L27-L43\napps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:52-56: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift#L52-L56\napps/visionos-plan-tree/README.md:31-35: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/README.md#L31-L35",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-19",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-183",
+    "Category": "Native clients and developer integrations",
+    "Title": "Apple fetch unbounded and refresh not owned",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Watch or visionOS user refreshing task data",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Big replies/repeated refresh waste watch memory/network.",
+    "Evidence statement": "shared apps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionStore.swift:174-182 session.data(for:) buffers complete body with no byte cap; watch apps/watch-glance/MaverickGlance/GlanceView.swift:37 and vision apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:61 spawn Tasks; model fences late replies but doesn't cancel older transport.",
+    "Recommended change": "Bounded streaming and cancellation/busy state.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Oversize mock aborts within cap.\n2. rapid refresh at most one accepted request.\n3. disposal cancels.",
+    "Dependencies": "Native URLSession behavior/cancellation propagation.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Oversize mock aborts within cap; rapid refresh at most one accepted request; disposal cancels.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Timeout and response fencing exist.",
+    "Source references": "apps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionStore.swift:174-182: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionStore.swift#L174-L182\napps/watch-glance/MaverickGlance/GlanceView.swift:37: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/watch-glance/MaverickGlance/GlanceView.swift#L37\napps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift:61: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/MaverickPlanTree/PlanTreeVolume.swift#L61",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-20",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-184",
+    "Category": "Native clients and developer integrations",
+    "Title": "Distribution/native qualification unfinished",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "L",
+    "Affected persona": "Native-client release owner and customer installing supported clients",
+    "Finding type": "Code-supported gap with native qualification still required",
+    "Problem": "Customers must assemble/build projects instead of installing finished clients.",
+    "Evidence statement": "mobile README apps/mobile-companion/README.md:27-34,59-63; watch README build requirements; vision README apps/visionos-plan-tree/README.md:20-35; JetBrains README apps/jetbrains-plugin/README.md:8-13; Zed README apps/zed-extension/README.md:37-64. Watch README advertises complication but tracked directory only has GlanceModel/GlanceView/README, no WidgetKit target/provider.",
+    "Recommended change": "Honest preview labels, reproducible signed packaging, compatibility/support matrix and installed-client acceptance; align complication promise with delivery.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Intended user installs without Xcode/Gradle assembly.\n2. actual hosts tested with mock auth and accessibility.\n3. previews labeled until qualified.",
+    "Dependencies": "Signing/CI/platform accounts. Audit authorizes no publication/credentials.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Intended user installs without Xcode/Gradle assembly; actual hosts tested with mock auth and accessibility; previews labeled until qualified.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Read-only companion sources, shared Apple secure connection settings, JetBrains bounded SSE and Zed MCP/terminal tasks exist; native release qualification remains unfinished.",
+    "Source references": "apps/mobile-companion/README.md:27-34: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/mobile-companion/README.md#L27-L34\napps/mobile-companion/README.md:59-63: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/mobile-companion/README.md#L59-L63\napps/watch-glance/README.md:3-4: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/watch-glance/README.md#L3-L4\napps/watch-glance/README.md:11-21: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/watch-glance/README.md#L11-L21\napps/visionos-plan-tree/README.md:20-35: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/visionos-plan-tree/README.md#L20-L35\napps/jetbrains-plugin/README.md:8-13: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/jetbrains-plugin/README.md#L8-L13\napps/zed-extension/README.md:37-64: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/zed-extension/README.md#L37-L64",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-21",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-185",
+    "Category": "Native clients and developer integrations",
+    "Title": "Pairing and contextual handoff opportunity",
+    "Priority": "P2",
+    "Evidence status": "proposal",
+    "Effort estimate": "L",
+    "Affected persona": "Supervisor pairing a read-only device and continuing work on a computer",
+    "Finding type": "Product improvement proposal",
+    "Problem": "Supervisor manually copies bearer then must relocate blocked task on computer.",
+    "Evidence statement": "mobile README apps/mobile-companion/README.md:7-9,38-43, Settings apps/mobile-companion/src/screens/SettingsScreen.tsx:113-168; Apple Settings apps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionSettingsView.swift:29-50: deliberate read-only/manual token setup.",
+    "Recommended change": "Short-lived QR/device pairing, protected renewal/revocation and exact-task dashboard handoff; evaluate native decisions separately.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. No manual/conversational bearer copying.\n2. revoke clears view.\n3. handoff retains authorized context.\n4. no writes merely because token permits.",
+    "Dependencies": "Device identity/deep links/admin policy; any future writes need consequences/current-state checks.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: No manual/conversational bearer copying; revoke clears view; handoff retains authorized context; no writes merely because token permits.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Read-only is intentional, not a bug.",
+    "Source references": "apps/mobile-companion/README.md:7-9: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/mobile-companion/README.md#L7-L9\napps/mobile-companion/README.md:38-43: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/mobile-companion/README.md#L38-L43\napps/mobile-companion/src/screens/SettingsScreen.tsx:113-168: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/mobile-companion/src/screens/SettingsScreen.tsx#L113-L168\napps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionSettingsView.swift:29-50: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/apple-companion-core/Sources/LightworkConnectionKit/ConnectionSettingsView.swift#L29-L50",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-22",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-186",
+    "Category": "Native clients and developer integrations",
+    "Title": "VS Code CLI lifecycle weaker than SSE",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "VS Code user starting or controlling CLI-backed work",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Hung capture/export/halt never finishes; launched work has no per-run ownership/reconciliation path.",
+    "Evidence statement": "apps/vscode-extension/src/extension.ts:34-56,59-81 no timeout/cancellation handle, capture buffers unbounded; apps/vscode-extension/src/extension.ts:196-211 no start in-flight guard; deactivate apps/vscode-extension/src/extension.ts:372-376 disposes only SSE/output. SSE already has strong deadline/bounds.",
+    "Recommended change": "Owned bounded CLI child lifecycle, cancellable progress, duplicate-start guard and retained task/receipt ID.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Mock hung child gives actionable unknown-state timeout.\n2. unload cleans owned resources.\n3. duplicate activations don't silently duplicate.\n4. nonzero start visibly fails beyond printing exit code.",
+    "Dependencies": "CLI task semantics; local process termination doesn't prove effects stopped.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Mock hung child gives actionable unknown-state timeout; unload cleans owned resources; duplicate activations don't silently duplicate; nonzero start visibly fails beyond printing exit code. The prior VS Code contract test could not initialize because TypeScript was unavailable; no product assertions ran and no dependency was installed.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "VS Code SSE already has owned cancellation, bounded replay and deadlines; local halt acknowledgement is checked.",
+    "Source references": "apps/vscode-extension/src/extension.ts:34-56: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L34-L56\napps/vscode-extension/src/extension.ts:59-81: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L59-L81\napps/vscode-extension/src/extension.ts:196-211: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L196-L211\napps/vscode-extension/src/extension.ts:372-376: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L372-L376",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-23",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-187",
+    "Category": "Native clients and developer integrations",
+    "Title": "VS Code first-workspace and numeric-ID friction",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "VS Code user with multiple repositories or task histories",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Multi-root task may use wrong repository; export/watch need remembered goal ID despite sidebar.",
+    "Evidence statement": "apps/vscode-extension/src/extension.ts:27-31 folders[0]; RunItem apps/vscode-extension/src/extension.ts:113-139 no command; export apps/vscode-extension/src/extension.ts:225-230, watch apps/vscode-extension/src/extension.ts:284-287 numeric prompts.",
+    "Recommended change": "Explicit/current-editor folder scope, sidebar actions and searchable task picker.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Two-root mock starts in chosen scope.\n2. selected run watch/export without ID typing.\n3. local/remote identities clear.",
+    "Dependencies": "Workspace trust and identity; preserve machine-scoped executable configuration.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Two-root mock starts in chosen scope; selected run watch/export without ID typing; local/remote identities clear. The prior VS Code contract test could not initialize because TypeScript was unavailable; no product assertions ran and no dependency was installed.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "VS Code provides a recent-run sidebar, start, export and watch commands; executable configuration is machine-scoped.",
+    "Source references": "apps/vscode-extension/src/extension.ts:27-31: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L27-L31\napps/vscode-extension/src/extension.ts:113-139: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L113-L139\napps/vscode-extension/src/extension.ts:225-230: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L225-L230\napps/vscode-extension/src/extension.ts:284-287: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L284-L287",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-24",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-188",
+    "Category": "Native clients and developer integrations",
+    "Title": "VS Code bearer in normal settings",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "VS Code user managing dashboard credentials",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Private credential mixed with JSON preferences, generic consent repeats per remote watch.",
+    "Evidence statement": "apps/vscode-extension/package.json:121-125 plain machine-scoped string; apps/vscode-extension/src/extension.ts:296-297 configuration read; apps/vscode-extension/src/extension.ts:273-277 repeated consent.",
+    "Recommended change": "SecretStorage-backed named connection test/rotate/disconnect; migrate/remove legacy token only after successful secure save.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Token absent from settings/log/export.\n2. failed migration preserves usability.\n3. host switch verified.\n4. NAPI-06 remains mandatory.",
+    "Dependencies": "VS Code credential API/migration failure.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Token absent from settings/log/export; failed migration preserves usability; host switch verified; NAPI-06 remains mandatory. The prior VS Code contract test could not initialize because TypeScript was unavailable; no product assertions ran and no dependency was installed.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Machine scope prevents workspace override, not protected storage.",
+    "Source references": "apps/vscode-extension/package.json:121-125: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/package.json#L121-L125\napps/vscode-extension/src/extension.ts:296-297: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L296-L297\napps/vscode-extension/src/extension.ts:273-277: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L273-L277",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-25",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-189",
+    "Category": "Native clients and developer integrations",
+    "Title": "JetBrains env-only setup and silent invalid input",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "JetBrains user configuring and monitoring tasks",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Credentials require process environment/restart; Watch appears inert on bad ID.",
+    "Evidence statement": "apps/jetbrains-plugin/README.md:8-13; apps/jetbrains-plugin/src/main/kotlin/dev/maverick/RunsToolWindowFactory.kt:24,53,56-57,96 unlabeled JTextField, silent early return, getenv configuration.",
+    "Recommended change": "Native settings/PasswordSafe/test, searchable labeled run picker and error recovery.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Configure/repair without restart.\n2. invalid selection has remedy.\n3. screen reader announces purpose/error.\n4. no identity crossover.",
+    "Dependencies": "Actual IntelliJ SDK project/qualification absent.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Configure/repair without restart; invalid selection has remedy; screen reader announces purpose/error; no identity crossover.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "JetBrains already owns a cancellable bounded SSE reader with replay, deadlines and transport policy checks.",
+    "Source references": "apps/jetbrains-plugin/README.md:8-13: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/jetbrains-plugin/README.md#L8-L13\napps/jetbrains-plugin/src/main/kotlin/dev/maverick/RunsToolWindowFactory.kt:24: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/jetbrains-plugin/src/main/kotlin/dev/maverick/RunsToolWindowFactory.kt#L24\napps/jetbrains-plugin/src/main/kotlin/dev/maverick/RunsToolWindowFactory.kt:53: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/jetbrains-plugin/src/main/kotlin/dev/maverick/RunsToolWindowFactory.kt#L53\napps/jetbrains-plugin/src/main/kotlin/dev/maverick/RunsToolWindowFactory.kt:56-57: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/jetbrains-plugin/src/main/kotlin/dev/maverick/RunsToolWindowFactory.kt#L56-L57\napps/jetbrains-plugin/src/main/kotlin/dev/maverick/RunsToolWindowFactory.kt:96: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/jetbrains-plugin/src/main/kotlin/dev/maverick/RunsToolWindowFactory.kt#L96",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-26",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-190",
+    "Category": "Native clients and developer integrations",
+    "Title": "Editor budgets and stop scope need direct controls",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Editor user managing task budget and cancellation scope",
+    "Finding type": "Code-supported gap with proposed interface extension",
+    "Problem": "VS Code start can't review per-run budget; local global stop is available instead of per-task cancellation.",
+    "Evidence statement": "start apps/vscode-extension/src/extension.ts:196-208 only title; config apps/vscode-extension/package.json:100-127 no budgets. Neovim/Emacs already optional default max dollars (apps/nvim/lua/maverick/init.lua:18-20,44-46; apps/emacs/maverick.el:39-42,54-58). Halt correctly checks local checkpoint semantics (apps/vscode-extension/src/extension.ts:84-91,333-346).",
+    "Recommended change": "Per-run effective cost/time caps and review; authorized task cancel/resume distinct from local emergency stop.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Effective caps visible, selected cancellation leaves others alone, halt never claims effects stopped.",
+    "Dependencies": "CLI/API/admin caps; preserve truthful ack.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Effective caps visible, selected cancellation leaves others alone, halt never claims effects stopped. The prior VS Code contract test could not initialize because TypeScript was unavailable; no product assertions ran and no dependency was installed.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Neovim and Emacs support optional default maximum-dollar budgets; VS Code local halt checks checkpoint acknowledgement rather than claiming all effects stopped.",
+    "Source references": "apps/vscode-extension/src/extension.ts:196-208: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L196-L208\napps/vscode-extension/src/extension.ts:84-91: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L84-L91\napps/vscode-extension/src/extension.ts:333-346: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L333-L346\napps/vscode-extension/package.json:100-127: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/package.json#L100-L127\napps/nvim/lua/maverick/init.lua:18-20: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/nvim/lua/maverick/init.lua#L18-L20\napps/nvim/lua/maverick/init.lua:44-46: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/nvim/lua/maverick/init.lua#L44-L46\napps/emacs/maverick.el:39-42: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/emacs/maverick.el#L39-L42\napps/emacs/maverick.el:54-58: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/emacs/maverick.el#L54-L58",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-27",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-191",
+    "Category": "Native clients and developer integrations",
+    "Title": "Synchronous editor controls may block UI",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "Neovim or Emacs user controlling slow CLI work",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Slow CLI can freeze editing while loading status/halting.",
+    "Evidence statement": "Neovim apps/nvim/lua/maverick/init.lua:63-78 synchronous system; Emacs apps/emacs/maverick.el:68,100 synchronous calls. Acknowledgement validation already exists.",
+    "Recommended change": "Async owned process, deadline/progress/cancel, same validation.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Mock stalled CLI leaves UI responsive and times out as unconfirmed.\n2. late result can't overwrite newer status.",
+    "Dependencies": "Native editor tests required; emergency-state precision.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Mock stalled CLI leaves UI responsive and times out as unconfirmed; late result can't overwrite newer status.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Neovim and Emacs already validate halt acknowledgements and provide CLI start/status/log/monitor controls.",
+    "Source references": "apps/nvim/lua/maverick/init.lua:63-78: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/nvim/lua/maverick/init.lua#L63-L78\napps/emacs/maverick.el:68: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/emacs/maverick.el#L68\napps/emacs/maverick.el:100: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/emacs/maverick.el#L100",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-28",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-192",
+    "Category": "Native clients and developer integrations",
+    "Title": "Main API start guide omits existing receipt recovery",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "REST API integration author recovering uncertain starts",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Retry after ambiguous response can duplicate work/cost.",
+    "Evidence statement": "docs/api.md:85-108 no Idempotency-Key/receipt; actual packages/maverick-dashboard/maverick_dashboard/api.py:1380,1485-1503 supports them; lifecycle docs/client-request-lifecycle.md:56-85 documents.",
+    "Recommended change": "Stable request ID, receipt GET, conflict/unknown/admission/dispatch distinctions in primary REST/language examples.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Accepted-then-timeout mock reconciled via GET, never new-key POST.\n2. differing-payload 409 clear.\n3. acceptance not called execution.",
+    "Dependencies": "Versioned admission contract; never blanket-retry side effects.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Accepted-then-timeout mock reconciled via GET, never new-key POST; differing-payload 409 clear; acceptance not called execution.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "The backend supports Idempotency-Key, start receipts and receipt lookup; the detailed lifecycle documentation describes recovery.",
+    "Source references": "docs/api.md:85-108: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/api.md#L85-L108\npackages/maverick-dashboard/maverick_dashboard/api.py:1380: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/api.py#L1380\npackages/maverick-dashboard/maverick_dashboard/api.py:1485-1503: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-dashboard/maverick_dashboard/api.py#L1485-L1503\ndocs/client-request-lifecycle.md:56-85: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/client-request-lifecycle.md#L56-L85",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-29",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-193",
+    "Category": "Native clients and developer integrations",
+    "Title": "External TS helper lacks timeout/typed recovery",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "TypeScript external-agent integration author",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "Copied helper may wait indefinitely and returns raw status/body error.",
+    "Evidence statement": "docs/clients/external-agent-quickstart.md:123-128,165-170 no AbortSignal/deadline; operational retry-after guidance separate docs/clients/external-agent-quickstart.md:305-307. Python helper does have request timeout.",
+    "Recommended change": "Maintained thin typed helper with owned deadlines, error status/retry-after/request ID, safe logs, explicit retry policy.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Stalled mock aborts, auth/rate limit/unknown effect distinguished, secrets redacted, writes not replayed.",
+    "Dependencies": "External API schemas/receipt semantics; avoid needless dependency.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Stalled mock aborts, auth/rate limit/unknown effect distinguished, secrets redacted, writes not replayed.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "The Python quickstart helper has a request timeout, and separate operational documentation discusses Retry-After.",
+    "Source references": "docs/clients/external-agent-quickstart.md:123-128: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/clients/external-agent-quickstart.md#L123-L128\ndocs/clients/external-agent-quickstart.md:165-170: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/clients/external-agent-quickstart.md#L165-L170\ndocs/clients/external-agent-quickstart.md:305-307: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/docs/clients/external-agent-quickstart.md#L305-L307",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-30",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-194",
+    "Category": "Native clients and developer integrations",
+    "Title": "SDK schema declaration isn't argument validation",
+    "Priority": "P2",
+    "Evidence status": "code-supported",
+    "Effort estimate": "M",
+    "Affected persona": "TypeScript plugin author",
+    "Finding type": "Code-supported gap with proposed interface extension",
+    "Problem": "Plugin author may assume inputSchema enforces arguments; must manually parse unknown values.",
+    "Evidence statement": "sdks/plugin-ts/src/index.ts:35-36,46-47 any schema object; sdks/plugin-ts/src/index.ts:115-119 coerces nonobject args to {} then directly invokes handler. Host manifests schema packages/maverick-core/maverick/ts_plugin_host.py:351-361. Scope limit: This does NOT claim kernel lacks separate validation.",
+    "Recommended change": "Explicit SDK boundary docs and optional typed schema validator/adapter with not_started failure.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. Standalone validated handler not entered for malformed/missing args.\n2. valid typed args succeed.\n3. legacy behavior documented.",
+    "Dependencies": "JSON Schema compatibility/backwards compatibility.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: Standalone validated handler not entered for malformed/missing args; valid typed args succeed; legacy behavior documented.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "Protocol-v2 effect receipts, serialized handler ownership, no replay after uncertainty, deadlines, frame limits and bounded page context exist. The prior audit executed all three SDK test files using native Node stripping plus an audit-only import hook: 23 passed, 0 failed; that does not qualify TypeScript compilation, package distribution or this proposed argument validator.",
+    "Source references": "sdks/plugin-ts/src/index.ts:35-36: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/sdks/plugin-ts/src/index.ts#L35-L36\nsdks/plugin-ts/src/index.ts:46-47: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/sdks/plugin-ts/src/index.ts#L46-L47\nsdks/plugin-ts/src/index.ts:115-119: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/sdks/plugin-ts/src/index.ts#L115-L119\npackages/maverick-core/maverick/ts_plugin_host.py:351-361: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/packages/maverick-core/maverick/ts_plugin_host.py#L351-L361",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-31",
+    "Suggested sequence": "3 Complete daily employee journeys",
+    "Implementation status": "Recommendation; not implemented by this audit"
+  },
+  {
+    "ID": "LW-195",
+    "Category": "Native clients and developer integrations",
+    "Title": "Capability/build metadata drift",
+    "Priority": "P3",
+    "Evidence status": "code-supported",
+    "Effort estimate": "S",
+    "Affected persona": "SDK or VS Code adopter and release/documentation owner",
+    "Finding type": "Code-supported defect or usability gap",
+    "Problem": "User can't tell capabilities/license/build path.",
+    "Evidence statement": "VS Code README apps/vscode-extension/README.md:30-38 says streaming roadmap although package apps/vscode-extension/package.json:65-70/code apps/vscode-extension/src/extension.ts:281-320 implement it; package apps/vscode-extension/package.json:7 MIT vs README apps/vscode-extension/README.md:40-42 proprietary. SDK README sdks/plugin-ts/README.md:21,29-35 jumps from source to compilation/config registration without complete project. Port drift separate LW-060.",
+    "Recommended change": "Generated command matrix, owner-resolved metadata, runnable minimal SDK package and troubleshooting.",
+    "Verification scope": "Static source review at the pinned commit; native or authenticated runtime behavior remains unqualified",
+    "Verification performed": "The prior audit inspected the cited source at the pinned commit. This integration only read audit artifacts and resolved source paths; it did not run product probes or perform runtime acceptance.",
+    "Acceptance criteria": "1. README matches manifest, owner-approved license metadata, mock quickstart builds/loads with specified versions.",
+    "Dependencies": "Release/documentation ownership; no legal inference from conflict.",
+    "Validation approach": "Remaining proposed validation, not executed in this integration: README matches manifest, owner-approved license metadata, mock quickstart builds/loads with specified versions. The prior VS Code contract test could not initialize because TypeScript was unavailable; no product assertions ran and no dependency was installed.",
+    "Customization and policy boundaries": "Apply experience changes within existing identity, workspace, authorization, privacy, retention and budget boundaries; do not widen access implicitly",
+    "Existing capability": "VS Code streaming commands are implemented, and the SDK has source, protocol behavior and configuration registration guidance; build/distribution qualification is incomplete.",
+    "Source references": "apps/vscode-extension/README.md:30-38: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/README.md#L30-L38\napps/vscode-extension/README.md:40-42: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/README.md#L40-L42\napps/vscode-extension/package.json:65-70: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/package.json#L65-L70\napps/vscode-extension/package.json:7: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/package.json#L7\napps/vscode-extension/src/extension.ts:281-320: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/apps/vscode-extension/src/extension.ts#L281-L320\nsdks/plugin-ts/README.md:21: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/sdks/plugin-ts/README.md#L21\nsdks/plugin-ts/README.md:29-35: https://github.com/Daybreak-AI-Labs/Lightwork/blob/6daa3165ff5a844320ec970553d5ecdec7e396c4/sdks/plugin-ts/README.md#L29-L35",
+    "Source commit": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
+    "Review date": "2026-09-30",
+    "Source entry IDs": "NAPI-32",
+    "Suggested sequence": "4 Expand after qualification",
     "Implementation status": "Recommendation; not implemented by this audit"
   }
 ]

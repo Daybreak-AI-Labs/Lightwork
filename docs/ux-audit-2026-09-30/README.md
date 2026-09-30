@@ -6,8 +6,9 @@ implementation worklist, not acceptance or release evidence.
 - Audit/main baseline: `6daa3165ff5a844320ec970553d5ecdec7e396c4`.
 - Preserved companion handoff: `d8904378537f0c04bd205a05446115687c2d0475`.
 - Source: **Lightwork UX improvement backlog.csv**, 195 distinct audit entries.
-- The initial Library text extraction is incomplete after LW-157. Missing rows
-  remain explicitly blocked on source delivery; no requirements are inferred.
+- All 195 entries and all 24 source fields were retrieved from ten lossless
+  Library parts, each checked for its expected entry count and end marker.
+  `source-provenance.json` records the resolved source parts.
 - Regression tests may be authored, but test suites, application journeys and
   provider calls remain deferred at the user's instruction.
 - No merge, deployment, credential changes, or production changes are authorized.
