@@ -163,6 +163,10 @@ def restore(name, version, actor, *, expected_generation, new_name=None, admin=F
 
 def execution_template(name):
     """Resolve a publication for a new schedule; its rendered body is then pinned."""
+    from .config import config_source_errors
+
+    if config_source_errors(include_tenant=True):
+        raise ValueError("Workflow policy is unavailable. Repair Settings before starting work.")
     if not enabled() or not _path(name).exists():
         template = load_template(name)
         return template, ""

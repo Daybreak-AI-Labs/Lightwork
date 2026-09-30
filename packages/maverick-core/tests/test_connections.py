@@ -10,6 +10,7 @@ from maverick import connections
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr("maverick.paths.data_dir", lambda *p, **k: tmp_path.joinpath(*p))
+    monkeypatch.setattr(connections, "data_dir", lambda *p, **k: tmp_path.joinpath(*p))
     monkeypatch.setenv("MAVERICK_CONNECTIONS", "1")
     # a plaintext seal so the test needs no KMS backend
     monkeypatch.setattr("maverick.connections.seal_text_for_tenant",
@@ -25,7 +26,7 @@ def test_set_list_get_delete_roundtrip():
                    "base_url": "https://eu.salesforce.com", "has_token": True,
                    "created": rec["created"], "owner": "", "access": "owner",
                    "allowed_principals": [], "revision": rec["revision"],
-                   "last_test": None}
+                   "last_test": None, "test_history": [], "capability_receipts": []}
     listed = connections.list_connections()
     assert listed[0]["name"] == "salesforce-eu" and "token" not in listed[0]
     full = connections.get_connection("salesforce-eu")
@@ -406,7 +407,7 @@ def test_readiness_receipt_is_non_secret_and_rotation_invalidates_it():
     rotated = connections.set_connection(
         "ready", token="new", owner="user:alice", expected_owner="user:alice",
     )
-    assert rotated["last_test"] is None
+    assert rotated["last_test"]["revision"] != rotated["revision"]
 
 
 def test_stale_readiness_probe_cannot_certify_rotated_credentials():
@@ -456,7 +457,7 @@ def test_readiness_receipt_is_bound_to_credential_revision_and_capability():
     assert checked["last_test"]["outcome"] == "access_unverified"
     assert "task access is not checked" in checked["last_test"]["capability"]
     rotated = connections.set_connection("test", token="replacement", expected_revision=saved["revision"])
-    assert rotated["last_test"] is None
+    assert rotated["last_test"]["revision"] != rotated["revision"]
     with pytest.raises(connections.ConnectionVersionConflict):
         connections.record_test_result("test", reachable=True, authenticated=True, expected_revision=saved["revision"])
 
@@ -468,3 +469,50 @@ def test_bad_aws_region_refuses_without_overwriting_saved_record():
     with pytest.raises(ValueError, match="region"):
         connections.set_connection("storage", token=json.dumps({"region": "bad/region"}), expected_revision=saved["revision"])
     assert connections.get_connection("storage")["revision"] == saved["revision"]
+
+
+def test_staged_replacement_fences_both_versions_and_preserves_old_receipts():
+    target = connections.set_connection("production", connector="github", base_url="https://api.github.com", token="old-key", owner="user:a", allowed_principals=["user:b"])
+    checked_target = connections.record_test_result("production", reachable=True, authenticated=False, expected_revision=target["revision"])
+    staged = connections.set_connection("candidate", connector="github", base_url="https://api.github.com", token="new-key", owner="user:a")
+    connections.record_test_result("candidate", reachable=True, authenticated=True, expected_revision=staged["revision"])
+    with pytest.raises(connections.ConnectionVersionConflict):
+        connections.replace_from_staged("production", "candidate", owner="user:a", expected_revision=target["revision"], replacement_revision="stale")
+    # Compose under the same lock, as the impact-review API does.
+    with connections._mutation_lock():
+        switched = connections.replace_from_staged("production", "candidate", owner="user:a", expected_revision=target["revision"], replacement_revision=staged["revision"])
+    assert connections.get_connection("production")["token"] == "new-key"
+    assert switched["allowed_principals"] == ["user:b"]
+    assert switched["test_history"][-1] == checked_target["last_test"]
+    assert switched["last_test"]["staged_revision"] == staged["revision"]
+    assert "token" not in switched and connections.get_connection("candidate") is not None
+
+
+def test_capability_probe_uses_one_fixed_read_and_persists_no_provider_payload(monkeypatch):
+    import contextlib
+    import json
+    from maverick.connection_capabilities import probe
+
+    saved = connections.set_connection("drive", connector="gdrive", base_url="https://www.googleapis.com", token="fixture", owner="user:a")
+    calls = []
+    class Reply:
+        status_code = 200
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def iter_bytes(self): yield json.dumps({"id": "file-a", "private_value": "must-not-persist"}).encode()
+    class Client:
+        def stream(self, method, url, **kwargs):
+            calls.append((method, url, kwargs))
+            return Reply()
+    @contextlib.contextmanager
+    def safe_client(_url, **_kwargs): yield Client()
+    monkeypatch.setattr("maverick.tools._ssrf.safe_client", safe_client)
+    receipt = probe("drive", "drive_file_metadata", "file-a", actor="user:a", expected_revision=saved["revision"], authorize=lambda: None)
+    assert receipt["verified"] and receipt["external_writes"] is False
+    assert calls[0][0] == "GET" and "/drive/v3/files/file-a?fields=id" in calls[0][1]
+    assert calls[0][2]["follow_redirects"] is False and len(calls) == 1
+    assert "must-not-persist" not in str(connections.get_connection("drive"))
+    assert "file-a" not in str(receipt)
+    with pytest.raises(ValueError):
+        probe("drive", "drive_file_metadata", "../different", actor="user:a", expected_revision=saved["revision"], authorize=lambda: None)
+    assert len(calls) == 1

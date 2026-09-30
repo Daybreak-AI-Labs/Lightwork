@@ -30,7 +30,9 @@ from collections.abc import Iterator, Sequence
 from .paths import data_dir
 from .tenant.kms import seal_text_for_tenant, unseal_text_for_tenant
 
-_lock = threading.Lock()
+# A reviewed mutation can compose an impact check and a store helper under
+# the same transaction. The OS sidecar lock is reentrant as well.
+_lock = threading.RLock()
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ACCESS = frozenset({"owner", "tenant"})
 _MAX_PRINCIPAL_LENGTH = 256
@@ -286,6 +288,15 @@ def set_connection(name: str, *, connector: str | None = None,
                 raise ValueError("Enter a valid AWS storage region, such as us-east-1.")
         if existing_oauth and token is None:
             rec["oauth"] = dict(existing_oauth)
+        if existing:
+            # Preserve the evidence of the old generation. Its revision stays
+            # unchanged so no consumer can mistake it for current readiness.
+            if existing.get("last_test"):
+                rec["last_test"] = dict(existing["last_test"])
+            if existing.get("test_history"):
+                rec["test_history"] = list(existing["test_history"])
+            if existing.get("capability_receipts"):
+                rec["capability_receipts"] = list(existing["capability_receipts"])
         data[slug] = rec
         _save(data)
     return _public(rec)
@@ -334,6 +345,8 @@ def _public(rec: dict) -> dict:
         "allowed_principals": list(rec.get("allowed_principals") or []),
         "revision": str(rec.get("revision") or ""),
         "last_test": dict(last_test) if last_test is not None else None,
+        "test_history": [dict(item) for item in rec.get("test_history", []) if isinstance(item, dict)],
+        "capability_receipts": [dict(item) for item in rec.get("capability_receipts", []) if isinstance(item, dict)],
     }
     status = public_status(rec)
     if status is not None:
@@ -477,6 +490,8 @@ def record_test_result(
                 "connection changed while its readiness probe was running"
             )
         updated = dict(rec)
+        if isinstance(rec.get("last_test"), dict):
+            updated["test_history"] = (list(rec.get("test_history", [])) + [dict(rec["last_test"])])[-100:]
         updated["last_test"] = {
             "tested_at": time.time(),
             "reachable": bool(reachable),
@@ -492,6 +507,46 @@ def record_test_result(
         data[slug] = updated
         _save(data)
     return _public(updated)
+
+
+def replace_from_staged(name: str, replacement: str, *, owner: str | None,
+                        expected_revision: str, replacement_revision: str) -> dict:
+    """Copy reviewed API-key bytes without exposing them to a client.
+
+    Both records and the fresh authentication receipt are checked under one
+    credential-store lock. Existing sharing remains explicit and unchanged.
+    OAuth accounts use their own consent flow, never this key-copy operation.
+    """
+    with _mutation_lock():
+        records = _load()
+        target, staged = records.get(normalize_name(name)), records.get(normalize_name(replacement))
+        expected_owner = owner or ""
+        if (not target or not staged or target["name"] == staged["name"]
+                or (target.get("owner") or "") != expected_owner
+                or (staged.get("owner") or "") != expected_owner):
+            raise PermissionError("Choose two different connections owned by your account.")
+        if target.get("revision") != expected_revision or staged.get("revision") != replacement_revision:
+            raise ConnectionVersionConflict("A connection changed. Review the replacement again.")
+        if target.get("oauth") or staged.get("oauth"):
+            raise ValueError("Reconnect renewable accounts through their provider consent flow.")
+        if target.get("connector") != staged.get("connector") or target.get("base_url") != staged.get("base_url"):
+            raise ValueError("A staged key replacement must use the same adapter and service address.")
+        receipt = staged.get("last_test") or {}
+        if (receipt.get("revision") != staged["revision"] or receipt.get("authenticated") is not True
+                or not 0 <= time.time() - float(receipt.get("tested_at") or 0) <= 86400):
+            raise ValueError("Verify the staged credential's authentication within the last day before switching it.")
+        updated = dict(target)
+        updated["token"] = staged["token"]
+        updated["revision"] = uuid.uuid4().hex
+        history = list(target.get("test_history", []))
+        if target.get("last_test"):
+            history.append(dict(target["last_test"]))
+        updated["test_history"] = history[-100:]
+        updated["last_test"] = {**receipt, "revision": updated["revision"],
+                                "staged_name": staged["name"], "staged_revision": staged["revision"]}
+        records[updated["name"]] = updated
+        _save(records)
+        return _public(updated)
 
 
 __all__ = [

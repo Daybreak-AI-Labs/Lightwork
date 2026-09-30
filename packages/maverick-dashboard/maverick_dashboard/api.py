@@ -5519,7 +5519,9 @@ async def list_connections_endpoint(request: Request) -> dict:
     from maverick import connections
 
     try:
-        rows = connections.list_connections(owner=_request_identity(request))
+        from .connection_dependencies import owned_connections
+
+        rows = owned_connections(request)
     except connections.ConnectionStoreUnavailable as exc:
         raise HTTPException(
             status_code=503, detail="connection credential registry is unavailable"
@@ -5562,14 +5564,22 @@ async def account_inventory_endpoint(request: Request) -> dict:
     coverage = []
     if connections.enabled():
         try:
-            for record in connections.list_connections(owner=_request_identity(request)):
+            from .connection_dependencies import owned_connections
+
+            for record in owned_connections(request):
                 identity = record.get("oauth") or {}
                 rows.append({"id": "named:" + record["name"], "name": record["name"],
                              "provider": record["connector"], "domain": "Named workflows and sources",
                              "owner": "Your account" if _request_identity(request) else "Workspace-managed",
                              "identity": (identity.get("identity") or {}).get("display_name") or "See account details in Connections",
                              "sharing": "Workspace" if record["access"] == "tenant" else "Owner and explicitly selected people",
-                             "repair_url": "/connections", "credential_kind": "named", "revision": record["revision"]})
+                             "repair_url": "/connections", "credential_kind": "named", "revision": record["revision"],
+                             "workspace": identity.get("workspace") or {}, "site_url": identity.get("site_url", ""),
+                             "granted_scopes": identity.get("granted_scopes", []), "scope_status": identity.get("scope_status", "not recorded"),
+                             "expires_at": identity.get("expires_at"), "renewal_state": identity.get("renewal_state", "not configured"),
+                             "renews": identity.get("available", False), "recovery_action": identity.get("recovery_action", ""),
+                             "used_by_href": "/connections?review=" + record["name"],
+                             "usage_coverage": "Review declared dependencies and dynamic selection limits before changing this account."})
             coverage.append({"domain": "Named connections", "state": "available"})
         except connections.ConnectionStoreUnavailable:
             coverage.append({"domain": "Named connections", "state": "unavailable"})
@@ -5586,7 +5596,9 @@ async def account_inventory_endpoint(request: Request) -> dict:
                              "owner": "Workspace-managed", "identity": "Account identity was not recorded by this legacy connection",
                              "sharing": "Existing automation vault policy", "repair_url": "/automations#oauth-connect",
                              "credential_kind": "automation", "expires_at": status.get("expires_at"),
-                             "expired": status.get("expired", False), "renews": status.get("has_refresh_token", False)})
+                             "expired": status.get("expired", False), "renews": status.get("has_refresh_token", False),
+                             "usage_coverage": "Provider-wide automation contract; per-task account bindings were not recorded. Review connected automations before disconnecting.",
+                             "used_by_href": "/automations#oauth-connect"})
             coverage.append({"domain": "Automation accounts", "state": "available"})
         except Exception:
             coverage.append({"domain": "Automation accounts", "state": "unavailable"})
@@ -5620,18 +5632,28 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
         # tenant's connection by reusing its name. Enforced INSIDE the store
         # lock (expected_owner) so the check and the write are atomic.
         owner = _request_identity(request)
-        rec = connections.set_connection(
-            payload.name,
-            connector=payload.connector,
-            base_url=payload.base_url,
-            token=payload.token,
-            owner=owner or "",
-            expected_owner=owner,
-            access=payload.access,
-            allowed_principals=payload.allowed_principals,
-            expected_revision=payload.expected_revision,
-            require_revision=True,
-        )
+        def save_reviewed():
+            from .connection_dependencies import require_review
+
+            with connections._mutation_lock():
+                existing = connections.get_connection(payload.name)
+                if existing is not None:
+                    widens = (payload.access == "tenant" and existing.get("access") != "tenant") or bool(set(payload.allowed_principals or []) - set(existing.get("allowed_principals") or []))
+                    rotates = payload.token is not None or (payload.base_url is not None and payload.base_url.rstrip("/") != existing.get("base_url")) or (payload.connector is not None and payload.connector != existing.get("connector"))
+                    require_review(request, connections.normalize_name(payload.name), payload.expected_revision, payload.impact_version, expected_context=payload.context or "", rotation=rotates or widens)
+                return connections.set_connection(
+                    payload.name,
+                    connector=payload.connector,
+                    base_url=payload.base_url,
+                    token=payload.token,
+                    owner=owner or "",
+                    expected_owner=owner,
+                    access=payload.access,
+                    allowed_principals=payload.allowed_principals,
+                    expected_revision=payload.expected_revision,
+                    require_revision=True,
+                )
+        rec = await run_in_threadpool(save_reviewed)
     except connections.ConnectionStoreUnavailable as e:
         raise HTTPException(
             status_code=503, detail="connection credential registry is unavailable"
@@ -5665,7 +5687,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     # connection (else a name-guess is a cross-owner reachability oracle AND
     # sends another owner's token). A 404 (not 403) so it can't confirm the name.
     owner_filter = _request_identity(request)
-    if rec is None or (owner_filter is not None and rec.get("owner", "") != owner_filter):
+    if rec is None or ((rec.get("owner") or None) != owner_filter):
         raise HTTPException(status_code=404, detail="no such connection")
     probe_revision = str(rec.get("revision") or "")
 
@@ -5807,6 +5829,8 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
 async def delete_connection_endpoint(
     request: Request, name: str,
     expected_revision: str | None = Query(default=None, min_length=1, max_length=64),
+    impact_version: str | None = Query(default=None, pattern=r"^[a-f0-9]{64}$"),
+    context: str | None = Query(default=None, pattern=r"^[a-f0-9]{64}$"),
 ) -> dict:
     require_permission(request, "admin")  # managing credentials is admin-only
     _require_connections()
@@ -5818,9 +5842,13 @@ async def delete_connection_endpoint(
             status_code=422, detail="Reload Connections and review the current account before removing it.",
         )
     try:
-        deleted = connections.delete_connection(
-            name, owner=owner, expected_revision=expected_revision,
-        )
+        def remove_reviewed():
+            from .connection_dependencies import require_review
+
+            with connections._mutation_lock():
+                require_review(request, connections.normalize_name(name), expected_revision, impact_version, expected_context=context or "")
+                return connections.delete_connection(name, owner=owner, expected_revision=expected_revision)
+        deleted = await run_in_threadpool(remove_reviewed)
     except connections.ConnectionVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except connections.ConnectionStoreUnavailable as exc:
@@ -6026,16 +6054,12 @@ def _require_flows() -> None:
 
 
 def _can_access_flow(request: Request, flow) -> bool:
-    """Whether the caller may read or mutate a saved flow definition.
+    """Private definitions are visible only to their exact owner.
 
-    Auth-off and dashboard admins keep the historical unscoped behavior.
-    Authenticated non-admins may only access flows they own; legacy ownerless
-    flows remain reachable only from the auth-off/admin paths.
+    Administration controls policy, not employee content. An auth-off local
+    session may inspect only legacy ownerless definitions.
     """
-    principal = caller_principal(request)
-    if principal is None or is_dashboard_admin(principal):
-        return True
-    return getattr(flow, "owner", "") == principal
+    return flow is not None and getattr(flow, "owner", "") == (caller_principal(request) or "")
 
 
 def _assert_flow_access(request: Request, flow) -> None:

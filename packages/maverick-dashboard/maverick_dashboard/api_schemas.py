@@ -498,6 +498,8 @@ class ConnectionIn(BaseModel):
     access: str | None = Field(None, pattern="^(owner|tenant)$")
     allowed_principals: list[str] | None = Field(None, max_length=100)
     expected_revision: str | None = Field(None, min_length=1, max_length=128)
+    impact_version: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
+    context: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
 
 
 class FlowSaveIn(BaseModel):

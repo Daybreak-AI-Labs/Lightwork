@@ -144,41 +144,45 @@
   },
   {
     "id": "LW-078",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142 already corrects local removal vs provider revocation copy; connection_dependencies.py owner-only attention adapter in progress."
+      "71c1142 already corrects local removal vs provider revocation copy; connection_dependencies.py owner-only attention adapter in progress.",
+      "connection_dependencies.py and connection_review_api.py: scoped pre-change impact digests; active-task rotation guard; staged two-record key switch, exact source CAS rebinding, retained receipts, and provider-consent handoff; Connections Used by/repair UI."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "In progress: permission-scoped dependency report, revision-bound pre-change review, staged key replacement and explicit source re-enrollment. No upstream revocation claim."
+      "Execute authored and acceptance tests during the user-authorized testing phase."
     ]
   },
   {
     "id": "LW-079",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing OAuth callback/policy and Windows recovery foundations retained; no native or provider qualification run."
+      "Existing OAuth callback/policy and Windows recovery foundations retained; no native or provider qualification run.",
+      "connection_review_api.py qualification matrix plus shared account inventory explicitly separate synthetic/native/live evidence and show every unobserved combination as not qualified; native/provider acceptance remains unexecuted by user instruction."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "Support qualification matrix still to be published. Native installed Windows and live-provider qualification are explicitly deferred by the user; no combination can be labelled qualified without observed evidence."
+      "Qualification intentionally not claimed: installed Windows/native and live-provider checks require signed distributable build, registered application, approved provider accounts and the user-authorized testing phase."
     ]
   },
   {
     "id": "LW-080",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142 exposes catalog auth/prerequisites and readiness coverage limits; exact job capability work remains."
+      "71c1142 exposes catalog auth/prerequisites and readiness coverage limits; exact job capability work remains.",
+      "connection_capabilities.py fixed bounded public-provider GET manifest, exact resource identity verification, declared minimum scopes, revision-scoped receipts, explicit no-write/no-replay; Used by repair links return to saved work."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "In progress: exact capability prerequisite/probe manifest and dependency repair return path. Generic service authentication is explicitly not task capability verification."
+      "Execute authored and acceptance tests during the user-authorized testing phase.",
+      "Exact intent resume uses operation recovery (LW-146); connection repair itself never starts or replays blocked work. No write capability is qualified by a read check."
     ]
   },
   {
@@ -249,15 +253,16 @@
   },
   {
     "id": "LW-086",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142: read-only named/provider-vault inventory facade with separate usage domains, identity, owner, renewals, coverage/context and repair destinations."
+      "71c1142: read-only named/provider-vault inventory facade with separate usage domains, identity, owner, renewals, coverage/context and repair destinations.",
+      "shared account inventory renders distinct account domain/name/owner/identity/workspace/site/grants/renewal and dependent-work review links; exact owner/context filtering; unknown legacy identity/grants/usage coverage is visible."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "Extend named account inventory with safe workspace/scope/renewal and scoped dependents; preserve distinct legacy usage contract and incomplete coverage states."
+      "Execute authored and acceptance tests during the user-authorized testing phase."
     ]
   },
   {

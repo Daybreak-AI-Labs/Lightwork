@@ -11,6 +11,7 @@ const raw=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/template
 function fixture(fetch){
   const html=raw.replace(/\{%[\s\S]*?%\}/g,'').replace(/\{\{[\s\S]*?\}\}/g,'').replace('data-can-manage=""','data-can-manage="true"');
   const dom=new JSDOM(html,{url:'http://localhost/connections',runScripts:'outside-only'});
+  dom.window.lightworkConnectionImpact={review:async()=> 'a'.repeat(64)};
   dom.window.fetch=fetch;dom.window.mvConfirm=async()=>true;dom.window.eval(source);return dom;
 }
 const record={name:'friendly-account',connector:'long_tail',revision:'original',has_token:true,base_url:'https://service.example',access:'owner',allowed_principals:[]};
@@ -22,10 +23,10 @@ test('outage never appears as an empty inventory and disables mutations',async()
   assert.equal(d.querySelector('#cx-form button[type="submit"]').disabled,true);dom.window.close();
 });
 
-test('conflict cannot inherit a revision from refreshed inventory; unknown binding survives',async()=>{
+test('conflict cannot inherit a revision from refreshed inventory; known long-tail binding survives',async()=>{
   let version='original',writes=[];
   const dom=fixture(async(url,options={})=>{
-    if(url.endsWith('/catalog'))return response({connectors:[]});
+    if(url.endsWith('/catalog'))return response({connectors:[{name:'long_tail',label:'Long tail',key_setup_supported:true}]});
     if(options.method==='POST'){writes.push(JSON.parse(options.body));version='newer';return response({},409);}
     return response({connections:[{...record,revision:version}],context:'workspace'});
   });await tick();await tick();const w=dom.window,d=w.document;
@@ -44,4 +45,17 @@ test('access loss prevents a late successful list restoring private rows',async(
   dom.window.document.dispatchEvent(new dom.window.Event('lightwork:connection-access-lost'));
   resolve(response({connections:[record],context:'workspace'}));await tick();await tick();
   assert.equal(dom.window.document.getElementById('cx-list').children.length,0);dom.window.close();
+});
+
+
+test('unknown adapters remain read-only rather than changing binding on submit',async()=>{
+  let writes=0;
+  const dom=fixture(async(url,options={})=>{
+    if(options.method==='POST')writes++;
+    return response(url.endsWith('/catalog')?{connectors:[]}:{connections:[record],context:'workspace'});
+  });await tick();await tick();const d=dom.window.document;
+  d.querySelector('#cx-list button').click();
+  assert.equal(d.querySelector('#cx-form button[type="submit"]').disabled,true);
+  d.getElementById('cx-form').dispatchEvent(new dom.window.Event('submit',{cancelable:true}));
+  await tick();assert.equal(writes,0);dom.window.close();
 });

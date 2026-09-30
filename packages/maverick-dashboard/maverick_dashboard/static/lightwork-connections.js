@@ -9,7 +9,7 @@
   function say(text, error) { msg.textContent = text || ''; msg.style.color = error ? 'var(--danger)' : 'var(--muted)'; }
   function controls() {
     form.querySelectorAll('button').forEach(function (button) { button.disabled = !canManage || !inventoryReady || busy || uncertain || conflict || unknownBinding || accessLost; });
-    list.querySelectorAll('button').forEach(function (button) { button.disabled = !canManage || !inventoryReady || busy || uncertain || accessLost; });
+    list.querySelectorAll('button').forEach(function (button) { button.disabled = (!canManage && !button.dataset.connectionImpact) || !inventoryReady || busy || uncertain || accessLost; });
     form.setAttribute('aria-busy', String(busy));
   }
   function clearSecrets() { ['cx-token','cx-aws-access','cx-aws-secret','cx-aws-region','cx-aws-session'].forEach(function (id) { document.getElementById(id).value = ''; }); }
@@ -156,7 +156,8 @@
         var test = el('button','btn btn--ghost',discoveryPreset(record.connector) ? 'Check source access' : 'Check service access'); test.type='button';
         test.addEventListener('click',function () { if (discoveryPreset(record.connector)) { location.href='/privacy/data-discovery'; return; } mutate('test', record); });
         var remove=el('button','btn btn--danger','Remove'); remove.type='button'; remove.addEventListener('click',function () { mutate('remove',record); });
-        li.append(change,test,remove); list.appendChild(li);
+        var impactButton=el('button','btn btn--ghost','Used by and repair'); impactButton.type='button'; impactButton.dataset.connectionImpact=record.name; impactButton.dataset.connectionRevision=record.revision;
+        li.append(change,test,remove,impactButton); list.appendChild(li);
       });
       inventoryReady = true;
       inventoryStatus.textContent = 'Connections checked at ' + new Date().toLocaleTimeString() + '.';
@@ -191,9 +192,15 @@
     if (action === 'save') { try { body=readBody(); } catch (error) { say(error.message,true); return; } if (!form.reportValidity()) return; }
     busy=true; controls();
     try {
-      if (action === 'remove' && !(await mvConfirm('Remove the locally saved connection "' + record.name + '"? Saved work may need reconnection. This does not revoke consent at the provider; review connected apps with that provider separately.', {okText:'Remove local connection'}))) return;
+      var impactVersion=null;
+      if (action === 'remove' || (action === 'save' && editing)) {
+        if (!window.lightworkConnectionImpact) throw new Error('Connection impact review is unavailable. Reload before changing this record.');
+        impactVersion=await window.lightworkConnectionImpact.review(action === 'remove' ? record.name : editing.name, action === 'remove' ? record.revision : editing.revision, action, context);
+        if (!impactVersion) return;
+        if (action === 'save') { body.impact_version=impactVersion; body.context=context; }
+      }
       if (accessLost) return;
-      var url='/api/v1/connections' + (action === 'save' ? '' : '/' + encodeURIComponent(record.name) + (action === 'test' ? '/test' : '?' + new URLSearchParams({expected_revision:record.revision})));
+      var url='/api/v1/connections' + (action === 'save' ? '' : '/' + encodeURIComponent(record.name) + (action === 'test' ? '/test' : '?' + new URLSearchParams({expected_revision:record.revision,impact_version:impactVersion,context:context})));
       say(action === 'test' ? 'Checking service access.' : 'Saving your change.');
       var result=await request(url,{method:action === 'remove' ? 'DELETE' : 'POST',body:action === 'save' ? JSON.stringify(body) : undefined});
       if (accessLost) return;

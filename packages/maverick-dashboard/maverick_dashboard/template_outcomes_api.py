@@ -125,8 +125,10 @@ def bind_template_outcomes(request: Request, name: str, body: BindIn):
                 raise LookupError()
             record["template_bindings"] = {**record.get("template_bindings", {}), name: {
                 "version": version, "exceptions": body.exceptions, "actor": caller_principal(request) or "local"}}
-        outcome_pilots.STORE.update(body.pilot_id, mutate, expected_revision=body.expected_revision,
+        updated = outcome_pilots.STORE.update(body.pilot_id, mutate, expected_revision=body.expected_revision,
                                    actor=caller_principal(request) or "local", action="attribute_template_pilot")
+        if updated is None:
+            raise LookupError()
     except LookupError as exc:
         raise HTTPException(404, "Pilot is unavailable in this account and workspace.") from exc
     except RecordConflict as exc:
