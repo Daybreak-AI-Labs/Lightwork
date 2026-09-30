@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,7 +41,12 @@ class _Sandbox:
         self.workdir = workdir
 
     def exec(self, cmd, timeout=None):
-        done = subprocess.run(cmd.split(), cwd=self.workdir, capture_output=True, text=True)
+        args = cmd.split()
+        # The synthetic local backend must use this test environment. Windows
+        # can resolve bare python beside the host executable before PATH.
+        if args[0] == "python":
+            args[0] = sys.executable
+        done = subprocess.run(args, cwd=self.workdir, capture_output=True, text=True)
         return type("R", (), {"stdout": done.stdout, "stderr": done.stderr,
                               "exit_code": done.returncode})()
 
