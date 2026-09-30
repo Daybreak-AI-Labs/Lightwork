@@ -202,10 +202,44 @@ def _entry_points(group: str):
     return eps
 
 
+# A workbench pin must describe the module actually loaded, not newer disk bytes
+# beneath an old Python import-cache object. Reload is an explicit admin action.
+_PINNED_IMPORTS: dict[tuple[str, str], tuple[object, str]] = {}
+
+
+def _load_current_entry(ep):
+    if _plugins_config().get("workbench", False) is not True:
+        return ep.load()
+    import sys
+
+    from .plugin_lock import _dist_content_hash
+
+    distribution = _ep_dist_name(ep)
+    value = str(getattr(ep, "value", "") or "")
+    module_name = value.split(":", 1)[0]
+    digest = _dist_content_hash(distribution) if distribution else None
+    if not digest or not module_name:
+        raise ValueError("Plugin has no inspectable installed bytes; no code was imported.")
+    key = (distribution, module_name)
+    cached = sys.modules.get(module_name)
+    previous = _PINNED_IMPORTS.get(key)
+    if cached is not None and (previous is None or previous != (cached, digest)):
+        raise ValueError("Plugin import cache does not match reviewed bytes. Stop affected work and explicitly reload the plugin.")
+    group = str(getattr(ep, "group", ""))
+    if group in _PLUGIN_GROUPS:
+        from .plugin_execution_pins import check_pin
+        check_pin(group, ep.name, distribution, digest)
+    target = ep.load()
+    if _dist_content_hash(distribution) != digest:
+        raise ValueError("Plugin bytes changed during import. Reload its reviewed version before dispatch.")
+    _PINNED_IMPORTS[key] = (sys.modules.get(module_name), digest)
+    return target
+
+
 def _load(ep, what: str) -> Any | None:
     """Resolve an entry point's target with logging on failure."""
     try:
-        return ep.load()
+        return _load_current_entry(ep)
     except Exception as e:
         log.warning("plugin %s.%s failed to load: %s", what, ep.name, e)
         return None
@@ -789,28 +823,52 @@ def _iter_loaded_with_value(group: str, what: str):
 def discover_channels() -> list[tuple[str, Any]]:
     """Return (name, Channel subclass) tuples for installed channel plugins."""
     out: list[tuple[str, Any]] = []
-    for name, target in _iter_loaded("maverick.channels", "channels"):
+    for name, target, _value, dist in _iter_loaded_with_value("maverick.channels", "channels"):
         # Heuristic: anything truthy + not a string passes; we don't import
         # the Channel base here to avoid a hard dep on maverick-channels.
         if isinstance(target, str):
             log.warning("plugin channel %s loaded a string; skipping", name)
             continue
+        if _plugins_config().get("workbench", False) is True:
+            from .plugin_execution_pins import bind_entry
+            try:
+                target = bind_entry("maverick.channels", name, dist, target)
+            except (ValueError, TypeError, PermissionError):
+                log.warning("plugin channel %s cannot retain an exact version pin; skipping", name)
+                continue
         out.append((name, target))
     return out
 
 
 def discover_skills() -> list[Any]:
     """Return a list of plugin-provided Skill objects."""
-    return [target for _, target in _iter_loaded("maverick.skills", "skills")]
+    result = []
+    for name, target, _value, dist in _iter_loaded_with_value("maverick.skills", "skills"):
+        if _plugins_config().get("workbench", False) is True:
+            from .plugin_execution_pins import bind_entry
+            try:
+                target = bind_entry("maverick.skills", name, dist, target)
+            except (ValueError, TypeError, AttributeError, PermissionError):
+                log.warning("plugin skill %s cannot retain an exact version pin; skipping", name)
+                continue
+        result.append(target)
+    return result
 
 
 def discover_personas() -> dict[str, Callable[[], str]]:
     """Return {name: renderer} for installed persona plugins."""
     out: dict[str, Callable[[], str]] = {}
-    for name, target in _iter_loaded("maverick.personas", "personas"):
+    for name, target, _value, dist in _iter_loaded_with_value("maverick.personas", "personas"):
         if not callable(target):
             log.warning("plugin persona %s is not callable; skipping", name)
             continue
+        if _plugins_config().get("workbench", False) is True:
+            from .plugin_execution_pins import bind_entry
+            try:
+                target = bind_entry("maverick.personas", name, dist, target)
+            except (ValueError, PermissionError):
+                log.warning("plugin persona %s cannot retain an exact version pin; skipping", name)
+                continue
         out[name] = target
     return out
 
@@ -916,7 +974,7 @@ def plugin_status_snapshot() -> dict[str, Any]:
                 row["load_error"] = "Blocked by the effective plugin trust policy."
                 continue
             try:
-                target = ep.load()
+                target = _load_current_entry(ep)
             except Exception as exc:
                 row["state"] = "import_failed"
                 row["load_error"] = _status_error(exc)
@@ -1046,6 +1104,9 @@ def reload_plugin(dist_name: str) -> list[str]:
         if any(name == m or name.startswith(m + ".") for m in mods):
             del sys.modules[name]
             dropped.append(name)
+    for key in list(_PINNED_IMPORTS):
+        if key[0] == dist_name:
+            del _PINNED_IMPORTS[key]
     # The path finders cache directory listings (and .pyc staleness checks);
     # without this a just-edited file can re-import as the old code.
     importlib.invalidate_caches()

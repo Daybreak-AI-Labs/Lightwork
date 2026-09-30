@@ -329,6 +329,7 @@ def _fetch_manifest(command: _PinnedCommand) -> tuple[str, list[Any]]:
 
 def load_ts_plugin(
     command: list[str], *, call_timeout: float = DEFAULT_CALL_TIMEOUT,
+    expected_source_sha256: str | None = None,
 ) -> list[Tool]:
     """Load an NDJSON plugin; one Tool per manifest entry.
 
@@ -337,6 +338,8 @@ def load_ts_plugin(
     with an invalid name are skipped with a warning.
     """
     pinned_command = _PinnedCommand.from_command(command)
+    if expected_source_sha256 is not None and not any(item.arg_index == 1 and item.digest == expected_source_sha256 for item in pinned_command.files):
+        raise TsPluginError("Node plugin source changed before manifest discovery")
     protocol, manifest = _fetch_manifest(pinned_command)
     pinned_command.verify()
     child = _PluginChild(pinned_command, call_timeout, protocol)
@@ -411,7 +414,16 @@ def load_configured_ts_plugins() -> list[Tool]:
             log.warning("[plugins] ts entry %r is not a list of strings; skipping", entry)
             continue
         try:
-            out.extend(load_ts_plugin(cmd))
-        except TsPluginError as e:
+            from .config import load_config
+            governed = (load_config().get("plugins") or {}).get("workbench", False) is True
+            if governed:
+                from .plugin_workbench_ts import admit, pin_tools
+                source_sha256 = admit(cmd)
+                tools = load_ts_plugin(cmd, expected_source_sha256=source_sha256)
+                tools = pin_tools(cmd, tools)
+            else:
+                tools = load_ts_plugin(cmd)
+            out.extend(tools)
+        except (TsPluginError, ValueError, PermissionError, OSError) as e:
             log.warning("ts plugin %s failed to load: %s", cmd, e)
     return out

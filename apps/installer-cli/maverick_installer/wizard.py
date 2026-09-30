@@ -21,6 +21,7 @@ v0.1.1 additions (council UX feedback):
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 import re
@@ -5111,7 +5112,7 @@ def pick_advanced() -> dict[str, Any]:
         "copilot_operation_families": _q_checkbox(
             "Which action families may Copilot open when enabled? Native permissions still apply.",
             ["learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
-             "connections", "artifacts", "notifications", "models", "budget"], default=["learning"],
+             "connections", "artifacts", "notifications", "models", "budget", "plugins"], default=["learning"],
         ),
         "allow_copilot_operations": _q_confirm(
             "Let Copilot open the native controls in your selected action families? "
@@ -8314,7 +8315,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("copilot_operations = true")
         families = advanced.get("copilot_operation_families", ["learning"])
         allowed_families = {"learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
-                            "connections", "artifacts", "notifications", "models", "budget"}
+                            "connections", "artifacts", "notifications", "models", "budget", "plugins"}
         if not isinstance(families, list) or any(value not in allowed_families for value in families):
             raise ValueError("Choose registered Copilot action families.")
         lines.append("[copilot]")

@@ -467,6 +467,8 @@ def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
     parts = ["# Relevant skills from past runs", ""]
     total = 0
     for s in skills:
+        from .plugin_execution_pins import check_skill
+        check_skill(s)
         body = s.body or ""
         if max_body_chars > 0 and len(body) > max_body_chars:
             body = (body[:max_body_chars].rstrip()

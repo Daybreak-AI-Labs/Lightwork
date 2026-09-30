@@ -31,17 +31,22 @@
       const value=await call('');if(attempt!==serial||lost)return;if(context&&context!==value.context){clear();return;}context=value.context;
       list.replaceChildren();
       for(const plugin of value.plugins){
-        const panel=node('section');panel.className='panel';panel.append(node('h3',plugin.name+' / '+plugin.distribution+' / '+plugin.version),node('p',plugin.scope));
-        panel.append(node('p',plugin.eligible?'Manifest and current admission policy permit sandbox checks.':'Qualification blocked: inspect the manifest, version, permissions or plugin kind below.'));
+        const panel=node('section');panel.className='panel';panel.append(node('h3',plugin.name+' / '+plugin.distribution+' / '+plugin.version),node('p',plugin.scope),node('p',plugin.blocked||''));
+        panel.append(node('p',plugin.eligible?(['maverick.ts','maverick.grpc'].includes(plugin.group)?'Configured source is inspectable. Its manifest and schema will be checked inside the restricted image.':'Manifest and current admission policy permit sandbox checks.'):'Qualification blocked: inspect the manifest, version, permissions or plugin kind below.'));
         const metadata=node('details');metadata.append(node('summary','Declared contract and permissions'),node('pre',JSON.stringify({manifest:plugin.manifest,missing_permissions:plugin.missing_permissions,policy_allowed:plugin.policy_allowed},null,2)));panel.append(metadata);
         const affected=value.dependencies.flows.filter(flow=>flow.tools.includes(plugin.name));
         for(const flow of affected){const link=node('a','Review affected workflow: '+flow.name);link.href=flow.href;panel.append(link,node('br'));}
-        for(const pin of value.dependencies.tasks.filter(row=>row.distribution===plugin.distribution&&row.name===plugin.name)){
+        for(const pin of value.dependencies.tasks.filter(row=>row.distribution===plugin.distribution&&row.name===(plugin.pin_name||plugin.name)&&(row.group||'maverick.tools')===plugin.group)){
           const label=node('p','Task '+pin.goal_id+' - '+pin.title+' - '+(pin.fingerprint===plugin.content_sha256?'pinned to current bytes':'retains earlier bytes; dispatch blocked after drift'));
           const link=node('a','Review this task');link.href=pin.href;label.append(link);panel.append(label);
           const migrate=button('Review task version migration',()=>mutate(migrate,'/migrate',{goal_id:pin.goal_id,fingerprint:plugin.fingerprint,previous:pin.fingerprint},'Change this stopped task to the currently qualified version? No work is resumed. Unknown earlier effects require separate reconciliation.'));panel.append(migrate);
         }
-        const sampleLabel=node('label','Synthetic sample arguments (JSON; no credentials or private data)'),sample=node('textarea');sample.className='input';sample.value='{}';sample.maxLength=16384;sampleLabel.append(sample);panel.append(sampleLabel);
+        for(const pin of (value.dependencies.runs||[]).filter(row=>row.distribution===plugin.distribution&&row.name===(plugin.pin_name||plugin.name)&&(row.group||'maverick.tools')===plugin.group)){
+          const label=node('p','Workflow run '+pin.run_id+' / '+pin.title+' / '+pin.state+' / '+(pin.fingerprint===plugin.content_sha256?'pinned to current bytes':'earlier bytes retained; dispatch blocked'));
+          const link=node('a','Review workflow');link.href=pin.href;label.append(link);panel.append(label);
+          const migrate=button('Review workflow version migration',()=>mutate(migrate,'/migrate-flow',{run_id:pin.run_id,fingerprint:plugin.fingerprint,previous:pin.fingerprint},'Migrate this stopped workflow to the qualified version? Review prior outcomes first. This does not resume it or replay an action.'));panel.append(migrate);
+        }
+        const sampleLabel=node('label','Synthetic sample arguments (JSON; no credentials or private data)'),sample=node('textarea');sample.className='input';sample.value=JSON.stringify(plugin.sample_example||{},null,2);sample.maxLength=16384;sampleLabel.append(sample);panel.append(sampleLabel);
         const expectedLabel=node('label','Expected result (JSON; string results need quotes)'),expected=node('textarea');expected.className='input';expected.value='null';expected.maxLength=16384;expectedLabel.append(expected);panel.append(expectedLabel);
         const modeLabel=node('label','Check'),mode=node('select');for(const [key,label] of [['sample','Validate schema and run this sample'],['timeout','Verify bounded timeout with a deliberately slow synthetic sample'],['cancellation','Verify cancellation with a deliberately slow synthetic sample']]){const option=node('option',label);option.value=key;mode.append(option);}modeLabel.append(mode);panel.append(modeLabel);
         const check=button('Review sandbox check',()=>{
@@ -50,11 +55,11 @@
         });check.disabled=!plugin.eligible;panel.append(check);
         const rollbackLabel=node('label','Affected-work review and rollback plan'),rollback=node('textarea');rollback.className='input';rollback.maxLength=2000;rollbackLabel.append(rollback);panel.append(rollbackLabel);
         const publish=button('Publish scoped readiness',()=>mutate(publish,'/publish',{fingerprint:plugin.fingerprint,rollback:rollback.value},'Publish sandbox-only readiness for this exact plugin version after reviewing affected work and the rollback plan? External service acceptance remains unverified.'));panel.append(publish);
-        for(const receipt of value.publications.filter(row=>row.fingerprint===plugin.fingerprint))panel.append(node('p','Published scope: '+receipt.scope+'. Rollback: '+receipt.rollback));
+        for(const receipt of value.publications.filter(row=>row.fingerprint===plugin.fingerprint))panel.append(node('p','Published scope: '+receipt.scope+'. Check observations: '+JSON.stringify(receipt.observations||[])+'. Rollback: '+receipt.rollback));
         list.append(panel);
       }
       const records=node('details');records.open=true;records.append(node('summary','Check ledger (completed, interrupted, and obsolete versions)'));
-      for(const row of value.checks)records.append(node('p',row.plugin+' / '+row.version+' / '+row.mode+' - '+row.state+(row.current?'':' (version or policy changed)')+'. '+(row.reason||'Result unconfirmed; refresh, never replay the same operation.')+' / '+row.id));list.append(records);
+      for(const row of value.checks)records.append(node('p',row.plugin+' / '+row.version+' / '+row.mode+' - '+row.state+(row.current?'':' (version or policy changed)')+'. '+(row.check_observation||row.reason||'Result unconfirmed; refresh, never replay the same operation.')+' / '+row.id));list.append(records);
       status.textContent=value.dependencies.coverage.join(' ')+(value.plugins.length?'':' No installed plugin entry points were found; nothing was qualified.');
     }catch(error){if(attempt===serial){list.replaceChildren();status.textContent=error.message+' Open Settings to review workbench and immutable-image configuration.';}}
   }

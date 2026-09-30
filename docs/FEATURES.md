@@ -2696,11 +2696,18 @@ here.
   `{id,result|error}`); the host (`ts_plugin_host.py`, `[plugins] ts =
   [["node", "/path/plugin.js"]]`, wizard step included) loads the manifest
   into regular Tools with a persistent scrubbed-env child, per-call timeout,
-  one crash-restart, and the no-shadowing rule built-ins enjoy. A **gRPC
+  no automatic call replay, owned process cleanup, and the no-shadowing rule built-ins enjoy. A **gRPC
   plugin host** (`grpc_plugin_host.py`, proto `grpc_api/plugin_host.proto`,
   `[plugins] grpc = [{target, command}]`) carries the same contract over gRPC
   for any language: Describe → Tools, Call with a deadline, scrubbed-env spawn,
-  reconnect/respawn-once.
+  owned process cleanup and typed unknown outcomes without call replay.
+  **Governed qualification workbench** (`plugin_workbench.py`, `/plugins`) runs
+  actual Python tool/channel/skill/persona, bundled Node and local gRPC contracts
+  in a reviewed immutable no-network container. It records observed completion or
+  interruption, rejects unknown/malformed versions, retains task/workflow pins,
+  and offers explicit stopped-work migration. Settings and the installer control
+  it and its shared native/Copilot review operations; no live-service acceptance
+  is inferred from process startup.
   **Retrospective generators (time-gated runs)** — the 2-/36-month
   retrospectives ship as period generators the operator runs at the mark:
   `safety_report` (safety), `benchmark_retrospective` (perf), and

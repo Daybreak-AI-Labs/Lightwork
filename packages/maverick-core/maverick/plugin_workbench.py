@@ -14,7 +14,12 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from .file_lock import atomic_read_text, atomic_write_text, cross_process_lock, ensure_private_directory
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+)
 from .paths import data_dir
 
 
@@ -40,7 +45,8 @@ def snapshot():
     from .plugin_lock import _dist_content_hash
 
     policy = config()
-    harness = hashlib.sha256((Path(__file__).parent / "sandbox" / "plugin_probe.py").read_bytes()).hexdigest()
+    harness = hashlib.sha256(b"".join((Path(__file__).parent / "sandbox" / name).read_bytes()
+        for name in ("plugin_probe.py", "plugin_contracts.py"))).hexdigest()
     rows = []
     allow, (granted, enforce) = plugins._allowed_plugin_names(), plugins._permission_policy()
     for group in plugins._PLUGIN_GROUPS:
@@ -51,6 +57,7 @@ def snapshot():
             row = {"group": group, "name": ep.name, "distribution": dist or "", "entry": ep.value,
                    "version": str(getattr(getattr(ep, "dist", None), "version", "") or ""),
                    "content_sha256": _dist_content_hash(dist) if dist else None,
+                   "sandbox_content_sha256": _dist_content_hash(dist, portable_paths=True) if dist else None,
                    "manifest": asdict(manifest) if manifest else None,
                    "missing_permissions": plugins._permission_violations(manifest, granted),
                    "permission_enforcement": enforce, "qualification_image": policy.get("workbench_image", ""),
@@ -63,12 +70,23 @@ def snapshot():
                 row["permission_denial_checked"] = not plugins._gate(ep, group, set(), plugins._name_dist_map(entries), set(), True)
             except Exception:
                 row["policy_allowed"] = row["permission_denial_checked"] = False
-            row["eligible"] = bool(group == "maverick.tools" and row["policy_allowed"] and manifest
+            row["eligible"] = bool(row["policy_allowed"] and manifest
                 and manifest.is_compatible() and not manifest.warnings and not row["missing_permissions"]
-                and row["content_sha256"] and row["version"])
+                and row["content_sha256"] and row["sandbox_content_sha256"] and row["version"])
             row["fingerprint"] = _digest(row)
-            row["scope"] = "Python tool sandbox qualification" if group == "maverick.tools" else "Metadata review only; this workbench has no executable contract for this plugin kind"
+            row["scope"] = {"maverick.tools": "Python tool schema and invocation",
+                "maverick.channels": "Channel lifecycle, normalized dispatch and send",
+                "maverick.skills": "Skill lexical selection and prompt rendering",
+                "maverick.personas": "Persona prompt rendering"}[group] + " in the restricted container; no live-service acceptance."
+            row["sample_example"] = {"maverick.tools": {}, "maverick.personas": {},
+                "maverick.skills": {"goal": "synthetic trigger phrase"},
+                "maverick.channels": {"user_id": "synthetic-user", "text": "synthetic input", "reply": "synthetic reply", "startup_seconds": 0}}[group]
             rows.append(row)
+    from .plugin_workbench_ts import rows as node_rows
+
+    rows.extend(node_rows(policy, harness, _digest))
+    from .plugin_workbench_grpc import rows as grpc_rows
+    rows.extend(grpc_rows(policy, harness, _digest))
     return rows
 
 
@@ -128,6 +146,29 @@ def _cancelled(context, operation):
     return bool(_read(_path(context))["checks"][operation].get("cancel_requested"))
 
 
+def _check_files(row, payload):
+    directory = Path(__file__).parent / "sandbox"
+    files = {"main.py": (directory / "plugin_probe.py").read_bytes(),
+             "plugin_contracts.py": (directory / "plugin_contracts.py").read_bytes()}
+    if row.get("group") == "maverick.ts":
+        from .plugin_workbench_ts import configured_command, source
+        payload["source_suffix"] = row["source_suffix"]
+        contents = source(configured_command(row["command_identity"]))
+        if hashlib.sha256(contents).hexdigest() != row["content_sha256"]:
+            raise ValueError("Node source changed before dispatch.")
+        files["plugin" + row["source_suffix"]] = contents
+    if row.get("group") == "maverick.grpc":
+        from .plugin_workbench_grpc import current, source
+        value = current(row["command_identity"])
+        contents, runtime, suffix = source(value)
+        if hashlib.sha256(contents).hexdigest() != row["content_sha256"]:
+            raise ValueError("gRPC server source changed before dispatch.")
+        payload.update(source_suffix=suffix, runtime=runtime, target=value["target"])
+        files["plugin" + suffix] = contents
+    files["sample.json"] = json.dumps(payload, allow_nan=False).encode()
+    return files
+
+
 def run_check(context, operation, fingerprint, sample, mode, *, authorize, expected=None):
     from .budget import Budget
     from .sandbox.research import ResearchContainerRunner, ResearchLimits
@@ -168,11 +209,11 @@ def run_check(context, operation, fingerprint, sample, mode, *, authorize, expec
             raise PermissionError("Check was cancelled before dispatch.")
         yield
     try:
-        payload = {"entry": row["entry"], "distribution": row["distribution"], "version": row["version"],
-                   "content_sha256": row["content_sha256"], "operation": operation, "sample": sample}
-        source = (Path(__file__).parent / "sandbox" / "plugin_probe.py").read_bytes()
+        payload = {"group": row.get("group", "maverick.tools"), "entry": row["entry"], "distribution": row["distribution"], "version": row["version"],
+                   "content_sha256": row.get("sandbox_content_sha256") or row["content_sha256"], "operation": operation, "sample": sample}
+        files = _check_files(row, payload)
         result = ResearchContainerRunner(image, limits=ResearchLimits(timeout_seconds=0.5 if mode == "timeout" else 15)).run(
-            {"main.py": source, "sample.json": json.dumps(payload, allow_nan=False).encode()},
+            files,
             budget=Budget(max_wall_seconds=45, max_tool_calls=1, max_dollars=0), effect_guard=guard, cancelled=interrupted)
         authorize()
         selected(fingerprint)
@@ -188,19 +229,23 @@ def run_check(context, operation, fingerprint, sample, mode, *, authorize, expec
                 dispatched = True
             elif frame.get("phase") == "result" and result.reason == "completed" and result.exit_code == 0:
                 observed = frame
-        passed = bool(result.cleanup_verified and ((mode == "sample" and observed.get("schema_valid") is True
-            and observed.get("sample_valid") is True and observed.get("completed") is True
-            and observed.get("content_sha256") == row["content_sha256"]
+        completed = bool(dispatched and result.reason == "completed" and result.exit_code == 0
+            and observed.get("schema_valid") is True and observed.get("sample_valid") is True
+            and observed.get("completed") is True and observed.get("content_sha256") == payload["content_sha256"]
             and observed.get("result_sha256") == expected_result)
-            or (mode == "timeout" and result.reason == "timeout" and dispatched)
-            or (mode == "cancellation" and result.reason == "cancelled" and dispatched)))
+        interrupted_after_dispatch = bool(dispatched and ((mode == "timeout" and result.reason == "timeout")
+            or (mode == "cancellation" and result.reason == "cancelled")))
+        passed = bool(result.cleanup_verified and (completed or interrupted_after_dispatch))
         final = {"state": "passed_scoped_check" if passed else "not_qualified", "finished_at": time.time(),
                  "reason": result.reason, "attempts": 1, "plugin_dispatch_observed": dispatched, "cleanup_verified": result.cleanup_verified,
                  "image_id": result.image_id, "policy_sha256": result.policy_sha256,
                  "permission_denial_checked": row["permission_denial_checked"],
+                 "completion_observed": completed, "interruption_observed": interrupted_after_dispatch,
+                 "check_observation": "exact result completed before interruption" if completed and mode != "sample" else ("interruption after dispatch" if interrupted_after_dispatch else result.reason),
                  "schema_valid": observed.get("schema_valid") is True,
                  "result_sha256": observed.get("result_sha256") if mode == "sample" else None,
-                 "external_outcome": "not attempted: no network or credentials" if result.reason == "completed" else "unknown; no replay",
+                 "invocation_outcome": "completed" if observed.get("completed") is True else "unknown",
+                 "external_outcome": "not attempted: no network or credentials" if result.reason == "completed" and result.exit_code == 0 else "unknown; no replay",
                  "scope": "Restricted-container behavior only. No live service or write capability was accepted."}
     except Exception:
         final = {"state": "not_qualified", "finished_at": time.time(), "reason": "check unavailable or authority changed",
@@ -211,19 +256,29 @@ def run_check(context, operation, fingerprint, sample, mode, *, authorize, expec
     return _edit(context, finish)
 
 
-def publish(context, fingerprint, rollback, *, authorize):
+def publish(context, fingerprint, rollback, *, authorize, operation=None):
     authorize()
     selected(fingerprint)
     if not isinstance(rollback, str) or not 10 <= len(rollback.strip()) <= 2000:
         raise ValueError("Record a concrete rollback and affected-work review plan (10-2000 characters).")
     def mutate(state):
+        authorize()
+        selected(fingerprint)
+        if operation is not None:
+            if not re.fullmatch(r"[a-f0-9]{32}", operation):
+                raise ValueError("Invalid publication operation identifier.")
+            previous = next((row for row in state["publications"] if row.get("operation_id") == operation), None)
+            if previous is not None:
+                return previous
         checks = [row for row in state["checks"].values() if row["fingerprint"] == fingerprint
                   and row["state"] == "passed_scoped_check" and row.get("cleanup_verified")
                   and row.get("permission_denial_checked")]
         if {row["mode"] for row in checks} != {"sample", "timeout", "cancellation"}:
             raise ValueError("A current sample, timeout and cancellation check must pass before publishing scoped readiness.")
-        receipt = {"fingerprint": fingerprint, "created_at": time.time(), "rollback": rollback,
-                   "checks": [row["id"] for row in checks], "scope": "sandbox-only; external read/write acceptance unverified"}
+        receipt = {"fingerprint": fingerprint, "created_at": time.time(), "rollback": rollback, "operation_id": operation,
+                   "checks": [row["id"] for row in checks], "scope": "sandbox-only; external read/write acceptance unverified",
+                   "observations": [{"mode": row["mode"], "completion_observed": bool(row.get("completion_observed")),
+                                     "interruption_observed": bool(row.get("interruption_observed"))} for row in checks]}
         state["publications"].append(receipt)
         return receipt
     return _edit(context, mutate)
@@ -243,12 +298,7 @@ def pinned_factory(name, distribution, factory):
     def construct():
         if _dist_content_hash(distribution) != fingerprint:
             raise PermissionError("Plugin changed before tool construction. Review its current version.")
-        tool = factory()
-        original = tool.fn
         def check():
-            from .audit.writer import _current_goal
-            from .connections import current_principal
-
             config()
             from . import plugins
 
@@ -259,19 +309,12 @@ def pinned_factory(name, distribution, factory):
                 raise PermissionError("Current plugin policy no longer permits this task tool.")
             if _dist_content_hash(distribution) != fingerprint:
                 raise PermissionError("Plugin version changed. Restore its pinned version or explicitly review migration before resuming this task.")
-            goal = _current_goal.get()
-            if goal is not None:
-                path = data_dir() / "plugin-task-pins" / (str(int(goal)) + ".json")
-                ensure_private_directory(path.parent)
-                with cross_process_lock(path, strict=True):
-                    pins = json.loads(atomic_read_text(path, encoding="utf-8")) if path.exists() else {}
-                    key = distribution + ":" + name
-                    existing = pins.get(key)
-                    if existing and (existing["fingerprint"] != fingerprint or existing["owner"] != (current_principal() or "")):
-                        raise PermissionError("This task retains an earlier plugin version. Review migration; no action was dispatched.")
-                    pins[key] = {"fingerprint": fingerprint, "distribution": distribution, "name": name,
-                                 "goal_id": goal, "owner": current_principal() or "", "updated_at": time.time()}
-                    atomic_write_text(path, json.dumps(pins, sort_keys=True))
+            from .plugin_execution_pins import check_pin
+
+            check_pin("maverick.tools", name, distribution, fingerprint)
+        check()
+        tool = factory()
+        original = tool.fn
         if inspect.iscoroutinefunction(original):
             async def invoke(args):
                 check()

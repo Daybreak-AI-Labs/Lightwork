@@ -2,53 +2,95 @@
 
 Enable **Plugin qualification workbench** in Settings or the installer, then open
 Plugins. Set the immutable `sha256:` ID of an already installed, reviewed local
-Linux image containing the exact distribution, Lightwork core and `jsonschema`.
-The workbench never pulls images, inherits provider credentials, mounts host work,
-or falls back to host execution. The strict research runner verifies its created
-container policy and cleanup. Its existing explicit Budget remains mandatory.
+Linux image containing the exact distribution and `maverick-agent[plugin-workbench]`.
+Channel checks also require `maverick-channels`; local gRPC checks require the `[grpc]` extra and generated plugin stubs already in the read-only image. Node checks require Node and the
+reviewed dependencies already in the image. Nothing pulls an image, installs a
+plugin, inherits provider credentials, mounts host work, or falls back to host
+execution. The strict research runner verifies container policy and cleanup and
+uses its explicit Budget. Missing image dependencies fail the check.
 
-The workbench inspects entry-point metadata without importing plugin targets.
-Missing/malformed manifests, incompatible API versions, denied permissions or
-uninspectable bytes cannot qualify. A negative admission control explicitly proves
-the runtime gate refuses a denied entry without import. That control does not claim
-an arbitrary plugin obeys advisory permissions when run outside this sandbox.
+The workbench inspects entry-point metadata without importing targets on the
+host. Missing/malformed manifests, incompatible API versions, denied permissions,
+uninspectable bytes or ambiguous names cannot qualify. Its negative admission
+control verifies the same runtime gate rejects a denied entry before import.
+For Node commands, current explicit configuration is the admission boundary;
+removing that exact command denies it before startup. These controls do not claim
+that arbitrary code obeys advisory permissions outside the restricted container.
 
-For Python tool factories, enter synthetic sample arguments and the exact expected
-JSON result. The container verifies installed distribution version/content, validates
-the actual tool schema (including formats, with external schema references refused),
-and executes that sample once. Receipts retain hashes, not input/output bodies.
-The result must match the expected digest. Run timeout and cancellation checks with
-a deliberately slow synthetic input; startup termination before observed plugin
-dispatch is not a passing plugin interruption check. Whole-container cleanup must
-be verified. Every operation ID is reserved durably before dispatch; refresh its
-ledger entry after a lost response. It cannot be replayed. Interrupted results remain
-unknown and never become live-service or write-access acceptance.
+The Plugins page supplies a sample shape for each real interface:
 
-Publishing requires current passing sample, timeout and cancellation receipts and
-a concrete affected-work/rollback plan. Installed bytes, manifest/policy, immutable
-image or harness changes invalidate the scoped record. No package is installed or
-rolled back by publication. The authorized workflow/task inventory links back to
-native review; no other employee's private content is disclosed.
+- **Python tools:** validate the actual declared object schema, including formats
+  and rejection of external schema references, then invoke the actual tool.
+- **Channels:** instantiate the actual Channel subclass with a synthetic handler,
+  run start, normalized dispatch, send, and stop. The image must contain synthetic
+  local configuration. A channel that requires real credentials or network access
+  cannot pass this offline check; no mocked provider acceptance is substituted.
+- **Skills:** validate the actual Skill fields, select using the native lexical
+  retriever with a synthetic goal, and render the native bounded prompt.
+- **Personas:** invoke the actual zero-argument renderer and require nonempty text.
+- **Node tools:** use the configured bundled `.js`, `.mjs` or `.cjs` source through
+  the actual NDJSON host. The supported qualification launch is `node <file>` with
+  no extra arguments or command-line secrets. Source is copied into the restricted
+  container, verified by hash, and run with its image's Node. Other launch forms
+  must be converted to a reviewed bundled entry. The actual manifest and selected
+  schema are checked before invocation; transport errors never qualify as a result.
+- **gRPC tools:** run an exact configured local bundled Python or Node server in
+  the container, validate its real Describe schemas, and call its selected tool
+  once with a deadline. Connection-only servers have no inspectable version and
+  cannot qualify until an exact local server entry is configured. Unsupported
+  launch forms must be bundled for the image; no live endpoint is substituted.
+  The host now owns its child process tree, bounds RPC messages and process output,
+  polls cancellation/deadlines, and never repeats a Call after a transport failure.
+  Typed unknown outcomes prevent outer tool retries, including read-looking names.
 
-While this feature is enabled, Python task tools pin installed bytes and retain
-used-plugin pins across task registry rebuilds/restarts. Drift refuses dispatch
-instead of silently swapping the implementation. Current plugin admission policy
-is rechecked. A stopped, owned task may be explicitly migrated to a current qualified
-version; this never resumes it or replays old effects. In-flight work must finish or
-be cancelled first. This is a dispatch guard, not a claim that side-by-side old plugin
-packages are installed. Existing flow publication and approval authority remain in
-force; direct flow-action execution and non-Python plugin kinds need separate pins.
+Enter synthetic input and the exact expected JSON result. A persona's result is a
+JSON string. Skill results contain selected names and the rendered prompt. Channel
+results contain the structured reply, synthetic handler messages and send completion.
+Node and gRPC results preserve their hosts' string result contract. Inputs and outputs remain
+in the one execution; durable receipts retain their hashes, not their bodies.
 
-Executable qualification currently covers Python `maverick.tools` factories.
-Channels, skills, personas and TypeScript transports expose metadata or existing
-runtime diagnostics; this workbench does not qualify their distinct execution
-contracts. Their adapters and direct-flow version pinning remain implementation
-follow-ups for the complete cross-plugin acceptance scope of LW-081. Existing
-owned-process timeout/no-replay foundations are retained, not replaced with mocks.
+Run sample, timeout and cancellation checks. A deliberately slow input can exercise
+actual interruption. A fast exact completion is recorded as **completed before
+interruption**, with `interruption_observed=false`; it never becomes evidence that
+an interruption occurred. Termination before observed plugin dispatch cannot pass.
+All passing records require verified whole-container cleanup. A crash after possible
+dispatch remains unknown. An operation ID is reserved durably before any execution
+and cannot replay, including after a lost response. Refresh the ledger to recover it.
+The 1000-check account ledger fails closed at capacity rather than forgetting IDs.
 
-The 1000-entry per-account ledger fails closed at capacity rather than forgetting
-operation IDs and allowing a replay. Readiness is sandbox-only. Running native/live
-acceptance, provisioning images and installing packages require their normal review;
-none was performed in this implementation. Python/JS static checks passed; regression
-and controlled-container tests are authored but unrun at the user's request.
-Copilot does not yet expose these qualification mutations; use the Plugins review UI.
+Publishing requires passing current sample and both deadline/cancellation attempts,
+plus an affected-work review and concrete rollback plan. Published records retain
+what each attempt actually observed. Scope is always restricted-container behavior,
+never live read/write capability or service acceptance. Installed bytes, admission
+policy, immutable image or harness changes invalidate qualification. Python image
+comparison normalizes path separators without changing existing deployment lock
+hashes; platform-specific bytes still must match exactly. No package is installed
+or rolled back by publication.
+
+While enabled, task registries and direct workflow actions retain durable plugin
+pins across restarts. Python, Node and gRPC pins are checked before plugin import/construction where a
+work identity exists and again before dispatch. Cached Python modules with different
+or untracked bytes require an explicit reload after affected work is stopped; they
+cannot be relabeled as a newer installed version. Skills retain a private copied
+binding; persona renderers and channel dispatch/send methods check current policy.
+Channel cleanup remains available after revocation. These guards refuse drift;
+they do not install side-by-side old packages.
+
+The affected-work inventory shows only authorized tasks and owned workflow runs,
+with up to 2000 records per inventory. Review their history before migrating a pin
+to a currently published version. A workflow migration uses the same run lock as
+execution, requires exact owner and definition revision, and refuses running or
+indeterminate work. Task migration requires a stopped owned task. Migration retains
+prior fingerprints, never resumes work, and never replays historical effects.
+
+Copilot uses the same typed native workbench handlers for status, sample checks,
+cancellation, publication and pin migration. Administrators must enable the
+**Plugins** Copilot action family in Settings or the installer. Every mutation
+requires a fresh review and explicit confirmation; durable operation receipts
+recover uncertain responses without redispatch. Turning Copilot off leaves the
+native Plugins journey available.
+
+Local trusted-fixture, API and existing process-host regressions were executed.
+No live provider, installed third-party plugin, or real qualification container was
+run during implementation. Per-image/container and installed-service acceptance
+must still be performed in the controlled qualification environment.

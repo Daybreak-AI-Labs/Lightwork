@@ -637,7 +637,9 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             return action_runner(node.tool, params, action_data)
 
     def _run_action(node: FlowNode, params: dict, action_data: dict):
-        with action_capture_scope(episode_capture, node):
+        from ..plugin_execution_pins import flow_scope
+
+        with action_capture_scope(episode_capture, node), flow_scope(rid, owner, definition_revision or flow.revision):
             return _dispatch_action(node, params, action_data)
 
     res = run_flow(
