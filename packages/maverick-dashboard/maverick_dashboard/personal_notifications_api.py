@@ -21,6 +21,7 @@ def _app():
 
 def _identity(request):
     from maverick import config
+
     from .preferences_api import _principal
     principal = _principal(request)
     if config.config_source_errors(include_tenant=True) or (config.load_config().get("notifications") or {}).get("personal_alerts", False) is not True:
@@ -33,6 +34,7 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
     if request is None:
         from maverick.paths import current_tenant_id_strict
         from maverick.personal_identity import principal_current
+
         from . import rbac, suite_grants
         if not principal_current(actor):
             raise PermissionError("Personal alert account no longer has access.")
@@ -97,10 +99,12 @@ def _state(request, *, seen_id=None):
 
 
 def _state_locked(request, *, seen_id=None):
-    from maverick import config, experience_preferences as preferences
-    from maverick.personal_notifications import PersonalInbox, validate_preferences
-    from maverick.personal_notification_recipients import enroll, status
+    from maverick import config
+    from maverick import experience_preferences as preferences
     from maverick.personal_notification_delivery import status as delivery_status
+    from maverick.personal_notification_recipients import enroll, status
+    from maverick.personal_notifications import PersonalInbox, validate_preferences
+
     from .draft_api import context_for
     actor = _identity(request)
     enroll(actor)
@@ -137,6 +141,7 @@ class PreferencesIn(BaseModel):
     context: str = Field(max_length=128)
     expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     preferences: dict[str, Any]
+    operation_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 
 def _binding(request, expected):
@@ -146,23 +151,31 @@ def _binding(request, expected):
         raise HTTPException(409, "Your account or workspace changed. Reload personal alerts.")
 
 
+def validate_current_preferences(request, value):
+    """One current authority check shared by direct and reviewed preference edits."""
+    from maverick.personal_identity import linked_channels
+    from maverick.personal_notifications import validate_preferences
+    actor = _identity(request)
+    choice = validate_preferences(value)
+    if set(choice["external_links"]) - {link["id"] for link in linked_channels(actor)}:
+        raise HTTPException(409, "A selected channel identity is no longer verified for your account. Refresh and review your linked identities.")
+    _, tasks, projects, _ = _projection(request, actor)
+    if (set(choice["muted_tasks"]) - {str(task["id"]) for task in tasks}
+            or set(choice["projects"]) - {project["id"] for project in projects}):
+        raise HTTPException(409, "A selected task or project is no longer available. Refresh and review your preferences.")
+    return actor, choice
+
+
 @router.post("/api/v1/notifications/personal/preferences")
 def save_preferences(request: Request, response: Response, body: PreferencesIn):
     from maverick import experience_preferences as preferences
-    from maverick.personal_notifications import validate_preferences
-    from maverick.personal_identity import linked_channels
+    from maverick.authority_effects import authority_effect_fence
     _binding(request, body.context)
-    actor = _identity(request)
     try:
-        choice = validate_preferences(body.preferences)
-        if set(choice["external_links"]) - {link["id"] for link in linked_channels(actor)}:
-            raise HTTPException(409, "A selected channel identity is no longer verified for your account. Refresh and review your linked identities.")
-        _, tasks, projects, _ = _projection(request, actor)
-        if (set(choice["muted_tasks"]) - {str(task["id"]) for task in tasks}
-                or set(choice["projects"]) - {project["id"] for project in projects}):
-            raise HTTPException(409, "A selected task or project is no longer available. Refresh and review your preferences.")
-        preferences.save(actor, scope="personal", changes={"notification_preferences": choice},
-                         expected_revision=body.expected_revision)
+        with authority_effect_fence():
+            actor, choice = validate_current_preferences(request, body.preferences)
+            preferences.save(actor, scope="personal", changes={"notification_preferences": choice},
+                             expected_revision=body.expected_revision, operation_id=body.operation_id)
     except preferences.PreferenceConflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:

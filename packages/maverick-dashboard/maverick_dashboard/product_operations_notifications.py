@@ -144,6 +144,7 @@ def _recover_retry(request, _selection, arguments, prepared, _operation_id):
 
 
 def entries() -> tuple[Adapter, ...]:
+    from .product_operations_personal_notifications import entries as personal_entries
     shared = {"family": "notifications", "direct_ui": "/settings/notifications", "pages": PAGES}
     return (
         Adapter(id="notifications.delivery_status", label="Show notification delivery status", input_model=EmptyInput,
@@ -154,4 +155,4 @@ def entries() -> tuple[Adapter, ...]:
         Adapter(id="notifications.retry_test", label="Retry a refused notification test", input_model=RetryInput,
                 snapshot=lambda request, selection: _snapshot(request, selection, action="retry"),
                 prepare=_prepare_retry, execute=_execute_retry, recover=_recover_retry, **shared),
-    )
+    ) + personal_entries()
