@@ -276,6 +276,21 @@ def explicit_tenant_id() -> str | None:
     return os.environ.get("MAVERICK_TENANT", "").strip() or None
 
 
+def implicit_tenant_id() -> str | None:
+    """The deployment's own default tenant: the ``MAVERICK_TENANT`` process
+    binding or the ``[client] id`` floor, ignoring any per-request scope.
+
+    This is the tenant every task ran in before an operator created the first
+    named workspace, so the tenant registry keeps it admitted rather than
+    treating it as an unknown tenant once a roster exists.
+    """
+    env = os.environ.get("MAVERICK_TENANT", "").strip()
+    if env:
+        return env
+    from .client import client_id
+    return client_id()
+
+
 def current_tenant_id() -> str | None:
     """The active raw tenant id, or ``None`` for the shared/legacy root.
 

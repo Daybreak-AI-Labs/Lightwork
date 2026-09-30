@@ -1595,11 +1595,14 @@ def goal_events(
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
+    from maverick.stop_reasons import stop_payload
+
     since = replay_cursor(since)
     events, has_more = event_page(w, goal_id, since, limit)
     return GoalEventsResponse(
         status=g.status,
         result=g.result,
+        stop=stop_payload(g.status, g.result),
         next_id=events[-1].id if events else since,
         events=[
             GoalEventOut(id=e.id, agent=e.agent, kind=e.kind, content=e.content, ts=e.ts)

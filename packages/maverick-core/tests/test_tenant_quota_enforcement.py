@@ -141,3 +141,28 @@ async def test_allowance_exhausted_by_in_flight_holds_is_refused_before_the_run(
     goal = world.get_goal(gid)
     assert goal.status == "blocked"
     assert goal.result.startswith("over quota:")
+
+
+@pytest.mark.asyncio
+async def test_first_named_workspace_keeps_the_default_tenant_running(
+    tmp_path: Path, fake_llm, make_llm_response, monkeypatch,
+):
+    """Reproduces the fresh-install defect: bound to ``owner-browser`` with no
+    roster, tasks run; after the first explicit workspace is created the
+    default must still be admitted instead of ``over quota: tenant policy
+    unavailable or inactive: tenant is suspended or unknown``."""
+    monkeypatch.setenv("MAVERICK_TENANT", "owner-browser")
+    registry.create_tenant("acme", plan="free")   # the "Create a workspace" form
+
+    fake_llm.scripted = _final_script(make_llm_response)
+    world = WorldModel(path=tmp_path / "world.db")
+    gid = world.create_goal("compute the answer", "trivial")
+
+    out = await run_goal(
+        llm=fake_llm, world=world, budget=Budget(max_dollars=1.0), goal_id=gid,
+        sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
+    )
+    assert "suspended or unknown" not in out
+    assert "over quota" not in (world.get_goal(gid).result or "")
+    assert fake_llm.calls                              # the run was admitted
+    assert registry.get_tenant("owner-browser").active

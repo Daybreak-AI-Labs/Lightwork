@@ -47,6 +47,7 @@ KIND_LABELS: dict[str, str] = {
     "config_remediated": "Setting fixed automatically", "tenant_plan_changed": "Workspace plan changed",
     "tenant_quota_changed": "Workspace limits changed",
     "spending_limits_changed": "Spending limits changed", "tenant_created": "Workspace created",
+    "tenant_default_registered": "Default workspace registered",
     "workspace_selected": "Workspace chosen", "access_grant_changed": "Access changed",
     "federation_delegate": "Access passed to a partner", "agent_trust_denied": "Outside assistant not trusted",
     "control_plane_action": "Administrator action", "learning_update": "Learning changed",

@@ -226,7 +226,11 @@ class EventKind:
     # with (or be attributed only to) the selected tenant's audit chain.
     # TENANT_CREATED payload: tenant, plan, max_daily_dollars, actor.
     # WORKSPACE_SELECTED payload: actor, previous_tenant, tenant, source.
+    # TENANT_DEFAULT_REGISTERED payload: tenant, trigger ("first_workspace" |
+    # "repair"), actor. The deployment's implicit default tenant was added to
+    # the roster so creating the first named workspace never locks it out.
     TENANT_CREATED = "tenant_created"
+    TENANT_DEFAULT_REGISTERED = "tenant_default_registered"
     WORKSPACE_SELECTED = "workspace_selected"
     # A user's dashboard access changed: privilege role (global or per-tenant),
     # department (suite) grant, or one atomic SCIM group-authority mutation.
