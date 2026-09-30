@@ -42,3 +42,6 @@ test('new message echoes reviewed erasure generation and closed execution disabl
 
 
 test('closed source permits freshly authorized pending cancellation without reopening execution',async()=>{const initial={...state([item]),execution_closed:true,can_cancel:true};const p=page(initial);await tick();p.allow(false);p.set(async(url,options)=>options.method==='PATCH'?p.response({...initial,item:{...item,state:'cancelled'},items:[{...item,state:'cancelled'}]}):p.response(initial));button(p,'Cancel this pending message').click();await tick();assert.equal(JSON.parse(p.calls.at(-1).options.body).action,'cancel');assert.equal(p.api.available,false);assert.match(p.doc.getElementById('conversation-inbox-items').textContent,/Cancelled before consumption/);p.dom.window.close();});
+
+
+test('brief balances compact message cards while detailed opens exact acknowledgements',async()=>{for(const detail of ['brief','balanced','detailed']){const initial=state([{...item,acknowledgement:{text:'Read payload',files:[],checkpoint:'turn-1',at:1}}]);initial.defaults.detail=detail;const p=page(initial);await tick();const sections=p.doc.querySelectorAll('.conversation-message details');assert.equal(sections[0].open,detail!=='brief');assert.equal(sections[1].open,detail==='detailed');p.dom.window.close();}});
