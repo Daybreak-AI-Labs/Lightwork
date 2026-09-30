@@ -12868,9 +12868,10 @@ async def disable_tool(request: Request, name: str) -> None:
 
     Writes ~/.maverick/runtime-overrides.toml (NOT config.toml), which
     the kernel unions into the deny-list. Takes effect on the next goal
-    with no restart.
+    with no restart. That file is shared by every workspace, so the global
+    role is required; a role held only inside one workspace is not enough.
     """
-    require_permission(request, "operate")
+    require_global_permission(request, "operate")
     from maverick.runtime_overrides import disable_tool as _disable
 
     try:
@@ -12885,9 +12886,9 @@ async def enable_tool(request: Request, name: str) -> dict:
 
     Only clears overrides set here. The response returns the freshly resolved
     effective state so a config ACL that still denies the tool cannot be
-    optimistically shown as enabled.
+    optimistically shown as enabled. Global role required, as for disable.
     """
-    require_permission(request, "operate")
+    require_global_permission(request, "operate")
     from maverick.runtime_overrides import enable_tool as _enable
 
     try:

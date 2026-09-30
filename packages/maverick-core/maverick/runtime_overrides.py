@@ -26,11 +26,18 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 
-from .paths import data_dir
+from .paths import data_dir, diagnostic_data_dir, reset_tenant, set_tenant
 
 log = logging.getLogger(__name__)
 
-OVERRIDES_PATH = data_dir("runtime-overrides.toml")
+# ``OVERRIDES_PATH`` stays a Path for callers and tests that inspect or
+# monkeypatch it, but the built-in location is resolved at *call time* by
+# :func:`overrides_path`: a home, tenant floor or client binding established
+# after this module was imported must not be ignored. Identity (not equality)
+# tells an intentional override from this untouched compatibility value, which
+# is computed without any storage admission so importing can never fail.
+_INITIAL_OVERRIDES_PATH = diagnostic_data_dir("runtime-overrides.toml")
+OVERRIDES_PATH = _INITIAL_OVERRIDES_PATH
 _VALID_TOOL_NAME = re.compile(r"^[a-z0-9_-]+$")
 
 # One overlay file holds every surface (denied_tools, models, budget, plugins,
@@ -69,6 +76,36 @@ class RuntimeOverridesSecurityError(RuntimeError):
     """The operator policy exists but cannot be read or validated safely."""
 
 
+def overrides_path() -> Path:
+    """The overlay file to read and write right now.
+
+    This is the DEPLOYMENT-wide policy: denied tools, the model allow-list and
+    pins, the spend cap and dashboard-added MCP servers are shared control-plane
+    state that every workspace runs under, and only a global administrator may
+    change them. A workspace selected for the current request or run therefore
+    does not move the file -- resolving it per workspace would stop a global
+    administrator's tool denies from applying inside workspaces. Only the
+    operator's floor (``MAVERICK_HOME``, ``MAVERICK_TENANT``, a bound client)
+    is honoured, and it is read on every call.
+
+    A location that cannot be resolved fails closed like an unreadable policy:
+    consumers re-raise :class:`RuntimeOverridesSecurityError` but swallow other
+    exceptions, which would silently drop the deny-list.
+    """
+    if OVERRIDES_PATH is not _INITIAL_OVERRIDES_PATH:
+        return Path(OVERRIDES_PATH)
+    token = set_tenant(None)  # ignore a request- or run-scoped workspace
+    try:
+        return data_dir("runtime-overrides.toml")
+    except Exception as exc:
+        raise RuntimeOverridesSecurityError(
+            "refusing to continue: the operator policy location cannot be "
+            "resolved; repair the tenant or client binding"
+        ) from exc
+    finally:
+        reset_tenant(token)
+
+
 def _serialized(fn):
     """Serialize a mutator's whole read-modify-write of the overlay file. The
     public mutators never call one another, so the non-reentrant flock can't
@@ -77,7 +114,7 @@ def _serialized(fn):
     def _wrap(*args, **kwargs):
         from .authority_effects import authority_effect_fence
         from .file_lock import cross_process_lock
-        with authority_effect_fence(), _OVERRIDE_LOCK, cross_process_lock(OVERRIDES_PATH):
+        with authority_effect_fence(), _OVERRIDE_LOCK, cross_process_lock(overrides_path()):
             previous = getattr(_mutation_context, "strict_reads", False)
             _mutation_context.strict_reads = True
             try:
@@ -95,7 +132,7 @@ def _tomllib():
     return tomllib
 
 
-def _cache_key() -> str:
+def _cache_key(path: Path) -> str:
     """Stable lexical identity for the policy path.
 
     Resolving symlinks makes the key depend on whether the link currently
@@ -103,9 +140,9 @@ def _cache_key() -> str:
     would otherwise change the key and bypass its last-known-good policy.
     """
     try:
-        return str(OVERRIDES_PATH.absolute())
+        return str(path.absolute())
     except OSError:
-        return str(OVERRIDES_PATH)
+        return str(path)
 
 
 def _remember_valid(key: str, state: dict) -> dict:
@@ -329,11 +366,12 @@ def _validate_loaded_state(state: object) -> dict:
 
 
 def _load() -> dict:
-    key = _cache_key()
+    path = overrides_path()
+    key = _cache_key(path)
     try:
         # lstat distinguishes a genuinely absent policy from a dangling or
         # unreadable symlink, which must fail closed rather than look empty.
-        OVERRIDES_PATH.lstat()
+        path.lstat()
     except FileNotFoundError:
         with _OVERRIDE_LOCK:
             retained = key in _last_known_good
@@ -351,7 +389,7 @@ def _load() -> dict:
     except OSError as exc:
         return _recover_or_raise(key, exc)
     try:
-        state = _validate_loaded_state(_read_overlay(OVERRIDES_PATH))
+        state = _validate_loaded_state(_read_overlay(path))
     except Exception as exc:
         # Every read, schema, and delegated MCP validation failure has the same
         # fail-closed contract. Critical consumers special-case
@@ -382,13 +420,13 @@ def _recover_or_raise(key: str, exc: Exception) -> dict:
                 log.error(
                     "runtime_overrides: cannot read or validate %s; retaining "
                     "the in-process last-known-good policy: %s",
-                    OVERRIDES_PATH,
+                    key,
                     exc,
                 )
             return state
     raise RuntimeOverridesSecurityError(
         f"refusing to continue with unreadable or invalid operator policy "
-        f"{OVERRIDES_PATH}; repair or restore the file"
+        f"{key}; repair or restore the file"
     ) from exc
 
 
@@ -412,7 +450,7 @@ def denied_tools() -> set[str]:
     if dropped:
         log.warning(
             "runtime_overrides: ignoring %d invalid denied_tools entr(y/ies) in %s: %r",
-            len(dropped), OVERRIDES_PATH, dropped[:10],
+            len(dropped), overrides_path(), dropped[:10],
         )
     if valid:
         key = ",".join(sorted(valid))
@@ -422,7 +460,7 @@ def denied_tools() -> set[str]:
                 _announced.popitem(last=False)
             log.info(
                 "runtime_overrides: %s is denying %d tool(s) via the dashboard "
-                "overlay: %s", OVERRIDES_PATH, len(valid), ", ".join(sorted(valid)),
+                "overlay: %s", overrides_path(), len(valid), ", ".join(sorted(valid)),
             )
     return valid
 
@@ -619,8 +657,9 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
     callers preserve what they don't touch. Atomic write at 0o600; no tomli-w
     dependency.
     """
-    OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    rendered = ", ".join(_toml_string(n) for n in sorted(denied))
+    path = overrides_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rendered =", ".join(_toml_string(n) for n in sorted(denied))
     body = (
         "# Dashboard-managed overrides. Edit via the dashboard's\n"
         "# permissions page, not by hand (the dashboard rewrites this\n"
@@ -668,10 +707,10 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
     # Parse and validate before replacement. A renderer/schema bug must never
     # atomically replace the last valid operator policy with corrupt TOML.
     state = _validate_loaded_state(_tomllib().loads(body))
-    atomic_write_text(OVERRIDES_PATH, body)
+    atomic_write_text(path, body)
     # Keep the fallback synchronized with writes from this process.
     with _OVERRIDE_LOCK:
-        _remember_valid(_cache_key(), state)
+        _remember_valid(_cache_key(path), state)
 
 
 def _toml_string(value: str) -> str:
@@ -918,5 +957,5 @@ __all__ = [
     "plugin_overlay", "enable_plugin", "disable_plugin", "reset_plugin",
     "allowed_models", "set_allowed_models",
     "mcp_overlay", "add_mcp_server", "remove_mcp_server",
-    "OVERRIDES_PATH",
+    "OVERRIDES_PATH", "overrides_path",
 ]
