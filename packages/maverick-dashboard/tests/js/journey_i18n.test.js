@@ -12,6 +12,11 @@ function page(language='fr', locale='fr-CA') {
     '{count} review': {text:'{count} révision',lang:'fr'},
     '{count} reviews': {text:'{count} révisions',lang:'fr'},
     'Complete this field.': {text:'Renseignez ce champ.',lang:'fr'},
+    'This action could not be completed. {reason}': {text:'Cette action n’a pas pu être effectuée. {reason}',lang:'fr'},
+    'You do not have permission to do this. Ask an administrator.': {text:'Vous n’avez pas l’autorisation nécessaire. Demandez un accès à un administrateur.',lang:'fr'},
+    'Review publication': {text:'Vérifier la publication',lang:'fr'},
+    'Restore as draft': {text:'Restaurer comme brouillon',lang:'fr'},
+    'No content changes.': {text:'Aucune modification du contenu.',lang:'fr'},
   };
   const dom = new JSDOM('<!doctype html><html lang="en"><head></head><body><div id="message"></div><div data-user-content dir="auto" lang="und"><span id="user" data-i18n="Save">Save</span></div><dialog id="dialog"><table><tr><th data-i18n="Save">Save</th><td data-user-content lang="und" dir="auto">مرحبا Save</td></tr></table></dialog><div id="stream" data-user-content dir="auto" lang="und"></div></body></html>', {runScripts:'outside-only'});
   const config=dom.window.document.createElement('script');config.id='lightwork-i18n-data';config.type='application/json';config.textContent=JSON.stringify({language,locale,catalog});dom.window.document.head.appendChild(config);
@@ -30,6 +35,41 @@ test('only explicitly marked product regions translate, including new dialogs',(
   assert.equal(doc.getElementById('stream').textContent,'Save');
   api.set(doc.getElementById('message'),'Missing translation');
   assert.equal(doc.getElementById('message').lang,'en');
+  dom.window.close();
+});
+
+test('classified request failures keep their language when shown by a status controller',()=>{
+  const dom=page(),w=dom.window;
+  w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+  w.eval(fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/static/lightwork-ui.js'),'utf8'));
+  const result=w.mvErrorText({status:403},'publish this draft');
+  assert.equal(result,'Cette action n’a pas pu être effectuée. Vous n’avez pas l’autorisation nécessaire. Demandez un accès à un administrateur.');
+  w.LightworkI18n.set(w.document.getElementById('message'),result);
+  assert.equal(w.document.getElementById('message').lang,'fr');
+  assert.doesNotMatch(result,/403|Could not/);
+  dom.window.close();
+});
+
+test('workflow review localizes actions while preserving stored labels, choices and diffs',async()=>{
+  const dom=page(),w=dom.window,doc=w.document;
+  w.history.replaceState=()=>{};
+  doc.body.insertAdjacentHTML('beforeend','<section id="workflow-versions"><div id="workflow-versions-content"></div><p id="workflow-versions-status"></p><button id="workflow-versions-refresh"></button></section>');
+  const records={context:'owner',current:'v2',published:'v1',params:['answer'],parameter_schema:{fields:{answer:{label:'Save',type:'enum',choices:['Save','مرحبا'],required:true}}},can_publish:true,effect:'Existing schedules keep their reviewed content and version. Publishing affects only new schedules; migration is never automatic.',schedules:[],generation:2,fixtures:[],versions:[{label:'Save مرحبا',version:'v1',current:false,published:true,diff:['+Save <img src=x> مرحبا']}]};
+  const calls=[];w.fetch=async(url,options)=>{calls.push({url,options});return {ok:true,status:200,json:async()=>records};};
+  w.eval(fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/static/lightwork-workflow-versions.js'),'utf8'));
+  doc.dispatchEvent(new w.CustomEvent('lightwork:workflow-saved',{detail:{name:'verbatim'}}));
+  await new Promise(resolve=>setImmediate(resolve));
+  const content=doc.getElementById('workflow-versions-content');
+  const buttons=[...content.querySelectorAll('button')];
+  assert.equal(buttons.find(b=>b.textContent==='Vérifier la publication').lang,'fr');
+  assert.equal(buttons.find(b=>b.textContent==='Restaurer comme brouillon').lang,'fr');
+  assert.equal(content.querySelector('label bdi').textContent,'Save');
+  assert.equal(content.querySelector('option[value="Save"]').textContent,'Save');
+  assert.equal(content.querySelector('summary bdi').textContent,'Save مرحبا');
+  assert.equal(content.querySelector('ins').textContent,'+Save <img src=x> مرحبا\n');
+  assert.equal(content.querySelector('ins').lang,'und');
+  assert.equal(content.querySelector('img'),null);
+  assert.equal(calls.length,1);assert.equal(calls[0].options.method,'GET');
   dom.window.close();
 });
 

@@ -14,8 +14,9 @@ from markupsafe import Markup, escape
 from .i18n_journey_common import ROWS as COMMON_ROWS
 from .i18n_journey_employee import ROWS as EMPLOYEE_ROWS
 from .i18n_journey_review import ROWS as REVIEW_ROWS
+from .i18n_journey_workflow import ROWS as WORKFLOW_ROWS
 
-ROWS = [*COMMON_ROWS, *EMPLOYEE_ROWS, *REVIEW_ROWS]
+ROWS = [*COMMON_ROWS, *EMPLOYEE_ROWS, *REVIEW_ROWS, *WORKFLOW_ROWS]
 
 TRANSLATION_LANGS = ("fr", "de", "ja", "zh")
 # Rows are source, French, German, Japanese, Chinese. No Arabic machine completion.
@@ -33,7 +34,8 @@ def messages():
             raise ValueError("Journey translations require all four draft languages")
         expected = {name for _, name, _, _ in Formatter().parse(source) if name}
         for text in translations:
-            if not text.strip() or {name for _, name, _, _ in Formatter().parse(text) if name} != expected:
+            if (not text.strip() or {name for _, name, _, _ in Formatter().parse(text) if name} != expected
+                    or set(re.findall(r"\{\{[a-z_]+\}\}", text)) != set(re.findall(r"\{\{[a-z_]+\}\}", source))):
                 raise ValueError("Journey catalog placeholders differ")
         result[key(source)] = {"en": source, **dict(zip(TRANSLATION_LANGS, translations, strict=True))}
     return result

@@ -242,10 +242,12 @@ test("readable permission chips retain exact identifiers and remove only the sel
   const allow = new Element(), deny = new Element();
   allow.value = "web_search, send_email"; deny.value = "delete_file";
   const allowed = new Element(), blocked = new Element(), browse = new Element();
-  const context = { pbAllow: allow, pbDeny: deny, Event,
+  const context = { pbAllow: allow, pbDeny: deny, Event, window: {},
     document: { createElement: () => new Element(), querySelector: () => browse,
       getElementById: id => id === "pb-allow-summary" ? allowed : blocked } };
   const source = fs.readFileSync(path.join(templates, "workflow_builder.html"), "utf8");
+  vm.runInNewContext(source.slice(source.indexOf("    function productText("),
+    source.indexOf("    function setStatus(")), context);
   const splitStart = source.indexOf("    function splitList(");
   const splitEnd = source.indexOf("\n    }", splitStart) + 6;
   vm.runInNewContext(source.slice(splitStart, splitEnd), context);
@@ -278,7 +280,7 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
     constructor(callback) { this.callback = callback; }
     observe(target) { observers.set(target, this.callback); }
   }
-  const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8");
+  const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("    (function () {", source.indexOf('// "Show work" strip'));
   const end = source.indexOf("    })();", start) + "    })();".length;
   vm.runInNewContext(source.slice(start, end), { MutationObserver, document: { getElementById: id => fields[id] } });

@@ -2,10 +2,14 @@
   'use strict';
   var payload = document.getElementById('lightwork-i18n-data'), data = {language: 'en', locale: 'en', catalog: {}};
   try { if (payload) data = JSON.parse(payload.textContent); } catch (_) { /* Honest English fallback. */ }
-  function lookup(source) { return Object.prototype.hasOwnProperty.call(data.catalog || {}, source) ? data.catalog[source] : {text: source, lang: 'en'}; }
+  // A bounded page-local record preserves language when a product formatter's
+  // string result is subsequently handed to a status or toast controller.
+  var formatted = new Map();
+  function lookup(source) { return Object.prototype.hasOwnProperty.call(data.catalog || {}, source) ? data.catalog[source] : formatted.get(source) || {text: source, lang: 'en'}; }
   function text(source, values) {
-    var value = lookup(source).text;
-    return value.replace(/\{([A-Za-z0-9_]+)\}/g, function (whole, name) { return values && Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : whole; });
+    var row = lookup(source), value = row.text.replace(/\{([A-Za-z0-9_]+)\}/g, function (whole, name) { return values && Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : whole; });
+    if (formatted.size >= 256) formatted.delete(formatted.keys().next().value);
+    formatted.set(value, {text:value, lang:row.lang}); return value;
   }
   function set(element, source, values) {
     if (!element || element.closest('[data-user-content]')) return;
@@ -65,7 +69,7 @@
     (root || document).querySelectorAll('[data-product-number]').forEach(function (element) { if (!element.closest('[data-user-content]')) { element.textContent = number(element.dataset.productNumber); element.lang = data.locale || data.language; element.dir = 'auto'; } });
     (root || document).querySelectorAll('form[data-product-validation]').forEach(validation);
   }
-  window.LightworkI18n = {text: text, set: set, languageFor: function (source) { return lookup(source).lang; },
+  window.LightworkI18n = {text: text, set: set, languageFor: function (source) { return lookup(source).lang; }, has: function (source) { return Object.prototype.hasOwnProperty.call(data.catalog || {}, source); },
     number: number, formatDate: formatDate, plural: plural, translate: translate, validation: validation, locale: data.locale, language: data.language};
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { translate(); }); else translate();
 })();

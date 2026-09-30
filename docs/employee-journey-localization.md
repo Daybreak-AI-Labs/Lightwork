@@ -46,3 +46,13 @@ Local tests cover locale precedence and inheritance, unchanged response prompts,
 account-bound cookies and locks, Arabic fallback, escaped parameter/source text,
 explicit dialog/table regions, streamed content, date/number/plural formatting
 and required-field error recovery. Provider services are not called.
+
+Workflow review now binds publication/restoration effects, draft/version states,
+sample checks, schedules and triggers explicitly. Stored schema labels/choices,
+workflow names and version diffs retain their own language and exact values.
+Generic request errors localize only classified product reasons; unknown server
+copy stays explicitly English. A bounded page-local formatter record preserves
+the actual language when a translated status is passed between controllers.
+The three remaining literal workflow examples are canonical parameter/tool
+identifiers, not prose. They remain unchanged because changing them would change
+what the workflow references.

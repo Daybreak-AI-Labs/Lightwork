@@ -87,6 +87,7 @@
         var t = document.createElement('div');
         t.className = 'mv-toast' + (opts.error ? ' mv-toast--error' : '');
         t.textContent = (opts.error ? '⚠ ' : '') + String(message);
+        if(window.LightworkI18n){t.lang=window.LightworkI18n.languageFor(String(message));t.dir='auto';}
         target.appendChild(t);
         setTimeout(function () {
           t.style.transition = 'opacity 200ms'; t.style.opacity = '0';
@@ -373,6 +374,15 @@
         }
         if (status >= 500) return what + 'Something went wrong on our side. Please try again in a minute.';
         return what + 'Something went wrong. Please try again.';
+      };
+      var originalErrorText = window.mvErrorText;
+      window.mvErrorText = function(failure, action) {
+        var value=originalErrorText(failure,action), locale=window.LightworkI18n;
+        if(!locale || locale.language==='en')return value;
+        var prefix=action ? 'Could not '+action+'. ' : '';
+        var reason=prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value;
+        if(prefix && locale.has(reason))return locale.text('This action could not be completed. {reason}',{reason:locale.text(reason)});
+        return locale.text(value);
       };
       // A server message is shown only when it is already a plain sentence
       // written for people ("Pick a later date."). Codes, snake_case names,

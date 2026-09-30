@@ -816,7 +816,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     r = _client().get("/workflow-builder")
     assert r.status_code == 200
     assert "<title>Workflow builder · Lightwork</title>" in r.text
-    assert '<h1 class="page-title">Workflow builder</h1>' in r.text
+    assert '<h1 class="page-title"><span lang="en" dir="ltr" data-product-copy>Workflow builder</span></h1>' in r.text
     assert 'id="wf-draft-btn"' in r.text
     assert "/api/v1/workflows/draft" in r.text
     # Both forms are offered, and the playbook saves via the agent-override path.
@@ -912,7 +912,7 @@ def test_non_admin_edit_agent_deeplink_withholds_existing_pack(monkeypatch, tmp_
     ).text
     assert "PB_EDIT = null" in html
     assert 'PB_EDIT_DENIED = "invoice-clerk"' in html
-    assert "draft a new unsaved first pass" in html
+    assert "You can still draft an unsaved first pass." in html
 
 
 def test_builder_edit_deeplink_rehydrates_editor(monkeypatch, tmp_path):

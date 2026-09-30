@@ -144,42 +144,42 @@
   .wf__days label { display: inline-flex; align-items: center; gap: 4px; }
 </style>
 
-  <h1 class="page-title">Workflow builder</h1>
-  <p class="page-subtitle">Describe what you want — or drop in a document — and Lightwork drafts it for you to refine, save, and run. Prefer to build by hand? Use the <a href="/goal-builder">manual builder</a>.</p>
+  <h1 class="page-title">{{ ui("Workflow builder") }}</h1>
+  <p class="page-subtitle">{{ ui("Describe what you want or provide a document. Lightwork drafts it for you to refine, save and run. You can also build it by hand.") }} <a href="/goal-builder">{{ ui("manual builder") }}</a>.</p>
 
   <div class="wf">
-    <div class="seg" role="group" aria-label="What to build">
+    <div class="seg" role="group" aria-label="{{ ut('What to build') }}" lang="{{ ul('What to build') }}">
       <button type="button" id="wf-form-template" class="seg__opt is-active" aria-pressed="true">
-        Reusable template
-        <span class="seg__sub">repeat the work with new details each time</span>
+        {{ ui("Reusable template") }}
+        <span class="seg__sub">{{ ui("repeat the work with new details each time") }}</span>
       </button>
       <button type="button" id="wf-form-playbook" class="seg__opt" aria-pressed="false">
-        Agent playbook
-        <span class="seg__sub">draft a specialist’s instructions and allowed actions</span>
+        {{ ui("Agent playbook") }}
+        <span class="seg__sub">{{ ui("draft a specialist’s instructions and allowed actions") }}</span>
       </button>
     </div>
 
     <div class="panel">
       <div class="wf__field" style="margin-bottom: var(--space-3);">
-        <label for="wf-brief">Describe the <span id="wf-noun">workflow</span></label>
+        <label for="wf-brief"><span id="wf-noun">{{ ui("Describe the workflow") }}</span></label>
         <textarea lang="und" dir="auto" data-user-content id="wf-brief" class="input wf__brief"
-          placeholder="e.g. Gather weekly news about a competitor I choose, summarize the important changes, and draft an email to the team."></textarea>
-        <div class="wf__chips" id="wf-examples" aria-label="Starter examples"></div>
+          ></textarea><span class="wf__hint">{{ ui('Example: gather competitor news, summarize changes and draft a team email.') }}</span>
+        <div class="wf__chips" id="wf-examples" aria-label="{{ ut('Starter examples') }}" lang="{{ ul('Starter examples') }}"></div>
       </div>
       <div class="wf__row">
         <button type="button" id="wf-draft-btn" class="btn btn--primary">
-          <span class="spinner" hidden aria-hidden="true"></span><span>Draft with AI</span>
+          <span class="spinner" hidden aria-hidden="true"></span><span>{{ ui("Draft with AI") }}</span>
         </button>
-        <button type="button" id="wf-file-btn" class="btn btn--ghost">Upload a document…</button>
+        <button type="button" id="wf-file-btn" class="btn btn--ghost">{{ ui("Upload a document…") }}</button>
         <input type="file" id="wf-file" class="wf__file-input"
                accept=".pdf,.docx,.txt,.md,.markdown,.json,.csv,.yaml,.yml,text/*,application/json"
-               aria-label="Upload a document to draft from" />
+               aria-label="{{ ut('Upload a document to draft from') }}" lang="{{ ul('Upload a document to draft from') }}">
         <span class="wf__hint" id="wf-file-name"></span>
         <div id="wf-source-review" hidden>
-          <label for="wf-source-text">Review extracted procedure</label>
+          <label for="wf-source-text">{{ ui("Review extracted procedure") }}</label>
           <textarea lang="und" dir="auto" data-user-content class="textarea" id="wf-source-text" rows="8" maxlength="8000"></textarea>
-          <p class="wf__hint">Source material only. Review and remove private or irrelevant text before Draft with AI. Uploading does not start work. PDF and Word documents require the installed document parsers; maximum file size is 512 KB.</p>
-          <button class="btn btn--ghost" type="button" id="wf-source-clear">Remove document</button>
+          <p class="wf__hint">{{ ui("Source material only. Review and remove private or irrelevant text before Draft with AI. Uploading does not start work. PDF and Word documents require the installed document parsers; maximum file size is 512 KB.") }}</p>
+          <button class="btn btn--ghost" type="button" id="wf-source-clear">{{ ui("Remove document") }}</button>
         </div>
       </div>
     </div>
@@ -189,136 +189,136 @@
     <!-- template editor -->
     <div class="panel wf-card" id="wf-preview" hidden>
       <div class="wf-card__head">
-        <span class="badge info">Template</span>
-        <h2>Review &amp; edit</h2>
+        <span class="badge info">{{ ui("Template") }}</span>
+        <h2>{{ ui("Review & edit") }}</h2>
       </div>
       <div class="wf-grid">
         <div class="wf__field" style="flex: 1 1 16rem;">
-          <label for="wf-name">Short name (filled in from the title)</label>
-          <input type="text" id="wf-name" class="input" aria-label="Workflow short name" />
+          <label for="wf-name">{{ ui("Short name (filled in from the title)") }}</label>
+          <input type="text" id="wf-name" class="input" aria-label="{{ ut('Workflow short name') }}" lang="{{ ul('Workflow short name') }}">
         </div>
         <div class="wf__field" style="flex: 2 1 18rem;">
-          <label for="wf-title">Title</label>
-          <input type="text" id="wf-title" class="input" aria-label="Workflow title" />
+          <label for="wf-title">{{ ui("Title") }}</label>
+          <input type="text" id="wf-title" class="input" aria-label="{{ ut('Workflow title') }}" lang="{{ ul('Workflow title') }}">
         </div>
       </div>
       <div class="wf__field">
-        <label for="wf-steps">Steps</label>
-        <textarea lang="und" dir="auto" data-user-content id="wf-steps" class="input wf__steps" aria-label="Workflow steps"></textarea>
+        <label for="wf-steps">{{ ui("Steps") }}</label>
+        <textarea lang="und" dir="auto" data-user-content id="wf-steps" class="input wf__steps" ></textarea>
       </div>
       <div class="wf-grid">
         <div class="wf__field">
-          <label for="wf-params">Input names (existing templates)</label>
-          <input type="text" id="wf-params" class="input" placeholder="competitor, timeframe" aria-label="Information to ask for each time" />
-          <p class="wf__hint">Add named input fields below to choose a label, type, optional value or default. Existing names remain required text unless you customize them.</p>
+          <label for="wf-params">{{ ui("Input names (existing templates)") }}</label>
+          <input type="text" id="wf-params" class="input" placeholder="competitor, timeframe" aria-label="{{ ut('Information to ask for each time') }}" lang="{{ ul('Information to ask for each time') }}">
+          <p class="wf__hint">{{ ui("Add named input fields below to choose a label, type, optional value or default. Existing names remain required text unless you customize them.") }}</p>
           <div id="wf-input-fields"></div>
-          <button class="btn btn--ghost" id="wf-add-input" type="button">Add input field</button>
+          <button class="btn btn--ghost" id="wf-add-input" type="button">{{ ui("Add input field") }}</button>
         </div>
         <div class="wf__field wf__field--sm">
-          <label for="wf-budget">Optional spending limit ($)</label>
+          <label for="wf-budget">{{ ui("Optional spending limit ($)") }}</label>
           <input type="number" id="wf-budget" class="input" min="0" step="0.01"
-                 aria-label="Optional per-run budget in dollars" placeholder="No task limit" />
+                 aria-label="{{ ut('Optional per-run budget in dollars') }}" placeholder="{{ ut('No task limit') }}" lang="{{ ul('No task limit') }}">
         </div>
       </div>
       <div class="wf__field">
-        <label for="wf-refine">Refine with a follow-up</label>
+        <label for="wf-refine">{{ ui("Refine with a follow-up") }}</label>
         <div class="wf__refine">
           <input type="text" id="wf-refine" class="input"
-                 placeholder="e.g. add a step to email the summary; make it weekly"
-                 aria-label="Refine the workflow with a follow-up instruction" />
+                 placeholder="{{ ut('Example: add a step to email the summary; make it weekly.') }}"
+                 aria-label="{{ ut('Refine the workflow with a follow-up instruction') }}" lang="{{ ul('Refine the workflow with a follow-up instruction') }}">
           <button type="button" id="wf-refine-btn" class="btn">
-            <span class="spinner" hidden aria-hidden="true"></span><span>Refine</span>
+            <span class="spinner" hidden aria-hidden="true"></span><span>{{ ui("Refine") }}</span>
           </button>
         </div>
       </div>
       <div class="wf__row">
-        <button type="button" id="wf-save-btn" class="btn btn--primary">Save workflow</button>
-        <span class="wf__hint">Saved workflows appear on <a href="/templates">Templates</a>, and you can run them from Chat.</span>
+        <button type="button" id="wf-save-btn" class="btn btn--primary">{{ ui("Save workflow") }}</button>
+        <span class="wf__hint">{{ ui("Saved workflows appear in Templates and can be run from Chat.") }} <a href="/templates">{{ ui("Templates") }}</a>.</span>
       </div>
     </div>
 
     <!-- playbook editor -->
     <div class="panel wf-card" id="pb-preview" hidden>
       <div class="wf-card__head">
-        <span class="badge info">Agent playbook</span>
-        <h2>Review &amp; edit the playbook</h2>
+        <span class="badge info">{{ ui("Agent playbook") }}</span>
+        <h2>{{ ui("Review & edit the playbook") }}</h2>
       </div>
       <div class="wf-grid">
         <div class="wf__field" style="flex: 1 1 16rem;">
-          <label for="pb-name">Short name (filled in from the description)</label>
-          <input type="text" id="pb-name" class="input" aria-label="Specialist short name" />
+          <label for="pb-name">{{ ui("Short name (filled in from the description)") }}</label>
+          <input type="text" id="pb-name" class="input" aria-label="{{ ut('Specialist short name') }}" lang="{{ ul('Specialist short name') }}">
         </div>
         <div class="wf__field wf__field--sm">
-          <label for="pb-risk">Riskiest action allowed</label>
+          <label for="pb-risk">{{ ui("Riskiest action allowed") }}</label>
           <select id="pb-risk" class="input">
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
+            <option value="low" lang="{{ ul("Low") }}">{{ ut("Low") }}</option>
+            <option value="medium" lang="{{ ul("Medium") }}">{{ ut("Medium") }}</option>
+            <option value="high" lang="{{ ul("High") }}">{{ ut("High") }}</option>
           </select>
         </div>
       </div>
       <div class="wf__field">
         <label for="pb-desc">{{ ui("Description") }}</label>
-        <input type="text" id="pb-desc" class="input" aria-label="Agent description" />
+        <input type="text" id="pb-desc" class="input" aria-label="{{ ut('Agent description') }}" lang="{{ ul('Agent description') }}">
       </div>
       <div class="wf__field">
-        <label for="pb-persona">Role and working instructions</label>
-        <textarea lang="und" dir="auto" data-user-content id="pb-persona" class="input pb-persona" aria-label="Specialist role and instructions"></textarea>
+        <label for="pb-persona">{{ ui("Role and working instructions") }}</label>
+        <textarea lang="und" dir="auto" data-user-content id="pb-persona" class="input pb-persona" ></textarea>
       </div>
       <div class="wf-grid">
         <div class="wf__field">
-          <strong>Allowed actions</strong>
-          <div id="pb-allow-summary" class="wf__row" aria-label="Selected allowed actions"></div>
+          <strong>{{ ui("Allowed actions") }}</strong>
+          <div id="pb-allow-summary" class="wf__row" aria-label="{{ ut('Selected allowed actions') }}" lang="{{ ul('Selected allowed actions') }}"></div>
           <button type="button" class="btn btn--ghost" data-browse="allow"
-                  aria-label="Choose allowed actions">Choose actions…</button>
+                  aria-label="{{ ut('Choose allowed actions') }}" lang="{{ ul('Choose allowed actions') }}">{{ ui("Choose actions…") }}</button>
           <details id="pb-allow-advanced">
-            <summary>Technical details: type action names instead</summary>
-            <label for="pb-allow">Allowed action names (separate with commas)</label>
+            <summary>{{ ui("Technical details: type action names instead") }}</summary>
+            <label for="pb-allow">{{ ui("Allowed action names (separate with commas)") }}</label>
             <input type="text" id="pb-allow" class="input" placeholder="web_search, send_email"
-                   aria-label="Allowed action names" />
+                   aria-label="{{ ut('Allowed action names') }}" lang="{{ ul('Allowed action names') }}">
           </details>
         </div>
         <div class="wf__field">
-          <strong>Always blocked actions</strong>
-          <div id="pb-deny-summary" class="wf__row" aria-label="Selected blocked actions"></div>
+          <strong>{{ ui("Always blocked actions") }}</strong>
+          <div id="pb-deny-summary" class="wf__row" aria-label="{{ ut('Selected blocked actions') }}" lang="{{ ul('Selected blocked actions') }}"></div>
           <button type="button" class="btn btn--ghost" data-browse="deny"
-                  aria-label="Choose blocked actions">Choose actions…</button>
+                  aria-label="{{ ut('Choose blocked actions') }}" lang="{{ ul('Choose blocked actions') }}">{{ ui("Choose actions…") }}</button>
           <details id="pb-deny-advanced">
-            <summary>Technical details: type action names instead</summary>
-            <label for="pb-deny">Blocked action names (separate with commas)</label>
+            <summary>{{ ui("Technical details: type action names instead") }}</summary>
+            <label for="pb-deny">{{ ui("Blocked action names (separate with commas)") }}</label>
             <input type="text" id="pb-deny" class="input" placeholder="shell, delete_file"
-                   aria-label="Blocked action names" />
+                   aria-label="{{ ut('Blocked action names') }}" lang="{{ ul('Blocked action names') }}">
           </details>
         </div>
       </div>
       <div class="wf__field">
-        <label>Steps <span class="wf__hint" style="text-transform: none; letter-spacing: 0;">— instructions to follow in order</span></label>
-        <p class="wf__hint" id="pb-gate-boundary">Playbook review instructions do not automatically pause the work. To require a human decision before continuing, add an <a href="/flows/designer">approval step in a flow</a>.</p>
+        <label>{{ ui("Steps") }} <span class="wf__hint" style="text-transform: none; letter-spacing: 0;">{{ ui("Instructions to follow in order") }}</span></label>
+        <p class="wf__hint" id="pb-gate-boundary">{{ ui("Playbook review instructions do not automatically pause the work. To require a human decision before continuing, add an approval step in a flow.") }} <a href="/flows/designer">{{ ui("approval step in a flow") }}</a>.</p>
         <div class="pb-flow">
-          <div class="pb-flow__node pb-flow__start"><span class="dot" aria-hidden="true"></span>Start here</div>
+          <div class="pb-flow__node pb-flow__start"><span class="dot" aria-hidden="true"></span>{{ ui("Start here") }}</div>
           <div id="pb-steps"></div>
-          <div class="pb-flow__node pb-flow__end" id="pb-flow-end" hidden><span class="dot" aria-hidden="true"></span>Goal complete</div>
+          <div class="pb-flow__node pb-flow__end" id="pb-flow-end" hidden><span class="dot" aria-hidden="true"></span>{{ ui("Goal complete") }}</div>
         </div>
-        <button type="button" id="pb-add-step" class="btn btn--ghost" style="margin-top: var(--space-4);">Add a step</button>
+        <button type="button" id="pb-add-step" class="btn btn--ghost" style="margin-top: var(--space-4);">{{ ui("Add a step") }}</button>
       </div>
       <div class="wf__field">
-        <label for="pb-refine">Refine with a follow-up</label>
+        <label for="pb-refine">{{ ui("Refine with a follow-up") }}</label>
         <div class="wf__refine">
           <input type="text" id="pb-refine" class="input"
-                 placeholder="e.g. require approval before any payment; add a reconciliation step"
-                 aria-label="Refine the playbook with a follow-up instruction" />
+                 placeholder="{{ ut('Example: require approval before a payment; add a reconciliation step.') }}"
+                 aria-label="{{ ut('Refine the playbook with a follow-up instruction') }}" lang="{{ ul('Refine the playbook with a follow-up instruction') }}">
           <button type="button" id="pb-refine-btn" class="btn">
-            <span class="spinner" hidden aria-hidden="true"></span><span>Refine</span>
+            <span class="spinner" hidden aria-hidden="true"></span><span>{{ ui("Refine") }}</span>
           </button>
         </div>
       </div>
       <div class="wf__govern" id="pb-govern">
-        <h3>Governance check</h3>
+        <h3>{{ ui("Governance check") }}</h3>
         <ul id="pb-lint" class="wf__lint"></ul>
       </div>
       <div class="wf__row">
-        <button type="button" id="pb-save-btn" class="btn btn--primary"{% if not pack_editing_allowed %} disabled title="An administrator must check and save this draft"{% endif %}>Save playbook</button>
-        <span class="wf__hint">{% if pack_editing_allowed %}Saved playbooks become specialists on <a href="/agents">Agents</a>.{% else %}This draft stays unsaved until an administrator checks and saves it. <button type="button" class="btn btn--ghost" id="pb-copy-draft">Copy the draft to send to an administrator</button>{% endif %}</span>
+        <button type="button" id="pb-save-btn" class="btn btn--primary"{% if not pack_editing_allowed %} disabled title="{{ ut('An administrator must check and save this draft') }}"{% endif %} lang="{{ ul('An administrator must check and save this draft') }}">{{ ui("Save playbook") }}</button>
+        <span class="wf__hint">{% if pack_editing_allowed %}{{ ui("Saved playbooks become specialists on Agents.") }} <a href="/agents">{{ ui("Agents") }}</a>.{% else %}This draft stays unsaved until an administrator checks and saves it. <button type="button" class="btn btn--ghost" id="pb-copy-draft">{{ ui("Copy the draft to send to an administrator") }}</button>{% endif %}</span>
       </div>
     </div>
 
@@ -327,111 +327,111 @@
       <div class="wf-saved__head">
         <span class="wf-saved__check" aria-hidden="true">✓</span>
         <div>
-          <h2>Saved</h2>
+          <h2>{{ ui("Saved") }}</h2>
           <p id="wf-saved-msg" class="muted" style="margin: var(--space-1) 0 0;"></p>
         </div>
       </div>
       <div class="wf__row">
-        <a class="btn btn--primary" id="wf-saved-link" href="/templates">Open Templates</a>
-        <a class="btn btn--ghost" id="wf-run-now" href="/chat">Run it now</a>
+        <a class="btn btn--primary" id="wf-saved-link" href="/templates">{{ ui("Open Templates") }}</a>
+        <a class="btn btn--ghost" id="wf-run-now" href="/chat">{{ ui("Run it now") }}</a>
       </div>
       {% if scheduling_enabled %}
       <details class="wf__sched" id="wf-sched" hidden>
-        <summary class="wf__sched-title"><span role="heading" aria-level="3">Run it on a schedule</span></summary>
-        <p class="wf__hint">Lightwork starts this workflow automatically while it is running. Times are in your time zone.</p>
+        <summary class="wf__sched-title"><span role="heading" aria-level="3">{{ ui("Run it on a schedule") }}</span></summary>
+        <p class="wf__hint">{{ ui("Lightwork starts this workflow automatically while it is running. Times are in your time zone.") }}</p>
         <div class="wf-grid">
           <div class="wf__field">
-            <label for="sched-cadence">How often</label>
+            <label for="sched-cadence">{{ ui("How often") }}</label>
             <select id="sched-cadence" class="input">
-              <option value="">Off</option>
-              <option value="daily">Every day</option>
-              <option value="weekdays">Every weekday (Mon–Fri)</option>
-              <option value="days">On certain days each week</option>
-              <option value="monthly">Once a month</option>
-              <option value="hourly">Every few hours</option>
+              <option value="" lang="{{ ul("Off") }}">{{ ut("Off") }}</option>
+              <option value="daily" lang="{{ ul("Every day") }}">{{ ut("Every day") }}</option>
+              <option value="weekdays" lang="{{ ul("Every weekday (Mon–Fri)") }}">{{ ut("Every weekday (Mon–Fri)") }}</option>
+              <option value="days" lang="{{ ul("On certain days each week") }}">{{ ut("On certain days each week") }}</option>
+              <option value="monthly" lang="{{ ul("Once a month") }}">{{ ut("Once a month") }}</option>
+              <option value="hourly" lang="{{ ul("Every few hours") }}">{{ ut("Every few hours") }}</option>
             </select>
           </div>
           <div class="wf__field wf__field--sm" id="sched-time-wrap">
-            <label for="sched-time">At (your time)</label>
+            <label for="sched-time">{{ ui("At (your time)") }}</label>
             <input type="time" id="sched-time" class="input" value="09:00" />
           </div>
           <div class="wf__field wf__field--sm" id="sched-interval-wrap" hidden>
-            <label for="sched-interval">Every</label>
+            <label for="sched-interval">{{ ui("Every") }}</label>
             <select id="sched-interval" class="input">
-              <option value="1">1 hour</option><option value="2">2 hours</option><option value="3">3 hours</option>
-              <option value="4">4 hours</option><option value="6" selected>6 hours</option><option value="8">8 hours</option>
-              <option value="12">12 hours</option>
+              <option value="1" lang="{{ ul("1 hour") }}">{{ ut("1 hour") }}</option><option value="2" lang="{{ ul("2 hours") }}">{{ ut("2 hours") }}</option><option value="3" lang="{{ ul("3 hours") }}">{{ ut("3 hours") }}</option>
+              <option value="4" lang="{{ ul("4 hours") }}">{{ ut("4 hours") }}</option><option value="6" selected lang="{{ ul("6 hours") }}">{{ ut("6 hours") }}</option><option value="8" lang="{{ ul("8 hours") }}">{{ ut("8 hours") }}</option>
+              <option value="12" lang="{{ ul("12 hours") }}">{{ ut("12 hours") }}</option>
             </select>
           </div>
           <div class="wf__field wf__field--sm" id="sched-dom-wrap" hidden>
-            <label for="sched-dom">Day of the month</label>
+            <label for="sched-dom">{{ ui("Day of the month") }}</label>
             <select id="sched-dom" class="input">
-              {% for d in range(1, 29) %}<option value="{{ d }}">{{ d }}{{ 'st' if d in (1, 21) else ('nd' if d in (2, 22) else ('rd' if d in (3, 23) else 'th')) }}</option>{% endfor %}
+              {% for d in range(1, 29) %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
             </select>
           </div>
         </div>
         <fieldset class="wf__days" id="sched-days-wrap" hidden>
-          <legend>On these days</legend>
-          <label><input type="checkbox" value="1" checked /> Mon</label>
-          <label><input type="checkbox" value="2" /> Tue</label>
-          <label><input type="checkbox" value="3" /> Wed</label>
-          <label><input type="checkbox" value="4" /> Thu</label>
-          <label><input type="checkbox" value="5" /> Fri</label>
-          <label><input type="checkbox" value="6" /> Sat</label>
-          <label><input type="checkbox" value="0" /> Sun</label>
+          <legend>{{ ui("On these days") }}</legend>
+          <label><input type="checkbox" value="1" checked /> {{ ui("Mon") }}</label>
+          <label><input type="checkbox" value="2" /> {{ ui("Tue") }}</label>
+          <label><input type="checkbox" value="3" /> {{ ui("Wed") }}</label>
+          <label><input type="checkbox" value="4" /> {{ ui("Thu") }}</label>
+          <label><input type="checkbox" value="5" /> {{ ui("Fri") }}</label>
+          <label><input type="checkbox" value="6" /> {{ ui("Sat") }}</label>
+          <label><input type="checkbox" value="0" /> {{ ui("Sun") }}</label>
         </fieldset>
         <p class="wf__hint" id="sched-local-hint" hidden></p>
         <div class="wf__field" id="sched-params-wrap" hidden>
-          <label>Answers to use each time</label>
+          <label>{{ ui("Answers to use each time") }}</label>
           <div id="sched-params"></div>
         </div>
         <div class="wf__row">
-          <button type="button" id="sched-btn" class="btn btn--primary" disabled>Schedule it</button>
+          <button type="button" id="sched-btn" class="btn btn--primary" disabled>{{ ui("Schedule it") }}</button>
           <span class="wf__hint" id="sched-cron-preview" aria-live="polite"></span>
         </div>
-        <ul class="wf__sched-list" id="sched-list" aria-label="Active schedules"></ul>
+        <ul class="wf__sched-list" id="sched-list" aria-label="{{ ut('Active schedules') }}" lang="{{ ul('Active schedules') }}"></ul>
       </details>
       {% endif %}
       {% if triggers_enabled %}
       <details class="wf__sched" id="wf-trig" hidden>
-        <summary class="wf__sched-title"><span role="heading" aria-level="3">Start it from another app</span></summary>
-        <p class="wf__hint">Let GitHub, Slack, Zapier or another app start this workflow whenever something happens there.</p>
+        <summary class="wf__sched-title"><span role="heading" aria-level="3">{{ ui("Start it from another app") }}</span></summary>
+        <p class="wf__hint">{{ ui("Let GitHub, Slack, Zapier or another app start this workflow whenever something happens there.") }}</p>
         <div class="wf-grid">
           <div class="wf__field">
-            <label for="trig-name">Name for this start (optional)</label>
-            <input type="text" id="trig-name" class="input" placeholder="Uses the workflow name" />
+            <label for="trig-name">{{ ui("Name for this start (optional)") }}</label>
+            <input type="text" id="trig-name" class="input" placeholder="{{ ut('Uses the workflow name') }}" lang="{{ ul('Uses the workflow name') }}">
           </div>
         </div>
         <div class="wf__field" id="trig-params-wrap" hidden>
-          <label>Answers to use each time</label>
+          <label>{{ ui("Answers to use each time") }}</label>
           <div id="trig-params"></div>
         </div>
         <div class="wf__row">
-          <button type="button" id="trig-btn" class="btn btn--primary" disabled>Let another app start it</button>
+          <button type="button" id="trig-btn" class="btn btn--primary" disabled>{{ ui("Let another app start it") }}</button>
           <span class="wf__hint" id="trig-msg" role="status" aria-live="polite"></span>
         </div>
         <div id="trig-howto" hidden>
-          <p class="wf__hint">In the other app, add a step that sends a web request to this address and names this start. Your administrator can help with the security key.<span id="trig-secret-warn" hidden> ⚠ The security key isn’t set up yet, so the address won’t accept requests. {% if pack_editing_allowed %}<a href="/settings#webhook-secret">Set it up in Settings</a>{% else %}Ask an administrator to set it up in Settings.{% endif %}</span></p>
-          <div class="wf__copyrow"><code id="trig-url"></code><button type="button" class="btn btn--ghost" id="trig-url-copy">Copy address</button><button type="button" class="btn btn--ghost" id="trig-name-copy">Copy start name</button></div>
+          <p class="wf__hint">{{ ui("In the other app, add a step that sends a web request to this address and names this start. Your administrator can help with the security key.") }}<span id="trig-secret-warn" hidden> ⚠ {{ ui("The security key isn’t set up yet, so the address won’t accept requests.") }} {% if pack_editing_allowed %}<a href="/settings#webhook-secret">{{ ui("Set it up in Settings") }}</a>{% else %}Ask an administrator to set it up in Settings.{% endif %}</span></p>
+          <div class="wf__copyrow"><code id="trig-url"></code><button type="button" class="btn btn--ghost" id="trig-url-copy">{{ ui("Copy address") }}</button><button type="button" class="btn btn--ghost" id="trig-name-copy">{{ ui("Copy start name") }}</button></div>
         </div>
-        <ul class="wf__sched-list" id="trig-list" aria-label="Starts from other apps"></ul>
+        <ul class="wf__sched-list" id="trig-list" aria-label="{{ ut('Starts from other apps') }}" lang="{{ ul('Starts from other apps') }}"></ul>
       </details>
       {% endif %}
     </div>
 
     <!-- connector picker (shared, for allow/deny/step tool fields) -->
-    <div class="picker-backdrop" id="tool-picker" hidden role="dialog" aria-modal="true" aria-label="Browse connectors">
+    <div class="picker-backdrop" id="tool-picker" hidden role="dialog" aria-modal="true" aria-label="{{ ut('Browse connectors') }}" lang="{{ ul('Browse connectors') }}">
       <div class="picker">
         <div class="picker__head">
-          <h3 id="tp-title">Browse connectors</h3>
-          <input type="search" id="tp-search" class="input" placeholder="Search actions by name or description…"
-                 aria-label="Search connectors" autocomplete="off" />
+          <h3 id="tp-title">{{ ui("Browse connectors") }}</h3>
+          <input type="search" id="tp-search" class="input" placeholder="{{ ut('Search actions by name or description…') }}"
+                 aria-label="{{ ut('Search connectors') }}" autocomplete="off" lang="{{ ul('Search connectors') }}">
           <p class="picker__count muted" id="tp-count" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);"></p>
         </div>
         <div class="picker__list" id="tp-list"></div>
         <div class="picker__foot">
           <span class="wf__hint" id="tp-hint"></span>
-          <button type="button" class="btn btn--primary" id="tp-done">Done</button>
+          <button type="button" class="btn btn--primary" id="tp-done">{{ ui("Done") }}</button>
         </div>
       </div>
     </div>
@@ -472,13 +472,14 @@
         var input = entry[0], host = document.getElementById(entry[1]);
         host.textContent = '';
         var tools = splitList(input.value);
-        if (!tools.length) host.textContent = input === pbAllow ? 'No actions selected' : 'No extra blocked actions';
+        if (!tools.length) productText(host,input === pbAllow ? 'No actions selected' : 'No extra blocked actions');
         tools.forEach(function (tool, index) {
           var button = document.createElement('button');
           var label = tool.replace(/_/g, ' ');
           button.type = 'button'; button.className = 'btn btn--ghost';
           button.textContent = label + ' ×'; button.title = tool;
-          button.setAttribute('aria-label', 'Remove ' + label + ' from this selection');
+          button.setAttribute('aria-label', translated('Remove {name} from this selection',{name:label}));
+          button.lang=window.LightworkI18n?window.LightworkI18n.languageFor('Remove {name} from this selection'):'en';
           button.addEventListener('click', function () {
             input.value = splitList(input.value).filter(function (name) { return name !== tool; }).join(', ');
             input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -642,8 +643,13 @@
       ],
     };
 
-    function setStatus(msg, isErr) {
-      status.textContent = msg || '';
+    function productText(node, source, values) { if (window.LightworkI18n) window.LightworkI18n.set(node, source, values); else node.textContent=translated(source,values); }
+    function translated(source,values) { return window.LightworkI18n ? window.LightworkI18n.text(source,values) : String(source || '').replace(/\{(\w+)\}/g,function(all,key){return values && Object.prototype.hasOwnProperty.call(values,key)?String(values[key]):all;}); }
+    function localizedNumber(value) { return window.LightworkI18n ? window.LightworkI18n.number(value) : String(value); }
+    function appendSource(node,value) { var source=document.createElement('bdi');source.lang='und';source.dir='auto';source.dataset.userContent='';source.textContent=value;node.append(' ',source); }
+
+    function setStatus(msg, isErr, values) {
+      productText(status, msg || '', values);
       status.style.color = isErr ? 'var(--danger)' : 'var(--muted)';
     }
     function playbookNoteSuffix(d) {
@@ -670,10 +676,10 @@
         b.className = 'chip';
         var lead = document.createElement('span');
         lead.className = 'chip__lead';
-        lead.textContent = 'Try:';
+        productText(lead,'Try:');
         b.appendChild(lead);
-        b.appendChild(document.createTextNode(ex));
-        b.addEventListener('click', function () { brief.value = ex; brief.focus(); });
+        var example=document.createElement('span');productText(example,ex);b.appendChild(example);
+        b.addEventListener('click', function () { brief.value = translated(ex); brief.focus(); });
         examples.appendChild(b);
       });
     }
@@ -685,7 +691,7 @@
       formTplBtn.setAttribute('aria-pressed', String(isTpl));
       formPbBtn.classList.toggle('is-active', !isTpl);
       formPbBtn.setAttribute('aria-pressed', String(!isTpl));
-      noun.textContent = isTpl ? 'workflow' : 'agent';
+      productText(noun, isTpl ? 'Describe the workflow' : 'Describe the agent');
       if (!isTpl) {
         if (PACK_EDITING) loadRoster();
         loadTools();
@@ -705,9 +711,9 @@
     formPbBtn.addEventListener('click', function () { setForm('playbook'); });
     if (!PACK_EDITING) {
       // Keep authoring available while making the mutation boundary explicit.
-      formPbBtn.title = 'Draft an unsaved first pass for admin review';
+      formPbBtn.title = translated('Draft an unsaved first pass for admin review');
       var pbSub = formPbBtn.querySelector('.seg__sub');
-      if (pbSub) pbSub.textContent = 'draft now; admin validates and saves';
+      if (pbSub) productText(pbSub,'draft now; admin validates and saves');
       pbSaveBtn.disabled = true;
     }
 
@@ -721,7 +727,7 @@
       var serial=++sourceSerial; sourceReady=false; sourceReview.hidden=true; sourceText.value='';
       if (!fileInput.files.length) return;
       var file=fileInput.files[0]; draftBtn.disabled=true;
-      fileName.textContent='Reading document for your review.';
+      productText(fileName,'Reading document for your review.');
       try {
         if (file.size > 512000) throw new Error('Choose a document smaller than 512 KB, or paste the relevant section.');
         var fd=new FormData(); fd.append('file',file);
@@ -731,15 +737,15 @@
         if (!response.ok) throw new Error(response.status===422 && typeof result.detail==='string' ? result.detail : plainErr(response,'read the document'));
         if (typeof result.text!=='string' || result.started!==false) throw new Error('The extracted document could not be confirmed. Choose the file again.');
         sourceText.value=result.text; sourceReview.hidden=false; sourceReady=true;
-        fileName.textContent=result.truncated ? 'Only the first 8,000 characters fit. Review this excerpt or replace it with the relevant section.' : 'Document ready for review. Draft with AI sends the reviewed text.';
+        productText(fileName,result.truncated ? 'Only the first 8,000 characters fit. Review this excerpt or replace it with the relevant section.' : 'Document ready for review. Draft with AI sends the reviewed text.');
         sourceText.focus();
-      } catch (error) { if (serial===sourceSerial) fileName.textContent=error.message; }
+      } catch (error) { if (serial===sourceSerial) productText(fileName,error.message); }
       finally { if (serial===sourceSerial) draftBtn.disabled=false; }
     });
 
     function showSaved(href, label) {
       savedLink.setAttribute('href', href);
-      savedLink.textContent = label;
+      productText(savedLink,label);
       preview.hidden = true; pbPreview.hidden = true;
       if (schedWrap) schedWrap.hidden = true;   // template saves re-show it; playbooks don't
       if (trigWrap) trigWrap.hidden = true;
@@ -763,7 +769,7 @@
           var loc = (e && e.loc && e.loc.length) ? e.loc[e.loc.length - 1] : '';
           return FIELD_WORDS[loc] || '';
         }).filter(Boolean);
-        if (fields.length) return 'Check ' + fields.filter(function (f, i) { return fields.indexOf(f) === i; }).join(' and ') + ', then try again.';
+        if (fields.length) return translated('Check {fields}, then try again.',{fields:fields.filter(function(f,i){return fields.indexOf(f)===i;}).map(function(field){return translated(field);}).join(', ')});
       }
       return plainErr({ status: status }, what || 'save the workflow');
     }
@@ -792,11 +798,11 @@
     var inputFields = document.getElementById('wf-input-fields');
     function addInputField(name, field) {
       field=field || {}; var row=document.createElement('fieldset'); row.className='wf__field';
-      var legend=document.createElement('legend'); legend.textContent='Input field'; row.appendChild(legend);
+      var legend=document.createElement('legend'); productText(legend,'Input field'); row.appendChild(legend);
       function control(key,label,type,value) {
-        var wrap=document.createElement('label'); wrap.textContent=label;
+        var wrap=document.createElement('label'); productText(wrap,label);
         var input=document.createElement(type==='select' ? 'select' : 'input'); input.className='input'; input.dataset.inputKey=key;
-        if (type==='select') ['text','date','enum','number','email'].forEach(function (kind) { input.appendChild(new Option({text:'Text',date:'Date',enum:'Choice',number:'Number',email:'Email'}[kind],kind)); });
+        if (type==='select') ['text','date','enum','number','email'].forEach(function (kind) { var option=new Option('',kind);productText(option,{text:'Text',date:'Date',enum:'Choice',number:'Number',email:'Email'}[kind]);input.appendChild(option); });
         else input.type=type;
         if (type==='checkbox') input.checked=value; else input.value=value || '';
         input.maxLength=key==='help' ? 500 : 100; wrap.appendChild(input); row.appendChild(wrap); return input;
@@ -810,7 +816,7 @@
       control('help','Help beside the field','text',field.help);
       control('condition_field','Show only when this other input matches (optional)','text',field.show_when && field.show_when.field);
       control('condition_value','Matching value','text',field.show_when && field.show_when.value);
-      var remove=document.createElement('button'); remove.type='button'; remove.className='btn btn--ghost'; remove.textContent='Remove field definition';
+      var remove=document.createElement('button'); remove.type='button'; remove.className='btn btn--ghost'; productText(remove,'Remove field definition');
       remove.addEventListener('click',function () { row.remove(); }); row.appendChild(remove); inputFields.appendChild(row);
     }
     document.getElementById('wf-add-input').addEventListener('click',function () { addInputField('',{}); });
@@ -896,7 +902,7 @@
           // A fresh name collision has no reviewed generation token. Open the
           // existing workflow through the edit route, which supplies one,
           // instead of turning confirmation into a blind overwrite.
-          if (await mvConfirm('A workflow named “' + payload.name + '” already exists. Open its latest version for conflict-safe editing?', { okText: 'Open latest' })) {
+          if (await mvConfirm('A workflow named {name} already exists. Open its latest version for conflict-safe editing?', { okText: 'Open latest', productCopy:true, values:{name:payload.name} })) {
             window.location.assign('/workflow-builder?edit=' + encodeURIComponent(payload.name));
           } else {
             setStatus('Not saved — pick a different name.', true);
@@ -910,8 +916,7 @@
         wfEditGeneration = data.generation;
         document.dispatchEvent(new CustomEvent('lightwork:workflow-saved', {detail:{name:data.name}}));
         if (recovery) recovery.changed();
-        savedMsg.textContent = 'Saved “' + (data.title || data.name) + '” as a reusable workflow'
-          + ((data.params && data.params.length) ? ' (it asks for: ' + data.params.map(function (p) { return window.mvHuman ? window.mvHuman(p) : p; }).join(', ') + ').' : '.');
+        productText(savedMsg,data.params && data.params.length ? 'Saved {name} as a reusable workflow. It asks for: {inputs}.' : 'Saved {name} as a reusable workflow.',{name:data.title || data.name,inputs:(data.params || []).join(', ')});
         var runNow = document.getElementById('wf-run-now');
         if (runNow) runNow.href = '/chat?title=' + encodeURIComponent(data.title || data.name);
         showSaved('/templates', 'Open Templates');
@@ -966,21 +971,21 @@
     var DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     function cronWords(cron) {
       var f = String(cron || '').trim().split(/\s+/);
-      if (f.length !== 5) return 'On a custom timetable';
-      if (f[0] === '0' && /^\*\/\d+$/.test(f[1]) && f[2] === '*' && f[3] === '*' && f[4] === '*') return 'Every ' + f[1].slice(2) + ' hours';
-      if (!/^\d+$/.test(f[0]) || !/^\d+$/.test(f[1]) || f[3] !== '*') return 'On a custom timetable';
+      if (f.length !== 5) return translated('On a custom timetable');
+      if (f[0] === '0' && /^\*\/\d+$/.test(f[1]) && f[2] === '*' && f[3] === '*' && f[4] === '*') return translated('Every {count} hours',{count:localizedNumber(f[1].slice(2))});
+      if (!/^\d+$/.test(f[0]) || !/^\d+$/.test(f[1]) || f[3] !== '*') return translated('On a custom timetable');
       var d = new Date(); d.setUTCHours(Number(f[1]), Number(f[0]), 0, 0);
       var shift = d.getDay() - d.getUTCDay(); if (shift > 1) shift = -1; else if (shift < -1) shift = 1;
-      var at = ' at ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      if (f[2] === '*' && f[4] === '*') return 'Every day' + at;
+      var at = d.toLocaleTimeString(window.LightworkI18n ? window.LightworkI18n.locale : undefined, { hour: 'numeric', minute: '2-digit' });
+      if (f[2] === '*' && f[4] === '*') return translated('Every day at {time}',{time:at});
       if (f[2] === '*' && /^[0-7](,[0-7])*$|^1-5$/.test(f[4])) {
         var days = f[4] === '1-5' ? ['1', '2', '3', '4', '5'] : f[4].split(',');
         days = shiftDays(days, shift).map(Number).sort();
-        if (days.join(',') === '1,2,3,4,5') return 'Weekdays' + at;
-        return 'Every ' + days.map(function (x) { return DAY_NAMES[x % 7]; }).join(', ') + at;
+        if (days.join(',') === '1,2,3,4,5') return translated('Weekdays at {time}',{time:at});
+        return translated('Every {days} at {time}',{days:days.map(function(x){return window.LightworkI18n ? new Intl.DateTimeFormat(window.LightworkI18n.locale,{weekday:'long'}).format(new Date(2024,0,7+(x%7))) : DAY_NAMES[x%7];}).join(', '),time:at});
       }
-      if (/^\d+$/.test(f[2]) && f[4] === '*') return 'Monthly on day ' + (Number(f[2]) + shift) + at;
-      return 'On a custom timetable';
+      if (/^\d+$/.test(f[2]) && f[4] === '*') return translated('Monthly on day {day} at {time}',{day:localizedNumber(Number(f[2])+shift),time:at});
+      return translated('On a custom timetable');
     }
     function syncSchedInputs() {
       // Show only the input(s) the chosen cadence needs.
@@ -989,7 +994,7 @@
         'sched-interval-wrap': cad === 'hourly', 'sched-dom-wrap': cad === 'monthly', 'sched-days-wrap': cad === 'days' };
       Object.keys(show).forEach(function (id) { var e = document.getElementById(id); if (e) e.hidden = !show[id]; });
     }
-    var fmtWhen = window.mvWhen;   // shared timestamp formatter (base.html)
+    var fmtWhen = function(value){return window.LightworkI18n ? window.LightworkI18n.formatDate(value) : window.mvWhen(value);};
     function renderSchedParams(params) {
       schedParams.textContent = '';
       if (!params || !params.length) { schedParamsWrap.hidden = true; return; }
@@ -1021,7 +1026,7 @@
       syncSchedInputs();
       var cron = currentCron();
       schedBtn.disabled = !cron || schedParamValues() === null;
-      schedCronPreview.textContent = cron ? ('Runs: ' + cronWords(cron)) : '';
+      productText(schedCronPreview,cron ? 'Runs: {schedule}' : '',{schedule:cronWords(cron)});
     }
     function showScheduling(tpl) {
       if (!schedWrap) return;             // no-op when [features] scheduling is off
@@ -1038,7 +1043,7 @@
       var cron = currentCron(); if (!cron) return;
       var params = schedParamValues(); if (params === null) return;
       schedBtn.disabled = true;
-      schedCronPreview.textContent = 'Scheduling…';
+      productText(schedCronPreview,'Scheduling…');
       try {
         // The server builds and checks the timetable in the person's own time zone.
         var cad = schedCadence.value, zone = 'UTC';
@@ -1053,13 +1058,13 @@
           body: JSON.stringify({ what: 'workflow', template: lastSavedTemplate.name, params: params, timetable: timetable }),
         });
         var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { schedCronPreview.textContent = plainErr(resp, 'save the schedule'); mvFail(resp, 'save the schedule'); return; }
+        if (!resp.ok) { productText(schedCronPreview,plainErr(resp, 'save the schedule')); mvFail(resp, 'save the schedule'); return; }
         schedCadence.value = '';
-        schedCronPreview.textContent = 'Scheduled — next run ' + fmtWhen(data.next_run) + '.';
-        mvToast('Schedule saved — next run ' + fmtWhen(data.next_run));
+        productText(schedCronPreview,'Scheduled — next run {time}.',{time:fmtWhen(data.next_run)});
+        mvToast(translated('Schedule saved — next run {time}',{time:fmtWhen(data.next_run)}));
         loadSchedules();
       } catch (e) {
-        schedCronPreview.textContent = plainErr(e, 'save the schedule');
+        productText(schedCronPreview,plainErr(e, 'save the schedule'));
       } finally {
         updateSchedBtn();
       }
@@ -1080,27 +1085,29 @@
         var span = document.createElement('span');
         span.className = 'mv-row__main';
         var title = document.createElement('strong');
-        title.textContent = s.title || 'Untitled task';
+        if(s.title){title.textContent=s.title;title.lang='und';title.dir='auto';title.dataset.userContent='';}else productText(title,'Untitled task');
         var when = document.createElement('span');
         when.className = 'wf__sched-when';
-        when.textContent = ' · ' + (s.zone ? 'Next ' + (fmtWhen(s.next_run) || 'run soon') + ' (' + String(s.zone).replace(/_/g, ' ') + ' time)'
-          : cronWords(s.cron) + (fmtWhen(s.next_run) ? ' · next ' + fmtWhen(s.next_run) : ''));
+        if(s.zone)productText(when,'Next {time} ({zone} time)',{time:fmtWhen(s.next_run)||translated('Run soon'),zone:String(s.zone).replace(/_/g,' ')});
+        else if(fmtWhen(s.next_run))productText(when,'{schedule} · next {time}',{schedule:cronWords(s.cron),time:fmtWhen(s.next_run)});
+        else productText(when,cronWords(s.cron));
+        when.prepend(' · ');
         span.appendChild(title); span.appendChild(when);
         var rm = document.createElement('button');
         rm.type = 'button';
         rm.className = 'btn btn--ghost btn--danger';
-        rm.setAttribute('aria-label', 'Delete the schedule for ' + (s.title || 'this task'));
-        rm.textContent = 'Delete';
+        rm.setAttribute('aria-label', translated('Delete the schedule for {name}',{name:s.title||translated('Untitled task')}));
+        productText(rm,'Delete');
         rm.addEventListener('click', function () { cancelSchedule(s.id, li); });
         li.appendChild(span); li.appendChild(rm);
         schedList.appendChild(li);
       });
     }
     async function cancelSchedule(id, li) {
-      if (!(await mvConfirm('Delete this schedule? It will stop running.', { okText: 'Delete' }))) return;
+      if (!(await mvConfirm('Delete this schedule? It will stop running.', { okText: 'Delete', productCopy:true }))) return;
       try {
         var resp = await fetch('/api/v1/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
-        if (resp.ok) { if (li) li.remove(); mvToast('Schedule deleted'); } else { mvFail(resp, 'delete the schedule'); }
+        if (resp.ok) { if (li) li.remove(); mvToast(translated('Schedule deleted')); } else { mvFail(resp, 'delete the schedule'); }
       } catch (e) { mvFail(e, 'delete the schedule'); }
     }
     if (schedWrap) {
@@ -1160,20 +1167,20 @@
       if (!trigTpl) return;
       var params = trigParamValues(); if (params === null) return;
       trigBtn.disabled = true;
-      trigMsg.textContent = 'Creating…';
+      productText(trigMsg,'Creating…');
       try {
         var resp = await fetch('/api/v1/triggers', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ template: trigTpl.name, params: params, name: trigName.value.trim() || null }),
         });
         var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { trigMsg.textContent = plainErr(resp, 'set that up'); mvFail(resp, 'set that up'); return; }
-        trigMsg.textContent = 'Ready.';
-        mvToast('“' + data.name + '” can now be started by another app');
+        if (!resp.ok) { productText(trigMsg,plainErr(resp, 'set that up')); mvFail(resp, 'set that up'); return; }
+        productText(trigMsg,'Ready.');
+        mvToast(translated('{name} can now be started by another app',{name:data.name}));
         showHowto(data);
         loadTriggers();
       } catch (e) {
-        trigMsg.textContent = plainErr(e, 'set that up');
+        productText(trigMsg,plainErr(e, 'set that up'));
       } finally {
         updateTrigBtn();
       }
@@ -1204,36 +1211,38 @@
         span.className = 'mv-row__main';
         var title = document.createElement('strong');
         title.textContent = t.name;
+        title.lang='und';title.dir='auto';title.dataset.userContent='';
         var sub = document.createElement('span');
         sub.className = 'wf__sched-when';
         var pcount = t.params ? Object.keys(t.params).length : 0;
-        sub.textContent = ' · runs ' + (window.mvHuman ? window.mvHuman(t.template || '') : (t.template || '')) + (pcount ? (' · ' + pcount + ' saved answer' + (pcount === 1 ? '' : 's')) : '');
+        productText(sub,'Runs {name}',{name:window.mvHuman?window.mvHuman(t.template||''):(t.template||'')});sub.prepend(' · ');
+        if(pcount){var answerCount=document.createElement('span');productText(answerCount,pcount===1?' · {count} saved answer':' · {count} saved answers',{count:localizedNumber(pcount)});sub.append(answerCount);}
         span.appendChild(title); span.appendChild(sub);
         var rm = document.createElement('button');
         rm.type = 'button';
         rm.className = 'btn btn--ghost btn--danger';
-        rm.setAttribute('aria-label', 'Delete the start ' + t.name);
-        rm.textContent = 'Delete';
+        rm.setAttribute('aria-label', translated('Delete the start {name}',{name:t.name}));
+        productText(rm,'Delete');
         rm.addEventListener('click', function () { deleteTrigger(t.name, li); });
         li.appendChild(span); li.appendChild(rm);
         trigList.appendChild(li);
       });
     }
     async function deleteTrigger(name, li) {
-      if (!(await mvConfirm('Delete “' + name + '”? Other apps will no longer be able to start this workflow.', { okText: 'Delete' }))) return;
+      if (!(await mvConfirm('Delete {name}? Other apps will no longer be able to start this workflow.', { okText: 'Delete', productCopy:true,values:{name:name} }))) return;
       try {
         var resp = await fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE' });
         if (resp.ok) {
           if (li) li.remove();
-          mvToast('Deleted');
+          mvToast(translated('Deleted'));
           return;
         }
         var detail = plainErr(resp, 'delete it');
-        if (trigMsg) trigMsg.textContent = detail;
+        if (trigMsg) productText(trigMsg,detail);
         mvToast(detail, { error: true });
       } catch (e) {
         var message = plainErr(e, 'delete it');
-        if (trigMsg) trigMsg.textContent = message;
+        if (trigMsg) productText(trigMsg,message);
         mvToast(message, { error: true });
       }
     }
@@ -1254,7 +1263,7 @@
       var badge = row.querySelector('.pb-gatebadge');
       if (!gate) { badge.hidden = true; return; }
       badge.hidden = false;
-      badge.textContent = GATE_LABEL[gate] || gate;
+      productText(badge,GATE_LABEL[gate] || gate);
       // Approval is the platform's signature governance control — paint it brand,
       // not the amber/warn reserved for risk/degraded states.
       badge.className = 'badge pb-gatebadge ' + (gate === 'approval' ? 'gov' : 'info');
@@ -1262,7 +1271,7 @@
     function renumber() {
       var steps = pbSteps.querySelectorAll('.pb-step');
       steps.forEach(function (row, i) {
-        row.querySelector('.pb-step__num').textContent = (i + 1);
+        row.querySelector('.pb-step__num').textContent = localizedNumber(i+1);
       });
       pbFlowEnd.hidden = !steps.length;   // the "Goal complete" node appears once there are steps
     }
@@ -1296,6 +1305,19 @@
         + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__browse">Choose actions…</button>'
         + '<span class="badge pb-gatebadge" hidden></span>'
         + '</div>';
+      productText(row.querySelector('.pb-step__up'), 'Move up');
+      productText(row.querySelector('.pb-step__down'), 'Move down');
+      productText(row.querySelector('.pb-step__rm'), 'Remove');
+      productText(row.querySelector('.pb-step__browse'), 'Choose actions…');
+      row.querySelectorAll('.pb-step__gate option').forEach(function(option){productText(option,option.textContent);});
+      if(window.LightworkI18n) {
+        row.querySelectorAll('input,textarea,select').forEach(function(field){
+          var label=field.getAttribute('aria-label'),placeholder=field.getAttribute('placeholder');
+          if(label){var described=document.createElement('span');described.className='sr-only';described.id='wf-step-label-'+crypto.randomUUID();productText(described,label);field.before(described);field.setAttribute('aria-labelledby',described.id);field.removeAttribute('aria-label');}
+          if(placeholder)field.setAttribute('placeholder',window.LightworkI18n.text(placeholder));
+          if(field.tagName!=='SELECT'){field.lang='und';field.dir='auto';field.dataset.userContent='';}
+        });
+      }
       // assign untrusted values via properties (never string-interpolated into HTML)
       row.querySelector('.pb-step__name').value = step.name || '';
       row.querySelector('.pb-step__inst').value = step.instruction || '';
@@ -1451,9 +1473,8 @@
         if (recovery) recovery.changed();
         setStatus('');
         var warns = data.warnings || [];
-        savedMsg.textContent = 'Saved “' + (data.name || name) + '” as an agent playbook'
-          + ((data.workflow && data.workflow.length) ? ' (' + data.workflow.length + ' steps).' : '.')
-          + (warns.length ? ' Heads up: ' + warns[0] : '');
+        productText(savedMsg,'Saved {name} as an agent playbook. Steps: {count}.',{name:data.name || name,count:localizedNumber((data.workflow || []).length)});
+        if(warns.length)appendSource(savedMsg,warns[0]);
         showSaved('/agents', 'Open Agents');
       } catch (e) {
         setStatus('Could not save the playbook.', true);
@@ -1480,7 +1501,7 @@
       pickerTarget = input;
       pickerRestrict = restrict || null;
       pickerOpener = document.activeElement;
-      tpTitle.textContent = title || 'Browse connectors';
+      productText(tpTitle,title || 'Browse connectors');
       tpSearch.value = '';
       tpBackdrop.hidden = false;
       renderTools();
@@ -1501,6 +1522,7 @@
         function (el) { return !el.hidden && el.getAttribute('aria-hidden') !== 'true'; }
       );
     }
+    function productPill(className,source){var item=pill(className,'');productText(item,source);return item;}
     function pill(cls, text) {
       var s = document.createElement('span');
       s.className = cls;
@@ -1509,7 +1531,7 @@
     }
     function renderTools() {
       tpList.textContent = '';
-      if (!toolCatalog) { tpCount.textContent = 'Loading connectors…'; return; }
+      if (!toolCatalog) { productText(tpCount,'Loading connectors…'); return; }
       var q = tpSearch.value.trim().toLowerCase();
       var ceiling = RISK_RANK[pbRisk.value] != null ? RISK_RANK[pbRisk.value] : 2;
       var already = pickerTarget ? new Set(splitList(pickerTarget.value)) : new Set();
@@ -1520,9 +1542,8 @@
         return !q || t.name.toLowerCase().indexOf(q) >= 0
           || (t.description || '').toLowerCase().indexOf(q) >= 0;
       });
-      tpCount.textContent = matches.length + (matches.length === 1 ? ' action' : ' actions')
-        + (pickerRestrict ? ' allowed for this specialist' : ' available')
-        + (matches.length > 80 ? ' — showing first 80' : '');
+      var countSource=pickerRestrict ? (matches.length===1 ? '{count} action allowed for this specialist' : '{count} actions allowed for this specialist') : (matches.length===1 ? '{count} action available' : '{count} actions available');
+      productText(tpCount,countSource,{count:localizedNumber(matches.length)});if(matches.length>80){var more=document.createElement('span');productText(more,'Showing the first 80.');tpCount.append(' ',more);}
       matches.slice(0, 80).forEach(function (t) {
         var risk = t.risk || 'medium';
         var over = (RISK_RANK[risk] != null ? RISK_RANK[risk] : 1) > ceiling;
@@ -1534,12 +1555,12 @@
         var nameRow = document.createElement('div');
         nameRow.appendChild(pill('picker__name', t.name.replace(/_/g, ' ')));
         item.title = t.name;
-        if (already.has(t.name)) nameRow.appendChild(pill('picker__added', '✓ added'));
-        if (over) nameRow.appendChild(pill('picker__over', 'exceeds max risk'));
+        if (already.has(t.name)) nameRow.appendChild(productPill('picker__added', '✓ added'));
+        if (over) nameRow.appendChild(productPill('picker__over', 'exceeds max risk'));
         main.appendChild(nameRow);
         if (t.description) main.appendChild(pill('picker__desc', t.description));
         item.appendChild(main);
-        item.appendChild(pill('badge risk-' + risk + ' picker__meta', risk));
+        item.appendChild(productPill('badge risk-' + risk + ' picker__meta', {low:'Low',medium:'Medium',high:'High'}[risk] || risk));
         item.addEventListener('click', function () { insertTool(t.name); });
         tpList.appendChild(item);
       });
@@ -1593,8 +1614,7 @@
         var draftStillVisible = mode === draftMode;
         if (draftMode === 'playbook') {
           renderPlaybook(data, draftStillVisible);
-          completedStatus = 'Draft ready — review the persona, tools, and gated steps, then save.'
-            + playbookNoteSuffix(data);
+          completedStatus = 'Draft ready — review the persona, tools, and gated steps, then save.';
         } else {
           // Only a successful fresh draft becomes a new-template workspace.
           // Empty briefs, provider errors, and network failures leave the edit
@@ -1610,10 +1630,9 @@
         // flags, without another provider request.
         if (mode !== draftMode) {
           setForm(mode);
-          setStatus((draftMode === 'playbook' ? 'Agent' : 'Workflow') +
-            ' draft ready. Switch back to review it.');
+          setStatus(draftMode === 'playbook' ? 'Agent draft ready. Switch back to review it.' : 'Workflow draft ready. Switch back to review it.');
         } else {
-          setStatus(completedStatus);
+          setStatus(completedStatus);if(draftMode==='playbook')appendSource(status,playbookNoteSuffix(data));
         }
       } catch (e) {
         setStatus('Could not reach the drafting service.', true);
@@ -1647,8 +1666,7 @@
         if (!resp.ok) { setStatus(plainErr(resp, 'refine it'), true); return; }
         if (isPb) renderPlaybook(data); else { data.parameter_schema = data.parameter_schema || current.parameter_schema; renderDraft(data); }
         instrEl.value = '';
-        setStatus('Refined — review the update, refine again, or save.'
-          + (isPb ? playbookNoteSuffix(data) : ''));
+        setStatus('Refined — review the update, refine again, or save.');if(isPb)appendSource(status,playbookNoteSuffix(data));
       } catch (e) {
         setStatus('Could not reach the refining service.', true);
       } finally {
@@ -1711,19 +1729,19 @@
       pbEditPreserve = PB_EDIT.preserve || null;
       pbEditingName = PB_EDIT.name; pbEditGeneration = PB_EDIT.generation;
       renderPlaybook(PB_EDIT);
-      setStatus('Editing agent “' + PB_EDIT.name + '” — change the persona, tools, or steps, then Save to overwrite.');
+      setStatus('Editing agent {name}. Change the persona, tools or steps, then save to overwrite.',false,{name:PB_EDIT.name});
     } else if (PB_EDIT_DENIED) {
       // The server deliberately withheld the existing pack from page data.
-      setStatus('Editing agent “' + PB_EDIT_DENIED + '” requires a dashboard admin. You can still draft a new unsaved first pass.', true);
+      setStatus('Editing agent {name} requires a dashboard administrator. You can still draft an unsaved first pass.',true,{name:PB_EDIT_DENIED});
     } else if (WF_EDIT && WF_EDIT.name) {
       setForm('template');
       wfEditingName = WF_EDIT.name;   // Save overwrites this template
       wfEditGeneration = WF_EDIT.generation;
       renderDraft(WF_EDIT);
-      setStatus('Editing “' + (WF_EDIT.title || WF_EDIT.name) + '” — change it and Save to overwrite (or rename to save a copy).');
+      setStatus('Editing {name}. Save to overwrite, or rename to save a copy.',false,{name:WF_EDIT.title || WF_EDIT.name});
     } else if (WF_PREFILL && WF_PREFILL.name) {
       setForm('template');
-      savedMsg.textContent = 'Automate “' + (WF_PREFILL.title || WF_PREFILL.name) + '” — schedule it, or trigger it from a webhook.';
+      productText(savedMsg,'Automate {name}: schedule it or start it from another app.',{name:WF_PREFILL.title || WF_PREFILL.name});
       showSaved('/templates', 'Open Templates');
       showScheduling({ name: WF_PREFILL.name, params: WF_PREFILL.params || [] });
       showTriggers({ name: WF_PREFILL.name, params: WF_PREFILL.params || [] });
@@ -1735,10 +1753,10 @@
   })();
   </script>
   <section class="panel" id="workflow-versions" hidden aria-labelledby="workflow-versions-title">
-    <h2 id="workflow-versions-title">Draft versions and publication</h2>
-    <p>Review the saved draft here. Save edits above before checking a sample. Samples validate inputs and show rendered instructions; they never call an AI model, tool, or external service.</p>
+    <h2 id="workflow-versions-title">{{ ui("Draft versions and publication") }}</h2>
+    <p>{{ ui("Review the saved draft here. Save edits above before checking a sample. Samples validate inputs and show rendered instructions; they never call an AI model, tool, or external service.") }}</p>
     <p id="workflow-versions-status" role="status" aria-live="polite"></p>
-    <button class="btn" type="button" id="workflow-versions-refresh">Refresh version review</button>
+    <button class="btn" type="button" id="workflow-versions-refresh">{{ ui("Refresh version review") }}</button>
     <div id="workflow-versions-content"></div>
   </section>
   <script src="/static/lightwork-workflow-versions.js"></script>
