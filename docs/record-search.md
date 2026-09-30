@@ -44,3 +44,57 @@ Automated checks use isolated local stores and synthetic records. Node DOM
 tests cover keyboard behavior, asynchronous interruption, stale paging, and
 workspace binding; they do not substitute for browser rendering or customer
 acceptance.
+
+## Historical metadata (audit LW-114)
+
+Choose **Historical metadata** in the finder, then a source and optional UTC
+calendar dates. Blank queries browse the chosen source; named queries match
+metadata only. **Oldest first** reaches older work directly. Continue with
+**Search next history window**, including when a window has no matches.
+Counts describe returned matches, never an exhaustive source census. A final
+window means the selected source/date sequence is exhausted only if none of its
+preceding windows was skipped. Changed filters or permissions require a fresh
+sequence. Source workspaces remain available from coverage recovery links.
+
+History covers tasks, projects, workflows/templates, durable automations,
+exact-owner connections, shared fact names, questionnaires, document-vault
+heads, executive reports, vendors/onboarding evidence and current project
+reviews. Auth-off uses the unowned scope, never every employee. Template
+visibility uses exact ownership or the canonical verified publication policy.
+Questionnaire departments and report role views are applied before matching
+and counts. Internal file scan positions stay inside tenant/context-bound
+sealed cursors; an empty window is never an inaccessible-record count. Fact values and private user/task namespaces never enter discovery.
+Source dates are labelled: most are creation dates; workflows/questionnaires
+use last saved time, automations/facts last changed time. Unknown-date records
+are omitted only when a date filter is selected.
+
+Tasks, projects and facts use tenant/owner-filtered native SQL windows.
+Migration 45 adds owner/date indexes for both SQLite and PostgreSQL, plus a
+shared-fact date index. Vault and report adapters keep native integrity/role
+checks; questionnaire windows authorize each head by current type before projection. Each
+native window returns at most 250 records, each response at most 50 matches.
+Snapshot proofs stream only metadata, with a 50,000-head and cooperative
+three-second scan budget checked between batches/records. A larger source asks
+for narrower dates and reports partial coverage; it is never reported empty
+and complete. Other governed catalogs retain their native bounded inventory
+limits. No asynchronous index, provider request, model call or full-text copy
+is created. Existing feature configuration, Settings and installer controls
+for record discovery govern both metadata modes.
+
+Copilot's **Find historical record metadata** uses this same service and
+returns the continuation cursor internally. Ask for the next window or narrow
+the dates. Its native-screen link opens the finder in history mode. Returned
+cursors are sealed and bind exact filters/current context and are positions, never grants;
+opening a result performs its ordinary current authorization again.
+
+Migration 45 is additive and preserves encrypted values. Rollback means stop
+using historical discovery and roll forward to a compatible build, or use the
+ordinary reviewed pre-upgrade backup restore. Do not lower the schema version
+or rewrite released migrations; older binaries reject newer schemas.
+
+Local validation includes 10,050 tasks (250-row first window measured at
+0.172 seconds), 1,005 questionnaires, 501 vault heads and 501 executive reports,
+exact-owner and department/role exclusion, private-body exclusion, date
+narrowing, scan limits, stale cursors and native index query-plan checks.
+PostgreSQL service execution and installed browser performance remain separate
+qualification work; these figures describe synthetic local SQLite fixtures.

@@ -149,7 +149,7 @@
       context = data.context; currentByName = {}; list.replaceChildren();
       data.connections.forEach(function (record) {
         currentByName[record.name] = record;
-        var li = el('li','cx__row'); li.appendChild(el('span','name',record.name));
+        var li = el('li','cx__row'); li.id='connection-'+record.name; li.appendChild(el('span','name',record.name));
         li.appendChild(el('div','meta',(catalog[record.connector] ? catalog[record.connector].label : record.connector) + ' · ' + (record.access === 'tenant' ? 'Everyone in this workspace' : 'Owner and selected people') + ' · ' + readiness(record)));
         li.appendChild(el('span','badge',record.has_token ? 'Credential saved' : 'No credential saved'));
         var change = el('button','btn btn--ghost','Change'); change.type='button'; change.addEventListener('click',function () { if (inventoryReady && !busy) editRecord(record); });
@@ -157,7 +157,7 @@
         test.addEventListener('click',function () { if (discoveryPreset(record.connector)) { location.href='/privacy/data-discovery'; return; } mutate('test', record); });
         var remove=el('button','btn btn--danger','Remove'); remove.type='button'; remove.addEventListener('click',function () { mutate('remove',record); });
         var impactButton=el('button','btn btn--ghost','Used by and repair'); impactButton.type='button'; impactButton.dataset.connectionImpact=record.name; impactButton.dataset.connectionRevision=record.revision;
-        li.append(change,test,remove,impactButton); list.appendChild(li);
+        li.append(change,test,remove,impactButton); list.appendChild(li); if(location.hash==='#'+encodeURIComponent(li.id)){li.tabIndex=-1;li.focus();}
       });
       inventoryReady = true;
       inventoryStatus.textContent = 'Connections checked at ' + new Date().toLocaleTimeString() + '.';

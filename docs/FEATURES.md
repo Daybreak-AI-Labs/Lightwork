@@ -5785,3 +5785,9 @@ explicitly reviewed synthetic text/image generation tests. Each uses one admitte
 request, narrow existing Budget limits, no failover/retry, and a durable account/workspace
 receipt with native Stop and recovery. Copilot's Models family uses the same service.
 Tool support remains provider-reported and untested. See [model choice tests](model-choice-tests.md).
+
+- Historical metadata discovery: finder source/date/oldest filters, bounded
+  current-authority continuation beyond recent-list caps, exact record and
+  recovery links, and the shared typed Copilot operation. See
+  [record search](record-search.md); governed by existing record-search Settings
+  and installer controls. Migration 45 adds owner/date indexes; no content index.

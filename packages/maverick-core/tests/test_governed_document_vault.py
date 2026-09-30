@@ -521,3 +521,21 @@ def test_cross_tenant_resolution_fails_closed(store):
         authority.resolve_authority(
             "tenant-b", "principal-a", record.document_ref
         )
+
+
+def test_historical_metadata_window_reaches_past_recent_five_hundred(store):
+    authority, clock = store
+    oldest = ingest(store)
+    for _ in range(500):
+        clock.advance(1)
+        ingest(store)
+    assert oldest.document_ref not in {row.document_ref for row in authority.list_documents(limit=500)}
+    page = authority.history_window(offset=500)
+    assert [row.document_ref for row in page.rows] == [oldest.document_ref]
+    assert page.next_offset is None
+    assert authority.history_window(oldest=True).rows[0].document_ref == oldest.document_ref
+    exact = authority.history_window(after=oldest.created_at, before=oldest.created_at + 1)
+    assert len(exact.rows) == 1
+    before = authority.history_window(oldest=True).snapshot
+    authority.revoke(oldest.document_ref, principal_ref="actor-a", expected_revision=oldest.authority_revision)
+    assert before != authority.history_window(oldest=True).snapshot

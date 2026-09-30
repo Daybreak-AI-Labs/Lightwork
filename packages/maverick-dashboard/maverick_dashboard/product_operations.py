@@ -146,6 +146,7 @@ def _adapter_modules():
         product_operations_plugins,
         product_operations_preferences,
         product_operations_projects,
+        product_operations_record_history,
         product_operations_stop,
         product_operations_tasks,
         product_operations_today,
@@ -166,6 +167,7 @@ def _adapter_modules():
         product_operations_projects,
         product_operations_stop,
         product_operations_identity,
+        product_operations_record_history,
     )
 
 

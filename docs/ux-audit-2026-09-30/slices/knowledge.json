@@ -33,13 +33,22 @@
   },
   {
     "id": "LW-114",
-    "status": "planned",
-    "implementation_evidence": [],
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "record_history.py shared current-authority metadata service; native SQLite/PostgreSQL owner/date task/project/fact pages, governed vault/report windows, bounded questionnaire metadata windows, sealed tenant/context/filter cursors, honest current/partial/unavailable coverage and source-recovery links.",
+      "Shared finder historical source, UTC dates, oldest/newest and20/50 page controls reach beyond former1000/500-head caps. Added workflows/templates, automations, projects, exact-owner connections and shared fact-key adapters, native detail links and typed Copilot knowledge.history with same service.",
+      "Formal additive migration45 owner/date indexes on both backends; release1–44 hashes preserved.50k metadata/250 returned-head/cooperative3s scan bounds; no persistent content index, model, connector call or private notes/results/fact values projected. Existing record-search Settings+installer gate retained.",
+      "Canonical template publication/ownership and exact flow-owner metadata filtering preserved; native source details reauthorize. docs/record-search.md includes customer controls, scope, budgets, rollback and qualification limits."
+    ],
     "validation": [
-      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+      "20 focused history Python checks passed after final bounded questionnaire/cursor repair;10,050-task fixture returned250 metadata heads in0.172–0.235s. Actual1005-questionnaire,501-vault and501-report beyond-cap fixtures pass; native SQLite owner/date index query plan verified.",
+      "Prior integration run passed12 existing record-search checks and31 migration-governance checks; no released migration altered. 43 finder/connection JS tests pass (including nine finder tests), including empty-window continuation, source recovery links, current context, stale paging and new exact native destinations.",
+      "Focused Ruff and changed JS syntax/whitespace pass. Existing integrated app.py import-order/E402 findings are reported to root for its shared cleanup.",
+      "Real VerifiedPrincipal exact-owner fixture passes without patching native auth; cursor confidentiality and cross-tenant rejection pass. No provider/native application execution or production calls."
     ],
     "remaining": [
-      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+      "Installed PostgreSQL concurrency/performance and real-browser rendering/accessibility remain qualification work; local fixtures do not certify those environments.",
+      "Current metadata only; no optional full-text ingestion enabled. Very large or slow source inventories visibly require narrower dates under scan budgets. Native governed catalog capacity and retention boundaries remain authoritative."
     ]
   },
   {

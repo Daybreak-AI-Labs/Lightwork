@@ -38,6 +38,7 @@ from .file_lock import (
     prepare_private_directory,
 )
 from .goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
+from .metadata_history import SQLITE_INDEXES as _HISTORY_INDEXES
 from .paths import bind_tenant_namespace, current_tenant_id, data_dir
 from .personal_alert_revisions import SQLITE_MIGRATION as _PERSONAL_ALERT_MIGRATION
 
@@ -51,7 +52,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 44
+SCHEMA_VERSION = 45
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -424,6 +425,7 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    45: _HISTORY_INDEXES,
     44: _PERSONAL_ALERT_MIGRATION,
     43: ["ALTER TABLE facts ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"],
     42: [_GOAL_MUTATION_SCHEMA],

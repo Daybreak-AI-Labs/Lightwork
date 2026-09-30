@@ -120,7 +120,7 @@
   function attach(){
     list.querySelectorAll('[data-schedule]').forEach(row=>{
       if(row.dataset.managementAttached)return;row.dataset.managementAttached='true';
-      const schedule=JSON.parse(row.dataset.schedule);if(!schedule.definition_id)return;
+      const schedule=JSON.parse(row.dataset.schedule);if(!schedule.definition_id)return;row.id='schedule-'+schedule.definition_id;if(location.hash==='#'+encodeURIComponent(row.id)){row.tabIndex=-1;row.focus();}
       button(row,'History',()=>history(row,schedule));
       if(schedule.state==='parked'){button(row,'Review recovery',()=>recovery(row,schedule));return;}
       if(schedule.state==='retired')return;

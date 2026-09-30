@@ -7,7 +7,7 @@ const context='a'.repeat(64),snapshot='b'.repeat(64);
 function row(id,title='Acme'){return {kind:'vendor',id,title,revision:'2',state:'approved',href:'/privacy/vendors/'+id};}
 function result(items,extra={}){return {context,snapshot,items,total:items.length,next_offset:null,complete:true,coverage:[{source:'vendors',state:'current',indexed:items.length}],...extra};}
 async function fixture(){
-  const dom=new JSDOM(`<meta name="lightwork-search-context" content="${context}"><button id="navfinder-open">Find</button><dialog id="navfinder-dialog"><button id="navfinder-close">Close</button><input id="navfinder-input"><p id="navfinder-count"></p><ul id="navfinder-results"><li><a id="page" href="/privacy" data-navfinder-target data-search="Privacy">Privacy</a></li></ul><p id="navfinder-empty" hidden></p><select id="navfinder-kind"><option value="all">All</option><option value="knowledge">Approved content</option><option value="task">Tasks</option><option value="pages">Pages</option></select><label id="navfinder-purpose-label" hidden><select id="navfinder-purpose"></select></label><button id="navfinder-search">Search records</button><p id="navfinder-record-status"></p><button id="navfinder-more" hidden>More</button><ul id="navfinder-coverage"></ul></dialog>`,{url:'https://lightwork.test/',runScripts:'outside-only'});
+  const dom=new JSDOM(`<meta name="lightwork-search-context" content="${context}"><button id="navfinder-open">Find</button><dialog id="navfinder-dialog"><button id="navfinder-close">Close</button><input id="navfinder-input"><p id="navfinder-count"></p><ul id="navfinder-results"><li><a id="page" href="/privacy" data-navfinder-target data-search="Privacy">Privacy</a></li></ul><p id="navfinder-empty" hidden></p><select id="navfinder-kind"><option value="all">All</option><option value="knowledge">Approved content</option><option value="history">History</option><option value="task">Tasks</option><option value="pages">Pages</option></select><label id="navfinder-purpose-label" hidden><select id="navfinder-purpose"></select></label><fieldset id="navfinder-history" hidden><select id="navfinder-source"><option value="tasks">Tasks</option><option value="facts">Facts</option></select><input id="navfinder-after"><input id="navfinder-before"><select id="navfinder-order"><option value="newest">Newest</option><option value="oldest">Oldest</option></select></fieldset><button id="navfinder-search">Search records</button><p id="navfinder-record-status"></p><button id="navfinder-more" hidden>More</button><ul id="navfinder-coverage"></ul></dialog>`,{url:'https://lightwork.test/',runScripts:'outside-only'});
   const w=dom.window,d=w.document,dialog=d.getElementById('navfinder-dialog'),calls=[];
   dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;dialog.dispatchEvent(new w.Event('close'));};
   let handler=async()=>({ok:true,json:async()=>result([row('v1')])});
@@ -94,4 +94,26 @@ test('approved-content mode requires current purposes and keeps metadata separat
   assert.equal(ui.calls[0].url,'/api/v1/knowledge-access/purposes');assert.equal(ui.calls[1].body.mode,'knowledge');assert.equal(ui.calls[1].body.purpose,'business');
   assert.match(ui.d.getElementById('navfinder-record-status').textContent,/approved content/);
   kind.value='all';kind.dispatchEvent(new ui.w.Event('change'));await tick();assert.equal(ui.calls[2].body.mode,'metadata');assert.equal(ui.calls[2].body.purpose,'');ui.dom.window.close();
+});
+
+
+test('history continues through empty windows and resets cursor when dates change',async()=>{
+  const ui=await fixture(),kind=ui.d.getElementById('navfinder-kind');
+  ui.handler=async()=>({ok:true,json:async()=>result([],{mode:'history',complete:false,next_cursor:'opaque-next',notice:'Continue through remaining windows.',coverage:[{source:'Tasks',state:'partial',href:'/goals'}]})});
+  kind.value='history';kind.dispatchEvent(new ui.w.Event('change'));await tick();
+  assert.equal(ui.calls[0].body.mode,'history');assert.equal(ui.calls[0].body.source,'tasks');assert.equal(ui.calls[0].body.query,'');
+  assert.equal(ui.d.getElementById('navfinder-history').hidden,false);
+  assert.equal(ui.d.getElementById('navfinder-more').hidden,false);
+  assert.equal(ui.d.querySelector('#navfinder-coverage a').getAttribute('href'),'/goals');
+  ui.d.getElementById('navfinder-more').click();await tick();assert.equal(ui.calls[1].body.cursor,'opaque-next');
+  const after=ui.d.getElementById('navfinder-after');after.value='2026-01-01';after.dispatchEvent(new ui.w.Event('change'));await tick();
+  assert.equal(ui.calls[2].body.cursor,null);assert.equal(ui.calls[2].body.after,'2026-01-01');
+  ui.dom.window.close();
+});
+
+test('new metadata families accept only their native exact record destinations',async()=>{
+  const ui=await fixture();
+  const values=[['project','/projects/4'],['workflow','/flows/designer/my-flow'],['workflow','/workflow-builder?edit=template-one'],['automation','/automations#schedule-abc'],['connection','/connections#connection-work'],['fact','/facts?key=shared%3Atag']];
+  for(const [kind,href] of values){ui.handler=async()=>({ok:true,json:async()=>result([{...row('x'),kind,href}])});await ui.search('x');assert.equal(ui.d.getElementById('navfinder-record-0').getAttribute('href'),href);}
+  ui.handler=async()=>({ok:true,json:async()=>result([{...row('x'),kind:'fact',href:'/facts?key=x&redirect=//evil.test'}])});await ui.search('x');assert.equal(ui.d.getElementById('navfinder-record-0'),null);ui.dom.window.close();
 });

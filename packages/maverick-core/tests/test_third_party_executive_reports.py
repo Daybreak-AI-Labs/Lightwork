@@ -662,3 +662,22 @@ def test_config_is_default_off_and_closed() -> None:
         reports.ThirdPartyExecutiveReportConfig.from_mapping(
             {"third_party_management": {"executive_reports": {"unknown": True}}}
         )
+
+
+def test_historical_reports_page_reaches_oldest_and_keeps_exact_role(tmp_path):
+    clock = Clock()
+    authority = store(tmp_path, clock, max_reports=600)
+    for index in range(501):
+        authority.create_report(snapshot=snapshot(), brand=brand(), report_id=f"report-{index:04d}",
+                                idempotency_key=f"history-create-{index:04d}")
+        clock.value += 1
+    assert "report-0000" not in {row.report_id for row in authority.list_reports(caller_role="operator", limit=500)}
+    page = authority.history_window(caller_role="operator", offset=500)
+    assert [row.report_id for row in page.rows] == ["report-0000"]
+    assert page.next_offset is None
+    assert authority.history_window(caller_role="operator", oldest=True).rows[0].report_id == "report-0000"
+    hidden = authority.history_window(caller_role="viewer")
+    assert hidden.rows == [] and hidden.next_offset is None
+    before = authority.history_window(caller_role="operator", oldest=True).snapshot
+    authority.revoke_report("report-0000", expected_control_revision=1, reason_code="superseded", idempotency_key="history-revoke-0000")
+    assert before != authority.history_window(caller_role="operator", oldest=True).snapshot

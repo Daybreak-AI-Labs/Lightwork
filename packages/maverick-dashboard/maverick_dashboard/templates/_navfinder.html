@@ -28,8 +28,15 @@
     {% if record_search_context %}
     <div class="navfinder-record-controls">
       <label for="navfinder-kind">Include records</label>
-      <select id="navfinder-kind" class="ctl"><option value="all">Business record metadata</option><option value="knowledge">Approved knowledge content</option><option value="vendor">Vendors</option><option value="evidence">Evidence</option><option value="assessment">Assessments</option><option value="decision">Decisions</option><option value="task">Tasks</option><option value="report">Reports</option><option value="pages">Pages only</option></select>
+      <select id="navfinder-kind" class="ctl"><option value="all">Business record metadata</option><option value="knowledge">Approved knowledge content</option><option value="history">Historical metadata</option><option value="vendor">Vendors</option><option value="evidence">Evidence</option><option value="assessment">Assessments</option><option value="decision">Decisions</option><option value="task">Tasks</option><option value="report">Reports</option><option value="pages">Pages only</option></select>
       <label id="navfinder-purpose-label" for="navfinder-purpose" hidden>Permitted use<select id="navfinder-purpose" class="ctl"></select></label>
+      <fieldset id="navfinder-history" hidden><legend>Historical metadata</legend>
+        <label>Source<select id="navfinder-source" class="ctl"><option value="tasks">Tasks</option><option value="projects">Projects</option><option value="workflows">Workflows</option><option value="automations">Automations</option><option value="connections">Connections</option><option value="facts">Shared facts</option><option value="questionnaires">Questionnaires</option><option value="vault">Document vault</option><option value="reports">Executive reports</option><option value="vendors">Vendor register</option><option value="onboarding">Vendor onboarding</option><option value="reviews">Project reviews</option></select></label>
+        <label>On or after (UTC)<input id="navfinder-after" class="ctl" type="date"></label>
+        <label>On or before (UTC)<input id="navfinder-before" class="ctl" type="date"></label>
+        <label>Order<select id="navfinder-order" class="ctl"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+        <label>Matches per page<select id="navfinder-page-size" class="ctl"><option value="20">20</option><option value="50">50</option></select></label>
+      </fieldset>
       <button type="button" id="navfinder-search" class="btn">Search records</button>
     </div>
     <p id="navfinder-record-status" class="navfinder__count" role="status" aria-live="polite">Metadata search by name or reference. Document contents and private notes are excluded.</p>
@@ -54,6 +61,6 @@
     <p class="navfinder__empty" id="navfinder-empty" hidden>No matching pages. Try a broader search.</p>
     {% if record_search_context %}
     <button type="button" id="navfinder-more" class="btn" hidden>More records</button>
-    <details class="navfinder-record-coverage"><summary>Search coverage</summary><p>Search reads current saved records. A partial source may omit older records; open that workspace to find records outside this bounded index.</p><ul id="navfinder-coverage"></ul></details>
+    <details class="navfinder-record-coverage"><summary>Search coverage</summary><p>Search reads current saved records. For older records, choose Historical metadata, a source and optional dates. Continue through bounded windows, including empty windows. Open a source workspace to resolve unavailable access.</p><ul id="navfinder-coverage"></ul></details>
     {% endif %}
   </dialog>

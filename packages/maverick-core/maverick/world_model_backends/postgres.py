@@ -42,6 +42,7 @@ from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_S
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
 from ..goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
 from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
+from ..metadata_history import POSTGRES_INDEXES as _HISTORY_INDEXES
 from ..personal_alert_revisions import POSTGRES_MIGRATION as _PERSONAL_ALERT_MIGRATION
 
 log = logging.getLogger(__name__)
@@ -715,6 +716,7 @@ MIGRATIONS.append((43, ["ALTER TABLE facts ADD COLUMN IF NOT EXISTS tags_json TE
 
 # Highest migration version = the reported schema version.
 MIGRATIONS.append((44, _PERSONAL_ALERT_MIGRATION))
+MIGRATIONS.append((45, _HISTORY_INDEXES))
 
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -5444,9 +5446,7 @@ class PostgresWorldModel:
     def schema_version(self) -> int:
         """Schema version, for parity with SQLite WorldModel.schema_version
         (read as a property by health.py + audit events). Derived from the
-        MIGRATIONS ladder (``MIGRATIONS.append((44, _PERSONAL_ALERT_MIGRATION))
-
-_PG_SCHEMA_VERSION = MIGRATIONS[-1][0]``)."""
+        MIGRATIONS ladder (``_PG_SCHEMA_VERSION = MIGRATIONS[-1][0]``)."""
         return _PG_SCHEMA_VERSION
 
     # ----- close -----

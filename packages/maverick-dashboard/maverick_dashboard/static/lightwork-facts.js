@@ -171,4 +171,10 @@
       finally { setBusy(false); }
     });
   }
+  var linkedKey = new URLSearchParams(window.location.search).get('key');
+  if (linkedKey && linkedKey.length <= 200) {
+    setBusy(true);
+    current(linkedKey).then(function(payload){showRecord(payload);document.getElementById('fact-inspector-title').focus();})
+      .catch(function(error){status.textContent=error.message;}).finally(function(){setBusy(false);});
+  }
 })();

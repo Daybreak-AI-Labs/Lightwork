@@ -25,6 +25,8 @@
     Choose what you'll use the information for, then search.
   </p>
 
+  {% if record_search_context %}<p><a href="/goals?find_history=tasks">Find older tasks and business records</a> by source, name or UTC date. This searches metadata without sending record content to AI.</p>{% endif %}
+
   <details class="panel">
     <summary>About this page's safeguards</summary>
     <p class="muted">Each result is checked against the exact version of its source, its approval, current rights, how fresh it is, consent and where it came from. If any of those change, the result is hidden from searches, downloads and queued work. <a href="/research">Add or review sources</a></p>

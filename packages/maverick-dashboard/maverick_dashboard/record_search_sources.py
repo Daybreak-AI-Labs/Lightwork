@@ -129,6 +129,17 @@ def _project_reviews(request):
                    for row in rows[:SOURCE_LIMIT]], len(rows) <= SOURCE_LIMIT)
 
 
+def _additional(request, source):
+    from maverick.metadata_history import HistoryNarrowing
+
+    from .record_history import load_window
+    try:
+        value = load_window(request, source, offset=0, after=None, before=None, oldest=False)
+    except HistoryNarrowing:
+        return Source([], False)
+    return Source(value.rows, value.next_offset is None)
+
+
 def sources_for(request, kind):
     sources = {
         "tasks": ({"task", "report"}, _tasks),
@@ -138,6 +149,9 @@ def sources_for(request, kind):
         "document vault": ({"evidence"}, _vault),
         "executive reports": ({"report"}, _reports),
         "project reviews": ({"decision"}, _project_reviews),
+        **{source: ({kind}, lambda request, source=source: _additional(request, source))
+           for source, kind in (("projects", "project"), ("workflows", "workflow"),
+                                ("automations", "automation"), ("connections", "connection"), ("facts", "fact"))},
     }
     return {name: (lambda load=load: load(request)) for name, (kinds, load) in sources.items()
             if kind == "all" or kind in kinds}

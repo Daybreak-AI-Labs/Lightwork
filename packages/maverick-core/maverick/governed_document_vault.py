@@ -1180,6 +1180,25 @@ class GovernedDocumentVault:
                 self._validate_document_row(row)
             return [self._record(row) for row in rows]
 
+    def history_window(self, *, offset=0, after=None, before=None, oldest=False):
+        """Metadata heads beyond the ordinary listing cap, never delivery grants."""
+        from .metadata_history import sql_window
+        where, params = ["1=1"], []
+        for value, operator in ((after, ">="), (before, "<")):
+            if value is not None:
+                where.append("created_at" + operator + "?")
+                params.append(value)
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN")
+            self._verify_meta(connection)
+            result = sql_window(connection.execute, table="governed_documents", columns="*",
+                                stamp="document_ref,row_sha256", where=" AND ".join(where), params=tuple(params),
+                                order="created_at " + ("ASC" if oldest else "DESC") + ",document_ref", offset=offset)
+            for row in result.rows:
+                self._validate_document_row(row)
+            result.rows = [self._record(row) for row in result.rows]
+            return result
+
     def context_record_count(self) -> int:
         """Return the exact current-head count without scanning document bodies."""
 

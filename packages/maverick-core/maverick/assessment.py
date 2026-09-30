@@ -5311,6 +5311,48 @@ def list_saved_heads(
     return tuple(records), len(identifiers)
 
 
+def history_heads(*, offset=0, after=None, before=None, oldest=False, allowed_types=None):
+    """Bounded current metadata, authorized by type before matching/counts.
+
+    Native file windows can be empty after authorization. Their private scan
+    positions must remain in sealed cursors; they are never accessible counts.
+    No answers/notes leave the adapter and no audit outbox is drained.
+    """
+    import time
+
+    from .metadata_history import WINDOW, HistoryChanged, Window, check_scan, digest
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        raise ValueError("Invalid history position")
+    directory = _assessments_dir()
+    started = time.monotonic()
+
+    def heads():
+        result = []
+        for count, path in enumerate(directory.glob("*.json"), 1):
+            check_scan(count, started)
+            if not _ASSESSMENT_ID_RE.fullmatch(path.stem):
+                continue
+            stat = path.stat()
+            if (after is not None and stat.st_mtime < after) or (before is not None and stat.st_mtime >= before):
+                continue
+            result.append((path.stem, stat.st_mtime_ns, stat.st_size))
+        return sorted(result, key=lambda row: (row[1] if oldest else -row[1], row[0]))
+
+    selected = heads()
+    snapshot = digest(selected)
+    rows = []
+    for identifier, modified, _ in selected[offset:offset + WINDOW]:
+        check_scan(len(selected), started)
+        raw = _load_saved_raw(identifier)
+        if raw is not None and (allowed_types is None or raw.get("type") in allowed_types):
+            rows.append({**{key: raw.get(key) for key in ("id", "type", "subject", "status", "revision")},
+                         "date": modified / 1_000_000_000})
+    if snapshot != digest(heads()):
+        raise HistoryChanged("Questionnaires changed during search. Start a fresh search.")
+    return Window(rows, snapshot, offset + WINDOW if offset + WINDOW < len(selected) else None)
+
+
+
 def assessment_score_profile(record: dict) -> dict:
     """Return a deterministic question-level score explanation.
 

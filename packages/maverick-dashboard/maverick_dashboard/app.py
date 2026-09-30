@@ -11637,9 +11637,7 @@ def workflows_index_page(request: Request) -> HTMLResponse:
         if flows_enabled:
             from maverick.flow import store as _flow_store
 
-            flows = [row for row in _flow_store.list_flow_summaries()
-                     if (flow := _flow_store.load_flow(row["id"])) is not None
-                     and flow.owner == (caller_principal(request) or "")]
+            flows = _flow_store.list_flow_summaries(owner=caller_principal(request) or "")
     except Exception:  # pragma: no cover -- never block the page on the flow engine
         flows = []
     return templates.TemplateResponse(

@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import quote
 
-KINDS = ("vendor", "evidence", "assessment", "decision", "task", "report")
+KINDS = ("vendor", "evidence", "assessment", "decision", "task", "report", "workflow", "automation", "project", "connection", "fact")
 SOURCE_LIMIT = 1000
 
 

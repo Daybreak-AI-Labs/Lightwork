@@ -303,22 +303,33 @@ def list_flows() -> list[Flow]:
     return out
 
 
-def list_flow_summaries() -> list[dict]:
+def list_flow_summaries(*, owner: str | None = None, after=None, before=None, bounded=False) -> list[dict]:
     """Cheap listing for index pages -- id/name/node count/single-agent flag
     plucked from the raw JSON, WITHOUT building the full recursive Flow IR per
     file (list_flows constructs every nested body just to be counted)."""
+    import time
+
+    from ..metadata_history import check_scan
+    started = time.monotonic()
     d = _flows_dir()
     if not d.exists():
         return []
     out = []
-    for p in sorted(d.glob("*.json")):
+    for count, p in enumerate(sorted(d.glob("*.json")), 1):
+        if bounded:
+            check_scan(count, started)
+        modified = p.stat().st_mtime
+        if (after is not None and modified < after) or (before is not None and modified >= before):
+            continue
         raw = _read_json(p) or {}
-        if not raw.get("id"):
+        if not raw.get("id") or (owner is not None and (raw.get("owner") or "") != owner):
             continue
         nodes = [n for n in (raw.get("nodes") or []) if isinstance(n, dict)]
         out.append({
             "id": str(raw["id"]), "name": str(raw.get("name") or ""),
-            "nodes": len(nodes),
+            "nodes": len(nodes), "owner": str(raw.get("owner") or ""),
+            "version": raw.get("version", 0), "revision": raw.get("revision", ""),
+            "updated_at": modified,
             "single_agent": (len(nodes) == 1 and nodes[0].get("kind") == "agent"
                              and not nodes[0].get("next")),
         })
