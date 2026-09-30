@@ -163,7 +163,12 @@ def _client(monkeypatch, tmp_path) -> TestClient:
 
 
 def test_rendered_finder_indexes_folded_pages_and_sidebar_does_not(monkeypatch, tmp_path):
-    from maverick_dashboard import ui_visibility
+    from maverick_dashboard import employee_companion_api, ui_visibility
+
+    # Companion destinations also require an available configured assignment.
+    # Model that gate explicitly; every other authorized registry link stays exact.
+    monkeypatch.setattr(employee_companion_api, "navigation_available", lambda request, *, admin: False)
+    unavailable = {"/companion", "/companion/admin"}
 
     response = _client(monkeypatch, tmp_path).get("/overview")
     assert response.status_code == 200
@@ -179,5 +184,6 @@ def test_rendered_finder_indexes_folded_pages_and_sidebar_does_not(monkeypatch, 
     assert set(NEWLY_GOVERNED).isdisjoint(markup.sidebar_hrefs)
     # The sidebar stays the curated rail; the finder is the governed whole.
     assert set(markup.sidebar_hrefs) < set(markup.finder_hrefs)
-    assert markup.finder_hrefs == _hrefs(ui_visibility.finder_pages(None))
-    assert markup.sidebar_hrefs == _hrefs(ui_visibility.nav_groups(None))
+    assert unavailable.isdisjoint(markup.finder_hrefs)
+    assert markup.finder_hrefs == [href for href in _hrefs(ui_visibility.finder_pages(None)) if href not in unavailable]
+    assert markup.sidebar_hrefs == [href for href in _hrefs(ui_visibility.nav_groups(None)) if href not in unavailable]

@@ -9,10 +9,10 @@
           aria-labelledby="navfinder-title" aria-describedby="navfinder-help">
     <div class="navfinder__head">
       <div>
-        <h2 id="navfinder-title">Find a page{% if record_search_context %} or record{% endif %}</h2>
-        <p class="sr-only" id="navfinder-help">Type to filter pages. Use the up and down arrow keys to choose a result, Enter to open it, and Escape to close.</p>
+        <h2 id="navfinder-title">{{ ui("Find a page or record" if record_search_context else "Find a page") }}</h2>
+        <p class="sr-only" id="navfinder-help">{{ ui('Type to filter pages. Use the up and down arrow keys to choose a result, Enter to open it, and Escape to close.') }}</p>
       </div>
-      <button type="button" class="iconbtn navfinder__close" id="navfinder-close" aria-label="Close page finder">
+      <button type="button" class="iconbtn navfinder__close" id="navfinder-close" aria-label="{{ ut("Close page finder") }}" lang="{{ ul("Close page finder") }}">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 3.5 9 9m0-9-9 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
     </div>
@@ -20,29 +20,29 @@
       <svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.25" stroke="currentColor" stroke-width="1.4"/><path d="m10.25 10.25 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
       <input type="search" id="navfinder-input" autocomplete="off" spellcheck="false"
              role="combobox" aria-autocomplete="list" aria-controls="navfinder-results"
-             aria-expanded="false" aria-label="Filter navigation pages"
-             placeholder="Find a task, page, or setting…" />
+             aria-expanded="false" aria-label="{{ ut("Filter navigation pages") }}"
+             placeholder="{{ ut("Find a task, page, or setting…") }}" lang="{{ ul("Find a task, page, or setting…") }}" />
       <kbd aria-hidden="true">Esc</kbd>
     </div>
     <p class="navfinder__count" id="navfinder-count" role="status" aria-live="polite" aria-atomic="true"></p>
     {% if record_search_context %}
     <div class="navfinder-record-controls">
-      <label for="navfinder-kind">Include records</label>
-      <select id="navfinder-kind" class="ctl"><option value="all">Business record metadata</option><option value="knowledge">Approved knowledge content</option><option value="history">Historical metadata</option><option value="vendor">Vendors</option><option value="evidence">Evidence</option><option value="assessment">Assessments</option><option value="decision">Decisions</option><option value="task">Tasks</option><option value="report">Reports</option><option value="pages">Pages only</option></select>
-      <label id="navfinder-purpose-label" for="navfinder-purpose" hidden>Permitted use<select id="navfinder-purpose" class="ctl"></select></label>
-      <fieldset id="navfinder-history" hidden><legend>Historical metadata</legend>
-        <label>Source<select id="navfinder-source" class="ctl"><option value="tasks">Tasks</option><option value="projects">Projects</option><option value="workflows">Workflows</option><option value="automations">Automations</option><option value="connections">Connections</option><option value="facts">Shared facts</option><option value="questionnaires">Questionnaires</option><option value="vault">Document vault</option><option value="reports">Executive reports</option><option value="vendors">Vendor register</option><option value="onboarding">Vendor onboarding</option><option value="reviews">Project reviews</option></select></label>
-        <label>On or after (UTC)<input id="navfinder-after" class="ctl" type="date"></label>
-        <label>On or before (UTC)<input id="navfinder-before" class="ctl" type="date"></label>
-        <label>Order<select id="navfinder-order" class="ctl"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
-        <label>Matches per page<select id="navfinder-page-size" class="ctl"><option value="20">20</option><option value="50">50</option></select></label>
+      <label for="navfinder-kind">{{ ui('Include records') }}</label>
+      <select id="navfinder-kind" class="ctl"><option value="all" lang="{{ ul('Business record metadata') }}">{{ ut('Business record metadata') }}</option><option value="knowledge" lang="{{ ul('Approved knowledge content') }}">{{ ut('Approved knowledge content') }}</option><option value="history" lang="{{ ul('Historical metadata') }}">{{ ut('Historical metadata') }}</option><option value="vendor" lang="{{ ul('Vendors') }}">{{ ut('Vendors') }}</option><option value="evidence" lang="{{ ul('Evidence') }}">{{ ut('Evidence') }}</option><option value="assessment" lang="{{ ul('Assessments') }}">{{ ut('Assessments') }}</option><option value="decision" lang="{{ ul('Decisions') }}">{{ ut('Decisions') }}</option><option value="task" lang="{{ ul('Tasks') }}">{{ ut('Tasks') }}</option><option value="report" lang="{{ ul('Reports') }}">{{ ut('Reports') }}</option><option value="pages" lang="{{ ul('Pages only') }}">{{ ut('Pages only') }}</option></select>
+      <label id="navfinder-purpose-label" for="navfinder-purpose" hidden>{{ ui('Permitted use') }}<select id="navfinder-purpose" class="ctl"></select></label>
+      <fieldset id="navfinder-history" hidden><legend>{{ ui('Historical metadata') }}</legend>
+        <label>{{ ui('Source') }}<select id="navfinder-source" class="ctl"><option value="tasks" lang="{{ ul('Tasks') }}">{{ ut('Tasks') }}</option><option value="projects" lang="{{ ul('Projects') }}">{{ ut('Projects') }}</option><option value="workflows" lang="{{ ul('Workflows') }}">{{ ut('Workflows') }}</option><option value="automations" lang="{{ ul('Automations') }}">{{ ut('Automations') }}</option><option value="connections" lang="{{ ul('Connections') }}">{{ ut('Connections') }}</option><option value="facts" lang="{{ ul('Shared facts') }}">{{ ut('Shared facts') }}</option><option value="questionnaires" lang="{{ ul('Questionnaires') }}">{{ ut('Questionnaires') }}</option><option value="vault" lang="{{ ul('Document vault') }}">{{ ut('Document vault') }}</option><option value="reports" lang="{{ ul('Executive reports') }}">{{ ut('Executive reports') }}</option><option value="vendors" lang="{{ ul('Vendor register') }}">{{ ut('Vendor register') }}</option><option value="onboarding" lang="{{ ul('Vendor onboarding') }}">{{ ut('Vendor onboarding') }}</option><option value="reviews" lang="{{ ul('Project reviews') }}">{{ ut('Project reviews') }}</option></select></label>
+        <label>{{ ui('On or after (UTC)') }}<input id="navfinder-after" class="ctl" type="date"></label>
+        <label>{{ ui('On or before (UTC)') }}<input id="navfinder-before" class="ctl" type="date"></label>
+        <label>{{ ui('Order') }}<select id="navfinder-order" class="ctl"><option value="newest" lang="{{ ul('Newest first') }}">{{ ut('Newest first') }}</option><option value="oldest" lang="{{ ul('Oldest first') }}">{{ ut('Oldest first') }}</option></select></label>
+        <label>{{ ui('Matches per page') }}<select id="navfinder-page-size" class="ctl"><option value="20">20</option><option value="50">50</option></select></label>
       </fieldset>
-      <button type="button" id="navfinder-search" class="btn">Search records</button>
+      <button type="button" id="navfinder-search" class="btn">{{ ui('Search records') }}</button>
     </div>
-    <p id="navfinder-record-status" class="navfinder__count" role="status" aria-live="polite">Metadata search by name or reference. Document contents and private notes are excluded.</p>
-    <p class="navfinder__count"><a href="/knowledge-access">Search approved knowledge content</a> — choose a permitted purpose and review exact source versions. Content access and training permission remain separate.</p>
+    <p id="navfinder-record-status" class="navfinder__count" role="status" aria-live="polite">{{ ui('Metadata search by name or reference. Document contents and private notes are excluded.') }}</p>
+    <p class="navfinder__count"><a href="/knowledge-access">{{ ui('Search approved knowledge content') }}</a> {{ ui("Choose a permitted purpose and review exact source versions. Content access and training permission remain separate.") }}</p>
     {% endif %}
-    <ul class="navfinder__results" id="navfinder-results" role="listbox" aria-label="Navigation pages">
+    <ul class="navfinder__results" id="navfinder-results" role="listbox" aria-label="{{ ut("Navigation pages") }}" lang="{{ ul("Navigation pages") }}">
       {% for _group in finder_pages %}
         {% set _navfinder_group_index = loop.index0 %}
         {% for _link in _group.links %}
@@ -50,17 +50,17 @@
             <a id="navfinder-option-{{ _navfinder_group_index }}-{{ loop.index0 }}"
                href="{{ _link.href }}" role="option" tabindex="-1"
                aria-selected="false" data-navfinder-target
-               data-search="{{ _link.label }} {{ _group_labels.get(_group.label, _group.label) }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }}">
-              <span class="navfinder__label">{{ _link.label }}</span>
-              <span class="navfinder__group">{{ _group_labels.get(_group.label, _group.label) }}</span>
+               data-search="{{ ut(_link.label) }} {{ ut(_group_labels.get(_group.label, _group.label)) }} {{ _link.label }} {{ _group_labels.get(_group.label, _group.label) }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }}">
+              <span class="navfinder__label">{{ ui(_link.label) }}</span>
+              <span class="navfinder__group">{{ ui(_group_labels.get(_group.label, _group.label)) }}</span>
             </a>
           </li>
         {% endfor %}
       {% endfor %}
     </ul>
-    <p class="navfinder__empty" id="navfinder-empty" hidden>No matching pages. Try a broader search.</p>
+    <p class="navfinder__empty" id="navfinder-empty" hidden>{{ ui('No matching pages. Try a broader search.') }}</p>
     {% if record_search_context %}
-    <button type="button" id="navfinder-more" class="btn" hidden>More records</button>
-    <details class="navfinder-record-coverage"><summary>Search coverage</summary><p>Search reads current saved records. For older records, choose Historical metadata, a source and optional dates. Continue through bounded windows, including empty windows. Open a source workspace to resolve unavailable access.</p><ul id="navfinder-coverage"></ul></details>
+    <button type="button" id="navfinder-more" class="btn" hidden>{{ ui('More records') }}</button>
+    <details class="navfinder-record-coverage"><summary>{{ ui('Search coverage') }}</summary><p>{{ ui('Search reads current saved records. For older records, choose Historical metadata, a source and optional dates. Continue through bounded windows, including empty windows. Open a source workspace to resolve unavailable access.') }}</p><ul id="navfinder-coverage"></ul></details>
     {% endif %}
   </dialog>

@@ -179,39 +179,39 @@
 {% include "_journey_i18n.html" %}
 </head>
 <body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
-{% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="Translation coverage">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
-  <a class="skip-link" href="#content">Skip to content</a>
-  <aside class="cs-side" id="cs-side" aria-label="Chats">
+{% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut("Translation coverage") }}" lang="{{ ul("Translation coverage") }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
+  <a class="skip-link" href="#content">{{ ui("Skip to content") }}</a>
+  <aside class="cs-side" id="cs-side" aria-label="{{ ut("Chats") }}" lang="{{ ul("Chats") }}">
     <div style="display:flex; align-items:center;">
-      <a class="cs-brand" href="/overview" title="Open the Lightwork dashboard">
+      <a class="cs-brand" href="/overview" title="{{ ut("Open the Lightwork dashboard") }}" lang="{{ ul("Open the Lightwork dashboard") }}">
         <img src="{{ asset('daybreak-mark.png') }}" alt="" width="32" height="22" />
         <span>Lightwork</span>
       </a>
-      <button type="button" class="btn btn--ghost cs-side__close" id="cs-menu-close">Close menu</button>
+      <button type="button" class="btn btn--ghost cs-side__close" id="cs-menu-close">{{ ui("Close menu") }}</button>
     </div>
     <a class="cs-item" href="/chat">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.5 2.5l2 2L6 12H4v-2z"/><path d="M2.5 13.5h11"/></svg>
-      New chat
+      {{ ui("New chat") }}
     </a>
     <label class="cs-search">
       <svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></svg>
-      <input type="search" id="cs-filter" placeholder="Filter recent chats" aria-label="Filter recent chat titles" aria-describedby="cs-filter-scope" autocomplete="off" />
+      <input type="search" id="cs-filter" placeholder="{{ ut("Filter recent chats") }}" aria-label="{{ ut("Filter recent chat titles") }}" lang="{{ ul("Filter recent chat titles") }}" aria-describedby="cs-filter-scope" autocomplete="off" />
     </label>
-    <p id="cs-filter-scope" class="muted">Filters the 25 recent chat titles below. <a href="/goals">Find older chats and task contents</a>.</p>
+    <p id="cs-filter-scope" class="muted">{{ ui("Filters the 25 recent chat titles below.") }} <a href="/goals">{{ ui("Find older chats and task contents") }}</a>.</p>
     <p id="cs-filter-status" role="status" aria-live="polite" class="muted"></p>
     <a class="cs-item" href="/overview">
       <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="2.6" y="8.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="8.6" width="4.8" height="4.8" rx="1.2"/></svg>
-      Dashboard
+      {{ ui("Dashboard") }}
     </a>
     <button type="button" class="cs-item cs-item--button" id="navfinder-open"
             aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg>
-      Find a page
+      {{ ui("Find a page") }}
       <kbd aria-hidden="true" id="cs-find-kbd">Ctrl K</kbd>
     </button>
     <div class="cs-recents">
-      <div class="cs-label">Recents</div>
-      {% from "_chat_threads.html" import chat_threads %}
+      <div class="cs-label">{{ ui("Recents") }}</div>
+      {% from "_chat_threads.html" import chat_threads with context %}
       {{ chat_threads(threads or []) }}
     </div>
     {% with copilot_chat_shell=true %}{% include "_copilot.html" %}{% endwith %}
@@ -220,16 +220,16 @@
       <a href="/settings">{{ ui("Settings") }}</a>
       {% include "_display_preferences.html" %}
       <span class="cs-spacer"></span>
-      {% if show_logout %}<a href="/auth/logout">Sign out</a>{% endif %}
+      {% if show_logout %}<a href="/auth/logout">{{ ui("Sign out") }}</a>{% endif %}
     </div>
   </aside>
   <div class="cs-backdrop" id="cs-backdrop" aria-hidden="true"></div>
   {% include "_navfinder.html" %}
   <main id="content" tabindex="-1">
     <div class="cs-topbar">
-      <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">Menu</button>
+      <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">{{ ui("Menu") }}</button>
       <span class="cs-topbar__title">Lightwork</span>
-      <a class="btn btn--ghost" href="/chat">New chat</a>
+      <a class="btn btn--ghost" href="/chat">{{ ui("New chat") }}</a>
     </div>
     <div class="cs-scroll" id="cs-scroll">
       <div class="cs-column">
@@ -263,7 +263,7 @@
       <p class="mv-form__err" id="mv-form-err" aria-live="polite"></p>
       <div class="mv-confirm__row">
         <button type="button" class="btn btn--ghost" id="mv-form-cancel">{{ ui("Cancel") }}</button>
-        <button type="submit" class="btn btn--primary" id="mv-form-ok">OK</button>
+        <button type="submit" class="btn btn--primary" id="mv-form-ok">{{ ui("OK") }}</button>
       </div>
     </form>
   </dialog>
@@ -332,11 +332,22 @@
         var q = input.value.trim().toLowerCase();
         var count = 0;
         Array.prototype.forEach.call(list.children, function (li) {
-          li.hidden = !!q && li.textContent.toLowerCase().indexOf(q) === -1;
+          var link = li.querySelector('[data-conversation-root]');
+          if (!link) { li.hidden = !!q; return; }
+          var title = link.querySelector('[data-user-content]');
+          var original = title ? title.textContent : link.getAttribute('title') || '';
+          li.hidden = !!q && original.toLowerCase().indexOf(q) === -1;
           if (!li.hidden) count += 1;
         });
         var status = document.getElementById('cs-filter-status');
-        if (status) status.textContent = q ? (count ? count + ' matching recent titles.' : 'No recent titles match. Open task search for older chats or a match in task contents.') : '';
+        if (status) {
+          var i18n = window.LightworkI18n;
+          if (!q) status.replaceChildren();
+          else if (i18n) {
+            var source = count ? i18n.plural('{count} matching recent title.', '{count} matching recent titles.', count) : 'No recent titles match. Open task search for older chats or a match in task contents.';
+            i18n.set(status, source);
+          } else status.textContent = count ? count + ' matching recent titles.' : 'No recent titles match. Open task search for older chats or a match in task contents.';
+        }
       });
     })();
   </script>

@@ -82,6 +82,7 @@ function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000 } = {}) {
     clearTimeout,
     setInterval(callback) { intervals.push(callback); },
   };
+  context.window = context;
   vm.runInNewContext(haltSource(), context, { filename: "lightwork-ui.js" });
   return {
     pill,

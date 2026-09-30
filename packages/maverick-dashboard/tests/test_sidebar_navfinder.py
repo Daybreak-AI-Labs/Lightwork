@@ -86,7 +86,10 @@ def test_page_finder_has_an_accessible_dialog_and_combobox_contract(monkeypatch,
 
 
 def test_page_finder_destinations_cover_the_visible_registry_beyond_the_sidebar(monkeypatch, tmp_path):
-    from maverick_dashboard import ui_visibility
+    from maverick_dashboard import employee_companion_api, ui_visibility
+
+    monkeypatch.setattr(employee_companion_api, "navigation_available", lambda request, *, admin: False)
+    unavailable = {"/companion", "/companion/admin"}
 
     markup = _overview_markup(monkeypatch, tmp_path)
 
@@ -96,7 +99,9 @@ def test_page_finder_destinations_cover_the_visible_registry_beyond_the_sidebar(
     assert set(markup.sidebar_hrefs) < set(markup.finder_hrefs)
     assert markup.finder_hrefs == [
         ln["href"] for g in ui_visibility.finder_pages(None) for ln in g["links"]
+        if ln["href"] not in unavailable
     ]
+    assert unavailable.isdisjoint(markup.finder_hrefs)
     assert "/fleets" in markup.finder_hrefs and "/fleets" not in markup.sidebar_hrefs
     assert all(href.startswith("/") for href in markup.finder_hrefs)
     assert "#" not in markup.finder_hrefs

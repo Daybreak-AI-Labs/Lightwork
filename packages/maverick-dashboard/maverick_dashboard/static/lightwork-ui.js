@@ -18,9 +18,14 @@
         contextChanged = true;
         var notice = document.createElement('section');
         notice.className = 'panel'; notice.setAttribute('role', 'alert');
-        notice.textContent = 'Your workspace changed in another tab. Changes here are paused. Keep any draft you need, then reopen this page in the current workspace. ';
+        var message = 'Your workspace changed in another tab. Changes here are paused. Keep any draft you need, then reopen this page in the current workspace.';
+        if (window.LightworkI18n) window.LightworkI18n.set(notice, message);
+        else notice.textContent = message;
+        notice.appendChild(document.createTextNode(' '));
         var reopen = document.createElement('a'); reopen.href = window.location.href;
-        reopen.textContent = 'Reopen in current workspace'; notice.appendChild(reopen);
+        if (window.LightworkI18n) window.LightworkI18n.set(reopen, 'Reopen in current workspace');
+        else reopen.textContent = 'Reopen in current workspace';
+        notice.appendChild(reopen);
         document.body.insertBefore(notice, document.body.firstChild);
         window.dispatchEvent(new CustomEvent('lightwork:context-changed'));
       }
@@ -135,6 +140,13 @@
       // a {key:value} object, or null if cancelled. Falls back to sequential
       // prompts where <dialog> is unsupported.
       var fdlg = document.getElementById('mv-form');
+      function productText(source, values) {
+        return window.LightworkI18n ? window.LightworkI18n.text(source, values) : source;
+      }
+      function productSet(element, source, values) {
+        if (window.LightworkI18n) window.LightworkI18n.set(element, source, values);
+        else element.textContent = source;
+      }
       function booleanDefault(value) {
         // Imported fields can carry serialized booleans. Only an explicit
         // affirmative value may preselect a boolean; "false" is not truthy here.
@@ -161,18 +173,18 @@
                 boolField ? String(booleanDefault(s.default)) : s.default != null ? String(s.default) : '');
               if (v0 === null) return Promise.resolve(null);
               v0 = v0.trim();
-              if (!v0 && s.required) { problem = 'This field is required.'; continue; }
+              if (!v0 && s.required) { problem = productText('This field is required.'); continue; }
               if (boolField) {
                 if (!/^(true|false|yes|no|1|0)$/i.test(v0)) {
-                  problem = 'Enter true or false.'; continue;
+                  problem = productText('Enter true or false.'); continue;
                 }
                 out0[s.key] = /^(true|yes|1)$/i.test(v0);
               } else if (v0) {
                 if (s.type === 'number' && !Number.isFinite(Number(v0))) {
-                  problem = 'Enter a valid number.'; continue;
+                  problem = productText('Enter a valid number.'); continue;
                 }
                 if (s.type === 'select' && choices.indexOf(v0) < 0) {
-                  problem = 'Choose one of the listed values.'; continue;
+                  problem = productText('Choose one of the listed values.'); continue;
                 }
                 out0[s.key] = v0;
               }
@@ -187,8 +199,10 @@
         var body = document.getElementById('mv-form-fields');
         var errEl = document.getElementById('mv-form-err');
         var cancelBtn = document.getElementById('mv-form-cancel');
-        document.getElementById('mv-form-title').textContent = String(title || 'Details');
-        document.getElementById('mv-form-ok').textContent = opts.okText || 'OK';
+        var titleElement = document.getElementById('mv-form-title');
+        if (!title || opts.productCopy) productSet(titleElement, String(title || 'Details'));
+        else { titleElement.textContent = String(title); titleElement.lang = 'und'; titleElement.dir = 'auto'; }
+        productSet(document.getElementById('mv-form-ok'), opts.okText || 'OK');
         body.textContent = ''; errEl.textContent = '';
         var controls = [];
         fields.forEach(function (f) {
@@ -198,18 +212,18 @@
           if (f.type === 'bool' || f.type === 'checkbox') {
             wrap.className += ' mv-form__check';
             ctl = document.createElement('input'); ctl.type = 'checkbox'; ctl.checked = booleanDefault(f.default); ctl.id = id;
-            var l1 = document.createElement('label'); l1.setAttribute('for', id); l1.textContent = f.label || f.key;
+            var l1 = document.createElement('label'); l1.setAttribute('for', id); l1.textContent = f.label || f.key; l1.lang = 'und'; l1.dir = 'auto';
             wrap.appendChild(ctl); wrap.appendChild(l1);
           } else {
             var lab = document.createElement('label'); lab.setAttribute('for', id);
-            lab.textContent = (f.label || f.key) + (f.required ? ' *' : '');
+            lab.textContent = (f.label || f.key) + (f.required ? ' *' : ''); lab.lang = 'und'; lab.dir = 'auto';
             wrap.appendChild(lab);
             if (f.type === 'select') {
               ctl = document.createElement('select');
               (f.options || []).forEach(function (o) {
                 var op = document.createElement('option');
                 op.value = (o && o.value != null) ? o.value : o;
-                op.textContent = (o && o.label != null) ? o.label : o;
+                op.textContent = (o && o.label != null) ? o.label : o; op.lang = 'und'; op.dir = 'auto';
                 ctl.appendChild(op);
               });
               if (f.default != null) ctl.value = String(f.default);
@@ -227,7 +241,7 @@
           }
           if (f.help) {
             var h = document.createElement('div'); h.className = 'mv-form__help';
-            h.id = id + '-help'; h.textContent = f.help;
+            h.id = id + '-help'; h.textContent = f.help; h.lang = 'und'; h.dir = 'auto';
             ctl.setAttribute('aria-describedby', h.id); wrap.appendChild(h);
           }
           controls.push({ f: f, ctl: ctl });
@@ -248,7 +262,8 @@
               if (val) out[c.f.key] = val;
             });
             if (missing.length) {
-              errEl.textContent = 'Required: ' + missing.join(', ');
+              if (window.LightworkI18n) window.LightworkI18n.set(errEl, 'Required: {fields}', {fields: missing.join(', ')});
+              else errEl.textContent = 'Required: ' + missing.join(', ');
               firstMissing.focus(); return null;
             }
             return out;
@@ -272,8 +287,8 @@
       };
       // Copy text to the clipboard with a toast; falls back for old browsers.
       window.mvCopy = function (text) {
-        function ok() { mvToast('Copied to clipboard'); }
-        function fail() { mvToast('Copy failed — select and copy manually', { error: true }); }
+        function ok() { mvToast(productText('Copied to clipboard')); }
+        function fail() { mvToast(productText('Copy failed — select and copy manually'), { error: true }); }
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(String(text)).then(ok, fail);
           return;
@@ -427,7 +442,7 @@
         // Unix epoch: (ts || 0) would turn 0/null/undefined/NaN into 1/1/1970,
         // which then leaks into visible text and aria-labels.
         if (!ts || !isFinite(ts)) return '';
-        try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
+        try { return window.LightworkI18n ? window.LightworkI18n.formatDate(ts) : new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
       };
     })();
 
@@ -437,6 +452,7 @@
       const label = document.getElementById('halt-label');
       if (!pill || !label) return;
       const canHalt = pill.dataset.canHalt === 'true';
+      function productText(source) { return window.LightworkI18n ? window.LightworkI18n.text(source) : source; }
       const configuredTimeout = Number(pill.dataset.haltTimeoutMs);
       const haltTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
         ? Math.min(configuredTimeout, 10000)
@@ -464,11 +480,13 @@
         const known = state === 'armed' || state === 'clear';
         pill.classList.toggle('armed', armed);
         pill.classList.toggle('unavailable', !known);
-        label.textContent = detail || (armed
+        const copy = detail || (armed
           ? (canHalt ? 'STOPPED — click to resume' : 'STOPPED')
           : state === 'clear'
             ? (canHalt ? 'Emergency stop' : 'Work is not stopped')
             : 'Stop status unavailable');
+        if (window.LightworkI18n) window.LightworkI18n.set(label, copy);
+        else label.textContent = copy;
         if (canHalt) {
           pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');
         } else {
@@ -546,11 +564,11 @@
       pill.addEventListener('click', async function(ev) {
         ev.preventDefault();
         if (!canHalt) {
-          mvToast('You do not have permission to stop or resume this work.', { error: true });
+          mvToast(productText('You do not have permission to stop or resume this work.'), { error: true });
           return;
         }
         if (pending || !knownState()) {
-          mvToast('Emergency stop status is unavailable. Retry after the dashboard can verify it.', { error: true });
+          mvToast(productText('Emergency stop status is unavailable. Retry after the dashboard can verify it.'), { error: true });
           return;
         }
         const wasArmed = haltState === 'armed';
@@ -563,8 +581,10 @@
             render(haltState, 'Resuming…');
             requestOptions = {method: 'DELETE'};
           } else {
-            const coverage = haltScope === 'cluster' ? 'across connected workers' : 'on this server';
-            if (!(await mvConfirm('Stop work ' + coverage + '? Work covered by this emergency stop pauses at its next step and waits for an authorized resume.', { okText: 'Stop work' }))) return;
+            const consequence = haltScope === 'cluster'
+              ? 'Stop work across connected workers? Work covered by this emergency stop pauses at its next step and waits for an authorized resume.'
+              : 'Stop work on this server? Work covered by this emergency stop pauses at its next step and waits for an authorized resume.';
+            if (!(await mvConfirm(consequence, { productCopy: true, okText: 'Stop work' }))) return;
             pending = true;
             refreshGeneration += 1;
             render(haltState, 'Stopping…');
@@ -587,7 +607,7 @@
             render('unknown');
             mvToast(typeof mvErrorText === 'function'
               ? mvErrorText(response, 'change the emergency stop')
-              : 'Emergency stop change failed. Please try again.', { error: true });
+              : productText('Emergency stop change failed. Please try again.'), { error: true });
           } else {
             // A 204 only acknowledges the mutation request.  It is not a
             // status document and cannot prove either local or cluster state.
@@ -597,7 +617,7 @@
           }
         } catch (e) {
           render('unknown');
-          mvToast('Emergency stop change failed. Lightwork is not responding. Check your connection and try again.', { error: true });
+          mvToast(productText('Emergency stop change failed. Lightwork is not responding. Check your connection and try again.'), { error: true });
         } finally {
           pending = false;
         }
