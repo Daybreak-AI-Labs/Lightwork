@@ -7,3 +7,5 @@ Enable `features.permission_access_requests` in Settings or the installer for sa
 Reviewers change real policy through existing People/Settings controls. Marking a request effective rechecks the current resolver and fails while the requested permission is still blocked. Cases store the actual explanation and reviewed result with durable activity receipts. No request, review note or Copilot instruction changes roles or tool ACLs automatically.
 
 Local mocked tests cover channel and exact-user ACL provenance, assigned role attenuation, stale submissions, independent/scope-appropriate reviewers, and refusal to mark a still-denied permission effective. Eight focused permission/identity tests passed. Browser and live-provider qualification remain unrun.
+
+The shared Copilot registry uses the same native service for explanation, request and reviewed decision. Its sealed preparation is bound to current account/workspace/policy revisions and requires explicit confirmation; models never choose execution arguments or grant access. Exact operation receipts support safe readback after interrupted responses.

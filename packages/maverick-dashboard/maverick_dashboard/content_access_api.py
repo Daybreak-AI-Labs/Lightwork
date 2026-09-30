@@ -94,8 +94,7 @@ def access_page(request: Request):
     return templates.TemplateResponse(request, "content_access.html", {})
 
 
-@router.get("/api/v1/content-access")
-async def access_status(request: Request):
+def access_state(request: Request):
     actor = _actor(request)
     is_admin = auth.has_global_permission(request, "admin")
     can_request = is_admin or auth.has_permission(request, "operate")
@@ -106,11 +105,10 @@ async def access_status(request: Request):
         return {"enabled": content_access.enabled(), "can_request": can_request,
                 "records": records, "resources": _resources(approvals_only=not is_admin) if can_request else [],
                 "resource_window": "The latest 500 approval records are considered. Installation administrators may also request the latest 500 tasks and up to 500 chat identities. Content stays private until reviewed."}
-    return await _call(read)
+    return read()
 
 
-@router.post("/api/v1/content-access")
-async def request_access(request: Request, body: AccessIn):
+def create_access(request: Request, body: AccessIn, *, operation_id=None):
     actor = _actor(request, write=True)
     (auth.require_permission if body.resource_kind == "approval" else auth.require_global_permission)(request, "operate" if body.resource_kind == "approval" else "admin")
     if not content_access.enabled():
@@ -134,14 +132,13 @@ async def request_access(request: Request, body: AccessIn):
                     return _public(existing, actor, True)
             row = content_access.STORE.create({"id": content_access.STORE.new_id(),
                 "tenant": content_access.tenant(), "requester": actor, **resource,
-                "purpose": body.purpose, "minutes": body.minutes, "status": "requested"},
+                "purpose": body.purpose, "minutes": body.minutes, "status": "requested", "operation_id": operation_id},
                 action="request", actor=actor, max_records=10000)
             return _public(row, actor, True)
-    return await _call(create)
+    return create()
 
 
-@router.post("/api/v1/content-access/{request_id}/decision")
-async def decide_access(request: Request, request_id: str, body: DecisionIn):
+def decide_current_access(request: Request, request_id: str, body: DecisionIn, *, operation_id=None):
     actor = _actor(request, write=True)
     def decide():
         with authority_effect_fence():
@@ -167,9 +164,25 @@ async def decide_access(request: Request, request_id: str, body: DecisionIn):
                     row["status"] = "revoked"
                 elif not is_admin and actor not in {row["requester"], row["owner"]}:
                     raise HTTPException(403, "You cannot repair this request.")
+                row["decision_operation_id"] = operation_id
             row = content_access.STORE.update(request_id, mutate, expected_revision=body.expected_revision,
                                               action=body.decision, actor=actor)
             if row is None:
                 raise HTTPException(404, "No such content-access request.")
             return _public(row, actor, is_admin)
-    return await _call(decide)
+    return decide()
+
+
+@router.get("/api/v1/content-access")
+async def access_status(request: Request):
+    return await _call(lambda: access_state(request))
+
+
+@router.post("/api/v1/content-access")
+async def request_access(request: Request, body: AccessIn):
+    return await _call(lambda: create_access(request, body))
+
+
+@router.post("/api/v1/content-access/{request_id}/decision")
+async def decide_access(request: Request, request_id: str, body: DecisionIn):
+    return await _call(lambda: decide_current_access(request, request_id, body))

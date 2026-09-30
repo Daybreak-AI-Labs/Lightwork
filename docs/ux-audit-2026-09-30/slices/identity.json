@@ -35,10 +35,11 @@
       "Reviewed identity/session retirement, generation-bound local credential removal, pending run-goal cancellation, durable dispatch/result steps and retained-data custodian.",
       "Per-item human handoff reports remain explicitly unverified; no private-content ACL transfer.",
       "Fresh-inventory closure requires every reviewed item and external boundary to have a current active named owner; explicit preserved obligations remain human-attested, with no private-content ACL grant.",
-      "All owned queued kinds and recurring schedule definitions inventoried; recurring definitions retired before cancellation. Exact verified-channel task scopes included, and linked inactive members denied new channel work even with sharing disabled."
+      "All owned queued kinds and recurring schedule definitions inventoried; recurring definitions retired before cancellation. Exact verified-channel task scopes included, and linked inactive members denied new channel work even with sharing disabled.",
+      "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed."
     ],
     "validation": "45 local departure/identity/recurrence/dispatcher regression tests passed. Ruff import/bug/complexity checks and extracted inline JavaScript syntax passed. Installed authenticated browser/provider acceptance remains unrun.",
-    "remaining": "Installed offboarding with running work, OAuth consent and pending reviews must be qualified. Provider-side revocation and unlinked external identities remain explicit named retained obligations, never automatically verified. Native global Copilot adapter integration is tracked by consolidated PR owner."
+    "remaining": "Installed offboarding with running work, OAuth consent and pending reviews must be qualified. Provider-side revocation and unlinked external identities remain explicit named retained obligations, never automatically verified."
   },
   {
     "id": "LW-095",
@@ -49,22 +50,24 @@
       "Current checkpoint adds approval-card content fingerprints and governed reads independent of decision authority; shoring, safety, Cortex, replay and overview side-path privacy.",
       "4424b8f: source ownership and stop-use rechecks before task/reflection/dream/skill recall and model-memory tools; 144 passed, 6 unavailable native-adapter tests skipped.",
       "7f65700: canonical bundled/publication receipt/exact-owner template visibility across catalog, builders, workflow history, suggestions and consumers.",
-      "Current follow-up: named employee donations refused; signed insight exchange and training corpus require known shared ownership and current nonexcluded source; 120 local regression tests passed."
+      "Current follow-up: named employee donations refused; signed insight exchange and training corpus require known shared ownership and current nonexcluded source; 120 local regression tests passed.",
+      "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed."
     ],
     "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
     "remaining": "Complete consolidated route/model-recall review across sibling slices, integration of all embedded approval surfaces and global Copilot operations; authenticated cross-user acceptance remains unrun."
   },
   {
     "id": "LW-096",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "e18aa52: Account exposes explicit allowed/blocked tool names, configured ceilings, broad policy source and administrator contact ownership.",
       "access_explanations follows actual pinned/workspace/explicit/group/default role ordering; role denials name the current ceiling and administrator owner. Account uses the actual dashboard channel/current user root grant and concrete file-read/file-write/command examples with effective denial reasons.",
       "permission_requests.py and direct API/UI provide exact layered root-capability provenance plus tenant-scoped requests to independent current policy owners; no raw resource data and no implicit grant changes.",
-      "Feature configuration and installer gate saved reviews. Effective status requires fresh actual permissions, while task/resource/consent/provider constraints remain explicitly separate."
+      "Feature configuration and installer gate saved reviews. Effective status requires fresh actual permissions, while task/resource/consent/provider constraints remain explicitly separate.",
+      "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed."
     ],
     "validation": "Eight focused local permission/identity regressions passed. Ruff bug/import/complexity checks and JavaScript syntax passed. Installed browser acceptance remains unrun.",
-    "remaining": "Shared global Copilot adapters in progress; final runtime denial/Account consistency sweep remains before closing this entry. Current root explanations explicitly do not claim all task-specific constraints are resolved."
+    "remaining": "Installed authenticated role/tool denial and permission-change acceptance remains unrun. Root-grant explanations explicitly distinguish separately evaluated task, resource, consent and provider constraints."
   },
   {
     "id": "LW-097",

@@ -136,7 +136,7 @@ def submit(request, kind, capability, reason, snapshot, *, operation_id=None):
         return public(request, row)
 
 
-def decide(request, identifier, revision, decision, note):
+def decide(request, identifier, revision, decision, note, *, operation_id=None):
     from .permission_requests_api import authority
     with authority_effect_fence():
         actor = authority(request, write=True)
@@ -149,7 +149,7 @@ def decide(request, identifier, revision, decision, note):
             if decision == "confirm_effective" and not current["allowed"]:
                 raise HTTPException(409, "The requested permission is still blocked. Change the actual policy through its existing controls, then check again.")
             row.update(status={"reviewing": "reviewing", "deny": "denied", "confirm_effective": "effective"}[decision],
-                       decision_note=note, reviewed_by=actor, reviewed_explanation=current)
+                       decision_note=note, reviewed_by=actor, reviewed_explanation=current, decision_operation_id=operation_id)
         row = STORE.update(identifier, mutate, expected_revision=revision, action="access_reviewed", actor=actor)
         if row is None:
             raise HTTPException(404, "No such access request.")
