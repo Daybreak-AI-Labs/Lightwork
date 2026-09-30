@@ -4715,11 +4715,14 @@ def pick_advanced() -> dict[str, Any]:
             "task/export reads and exact approval-card reads with a separate reviewer, a stated purpose, "
             "expiry within one hour and a recorded receipt for each read?", default=False,
         ),
+        "allow_permission_access_requests": _q_confirm(
+            "Enable named employees to request permission reviews from the responsible administrator? Requests never grant access automatically.", default=False,
+        ),
         "allow_employee_departures": _q_confirm(
             "Enable reviewed employee-departure controls? Named installation administrators "
-            "can deactivate accounts, remove reviewed local credentials, cancel pending run-goal "
-            "schedules and record handoff owners. Data is retained; external provider revocation "
-            "and running work still need separate closure.", default=False,
+            "can deactivate accounts, remove reviewed local credentials, retire recurring schedules "
+            "and record handoff owners. Closure retains data, holds and explicit named responsibility "
+            "for running work and unverified external outcomes.", default=False,
         ),
         "allow_outcome_measurement": _q_confirm(
             "Enable measured workflow pilots with paired baseline observations "
@@ -8339,6 +8342,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("employee_content_access_requests = true")
     if advanced.get("allow_personal_data_controls") is True:
         _feature_locks.append("personal_data_controls = true")
+    if advanced.get("allow_permission_access_requests") is True:
+        _feature_locks.append("permission_access_requests = true")
     if advanced.get("allow_employee_departures") is True:
         _feature_locks.append("employee_departures = true")
     if advanced.get("allow_outcome_measurement") is True:

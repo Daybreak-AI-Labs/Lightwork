@@ -1064,6 +1064,9 @@ def get_features() -> dict:
         "employee_content_access_requests": (
             not config_source_errors() and cfg.get("employee_content_access_requests", False) is True
         ),
+        "permission_access_requests": (
+            not config_source_errors() and cfg.get("permission_access_requests", False) is True
+        ),
         "employee_departures": (
             not config_source_errors() and cfg.get("employee_departures", False) is True
         ),

@@ -46,6 +46,6 @@ def denial(request, permission, *, installation=False):
         current = role(auth._authorization_principal(request), installation=installation)
         name = role_label(current["role"]) if current["role"] else "No active role"
         return (f"Your {name} role from {current['source'].lower()} does not allow {permission}. "
-                f"Ask your {current['owner'].lower()} to review access. Account shows your current permissions.")
+                f"Ask your {current['owner'].lower()} to review access. Account shows your current permissions; Permission requests lets you ask the policy owner for review.")
     except Exception:
         return "Your current access policy is unavailable. Ask an installation administrator to restore it before retrying."

@@ -59,10 +59,12 @@
     "status": "partial-planned",
     "implementation_evidence": [
       "e18aa52: Account exposes explicit allowed/blocked tool names, configured ceilings, broad policy source and administrator contact ownership.",
-      "access_explanations follows actual pinned/workspace/explicit/group/default role ordering; role denials name the current ceiling and administrator owner. Account uses the actual dashboard channel/current user root grant and concrete file-read/file-write/command examples with effective denial reasons."
+      "access_explanations follows actual pinned/workspace/explicit/group/default role ordering; role denials name the current ceiling and administrator owner. Account uses the actual dashboard channel/current user root grant and concrete file-read/file-write/command examples with effective denial reasons.",
+      "permission_requests.py and direct API/UI provide exact layered root-capability provenance plus tenant-scoped requests to independent current policy owners; no raw resource data and no implicit grant changes.",
+      "Feature configuration and installer gate saved reviews. Effective status requires fresh actual permissions, while task/resource/consent/provider constraints remain explicitly separate."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Account now explains base role/department/root-tool provenance and examples. A unified per-task explanation across attenuated agent roles, runtime consent/resource limits and a persisted access-request case remains open; base-grant guidance explicitly does not claim all task checks are resolved."
+    "validation": "Eight focused local permission/identity regressions passed. Ruff bug/import/complexity checks and JavaScript syntax passed. Installed browser acceptance remains unrun.",
+    "remaining": "Shared global Copilot adapters in progress; final runtime denial/Account consistency sweep remains before closing this entry. Current root explanations explicitly do not claim all task-specific constraints are resolved."
   },
   {
     "id": "LW-097",

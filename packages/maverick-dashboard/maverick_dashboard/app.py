@@ -1462,6 +1462,8 @@ from .personal_data_api import router as personal_data_router  # noqa: E402
 
 app.include_router(content_access_router)
 app.include_router(employee_departures_router)
+from .permission_requests_api import router as permission_requests_router  # noqa: E402
+app.include_router(permission_requests_router)
 app.include_router(personal_data_router)
 # Settings > License (/settings/license + its install, sign and key-pair API).
 from .license_ops_api import router as license_ops_router  # noqa: E402
