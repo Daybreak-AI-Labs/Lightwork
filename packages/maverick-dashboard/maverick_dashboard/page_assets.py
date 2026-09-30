@@ -21,6 +21,7 @@ ASSETS = (
     "lightwork-read-aloud.js",
     "lightwork-theme-preview.js",
     "lightwork-model-guidance.js",
+    "lightwork-model-tests.js",
     "lightwork-notification-health.js",
     "lightwork-personal-notifications.js",
     "lightwork-settings-admin.js",

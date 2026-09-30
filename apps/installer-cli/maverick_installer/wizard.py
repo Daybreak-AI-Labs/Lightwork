@@ -5573,16 +5573,13 @@ def pick_advanced() -> dict[str, Any]:
     advanced["mobile_offline"] = {"enabled": _q_confirm(
         "Allow mobile companions to save task copies for up to 24 hours and 2 MB? Shorter limits are available in All settings.", default=True,
     ), "max_age_seconds": 86400, "max_bytes": 2097152}
-    advanced["device_pairing"] = {"enabled": _q_confirm(
-        "Let named members pair personal companions with an expiring code and explicit browser approval? Devices can read only their own work in the chosen workspace.", default=False,
-    ), "credential_hours": 24, "allow_actions": False}
-    if advanced["device_pairing"]["enabled"]:
-        advanced["device_pairing"]["allow_actions"] = _q_confirm(
-            "Also allow separately opted-in companions to review and submit answers or Stop on their own tasks? Approvals remain on the dashboard.", default=False,
-        )
+    advanced["device_pairing"] = _pick_device_pairing()
     advanced["model_guidance"] = _q_confirm(
         "Show dated model pricing evidence and provider-reported capabilities in Settings?",
         default=True,
+    )
+    advanced["model_capability_tests"] = _q_confirm(
+        "Allow administrators to explicitly confirm bounded, potentially paid synthetic model tests (at most USD 0.05 and 64 output tokens, no retry)?", default=False,
     )
     advanced["model_discovery"] = _q_confirm(
         "Let Settings discover the models each provider key can reach (one "
@@ -5591,6 +5588,18 @@ def pick_advanced() -> dict[str, Any]:
         default=True,
     )
     return advanced
+
+
+def _pick_device_pairing() -> dict[str, Any]:
+    """Keep pairing and optional task-control consent in one ordered group."""
+    pairing = {"enabled": _q_confirm(
+        "Let named members pair personal companions with an expiring code and explicit browser approval? Devices can read only their own work in the chosen workspace.", default=False,
+    ), "credential_hours": 24, "allow_actions": False}
+    if pairing["enabled"]:
+        pairing["allow_actions"] = _q_confirm(
+            "Also allow separately opted-in companions to review and submit answers or Stop on their own tasks? Approvals remain on the dashboard.", default=False,
+        )
+    return pairing
 
 
 def _regulatory_profile_choices() -> list[str]:
@@ -6793,10 +6802,12 @@ def _cfg_providers(
     return lines
 
 
-def _cfg_role_models(role_models: dict[str, str], *, discovery: bool = True, guidance: bool = True) -> list[str]:
-    if not role_models and discovery and guidance:
+def _cfg_role_models(role_models: dict[str, str], *, discovery: bool = True, guidance: bool = True, capability_tests: bool = False) -> list[str]:
+    if not role_models and discovery and guidance and not capability_tests:
         return []
     lines = ["[models]"]
+    if capability_tests:
+        lines.append("capability_tests = true")
     if not guidance:
         lines.append("guidance = false")
     for role, spec in role_models.items():
@@ -9238,6 +9249,7 @@ def write_config(
     lines += _cfg_role_models(
         role_models, discovery=advanced.get("model_discovery") is not False,
         guidance=advanced.get("model_guidance") is not False,
+        capability_tests=advanced.get("model_capability_tests") is True,
     )
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)

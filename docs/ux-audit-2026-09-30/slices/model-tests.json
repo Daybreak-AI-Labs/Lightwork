@@ -1,0 +1,23 @@
+[
+  {
+    "id": "LW-140",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Existing model_guidance.py/model_pickers.py and lightwork-model-guidance.js preserve capability/local/vision/unknown filters, manual choices, reported limits, stale/expired pricing provenance and unsupported/unknown capability warnings under the approved-model policy.",
+      "model_tests.py implements an explicitly reviewed text-generation or generated synthetic-image sample through the existing LLM facade: one physical attempt, no failover/hedge/retry/tools, narrowed configured Budget ceilings, test-only SDK timeout snapshot, current authority/model/tenant/route and quota checks, and ordinary provider/quota settlement.",
+      "model_tests_api.py and Settings model-test controls provide review, explicit paid confirmation, stop, private account/workspace history and original-receipt recovery. Durable claims survive response loss and restarts without redispatch; policy disablement retains readable history and cannot start work.",
+      "product_operations_models.py implements native-authorized model comparison, reviewed test, history and stop for the existing Models Copilot action family. models.capability_tests defaults off and has All settings plus installer controls.",
+      "Corrected model_pickers.build guidance import shadowing the discovery-enabled boolean; disabling discovery now remains accurately represented alongside enabled guidance. Extracted installer pairing consent group to keep pick_advanced below the complexity limit."
+    ],
+    "validation": [
+      "45 focused Python tests passed: model test service, native/Copilot routes, model guidance, guarded LLM physical-attempt boundary and installer serialization/consent grouping. All provider and accounting work mocked.",
+      "53 existing model picker/allowlist/role/discovery/installer tests passed after fixing the discovered guidance/discovery shadowing defect and an obsolete attribute-order-dependent assertion.",
+      "2 DOM tests passed for explicit review/confirmation, duplicate suppression, response-loss recovery, account changes, disabled policy and safe receipt rendering. Python 3.10 AST, new/changed feature-file Ruff, JavaScript syntax and git diff --check passed. Root owns remaining pre-existing app.py integration-import lint."
+    ],
+    "remaining": [
+      "No live provider test or rendered customer/installed qualification was performed. A matched sample demonstrates only that single synthetic response; task quality, context limits and reliable latency remain unqualified.",
+      "Tool capability remains explicitly provider-reported and untested; the bounded guarded facade rejects tool-bearing requests because not all provider compatibility resends are independently observed. Text/image success never certifies tool support.",
+      "Cancellation cannot retract a transmitted request or prove provider billing stopped. Unknown outcomes retain their original durable receipt and require accounting review before a user deliberately chooses another test."
+    ]
+  }
+]

@@ -155,6 +155,30 @@
   </div>
   {% endif %}
 
+  <section class="panel" data-settings-group="models" id="model-tests" aria-labelledby="model-tests-title">
+    <h3 id="model-tests-title">Try one bounded model sample</h3>
+    <p>A model-list refresh does not generate a response. This separate test sends a synthetic text or image sample to the model you select, after you review and confirm the possible cost. It does not change your model choices.</p>
+    <p class="muted">One request, at most USD 0.05 and 64 output tokens or lower policy limits, with up to 30 seconds of local waiting. Stop cannot retract a request already sent to the provider. Tools remain provider-reported and untested; a successful sample does not establish suitability for your tasks.</p>
+    <p><a href="/settings/all">Enable or disable bounded model tests in All settings</a></p>
+    <form id="model-test-form">
+      <label>Model <select class="select" id="model-test-model" data-model-picker="model-test-custom">
+        {% for pg in picker_groups %}<optgroup label="{{ pg.label }}">{% for m in pg.options %}<option value="{{ m.spec }}">{{ m.spec|model_label }}</option>{% endfor %}</optgroup>{% endfor %}
+        <option value="__custom__">Other model (advanced)</option>
+      </select></label>
+      <label id="model-test-custom" hidden>Exact model name from your provider <input class="input" id="model-test-custom-value" maxlength="200"></label>
+      <label>Sample <select class="select" id="model-test-kind"><option value="generation">Short text generation</option><option value="vision">Synthetic image recognition</option></select></label>
+      <button class="btn" type="submit" id="model-test-review">Review test and limits</button>
+    </form>
+    <div id="model-test-review-card" hidden tabindex="-1">
+      <p id="model-test-review-text"></p>
+      <button class="btn btn--primary" type="button" id="model-test-confirm">Confirm one potentially paid test</button>
+      <button class="btn" type="button" id="model-test-abandon">Cancel review</button>
+    </div>
+    <p id="model-test-status" role="status" aria-live="polite"></p>
+    <button class="btn btn--ghost" type="button" id="model-test-refresh">Refresh original test results</button>
+    <div id="model-test-history" aria-label="Model test receipts"></div>
+  </section>
+
   <div class="section-head" data-settings-group="models"><h2>Default model</h2></div>
   <div class="panel" data-settings-group="models">
     <p class="muted settings-lead">
@@ -911,6 +935,7 @@
   })();
   </script>
   <script src="/static/lightwork-model-guidance.js" defer></script>
+  <script src="/static/lightwork-model-tests.js" defer></script>
   <script src="/static/lightwork-voice-setup.js" defer></script>
   <script src="/static/lightwork-settings-admin.js" defer></script>
 {% endblock %}

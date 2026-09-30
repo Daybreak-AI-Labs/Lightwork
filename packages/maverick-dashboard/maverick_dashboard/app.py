@@ -102,6 +102,7 @@ from .draft_api import context_for as _conversation_context
 from .draft_api import page_context as _draft_page_context
 from .draft_api import router as draft_router
 from .employee_activation import router as employee_activation_router
+from .model_tests_api import router as model_tests_router
 from .health_routes import (
     health_response as _health_response,
 )
@@ -1104,6 +1105,7 @@ app.include_router(draft_router)
 
 app.include_router(preferences_router)
 app.include_router(budget_guidance_router)
+app.include_router(model_tests_router)
 app.include_router(cost_reconciliation_router)
 app.include_router(task_diagnostics_router)
 app.include_router(employee_activation_router)

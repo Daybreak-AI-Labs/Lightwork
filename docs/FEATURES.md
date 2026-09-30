@@ -5778,3 +5778,10 @@ Today composes authorized native work, decisions, occurrences and template pins 
   approval and supporting versus dissenting votes. Stale and unreviewed precedent
   stays visibly distinct from current approved precedent. Each value can be
   rejected or added to the respondent draft independently under `assessments.learn`.
+### Bounded model samples
+
+Settings > Models combines reported capability/pricing evidence with separately enabled,
+explicitly reviewed synthetic text/image generation tests. Each uses one admitted physical
+request, narrow existing Budget limits, no failover/retry, and a durable account/workspace
+receipt with native Stop and recovery. Copilot's Models family uses the same service.
+Tool support remains provider-reported and untested. See [model choice tests](model-choice-tests.md).

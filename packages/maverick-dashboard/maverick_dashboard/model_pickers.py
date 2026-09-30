@@ -109,8 +109,9 @@ def build(providers: list[dict], allow: set[str]) -> dict:
                rows.get(name), discovered.get(name) or {}, enabled, now)
         for name in order
     ]
-    from maverick.model_guidance import describe, enabled
-    guidance_enabled = enabled()
+    from maverick.model_guidance import describe
+    from maverick.model_guidance import enabled as model_guidance_enabled
+    guidance_enabled = model_guidance_enabled()
     metadata = {}
     if guidance_enabled:
         for group in groups:

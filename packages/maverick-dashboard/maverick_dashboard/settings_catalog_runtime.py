@@ -178,6 +178,9 @@ def _models(S, C) -> tuple:
         S("models", "guidance", "Show model choice guidance",
           "Show provider-reported capabilities and dated pricing evidence alongside model choices. Unknown details remain unknown.",
           "toggle", "AI models", True, "maverick.model_guidance", subgroup="Model choices"),
+        S("models", "capability_tests", "Allow bounded model generation tests",
+          "Let administrators review and explicitly confirm one synthetic model call, capped at USD 0.05 and 64 output tokens or lower workspace limits. Cancellation cannot retract a sent request; uncertain calls are never retried.",
+          "toggle", "AI models", False, "maverick.model_tests", subgroup="Model choices"),
         S("models", "catalog", "Extra models to offer",
           "Models that are not in the built-in list, so they can be chosen everywhere. Write "
           "each as the service name, a colon and the model name.", "list", "AI models", [],
