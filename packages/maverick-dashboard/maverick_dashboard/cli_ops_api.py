@@ -24,11 +24,12 @@ from .schedule_ops_api import router as _schedule_router
 from .task_journal_ops_api import router as _journal_router
 from .template_ops_api import router as _template_router
 from .workflow_versions_api import router as _workflow_versions_router
+from .template_outcomes_api import router as _template_outcomes_router
 
 router = APIRouter()
 for _child in (_journal_router, _goal_export_router, _schedule_router, _template_router,
                _business_agent_router, _ekko_router, _flow_teach_router, _plan_reflect_router,
-               _flow_capture_router, _workflow_versions_router):
+               _flow_capture_router, _workflow_versions_router, _template_outcomes_router):
     router.include_router(_child)
 
 _STATIC = Path(__file__).parent / "static"
@@ -43,6 +44,7 @@ ASSETS = (
     "lightwork-planning-steps.js",
     "lightwork-learning-capture.js",
     "lightwork-workflow-versions.js",
+    "lightwork-template-outcomes.js",
 )
 
 

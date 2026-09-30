@@ -92,15 +92,15 @@
   },
   {
     "id": "LW-074",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "New template_outcomes_api.py and lightwork-template-outcomes.js are in progress, not yet committed."
+      "template_outcomes_api.py projects authorized pilot reports with all planned cases, correction coverage, complete-only reported costs and explicit content-version bindings; template cards provide reviewed attribution, stale marking, exceptions and sample draft preparation; tests/test_template_outcomes.py authored unrun."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "In progress: template_outcomes_api.py and card UI bind explicitly reviewed scoped pilot evidence to template content versions; finish tests/static review and commit."
+      "Execute acceptance tests later; associations are explicitly attributed rather than independent execution provenance, and provider invoices remain unverified."
     ]
   },
   {
@@ -209,15 +209,16 @@
   },
   {
     "id": "LW-083",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142: original connector preserved during edits; complete catalog metadata exposed; known dedicated setup prerequisites explained."
+      "71c1142: original connector preserved during edits; complete catalog metadata exposed; known dedicated setup prerequisites explained.",
+      "lightwork-connections.js now makes unknown/retired adapters unsaveable and explains reviewed replacement; catalog completion can safely unlock a recognized preserved adapter."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "Complete read-only enforcement for unknown/retired adapters, then author/static-review regression coverage."
+      "Execute long-tail and unknown-adapter interaction acceptance tests later."
     ]
   },
   {

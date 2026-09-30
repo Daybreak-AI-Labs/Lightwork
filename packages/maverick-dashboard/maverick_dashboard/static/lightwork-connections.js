@@ -4,11 +4,11 @@
   var form = document.getElementById('cx-form'), inventoryStatus = document.getElementById('cx-inventory-status');
   var currentByName = {}, editing = null, context = null, inventoryReady = false, accessLost = false;
   var canManage = form.dataset.canManage === 'true';
-  var busy = false, uncertain = false, conflict = false, loadSerial = 0;
+  var busy = false, uncertain = false, conflict = false, unknownBinding = false, loadSerial = 0;
   function el(tag, cls, text) { var node = document.createElement(tag); node.className = cls || ''; if (text != null) node.textContent = text; return node; }
   function say(text, error) { msg.textContent = text || ''; msg.style.color = error ? 'var(--danger)' : 'var(--muted)'; }
   function controls() {
-    form.querySelectorAll('button').forEach(function (button) { button.disabled = !canManage || !inventoryReady || busy || uncertain || conflict || accessLost; });
+    form.querySelectorAll('button').forEach(function (button) { button.disabled = !canManage || !inventoryReady || busy || uncertain || conflict || unknownBinding || accessLost; });
     list.querySelectorAll('button').forEach(function (button) { button.disabled = !canManage || !inventoryReady || busy || uncertain || accessLost; });
     form.setAttribute('aria-busy', String(busy));
   }
@@ -109,6 +109,7 @@
   }
   function editRecord(record) {
     editing = JSON.parse(JSON.stringify(record)); conflict = false;
+    unknownBinding = !catalog[record.connector] && !PRESETS.some(function (item) { return item.connector === record.connector; });
     nameEl.value = record.name; nameEl.readOnly = true;
     addOption(record.connector, catalog[record.connector] ? catalog[record.connector].label : record.connector + ' (existing binding)');
     connEl.value = record.connector; preset.value = record.connector;
@@ -119,7 +120,7 @@
     peopleBoxes().forEach(function (box) { box.checked = (record.allowed_principals || []).includes(box.value); });
     clearSecrets(); credentialFields(record.connector); advanced.open = true;
     document.getElementById('cx-connector-field').hidden = false;
-    say('Changing ' + record.name + '. Blank credential fields keep the saved credential. Provider changes require a separate reviewed connection.'); controls();
+    say(unknownBinding ? 'This adapter is unknown or retired. The saved record is read-only; create and review a supported replacement before migration.' : 'Changing ' + record.name + '. Blank credential fields keep the saved credential. Provider changes require a separate reviewed connection.'); controls();
   }
   function publicSummary(value) {
     return JSON.stringify({name:value.name, service:value.connector, address:value.base_url, sharing:value.access, people:value.allowed_principals || []}, null, 2);
@@ -167,6 +168,7 @@
     } finally { if (serial === loadSerial) controls(); }
   }
   function readBody() {
+    if (editing && unknownBinding) throw new Error('This saved adapter is read-only until a supported migration is reviewed.');
     var name = slugName(nameEl.value), body = {name:name, connector:editing ? editing.connector : connEl.value, base_url:baseEl.value.trim(), access:document.getElementById('cx-tenant-access').checked ? 'tenant' : 'owner', allowed_principals:peopleBoxes().filter(function (b) { return b.checked; }).map(function (b) { return b.value; })};
     var token = document.getElementById('cx-token').value;
     if (!editing && currentByName[name]) throw new Error('That name is already saved. Choose Change on its current row before editing.');
@@ -199,7 +201,7 @@
       if (action === 'remove' && result.deleted !== record.name) throw new Error('Removal receipt is unreadable.');
       if (action === 'test' && typeof result.reachable !== 'boolean') throw new Error('Test receipt is unreadable.');
       if (action === 'save') {
-        clearSecrets(); editing=null; nameEl.readOnly=false; preset.disabled=false; connEl.disabled=false; baseEl.readOnly=false;
+        clearSecrets(); editing=null; unknownBinding=false; nameEl.readOnly=false; preset.disabled=false; connEl.disabled=false; baseEl.readOnly=false;
         if (thenTest && !discoveryPreset(body.connector)) { await request('/api/v1/connections/'+encodeURIComponent(body.name)+'/test',{method:'POST'}); }
       }
       say(action === 'remove' ? 'Local connection removed. Provider authorization has not been revoked.' : action === 'test' ? 'Check recorded. Review its scope and time on the connection row.' : 'Connection saved. Review the separate service or source check before running work.');
@@ -217,6 +219,7 @@
   request('/api/v1/connections/catalog').then(function (data) {
     if (accessLost || !Array.isArray(data.connectors)) return;
     data.connectors.forEach(function (item) { catalog[item.name]=item; addOption(item.name,item.label + (item.key_setup_supported ? '' : ' (dedicated setup)')); });
+    if (editing && catalog[editing.connector]) { unknownBinding=false; controls(); }
   }).catch(function () { if (!accessLost) say('The full service catalog is unavailable. Refresh before setting up a new service.',true); });
   load();
 })();

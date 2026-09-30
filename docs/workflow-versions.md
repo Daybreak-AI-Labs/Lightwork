@@ -11,3 +11,11 @@ Existing templates are adopted as the prior publication on their first edit. New
 History and samples are private files in the tenant template directory and follow that directory's backup and retention policy. Only the author or an administrator may review history; only administrators may publish. Current ownership, account context, configuration, and generation checks are repeated for mutations. Fixture history retains the latest 50 checks; immutable content snapshots and publication events remain until the workflow data is removed through the installation retention process.
 
 The visual controls are implemented. Conversational routing for these new version operations is not yet connected; this is a remaining customer-experience-contract coverage item, not a claim of complete Copilot coverage.
+
+## Measured template outcomes
+
+Templates offers account-scoped outcome cards under **Measured outcomes and reviewed samples**. A person can explicitly associate one of their existing Workflow pilots with the saved template content after reviewing the workflow scope and entering exceptions. This is an attributed association, not automatically proven execution provenance. Current source permissions are rechecked by the existing pilot report resolver every time evidence is read.
+
+All planned business cases remain in the denominator, including failed, cancelled, rejected, and unavailable cases. Business cases are not provider attempts. Correction coverage is shown alongside counts. Reported cost differences appear only when every planned case has a current complete observation, all required delivered-cost families are covered, and currencies agree; missing cost is unknown. Provider invoice verification and generalized ROI are never inferred. A content change marks the association stale.
+
+These cards reuse the existing **Outcome measurement** Settings and installer feature control. Creating a sample through Templates still prepares a Chat draft, with no execution until the person explicitly starts it.
