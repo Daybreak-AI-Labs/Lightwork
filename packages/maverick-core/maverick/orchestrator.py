@@ -1881,6 +1881,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         log.warning("goal #%s blocked by UserPromptSubmit hook", goal_id)
         return "BLOCKED: goal input rejected by a UserPromptSubmit hook"
 
+    from .knowledge_task_context import has_binding, run_analysis
+    if has_binding(goal_id, world):
+        return await run_analysis(world, goal_id, budget, _lifecycle, shield=shield)
+
     _fire_webhook("goal_created", {"goal_id": goal_id, "title": goal.title})
 
     mcp_specs = load_mcp_specs_from_config()

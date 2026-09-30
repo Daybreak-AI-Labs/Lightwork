@@ -201,10 +201,10 @@ from .auth import (
     require_suite,
     stored_automation_identity,
 )
+from .product_errors import next_action, product_error
 
 log = logging.getLogger(__name__)
 
-from .product_errors import next_action, product_error
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
 
@@ -1371,6 +1371,7 @@ def create_goal(
     from maverick_dashboard.app import check_goal_rate_limit
 
     check_goal_rate_limit(request)
+    source_selection = _source_analysis_selection(request, payload)
     title = payload.title
     description = payload.description
     if payload.template:
@@ -1447,6 +1448,7 @@ def create_goal(
         goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
         if domain:
             w.set_goal_domain(goal_id, domain)
+    _bind_source_analysis(w, goal_id, caller_principal(request) or "", source_selection)
     _record_api_director(w, goal_id, director, receipt)
     from maverick.runner import run_goal_in_background_async
 
@@ -1495,6 +1497,35 @@ def create_goal(
     response.headers["Location"] = f"/api/v1/goals/{goal_id}"
     response.headers["Idempotency-Replayed"] = "true" if receipt is not None and replay_resume else "false"
     return _to_goal_out(g)
+
+
+def _bind_source_analysis(world, goal_id, actor, selection):
+    if selection is None:
+        return
+    from maverick.knowledge_task_context import SourceContextUnavailable, bind
+    try:
+        bind(world, goal_id, actor, selection)
+    except SourceContextUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+def _source_analysis_selection(request: Request, payload: GoalIn):
+    if payload.knowledge_context is None:
+        return None
+    from maverick.knowledge_task_context import SourceContextUnavailable, validate_selection
+    if payload.template or payload.domain or payload.director_profile or payload.params:
+        raise HTTPException(422, "Selected knowledge is available only for a source analysis task, without specialist tools or workflow execution.")
+    if not (request.headers.get("Idempotency-Key") or "").strip():
+        raise HTTPException(422, "Keep one request identity for this source analysis and reconcile it before retrying.")
+    from .draft_api import context_for
+    if payload.knowledge_context.context != context_for(request):
+        raise HTTPException(409, "Account or workspace changed. Select sources again in the current workspace.")
+    selection = payload.knowledge_context.model_dump(exclude={"context"}, by_alias=True)
+    try:
+        validate_selection(caller_principal(request) or "", selection)
+    except SourceContextUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return selection
 
 
 def _api_director(payload: GoalIn, title: str, description: str):

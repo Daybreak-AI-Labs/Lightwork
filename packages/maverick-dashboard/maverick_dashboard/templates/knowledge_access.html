@@ -66,6 +66,21 @@
     <div id="ka-detail"></div>
   </section>
 
+  <section class="panel" id="source-analysis" aria-labelledby="source-analysis-heading">
+    <h2 id="source-analysis-heading">Analyze selected sources</h2>
+    <p class="muted">Open source details and choose up to five exact versions. This task can write an analysis with the configured AI; it cannot use action tools. Selecting a source does not grant additional access.</p>
+    <p id="sa-policy" role="status">Checking current source-analysis policy.</p>
+    <ul id="sa-sources" aria-label="Selected source versions"></ul>
+    <form id="sa-form" class="ka-form" autocomplete="off">
+      <label class="ka-field ka-field--wide" for="sa-title">Task title<input id="sa-title" class="input" required maxlength="200"></label>
+      <label class="ka-field ka-field--wide" for="sa-description">What should the analysis answer?<textarea id="sa-description" class="textarea" required maxlength="16000" rows="3"></textarea></label>
+      <button id="sa-start" class="btn btn--primary" type="submit" disabled>Review and start analysis</button>
+      <button id="sa-recover" class="btn" type="button" hidden>Check previous submission</button>
+    </form>
+    <p id="sa-status" role="status" aria-live="polite"></p>
+    <div id="sa-output" aria-live="polite"></div>
+  </section>
+
   <section class="ka-grid" aria-label="Knowledge rights requests">
     <div class="panel">
       <div class="section-head">
@@ -131,4 +146,4 @@
   <noscript><p class="panel">JavaScript is required to revalidate and display governed knowledge sources.</p></noscript>
 </section>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-access-state.js" defer></script><script src="/static/lightwork-knowledge-access.js" defer></script><script src="/static/lightwork-knowledge-library.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-access-state.js" defer></script><script src="/static/lightwork-knowledge-access.js" defer></script><script src="/static/lightwork-knowledge-library.js" defer></script><script src="/static/lightwork-source-analysis.js" defer></script>{% endblock %}

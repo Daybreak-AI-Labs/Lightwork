@@ -342,6 +342,31 @@ def _registry_purposes(service, tenant: str, actor: str) -> list[str]:
     return service.available_purposes(tenant, actor)
 
 
+@router.get("/task-policy")
+def task_policy(request: Request, response: Response):
+    from maverick.knowledge_task_context import enabled
+    from maverick.runner import configured_max_dollars, configured_max_wall_seconds
+    _, _, context = _binding(request, response)
+    return {"context": context, "enabled": enabled(), "max_dollars": configured_max_dollars(),
+            "max_wall_seconds": configured_max_wall_seconds(),
+            "mode": "source_analysis", "maximum_sources": 5}
+
+
+@router.get("/analyses/{goal_id}")
+def source_analysis(request: Request, response: Response, goal_id: int):
+    from maverick.knowledge_task_context import SourceContextUnavailable, read_analysis
+
+    from .api import _world
+    _, actor, context = _binding(request, response)
+    try:
+        value = read_analysis(_world(), goal_id, actor)
+    except SourceContextUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, "Current source checks are unavailable. No analysis was released.") from exc
+    return {"context": context, **value}
+
+
 @router.get("/purposes")
 async def purposes(request: Request, response: Response):
     """The uses your approved sources allow, for the search picker.
@@ -646,3 +671,8 @@ __all__ = [
     "page_router",
     "router",
 ]
+
+
+@page_router.get("/static/lightwork-source-analysis.js", include_in_schema=False)
+def source_analysis_script():
+    return FileResponse(_STATIC_DIR / "lightwork-source-analysis.js", media_type="application/javascript")

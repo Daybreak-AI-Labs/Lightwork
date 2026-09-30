@@ -105,6 +105,93 @@ def job_execute(request, selection, arguments, native, operation):
     return Outcome("queued" if native["action"] == "resume" else "confirmed", "Rebuild action recorded. Refresh native progress for its confirmed outcome.", value["job"], background=background)
 
 
+class AnalysisInput(StrictInput):
+    purpose: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
+    source: str = Field(pattern=r"^[a-f0-9]{64}$")
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=16000)
+
+
+def _analysis_catalog(request):
+    from fastapi import Response
+    from maverick.knowledge_task_context import enabled
+
+    from .knowledge_access_api import _binding, _service, task_policy
+    tenant, actor, context = _binding(request, Response())
+    if not enabled():
+        raise HTTPException(409, "An administrator can enable source analysis in Knowledge settings.")
+    service = _service(request)
+    purposes = service.available_purposes(tenant, actor)
+    rows = []
+    for purpose in purposes[:20]:
+        page = service.search(tenant, actor, query="", purpose=purpose, limit=20)
+        rows.extend({"key": digest(item["reference"]), "reference": item["reference"],
+                     "title": item["title"], "purpose": purpose} for item in page["items"])
+    return context, rows, task_policy(request, Response())
+
+
+def analysis_snapshot(request, selection):
+    context, rows, policy = _analysis_catalog(request)
+    purposes = sorted({row["purpose"] for row in rows})
+    choices = {purpose: [{"value": row["key"], "label": row["title"] + " / " + row["reference"]["version"]}
+                         for row in rows if row["purpose"] == purpose] for purpose in purposes}
+    return Snapshot(digest([context, rows, policy]), "Approved knowledge source versions",
+        "Prepare one tool-free AI analysis. For multiple sources or further pages use Knowledge's source picker.",
+        fields=[{"name": "purpose", "label": "Permitted use", "kind": "select", "required": True,
+                 "choices": [{"value": purpose, "label": purpose} for purpose in purposes]},
+                {"name": "source", "label": "Exact source version", "kind": "select", "required": True,
+                 "depends_on": "purpose", "choices_by": choices},
+                {"name": "title", "label": "Task title", "kind": "text", "required": True},
+                {"name": "description", "label": "What should the analysis answer?", "kind": "textarea", "required": True}],
+        blocked="No currently approved source is available. Open Knowledge to request fresh evidence." if not rows else "")
+
+
+def analysis_prepare(request, selection, arguments):
+    from maverick.knowledge_task_context import validate_selection
+
+    from .auth import caller_principal
+    context, rows, policy = _analysis_catalog(request)
+    chosen = next((row for row in rows if row["key"] == arguments["source"] and row["purpose"] == arguments["purpose"]), None)
+    if chosen is None:
+        raise HTTPException(409, "Source changed. Select current evidence again.")
+    source = {"references": [chosen["reference"]], "purpose": arguments["purpose"]}
+    validate_selection(caller_principal(request), source)
+    return Preview("Send the reviewed request and this exact source excerpt to the configured AI. No action tools; current source access is required to open the private analysis.",
+                   changes=[{"label": "Source", "before": "No task", "after": chosen["title"] + " / " + chosen["reference"]["version"]},
+                            {"label": "Spending ceiling", "before": "No AI request", "after": policy["max_dollars"]},
+                            {"label": "Time limit in seconds", "before": "No AI request", "after": policy["max_wall_seconds"]}],
+                   native={"title": arguments["title"], "description": arguments["description"], "max_depth": 1,
+                           "knowledge_context": {"context": context, **source}})
+
+
+def analysis_recover(request, selection, arguments, native, operation):
+    from .api import _world
+    from .auth import caller_principal
+    from .goal_submission import lookup_receipt
+    try:
+        receipt, goal = lookup_receipt(_world(), key=operation, owner=caller_principal(request) or "", kind="api")
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+    return Outcome("replayed", "Source-analysis request already recorded. Check its task state; no AI attempt was repeated.",
+                   {"goal_id": goal.id, "state": goal.status, "submission_state": receipt["state"], "href": "/knowledge-access#analysis=" + str(goal.id)})
+
+
+def analysis_execute(request, selection, arguments, native, operation):
+    from fastapi import BackgroundTasks, Request, Response
+
+    from .api import create_goal
+    from .api_schemas import GoalIn
+    headers = [(key, value) for key, value in request.scope["headers"] if key.lower() != b"idempotency-key"]
+    scoped = Request({**request.scope, "headers": [*headers, (b"idempotency-key", operation.encode())]}, receive=request.receive)
+    background = BackgroundTasks()
+    goal = create_goal(scoped, GoalIn(**native), background, Response())
+    return Outcome("queued", "Source-analysis task recorded. Open its current status and private analysis in Knowledge.",
+                   {"goal_id": goal.id, "state": goal.status, "href": "/knowledge-access#analysis=" + str(goal.id)}, background=background)
+
+
 def entries():
-    return (Adapter("knowledge.rebuild", "Rebuild document search", "learning", "/knowledge-access", ("/knowledge-access",), RebuildInput, rebuild_snapshot, rebuild_prepare, rebuild_execute, rebuild_recover),
+    return (Adapter("knowledge.source_analysis", "Analyze an approved source", "learning", "/knowledge-access#source-analysis", ("/knowledge-access",), AnalysisInput, analysis_snapshot, analysis_prepare, analysis_execute, analysis_recover),
+            Adapter("knowledge.rebuild", "Rebuild document search", "learning", "/knowledge-access", ("/knowledge-access",), RebuildInput, rebuild_snapshot, rebuild_prepare, rebuild_execute, rebuild_recover),
             Adapter("knowledge.rebuild_job", "Review or control rebuild progress", "learning", "/knowledge-access", ("/knowledge-access",), JobInput, job_snapshot, job_prepare, job_execute))

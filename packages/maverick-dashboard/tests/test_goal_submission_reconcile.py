@@ -117,9 +117,12 @@ def test_missing_receipt_stays_unknown_and_denied_owner_cannot_read_private_goal
     store = SubmissionStore(world)
     receipt = store.create(token="private", fingerprint="a" * 64, owner="user:alice", title="Private", description="secret", manifest=[])
     headers = {"Idempotency-Key": "private"}
+    from maverick_dashboard import auth
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:bob")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:bob")
     missing = client.get("/api/v1/goal-submissions/receipt?kind=chat", headers=headers)
     assert missing.status_code == 404 and missing.headers["cache-control"] == "no-store"
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
     response = client.get("/api/v1/goal-submissions/receipt?kind=chat", headers=headers)
     assert response.status_code == 200 and response.json()["goal"]["id"] == receipt["goal_id"]

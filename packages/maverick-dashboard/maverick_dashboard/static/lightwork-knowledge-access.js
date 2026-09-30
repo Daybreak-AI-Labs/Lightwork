@@ -480,6 +480,7 @@
   }
 
   function clearPrivate() {
+    window.dispatchEvent(new CustomEvent("lightwork:knowledge-cleared"));
     resetSearch();
     announce("Private knowledge was cleared. Reload to recheck the current account and workspace.", true);
     currentItems = [];
@@ -653,6 +654,17 @@
     detail.appendChild(history);
     detail.appendChild(node("p", "ka-honesty", value.training_permission_notice));
     detailPanel.hidden = false;
+    var use = node("button", "btn", "Use in source analysis");
+    use.type = "button";
+    use.addEventListener("click", function () {
+      window.dispatchEvent(new CustomEvent("lightwork:source-selected", {detail: {
+        reference: value.reference, title: value.title, purpose: value.eligibility.purpose,
+        fresh_until: value.eligibility.fresh_until, context: context
+      }}));
+      var composer = document.getElementById("source-analysis");
+      if (composer) composer.scrollIntoView({block: "center"});
+    });
+    detail.appendChild(use);
     selectedReference = value.reference;
     if (requestSource) {
       requestSource.textContent = value.title + " · version " + value.reference.version;

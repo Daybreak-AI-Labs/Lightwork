@@ -5968,7 +5968,11 @@ def pick_knowledge_access() -> dict[str, bool]:
         "enable": _q_confirm(
             "Enable governed Knowledge in the app (recommended)?",
             default=True,
-        )
+        ),
+        "task_context": _q_confirm(
+            "Allow tool-free AI tasks using employee-selected approved source versions?",
+            default=False,
+        ),
     }
 
 
@@ -6939,7 +6943,11 @@ def _cfg_knowledge_access(knowledge_access: dict[str, Any] | None) -> list[str]:
     enabled = knowledge_access.get("enable")
     if type(enabled) is not bool:
         raise ValueError("knowledge access enable must be boolean")
-    return ["", "[knowledge_access]", f"enable = {str(enabled).lower()}"]
+    task_context = knowledge_access.get("task_context", False)
+    if type(task_context) is not bool:
+        raise ValueError("knowledge task context must be boolean")
+    return ["", "[knowledge_access]", f"enable = {str(enabled).lower()}",
+            f"task_context = {str(task_context).lower()}"]
 
 
 def _cfg_ekko(ekko: dict[str, Any] | None) -> list[str]:

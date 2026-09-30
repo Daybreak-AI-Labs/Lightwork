@@ -162,6 +162,22 @@ class GoalResumeIn(BaseModel):
     max_dollars: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 
+class TaskSourceReference(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["dataset"]
+    asset_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    version: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reference_schema: Literal["lightwork.research-registry-ref.v1"] = Field(default="lightwork.research-registry-ref.v1", alias="schema")
+
+
+class KnowledgeContextIn(BaseModel):
+    model_config = {"extra": "forbid"}
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    purpose: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
+    references: list[TaskSourceReference] = Field(min_length=1, max_length=5)
+
+
 class GoalIn(BaseModel):
     title: str = Field(..., max_length=GOAL_TITLE_MAX_LENGTH)
     # Bound the description like the title: it flows into SQLite, the at-rest
@@ -180,6 +196,7 @@ class GoalIn(BaseModel):
     # Director mode: an autonomy level from [director] profiles. It can only
     # tighten consent and review checkpoints and lower the spending cap.
     director_profile: str | None = Field(None, max_length=40)
+    knowledge_context: KnowledgeContextIn | None = None
 
 
 class GoalOut(BaseModel):

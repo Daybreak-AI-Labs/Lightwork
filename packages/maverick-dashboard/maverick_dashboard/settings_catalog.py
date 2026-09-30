@@ -2137,6 +2137,12 @@ _POLICY: tuple[Setting, ...] = (
       "exclusion and deletion.", "toggle", "Memory & learning", True, "maverick.config",
       subgroup="Knowledge library", env=("MAVERICK_KNOWLEDGE_ACCESS",)),
 
+    S("knowledge_access", "task_context", "Tasks that analyze selected approved sources",
+      "Allow named workspace members to select exact source versions for tool-free AI analysis. "
+      "Source permission is checked again before AI use, publication and opening the result.",
+      "toggle", "Memory & learning", False, "maverick.knowledge_task_context",
+      subgroup="Knowledge library"),
+
     # ----------------------------------------------------- AI governance
     S("eu_ai_incidents", "authorities", "People who decide serious AI incident reports",
       "Each person listed may make reporting decisions on serious AI incidents, in the role "

@@ -12,17 +12,17 @@
   },
   {
     "id": "LW-113",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "Shared keyboard finder explicit business-metadata vs approved-knowledge modes; current-purpose picker; record_search_api delegates native knowledge ACL service and independently rechecks account/workspace before returning.",
-      "Exact-version deep link reopens through native governed detail; no source text in URL and no model called by either mode."
+      "Exact-version deep link reopens through native governed detail; no source text in URL and no model called by either mode.",
+      "LW115 exact selected-source task admission rechecks current ACL/purpose/source at queue start, provider dispatch and private output read; no metadata search sends content to a model."
     ],
     "validation": [
-      "12 local record search tests passed, including metadata route never calling knowledge service, native ACL refusal and exact-version link. JS syntax passed; JS fixture execution awaiting shared jsdom dependencies."
+      "12 local record-search Python tests and 7 shared-finder JS fixtures passed; native denied sources never supply snippets/counts; metadata mode never calls knowledge service."
     ],
     "remaining": [
-      "Queued-use and new-task attachment current-source enforcement is being implemented in LW115; historical metadata paging remains LW114.",
-      "Browser/large-fixture qualification and JS fixtures pending."
+      "Integrated real-browser and installed PostgreSQL qualification; historical metadata scale is tracked independently in LW114."
     ]
   },
   {
@@ -38,13 +38,20 @@
   },
   {
     "id": "LW-115",
-    "status": "planned",
-    "implementation_evidence": [],
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "knowledge_task_context.py immutable owner/tenant/brief/exact-version binding, atomic source-analysis admission marker, existing Budget/provider authority, one tool-free physical model attempt, current source revalidation at dispatch/publication/read, no automatic paid retry.",
+      "Native Knowledge source picker (up to five), purpose/freshness review, private analysis with exact source links, unknown-submission reconciliation and explicit saved-draft cancellation; ordinary task history/export stores only status and link, so task copies cannot inherit content access.",
+      "knowledge_access.task_context Settings/installer gate default false; product_operations_knowledge.py typed native source-analysis operation; docs/knowledge-source-analysis.md."
+    ],
     "validation": [
-      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+      "21 focused local Python tests passed for source runtime/admission, installer and original receipt reconciliation; fake models only.",
+      "24 Knowledge/source-analysis JS fixtures passed after source-analysis fixture repair; additional 7 shared-finder JS tests passed.",
+      "Typed operation dependency loaded from committed settings foundation for local verification only; focused Ruff and JS syntax passed."
     ],
     "remaining": [
-      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+      "Integrated suites, live browser rendering and PostgreSQL concurrency qualification remain; no actual provider or production calls made.",
+      "General action agents do not accept selected-source bindings: this implemented workflow is explicitly a tool-free source analysis. Already-transmitted provider content cannot be recalled."
     ]
   },
   {
