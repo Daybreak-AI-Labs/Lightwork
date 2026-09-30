@@ -24,8 +24,7 @@ window.lwVoice = (function () {
     if (!window.speechSynthesis) return [];
     var all = window.speechSynthesis.getVoices() || [];
     cached = all.filter(function (v) {
-      return (v.lang || '').toLowerCase().indexOf('en') === 0 &&
-             !AVOID.test(v.name || '');
+      return !AVOID.test(v.name || '');
     });
     return cached;
   }
@@ -50,7 +49,7 @@ window.lwVoice = (function () {
     return list.slice().sort(function (a, b) { return score(b) - score(a); });
   }
 
-  function best() {
+  function best(contentLanguage) {
     var list = options();
     if (!list.length) return null;
     var want = null;
@@ -60,7 +59,16 @@ window.lwVoice = (function () {
         if (list[i].name === want) return list[i];
       }
     }
-    return list[0];
+    var language = String(contentLanguage || '').toLowerCase();
+    if (/^[a-z]{2,3}(?:-[a-z0-9]+)*$/.test(language) && language !== 'und') {
+      var exact = list.find(function (voice) { return (voice.lang || '').toLowerCase() === language; });
+      if (exact) return exact;
+      var base = language.split('-')[0];
+      var matching = list.find(function (voice) { return (voice.lang || '').toLowerCase().split('-')[0] === base; });
+      if (matching) return matching;
+    }
+    // Unknown source language must not be guessed from interface preferences.
+    return list.find(function (voice) { return voice.default; }) || null;
   }
 
   function setVoice(name) {
@@ -94,8 +102,9 @@ window.lwVoice = (function () {
     [/\s{2,}/g, ' '],
   ];
 
-  function humanize(text) {
+  function humanize(text, contentLanguage) {
     var out = String(text == null ? '' : text);
+    if (contentLanguage && !/^en(?:-|$)/i.test(contentLanguage)) return out.trim();
     for (var i = 0; i < SAY.length; i++) out = out.replace(SAY[i][0], SAY[i][1]);
     return out.trim();
   }

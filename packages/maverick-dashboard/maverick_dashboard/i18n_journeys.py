@@ -23,11 +23,12 @@ from .i18n_journey_resume import ROWS as RESUME_ROWS
 from .i18n_journey_review import ROWS as REVIEW_ROWS
 from .i18n_journey_shell import ROWS as SHELL_ROWS
 from .i18n_journey_task_controls import ROWS as TASK_CONTROL_ROWS
+from .i18n_journey_voice_controls import ROWS as VOICE_CONTROL_ROWS
 from .i18n_journey_workflow import ROWS as WORKFLOW_ROWS
 
 ROWS = [*BUDGET_ROWS, *COMMON_ROWS, *EMPLOYEE_ROWS, *REVIEW_ROWS, *WORKFLOW_ROWS, *CONVERSATION_ROWS,
         *RECEIPT_ROWS, *RECOVERY_CONTROL_ROWS, *RESUME_ROWS, *SHELL_ROWS, *TASK_CONTROL_ROWS,
-        *LIVE_CHAT_ROWS, *PREFERENCE_ROWS]
+        *LIVE_CHAT_ROWS, *PREFERENCE_ROWS, *VOICE_CONTROL_ROWS]
 
 TRANSLATION_LANGS = ("fr", "de", "ja", "zh")
 # Rows are source, French, German, Japanese, Chinese. No Arabic machine completion.

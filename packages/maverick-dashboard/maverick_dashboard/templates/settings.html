@@ -299,26 +299,26 @@
     </form>
   </div>
 
-  <div class="section-head" data-settings-group="models"><h2 id="voice-model-setup">Voice dictation on this computer</h2></div>
+  <div class="section-head" data-settings-group="models"><h2 id="voice-model-setup">{{ ui("Voice dictation on this computer") }}</h2></div>
   <section class="panel voice-setup" data-settings-group="models" aria-labelledby="voice-model-setup" data-draft-recovery="off">
-    <p>Get voice dictation ready on the computer running Lightwork. The voice model is shared by all its workspaces. Your speech-provider choice stays the same.</p>
+    <p>{{ ui('Get voice dictation ready on the computer running Lightwork. The voice model is shared by all its workspaces. Your speech-provider choice stays the same.') }}</p>
     <p id="voice-setup-policy" class="muted"></p>
-    <p><strong>Voice model:</strong> <span id="voice-setup-model">Checking…</span></p>
+    <p><strong>{{ ui('Voice model:') }}</strong> <span id="voice-setup-model">{{ ui('Checking…') }}</span></p>
     <p id="voice-setup-model-details"></p>
-    <details><summary>Technical details (for your IT team)</summary><p id="voice-setup-technical"></p></details>
+    <details><summary>{{ ui('Technical details (for your IT team)') }}</summary><p id="voice-setup-technical"></p></details>
     <p id="voice-setup-readiness" class="muted"></p>
-    <label class="voice-setup-confirm" for="voice-setup-confirm"><input id="voice-setup-confirm" type="checkbox" aria-describedby="voice-setup-model-details" disabled> I agree to check the voice model already on this computer, or download it from the source shown, using the disk space shown.</label>
+    <label class="voice-setup-confirm" for="voice-setup-confirm"><input id="voice-setup-confirm" type="checkbox" aria-describedby="voice-setup-model-details" disabled>{{ ui('I agree to check the voice model already on this computer, or download it from the source shown, using the disk space shown.') }}</label>
     <div class="voice-setup-actions">
-      <button class="btn btn--primary" id="voice-setup-start" type="button" disabled>Check or download voice model</button>
-      <button class="btn" id="voice-setup-cancel" type="button" disabled>Stop download</button>
-      <button class="btn" id="voice-setup-refresh" type="button">Refresh status</button>
+      <button class="btn btn--primary" id="voice-setup-start" type="button" disabled>{{ ui('Check or download voice model') }}</button>
+      <button class="btn" id="voice-setup-cancel" type="button" disabled>{{ ui('Stop download') }}</button>
+      <button class="btn" id="voice-setup-refresh" type="button">{{ ui('Refresh status') }}</button>
     </div>
-    <progress id="voice-setup-progress" aria-label="Voice model download progress" hidden></progress>
+    <progress id="voice-setup-progress" aria-label="{{ ut("Voice model download progress") }}" hidden></progress>
     <p id="voice-setup-progress-text" class="muted"></p>
-    <p id="voice-setup-status" role="status" aria-live="polite">Checking voice setup…</p>
-    <p><a class="btn" id="voice-setup-try" href="/chat" hidden>Try dictation in Chat</a></p>
-    <p class="muted">You can leave Settings and come back to check progress. Lightwork checks the downloaded file before using it.</p>
-    <p><a href="/settings/voice-unlock">Voice unlock: record your voice so spoken requests are checked against it</a></p>
+    <p id="voice-setup-status" role="status" aria-live="polite">{{ ui('Checking voice setup…') }}</p>
+    <p><a class="btn" id="voice-setup-try" href="/chat" hidden>{{ ui('Try dictation in Chat') }}</a></p>
+    <p class="muted">{{ ui('You can leave Settings and come back to check progress. Lightwork checks the downloaded file before using it.') }}</p>
+    <p><a href="/settings/voice-unlock">{{ ui('Voice unlock: record your voice so spoken requests are checked against it') }}</a></p>
   </section>
 
   <div class="section-head" data-settings-group="general"><h2>Spending per task</h2></div>

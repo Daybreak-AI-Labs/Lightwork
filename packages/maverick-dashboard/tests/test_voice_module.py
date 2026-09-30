@@ -26,7 +26,9 @@ def test_base_loads_module_and_chat_fallback_uses_it():
     assert "asset('lightwork-read-aloud.js')" in chat
     controller = client.get("/static/lightwork-read-aloud.js")
     assert controller.status_code == 200
-    # Every browser chunk uses the shared humanizer and selected natural voice.
-    assert "window.lwVoice.humanize(text)" in controller.text
-    assert "window.lwVoice.best()" in controller.text
+    # Only the result's own declared language may influence playback. Unknown
+    # user content is never rewritten with the interface language's prose.
+    assert "window.lwVoice.humanize(text, contentLanguage)" in controller.text
+    assert "window.lwVoice.best(contentLanguage)" in controller.text
+    assert "source.getAttribute('lang') || 'und'" in controller.text
     assert "utterance.voice = voice" in controller.text
