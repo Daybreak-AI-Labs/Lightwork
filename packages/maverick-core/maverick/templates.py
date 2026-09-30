@@ -252,6 +252,23 @@ def _optional_template_budget(value: float | None) -> float | None:
     return amount
 
 
+def _template_parameters(params, title, body):
+    clean_params: list[str] = []
+    for p in (str(p).strip() for p in (params or [])):
+        if re.match(r"^[A-Za-z_]\w*$", p) and p not in clean_params:
+            clean_params.append(p)
+    # Reconcile declared params with the {{placeholders}} the title/body actually
+    # use: an undeclared placeholder would render as a literal "{{x}}" in the
+    # goal, and the scheduler/trigger UI (which prompts from tpl.params) would
+    # never ask the operator to fill it. Fold any used-but-undeclared placeholder
+    # into params so every slot is fillable.
+    for m in _VAR.finditer(f"{title}\n{body}"):
+        placeholder = m.group(1)
+        if placeholder not in clean_params:
+            clean_params.append(placeholder)
+    return clean_params
+
+
 def save_user_template(
     name: str,
     *,
@@ -298,19 +315,7 @@ def save_user_template(
     body = (body or "").strip()
     if not body:
         raise ValueError("template body must not be empty")
-    clean_params: list[str] = []
-    for p in (str(p).strip() for p in (params or [])):
-        if re.match(r"^[A-Za-z_]\w*$", p) and p not in clean_params:
-            clean_params.append(p)
-    # Reconcile declared params with the {{placeholders}} the title/body actually
-    # use: an undeclared placeholder would render as a literal "{{x}}" in the
-    # goal, and the scheduler/trigger UI (which prompts from tpl.params) would
-    # never ask the operator to fill it. Fold any used-but-undeclared placeholder
-    # into params so every slot is fillable.
-    for m in _VAR.finditer(f"{title}\n{body}"):
-        placeholder = m.group(1)
-        if placeholder not in clean_params:
-            clean_params.append(placeholder)
+    clean_params = _template_parameters(params, title, body)
     from .template_parameters import normalize_schema
 
     schema = normalize_schema(parameter_schema, clean_params)

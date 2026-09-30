@@ -1,9 +1,9 @@
 """Permission-scoped connection attention and explicit dependency review."""
 from __future__ import annotations
 
-import time
 import hashlib
 import json
+import time
 
 from .auth import has_permission
 
@@ -67,6 +67,40 @@ def _tools(value):
     return set()
 
 
+def _active_flow_impact(request, name, record, owner, items, coverage):
+    from fastapi import HTTPException
+    from maverick.flow import store
+
+    from .api import _assert_flow_access
+
+    try:
+        count = 0
+        for run in store.iter_run_metadata(owner=owner):
+            if run.status in {"done", "failed", "cancelled"}:
+                continue
+            count += 1
+            if count > 2000:
+                break
+            # Approval authority binds the credential inventory. Any connection
+            # generation change can invalidate an owner's pending approval,
+            # even when a dynamic tool selection has not happened yet.
+            flow = store.load_flow_snapshot(run.definition_digest) if run.definition_digest else store.load_flow(run.flow_id)
+            if flow is None:
+                continue
+            try:
+                _assert_flow_access(request, flow)
+            except HTTPException:
+                continue
+            if run.owner == record.get("owner") or _references(flow.to_dict(), name) or record["connector"] in _tools(flow.to_dict()):
+                items.append({"kind": "active_flow", "id": run.run_id, "title": flow.name,
+                              "revision": str(run.updated), "owner": run.owner,
+                              "binding": "run authority includes saved credential inventory", "state": run.status,
+                              "external_outcome": "unknown; never replayed by connection repair", "href": "/flows"})
+        coverage.append({"kind": "active flows and approvals", "state": "partial" if count > 2000 else "current"})
+    except Exception:
+        coverage.append({"kind": "active flows and approvals", "state": "unavailable"})
+
+
 def impact(request, name):
     """Review authorized exact references and explicitly labelled fallback use.
 
@@ -109,32 +143,7 @@ def impact(request, name):
         coverage.append({"kind": "saved flows", "state": "current"})
     except Exception:
         coverage.append({"kind": "saved flows", "state": "unavailable"})
-    try:
-        count = 0
-        for run in store.iter_run_metadata(owner=owner):
-            if run.status in {"done", "failed", "cancelled"}:
-                continue
-            count += 1
-            if count > 2000:
-                break
-            # Approval authority binds the credential inventory. Any connection
-            # generation change can invalidate an owner's pending approval,
-            # even when a dynamic tool selection has not happened yet.
-            flow = store.load_flow_snapshot(run.definition_digest) if run.definition_digest else store.load_flow(run.flow_id)
-            if flow is None:
-                continue
-            try:
-                _assert_flow_access(request, flow)
-            except HTTPException:
-                continue
-            if run.owner == record.get("owner") or _references(flow.to_dict(), name) or record["connector"] in _tools(flow.to_dict()):
-                items.append({"kind": "active_flow", "id": run.run_id, "title": flow.name,
-                              "revision": str(run.updated), "owner": run.owner,
-                              "binding": "run authority includes saved credential inventory", "state": run.status,
-                              "external_outcome": "unknown; never replayed by connection repair", "href": "/flows"})
-        coverage.append({"kind": "active flows and approvals", "state": "partial" if count > 2000 else "current"})
-    except Exception:
-        coverage.append({"kind": "active flows and approvals", "state": "unavailable"})
+    _active_flow_impact(request, name, record, owner, items, coverage)
     try:
         from .app import _world
         from .auth import can_access_goal
