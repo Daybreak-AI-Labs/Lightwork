@@ -347,6 +347,8 @@
     <button type="button" id="stream-retry" class="btn btn--ghost" hidden>Reconnect updates</button>
     <p id="question-status" role="status" aria-live="polite"></p>
     <button type="button" id="question-retry" class="btn btn--ghost" hidden>Retry loading question</button>
+    <button type="button" id="answer-receipt-check" class="btn btn--ghost" hidden>Check answer receipt</button>
+    <p class="muted">Question answers can include documents, PDFs, images and text. Audio and video need a separately reviewed transcription task.</p>
     <p id="stream-error" role="alert" class="muted" style="display: none; margin: 0 0 var(--space-4); color: var(--danger);"></p>
     <p id="answer-refresh-status" class="muted" role="status" aria-live="polite"></p>
     <button type="button" id="answer-refresh" class="btn btn--ghost" hidden>Refresh saved result and controls</button>
@@ -529,7 +531,7 @@
       // composer never flashes the working state on a finished chat.
       let done = {{ (not run_open|default(true))|tojson }};
       let pollDelay = 2000;
-      let currentQuestionId = null;
+      let currentQuestionId = null, currentQuestionVersion = null, pendingClarification = null;
       let currentStatus = {{ goal.status|tojson }};
       let lastResult = {{ (goal.result or '')|tojson }};
 
@@ -712,7 +714,7 @@
         openStream();
       }
 
-      async function pollQuestions() {
+      async function pollQuestions(reviewChange = false) {
         if (questionLoading) return;
         questionLoading = true;
         const status = document.getElementById('question-status');
@@ -728,10 +730,22 @@
           const j = await r.json();
           if (!Array.isArray(j.open_questions)) throw new Error('The question response could not be read. Retry loading it.');
           const qs = ['cancelled', 'done', 'failed'].includes(currentStatus) ? [] : j.open_questions;
-          questionsFresh = true; status.textContent = ''; retry.hidden = true;
+          if (submitting || (pendingClarification && pendingClarification.unconfirmed)) {
+            status.textContent = 'Check the pending answer receipt before answering another question.';
+            return;
+          }
+          if (!reviewChange && qs.length && currentQuestionId != null &&
+              (qs[0].id !== currentQuestionId || qs[0].version !== currentQuestionVersion) && answerInput.value.trim()) {
+            questionsFresh = false; retry.hidden = false;
+            status.textContent = 'The current question changed. Your draft is kept. Refresh and review the question before sending it.';
+            return;
+          }
+          questionsFresh = true; status.textContent = j.last_answer ? 'Earlier answer accepted with ' + j.last_answer.file_count + ' prepared file(s) on ' + new Date(j.last_answer.created_at * 1000).toLocaleString() + '. Any recovered composer draft is kept for you to review.' : ''; retry.hidden = true;
           if (qs.length) {
             const changed = currentQuestionId !== qs[0].id;
             currentQuestionId = qs[0].id;
+            currentQuestionVersion = qs[0].version;
+            questionText.textContent = qs[0].question;
             questionPanel.style.display = 'block';
             if (changed) questionText.textContent = qs[0].question;
           } else {
@@ -747,7 +761,7 @@
         } finally { clearTimeout(timeout); questionLoading = false; syncComposer(); }
       }
 
-      document.getElementById('question-retry').addEventListener('click', pollQuestions);
+      document.getElementById('question-retry').addEventListener('click', function () { pollQuestions(true); });
       const sendBtn = document.getElementById('answer-send');
       const composerHint = document.getElementById('composer-hint');
       const replyFiles = document.getElementById('reply-files');
@@ -782,11 +796,12 @@
       // The composer follows the run: answer an open question, wait (Stop
       // available) while Lightwork works, or send the next message.
       function syncComposer() {
+        if (submitting) return;
         const asking = currentQuestionId != null;
         const running = !done && !asking;
         const stoppable = ['pending', 'running', 'blocked'].includes(currentStatus);
-        if (replyAttach) { replyAttach.disabled = asking; replyAttach.title = asking ? 'File answers are not supported yet. Keep selected files for your next message, or add them to this task separately.' : 'Attach files to your next message'; }
-        if (replyFiles) replyFiles.disabled = asking;
+        if (replyAttach) { replyAttach.disabled = false; replyAttach.title = asking ? 'Attach a document, PDF, image or text file to your answer' : 'Attach files to your next message'; }
+        if (replyFiles) replyFiles.disabled = false;
         answerInput.placeholder = asking ? 'Reply to Lightwork…'
           : running ? 'Lightwork is working… you can type while you wait'
           : 'Message Lightwork…';
@@ -819,44 +834,93 @@
         });
       }
 
+      function clarificationSignature() {
+        return JSON.stringify([answerInput.value.trim(), currentQuestionId, currentQuestionVersion,
+          Array.from(replyFiles ? replyFiles.files : []).map(function (file) { return [file.name,file.size,file.type,file.lastModified]; })]);
+      }
+      async function acceptClarificationReceipt(receipt, attempt) {
+        const unchanged = clarificationSignature() === attempt.signature;
+        if (unchanged) {
+          if (answerForm.mvRecovery) await answerForm.mvRecovery.clear();
+          resetField();
+          window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail:{form:answerForm,recoveryCleared:true}}));
+        }
+        pendingClarification = null; document.getElementById('answer-receipt-check').hidden = true;
+        currentQuestionId = null; currentQuestionVersion = null; questionPanel.style.display = 'none';
+        recordExchange(attempt.question, attempt.answer);
+        actionMsg.textContent = 'Answer and ' + receipt.attachment_ids.length + ' prepared file(s) accepted.' +
+          (receipt.admitted ? ' A restart was reserved; task updates show its actual progress.' : ' Waiting for the remaining question or current worker checkpoint.') +
+          (unchanged ? '' : ' Your newer draft has been kept.');
+        if (receipt.admitted) resumeFollowing();
+        else { await pollQuestions(); syncComposer(); }
+      }
+      document.getElementById('answer-receipt-check').addEventListener('click', async function () {
+        if (!pendingClarification || submitting) return;
+        const attempt = pendingClarification, button = this; button.disabled = true;
+        const controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); },12000);
+        try {
+          const response = await fetch('/api/v1/goals/' + goalId + '/answer-receipts/' + encodeURIComponent(attempt.operation),
+            {credentials:'same-origin',cache:'no-store',signal:controller.signal});
+          const receipt = await response.json();
+          if (response.ok && receipt.received && receipt.operation_id === attempt.operation) await acceptClarificationReceipt(receipt, attempt);
+          else if (response.ok) actionMsg.textContent = 'No accepted answer receipt is available yet. The original request may still be finishing. Keep the draft and retry the same answer to check safely.';
+          else window.mvRenderError(actionMsg,response,'check the answer receipt',receipt);
+        } catch (failure) { actionMsg.textContent = 'The answer receipt could not be checked. Keep the draft and retry this check.'; }
+        finally { clearTimeout(timeout); button.disabled = false; }
+      });
       answerForm.addEventListener('submit', async function(ev) {
         ev.preventDefault();
         if (submitting) return;
         const text = answerInput.value.trim();
         if (!text) return;
         if (currentQuestionId != null) {
-          if (!questionsFresh) { composerMessage('Refresh the question before answering. Your answer has been kept.', true); return; }
-          if (replyFiles && replyFiles.files.length) { composerMessage('Files cannot be sent with a clarification answer yet. Remove them here or add them to this task before answering. Your text and files have been kept.', true); return; }
-          const qid = currentQuestionId;
-          const ans = text;
-          submitting = true;
-          answerInput.disabled = true;
-          actionMsg.textContent = '';
+          if (!questionsFresh || !currentQuestionVersion) { composerMessage('Refresh the question before answering. Your answer has been kept.', true); return; }
+          const signature = clarificationSignature();
+          if (pendingClarification && pendingClarification.unconfirmed && signature !== pendingClarification.signature) {
+            composerMessage('Check the earlier answer receipt before sending an edited answer. Your draft and files have been kept.', true); return;
+          }
+          if (!pendingClarification || signature !== pendingClarification.signature) pendingClarification = {
+            operation: crypto.randomUUID(), questionId: currentQuestionId, questionVersion: currentQuestionVersion,
+            signature: signature, answer: text, question: questionText.textContent, unconfirmed: false
+          };
+          const attempt = pendingClarification;
+          const body = new FormData(answerForm);
+          body.set('question_id', String(attempt.questionId)); body.set('answer', text);
+          body.set('expected_question', attempt.questionVersion); body.set('operation_id', attempt.operation);
+          body.set('expected_context', {{ conversation_context|tojson }});
+          const controls = Array.from(answerForm.querySelectorAll('input,select,textarea,button'));
+          const before = controls.map(function (control) { return control.disabled; });
+          controls.forEach(function (control) { control.disabled = true; });
+          submitting = true; actionMsg.textContent = 'Preparing the selected evidence and saving your answer.';
+          const controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 45000);
           try {
-            const r = await fetch('/api/v1/goals/' + goalId + '/answer', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({question_id: qid, answer: ans}),
+            const r = await fetch('/api/v1/goals/' + goalId + '/answer-with-files', {
+              method: 'POST', body: body, credentials: 'same-origin', signal: controller.signal
             });
-            if (r.status === 204 && !r.redirected) {
-              if (answerForm.mvRecovery) await answerForm.mvRecovery.clear();
-              resetField();
-              window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: answerForm, recoveryCleared: true}}));
-              currentQuestionId = null;
-              questionPanel.style.display = 'none';
-              recordExchange(questionText.textContent, ans);
-              resumeFollowing();
-            } else {
-              const j = await r.json().catch(function() { return {}; });
-              actionMsg.style.color = 'var(--danger)';
-              actionMsg.textContent = cgErr(r, 'send your answer');
+            const receipt = await r.json().catch(function () { return {}; });
+            if (receipt.detail && receipt.detail.code === 'context_changed') {
+              resetField(); pendingClarification = null;
+              actionMsg.textContent = 'Your signed-in workspace changed. Reopen the task before sending private content.';
+              return;
             }
-          } catch (e) {
-            actionMsg.style.color = 'var(--danger)';
-            actionMsg.textContent = 'Could not send — check your connection and try again.';
+            if (r.redirected) {
+              attempt.unconfirmed = true; document.getElementById('answer-receipt-check').hidden = false;
+              actionMsg.textContent = 'Sign in again to check the answer receipt. Your draft and files have been kept.'; return;
+            }
+            if (r.ok && receipt.received && receipt.operation_id === attempt.operation) {
+              await acceptClarificationReceipt(receipt, attempt);
+            } else {
+              attempt.unconfirmed = r.status >= 500;
+              document.getElementById('answer-receipt-check').hidden = !attempt.unconfirmed;
+              window.mvRenderError(actionMsg, r, 'save your answer', receipt);
+              if (r.status === 409 && !attempt.unconfirmed) questionsFresh = false;
+            }
+          } catch (_) {
+            attempt.unconfirmed = true; document.getElementById('answer-receipt-check').hidden = false;
+            actionMsg.textContent = 'The answer receipt is unconfirmed. Your text and files are kept. Check the receipt or retry the same answer; an accepted answer will not restart twice.';
           } finally {
-            submitting = false;
-            answerInput.disabled = false;
+            clearTimeout(timeout); submitting = false;
+            controls.forEach(function (control, index) { control.disabled = before[index]; }); syncComposer();
           }
           return;
         }

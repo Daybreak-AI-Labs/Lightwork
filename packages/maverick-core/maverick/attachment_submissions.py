@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 
 SQLITE_SCHEMA = (
@@ -230,14 +230,14 @@ class SubmissionStore:
         return {"key": row[0], "goal_id": int(row[1]), "fingerprint": row[2], "state": row[3],
                 "detail": json.loads(self.open(row[4]))}
 
-    def admit(self, goal_id, records, *, publish=None):
+    def admit(self, goal_id, records, *, publish=None, connection=None, verify_existing=False):
         from .attachments import MAX_FILE_BYTES, MAX_GOAL_BYTES, AttachmentRejected
 
         if not records:
             return []
         if len(records) > 128:
             raise AttachmentRejected("Too many attachments in one batch")
-        with self.transaction(f"attachments:{goal_id}") as connection:
+        with (self.transaction(f"attachments:{goal_id}") if connection is None else nullcontext(connection)) as connection:
             params = (goal_id,)
             sql = "SELECT id FROM goals WHERE id=?"
             if not self.sqlite:
@@ -251,9 +251,10 @@ class SubmissionStore:
                                      (goal_id,)).fetchone()[0])
             terms = " OR ".join("(filename=? AND mime=? AND size_bytes=? AND sha256=?)" for _ in identities)
             values = (goal_id, *(value for identity in identities for value in identity))
-            existing = self.execute(connection, "SELECT id,filename,mime,size_bytes,sha256 FROM attachments "
+            existing = self.execute(connection, "SELECT id,filename,mime,size_bytes,sha256,path FROM attachments "
                                     f"WHERE goal_id=? AND ({terms})", values).fetchall()
             known = {(row[1], row[2], int(row[3]), row[4]): int(row[0]) for row in existing}
+            paths = {(row[1], row[2], int(row[3]), row[4]): row[5] for row in existing}
             novel = set(identities) - known.keys()
             if any(not 0 < item[2] <= MAX_FILE_BYTES for item in identities) or total + sum(item[2] for item in novel) > MAX_GOAL_BYTES:
                 raise AttachmentRejected("Per-goal attachment quota exceeded")
@@ -266,5 +267,17 @@ class SubmissionStore:
                     cursor = self.execute(connection, sql + ("" if self.sqlite else " RETURNING id"),
                                           (goal_id, *identity[:3], identity[3], str(record.path), time.time()))
                     known[identity] = int(cursor.lastrowid if self.sqlite else cursor.fetchone()[0])
+                    paths[identity] = str(record.path)
+                elif verify_existing:
+                    from pathlib import Path
+                    from .attachments import _verify_stored_attachment
+                    try:
+                        _verify_stored_attachment(Path(paths[identity]), identity[3])
+                    except (OSError, AttachmentRejected):
+                        if publish is None:
+                            raise
+                        repaired = publish(record)
+                        self.execute(connection, "UPDATE attachments SET path=? WHERE id=? AND goal_id=?",
+                                     (str(repaired.path), known[identity], goal_id))
                 ids.append(known[identity])
             return ids

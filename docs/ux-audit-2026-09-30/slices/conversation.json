@@ -15,10 +15,22 @@
   },
   {
     "id": "LW-003",
-    "status": "planned",
-    "implementation_evidence": "Clarification mode disables attachment selection, explains unsupported file answers and refuses to clear or silently submit a selected batch. Text/files remain intact.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Atomic text+file clarification admission, extraction readiness, version-bound answer and replay receipt still required; mitigation is not full acceptance."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "ChatThreads.answer_with_evidence atomically validates current owner/question fingerprint, admits verified prepared evidence, saves answer, reserves last-question restart and records actor-bound idempotent receipt using root v42 goal_mutation_receipts.",
+      "Multipart /answer-with-files stages and validates the complete batch; native local document extraction must finish before admission. Concurrent answers refuse before publication; transaction failures roll back metadata and clean attempt-exclusive unreferenced files when commit state is known.",
+      "Composer snapshots text/files before locking controls, preserves work on failures and uncertain responses, checks durable answer receipts, and replays the same operation without a second restart. Context mismatch clears private composer state; a changed question requires renewed review.",
+      "Question projection includes current question version and latest accepted answer receipt for reload recovery.",
+      "Question-file policy is explicit before selection: documents/PDFs/images/text are admitted; audio/video requires a separately reviewed transcription task, preventing automatic paid transcription or retry. Existing optional attachment S3 mirror semantics are preserved."
+    ],
+    "validation": [
+      "Python AST for 8 changed/new units, 7 JavaScript syntax units and git whitespace passed. Native atomic-race/upload/replay/permission/context regression tests authored.",
+      "User has now authorized local suites after all requested implementation; root coordinates those suites. No suites or provider calls executed in this checkpoint."
+    ],
+    "remaining": [
+      "Run native SQLite/PostgreSQL admission/concurrency, authenticated browser retained-file and account-switch cases, and installed attachment readiness checks.",
+      "Verify configured multi-host attachment mirroring separately; existing mirror remains best-effort. A process crash with indeterminate database availability retains private evidence instead of risking deletion of committed files."
+    ]
   },
   {
     "id": "LW-004",

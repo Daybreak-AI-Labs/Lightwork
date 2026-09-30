@@ -18,7 +18,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(projection, "context_for", lambda *args: "a" * 64)
     monkeypatch.setattr(app, "_voice_only_mode", lambda: False)
     with WorldModel(tmp_path / "world.db") as world:
-        goal_id = world.add_goal("Task", owner="user:alice")
+        goal_id = world.create_goal("Task", owner="user:alice")
         world.set_goal_status(goal_id, "running")
         yield world, goal_id
 

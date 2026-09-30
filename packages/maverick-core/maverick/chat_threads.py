@@ -31,6 +31,13 @@ class ChatRestart:
     conversation_id: int | None
 
 
+def question_version(question_id, asked_at, question):
+    import json
+
+    return hashlib.sha256(json.dumps([int(question_id), float(asked_at), str(question)],
+                                     ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+
 class ChatThreads:
     def __init__(self, world):
         self.store = SubmissionStore(world)
@@ -204,6 +211,56 @@ class ChatThreads:
                 self.require_idle(connection, binding.root_id, binding.owner, except_goal=goal_id)
             self._pending(connection, goal_id)
         return binding.conversation_id if binding is not None else None
+
+    def answer_with_evidence(self, goal_id, question_id, text, *, expected_question,
+                             operation_id, actor, request_hash, records, publish,
+                             require_admission, require_authority):
+        """Admit ready evidence, answer and last-question restart in one transaction.
+
+        Evidence publishers run only after the exact question and fresh owner
+        authority pass. Exact receipt replay never publishes or reserves again.
+        """
+        from .goal_mutations import _receipt, _record
+
+        with self._restart_transaction(goal_id) as (connection, binding, status):
+            require_authority()
+            def execute(sql, args=()):
+                return self.store.execute(connection, sql, args)
+            prior = _receipt(execute, self.store.open, goal_id, "clarification", operation_id, actor, request_hash)
+            if prior is not None:
+                return prior
+            if status in {"cancelled", "done", "completed", "failed", "error"}:
+                raise SubmissionConflict("This task is no longer waiting for an answer. Review it before restarting.")
+            questions = self._rows("SELECT id,asked_at,question FROM questions WHERE goal_id=? AND answer IS NULL",
+                                   (goal_id,), connection=connection)
+            question = next((row for row in questions if int(row[0]) == question_id), None)
+            if question is None or question_version(question[0], question[1], self.store.open(question[2])) != expected_question:
+                raise SubmissionConflict("The question changed or was answered. Your draft and selected files have been kept.")
+            restart = status == "blocked" and len(questions) == 1
+            if restart:
+                if binding is not None:
+                    self.require_idle(connection, binding.root_id, binding.owner, except_goal=goal_id)
+                require_admission()
+            # Identical filenames with different evidence would misbind companion text.
+            existing = execute("SELECT filename,sha256 FROM attachments WHERE goal_id=?", (goal_id,)).fetchall()
+            names = {row[0]: row[1] for row in existing}
+            for record in records:
+                if record.filename in names and names[record.filename] != record.sha256:
+                    raise SubmissionConflict("A different file already uses this name. Rename the selected file before answering.")
+                names[record.filename] = record.sha256
+            attachment_ids = list(dict.fromkeys(self.store.admit(goal_id, records, publish=publish, connection=connection, verify_existing=True)))
+            changed = execute("UPDATE questions SET answer=?,answered_at=? WHERE id=? AND goal_id=? AND answer IS NULL",
+                              (self.store.seal(text), time.time(), question_id, goal_id))
+            if changed.rowcount != 1:
+                raise SubmissionConflict("The question changed; reload before answering")
+            if restart:
+                self._pending(connection, goal_id)
+            result = {"received": True, "goal_id": goal_id, "question_id": question_id,
+                      "question_version": expected_question, "attachment_ids": attachment_ids,
+                      "admitted": restart, "conversation_id": binding.conversation_id if binding is not None else None,
+                      "operation_id": operation_id, "replayed": False}
+            _record(execute, self.store.seal, goal_id, "clarification", operation_id, actor, request_hash, result)
+        return result
 
     def answer(self, goal_id, question_id, text, *, require_admission):
         """Save a clarification and reserve its last-question restart atomically.

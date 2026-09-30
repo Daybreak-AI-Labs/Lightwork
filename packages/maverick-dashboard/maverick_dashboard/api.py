@@ -1728,6 +1728,28 @@ def goal_thread_history(request: Request, goal_id: int, before_id: int | None = 
             "before_id": turns[0].id if turns else before_id}
 
 
+@router.post("/goals/{goal_id}/answer-with-files")
+async def answer_question_with_files(
+    request: Request, goal_id: int, bg: BackgroundTasks,
+    question_id: int = Form(...), answer: str = Form(...),
+    expected_question: str = Form(...), operation_id: str = Form(...),
+    expected_context: str = Form(...), files: list[UploadFile] = File(default=[]),
+) -> dict:
+    from .clarification_submission import submit
+
+    receipt = await submit(request, _world(), goal_id, question_id=question_id, answer=answer,
+                           expected_question=expected_question, operation_id=operation_id, files=files, expected_context=expected_context)
+    if receipt["admitted"] and not receipt["replayed"]:
+        _dispatch_requeued_goal(request, bg, goal_id, conversation_id=receipt["conversation_id"])
+    return receipt
+
+
+@router.get("/goals/{goal_id}/answer-receipts/{operation_id}")
+def clarification_receipt(request: Request, goal_id: int, operation_id: str) -> dict:
+    from .clarification_submission import receipt
+    return receipt(request, _world(), goal_id, operation_id)
+
+
 @router.post("/goals/{goal_id}/answer", status_code=204)
 def answer_question(
     request: Request, goal_id: int, payload: AnswerIn, bg: BackgroundTasks
@@ -9559,10 +9581,14 @@ def goal_open_questions(request: Request, goal_id: int) -> dict:
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
+    from maverick.chat_threads import question_version
+    from .clarification_submission import latest_receipt
     qs = w.open_questions(goal_id=goal_id)
     return {
+        "last_answer": latest_receipt(request, w, goal_id),
         "open_questions": [
-            {"id": q.id, "question": q.question, "asked_at": q.asked_at} for q in qs
+            {"id": q.id, "question": q.question, "asked_at": q.asked_at,
+             "version": question_version(q.id, q.asked_at, q.question)} for q in qs
         ],
     }
 
@@ -15102,6 +15128,10 @@ def _requeue_goal(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    _dispatch_requeued_goal(request, bg, goal_id, conversation_id=conversation_id, max_dollars=max_dollars)
+
+
+def _dispatch_requeued_goal(request, bg, goal_id, *, conversation_id=None, max_dollars=None):
     from maverick.runner import run_goal_in_background_async
 
     allowed_suites = caller_suites(request)

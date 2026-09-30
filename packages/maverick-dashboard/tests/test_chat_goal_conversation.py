@@ -63,7 +63,7 @@ def test_blocked_goal_reads_as_paused_and_keeps_the_question_in_the_conversation
     # Answering re-opens the live stream instead of leaving the page on a
     # finished stream with a Resume button.
     assert "resumeFollowing()" in text
-    assert "recordExchange(questionText.textContent, ans)" in text
+    assert "recordExchange(attempt.question, attempt.answer)" in text
 
 
 def test_markdown_renderer_is_served_as_javascript(page_env):
