@@ -202,6 +202,16 @@ class TestWantsMaxCompletion:
     def test_gpt_5(self):
         assert OpenAIClient._wants_max_completion("gpt-5")
 
+    def test_later_generations(self):
+        """gpt-6 and later reject max_tokens with a 400 (seen in production
+        on gpt-6.1-sol); the generation number decides, not a release list."""
+        for name in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-7"):
+            assert OpenAIClient._wants_max_completion(name), name
+
+    def test_older_generations_keep_max_tokens(self):
+        for name in ("gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"):
+            assert not OpenAIClient._wants_max_completion(name), name
+
     def test_legacy(self):
         assert not OpenAIClient._wants_max_completion("gpt-3.5-turbo")
         assert not OpenAIClient._wants_max_completion("text-davinci-003")
