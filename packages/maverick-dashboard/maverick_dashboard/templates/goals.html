@@ -56,6 +56,7 @@
     {% endif %}
   </div>
 
+  {% if task_views_available %}{% include "_task_saved_views.html" %}{% endif %}
   {% include "_upcoming_tasks.html" %}
 
   {% if goals %}
@@ -139,7 +140,7 @@
       clearTimeout(timer); var attempt = ++generation;
       if (controller) controller.abort();
       retry.hidden = true; listEl.setAttribute('aria-busy', 'false');
-      if (!q) { listEl.innerHTML = original; status.textContent = ''; return; }
+      if (!q) { listEl.innerHTML = original; applyFilter(); status.textContent = ''; return; }
       timer = setTimeout(function () {
         controller = new AbortController(); listEl.setAttribute('aria-busy', 'true');
         status.textContent = 'Searching… Previous results remain below until the search completes.';
@@ -183,8 +184,24 @@
         applyFilter();
       });
     });
+    var savedStatuses = {'':'', running:'running active pending', waiting:'blocked awaiting_approval', failed:'failed', done:'done'};
+    window.LightworkTaskFilters = {current:function () {
+      return {q:input.value.trim(), status:Object.keys(savedStatuses).find(function (key) { return savedStatuses[key] === active; }) || ''};
+    }};
+    function selection() {
+      document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:{kind:'task_filter', filters:window.LightworkTaskFilters.current()}}}));
+    }
+    input.addEventListener('input',selection);
+    filterBtns.forEach(function (button) { button.addEventListener('click',selection); });
+    var initial=new URLSearchParams(window.location.search), initialStatus=initial.get('status') || '';
+    if (Object.prototype.hasOwnProperty.call(savedStatuses,initialStatus)) {
+      filterBtns.forEach(function (button) { if (button.getAttribute('data-g-filter') === savedStatuses[initialStatus]) button.click(); });
+    }
+    if (initial.has('q')) { input.value=initial.get('q').slice(0,256); search(true); }
+    selection();
     retry.addEventListener('click', function () { search(true); });
     window.addEventListener('pagehide', function () { ++generation; clearTimeout(timer); if (controller) controller.abort(); });
   })();
   </script>
+{% if task_views_available %}<script src="/static/lightwork-task-views.js" defer></script>{% endif %}
 {% endblock %}

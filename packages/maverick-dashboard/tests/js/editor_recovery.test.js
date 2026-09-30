@@ -37,7 +37,7 @@ test('malformed flow recovery cannot partially replace an editor',async()=>{
 
 function workflowFixture(){
   const dom=new JSDOM('<div class="wf"><textarea id="wf-brief">brief</textarea><input id="wf-name" value="workflow"><textarea id="wf-steps">  unfinished steps  </textarea><input id="pb-name" value="agent"><input id="pb-risk" value="medium"><input id="wf-file" type="file"><div id="pb-steps"></div><div id="wf-input-fields"></div><button id="wf-add-input"></button></div>'),d=dom.window.document;
-  const context={document:d,Option:dom.window.Option,mode:'playbook',templateWorkspaceStarted:true,playbookWorkspaceStarted:true,wfEditingName:'workflow',wfEditGeneration:3,wfEditWall:90,pbEditingName:'agent',pbEditGeneration:'a'.repeat(64),pbEditPreserve:{compartment:'trusted'},pbSteps:d.getElementById('pb-steps'),pbName:d.getElementById('pb-name'),
+  const context={document:d,Option:dom.window.Option,productText(node,source){node.textContent=source;},mode:'playbook',templateWorkspaceStarted:true,playbookWorkspaceStarted:true,wfEditingName:'workflow',wfEditGeneration:3,wfEditWall:90,pbEditingName:'agent',pbEditGeneration:'a'.repeat(64),pbEditPreserve:{compartment:'trusted'},pbSteps:d.getElementById('pb-steps'),pbName:d.getElementById('pb-name'),
     addStep(){const row=d.createElement('div');row.className='pb-step';for(const key of ['name','inst','tools','gate']){const input=d.createElement('input');input.className='pb-step__'+key;row.append(input);}context.pbSteps.append(row);},
     paintGate(){},renumber(){},renderToolSelections(){},schedulePbLint(){},setStatus(){},setForm(mode){context.mode=mode;},collectPlaybook(){return {workflow:[]};}};
   context.addStep();context.pbSteps.querySelector('.pb-step__inst').value='  Work without a step name yet  ';

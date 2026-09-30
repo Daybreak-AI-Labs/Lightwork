@@ -3280,10 +3280,21 @@ async def perf_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "perf.html", {})
 
 
+@app.get("/static/lightwork-task-views.js")
+def task_views_script():
+    return FileResponse(Path(__file__).parent / "static" / "lightwork-task-views.js", media_type="application/javascript")
+
+
 @app.get("/goals", response_class=HTMLResponse)
 def goals_page(request: Request) -> HTMLResponse:
     goals = _world().list_goals(owner=goal_owner_filter(request), limit=200, order="desc")
-    return templates.TemplateResponse(request, "goals.html", {"goals": goals})
+    from .preferences_api import _principal
+    try:
+        _principal(request)
+        task_views_available = True
+    except HTTPException:
+        task_views_available = False
+    return templates.TemplateResponse(request, "goals.html", {"goals": goals, "task_views_available": task_views_available})
 
 
 @app.get("/projects", response_class=HTMLResponse)
@@ -8558,15 +8569,18 @@ async def pins_remove(request: Request, goal_id: int) -> JSONResponse:
 
 
 @app.get("/api/v1/views")
-async def views_list(request: Request) -> JSONResponse:
+async def views_list(request: Request, task_filters: bool = False) -> JSONResponse:
     """Saved dashboard views (named filter/query-param sets) for the caller."""
     from maverick.ux_store import shared as _ux
 
+    if task_filters:
+        from .task_saved_views import current
+        return JSONResponse(current(request), headers={"Cache-Control": "private, no-store"})
     return JSONResponse({"views": _ux().views(caller_principal(request))})
 
 
 @app.post("/api/v1/views/{name}")
-async def views_save(request: Request, name: str) -> JSONResponse:
+async def views_save(request: Request, name: str, task_filters: bool = False) -> JSONResponse:
     from maverick.ux_store import shared as _ux
 
     try:
@@ -8582,6 +8596,16 @@ async def views_save(request: Request, name: str) -> JSONResponse:
         ) from None
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object of params")
+    if task_filters:
+        from pydantic import ValidationError
+
+        from .task_saved_views import Change, change
+        try:
+            reviewed = Change.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(422, "Refresh saved views and review a valid task search and status.") from exc
+        return JSONResponse(change(request, name, reviewed), status_code=201,
+                            headers={"Cache-Control": "private, no-store"})
     try:
         _ux().save_view(caller_principal(request), name, body)
     except ValueError as e:
@@ -8590,9 +8614,21 @@ async def views_save(request: Request, name: str) -> JSONResponse:
 
 
 @app.delete("/api/v1/views/{name}")
-async def views_delete(request: Request, name: str) -> JSONResponse:
+async def views_delete(request: Request, name: str, task_filters: bool = False) -> JSONResponse:
     from maverick.ux_store import shared as _ux
 
+    if task_filters:
+        from pydantic import ValidationError
+
+        from .task_saved_views import Change, change
+        try:
+            raw = await _read_limited_request_body(request, max_bytes=_MAX_SAVED_VIEW_BODY_BYTES,
+                                                 too_large_detail="saved view body too large")
+            reviewed = Change.model_validate(json.loads(raw or b"{}"))
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(422, "Refresh saved views before reviewing removal.") from exc
+        return JSONResponse(change(request, name, reviewed, delete=True),
+                            headers={"Cache-Control": "private, no-store"})
     if not _ux().delete_view(caller_principal(request), name):
         raise HTTPException(status_code=404, detail="no such view")
     return JSONResponse({"deleted": name})

@@ -16,6 +16,7 @@ permissions, thread-safe, bounded (caps below) so it can't grow unbounded.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -97,7 +98,22 @@ class UxStore:
 
     # -- saved dashboard views ----------------------------------------------
 
-    def save_view(self, principal: str | None, name: str, params: dict[str, str]) -> None:
+    @staticmethod
+    def _view_revision(views: dict) -> str:
+        return hashlib.sha256(json.dumps(views, sort_keys=True, ensure_ascii=False,
+                                        separators=(",", ":")).encode()).hexdigest()
+
+    def view_snapshot(self, principal: str | None) -> dict:
+        """Return one locked view inventory and its compare-and-swap version."""
+        with self._lock:
+            views = self._load()["views"].get(_principal_key(principal), {})
+            return {"views": views, "revision": self._view_revision(views)}
+
+    def view_revision(self, principal: str | None) -> str:
+        return self.view_snapshot(principal)["revision"]
+
+    def save_view(self, principal: str | None, name: str, params: dict[str, str],
+                  *, expected_revision: str | None = None) -> None:
         name = str(name).strip()
         if not name or len(name) > 80:
             raise ValueError("view name must be 1-80 chars")
@@ -110,6 +126,8 @@ class UxStore:
         with self._lock:
             data = self._load()
             views = data["views"].setdefault(key, {})
+            if expected_revision is not None and expected_revision != self._view_revision(views):
+                raise ViewConflict("Saved views changed. Refresh them and review your changes again.")
             if name not in views and len(views) >= MAX_VIEWS:
                 raise ValueError(f"too many saved views (max {MAX_VIEWS})")
             views[name] = {"params": clean, "saved_at": time.time()}
@@ -119,11 +137,14 @@ class UxStore:
         with self._lock:
             return dict(self._load()["views"].get(_principal_key(principal), {}))
 
-    def delete_view(self, principal: str | None, name: str) -> bool:
+    def delete_view(self, principal: str | None, name: str,
+                    *, expected_revision: str | None = None) -> bool:
         key = _principal_key(principal)
         with self._lock:
             data = self._load()
             views = data["views"].get(key, {})
+            if expected_revision is not None and expected_revision != self._view_revision(views):
+                raise ViewConflict("Saved views changed. Refresh them and review removal again.")
             existed = views.pop(str(name).strip(), None) is not None
             if existed:
                 self._save(data)
@@ -201,6 +222,10 @@ class UxStore:
             reverse=True,
         )
         return [entry for _, entry in indexed]
+
+
+class ViewConflict(ValueError):
+    """A reviewed saved-view inventory no longer matches current storage."""
 
 
 _shared: dict[Path, UxStore] | None = None

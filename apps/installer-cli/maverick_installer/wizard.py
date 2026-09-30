@@ -4646,7 +4646,7 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
         "allow_personal_preferences": _q_confirm(
-            "Allow account-scoped writing style, display preferences, pinned pages and daily work layout? "
+            "Allow account-scoped writing style, display preferences, pinned pages, saved task filters and daily work layout? "
             "Personal choices never grant tools or change security or retention policy.",
             default=True,
         ),
