@@ -138,6 +138,20 @@
     {% endif %}
   </div>
 
+  {% if model_guidance_enabled %}
+  <div class="panel" data-settings-group="models">
+    <h3>Find a suitable model</h3>
+    <label>Filter choices <select class="select" id="model-capability-filter">
+      <option value="all">All approved choices</option><option value="tools">Known tool support</option>
+      <option value="vision">Known image support</option><option value="self_hosted">Local or self-hosted</option>
+      <option value="unknown">Unknown capabilities</option>
+    </select></label>
+    <p class="muted">Filters use reported evidence. Missing metadata does not mean a model lacks a capability. Other model (advanced) stays available and the approved-model policy still applies.</p>
+    <p class="muted">Refresh model lists above checks availability with a bounded request; it does not run a paid generation or prove tool quality. Pricing is a dated planning reference, not a final invoice.</p>
+    <script type="application/json" id="model-guidance-data">{{ model_guidance|tojson }}</script>
+  </div>
+  {% endif %}
+
   <div class="section-head" data-settings-group="models"><h2>Default model</h2></div>
   <div class="panel" data-settings-group="models">
     <p class="muted settings-lead">
@@ -858,6 +872,7 @@
     });
   })();
   </script>
+  <script src="/static/lightwork-model-guidance.js" defer></script>
   <script src="/static/lightwork-voice-setup.js" defer></script>
   <script src="/static/lightwork-settings-admin.js" defer></script>
 {% endblock %}

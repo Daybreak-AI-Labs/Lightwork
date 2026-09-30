@@ -179,6 +179,9 @@ def _models(S, C) -> tuple:
           env=("MAVERICK_COMPACTION_HYBRID",)),
 
         # ------------------------------------------------------- model routing
+        S("models", "guidance", "Show model choice guidance",
+          "Show provider-reported capabilities and dated pricing evidence alongside model choices. Unknown details remain unknown.",
+          "toggle", "AI models", True, "maverick.model_guidance", subgroup="Model choices"),
         S("models", "catalog", "Extra models to offer",
           "Models that are not in the built-in list, so they can be chosen everywhere. Write "
           "each as the service name, a colon and the model name.", "list", "AI models", [],

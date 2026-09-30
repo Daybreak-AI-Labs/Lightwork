@@ -5500,6 +5500,10 @@ def pick_advanced() -> dict[str, Any]:
     )
     # Settings > Models lists the models each saved key can reach by asking the
     # provider's own model-list endpoint ([models] discovery, default on).
+    advanced["model_guidance"] = _q_confirm(
+        "Show dated model pricing evidence and provider-reported capabilities in Settings?",
+        default=True,
+    )
     advanced["model_discovery"] = _q_confirm(
         "Let Settings discover the models each provider key can reach (one "
         "bounded model-list request per provider, cached)? Say no to offer "
@@ -6683,10 +6687,12 @@ def _cfg_providers(
     return lines
 
 
-def _cfg_role_models(role_models: dict[str, str], *, discovery: bool = True) -> list[str]:
-    if not role_models and discovery:
+def _cfg_role_models(role_models: dict[str, str], *, discovery: bool = True, guidance: bool = True) -> list[str]:
+    if not role_models and discovery and guidance:
         return []
     lines = ["[models]"]
+    if not guidance:
+        lines.append("guidance = false")
     for role, spec in role_models.items():
         lines.append(f'{role} = "{spec}"')
     if not discovery:
@@ -9086,6 +9092,7 @@ def write_config(
     )
     lines += _cfg_role_models(
         role_models, discovery=advanced.get("model_discovery") is not False,
+        guidance=advanced.get("model_guidance") is not False,
     )
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)

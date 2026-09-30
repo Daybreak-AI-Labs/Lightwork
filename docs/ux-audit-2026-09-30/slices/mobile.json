@@ -170,9 +170,9 @@
   {
     "id": "LW-140",
     "status": "planned",
-    "implementation_evidence": "Reviewed model_pickers.py: picker groups/allowlist/manual entry preserved. No fabricated capability/pricing metadata or provider test added.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement provenance/freshness-bearing capability metadata, capability filters/warnings, approved-model-aware presentation and explicit bounded test through existing budgeted provider service."
+    "implementation_evidence": "model_guidance.py projects only typed provider capability evidence and existing provenance-bearing prices; bounded model_discovery preserves metadata; picker filters tools/images/self-hosted/unknown, preserves selected/manual entry and existing allow-list enforcement, warns about unsupported/unknown capabilities, labels stale/expired rates, context/output/latency unknown. Config models.guidance plus All settings and installer question added. Existing bounded availability refresh is accurately labelled as discovery, not generation.",
+    "validation": "2026-09-30: Python AST parsed six changed/new model files; standalone JavaScript syntax passed; git diff --check passed. Model metadata regressions authored unrun. No live discovery/provider/browser tests run.",
+    "remaining": "Explicit paid bounded generation/capability test and authorized Copilot operation coverage remain unimplemented; discovery is not claimed as a generation test. Browser/runtime validation deferred."
   },
   {
     "id": "LW-141",
