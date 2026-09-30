@@ -94,6 +94,7 @@ from .auth import (
     websocket_caller_principal,
 )
 from .budget_guidance_api import router as budget_guidance_router
+from .conversation_inbox_api import router as conversation_inbox_router
 from .conversation_organization import present_title as _conversation_title
 from .conversation_organization import router as conversation_organization_router
 from .cost_reconciliation_api import router as cost_reconciliation_router
@@ -767,6 +768,8 @@ async def _lifespan(app: FastAPI):
             await run_in_threadpool(start_personal_notification_scheduler)
         except Exception as exc:
             log.warning("Personal notification observer did not start (%s)", type(exc).__name__)
+        from .conversation_inbox_scheduler import start_conversation_inbox_scheduler
+        await run_in_threadpool(start_conversation_inbox_scheduler)
         _warm_goal_runtime()
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
@@ -1131,6 +1134,7 @@ app.include_router(settings_experience_router)
 app.include_router(settings_runtime_router)
 templates.context_processors.append(_display_preference_context)
 app.include_router(record_search_router)
+app.include_router(conversation_inbox_router)
 app.include_router(action_center_router)
 app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)

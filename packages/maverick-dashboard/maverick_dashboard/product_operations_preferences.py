@@ -13,7 +13,7 @@ from . import preferences_api as native
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 KEYS = ("preferred_name", "tone", "language", "verbosity", "output_style", "custom_style_name",
-        "custom_style", "theme", "font", "density", "text_size")
+        "custom_style", "theme", "font", "density", "text_size", "conversation_mode", "conversation_detail")
 STYLE_KEYS = {"tone", "language", "verbosity", "output_style", "custom_style_name", "custom_style"}
 
 
@@ -59,6 +59,8 @@ def _choices():
         "font": (("default", "Default"), ("dyslexic", "Dyslexia-friendly")),
         "density": (("comfortable", "Comfortable"), ("compact", "Compact")),
         "text_size": (("standard", "Standard"), ("large", "Large"), ("larger", "Larger")),
+        "conversation_mode": (("queue", "Queue next message"), ("guidance", "Review task guidance"), ("independent", "Start separately")),
+        "conversation_detail": (("brief", "Brief"), ("balanced", "Balanced"), ("detailed", "Detailed")),
     }
 
 

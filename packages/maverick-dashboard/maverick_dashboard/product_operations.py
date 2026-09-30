@@ -137,6 +137,7 @@ def _adapter_modules():
         product_operations_activation,
         product_operations_budget,
         product_operations_connections,
+        product_operations_conversation,
         product_operations_devices,
         product_operations_diagnostics,
         product_operations_identity,
@@ -168,6 +169,7 @@ def _adapter_modules():
         product_operations_stop,
         product_operations_identity,
         product_operations_record_history,
+        product_operations_conversation,
     )
 
 

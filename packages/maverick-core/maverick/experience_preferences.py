@@ -22,9 +22,12 @@ DEFAULTS = {
     "start_page": "/chat", "favorites": [], "today_cards": ["tasks", "decisions", "recent", "schedules", "templates"],
     "today_days": "7", "template_favorites": [],
     "notification_preferences": {},
+    "conversation_mode": "queue", "conversation_detail": "balanced",
 }
 PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "today_days", "template_favorites", "start_page", "notification_preferences"})
-CHOICES = {"interface_language": {"", "en", "fr", "de", "ja", "zh", "ar"}, "verbosity": {"brief", "balanced", "detailed"},
+CHOICES = {"interface_language": {"", "en", "fr", "de", "ja", "zh", "ar"},
+           "conversation_mode": {"queue", "guidance", "independent"},
+           "conversation_detail": {"brief", "balanced", "detailed"}, "verbosity": {"brief", "balanced", "detailed"},
            "font": {"default", "dyslexic"}, "density": {"comfortable", "compact"},
            "text_size": {"standard", "large", "larger"}, "today_days": {"1", "7", "30"}}
 

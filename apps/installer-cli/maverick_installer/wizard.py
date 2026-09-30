@@ -4640,6 +4640,11 @@ def pick_advanced() -> dict[str, Any]:
             "Allow reviewed, secret-free configuration profiles and outcome presets? "
             "Import previews every change and keeps current policy checks.", default=True,
         ),
+        "allow_conversation_inbox": _q_confirm(
+            "Enable durable conversation guidance, queued messages and explicitly separate tasks while work is running? "
+            "Guidance requires review and a safe checkpoint; existing task ownership, permissions and spending limits remain enforced.",
+            default=False,
+        ),
         "allow_personal_preferences": _q_confirm(
             "Allow account-scoped writing style, display preferences, pinned pages and daily work layout? "
             "Personal choices never grant tools or change security or retention policy.",
@@ -8390,6 +8395,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[features]")
         lines.extend(_feature_locks)
+    if advanced.get("allow_conversation_inbox") is True:
+        lines.extend(["", "[conversation_inbox]", "enabled = true", "guidance = true", "queue = true", "independent = true", "max_pending = 20"])
     if advanced.get("tree_of_thought"):
         lines.append("")
         lines.append("[planning]")

@@ -4368,6 +4368,17 @@ class Agent:
         steps = (range(start_step, self.max_steps) if self.max_steps is not None
                  else itertools.count(start_step))
         for step in steps:
+            if self.depth == 0 and self.ctx.goal_id is not None:
+                from .conversation_inbox import checkpoint as conversation_checkpoint
+                try:
+                    conversation_checkpoint(self.ctx.world, self.ctx.goal_id,
+                                            checkpoint_id=f"{ep_id}:{self.checkpoint_id}:{step}", messages=messages)
+                except Exception as exc:
+                    # Pending guidance is never silently skipped before further
+                    # paid work. A fresh authorized retry replays its receipt.
+                    bb.post(self.name, "error", "Conversation guidance could not be verified at this checkpoint")
+                    return AgentResult(error="Conversation guidance is unavailable; review the pending message before resuming",
+                                       role=self.role, name=self.name, stop_kind="review_checkpoint", stop_detail=type(exc).__name__)
             # Durable checkpoint at the turn boundary: commit the resumable loop
             # state BEFORE the next LLM call, so a crash mid-step loses at most
             # one step's work. Extracted to _save_checkpoint; fail-open.

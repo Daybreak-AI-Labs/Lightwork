@@ -1160,6 +1160,8 @@ def entries(S, C, Column) -> tuple:  # noqa: N803,ARG001 -- the catalog's row an
 
     rows = list(_sign_in(S) + _people(S) + _security(S) + _other_agents(S) + _server(S)
                 + _plumbing(S) + _journal(S))
+    from .settings_catalog_conversation import entries as conversation_entries
+    rows.extend(conversation_entries(S))
     for index, row in enumerate(rows):
         if row.id == "tenancy.egress":
             rows[index] = dataclasses.replace(row, columns=(
