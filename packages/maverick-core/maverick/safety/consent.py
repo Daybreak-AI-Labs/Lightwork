@@ -1207,6 +1207,67 @@ def _dashboard_approval_card(
     )
 
 
+def approval_undo_grace_seconds() -> float:
+    """How long (seconds) a dashboard decision can still be undone.
+
+    The Approvals page offers "Undo" for this long after approve/reject, so
+    the agent-side consumer must not act on a decision until the window has
+    passed. ``MAVERICK_APPROVAL_UNDO_GRACE_SECONDS`` wins; otherwise
+    ``[approval] undo_grace_seconds`` (Settings > All settings) applies;
+    default 30. ``0`` disables undo and restores immediate consumption.
+    """
+    raw = os.environ.get("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "")
+    if not raw.strip():
+        try:
+            from ..config import load_config
+
+            value = ((load_config() or {}).get("approval") or {}).get("undo_grace_seconds")
+        except Exception:  # config never blocks the approval wait
+            value = None
+        if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                and math.isfinite(value):
+            return max(0.0, min(float(value), 3600.0))
+        raw = "30"
+    try:
+        return max(0.0, min(float(raw), 3600.0))
+    except ValueError:
+        return 30.0
+
+
+def approval_requires_acknowledgement() -> bool:
+    """Whether approving a high or critical risk request must carry an explicit
+    acknowledgement (the Approvals page confirmation; the API's
+    ``acknowledged`` field, plus a typed ``confirmation`` for critical risk).
+
+    ``MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT`` wins; otherwise ``[approval]
+    require_acknowledgement`` applies; default on.
+    """
+    raw = os.environ.get("MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT", "").strip().lower()
+    if raw:
+        return raw not in ("0", "false", "no", "off")
+    try:
+        from ..config import load_config
+
+        value = ((load_config() or {}).get("approval") or {}).get("require_acknowledgement")
+    except Exception:  # config never weakens the confirmation
+        value = None
+    return value if isinstance(value, bool) else True
+
+
+def approval_decision_settles_at(row: object, *, grace: float | None = None) -> float:
+    """Wall-clock time when a decided approval stops being undoable.
+
+    Until then the decision is recorded but not yet in effect: a consumer
+    keeps waiting and an undo returns the request to pending.
+    """
+    if grace is None:
+        grace = approval_undo_grace_seconds()
+    decided_at = getattr(row, "decided_at", None)
+    if not isinstance(decided_at, (int, float)) or isinstance(decided_at, bool):
+        decided_at = time.time()
+    return float(decided_at) + grace
+
+
 def _decide_via_dashboard(
     action: str,
     risk: str,
@@ -1272,13 +1333,21 @@ def _decide_via_dashboard(
     # the human-approval window (timing out a risky-action prompt early) or
     # extend it (stalling the agent). The decision record below keeps wall time.
     deadline = time.monotonic() + _dashboard_timeout()
-    while time.monotonic() < deadline:
+    grace = approval_undo_grace_seconds()
+    while True:
         try:
             row = wm.get_approval(approval_id)
         except Exception:
             close_world_if_owned(wm)
             return None
         if row is not None and row.status != "pending":
+            # The person can still undo for the grace window: keep polling
+            # (a decision seen near the deadline still gets its full window;
+            # an undo flips the row back to pending and the wait resumes).
+            remaining = approval_decision_settles_at(row, grace=grace) - time.time()
+            if remaining > 0:
+                time.sleep(min(1.0, remaining))
+                continue
             granted = row.status == "approved"
             source = "dashboard"
             if granted:
@@ -1310,6 +1379,8 @@ def _decide_via_dashboard(
             )
             close_world_if_owned(wm)
             return decision
+        if time.monotonic() >= deadline:
+            break
         time.sleep(1.0)
     if withdraw_on_timeout:
         # Nobody decided in time and the caller will not act on a later vote:

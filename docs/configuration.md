@@ -122,6 +122,14 @@ scan_output     = true
 # goal_risk_require_human = "high"   # never (default) | high | medium
 # goal_risk_floor         = "low"    # low (default) | medium | high
 
+[approval]
+# The Approvals page. A decision can be undone for this long; the agent
+# only acts on an approval once the window has passed (0 = act at once,
+# no Undo). High and critical risk approvals need an explicit confirmation
+# (a ticked box; typing APPROVE for critical) unless switched off.
+undo_grace_seconds      = 30
+require_acknowledgement = true
+
 [sandbox]
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes
 workdir = "~/maverick-workspace"

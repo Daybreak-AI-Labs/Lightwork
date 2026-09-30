@@ -740,16 +740,33 @@ def _approval_audit_event_id(
     approval_id: int,
     status: str,
     decided_by: str,
+    undo_round: int = 0,
 ) -> str:
-    """Stable, unambiguous id for retrying one supervisor's exact vote."""
-    parts = (
+    """Stable, unambiguous id for retrying one supervisor's exact vote.
+
+    ``undo_round`` counts how many times the approval was undone: a vote
+    cast after an undo is a new decision and gets a new identity, so the
+    signed audit chain records it instead of treating it as a replay of the
+    retracted vote. Round 0 keeps the historical id.
+    """
+    parts = [
         (tenant_id or "").encode("utf-8"),
         str(int(approval_id)).encode("ascii"),
         status.encode("ascii"),
         decided_by.encode("utf-8"),
-    )
+    ]
+    if int(undo_round) > 0:
+        parts.append(f"undo-round:{int(undo_round)}".encode("ascii"))
     framed = b"".join(len(part).to_bytes(4, "big") + part for part in parts)
     return "approval-v1-" + hashlib.sha256(framed).hexdigest()
+
+
+APPROVAL_UNDO_STATUS = "undone"
+
+
+def _approval_undo_marker_id(tenant_id: str | None, approval_id: int, undo_round: int) -> str:
+    """Outbox row id for one undo of an approval (never delivered; a counter)."""
+    return _approval_audit_event_id(tenant_id, approval_id, APPROVAL_UNDO_STATUS, "", undo_round)
 
 
 @dataclass
@@ -3055,7 +3072,78 @@ class WorldModel:
             approval_id,
             status,
             (decided_by or "").strip(),
+            self._approval_undo_round(approval_id),
         )
+
+    def _approval_undo_round(self, approval_id: int, conn=None) -> int:
+        """How many times this approval was undone (see ``undo_approval_decision``)."""
+        sql = (
+            "SELECT COUNT(*) FROM approval_audit_outbox "
+            "WHERE approval_id = ? AND status = ?"
+        )
+        params = (int(approval_id), APPROVAL_UNDO_STATUS)
+        row = conn.execute(sql, params).fetchone() if conn is not None else self._read_one(sql, params)
+        return int(row[0]) if row else 0
+
+    def undo_approval_decision(
+        self,
+        approval_id: int,
+        *,
+        undone_by: str,
+        within_seconds: float,
+    ) -> str:
+        """Return a just-decided approval to pending while it can still be undone.
+
+        Outcomes: ``"undone"``, ``"not_found"``, ``"not_decided"`` (still
+        pending, or its final vote is awaiting audit delivery), ``"too_late"``
+        (the window of ``within_seconds`` after ``decided_at`` has passed, so
+        the consumer may already have acted). On success the sign-offs are
+        cleared, the delivered vote rows keep their place in the outbox but no
+        longer carry a final status, and an undo marker row bumps the vote
+        identity round so the next decision is a new signed audit event.
+        """
+        with self._writing() as conn:
+            row = conn.execute(
+                "SELECT status, decided_at FROM approvals WHERE id = ?",
+                (int(approval_id),),
+            ).fetchone()
+            if row is None:
+                return "not_found"
+            if row["status"] == "pending":
+                return "not_decided"
+            decided_at = row["decided_at"]
+            if decided_at is None or time.time() - float(decided_at) > float(within_seconds):
+                return "too_late"
+            conn.execute(
+                "UPDATE approvals SET status = 'pending', decided_at = NULL, "
+                "decided_by = NULL WHERE id = ? AND status = ?",
+                (int(approval_id), row["status"]),
+            )
+            conn.execute(
+                "DELETE FROM approval_signoffs WHERE approval_id = ?",
+                (int(approval_id),),
+            )
+            conn.execute(
+                "UPDATE approval_audit_outbox SET final_status = NULL "
+                "WHERE approval_id = ? AND status IN ('approved', 'denied')",
+                (int(approval_id),),
+            )
+            undo_round = self._approval_undo_round(approval_id, conn) + 1
+            now = time.time()
+            conn.execute(
+                "INSERT INTO approval_audit_outbox("
+                "event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at) VALUES(?, ?, ?, ?, NULL, ?, ?)",
+                (
+                    _approval_undo_marker_id(current_tenant_id(), approval_id, undo_round),
+                    int(approval_id),
+                    APPROVAL_UNDO_STATUS,
+                    (undone_by or "").strip(),
+                    now,
+                    now,
+                ),
+            )
+            return "undone"
 
     def get_approval_audit_event(
         self,
@@ -3126,11 +3214,6 @@ class WorldModel:
         approver = (decided_by or "").strip()
         if not approver:
             return None
-        event_id = self.approval_audit_event_id(
-            approval_id,
-            status,
-            approver,
-        )
         with self._writing() as conn:
             # The no-op write acquires SQLite's cross-process write reservation
             # before any decision read.  A SELECT-first deferred transaction can
@@ -3140,6 +3223,10 @@ class WorldModel:
                 "WHERE id = ? AND status = 'pending'",
                 (int(approval_id),),
             ).rowcount > 0
+            undo_round = self._approval_undo_round(approval_id, conn)
+            event_id = _approval_audit_event_id(
+                current_tenant_id(), approval_id, status, approver, undo_round,
+            )
 
             prior = conn.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -3205,10 +3292,12 @@ class WorldModel:
                     "ORDER BY decided_at, approver",
                     (int(approval_id),),
                 ).fetchall():
-                    legacy_event_id = self.approval_audit_event_id(
+                    legacy_event_id = _approval_audit_event_id(
+                        current_tenant_id(),
                         approval_id,
                         legacy["decision"],
                         legacy["approver"],
+                        undo_round,
                     )
                     conn.execute(
                         "INSERT OR IGNORE INTO approval_audit_outbox("

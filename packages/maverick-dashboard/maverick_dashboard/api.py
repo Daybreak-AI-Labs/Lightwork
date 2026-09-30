@@ -13038,6 +13038,7 @@ def _deliver_approval_audit_event(world, event) -> bool:
             status=event.status,
             decided_by=event.decided_by,
             occurred_at=float(event.created_at),
+            summary=_decision_summary(world, event),
         )
     except AuditRefused as exc:
         # This is not refusal swallowing: no approval becomes effective. The
@@ -13072,6 +13073,92 @@ def _deliver_approval_audit_event(world, event) -> bool:
         except Exception:
             return False
         return bool(reconciled and reconciled.delivered_at is not None)
+
+
+def _safe_action_label(approval) -> str:
+    """The queued action as plain, redacted text for audit summaries."""
+    from maverick.safety.secret_detector import redact
+
+    try:
+        text, _matches = redact(" ".join(str(getattr(approval, "action", "") or "").split()))
+    except Exception:
+        return "the reviewed action"
+    return (text[:200] or "the reviewed action").replace(".", " ").replace("_", " ")
+
+
+def _decision_summary(world, event) -> str:
+    """One plain sentence for the audit log: who decided what."""
+    try:
+        approval = world.get_approval(int(event.approval_id))
+    except Exception:
+        approval = None
+    label = _safe_action_label(approval) if approval is not None else "the reviewed action"
+    risk = str(getattr(approval, "risk", "") or "").strip() or "unrated"
+    verb = "approved" if event.status == "approved" else "rejected"
+    if event.final_status is None:
+        return (
+            f"{event.decided_by} {verb} '{label}' ({risk} risk); "
+            "more approvers are needed before it takes effect."
+        )
+    return f"{event.decided_by} {verb} '{label}' ({risk} risk)."
+
+
+async def _decision_payload(request: Request) -> dict:
+    """The optional JSON body of a decision (acknowledgement, reason)."""
+    if not (request.headers.get("content-type") or "").lower().startswith("application/json"):
+        return {}
+    try:
+        payload = await request.json()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="the decision details could not be read") from None
+    return payload if isinstance(payload, dict) else {}
+
+
+def _require_acknowledgement(world, approval_id: int, payload: dict, who: str) -> None:
+    """High and critical risk approvals need an explicit acknowledgement.
+
+    The Approvals page collects it in its confirmation step; API callers send
+    ``{"acknowledged": true}`` and, for critical risk, ``"confirmation":
+    "approve"`` typed by the person. Off via ``[approval]
+    require_acknowledgement = false``. The outcome is written to the audit log.
+    """
+    from maverick.safety.consent import approval_requires_acknowledgement
+
+    approval = world.get_approval(approval_id)
+    if approval is None or approval.status != "pending":
+        return
+    risk = str(approval.risk or "").lower()
+    if risk not in ("high", "critical") or not approval_requires_acknowledgement():
+        return
+    acknowledged = payload.get("acknowledged") is True
+    typed = " ".join(str(payload.get("confirmation") or "").split()).lower()
+    if not acknowledged:
+        raise HTTPException(
+            status_code=422,
+            detail="Confirm you have read what this action will do before approving it.",
+        )
+    if risk == "critical" and typed != "approve":
+        raise HTTPException(
+            status_code=422,
+            detail="Type APPROVE to confirm this critical action.",
+        )
+    from maverick import audit
+
+    label = _safe_action_label(approval)
+    recorded = audit.audit_event(
+        audit.EventKind.CONSENT_RESULT,
+        agent=who,
+        action="approval_confirmation",
+        approval_id=int(approval_id),
+        risk=risk,
+        acknowledged=True,
+        typed_confirmation=(risk == "critical"),
+        summary=(
+            f"{who} confirmed reading what '{label}' will do ({risk} risk) before approving it."
+        ),
+    )
+    if not recorded:
+        log.warning("approval confirmation audit write failed (approval_id=%s)", approval_id)
 
 
 def _audit_approval_decision(world, event) -> bool:
@@ -13204,7 +13291,15 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
         "X-Lightwork-Decision-Id": event.event_id,
         "X-Lightwork-Approval-Audit": ("delivered" if audit_delivered else "pending"),
         "X-Lightwork-Approval-State": approval_status,
+        "X-Lightwork-Decided-By": (
+            str(event.decided_by).encode("ascii", "backslashreplace").decode("ascii")
+        ),
     }
+    if audit_delivered and approval_status != "pending":
+        from maverick.safety.consent import approval_undo_grace_seconds
+
+        # The page offers Undo for this long; the consumer waits the same window.
+        common_headers["X-Lightwork-Undo-Seconds"] = str(int(approval_undo_grace_seconds()))
     if audit_delivered:
         return Response(status_code=204, headers=common_headers)
     return JSONResponse(
@@ -13240,18 +13335,23 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
         },
     },
 )
-def approve_approval(request: Request, approval_id: int) -> Response:
+async def approve_approval(request: Request, approval_id: int) -> Response:
     """Record an approval vote; once the required quorum of distinct approvers is
-    met the polling consent path proceeds (N-of-M dual control)."""
+    met the polling consent path proceeds (N-of-M dual control).
+
+    High and critical risk requests also need the person's acknowledgement in
+    the JSON body (see ``_require_acknowledgement``)."""
     from .approval_authority import require_approval_authority
 
     require_approval_authority(
         request, action="approval.approve", resource=str(approval_id),
     )
+    payload = await _decision_payload(request)
     who = _supervisor(request)
     world = _world()
     _require_settings_decider(request, world, approval_id, who, approving=True)
     _require_current_decision_card(world, approval_id, request)
+    _require_acknowledgement(world, approval_id, payload, who)
     event = _record_vote_or_raise(world, approval_id, "approved", who)
     return _approval_decision_response(
         world,
@@ -13279,22 +13379,110 @@ def approve_approval(request: Request, approval_id: int) -> Response:
         },
     },
 )
-def deny_approval(request: Request, approval_id: int) -> Response:
+async def deny_approval(request: Request, approval_id: int) -> Response:
     """Deny a parked action (a single deny rejects it); the polling consent path
-    then refuses it."""
+    then refuses it. An optional JSON ``reason`` is written to the audit log."""
     from .approval_authority import require_approval_authority
 
     require_approval_authority(
         request, action="approval.deny", resource=str(approval_id),
     )
+    payload = await _decision_payload(request)
     who = _supervisor(request)
     world = _world()
     _require_settings_decider(request, world, approval_id, who, approving=False)
+    reason = " ".join(str(payload.get("reason") or "").split())[:2000]
+    before = world.get_approval(approval_id) if reason else None
     event = _record_vote_or_raise(world, approval_id, "denied", who)
-    return _approval_decision_response(
-        world,
-        event,
-        _audit_approval_decision(world, event),
+    delivered = _audit_approval_decision(world, event)
+    if reason and delivered and before is not None:
+        from maverick import audit
+        from maverick.safety.secret_detector import redact
+
+        try:
+            reason, _matches = redact(reason)
+        except Exception:
+            reason = "Reason removed because redaction failed."
+        label = _safe_action_label(before)
+        if not audit.audit_event(
+            audit.EventKind.CONSENT_RESULT,
+            agent=who,
+            action="approval_rejection_reason",
+            approval_id=int(approval_id),
+            reason=reason,
+            summary=f"{who} rejected '{label}' and gave a reason: {reason}",
+        ):
+            log.warning("approval rejection reason audit write failed (approval_id=%s)", approval_id)
+    return _approval_decision_response(world, event, delivered)
+
+
+@router.post("/approvals/{approval_id}/undo")
+def undo_approval(request: Request, approval_id: int) -> Response:
+    """Undo a decision made moments ago, returning the request to pending.
+
+    Allowed only while the decision can still be undone (``[approval]
+    undo_grace_seconds``, default 30): the agent-side consumer waits that long
+    before acting, so nothing has run yet. After that the answer is a plain
+    409. The undo is written to the audit log; the original decision stays in
+    the signed chain."""
+    from maverick.safety.consent import approval_undo_grace_seconds
+
+    from .approval_authority import require_approval_authority
+
+    require_approval_authority(
+        request, action="approval.undo", resource=str(approval_id),
+    )
+    who = _supervisor(request)
+    world = _world()
+    before = world.get_approval(approval_id)
+    if before is None:
+        raise HTTPException(status_code=404, detail="no such approval")
+    grace = approval_undo_grace_seconds()
+    outcome = world.undo_approval_decision(
+        approval_id, undone_by=who, within_seconds=grace,
+    )
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail="no such approval")
+    if outcome == "not_decided":
+        raise HTTPException(
+            status_code=409, detail="There is no decision to undo yet.",
+        )
+    if outcome != "undone":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Too late to undo: the agent has already been told about this "
+                "decision. Ask for a new request if it should not go ahead."
+            ),
+        )
+    from maverick import audit
+
+    label = _safe_action_label(before)
+    previous = "approval" if before.status == "approved" else "rejection"
+    recorded = audit.audit_event(
+        audit.EventKind.CONSENT_RESULT,
+        agent=who,
+        action="approval_decision_undone",
+        approval_id=int(approval_id),
+        previous_status=before.status,
+        previously_decided_by=before.decided_by or "",
+        summary=(
+            f"{who} undid the {previous} of '{label}'; it is waiting for a decision again."
+        ),
+    )
+    if not recorded:
+        raise HTTPException(
+            status_code=503,
+            detail="The decision was undone but could not be recorded in the audit log.",
+        )
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "pending",
+            "previous_status": before.status,
+            "undone_by": who,
+            "approval_id": int(approval_id),
+        },
     )
 
 

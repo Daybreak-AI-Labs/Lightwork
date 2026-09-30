@@ -3630,12 +3630,92 @@ class PostgresWorldModel:
     ) -> str:
         from ..world_model import _approval_audit_event_id
 
+        with self._tx() as cur:
+            undo_round = self._approval_undo_round(cur, approval_id)
         return _approval_audit_event_id(
             _active_tenant(),
             approval_id,
             status,
             (decided_by or "").strip(),
+            undo_round,
         )
+
+    def _approval_undo_round(self, cur, approval_id: int) -> int:
+        """How many times this approval was undone (mirrors SQLite)."""
+        from ..world_model import APPROVAL_UNDO_STATUS
+
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        cur.execute(
+            "SELECT COUNT(*) FROM approval_audit_outbox "
+            f"WHERE approval_id = %s AND status = %s AND {outbox_scope}",
+            tuple([int(approval_id), APPROVAL_UNDO_STATUS, *outbox_params]),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def undo_approval_decision(
+        self,
+        approval_id: int,
+        *,
+        undone_by: str,
+        within_seconds: float,
+    ) -> str:
+        """Return a just-decided approval to pending (mirrors SQLite; see there)."""
+        from ..world_model import (
+            APPROVAL_UNDO_STATUS,
+            _approval_undo_marker_id,
+        )
+
+        tenant = _active_tenant()
+        approval_scope, approval_params = _tenant_scope()
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        sql = "SELECT status, decided_at FROM approvals WHERE id = %s"
+        values: list = [int(approval_id)]
+        if approval_scope:
+            sql += " AND " + approval_scope
+            values += approval_params
+        sql += " FOR UPDATE"
+        with self._tx() as cur:
+            cur.execute(sql, tuple(values))
+            row = cur.fetchone()
+            if row is None:
+                return "not_found"
+            if row[0] == "pending":
+                return "not_decided"
+            if row[1] is None or time.time() - float(row[1]) > float(within_seconds):
+                return "too_late"
+            cur.execute(
+                "UPDATE approvals SET status = 'pending', decided_at = NULL, "
+                "decided_by = NULL WHERE id = %s AND status = %s",
+                (int(approval_id), row[0]),
+            )
+            cur.execute(
+                "DELETE FROM approval_signoffs WHERE approval_id = %s",
+                (int(approval_id),),
+            )
+            cur.execute(
+                "UPDATE approval_audit_outbox SET final_status = NULL "
+                f"WHERE approval_id = %s AND status IN ('approved', 'denied') AND {outbox_scope}",
+                tuple([int(approval_id), *outbox_params]),
+            )
+            undo_round = self._approval_undo_round(cur, approval_id) + 1
+            now = time.time()
+            cur.execute(
+                "INSERT INTO approval_audit_outbox("
+                "event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at, tenant_id) "
+                "VALUES(%s, %s, %s, %s, NULL, %s, %s, %s)",
+                (
+                    _approval_undo_marker_id(tenant, approval_id, undo_round),
+                    int(approval_id),
+                    APPROVAL_UNDO_STATUS,
+                    (undone_by or "").strip(),
+                    now,
+                    now,
+                    tenant,
+                ),
+            )
+            return "undone"
 
     def get_approval_audit_event(self, event_id: str):
         scope, params = _approval_outbox_scope()
@@ -3698,13 +3778,8 @@ class PostgresWorldModel:
         if not approver:
             return None
 
-        from ..world_model import ApprovalAuditEvent
+        from ..world_model import ApprovalAuditEvent, _approval_audit_event_id
 
-        event_id = self.approval_audit_event_id(
-            approval_id,
-            status,
-            approver,
-        )
         tenant = _active_tenant()
         approval_scope, approval_params = _tenant_scope()
         outbox_scope, outbox_params = _approval_outbox_scope()
@@ -3722,6 +3797,10 @@ class PostgresWorldModel:
             # Row lock serializes duplicate and competing votes across replicas.
             cur.execute(approval_sql, tuple(approval_values))
             approval = cur.fetchone()
+            undo_round = self._approval_undo_round(cur, approval_id)
+            event_id = _approval_audit_event_id(
+                tenant, approval_id, status, approver, undo_round,
+            )
 
             cur.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -3777,10 +3856,8 @@ class PostgresWorldModel:
                     (int(approval_id),),
                 )
                 for legacy in cur.fetchall():
-                    legacy_event_id = self.approval_audit_event_id(
-                        approval_id,
-                        legacy[1],
-                        legacy[0],
+                    legacy_event_id = _approval_audit_event_id(
+                        tenant, approval_id, legacy[1], legacy[0], undo_round,
                     )
                     cur.execute(
                         "INSERT INTO approval_audit_outbox("

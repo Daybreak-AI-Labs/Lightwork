@@ -1000,6 +1000,22 @@ def _other_rows(S) -> tuple:
           5 * _MINUTE, "maverick.safety.consent", subgroup="Approvals", minimum=1, maximum=60,
           integer=True, scale=_MINUTE, unit="minutes",
           env=("MAVERICK_CONSENT_DASHBOARD_TIMEOUT",)),
+        S("approval", "undo_grace_seconds", "Allow undo after a decision for",
+          "How long a person can undo an approve or reject on the Approvals page. "
+          "The agent waits this long before acting on the decision. 0 turns undo off "
+          "and lets the agent act at once.", "number", "Safety",
+          30, "maverick.safety.consent", subgroup="Approvals", minimum=0, maximum=3600,
+          integer=True, unit="seconds", weaker="higher",
+          warning="Approved actions will wait longer before they start.",
+          env=("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS",)),
+        S("approval", "require_acknowledgement", "Confirm high-risk approvals",
+          "Approving a high or critical risk request needs an explicit confirmation: a "
+          "ticked box for high risk, and typing APPROVE for critical risk. Turning this "
+          "off makes those approvals one click.", "toggle", "Safety",
+          True, "maverick.safety.consent", subgroup="Approvals", weaker=False,
+          warning="High-risk actions can be approved with a single click, without "
+                  "restating what they will do.",
+          env=("MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT",)),
     )
 
 

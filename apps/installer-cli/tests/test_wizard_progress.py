@@ -6,14 +6,15 @@ from __future__ import annotations
 
 def test_steps_list_is_ordered_and_unique():
     from maverick_installer import wizard
-    assert len(wizard.STEPS) == 38
+    assert len(wizard.STEPS) == 39
     keys = [k for k, _ in wizard.STEPS]
     assert keys[0] == "deployment"
     assert keys[-1] == "a2a"
-    assert keys[8] == "research_execution"
-    assert keys[9] == "candidate_promotion"
-    assert keys[10] == "knowledge_access"
-    assert keys[24:27] == ["assessments", "security_suite", "advanced"]
+    assert keys[7] == "approvals"
+    assert keys[9] == "research_execution"
+    assert keys[10] == "candidate_promotion"
+    assert keys[11] == "knowledge_access"
+    assert keys[25:28] == ["assessments", "security_suite", "advanced"]
     assert len(set(keys)) == len(keys)  # no dupes
 
 
@@ -22,14 +23,14 @@ def test_steps_list_is_ordered_and_unique():
 def test_step_indicator_formats_step_n_of_m():
     from maverick_installer import wizard
     out = wizard._step_indicator(3)
-    assert "Step 3/38" in out
+    assert "Step 3/39" in out
     assert wizard.STEPS[2][1] in out  # the label
 
 
 def test_step_indicator_includes_breadcrumb_of_done_labels():
     from maverick_installer import wizard
     out = wizard._step_indicator(3, done=["Deployment", "Providers"])
-    assert "Step 3/38" in out
+    assert "Step 3/39" in out
     assert "Deployment" in out
     assert "Providers" in out
 
@@ -37,7 +38,7 @@ def test_step_indicator_includes_breadcrumb_of_done_labels():
 def test_step_indicator_no_breadcrumb_when_done_empty():
     from maverick_installer import wizard
     out = wizard._step_indicator(1, done=[])
-    assert "Step 1/38" in out
+    assert "Step 1/39" in out
     assert "›" not in out
 
 
@@ -107,9 +108,9 @@ def test_run_prints_step_indicators(monkeypatch):
     assert rc == 0
 
     out = wizard.console.file.getvalue()
-    assert "Step 1/38" in out
-    assert "Step 3/38" in out
-    assert "Step 26/38 Security & GRC" in out
-    assert "Step 38/38" in out
+    assert "Step 1/39" in out
+    assert "Step 3/39" in out
+    assert "Step 27/39 Security & GRC" in out
+    assert "Step 39/39" in out
     # Breadcrumb of earlier answers trails later steps.
     assert "Deployment" in out
