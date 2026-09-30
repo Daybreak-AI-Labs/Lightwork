@@ -4686,6 +4686,10 @@ def pick_advanced() -> dict[str, Any]:
             "Assigned workspace reviewers cannot execute or sign off the live task.",
             default=False,
         ),
+        "allow_deliverable_bundles": _q_confirm(
+            "Enable selected deliverable bundles with named recipient access, separate human acceptance and offline verification?",
+            default=False,
+        ),
         "allow_employee_companions": _q_confirm(
             "Enable personal companions for employees enrolled by a workspace "
             "administrator, with own-task status and optional AI drafts? An "
@@ -8304,6 +8308,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("workflow_readiness = false")
     if advanced.get("allow_project_reviews") is True:
         _feature_locks.append("project_reviews = true")
+    if advanced.get("allow_deliverable_bundles") is True:
+        _feature_locks.append("deliverable_bundles = true")
     if advanced.get("allow_employee_companions") is True:
         _feature_locks.append("employee_companions = true")
     if advanced.get("allow_employee_content_access_requests") is True:

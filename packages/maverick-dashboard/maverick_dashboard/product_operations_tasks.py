@@ -58,7 +58,8 @@ def task_snapshot(request, selection):
                     goal.title, {"title": goal.title, "status": goal.status,
                                  "result": state["goal"].result or "",
                                  "updated_at": state["goal"].updated_at,
-                                 "artifacts": state["artifacts"],
+                                 "artifacts": [{key: artifact.get(key) for key in ("id", "title", "kind", "version", "content")}
+                                               for artifact in state["artifacts"]],
                                  "can_operate": state["can_operate"],
                                  "href": f"/chat/goal/{goal.id}"})
 
@@ -258,6 +259,8 @@ def review_recover(request, selection, args, native, operation_id):
 
 
 def entries():
+    from .product_operations_bundles import entries as bundle_entries
+
     return (
         Adapter("tasks.current_status", "Read this task's status and saved result", "tasks", "/chat", TASK_PAGES,
                 EmptyInput, task_snapshot, task_preview),
@@ -268,4 +271,4 @@ def entries():
         Adapter("reviews.respond", "Respond to a project review", "reviews", "/project-reviews",
                 ("/project-reviews", "/projects", "/projects/*"),
                 ReviewInput, review_snapshot, review_preview, review_execute, review_recover),
-    )
+    ) + bundle_entries()

@@ -63,6 +63,8 @@ PAGES: tuple[dict, ...] = (
      "group": "Operate", "icon": "bench", "floor": "operate", "default": "operate"},
     {"path": "/project-reviews", "label": "Project team reviews", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/deliverable-bundles", "label": "Selected deliverable bundles", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {
         "path": "/action-center", "label": "Action Center", "group": "Operate",
         "icon": "check", "floor": "operate", "default": "operate",

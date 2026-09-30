@@ -201,9 +201,13 @@
   {
     "id": "LW-130",
     "status": "planned",
-    "implementation_evidence": "Readable private handoff added for139; no recipient ACL widened.",
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Exact selected-artifact bundle, current ACL/version-bound audience preview, stale acceptance and offline verification manifest still required."
+    "implementation_evidence": [
+      "deliverable_bundles.py captures exact selected artifact versions, original evidence bytes and optional result with one named recipient, expiring current-membership ACL, human acceptance separate from integrity, stale source checks, CAS response and exact duplicate receipt.",
+      "deliverable_bundle_export.py preserves selected original native files, editable Markdown/complete-table formula-safe CSV, escaped HTML, review record and offline browser SHA-256 manifest checker; ZIP entries verified before release and no prior bundle changed on failure.",
+      "Native /deliverable-bundles UI, per-file/export authorization, feature knob, settings labels, installer question and source-task link implemented. Copilot artifact share/accept/revoke/download adapters use same service."
+    ],
+    "validation": "Ruff, Python AST, Jinja syntax and JavaScript syntax/whitespace checks. Native selection/replay/revocation/source-change/ZIP-integrity/render-safety/export-failure tests authored, pending root-coordinated local run. No provider calls or installed-browser/PostgreSQL qualification.",
+    "remaining": "Root integration must add shared Copilot UI multiselect fields and local href review links (requested); then complete local/native/browser acceptance. Native bundle journey is implemented; do not count required Copilot UI extension as finished until integrated."
   },
   {
     "id": "LW-131",

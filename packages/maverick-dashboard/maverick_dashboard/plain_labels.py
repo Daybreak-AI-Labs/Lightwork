@@ -115,6 +115,7 @@ FEATURE_LABELS = {
     "employee_companions": "Employee companions",
     "workflow_readiness": "Workflow catalog",
     "project_reviews": "Project reviews",
+    "deliverable_bundles": "Selected deliverable bundles",
     "outcome_measurement": "Outcome measurement",
     "guided_onboarding": "Guided first steps",
     "action_center": "Action center",
@@ -136,6 +137,7 @@ FEATURE_LABELS = {
 FEATURE_HELP = {
     "workflow_readiness": "Show the ready-made workflows you can run and what each still needs before you rely on it.",
     "project_reviews": "Share finished task results with the reviewers you choose.",
+    "deliverable_bundles": "Share selected files and result versions with a named colleague for review and offline use.",
     "outcome_measurement": "Compare how long work took before and after Lightwork, using your own numbers.",
     "guided_onboarding": "Offer a step-by-step path to your first finished piece of work.",
     "action_center": "Collect approvals, sign-offs and reviews waiting for you in one list.",
