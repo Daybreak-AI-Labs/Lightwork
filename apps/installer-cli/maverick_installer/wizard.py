@@ -6253,6 +6253,19 @@ def pick_daily_summary(
     return my_work, mail, slack, envs
 
 
+def _daily_summary_step(
+    state: dict[str, Any], channels: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Run (or resume) the daily-summary step and fold Slack extras into the
+    Slack channel table. Returns ``(my_work, notifications_email, envs)``."""
+    parts = state.get("_daily_summary") or list(pick_daily_summary(channels))
+    state["_daily_summary"] = parts
+    my_work, mail, slack_extras, envs = parts
+    if slack_extras and isinstance(channels.get("slack"), dict):
+        channels["slack"].update(slack_extras)
+    return my_work, mail, list(envs)
+
+
 def pick_webhooks() -> tuple[dict[str, Any], list[str]]:
     """Outbound run-lifecycle webhooks. Returns (config, env_vars_needed).
 
@@ -10360,11 +10373,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     _save_partial(state)
 
     _announce()
-    summary_parts = state.get("_daily_summary") or list(pick_daily_summary(channels))
-    state["_daily_summary"] = summary_parts
-    my_work_cfg, notifications_email, slack_extras, summary_envs = summary_parts
-    if slack_extras and isinstance(channels.get("slack"), dict):
-        channels["slack"].update(slack_extras)
+    my_work_cfg, notifications_email, summary_envs = _daily_summary_step(state, channels)
     _save_partial(state)
 
     _announce()

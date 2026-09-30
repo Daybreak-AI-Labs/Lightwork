@@ -203,6 +203,73 @@ def test_block_action_approves_and_rewrites_the_card(tmp_path):
     assert again["response_type"] == "ephemeral" and "no longer waiting" in again["text"]
 
 
+def test_critical_approve_opens_the_typed_confirmation_modal(tmp_path):
+    from maverick.slack_interactive import (
+        ACTION_APPROVE,
+        CONFIRM_BLOCK,
+        CONFIRM_INPUT,
+        CONFIRM_VIEW_CALLBACK,
+        encode_button_value,
+        handle_block_action,
+        handle_view_submission,
+    )
+
+    world = _world(tmp_path)
+    card = _card()
+    aid = _park(world, risk="critical", card=card)
+    value = encode_button_value(aid, card["binding_sha256"])
+    opened = []
+    reply = handle_block_action(_payload(ACTION_APPROVE, value) | {"trigger_id": "trig-1"},
+                                world=world, principal_for=lambda uid: "user:alice",
+                                open_view=lambda trigger, view: opened.append((trigger, view)) or True)
+    assert "window that opened" in reply["text"] and world.get_approval(aid).status == "pending"
+    trigger, view = opened[0]
+    assert trigger == "trig-1" and view["callback_id"] == CONFIRM_VIEW_CALLBACK
+    assert json.loads(view["private_metadata"])["approval_id"] == aid
+    assert len(view["title"]["text"]) <= 24
+    without = handle_block_action(_payload(ACTION_APPROVE, value), world=world,
+                                  principal_for=lambda uid: "user:alice")
+    assert f"/lightwork approve {aid} confirm APPROVE" in without["text"]
+
+    def submission(typed, user="U1"):
+        return {"type": "view_submission", "user": {"id": user},
+                "view": {"callback_id": CONFIRM_VIEW_CALLBACK,
+                         "private_metadata": view["private_metadata"],
+                         "state": {"values": {CONFIRM_BLOCK: {CONFIRM_INPUT: {"value": typed}}}}}}
+
+    wrong = handle_view_submission(submission("nope"), world=world, principal_for=lambda uid: "user:alice")
+    assert wrong["ack"]["response_action"] == "errors" and CONFIRM_BLOCK in wrong["ack"]["errors"]
+    assert world.get_approval(aid).status == "pending"
+    unlinked = handle_view_submission(submission("APPROVE"), world=world, principal_for=lambda uid: None)
+    assert "Link your Slack account" in unlinked["ack"]["errors"][CONFIRM_BLOCK]
+    ok = handle_view_submission(submission("approve"), world=world, principal_for=lambda uid: "user:alice")
+    assert ok["ack"] == {"response_action": "clear"}
+    assert ok["respond_to"] == "https://hooks.slack.com/actions/x"
+    assert ok["message"]["replace_original"] is True
+    assert world.get_approval(aid).status == "approved"
+    assert handle_view_submission({"type": "view_submission", "view": {"callback_id": "other"}},
+                                  world=world, principal_for=lambda uid: "user:a") is None
+
+
+def test_decided_card_offers_undo_inside_the_window(tmp_path):
+    from maverick.channel_approvals import card_content
+    from maverick.slack_interactive import ACTION_UNDO, decided_blocks, handle_block_action
+
+    world = _world(tmp_path)
+    aid = _park(world, card=_card())
+    content = card_content(world.get_approval(aid))
+    blocks = decided_blocks(content, decision="denied", decided_by="user:a", effective=True,
+                            status="denied", undo_seconds=30)
+    assert blocks[-1]["type"] == "actions" and blocks[-1]["elements"][0]["action_id"] == ACTION_UNDO
+    assert "undo this for 30 seconds" in blocks[-2]["text"]["text"]
+    none = decided_blocks(content, decision="denied", decided_by="user:a", effective=True,
+                          status="denied", undo_seconds=0)
+    assert none[-1]["type"] == "section"
+    reply = handle_block_action(_payload(ACTION_UNDO, f"{aid}:"), world=world,
+                                principal_for=lambda uid: "user:a")
+    assert reply["response_type"] == "ephemeral" and "not available" in reply["text"]
+
+
 def test_block_action_unlinked_question_and_foreign_actions(tmp_path):
     from maverick.slack_interactive import (
         ACTION_QUESTION,
@@ -253,8 +320,15 @@ def test_slash_commands_end_to_end(tmp_path):
     assert "Say which request" in run("approve")["text"]
     needs = run(f"approve {aid}")["text"]
     assert "confirm" in needs.lower() and world.get_approval(aid).status == "pending"
-    assert "approved" in run(f"approve #{aid} confirm")["text"]
+    done = run(f"approve #{aid} confirm")["text"]
+    assert "approved" in done and f"/lightwork undo {aid}" in done
     assert world.get_approval(aid).status == "approved"
+    assert "not available" in run(f"undo {aid}")["text"]  # undo lands with package B
+    critical = _park(world, risk="critical", card=_card())
+    typed = run(f"approve {critical} confirm")["text"]
+    assert "Type APPROVE" in typed and "confirm APPROVE" in typed
+    assert "approved" in run(f"approve {critical} confirm APPROVE")["text"]
+    assert world.get_approval(critical).status == "approved"
     assert "Tell Lightwork what you need" in run("ask")["text"]
     assert "not available" in run("ask do the thing")["text"]
     answered = run("ask do the thing", ask=lambda principal, goal: f"{principal} asked: {goal}")

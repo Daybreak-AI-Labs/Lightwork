@@ -13028,9 +13028,6 @@ def _supervisor(request: Request) -> str:
 from maverick.channel_approvals import (  # noqa: E402
     audit_approval_decision as _audit_approval_decision,
 )
-from maverick.channel_approvals import (  # noqa: E402
-    deliver_approval_audit_event as _deliver_approval_audit_event,
-)
 
 
 def _record_vote_or_raise(world, approval_id: int, status: str, who: str):

@@ -80,12 +80,18 @@ link and unlink is written to the audit log.
 * **Approval cards** — new requests appear in the approvals channel with what
   it will do, the risk, the spending, whether it can be undone and the
   decide-by time. Approve/Reject record the same signed audit entry as the
-  Approvals page, tagged `channel = slack`. High and Critical requests show
-  a confirmation dialog first. The card is rewritten in place with the
-  outcome and who decided. An expired or already decided request is refused.
+  Approvals page, tagged `channel = slack`. A High request shows a
+  confirmation dialog first; a Critical one also opens a window where the
+  person types `APPROVE` (the same acknowledgement rule as the Approvals
+  page, written to the audit log as `approval_confirmation`). The card is
+  rewritten in place with the outcome and who decided, and offers **Undo**
+  while the undo window (`[approval] undo_grace_seconds`, default 30 s) is
+  open; an undo returns the request to pending and the next decision is a
+  new audit round. An expired or already decided request is refused.
 * **Slash commands**: `/lightwork status`, `/lightwork approve <n> [confirm]`,
-  `/lightwork reject <n> [confirm]`, `/lightwork ask <what you need>`,
-  `/lightwork link <code>`, `/lightwork help`. High/Critical needs `confirm`.
+  `/lightwork reject <n> [confirm]`, `/lightwork undo <n>`,
+  `/lightwork ask <what you need>`, `/lightwork link <code>`,
+  `/lightwork help`. High needs `confirm`; Critical needs `confirm APPROVE`.
   `/lightwork ask` runs through the Socket Mode bot; over the web it points
   the person at the bot.
 * **Daily summary** — at the hour the person chose on My work (default 08:00

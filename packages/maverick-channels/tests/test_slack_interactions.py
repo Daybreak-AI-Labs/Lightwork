@@ -92,6 +92,43 @@ def test_button_press_is_acked_decided_and_card_updated(monkeypatch, tmp_path):
     assert updates[0][0] == "https://hooks.slack.com/a"
 
 
+def test_critical_button_opens_modal_and_submission_is_answered_in_the_ack(monkeypatch, tmp_path):
+    from maverick import channel_identities, slack_interactive
+    from maverick.approval_cards import encode_approval_detail
+    from maverick.slack_interactive import (
+        ACTION_APPROVE,
+        CONFIRM_BLOCK,
+        CONFIRM_INPUT,
+        CONFIRM_VIEW_CALLBACK,
+        encode_button_value,
+    )
+
+    ch = _channel(monkeypatch, tmp_path)
+    ch._web.views_open = AsyncMock(return_value={"ok": True})
+    card = _card()
+    aid = ch._world.create_approval("wire_funds", risk="critical", detail=encode_approval_detail(card))
+    channel_identities.link("slack", "U123", "user:alice", actor="admin")
+    updates = []
+    monkeypatch.setattr(slack_interactive, "respond", lambda url, payload: updates.append(payload) or True)
+    payload = {"type": "block_actions", "user": {"id": "U123"}, "trigger_id": "trig",
+               "response_url": "https://hooks.slack.com/a",
+               "actions": [{"action_id": ACTION_APPROVE, "type": "button",
+                            "value": encode_button_value(aid, card["binding_sha256"])}]}
+    asyncio.run(ch._on_request(_client(), _req("interactive", payload)))
+    assert ch._web.views_open.await_args.kwargs["trigger_id"] == "trig"
+    view = ch._web.views_open.await_args.kwargs["view"]
+    assert ch._world.get_approval(aid).status == "pending"
+    submission = {"type": "view_submission", "user": {"id": "U123"},
+                  "view": {"callback_id": CONFIRM_VIEW_CALLBACK, "private_metadata": view["private_metadata"],
+                           "state": {"values": {CONFIRM_BLOCK: {CONFIRM_INPUT: {"value": "APPROVE"}}}}}}
+    client = _client()
+    asyncio.run(ch._on_request(client, _req("interactive", submission)))
+    client.send_socket_mode_response.assert_awaited_once_with(
+        {"envelope_id": "env-1", "payload": {"response_action": "clear"}})
+    assert ch._world.get_approval(aid).status == "approved"
+    assert updates[-1]["replace_original"] is True
+
+
 def test_button_press_from_unlisted_user_is_only_acked(monkeypatch, tmp_path):
     from maverick.slack_interactive import ACTION_REJECT
 

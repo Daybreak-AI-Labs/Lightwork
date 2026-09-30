@@ -260,26 +260,11 @@ def dashboard_url() -> str:
         return ""
 
 
-def _slack_bot_token() -> str:
-    import os
-
-    try:
-        from .config import load_config
-
-        section = (load_config().get("channels") or {}).get("slack") or {}
-    except Exception:  # noqa: BLE001 -- fall back to the environment
-        section = {}
-    from .notifications import _resolve_env_ref
-
-    saved = _resolve_env_ref(section.get("bot_token")) if isinstance(section.get("bot_token"), str) else None
-    return (os.environ.get("SLACK_BOT_TOKEN") or saved or "").strip()
-
-
 def _send_slack(principal: str, digest: dict[str, Any], links: list[dict[str, Any]],
                 prefs: dict[str, Any]) -> bool:
-    from .slack_interactive import digest_blocks, send_dm
+    from .slack_interactive import digest_blocks, send_dm, slack_bot_token
 
-    token = _slack_bot_token()
+    token = slack_bot_token()
     if not token or not links:
         return False
     base = dashboard_url()

@@ -26,7 +26,7 @@ from typing import Any
 
 CHANNELS = ("slack", "teams", "email")
 CODE_TTL_SECONDS = 15 * 60
-_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I look-alikes
+_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # pragma: allowlist secret -- no 0/O/1/I look-alikes
 _EXTERNAL_ID = re.compile(r"[^\s\"'<>{}]{1,254}")
 _LOCK = threading.RLock()
 

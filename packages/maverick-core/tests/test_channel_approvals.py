@@ -137,9 +137,90 @@ def test_high_and_critical_need_a_second_confirmation(tmp_path, recorded):
     assert exc.value.reason == "confirm_required"
     assert world.get_approval(aid).status == "pending"
     assert recorded == []
-    decide_from_channel(world, aid, "approved", principal="user:alice", channel="slack",
-                        binding=card["binding_sha256"], confirmed=True)
+    # Critical: the acknowledgement alone is not enough; APPROVE must be typed.
+    with pytest.raises(ChannelApprovalRefused) as exc:
+        decide_from_channel(world, aid, "approved", principal="user:alice", channel="slack",
+                            binding=card["binding_sha256"], confirmed=True)
+    assert exc.value.reason == "typed_confirmation_required" and recorded == []
+    result = decide_from_channel(world, aid, "approved", principal="user:alice", channel="slack",
+                                 binding=card["binding_sha256"], confirmed=True,
+                                 typed_confirmation=" approve ")
     assert world.get_approval(aid).status == "approved"
+    assert result["undo_seconds"] == 30.0
+    kinds = [k for k, _ in recorded]
+    assert kinds == ["consent_result", "approval_decision", "channel_approval_decision"]
+    ack = recorded[0][1]
+    assert ack["action"] == "approval_confirmation" and ack["channel"] == "slack"
+    assert ack["acknowledged"] is True and ack["typed_confirmation"] is True
+    # High: the acknowledgement (confirm dialog) is enough; rejecting needs no typed word.
+    high = _park(world, risk="high", card=_card())
+    decide_from_channel(world, high, "denied", principal="user:alice", channel="slack",
+                        confirmed=True)
+    assert recorded[-3][1]["typed_confirmation"] is False
+
+
+def test_acknowledgement_rule_can_be_switched_off(tmp_path, recorded, monkeypatch):
+    from maverick.channel_approvals import decide_from_channel
+
+    monkeypatch.setenv("MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT", "0")
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "0")
+    world = _world(tmp_path)
+    card = _card()
+    aid = _park(world, risk="critical", card=card)
+    result = decide_from_channel(world, aid, "approved", principal="user:alice", channel="slack",
+                                 binding=card["binding_sha256"], confirmed=True)
+    assert result["status"] == "approved" and result["undo_seconds"] == 0.0
+
+
+class _UndoableWorld:
+    """A world with the confirmable-queue undo primitive (lands with package B)."""
+
+    def __init__(self, inner, outcome="undone"):
+        self._inner, self.outcome, self.calls = inner, outcome, []
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def undo_approval_decision(self, approval_id, *, undone_by, within_seconds):
+        self.calls.append((approval_id, undone_by, within_seconds))
+        if self.outcome == "undone":
+            with self._inner._writing() as conn:
+                conn.execute("UPDATE approvals SET status = 'pending', decided_at = NULL, "
+                             "decided_by = NULL WHERE id = ?", (approval_id,))
+        return self.outcome
+
+
+def test_undo_uses_the_shared_rule_and_audit(tmp_path, recorded):
+    from maverick.channel_approvals import (
+        ChannelApprovalRefused,
+        decide_from_channel,
+        undo_decision,
+        undo_seconds_left,
+    )
+
+    plain = _world(tmp_path)
+    aid = _park(plain, detail="x")
+    with pytest.raises(ChannelApprovalRefused) as exc:
+        undo_decision(plain, aid, undone_by="user:a", channel="slack")
+    assert exc.value.reason == "unavailable"
+    world = _UndoableWorld(plain)
+    decide_from_channel(world, aid, "denied", principal="user:a", channel="slack")
+    assert 0 < undo_seconds_left(plain.get_approval(aid)) <= 30
+    result = undo_decision(world, aid, undone_by="user:a", channel="slack")
+    assert result["status"] == "pending" and result["previous_status"] == "denied"
+    assert world.calls == [(aid, "user:a", 30.0)]
+    note = recorded[-1]
+    assert note[0] == "consent_result" and note[1]["action"] == "approval_decision_undone"
+    assert note[1]["channel"] == "slack" and note[1]["previous_status"] == "denied"
+    assert plain.get_approval(aid).status == "pending"
+    for outcome, reason in (("too_late", "too_late"), ("not_decided", "not_decided"),
+                            ("not_found", "not_found")):
+        with pytest.raises(ChannelApprovalRefused) as exc:
+            undo_decision(_UndoableWorld(plain, outcome), aid, undone_by="user:a", channel="slack")
+        assert exc.value.reason == reason
+    with pytest.raises(ChannelApprovalRefused) as exc:
+        undo_decision(world, 9999, undone_by="user:a", channel="slack")
+    assert exc.value.reason == "not_found"
 
 
 def test_expired_stale_and_legacy_approvals_are_refused(tmp_path, recorded):
@@ -216,7 +297,6 @@ def test_dashboard_api_uses_the_shared_audit_delivery():
     from maverick_dashboard import api
 
     assert api._audit_approval_decision is channel_approvals.audit_approval_decision
-    assert api._deliver_approval_audit_event is channel_approvals.deliver_approval_audit_event
 
 
 # ----------------------------------------------------------- announcements

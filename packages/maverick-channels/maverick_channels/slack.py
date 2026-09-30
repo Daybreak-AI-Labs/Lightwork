@@ -178,18 +178,49 @@ class SlackChannel(Channel):
             kwargs["payload"] = payload
         await client.send_socket_mode_response(SocketModeResponse(**kwargs))
 
+    async def _open_view(self, trigger_id: str, view: dict) -> bool:
+        """``views.open`` through the Socket Mode web client (the modal for Critical)."""
+        try:
+            result = await self._web.views_open(trigger_id=trigger_id, view=view)
+        except Exception:  # noqa: BLE001 -- the caller falls back to the slash-command path
+            log.warning("slack views.open failed", exc_info=True)
+            return False
+        return bool(result.get("ok", True))
+
+    async def _on_view_submission(self, client, req, payload: dict):
+        from maverick.slack_interactive import handle_view_submission, respond
+
+        outcome = await asyncio.to_thread(
+            handle_view_submission, payload, world=self._approval_world(),
+            principal_for=self._principal_for,
+        )
+        await self._ack(client, req, (outcome or {}).get("ack"))
+        if outcome and outcome.get("message"):
+            await asyncio.to_thread(respond, outcome["respond_to"], outcome["message"])
+        return outcome
+
     async def _on_interactive(self, client, req):
-        """A button press: ack within Slack's 3 seconds, decide, update in place."""
+        """A button press: ack within Slack's 3 seconds, decide, update in place.
+        A submitted confirmation modal is answered in the ack itself."""
         from maverick.slack_interactive import handle_block_action, respond
 
         payload = req.payload if isinstance(req.payload, dict) else {}
-        await self._ack(client, req)
         user_id = str((payload.get("user") or {}).get("id") or "")
-        if payload.get("type") != "block_actions" or not is_allowed(user_id, self.allowed_user_ids):
+        allowed = is_allowed(user_id, self.allowed_user_ids)
+        if payload.get("type") == "view_submission" and allowed:
+            return await self._on_view_submission(client, req, payload)
+        await self._ack(client, req)
+        if payload.get("type") != "block_actions" or not allowed:
             return None
+        loop = asyncio.get_running_loop()
+
+        def open_view(trigger_id: str, view: dict) -> bool:
+            future = asyncio.run_coroutine_threadsafe(self._open_view(trigger_id, view), loop)
+            return bool(future.result(timeout=5))
+
         result = await asyncio.to_thread(
             handle_block_action, payload, world=self._approval_world(),
-            principal_for=self._principal_for,
+            principal_for=self._principal_for, open_view=open_view,
         )
         if result is not None:
             await asyncio.to_thread(respond, str(payload.get("response_url") or ""), result)
@@ -234,9 +265,8 @@ class SlackChannel(Channel):
         """DMs always; channels and groups only when the bot is mentioned."""
         if event.get("type") == "app_mention":
             return True
-        channel = str(event.get("channel") or "")
-        if event.get("channel_type") == "im" or channel.startswith("D"):
-            return True
+        if event.get("channel_type") not in ("channel", "group", "mpim"):
+            return True  # a direct message (or an older payload without the type)
         return bool(self._bot_user_id and f"<@{self._bot_user_id}" in str(event.get("text") or ""))
 
     async def post_approval_card(self, channel: str, approval, *, dashboard_url: str = ""):
@@ -282,7 +312,8 @@ class SlackChannel(Channel):
             account = self._account_id
             # A mention in a channel or group answers in its thread so the
             # room is not flooded; DMs keep the configured threading.
-            in_room = not (event.get("channel_type") == "im" or event["channel"].startswith("D"))
+            in_room = (event.get("type") == "app_mention"
+                       or event.get("channel_type") in ("channel", "group", "mpim"))
             thread = event.get("thread_ts") or event["ts"]
             route = {"reply_to": thread if (self.thread_replies or in_room) else None,
                      "files": files}

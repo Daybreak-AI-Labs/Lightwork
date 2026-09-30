@@ -57,13 +57,19 @@ MAX_BODY_BYTES = 256 * 1024
 ACTION_APPROVE = "lightwork_approve"
 ACTION_REJECT = "lightwork_reject"
 ACTION_QUESTION = "lightwork_question"
-SLASH_VERBS = ("approve", "reject", "status", "help", "ask", "link")
+ACTION_UNDO = "lightwork_undo"
+CONFIRM_VIEW_CALLBACK = "lightwork_confirm_critical"
+CONFIRM_BLOCK = "lightwork_typed"
+CONFIRM_INPUT = "typed_confirmation"
+SLASH_VERBS = ("approve", "reject", "status", "help", "ask", "link", "undo")
 SLACK_API = "https://slack.com/api"
 _HELP = (
     "*Lightwork commands*\n"
     "• `/lightwork status` — what is waiting for you\n"
-    "• `/lightwork approve <number> [confirm]` — approve a request (High/Critical needs `confirm`)\n"
+    "• `/lightwork approve <number> [confirm]` — approve a request (High needs `confirm`; "
+    "Critical needs `confirm APPROVE`)\n"
     "• `/lightwork reject <number> [confirm]` — reject a request\n"
+    "• `/lightwork undo <number>` — take back a decision made moments ago\n"
     "• `/lightwork ask <what you need>` — give Lightwork a task\n"
     "• `/lightwork link <code>` — tie this Slack account to your Lightwork account\n"
     "• `/lightwork help` — this list"
@@ -154,16 +160,20 @@ def parse_slash_text(text: str | None) -> tuple[str, str]:
     return verb, rest
 
 
-def _decision_args(rest: str) -> tuple[int | None, bool]:
+def _decision_args(rest: str) -> tuple[int | None, bool, str | None]:
+    """``"12 confirm APPROVE"`` -> ``(12, True, "APPROVE")``."""
     parts = rest.split()
     if not parts:
-        return None, False
+        return None, False, None
     head = parts[0].lstrip("#")
     try:
         approval_id = int(head)
     except ValueError:
-        return None, False
-    return approval_id, any(p.lower() in ("confirm", "yes") for p in parts[1:])
+        return None, False, None
+    words = [p.lower() for p in parts[1:]]
+    confirmed = any(w in ("confirm", "yes") for w in words)
+    typed = next((p for p in parts[1:] if p.lower() == "approve"), None)
+    return approval_id, confirmed, typed
 
 
 # ----------------------------------------------------------------------------
@@ -256,7 +266,7 @@ def approval_blocks(content: dict[str, Any], *, dashboard_url: str = "",
 
 
 def decided_blocks(content: dict[str, Any], *, decision: str, decided_by: str,
-                   effective: bool, status: str) -> list[dict[str, Any]]:
+                   effective: bool, status: str, undo_seconds: float = 0.0) -> list[dict[str, Any]]:
     """The same card after a decision: buttons gone, outcome and decider shown."""
     blocks = approval_blocks(content, include_actions=False)
     if status == "pending":
@@ -269,7 +279,13 @@ def decided_blocks(content: dict[str, Any], *, decision: str, decided_by: str,
         outcome = f":no_entry_sign: *Rejected* by {decided_by}."
     if not effective:
         outcome += " Recorded; it takes effect once the audit record is confirmed."
+    if undo_seconds and status != "pending":
+        outcome += f" You can undo this for {int(undo_seconds)} seconds."
     blocks.append({"type": "section", "text": _mrkdwn(outcome)})
+    if undo_seconds and status != "pending":
+        blocks.append({"type": "actions", "block_id": f"lightwork_undo_{content['id']}", "elements": [
+            {"type": "button", "action_id": ACTION_UNDO, "value": encode_button_value(content["id"], None),
+             "text": _plain("Undo", 75)}]})
     return blocks
 
 
@@ -315,6 +331,30 @@ def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[di
     return blocks
 
 
+def confirm_view(content: dict[str, Any], *, binding: str | None, response_url: str) -> dict[str, Any]:
+    """The modal a Critical approval opens: the person types APPROVE."""
+    metadata = json.dumps({"approval_id": content["id"], "binding": binding,
+                           "response_url": response_url})[:3000]
+    return {
+        "type": "modal",
+        "callback_id": CONFIRM_VIEW_CALLBACK,
+        "private_metadata": metadata,
+        "title": _plain("Confirm a critical action", 24),
+        "submit": _plain("Approve", 24),
+        "close": _plain("Go back", 24),
+        "blocks": [
+            {"type": "section", "text": _mrkdwn(
+                f"*Request #{content['id']}: {content['action']}*\n{content['summary']}\n\n"
+                "This is a *critical-risk* action"
+                + (" that *can't be undone*" if content.get("irreversible") else "") + ".")},
+            {"type": "input", "block_id": CONFIRM_BLOCK,
+             "label": _plain("Type APPROVE to confirm", 2000),
+             "element": {"type": "plain_text_input", "action_id": CONFIRM_INPUT,
+                         "placeholder": _plain("APPROVE", 150)}},
+        ],
+    }
+
+
 # ----------------------------------------------------------------------------
 # Handling interactions and slash commands
 # ----------------------------------------------------------------------------
@@ -332,14 +372,15 @@ def _unlinked_note(user_id: str) -> dict[str, Any]:
 
 
 def _decide(world, *, approval_id: int, decision: str, principal: str,
-            binding: str | None, confirmed: bool) -> tuple[dict[str, Any] | None, str | None]:
+            binding: str | None, confirmed: bool,
+            typed: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
     """Run the shared decision; return ``(result, error_text)``."""
     from .channel_approvals import ChannelApprovalRefused, decide_from_channel
 
     try:
         result = decide_from_channel(
             world, approval_id, decision, principal=principal, channel="slack",
-            binding=binding, confirmed=confirmed,
+            binding=binding, confirmed=confirmed, typed_confirmation=typed,
         )
     except ChannelApprovalRefused as exc:
         return None, exc.message
@@ -349,13 +390,47 @@ def _decide(world, *, approval_id: int, decision: str, principal: str,
     return result, None
 
 
-def handle_block_action(payload: dict[str, Any], *, world,
-                        principal_for: PrincipalResolver) -> dict[str, Any] | None:
+def _decided_message(world, approval_id: int, *, decision: str, principal: str,
+                     result: dict[str, Any]) -> dict[str, Any]:
+    from .channel_approvals import card_content
+
+    content = card_content(world.get_approval(approval_id))
+    label = result["status"] if result["status"] != "pending" else "voted on"
+    return {
+        "replace_original": True,
+        "text": f"Request #{approval_id} {label} by {principal}",
+        "blocks": decided_blocks(content, decision=decision, decided_by=principal,
+                                 effective=result["effective"], status=result["status"],
+                                 undo_seconds=result.get("undo_seconds", 0.0)),
+    }
+
+
+def _undo_message(world, approval_id: int, *, principal: str) -> dict[str, Any]:
+    """After an undo the card is live again, with its buttons."""
+    from .channel_approvals import ChannelApprovalRefused, card_content, undo_decision
+
+    try:
+        undo_decision(world, approval_id, undone_by=principal, channel="slack")
+    except ChannelApprovalRefused as exc:
+        return _ephemeral(exc.message)
+    content = card_content(world.get_approval(approval_id))
+    blocks = approval_blocks(content)
+    blocks.append({"type": "context", "elements": [_mrkdwn(
+        f"{principal} took back their decision; the request is waiting again.")]})
+    return {"replace_original": True,
+            "text": f"Request #{approval_id} is waiting for a decision again", "blocks": blocks}
+
+
+def handle_block_action(payload: dict[str, Any], *, world, principal_for: PrincipalResolver,
+                        open_view: Callable[[str, dict[str, Any]], bool] | None = None,
+                        ) -> dict[str, Any] | None:
     """Handle one ``block_actions`` payload; return the message to send back.
 
     A returned mapping with ``replace_original: True`` rewrites the card in
     place; ``response_type: "ephemeral"`` is a private note. ``None`` means
-    nothing to say (an action we do not own).
+    nothing to say (an action we do not own). Approving a Critical request
+    opens the typed-confirmation modal through ``open_view(trigger_id, view)``
+    (``views.open``) instead of deciding at once.
     """
     from .channel_approvals import card_content
 
@@ -363,7 +438,7 @@ def handle_block_action(payload: dict[str, Any], *, world,
         return None
     actions = [a for a in (payload.get("actions") or []) if isinstance(a, dict)]
     action = next((a for a in actions if a.get("action_id") in
-                   (ACTION_APPROVE, ACTION_REJECT, ACTION_QUESTION)), None)
+                   (ACTION_APPROVE, ACTION_REJECT, ACTION_QUESTION, ACTION_UNDO)), None)
     if action is None:
         return None
     approval_id, binding = decode_button_value(action.get("value"))
@@ -379,21 +454,67 @@ def handle_block_action(payload: dict[str, Any], *, world,
             f"or with `/lightwork ask question about request #{approval_id}: ...`. "
             "The requester and Lightwork see it; the request stays waiting until you decide."
         )
+    if action["action_id"] == ACTION_UNDO:
+        return _undo_message(world, approval_id, principal=principal)
     decision = "approved" if action["action_id"] == ACTION_APPROVE else "denied"
     approval = world.get_approval(approval_id)
-    # The button's confirm dialog is the second confirmation for High/Critical:
+    if decision == "approved" and approval is not None and approval.status == "pending":
+        content = card_content(approval)
+        if content["needs_typed_confirmation"]:
+            trigger = str(payload.get("trigger_id") or "")
+            view = confirm_view(content, binding=binding,
+                                response_url=str(payload.get("response_url") or ""))
+            if open_view is not None and trigger and open_view(trigger, view):
+                return _ephemeral("Type APPROVE in the window that opened to confirm this "
+                                  "critical action.")
+            return _ephemeral("This critical action needs a typed confirmation: "
+                              f"`/lightwork approve {approval_id} confirm APPROVE`.")
+    # The button's confirm dialog is the acknowledgement for High/Critical:
     # Slack only sends this action after the person pressed "Yes" in it.
     result, error = _decide(world, approval_id=approval_id, decision=decision,
                             principal=principal, binding=binding, confirmed=True)
     if error:
         return _ephemeral(error)
-    content = card_content(world.get_approval(approval_id) or approval)
-    return {
-        "replace_original": True,
-        "text": f"Request #{approval_id} {result['status'] if result['status'] != 'pending' else 'voted on'} by {principal}",
-        "blocks": decided_blocks(content, decision=decision, decided_by=principal,
-                                 effective=result["effective"], status=result["status"]),
-    }
+    return _decided_message(world, approval_id, decision=decision, principal=principal,
+                            result=result)
+
+
+def handle_view_submission(payload: dict[str, Any], *, world,
+                           principal_for: PrincipalResolver) -> dict[str, Any] | None:
+    """The typed-confirmation modal was submitted.
+
+    Returns ``{"ack": <view response>, "respond_to": url, "message": <update>}``:
+    ``ack`` answers Slack (``response_action`` ``clear`` or ``errors``), and
+    ``message`` (when present) rewrites the original card through ``respond_to``.
+    """
+    view = payload.get("view") if isinstance(payload.get("view"), dict) else {}
+    if payload.get("type") != "view_submission" or view.get("callback_id") != CONFIRM_VIEW_CALLBACK:
+        return None
+    try:
+        meta = json.loads(view.get("private_metadata") or "{}")
+    except ValueError:
+        meta = {}
+    approval_id = meta.get("approval_id")
+    if not isinstance(approval_id, int):
+        return {"ack": {"response_action": "clear"}, "respond_to": "", "message": None}
+    user_id = str((payload.get("user") or {}).get("id") or "")
+    principal = principal_for(user_id) if user_id else None
+    errors = {"response_action": "errors", "errors": {}}
+    if not principal:
+        errors["errors"][CONFIRM_BLOCK] = "Link your Slack account to Lightwork first."
+        return {"ack": errors, "respond_to": "", "message": None}
+    values = ((view.get("state") or {}).get("values") or {}).get(CONFIRM_BLOCK) or {}
+    typed = str((values.get(CONFIRM_INPUT) or {}).get("value") or "")
+    result, error = _decide(world, approval_id=approval_id, decision="approved",
+                            principal=principal, binding=meta.get("binding"),
+                            confirmed=True, typed=typed)
+    if error:
+        errors["errors"][CONFIRM_BLOCK] = error[:200]
+        return {"ack": errors, "respond_to": "", "message": None}
+    return {"ack": {"response_action": "clear"},
+            "respond_to": str(meta.get("response_url") or ""),
+            "message": _decided_message(world, approval_id, decision="approved",
+                                        principal=principal, result=result)}
 
 
 def _status_text(world, principal: str) -> str:
@@ -444,9 +565,15 @@ def handle_slash_command(form: dict[str, Any], *, world, principal_for: Principa
             answer = "Lightwork could not take that request right now."
         return {"response_type": "ephemeral", "replace_original": False,
                 "text": str(answer)[:3000]}
-    approval_id, confirmed = _decision_args(rest)
+    approval_id, confirmed, typed = _decision_args(rest)
     if approval_id is None:
         return _ephemeral(f"Say which request: `/lightwork {verb} <number>`.")
+    if verb == "undo":
+        reply = _undo_message(world, approval_id, principal=principal)
+        if reply.get("replace_original"):
+            return _ephemeral(f"Your decision on request #{approval_id} is taken back; "
+                              "it is waiting for a decision again.")
+        return reply
     decision = "approved" if verb == "approve" else "denied"
     approval = world.get_approval(approval_id)
     binding = None
@@ -455,18 +582,22 @@ def handle_slash_command(form: dict[str, Any], *, world, principal_for: Principa
 
         binding = card_content(approval).get("binding")
     result, error = _decide(world, approval_id=approval_id, decision=decision,
-                            principal=principal, binding=binding, confirmed=confirmed)
+                            principal=principal, binding=binding, confirmed=confirmed, typed=typed)
     if error:
-        hint = (f" Add `confirm`: `/lightwork {verb} {approval_id} confirm`."
-                if "Confirm you really mean it" in error else "")
+        hint = ""
+        if "Confirm you really mean it" in error:
+            hint = f" Add `confirm`: `/lightwork {verb} {approval_id} confirm`."
+        elif "Type APPROVE" in error:
+            hint = f" Send `/lightwork approve {approval_id} confirm APPROVE`."
         return _ephemeral(error + hint)
     word = "approved" if decision == "approved" else "rejected"
     if result["status"] == "pending":
         return _ephemeral(f"Your vote to have request #{approval_id} {word} is recorded; "
                           "more approvers are needed.")
-    return _ephemeral(f"Request #{approval_id} {word}."
-                      + ("" if result["effective"] else
-                         " It takes effect once the audit record is confirmed."))
+    note = "" if result["effective"] else " It takes effect once the audit record is confirmed."
+    if result.get("undo_seconds"):
+        note += f" You can take it back for {int(result['undo_seconds'])} seconds with `/lightwork undo {approval_id}`."
+    return _ephemeral(f"Request #{approval_id} {word}." + note)
 
 
 # ----------------------------------------------------------------------------
@@ -508,6 +639,29 @@ def respond(response_url: str, payload: dict[str, Any]) -> bool:
     return bool(result and result.get("ok", True))
 
 
+def slack_bot_token() -> str:
+    """``SLACK_BOT_TOKEN`` or the saved ``[channels.slack] bot_token``."""
+    import os
+
+    try:
+        from .config import load_config
+
+        section = (load_config().get("channels") or {}).get("slack") or {}
+    except Exception:  # noqa: BLE001 -- fall back to the environment
+        section = {}
+    from .notifications import _resolve_env_ref
+
+    saved = _resolve_env_ref(section.get("bot_token")) if isinstance(section.get("bot_token"), str) else None
+    return (os.environ.get("SLACK_BOT_TOKEN") or saved or "").strip()
+
+
+def open_view(bot_token: str, trigger_id: str, view: dict[str, Any]) -> bool:
+    """``views.open``: show a modal for the interaction ``trigger_id`` (3-second life)."""
+    result = post_json(f"{SLACK_API}/views.open", {"trigger_id": trigger_id, "view": view},
+                       token=bot_token)
+    return bool(result and result.get("ok"))
+
+
 def open_dm(bot_token: str, user_id: str) -> str | None:
     """The person's DM channel id with the app (``conversations.open``)."""
     result = post_json(f"{SLACK_API}/conversations.open", {"users": user_id}, token=bot_token)
@@ -544,6 +698,12 @@ __all__ = [
     "ACTION_APPROVE",
     "ACTION_QUESTION",
     "ACTION_REJECT",
+    "ACTION_UNDO",
+    "CONFIRM_VIEW_CALLBACK",
+    "confirm_view",
+    "handle_view_submission",
+    "open_view",
+    "slack_bot_token",
     "SIGNATURE_TOLERANCE_SECONDS",
     "SLASH_VERBS",
     "approval_blocks",

@@ -22,7 +22,8 @@ def isolated(tmp_path, monkeypatch):
 
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
-    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
+    (tmp_path / "config.toml").write_text("")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_ADMINS", raising=False)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
@@ -43,13 +44,15 @@ def _as(monkeypatch, principal, role="operator"):
 
     monkeypatch.setattr(auth, "caller_principal", lambda request: principal)
     monkeypatch.setattr(auth, "_authorization_principal", lambda request: principal)
+    monkeypatch.setattr(auth, "role_for_principal", lambda p: role)
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda p: role)
     monkeypatch.setattr(rbac, "list_users", lambda: {principal: role})
 
 
 def _client():
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers=ORIGIN)
+    return TestClient(app, headers=ORIGIN, follow_redirects=False)
 
 
 def _world(tmp_path):
@@ -98,7 +101,7 @@ def test_me_page_for_an_operator_shows_only_their_work(tmp_path, monkeypatch):
     text = page.text
     assert "My work" in text and "Forecast" in text and "Which quarter?" in text
     assert "Bob&#39;s" not in text and "Bob's" not in text
-    assert f"#{ids['approval']} Wire funds" in text and "Can&#39;t be undone" in text
+    assert f"#{ids['approval']} Wire funds" in text and "Can't be undone" in text
     assert "$2.50" in text
     assert 'href="/me"' in text  # in the sidebar under Work
 
@@ -109,6 +112,7 @@ def test_me_page_for_a_viewer_and_an_administrator(tmp_path, monkeypatch):
     text = _client().get("/me").text
     assert "Nothing is waiting for your decision" in text  # viewers see only their own requests
     assert "No results in the last 7 days" in text
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
     _as(monkeypatch, "user:root", role="admin")
     text = _client().get("/me").text
     assert "Forecast" in text and "Bob" in text and f"#{ids['approval']}" in text

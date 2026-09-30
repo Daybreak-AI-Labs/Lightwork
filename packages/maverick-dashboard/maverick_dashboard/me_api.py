@@ -301,14 +301,32 @@ def _slack_principal_for(user_id: str):
 @router.post("/webhook/slack/interactions")
 async def webhook_slack_interactions(request: Request) -> JSONResponse:
     """Button presses from Slack (signed; ``payload`` form field)."""
-    from maverick.slack_interactive import handle_block_action, parse_interaction_body, respond
+    from maverick.slack_interactive import (
+        handle_block_action,
+        handle_view_submission,
+        open_view,
+        parse_interaction_body,
+        respond,
+        slack_bot_token,
+    )
 
     body = await _verified_slack_body(request)
     payload = parse_interaction_body(body)
+    if payload.get("type") == "view_submission":
+        # The typed confirmation for a Critical request: Slack reads the answer
+        # from this response (response_action), the card update goes through
+        # the response_url kept in the modal.
+        outcome = await run_in_threadpool(
+            handle_view_submission, payload, world=_world(), principal_for=_slack_principal_for)
+        if outcome and outcome.get("message"):
+            await run_in_threadpool(respond, outcome["respond_to"], outcome["message"])
+        return JSONResponse((outcome or {}).get("ack") or {})
     if payload.get("type") != "block_actions":
         return JSONResponse({})
+    token = slack_bot_token()
     result = await run_in_threadpool(
-        handle_block_action, payload, world=_world(), principal_for=_slack_principal_for)
+        handle_block_action, payload, world=_world(), principal_for=_slack_principal_for,
+        open_view=(lambda trigger, view: open_view(token, trigger, view)) if token else None)
     if result is None:
         return JSONResponse({})
     # Update the card in place through the payload's response_url; answering the
