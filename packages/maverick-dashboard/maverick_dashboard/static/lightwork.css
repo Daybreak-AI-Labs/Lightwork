@@ -606,6 +606,13 @@
     .iconbtn--text { width: auto; padding-inline: 0.55rem; gap: 0.35rem; }
     .iconbtn__text { font-size: var(--text-sm); }
     .page-docs { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--muted); }
+    /* Task pages share one tab strip: Result · Steps · Plan · Problems. */
+    .task-tabs { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; margin: 0 0 var(--space-4); }
+    .task-tabs__back { font-size: var(--text-sm); color: var(--muted); }
+    .task-tabs__list { display: flex; gap: var(--space-1); list-style: none; margin: 0; padding: 0; border-bottom: 1px solid var(--border); flex: 1 1 auto; }
+    .task-tabs__list a { display: inline-block; padding: var(--space-2) var(--space-3); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .task-tabs__list a:hover { color: var(--text); text-decoration: none; }
+    .task-tabs__list a.task-tabs__on { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
     .navquick-list { list-style: none; margin: 0 0 var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border); }
     .halt-pill.armed .dot { background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }

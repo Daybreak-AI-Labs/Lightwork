@@ -3370,6 +3370,9 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     mine = set(persona_roles_for(caller_principal(request)))
     default_mine = mine if (not selected and role != "all") else None
     model = build_inbox(specs, runs_by_domain, selected, signoffs, mine=default_mine)
+    # ?role=all is the explicit request to browse the whole catalogue even
+    # before any result exists; the plain page shows a real empty state.
+    model["showing_all"] = role == "all"
     return templates.TemplateResponse(request, "deliverables.html", model)
 
 
@@ -3421,10 +3424,18 @@ async def tenants_page(request: Request) -> HTMLResponse:
         tenants = list_tenants()
     except Exception:  # pragma: no cover -- never 500 the console
         tenants = []
+    # Plans (Free / Pro / Enterprise) only mean something when platform billing
+    # collects for them; a self-hosted administrator never sees them otherwise.
+    try:
+        from maverick import billing_stripe
+
+        billing_on = bool(billing_stripe.enabled())
+    except Exception:  # pragma: no cover -- billing is optional
+        billing_on = False
     return templates.TemplateResponse(
         request,
         "tenants.html",
-        {"tenants": tenants, "is_admin": True},
+        {"tenants": tenants, "is_admin": True, "billing_on": billing_on},
     )
 
 
@@ -8939,10 +8950,25 @@ def _submission_conversation(w, receipt) -> int | None:
 # bare root renders it too; the overview/stats view lives at /overview. This is
 # a distinct handler rather than a second decorator on chat_page so the route
 # name stays unique (duplicate names collide as OpenAPI operationIds).
+def _owner_setup_first(request: Request) -> bool:
+    """A fresh install opens on owner creation before anything else, unless the
+    person chose Skip for now (a cookie the /start page sets)."""
+    if request.query_params.get("owner") == "later" or request.cookies.get("mvk_owner_later"):
+        return False
+    try:
+        from .local_owner import available as local_owner_available
+
+        return bool(local_owner_available(request))
+    except Exception:  # pragma: no cover -- never block the home page on this
+        return False
+
+
 @app.get("/", response_class=HTMLResponse, response_model=None)
 async def home(request: Request) -> HTMLResponse | RedirectResponse:
     from .onboarding_state import selected_model_routes_ready
 
+    if _owner_setup_first(request):
+        return RedirectResponse("/auth/local-owner", status_code=303)
     if not await run_in_threadpool(selected_model_routes_ready):
         return RedirectResponse("/start", status_code=303)
     return await run_in_threadpool(chat_page, request)
@@ -10539,6 +10565,18 @@ def _render_tree_html(node: dict) -> str:
     return f"<ul>{_render(node)}</ul>"
 
 
+@app.get("/goals/{goal_id}", response_class=HTMLResponse, response_model=None)
+def goal_page(request: Request, goal_id: int) -> RedirectResponse:
+    """The task's own address: the Result tab (the readable chat view). The
+    other tabs live at /goals/{id}/trajectory, /plan and /errors."""
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    return RedirectResponse(f"/chat/goal/{goal_id}", status_code=302)
+
+
 @app.get("/goals/{goal_id}/plan", response_class=HTMLResponse)
 def plan_tree_page(request: Request, goal_id: int) -> HTMLResponse:
     """HTML plan-tree visualization."""
@@ -11456,12 +11494,15 @@ async def workflow_builder_page(
     )
 
 
-@app.get("/start", response_class=HTMLResponse)
-def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLResponse:
+@app.get("/start", response_class=HTMLResponse, response_model=None)
+def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLResponse | RedirectResponse:
     """First-run guide: a live checklist from zero to a running AI workforce.
     Each step reflects real workspace state (provider configured? a workflow or
     agent built? anything run or automated?) so it self-completes as you go."""
     from maverick.config import get_features
+
+    if _owner_setup_first(request):
+        return RedirectResponse("/auth/local-owner", status_code=303)
 
     from .guided_outcome import for_request
     from .onboarding_state import build
@@ -11478,11 +11519,14 @@ def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLRes
     state["guided"] = guided
     from .local_owner import available as local_owner_available
     state["local_owner_setup_available"] = local_owner_available(request)
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "get_started.html",
         state,
     )
+    if request.query_params.get("owner") == "later":
+        response.set_cookie("mvk_owner_later", "1", max_age=7 * 24 * 3600, httponly=True, samesite="lax")
+    return response
 
 
 @app.get("/workflows", response_class=HTMLResponse)

@@ -77,8 +77,9 @@
         {% if g.description %}<div class="g-row__desc" title="{{ g.description }}">{{ (g.description or '')[:160] }}</div>{% endif %}
       </span>
       <span class="g-row__actions">
+        <a href="/chat/goal/{{ g.id }}">Result</a>
+        <a href="/goals/{{ g.id }}/trajectory">Steps</a>
         <a href="/goals/{{ g.id }}/plan">Plan</a>
-        <a href="/goals/{{ g.id }}/trajectory">Step by step</a>
         {% if g.status in ('failed', 'blocked') %}<a href="/goals/{{ g.id }}/errors">Problems</a>{% endif %}
       </span>
     </div>
@@ -128,8 +129,9 @@
           '<span class="g-row__main"><div class="g-row__title"><a href="/chat/goal/' + gid + '">' + esc(g.title) + '</a></div>' +
           (d ? '<div class="g-row__desc">' + esc(d) + '</div>' : '') + '</span>' +
           '<span class="g-row__actions">' +
+          '<a href="/chat/goal/' + gid + '">Result</a>' +
+          '<a href="/goals/' + gid + '/trajectory">Steps</a>' +
           '<a href="/goals/' + gid + '/plan">Plan</a>' +
-          '<a href="/goals/' + gid + '/trajectory">Step by step</a>' +
           (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + gid + '/errors">Problems</a>' : '') + '</span></div>';
       }).join('');
     }

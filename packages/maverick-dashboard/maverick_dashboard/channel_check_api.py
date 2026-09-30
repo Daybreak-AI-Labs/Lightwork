@@ -160,19 +160,40 @@ def _back(name: str, result: str) -> RedirectResponse:
                             status_code=303)
 
 
-@router.post("/channels/test")
-async def channels_test(request: Request, channel: str = Form(...)) -> RedirectResponse:
+def _wants_json(request: Request) -> bool:
+    return "application/json" in (request.headers.get("accept") or "")
+
+
+def _answer(request: Request, name: str, cfg: dict[str, Any], *, ok: bool, detail: str,
+            result: str, sentence: str):
+    """Redirect for a plain form post; a JSON answer (with the re-rendered
+    status block) when the page asked for one, so the result shows inline."""
+    if not _wants_json(request):
+        return _back(name, result)
+    from .app import templates
+    from .integration_readiness import channel_readiness
+
+    readiness = channel_readiness(name, cfg)
+    module = templates.get_template("_integration_readiness.html").module
+    return {"ok": ok, "detail": detail, "status": "Working" if ok else "Test failed",
+            "message": sentence, "readiness_html": str(module.integration_readiness(readiness))}
+
+
+@router.post("/channels/test", response_model=None)
+async def channels_test(request: Request, channel: str = Form(...)):
     _admin(request)
     from .integration_readiness import record
     name = channel.strip()
     cfg = await run_in_threadpool(_channel_config, name)
     ok, detail = await run_in_threadpool(check_credentials, name, cfg)
     record("channel", name, cfg, verified=ok, detail=detail, evidence={"kind": "credential_check"})
-    return _back(name, "tested" if ok else "test_failed")
+    return _answer(request, name, cfg, ok=ok, detail=detail, result="tested" if ok else "test_failed",
+                   sentence="Connection test passed: the service accepted the saved details." if ok
+                   else "The connection test failed. Check the details, save, and test again.")
 
 
-@router.post("/channels/send-test")
-async def channels_send_test(request: Request, channel: str = Form(...), to: str = Form("")) -> RedirectResponse:
+@router.post("/channels/send-test", response_model=None)
+async def channels_send_test(request: Request, channel: str = Form(...), to: str = Form("")):
     _admin(request)
     from .integration_readiness import record
     name = channel.strip()
@@ -183,4 +204,6 @@ async def channels_send_test(request: Request, channel: str = Form(...), to: str
     ok, detail = await run_in_threadpool(send_test, name, cfg, destination)
     record("channel", name, cfg, verified=ok, detail=detail,
            evidence={"kind": "test_message", "external_delivery_verified": False})
-    return _back(name, "sent" if ok else "send_failed")
+    return _answer(request, name, cfg, ok=ok, detail=detail, result="sent" if ok else "send_failed",
+                   sentence="Test message sent. Check that it arrived." if ok
+                   else "The test message could not be sent. Check the details and try again.")

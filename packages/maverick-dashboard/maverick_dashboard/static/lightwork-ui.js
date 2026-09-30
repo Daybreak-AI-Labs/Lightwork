@@ -436,6 +436,15 @@
         var text = el.getAttribute('data-mv-toast');
         if (text) window.mvToast(text, { error: el.getAttribute('data-mv-toast-error') === 'true' });
       });
+      // A page that reloads right after a change hands its toast to the next load.
+      var FLASH = 'lightwork.flash-toast';
+      window.mvToastAfterReload = function (message) {
+        try { sessionStorage.setItem(FLASH, String(message)); } catch (e) { window.mvToast(message); }
+      };
+      try {
+        var flashed = sessionStorage.getItem(FLASH);
+        if (flashed) { sessionStorage.removeItem(FLASH); window.mvToast(flashed); }
+      } catch (e) {}
     })();
 
     // Halt indicator + arm/clear via /api/v1/halt.

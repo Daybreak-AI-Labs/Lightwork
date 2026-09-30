@@ -23,8 +23,9 @@
   .tree .title { color: var(--text); }
   .tree .cost { color: var(--muted); font-size: 0.85em; margin-left: 0.5rem; }
 </style>
-<p class="muted"><a href="/goals">← All tasks</a> · <a href="/goals/{{ goal.id }}/trajectory">What happened</a></p>
-<div class="section-head"><h2>Steps for: {{ goal.title }}</h2></div>
+{% from "_task_tabs.html" import task_tabs %}
+{{ task_tabs(goal, 'plan') }}
+<div class="section-head"><h2>Plan for: {{ goal.title }}</h2></div>
 <div class="panel">
   <div class="legend">
     <span><span class="badge active">In progress</span></span>
@@ -34,16 +35,20 @@
     <span><span class="badge pending">Waiting</span></span>
     <span class="live" id="plan-tree-status" aria-live="polite">Loading…</span>
   </div>
-  <div id="plan-tree" role="img"
+  <div id="plan-tree" role="img" hidden
        aria-label="Map of the steps for {{ goal.title }}"></div>
-  <noscript>
-    <div class="tree">
-      {# Server-rendered fallback for clients without JS. Tree HTML is
-         pre-rendered in Python because Jinja macros can't recurse with
-         dict args (unhashable). #}
-      {{ tree_html | safe }}
-    </div>
-  </noscript>
+  {# The readable plan is always on the page: it is what people see without
+     JavaScript, when the map library cannot load, and while the map loads.
+     Tree HTML is pre-rendered in Python because Jinja macros can't recurse
+     with dict args (unhashable). #}
+  <div class="tree" id="plan-tree-list">
+    {% if root and root.children %}
+    {{ tree_html | safe }}
+    {% else %}
+    <p class="muted" style="margin: 0;">This task ran as one step, so there is no map of smaller steps.
+      <a href="/chat/goal/{{ goal.id }}">Open the result</a> or <a href="/goals/{{ goal.id }}/trajectory">read what happened step by step</a>.</p>
+    {% endif %}
+  </div>
 </div>
 
 <p class="muted">
@@ -65,10 +70,18 @@
     const TERMINAL = ["done", "succeeded", "failed", "cancelled"];
     const container = document.getElementById("plan-tree");
     const statusEl = document.getElementById("plan-tree-status");
+    const listEl = document.getElementById("plan-tree-list");
     if (!container || typeof cytoscape === "undefined") {
-      if (statusEl) statusEl.textContent = "Showing a simple list";
+      if (statusEl) statusEl.textContent = "Showing the plan as a list";
       return;
     }
+    {% if not (root and root.children) %}
+    // One step only: the map would be a single dot, so the sentence above says it.
+    if (statusEl) statusEl.textContent = "Finished — {{ goal.status | humanize | lower }}";
+    return;
+    {% endif %}
+    container.hidden = false;
+    if (listEl) listEl.hidden = true;
 
     // Map a goal status to a node colour (theme-driven CSS vars).
     const css = getComputedStyle(document.body);

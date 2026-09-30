@@ -22,6 +22,7 @@
       <label class="tenants-field">Workspace name
         <input class="input" name="display_name" required maxlength="200" placeholder="e.g. Acme Finance" autocomplete="off">
       </label>
+      {% if billing_on %}
       <label class="tenants-field">Plan
         <select class="select" name="plan">
           <option value="free" selected>Free</option>
@@ -29,6 +30,7 @@
           <option value="enterprise">Enterprise</option>
         </select>
       </label>
+      {% endif %}
       <fieldset class="tenants-limit">
         <legend>Daily spending limit</legend>
         <label><input type="checkbox" name="no_limit" checked data-limit-toggle> No daily limit</label>
@@ -36,9 +38,27 @@
           <input class="input" name="max_daily_dollars" type="number" min="0.01" step="0.01" disabled data-limit-amount>
         </label>
       </fieldset>
+      <details class="tenants-invite" id="tenant-invite">
+        <summary>Also invite an administrator for this workspace</summary>
+        <p class="muted tenants-msg">Creates the workspace and an invitation for its first administrator together. The invitation link is shown once so you can send it.</p>
+        <div class="tenants-form">
+          <label class="tenants-field">Administrator's email
+            <input class="input" name="admin_email" type="email" maxlength="254" autocomplete="off" placeholder="name@client.com">
+          </label>
+          <label class="tenants-field">Their role
+            <select class="select" name="role" data-onboard-roles><option value="admin" selected>Admin</option></select>
+          </label>
+        </div>
+      </details>
       <div><button type="submit" class="btn btn--primary">Create workspace</button></div>
     </form>
     <p id="tenant-add-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
+    <div id="tenant-onboard-out" hidden>
+      <label class="tenants-field" for="tenant-onboard-link">Invitation link (shown once)
+        <input class="input" id="tenant-onboard-link" readonly autocomplete="off" spellcheck="false">
+      </label>
+      <p><button type="button" class="btn" id="tenant-onboard-copy">Copy link</button></p>
+    </div>
     <details class="tenants-why">
       <summary>Why use workspaces?</summary>
       <ul class="muted">
@@ -48,63 +68,6 @@
         <li><strong>Its own access.</strong> People can have a different role in each workspace.</li>
       </ul>
     </details>
-  </div>
-
-  <div class="section-head"><h2 id="onboard-title">Set up a new client in one step</h2></div>
-  <div class="panel" id="tenant-onboard-panel">
-    <p class="muted">Creates the workspace and an invitation for its first administrator together. The invitation link is shown once so you can send it.</p>
-    <form id="tenant-onboard" class="tenants-form" aria-labelledby="onboard-title">
-      <label class="tenants-field">Workspace name
-        <input class="input" name="display_name" required maxlength="200" placeholder="e.g. Acme Finance" autocomplete="off">
-      </label>
-      <label class="tenants-field">Plan
-        <select class="select" name="plan">
-          <option value="free" selected>Free</option>
-          <option value="pro">Pro</option>
-          <option value="enterprise">Enterprise</option>
-        </select>
-      </label>
-      <fieldset class="tenants-limit">
-        <legend>Daily spending limit</legend>
-        <label><input type="checkbox" name="no_limit" checked data-limit-toggle> No daily limit</label>
-        <label class="tenants-field">Limit in US dollars per day
-          <input class="input" name="max_daily_dollars" type="number" min="0.01" step="0.01" disabled data-limit-amount>
-        </label>
-      </fieldset>
-      <label class="tenants-field">First administrator's email
-        <input class="input" name="admin_email" type="email" required maxlength="254" autocomplete="off">
-      </label>
-      <label class="tenants-field">Their role
-        <select class="select" name="role" data-onboard-roles><option value="admin" selected>Admin</option></select>
-      </label>
-      <div><button type="submit" class="btn btn--primary">Create workspace and invite</button></div>
-    </form>
-    <p id="tenant-onboard-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
-    <div id="tenant-onboard-out" hidden>
-      <label class="tenants-field" for="tenant-onboard-link">Invitation link (shown once)
-        <input class="input" id="tenant-onboard-link" readonly autocomplete="off" spellcheck="false">
-      </label>
-      <p><button type="button" class="btn" id="tenant-onboard-copy">Copy link</button></p>
-    </div>
-  </div>
-
-  <div class="section-head"><h2 id="keys-title">Workspace encryption keys</h2></div>
-  <div class="panel" id="tenant-keys-panel">
-    <p class="muted">When your IT team replaces the master encryption key, re-protect every workspace's own key with the new one here before the server switches over. Choose both key files; they are used only for this and are never saved or shown.</p>
-    <form id="tenant-keys" class="tenants-form" aria-labelledby="keys-title">
-      <label class="tenants-field">Current key file
-        <input class="input" type="file" name="current_key" accept=".txt,.key,text/plain" required>
-      </label>
-      <label class="tenants-field">New key file
-        <input class="input" type="file" name="new_key" accept=".txt,.key,text/plain" required>
-      </label>
-      <div class="tenants-actions">
-        <button type="submit" class="btn">See what would change</button>
-        <button type="button" class="btn btn--primary" id="tenant-keys-rotate" hidden>Re-protect workspaces</button>
-      </div>
-    </form>
-    <p id="tenant-keys-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
-    <div id="tenant-keys-out"></div>
   </div>
 
   {% if not tenants %}
@@ -119,7 +82,7 @@
         <thead>
           <tr>
             <th scope="col">Workspace</th><th scope="col">Status</th>
-            <th scope="col">Plan</th><th scope="col">Daily Limit</th>
+            {% if billing_on %}<th scope="col">Plan</th>{% endif %}<th scope="col">Daily Limit</th>
             <th scope="col">Actions</th>
           </tr>
         </thead>
@@ -129,12 +92,14 @@
             <tr data-tenant-row="{{ t.id }}" data-tenant-name="{{ name }}">
               <td>{{ name }}</td>
               <td><span class="badge {{ 'active' if t.status == 'active' else 'blocked' }}">{{ 'Active' if t.status == 'active' else ('Paused' if t.status == 'suspended' else t.status | humanize) }}</span></td>
+              {% if billing_on %}
               <td>
                 <label class="sr-only" for="plan-{{ loop.index }}">Plan for {{ name }}</label>
                 <select class="select" id="plan-{{ loop.index }}" data-tenant-plan="{{ t.id }}" data-current="{{ t.plan }}">
                   {% for p in ('free', 'pro', 'enterprise') %}<option value="{{ p }}"{% if t.plan == p %} selected{% endif %}>{{ p | capitalize }}</option>{% endfor %}
                 </select>
               </td>
+              {% endif %}
               <td>
                 <form class="tenant-quota" data-tenant="{{ t.id }}">
                   <label><input type="checkbox" name="no_limit" data-limit-toggle{% if not t.max_daily_dollars %} checked{% endif %}
@@ -163,7 +128,31 @@
       <p id="tenant-quota-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
     </div>
   {% endif %}
+  <details class="panel tenants-advanced" id="tenant-keys-panel">
+    <summary><h2 id="keys-title" class="tenants-advanced__title">Advanced: workspace encryption keys</h2></summary>
+    <p class="muted">When your IT team replaces the master encryption key, re-protect every workspace's own key with the new one here before the server switches over. Choose both key files; they are used only for this and are never saved or shown.</p>
+    <form id="tenant-keys" class="tenants-form" aria-labelledby="keys-title">
+      <label class="tenants-field">Current key file
+        <input class="input" type="file" name="current_key" accept=".txt,.key,text/plain" required>
+      </label>
+      <label class="tenants-field">New key file
+        <input class="input" type="file" name="new_key" accept=".txt,.key,text/plain" required>
+      </label>
+      <div class="tenants-actions">
+        <button type="submit" class="btn">See what would change</button>
+        <button type="button" class="btn btn--primary" id="tenant-keys-rotate" hidden>Re-protect workspaces</button>
+      </div>
+    </form>
+    <p id="tenant-keys-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
+    <div id="tenant-keys-out"></div>
+  </details>
+
   <style>
+    .tenants-advanced { margin-top: var(--space-4); }
+    .tenants-advanced > summary { cursor: pointer; }
+    .tenants-advanced__title { display: inline; font-size: var(--text-md, 1rem); margin: 0; }
+    .tenants-invite { grid-column: 1 / -1; }
+    .tenants-invite > summary { cursor: pointer; }
     .tenants-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: var(--space-3); align-items: end; }
     .tenants-field { display: flex; flex-direction: column; gap: var(--space-1); }
     .tenants-limit { border: 0; padding: 0; margin: 0; display: grid; gap: var(--space-2); }

@@ -27,48 +27,32 @@
     return response.json();
   }
 
-  // ---- one-step client setup ---------------------------------------------------
-  var onboard = $('tenant-onboard');
-  if (onboard) {
-    var msg = $('tenant-onboard-msg');
-    var roles = onboard.querySelector('[data-onboard-roles]');
+  // ---- one-step client setup (the create form's optional invitation) -----
+  var roles = document.querySelector('[data-onboard-roles]');
+  if (roles) {
+    var msg = $('tenant-add-msg');
     call(BASE + '/roles').then(function (data) {
       roles.textContent = '';
       data.roles.forEach(function (r) {
         var o = el('option', null, r.label); o.value = r.value; if (r.value === 'admin') o.selected = true; roles.appendChild(o);
       });
-      if (!data.invitations_on) msg.textContent = 'Invitations are turned off. Turn them on in Settings before setting up a client here.';
+      if (!data.invitations_on) {
+        var invite = $('tenant-invite');
+        if (invite) {
+          invite.open = false;
+          invite.querySelectorAll('input, select').forEach(function (c) { c.disabled = true; });
+          invite.querySelector('p').appendChild(el('span', null, ' Invitations are turned off, so a workspace cannot invite its administrator yet. Turn them on in Settings.'));
+        }
+      }
     }).catch(function () { /* the built-in Admin choice stays */ });
-    onboard.addEventListener('submit', async function (event) {
-      event.preventDefault();
-      var data = new FormData(onboard);
-      var noLimit = onboard.querySelector('[data-limit-toggle]').checked;
-      var body = {
-        display_name: String(data.get('display_name') || '').trim(),
-        plan: String(data.get('plan') || 'free'),
-        max_daily_dollars: noLimit ? 0 : Number(data.get('max_daily_dollars') || 0),
-        admin_email: String(data.get('admin_email') || '').trim(),
-        role: String(data.get('role') || 'admin')
-      };
-      if (!body.display_name || !body.admin_email) { msg.textContent = 'Enter the workspace name and the administrator\'s email.'; return; }
-      msg.textContent = 'Setting up the workspace…';
-      $('tenant-onboard-out').hidden = true;
-      try {
-        var result = await call(BASE + '/onboard', 'POST', body);
-        msg.textContent = result.summary;
-        $('tenant-onboard-link').value = result.invite_link;
-        $('tenant-onboard-out').hidden = false;
-        onboard.reset();
-      } catch (failure) { msg.textContent = await failText(failure, 'set up the workspace'); }
-    });
-    $('tenant-onboard-copy').addEventListener('click', async function () {
+    var copy = $('tenant-onboard-copy');
+    if (copy) copy.addEventListener('click', async function () {
       var field = $('tenant-onboard-link');
       try { await navigator.clipboard.writeText(field.value); msg.textContent = 'Invitation link copied.'; }
       catch (e) { field.select(); msg.textContent = 'Select the link and copy it.'; }
     });
   }
 
-  // ---- re-protect workspace keys -----------------------------------------------
   var keys = $('tenant-keys');
   if (keys) {
     var keysMsg = $('tenant-keys-msg');

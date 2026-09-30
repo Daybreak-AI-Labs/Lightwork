@@ -153,3 +153,131 @@ def test_activity_log_hides_machine_ids_and_never_shows_raw_epochs(monkeypatch, 
     assert page.index("<summary>Technical details</summary>") < page.index("ab12" * 16)
     # The recorded moment is a formatted <time>, in the viewer's zone once JS runs.
     assert re.search(r'Occurred at</span>\s*<span class="aud-v"><time ', page)
+
+
+# ---- task pages ------------------------------------------------------------
+
+def _goal():
+    from maverick_dashboard.app import _world
+    w = _world()
+    gid = w.create_goal("Summarize vendor contracts", "Summarize the top five vendor contracts")
+    return w.get_goal(gid)
+
+
+def test_goal_id_resolves_and_every_task_page_shares_the_tabs():
+    client = _client()
+    g = _goal()
+    r = client.get(f"/goals/{g.id}", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == f"/chat/goal/{g.id}"
+    assert client.get("/goals/999999").status_code == 404
+    for path in (f"/chat/goal/{g.id}", f"/goals/{g.id}/trajectory", f"/goals/{g.id}/plan", f"/goals/{g.id}/errors"):
+        body = client.get(path).text
+        assert 'aria-label="Task pages"' in body, path
+        for tab in (f'href="/chat/goal/{g.id}"', f'href="/goals/{g.id}/trajectory"',
+                    f'href="/goals/{g.id}/plan"', f'href="/goals/{g.id}/errors"'):
+            assert tab in body, (path, tab)
+        assert body.count('class="task-tabs__on" aria-current="page"') == 1
+    # A one-step task's plan page says so instead of showing an empty map.
+    plan = client.get(f"/goals/{g.id}/plan").text
+    assert "This task ran as one step" in plan
+    assert 'id="plan-tree-list"' in plan and "<noscript>" not in plan
+    listing = client.get("/goals").text
+    assert f'<a href="/chat/goal/{g.id}">Result</a>' in listing
+
+
+# ---- owner creation --------------------------------------------------------
+
+def test_fresh_install_opens_on_owner_creation_until_skipped(monkeypatch):
+    from maverick_dashboard import local_owner
+    monkeypatch.setattr(local_owner, "available", lambda request: True)
+    client = _client()
+    for path in ("/", "/start"):
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/auth/local-owner", path
+    r = client.get("/start?owner=later", follow_redirects=False)
+    assert r.status_code == 200 and "mvk_owner_later" in r.headers.get("set-cookie", "")
+    client.cookies.set("mvk_owner_later", "1")
+    assert client.get("/start", follow_redirects=False).status_code == 200
+
+
+def test_owner_form_is_themed_with_confirm_and_show_passphrase(monkeypatch):
+    from maverick_dashboard import local_owner
+    monkeypatch.setattr(local_owner, "_local", lambda request, mutate=False: None)
+    monkeypatch.setattr(local_owner, "available", lambda request: True)
+    body = _client().get("/auth/local-owner").text
+    assert 'lightwork.css' in body and 'class="public-shell' in body
+    assert 'name="password2"' in body and 'id="owner-show"' in body
+    assert 'id="owner-strength"' in body and 'href="/start?owner=later"' in body
+
+
+def test_owner_setup_refuses_mismatched_passphrases(monkeypatch):
+    from maverick_dashboard import local_owner
+    monkeypatch.setattr(local_owner, "_local", lambda request, mutate=False: None)
+    monkeypatch.setattr(local_owner, "available", lambda request: True)
+    called = []
+    monkeypatch.setattr(local_owner, "enroll", lambda *a, **k: called.append(k) or "token")
+    r = _client().post("/auth/local-owner", data={"email": "o@example.com", "password": "a" * 20,
+                                                  "password2": "b" * 20, "confirm": "yes"})
+    assert r.status_code == 422 and "do not match" in r.text and not called
+
+
+# ---- users, workspaces, results ----------------------------------------------
+
+def test_departments_have_real_names_everywhere():
+    from maverick.departments import department_title
+    from maverick_dashboard import suite_grants
+    for key in suite_grants.known_suites():
+        title = department_title(key)
+        assert " Cpg" not in title and "Esg" not in title and " Vc" not in title, key
+    assert department_title("esg_sustainability") == "ESG & Sustainability"
+    assert department_title("oil_gas") == "Oil & Gas"
+    body = _client().get("/users").text
+    assert "Food, Beverage &amp; Consumer Goods" in body and "Esg Sustainability" not in body
+    assert "data-departments-filter" in body and "data-departments-all" in body
+
+
+def test_workspaces_page_has_one_create_form_and_hides_plans_without_billing(monkeypatch):
+    from maverick import billing_stripe
+    monkeypatch.setattr(billing_stripe, "enabled", lambda: False)
+    body = _client().get("/tenants").text
+    assert body.count("<form") == 2  # create (with optional invite) + key rotation
+    assert "Set up a new client in one step" not in body
+    assert 'name="admin_email"' in body and 'id="tenant-invite"' in body
+    assert 'name="plan"' not in body and "Enterprise" not in body
+    assert "Advanced: workspace encryption keys" in body
+    monkeypatch.setattr(billing_stripe, "enabled", lambda: True)
+    assert 'name="plan"' in _client().get("/tenants").text
+
+
+def test_results_page_shows_a_real_empty_state_and_a_typeahead():
+    body = _client().get("/deliverables").text
+    assert "No results yet — start a task" in body
+    assert "deliverables in view" not in body and 'name="role"' not in body
+    catalogue = _client().get("/deliverables?role=all").text
+    assert "data-typeahead" in catalogue and "lightwork-typeahead.js" in catalogue
+
+
+def test_channels_page_answers_json_for_the_inline_test(monkeypatch):
+    from maverick_dashboard import channel_check_api, settings_store
+    settings_store.set_channel("slack", True, {"app_token": "xapp-1", "bot_token": "xoxb-1"})
+    monkeypatch.setattr(channel_check_api, "check_credentials",
+                        lambda name, cfg: (False, "the service did not accept the saved details"))
+    client = _client()
+    r = client.post("/channels/test", data={"channel": "slack"}, headers={"Accept": "application/json"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is False and body["status"] == "Test failed" and "Test failed" in body["readiness_html"]
+    page = client.get("/channels").text
+    assert "1 turned on · 0 working · 1 failed" in page and "data-ch-result" in page
+
+
+def test_setup_checks_are_worded_as_outcomes():
+    from maverick_dashboard.onboarding_state import _plain_check
+    check = _plain_check({"id": "evidence_graph", "label": "Evidence graph", "status": "attention"},
+                         frozenset({"evidence_graph"}))
+    assert check["title"] == "Evidence linking"
+    assert check["fix_label"] == "Turn on evidence linking"
+    assert check["summary"] == "Turn on evidence linking so reviews can cite the sources behind each result."
+    # Provider checks keep their wording (owned by the provider-readiness work).
+    provider = _plain_check({"id": "provider", "label": "Model provider", "status": "blocked"}, frozenset())
+    assert provider["fix_label"] == "Add an AI provider key"

@@ -25,20 +25,22 @@
       {% endmacro %}
   {% set configured_count = managed | selectattr('configured') | list | length %}
   {% set verified_count = managed | selectattr('readiness.live.status', 'equalto', 'verified') | list | length %}
+  {% set failed_count = managed | selectattr('readiness.live.status', 'equalto', 'failed') | list | length %}
   {% call hero('Meet people where they work', 'Channels',
                subtitle='Slack, email and more',
                lede='Connect the chat apps your team already uses, so people can
                      ask Lightwork for work and get results right there.') %}
     {{ state('Current state',
-             configured_count ~ ' turned on · ' ~ verified_count ~ ' tested and working',
-             badge='Working' if verified_count else 'Not tested yet',
-             badge_class='ok' if verified_count else 'idle',
+             ('<span data-ch-summary>' ~ configured_count ~ ' turned on · ' ~ verified_count ~ ' working · ' ~ failed_count ~ ' failed</span>') | safe,
+             badge=('Working' if verified_count else ('Test failed' if failed_count else 'Not tested yet')),
+             badge_class=('ok' if verified_count else ('blocked' if failed_count else 'idle')),
              copy='Saving your details doesn\'t prove messages get through.
                    Use Test connection or Send a test message to check.') }}
   {% endcall %}
 
   {% if saved %}
-  <div class="panel ch-saved{{ ' ch-saved--failed' if saved_failed }}" role="{{ 'alert' if saved_failed else 'status' }}">
+  <div class="panel ch-saved{{ ' ch-saved--failed' if saved_failed }}" role="{{ 'alert' if saved_failed else 'status' }}"
+       data-mv-toast="{{ saved }}"{% if saved_failed %} data-mv-toast-error="true"{% endif %}>
     <strong>{{ 'Not done.' if saved_failed else 'Done.' }}</strong> {{ saved }}
   </div>
   {% endif %}
@@ -89,13 +91,14 @@
       </div>
     </form>
 
-    <div class="ch-status">{{ integration_readiness(c.readiness) }}</div>
+    <div class="ch-status" data-ch-status="{{ c.name }}">{{ integration_readiness(c.readiness) }}</div>
 
     <div class="ch-actions">
       {% if c.configured %}
-      <form method="post" action="/channels/test">
+      <form method="post" action="/channels/test" data-ch-check="{{ c.name }}">
         <input type="hidden" name="channel" value="{{ c.name }}" />
         <button type="submit" class="btn">Test connection</button>
+        <span class="ch-result" data-ch-result role="status" aria-live="polite"></span>
       </form>
       {% endif %}
       {% if c.dashboard_set %}
@@ -108,7 +111,7 @@
     </div>
 
     {% if c.configured and c.name in sendable %}
-    <form method="post" action="/channels/send-test" class="ch-send"
+    <form method="post" action="/channels/send-test" class="ch-send" data-ch-check="{{ c.name }}"
           data-channels-confirm="Send a test message through {{ c.label }}? It goes to the {{ {'email': 'email address', 'sms': 'phone number', 'slack': 'Slack channel'}[c.name] }} you entered.">
       <input type="hidden" name="channel" value="{{ c.name }}" />
       <label class="ch-field">
@@ -121,6 +124,7 @@
         {% endif %}
       </label>
       <button type="submit" class="btn">Send a test message</button>
+      <span class="ch-result" data-ch-result role="status" aria-live="polite"></span>
     </form>
     {% elif c.configured %}
     <p class="muted ch-help">To check replies, send a message to your {{ c.label }} bot. Lightwork answers in the same conversation.</p>
@@ -160,13 +164,20 @@
     .ch-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; margin-top: var(--space-3); }
     .ch-status { margin-top: var(--space-3); }
     .ch-advanced { display: grid; gap: var(--space-3); }
+    .ch-result { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); margin-inline-start: var(--space-2); }
+    .ch-result:empty { display: none; }
+    .ch-result--ok { color: var(--success); }
+    .ch-result--failed { color: var(--danger); }
+    .ch-spinner { width: 0.9rem; height: 0.9rem; border: 2px solid var(--border); border-top-color: var(--brand); border-radius: 50%; animation: ch-spin 0.8s linear infinite; }
+    @keyframes ch-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .ch-spinner { animation: none; } }
   </style>
   <script>
   (function () {
     'use strict';
     document.querySelectorAll('form[data-channels-confirm]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
-        if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
+        if (form.dataset.confirmed === 'true') { form.dataset.confirmed = 'done'; return; }
         event.preventDefault();
         if (!form.reportValidity()) return;
         window.mvConfirm(form.dataset.channelsConfirm, {okText: 'Continue'}).then(function (ok) {
@@ -174,6 +185,64 @@
           form.dataset.confirmed = 'true';
           if (form.requestSubmit) form.requestSubmit(); else form.submit();
         });
+      });
+    });
+    // Test connection / Send a test message: the result appears next to the
+    // button (spinner while the service answers), the status block re-renders
+    // from the same record, and the page summary counts the new state.
+    function summarize() {
+      var working = 0, failed = 0, on = 0;
+      document.querySelectorAll('[data-ch-status]').forEach(function (block) {
+        on += 1;
+        var badge = block.querySelector('.badge');
+        var text = badge ? badge.textContent.trim() : '';
+        if (text === 'Working') working += 1;
+        if (text === 'Test failed') failed += 1;
+      });
+      var summary = document.querySelector('[data-ch-summary]');
+      if (summary) summary.textContent = on + ' turned on · ' + working + ' working · ' + failed + ' failed';
+      var heroBadge = summary && summary.closest('.hero-statebox__row') ? summary.closest('.hero-statebox__row').querySelector('.badge') : null;
+      if (heroBadge) {
+        heroBadge.textContent = working ? 'Working' : (failed ? 'Test failed' : 'Not tested yet');
+        heroBadge.className = 'badge ' + (working ? 'ok' : (failed ? 'blocked' : 'idle'));
+      }
+    }
+    document.querySelectorAll('form[data-ch-check]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        // The confirm handler above re-submits with dataset.confirmed set; run then.
+        if (form.dataset.channelsConfirm && form.dataset.confirmed !== 'done') return;
+        event.preventDefault();
+        delete form.dataset.confirmed;
+        var result = form.querySelector('[data-ch-result]');
+        var button = form.querySelector('button[type="submit"]');
+        var isSend = form.action.indexOf('/channels/send-test') !== -1;
+        result.className = 'ch-result';
+        result.textContent = '';
+        var spinner = document.createElement('span'); spinner.className = 'ch-spinner'; spinner.setAttribute('aria-hidden', 'true');
+        result.appendChild(spinner);
+        result.appendChild(document.createTextNode(isSend ? 'Sending the test message…' : 'Testing the connection… this can take up to ten seconds.'));
+        button.disabled = true; button.setAttribute('aria-busy', 'true');
+        fetch(form.action, {method: 'POST', body: new URLSearchParams(new FormData(form)),
+                            headers: {'Accept': 'application/json'}, credentials: 'same-origin'})
+          .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, status: r.status, body: j}; }); })
+          .then(function (res) {
+            var body = res.body || {};
+            if (!res.ok) {
+              var plain = window.mvPlainDetail ? window.mvPlainDetail(body.detail) : '';
+              throw new Error(plain || window.mvErrorText({status: res.status}, isSend ? 'send the test message' : 'test the connection'));
+            }
+            result.className = 'ch-result ' + (body.ok ? 'ch-result--ok' : 'ch-result--failed');
+            result.textContent = body.message || (body.ok ? 'Passed.' : 'Failed.');
+            var status = document.querySelector('[data-ch-status="' + form.getAttribute('data-ch-check') + '"]');
+            if (status && body.readiness_html) status.innerHTML = body.readiness_html;
+            summarize();
+            if (window.mvToast) window.mvToast(body.message || (body.ok ? 'Test passed.' : 'Test failed.'), {error: !body.ok});
+          })
+          .catch(function (e) {
+            result.className = 'ch-result ch-result--failed';
+            result.textContent = e && e.message ? e.message : window.mvErrorText(e, 'test the connection');
+          })
+          .finally(function () { button.disabled = false; button.removeAttribute('aria-busy'); });
       });
     });
     var presets = {

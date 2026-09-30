@@ -48,12 +48,17 @@
 
 <div class="cx">
   {% if not connections_enabled %}
+  {# Connections off: one switch, one explanation. The key form and the
+     account sign-in section appear once it is on. #}
   {% from "_module_gate.html" import module_gate %}
-  {{ module_gate('connections', 'Connections', detail='Save sign-ins and keys for the services your workflows use.') }}
-  {% endif %}
+  {{ module_gate('connections', 'Connections',
+                 detail='A connection is how a workflow uses another service: either paste a key the service gave you (key-based), or sign in to the account so access renews itself (sign-in-based: Google Drive, Google Cloud Storage and Jira Cloud).') }}
+  {% else %}
+  <p class="cx__sub">Two kinds of connection: <strong>key-based</strong>, where you paste a key the service gave you, and <strong>sign-in-based</strong>, where you sign in to the account so access renews itself (Google Drive, Google Cloud Storage and Jira Cloud).</p>
   {% include "_connection_setup.html" %}
-  <div class="section-head"><h2>Add a connection with a key</h2></div>
-  <form class="cx__form" id="cx-form" autocomplete="off" data-draft-recovery="off">
+  {% endif %}
+  <div class="section-head"{% if not connections_enabled %} hidden{% endif %}><h2>Add a connection with a key</h2></div>
+  <form class="cx__form" id="cx-form" autocomplete="off" data-draft-recovery="off"{% if not connections_enabled %} hidden{% endif %}>
     <div class="cx__fld">
       <label for="cx-preset">What are you connecting?</label>
       <select class="select" id="cx-preset">
@@ -124,8 +129,8 @@
     </div>
   </form>
 
-  <div class="section-head"><h2>Saved connections</h2></div>
-  <ul class="cx__list" id="cx-list"></ul>
+  <div class="section-head"{% if not connections_enabled %} hidden{% endif %}><h2>Saved connections</h2></div>
+  <ul class="cx__list" id="cx-list"{% if not connections_enabled %} hidden{% endif %}></ul>
   <p class="cx__sub" id="cx-empty" hidden>None yet — save your first connection above and it appears here, ready to test.</p>
 
   <section aria-labelledby="to-connectors-title" id="to-connectors-panel" hidden>
