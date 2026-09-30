@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -57,7 +57,7 @@ def _loaded():
 
 
 def _save(changes, confirm=False, http=client):
-    return http.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(http, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -86,7 +86,7 @@ def test_page_lists_groups_controls_and_speaks_plain_language():
     assert developer_terms(page) == []
     group = client.get("/settings/all?group=safety").text
     assert 'role="switch"' in group and "<select" in group and 'type="number"' in group
-    assert "Reset to default" in group and "Save changes in Safety" in group
+    assert "Reset to product default" in group and "Use inherited value" in group and "Save changes in Safety" in group
     assert developer_terms(group) == []
 
 
@@ -217,7 +217,7 @@ def test_a_save_replies_with_the_rows_it_touched_not_every_row(audit_rows):
     assert again.json()["changed"] == []
     assert [s["id"] for g in again.json()["groups"] for s in g["settings"]] == ["ifc.mode"]
     # ?full=1 keeps the whole listing for a caller that wants it.
-    whole = client.post(API + "?full=1", json={"changes": [{"id": "ifc.mode", "reset": True}],
+    whole = save_catalog(client, API + "?full=1", json={"changes": [{"id": "ifc.mode", "reset": True}],
                                                 "confirm": True})
     assert whole.status_code == 200
     assert sum(len(g["settings"]) for g in whole.json()["groups"]) == len(catalog.SETTINGS)
@@ -491,7 +491,7 @@ def test_values_that_would_break_the_settings_file_are_refused(audit_rows, bad):
 
     assert _save([{"id": "sandbox.timeout", "value": 30}]).status_code == 200
     # Sent as escaped JSON, the way any script can send it.
-    body = json.dumps({"changes": [{"id": "persona.name", "value": bad}]})
+    body = json.dumps({"expected_revision": client.get(API, params={"q":"__revision__"}).json()["revision"], "changes": [{"id": "persona.name", "value": bad}]})
     r = client.post(API, content=body, headers={"Content-Type": "application/json"})
     assert r.status_code == 400
     message = r.json()["message"]

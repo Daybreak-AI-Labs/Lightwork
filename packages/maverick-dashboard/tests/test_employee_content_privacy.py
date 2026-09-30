@@ -17,7 +17,7 @@ def authority(monkeypatch):
     monkeypatch.setattr(content_access, "_reviewer_current", lambda _: True)
     from maverick_dashboard import scim_groups
     monkeypatch.setattr(scim_groups, "active_for_principal", lambda _: True)
-    return SimpleNamespace(method="GET")
+    return SimpleNamespace(method="GET", state=SimpleNamespace())
 
 
 def grant(**updates):

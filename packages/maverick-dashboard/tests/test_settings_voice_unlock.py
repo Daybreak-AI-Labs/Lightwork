@@ -17,6 +17,8 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import save_catalog
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 UNLOCK = "/api/v1/voice/unlock"
@@ -75,7 +77,7 @@ def model_ready(monkeypatch):
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _files(*clips):

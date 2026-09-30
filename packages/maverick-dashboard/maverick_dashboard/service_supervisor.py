@@ -180,6 +180,7 @@ def _take_lines(service: Service, pending: bytes, chunk: bytes) -> bytes:
         pending = b""
     with _LOCK:
         for line in lines:
+            line = line.removesuffix(b"\r")
             if line.strip():
                 service.log.append(_scrub(line.decode("utf-8", errors="replace")))
     return pending

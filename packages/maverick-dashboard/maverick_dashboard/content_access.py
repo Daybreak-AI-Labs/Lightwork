@@ -95,6 +95,10 @@ def approval_resource(approval, world) -> dict:
 def can_read_approval(request, approval, world=None) -> bool:
     if approval is None:
         return False
+    from . import auth, settings_quorum
+    if settings_quorum.is_settings_approval(approval) and auth.has_global_permission(request, "admin"):
+        if settings_quorum.has_bound_admin_review(approval):
+            return True
     if world is None:
         from ._shared import _world
         world = _world()

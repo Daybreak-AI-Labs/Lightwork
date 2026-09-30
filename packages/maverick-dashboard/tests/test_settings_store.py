@@ -17,9 +17,9 @@ def _lock_held_during(monkeypatch, call) -> bool:
     Mutators intentionally use the strict ``_load_overlay_for_update`` reader,
     rather than the forgiving public ``load_overlay`` reader, so an unreadable
     overlay cannot be replaced and lose unrelated settings. Instrument both
-    that read and the write: ``_locked`` acquires the non-reentrant
-    ``_SETTINGS_LOCK``, so a non-blocking acquire fails at each boundary iff
-    the mutator still holds the lock.
+    that read and the write from a competing thread. ``_SETTINGS_LOCK`` is
+    reentrant for nested reviewed changes, so probing from its owning thread
+    would succeed even while the complete mutation is correctly locked.
     """
     from maverick_dashboard import settings_store
 
@@ -28,10 +28,15 @@ def _lock_held_during(monkeypatch, call) -> bool:
     real_write = settings_store._write
 
     def record_lock_state() -> None:
-        acquired = settings_store._SETTINGS_LOCK.acquire(blocking=False)
-        if acquired:
-            settings_store._SETTINGS_LOCK.release()
-        held.append(not acquired)
+        def probe():
+            acquired = settings_store._SETTINGS_LOCK.acquire(blocking=False)
+            if acquired:
+                settings_store._SETTINGS_LOCK.release()
+            held.append(not acquired)
+        contender = threading.Thread(target=probe)
+        contender.start()
+        contender.join(timeout=2)
+        assert not contender.is_alive(), "The competing lock probe must return without blocking"
 
     def probing_load():
         record_lock_state()

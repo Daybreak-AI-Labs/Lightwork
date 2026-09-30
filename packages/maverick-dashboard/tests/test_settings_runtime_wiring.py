@@ -20,6 +20,8 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_runtime as runtime
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import save_catalog
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 ROWS = runtime.entries(catalog.S, catalog.C, catalog.Column)
@@ -48,7 +50,7 @@ def _isolated(tmp_path, monkeypatch):
 def _save(changes, confirm=True):
     from maverick import config
 
-    r = client.post(API, json={"changes": changes, "confirm": confirm})
+    r = save_catalog(client, API, json={"changes": changes, "confirm": confirm})
     config.reset_config_cache()
     return r
 
@@ -656,3 +658,14 @@ def test_cost_collection_limits_reach_the_collector():
     assert r.status_code == 409  # raising a limit needs a confirmation
     r = _save([{"id": "ai_cost_roi.collector_limits.page_cap", "value": 51}])
     assert r.status_code == 400  # beyond what the collector accepts
+
+
+def test_supervised_log_normalizes_split_crlf_without_removing_meaningful_spaces():
+    from maverick_dashboard import service_supervisor as supervisor
+
+    service = supervisor.Service("model_proxy")
+    pending = supervisor._take_lines(service, b"", b"  ready  \r")
+    assert list(service.log) == []
+    pending = supervisor._take_lines(service, pending, b"\nnext\n")
+    assert pending == b""
+    assert list(service.log) == ["  ready  ", "next"]

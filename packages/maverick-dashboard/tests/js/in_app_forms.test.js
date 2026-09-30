@@ -166,3 +166,12 @@ test('search and suggestion modes compose without stale empty states',async()=>{
   d.getElementById('templates-all').click();assert.equal(d.querySelector('[data-template-name]').hidden,true);
   find.value='';find.dispatchEvent(new w.Event('input'));assert.equal(d.querySelector('[data-template-name]').hidden,false);assert.equal(d.getElementById('tplm-none').hidden,true);w.close();
 });
+
+
+test('revocation during confirmed-save list refresh keeps private content cleared and explains access change',async()=>{
+  let calls=0;const dom=fixture(factsHTML,'lightwork-facts.js',async()=>{
+    calls++;return calls===1?response(null,204):calls===2?response(factRecord()):response({},403);
+  });fillFact(dom.window);await tick();await tick();const d=dom.window.document;
+  assert.equal(calls,3);assert.equal(d.getElementById('fact-detail').value,'');
+  assert.equal(d.querySelector('#fact-list tbody').textContent,'');assert.match(d.getElementById('fact-status').textContent,/Access changed/);dom.window.close();
+});

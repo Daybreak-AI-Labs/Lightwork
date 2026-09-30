@@ -176,7 +176,7 @@
         var unchanged=name.value.trim()===payload.key && detail.value===payload.value;
         if (unchanged) reset();
         try { snapshot = ''; offset = 0; await load(); status.textContent = unchanged ? 'Fact saved.' : 'Fact saved. Newer edits are kept as an unsaved draft.'; }
-        catch (refreshError) { status.textContent = 'Fact saved, but this list could not refresh. Refresh the list to see it.'; }
+        catch (refreshError) { status.textContent = refreshError.accessChanged ? refreshError.message : 'Fact saved, but this list could not refresh. Refresh the list to see it.'; }
       }
       catch (error) { if (error.status === 409) await showConflict(payload.key); else status.textContent = error.message; }
       finally { setBusy(false); }
