@@ -751,6 +751,15 @@ def discover_tools() -> list[Any]:
         if count:
             # Applied last so the tick covers isolated calls too.
             factory = telemetry_wrap(name, dist, factory)
+        from .config import load_config
+        if (load_config().get("plugins") or {}).get("workbench", False) is True:
+            from .plugin_workbench import pinned_factory
+
+            try:
+                factory = pinned_factory(name, dist, factory)
+            except (ValueError, PermissionError):
+                log.warning("plugin tool %s has no inspectable pin; skipping this tool", name)
+                continue
         out.append((name, factory))
     return out
 

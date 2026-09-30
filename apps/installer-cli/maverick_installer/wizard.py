@@ -4959,6 +4959,8 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "plugin_workbench": _q_confirm(
+            "Enable the governed plugin qualification workbench? Sandbox checks require a reviewed local Linux image configured later in Settings; no image is downloaded. Ongoing tasks retain pins to plugin bytes already used.", default=False),
         "workflow_versioning": _q_confirm(
             "Keep workflow version history, safe input fixtures and administrator-reviewed publication before new schedules?", default=True),
         "workflow_typed_inputs": _q_confirm(
@@ -8820,10 +8822,13 @@ def _cfg_plugins(
     plugin_grant: list[str] | None,
     plugin_enforce: bool,
     ts_plugins: list[list[str]] | None,
+    workbench: bool | None = None,
 ) -> list[str]:
-    if not (plugins or ts_plugins):
+    if not (plugins or ts_plugins or workbench is not None):
         return []
     lines = ["", "[plugins]"]
+    if workbench is not None:
+        _emit_kv(lines, "workbench", workbench is True)
     if plugins:
         _emit_kv(lines, "enabled", plugins)
     if plugin_grant:
@@ -9212,7 +9217,7 @@ def write_config(
     lines += _cfg_mcp_servers(mcp_servers)
     lines += _cfg_registries("mcp_registries", mcp_registries)
     lines += _cfg_registries("template_registries", template_registries)
-    lines += _cfg_plugins(plugins, plugin_grant, plugin_enforce, ts_plugins)
+    lines += _cfg_plugins(plugins, plugin_grant, plugin_enforce, ts_plugins, workbench=(advanced or {}).get("plugin_workbench"))
     lines += _cfg_security(
         tool_acl,
         bool((advanced or {}).get("security_autofix")),

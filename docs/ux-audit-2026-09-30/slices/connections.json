@@ -189,13 +189,14 @@
     "id": "LW-081",
     "status": "planned",
     "implementation_evidence": [
-      "Existing plugin permission, owned-process, approved-version and no-replay contracts retained; workbench implementation pending."
+      "plugin_workbench.py, sandbox/plugin_probe.py and plugin_workbench_api.py: implemented version/content/policy/image/harness-bound Python tool qualification, strict no-network container, actual schema/sample+expected result checks, durable no-replay ledger, timeout/cancel and cleanup receipts, scoped publication, owned task pins/migration, Plugins UI, Settings/installer. Tests authored unrun."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "In progress: governed version-specific plugin contract workbench, effect-free schema/sample checks and pinned readiness records. Native cancellation/no-replay qualification remains unrun by user request."
+      "Partial implementation, not complete acceptance: add execution qualification adapters for TypeScript transports/channels/skills/personas and durable direct-flow action plugin pins; current scope labels refuse to qualify these contracts.",
+      "Run authored regressions and controlled container/native checks only during the user-authorized testing phase. No plugin, image or live service is qualified by this implementation."
     ]
   },
   {
