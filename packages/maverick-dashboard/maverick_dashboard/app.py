@@ -149,7 +149,51 @@ if not any(getattr(item, "_lightwork_callback_redaction", False) for item in _ac
     _access_logger.addFilter(_CallbackAccessLogFilter())
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+def _templates_auto_reload() -> bool:
+    """Whether Jinja re-checks template files on every render.
+
+    Off outside development: with 120+ templates the per-render stat calls
+    and recompiles are pure overhead, and a deployment changes templates only
+    by upgrading the package (a restart). ``MAVERICK_DEBUG=1``, the
+    ``MAVERICK_TEMPLATE_AUTO_RELOAD`` environment variable or
+    ``[dashboard] template_auto_reload = true`` turn it on for template work.
+    """
+    if os.environ.get("MAVERICK_DEBUG", "").strip():
+        return True
+    from maverick.env_setting import env_or_config
+
+    raw = env_or_config("MAVERICK_TEMPLATE_AUTO_RELOAD", "dashboard",
+                        "template_auto_reload", "0") or "0"
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _template_bytecode_cache():
+    """Compiled-template cache under ``MAVERICK_HOME`` (fail-open: ``None``).
+
+    Jinja compiles each template on first use; the first page after a start
+    paid ~1.2 s compiling the shell, the page finder and the page itself. The
+    on-disk cache is keyed on the template source checksum, so an upgraded
+    template is recompiled, never served stale.
+    """
+    try:
+        from jinja2 import FileSystemBytecodeCache
+        from maverick.paths import maverick_home
+
+        cache_dir = maverick_home() / "cache" / "templates"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return FileSystemBytecodeCache(str(cache_dir))
+    except Exception:  # pragma: no cover - an unwritable home just compiles per process
+        log.debug("template bytecode cache unavailable", exc_info=True)
+        return None
+
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+# Starlette builds the Environment itself; both are plain Environment
+# attributes read at get_template time.
+templates.env.auto_reload = _templates_auto_reload()
+templates.env.bytecode_cache = _template_bytecode_cache()
 
 
 def _format_datetime(ts) -> str:
@@ -627,10 +671,62 @@ async def _start_privacy_notice_publication_scheduler() -> None:
         log.exception("privacy-notice publication scheduler not started")
 
 
+#: Templates every session renders early: the shell, the page finder and the
+#: landing pages. Compiling them (and their includes) here moves the Jinja
+#: compile cost off the first request.
+_WARM_TEMPLATES = ("base.html", "_navfinder.html", "index.html", "goals.html",
+                   "chat.html", "approvals.html")
+
+
+def _warm_dashboard_caches() -> dict[str, float]:
+    """Pay the dashboard's once-per-process first-hit costs now.
+
+    Measured cold on a 4 vCPU box: first ``GET /`` 1.25 s (Jinja compile),
+    first ``/openapi.json`` 4.2 s (schema build, which also materialises
+    every lazily included route), ``builtin_domains()`` 0.78 s (2,031 pack
+    files), ``_build_shield()`` 37 ms. Each step is independent and
+    fail-open; the returned timings are for logs and tests.
+    """
+    timings: dict[str, float] = {}
+
+    def _step(name: str, fn) -> None:
+        started = time.perf_counter()
+        try:
+            fn()
+        except Exception:  # pragma: no cover - warm-up is best-effort
+            log.debug("dashboard warm-up step %s skipped", name, exc_info=True)
+        timings[name] = time.perf_counter() - started
+
+    def _templates() -> None:
+        for name in _WARM_TEMPLATES:
+            try:
+                templates.env.get_template(name)
+            except Exception:  # pragma: no cover - a renamed page is not fatal
+                log.debug("template warm-up skipped %s", name, exc_info=True)
+
+    def _domains() -> None:
+        from maverick.domain import builtin_domains
+
+        builtin_domains()
+
+    def _shield() -> None:
+        from maverick.orchestrator import _build_shield
+
+        _build_shield()
+
+    _step("templates", _templates)
+    _step("openapi", app.openapi)
+    _step("domains", _domains)
+    _step("shield", _shield)
+    return timings
+
+
 def _warm_goal_runtime() -> None:
     """Pay the kernel's once-per-process start-up cost (hook discovery across
-    installed distributions, about 1.5 s cold) now, in the background, instead
-    of on the first chat turn after start. Fail-open: never blocks startup."""
+    installed distributions, about 1.5 s cold) and the dashboard's first-hit
+    costs (:func:`_warm_dashboard_caches`) now, in the background, instead of
+    on the first request or chat turn after start. Fail-open: never blocks
+    startup."""
 
     def _warm() -> None:
         try:
@@ -641,6 +737,9 @@ def _warm_goal_runtime() -> None:
             _asyncio.run(hooks.ensure_loaded())
         except Exception:  # pragma: no cover - warm-up is best-effort
             log.debug("goal runtime warm-up skipped", exc_info=True)
+        timings = _warm_dashboard_caches()
+        log.info("dashboard warm-up done: %s",
+                 ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
 
