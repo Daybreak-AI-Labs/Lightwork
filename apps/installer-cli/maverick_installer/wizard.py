@@ -1100,7 +1100,7 @@ def pick_budget() -> dict[str, Any]:
     return budget
 
 
-def pick_capabilities() -> dict[str, bool]:
+def pick_capabilities() -> dict[str, Any]:
     """Opt-in to high-impact tools that ship disabled.
 
     Computer-use, browser, ROS robotics, and code-exec tools have real safety
@@ -1144,6 +1144,16 @@ def pick_capabilities() -> dict[str, bool]:
         "connector schema offered on every turn.",
         default=True,
     )
+    # [tools] exposure: what each request describes up front. The short list
+    # is role-aware (about 30-40 tools; a specialist pack sees its own allow
+    # list) and the rest is one find_tools call away; every tool means the
+    # previous ~240-tool catalog (~47k tokens) on every turn.
+    _exposure_short = "Show agents a short tool list and let them look up the rest (recommended)"
+    _exposure_full = "Show every tool on every request (costs far more per task)"
+    tool_exposure = "core" if _q_select(
+        "How much of the tool list should each request to the AI describe?",
+        [_exposure_short, _exposure_full], default=_exposure_short,
+    ) == _exposure_short else "full"
     jd_hiring = _q_confirm(
         "Enable JD hiring in the Agent Factory? HR can upload a job "
         "description to match it against the specialist roster or draft a "
@@ -1158,6 +1168,7 @@ def pick_capabilities() -> dict[str, bool]:
         "code_exec": use_code_exec,
         "embedded_flash": embedded_flash,
         "deferred_tools": deferred_tools,
+        "tool_exposure": tool_exposure,
         "jd_hiring": jd_hiring,
     }
 
@@ -8575,6 +8586,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     tool_lines: list[str] = []
     if advanced.get("deferred_tools"):
         tool_lines.append("deferred_loading = true")
+    if advanced.get("tool_exposure") == "full":
+        tool_lines.append('exposure = "full"')
     if advanced.get("output_cache"):
         tool_lines.append("output_cache = true")
     if advanced.get("hardware_sensors"):
@@ -9090,6 +9103,11 @@ def write_config(
     embedded_flash = bool(capability_config.pop("embedded_flash", False))
     # JD hiring lives under [agent_factory] (kernel: maverick.jd_hiring).
     jd_hiring = bool(capability_config.pop("jd_hiring", True))
+    # Tool exposure lives under [tools] (kernel: maverick.agent via
+    # config.get_tool_exposure); "core" is the default, so only "full" is
+    # written (write-only-on-divergence, like the other [tools] keys).
+    if str(capability_config.pop("tool_exposure", "core")).lower() == "full":
+        advanced["tool_exposure"] = "full"
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
     lines += _cfg_agent_factory(jd_hiring)

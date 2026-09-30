@@ -145,7 +145,9 @@ here.
   supervisor) that doesn't join the control flow; `blackboard.post` tees into
   it, a slow observer drops its oldest events rather than stalling the swarm,
   and it's a no-op (lock-free subscriber check) when nobody is watching.
-- **Context lifecycle** — deferred tool loading + `find_tools`, cross-session
+- **Context lifecycle** — deferred tool loading + `find_tools` with a
+  role- and pack-aware short catalog (`[tools] exposure`, default `core`:
+  ~30-40 tools per turn instead of ~240), cross-session
   `memory` tool (`tools/memory.py`), programmatic tool calling
   (`tools/code_exec.py`), structural/retrieval-augmented compaction
   (`compaction/__init__.py`, `context_compactor.py`), and a **long-context retrieval

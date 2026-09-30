@@ -2059,17 +2059,22 @@ class Agent:
         if code_exec_on:
             from .tools.code_exec import code_exec_tool
             reg.register(code_exec_tool(self))
-        # Deferred tool loading (default ON): hide the SaaS-connector long
-        # tail behind the find_tools meta-tool so the model's catalog stays
-        # lean -- 470+ connector schemas rode EVERY model turn at consumer
-        # defaults (observed: 601 tools offered per call), dominating context
-        # cost. The mechanism (ToolRegistry.enable_deferred / find_tools)
-        # already existed and was tested; nothing wired it. Everything
-        # registered above (file/shell/spawn/bus/memory/MCP/...) stays
-        # visible; only base_registry's marked long tail defers, and run()
-        # still executes ANY registered tool, so execution semantics are
-        # unchanged. Disable via [capabilities] deferred_tools = false or
-        # MAVERICK_DEFERRED_TOOLS=0.
+        # Deferred tool loading (default ON): the model's per-turn catalog is
+        # what [tools] exposure says, and the rest hides behind the find_tools
+        # meta-tool. run() still executes ANY registered tool, so execution
+        # semantics are unchanged; only what is DESCRIBED up front shrinks.
+        #   exposure = "core" (default): a role-aware core set
+        #     (tools.core_tool_names + [tools] core_extra), or -- for an agent
+        #     running under a pack's allow_tools -- exactly that allow list
+        #     (measured: 237 tools / ~188 KB / ~47k tokens rode EVERY turn
+        #     for every role, ~95% of the first call's input).
+        #   exposure = "full": everything except base_registry's marked SaaS
+        #     long tail (the previous behaviour; ~237 tools).
+        # A tool the agent's capability refuses (a pack's deny_tools, an
+        # allow list it is outside of, a risk ceiling) is neither shown nor
+        # discoverable. Disable deferral entirely via [capabilities]
+        # deferred_tools = false or MAVERICK_DEFERRED_TOOLS=0 (every schema,
+        # 600+ tools, on every turn).
         env_dt = os.environ.get("MAVERICK_DEFERRED_TOOLS", "").strip().lower()
         if env_dt in {"0", "false", "no", "off"}:
             deferred_on = False
@@ -2081,8 +2086,41 @@ class Agent:
         if deferred_on and deferrable:
             from .tools.find_tools import find_tools
             reg.register(find_tools(reg))
-            reg.enable_deferred(core={t.name for t in reg.all()} - set(deferrable))
+            core, hidden = self._tool_exposure_sets(reg, deferrable)
+            reg.enable_deferred(core=core, hidden=hidden)
         return reg
+
+    def _tool_exposure_sets(self, reg: ToolRegistry, deferrable) -> tuple[set[str], set[str]]:
+        """(visible core names, never-discoverable names) for this agent."""
+        try:
+            from .config import get_tool_exposure
+            exposure = get_tool_exposure()
+        except Exception:  # pragma: no cover -- config never blocks tool build
+            exposure = {"exposure": "core", "core_extra": []}
+        registered = {t.name for t in reg.all()}
+        cap = getattr(self, "capability", None)
+        if exposure["exposure"] == "full":
+            core = registered - set(deferrable)
+        else:
+            from .tools import core_tool_names
+            allow = set(getattr(cap, "allow_tools", ()) or ()) if cap is not None else set()
+            if allow:
+                # Pack-aware: the pack's allow_tools are visible in full (the
+                # capability refuses everything else at call time anyway,
+                # apart from the coordination floor it always permits). The
+                # suite data connectors data grounding adds to a pack's grant
+                # are documented as deferred (no context cost), so the marked
+                # long tail stays behind find_tools here too. A deny-all
+                # grant permits nothing, so ``hidden`` below empties it.
+                from .capability import COORDINATION_TOOLS
+                core = ((allow - set(deferrable)) | COORDINATION_TOOLS | {reg.META_TOOL}) & registered
+            else:
+                core = set(core_tool_names(self.role, extra=exposure["core_extra"]))
+        hidden: set[str] = set()
+        if cap is not None:
+            hidden = {n for n in registered if not cap.permits(n)}
+            core -= hidden
+        return core, hidden
 
     def _build_system(self) -> str:
         # Wave 9 fix: coding mode applies to the ORCHESTRATOR too, not

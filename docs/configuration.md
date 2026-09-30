@@ -784,6 +784,10 @@ weaviate_grpc_port = 50051    # MAVERICK_WEAVIATE_GRPC_PORT (443 for a standard 
 weaviate_vectorizer = ""      # MAVERICK_WEAVIATE_VECTORIZER (default text2vec-transformers)
 
 [tools]
+exposure = "core"             # MAVERICK_TOOL_EXPOSURE: "core" describes a short role-aware tool list on each
+                              # request (a specialist pack sees its own allow_tools) and agents look the rest
+                              # up with find_tools; "full" describes every tool (~240, ~47k tokens per turn)
+core_extra = []               # tool names always described as well as the short list
 speculative = false           # MAVERICK_SPECULATIVE_TOOLS: read ahead for repeated look-ups (needs output_cache)
 openapi_spec_max_bytes = 10000000   # MAVERICK_OPENAPI_SPEC_MAX_BYTES (read at startup)
 openapi_call_max_bytes = 1000000    # MAVERICK_OPENAPI_CALL_MAX_BYTES (read at startup)

@@ -978,6 +978,31 @@ def get_capabilities() -> dict:
     }
 
 
+TOOL_EXPOSURE_MODES = ("core", "full")
+
+
+def get_tool_exposure() -> dict:
+    """Return ``[tools] exposure`` and ``core_extra``.
+
+    ``exposure`` is how much of the tool catalog every model turn describes up
+    front: ``"core"`` (default) shows a short role-aware set (plus a selected
+    pack's ``allow_tools``) and lets the model look the rest up with
+    ``find_tools``; ``"full"`` shows every tool except the SaaS-connector long
+    tail (the previous behaviour). ``core_extra`` pins extra tool names into
+    the visible set. ``MAVERICK_TOOL_EXPOSURE`` overrides ``exposure``. An
+    unknown mode or a malformed list falls back to the lean default.
+    """
+    cfg = load_config().get("tools", {}) or {}
+    mode = os.environ.get("MAVERICK_TOOL_EXPOSURE", "").strip().lower() or str(
+        cfg.get("exposure", "core") or "core").strip().lower()
+    if mode not in TOOL_EXPOSURE_MODES:
+        mode = "core"
+    raw = cfg.get("core_extra", [])
+    extra = [str(t).strip() for t in raw if isinstance(t, str) and str(t).strip()] \
+        if isinstance(raw, list) else []
+    return {"exposure": mode, "core_extra": extra}
+
+
 def signing_identity_transition_enabled() -> bool:
     """Whole-installation trust admission requires a healthy global opt-in."""
     try:
