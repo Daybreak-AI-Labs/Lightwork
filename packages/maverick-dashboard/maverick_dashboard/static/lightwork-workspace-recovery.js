@@ -13,6 +13,12 @@
   var identityTransition = null;
   var accessMessage = "Your recovery access is unavailable. Sign in with an authorized account and reload this page before continuing.";
   function say(text) { get("status").textContent = text; }
+  function currentNativeReview() {
+    return !!nativeReview && /^[0-9a-f]{32}$/.test(nativeReview.id)
+      && typeof nativeReview.expires_at === "number" && Number.isFinite(nativeReview.expires_at)
+      && nativeReview.expires_at * 1000 > Date.now() && !!nativeReview.release
+      && typeof nativeReview.release.version === "string" && nativeReview.release.version.length > 0 && nativeReview.release.version.length <= 64;
+  }
   function controls() {
     var ready = !busy && !accessDenied && !!state;
     var hasKey = ready && !!state.key_id;
@@ -47,8 +53,9 @@
     get("encryption-download").disabled = !hasKey || !state.encryption_custody || !state.encryption_custody.local_export_available || !get("encryption-confirm").checked;
     get("prepare").disabled = !selected || !state.live_restore_available;
     get("restore").disabled = !ready || !review || !get("confirm").checked;
-    get("installation-authorize").disabled = !ready || !state.live_restore_available || !get("installation-confirm").checked;
-    get("installation-rollback").disabled = get("installation-authorize").disabled || !get("installation-point").value;
+    var installationReady = ready && state.live_restore_available && get("installation-confirm").checked;
+    get("installation-authorize").disabled = !installationReady || !currentNativeReview();
+    get("installation-rollback").disabled = !installationReady || !get("installation-point").value;
     get("installation-transition-file").disabled = !ready || !state.live_restore_available;
     get("installation-transition-review").disabled = !ready || !state.live_restore_available || !get("installation-transition-file").files.length;
     get("installation-transition-confirm").disabled = !ready || !identityTransition;
@@ -74,7 +81,7 @@
   function clearConfirmations() {
     clearReview();
     clearIdentityTransition();
-    root.querySelectorAll('input[type="checkbox"]').forEach(function (input) { input.checked = false; });
+    root.querySelectorAll('input[type="checkbox"]:not(#wrec-installation-handoff)').forEach(function (input) { input.checked = false; });
   }
   function clearIdentityTransition() { identityTransition = null; get("installation-transition-details").textContent = ""; get("installation-transition-confirm").checked = false; }
   function clearComparison() {
@@ -107,10 +114,10 @@
   }
   function clearPrivateState() {
     channelDrafts.clear();
-    accessDenied = true; state = null; installationPoints = []; clearConfirmations(); clearEvidence(); clearReconciliation();
+    accessDenied = true; state = null; installationPoints = []; nativeReview = null; clearConfirmations(); clearEvidence(); clearReconciliation();
     root.querySelectorAll("input, textarea").forEach(function (input) { if (input.type !== "checkbox") input.value = ""; });
     root.querySelectorAll("select, ul").forEach(function (element) { element.replaceChildren(); });
-    ["identity", "last-restore", "key-status", "encryption-status", "result", "bootstrap-status", "installation-result", "installation-retention-status"].forEach(function (id) { get(id).textContent = ""; });
+    ["identity", "last-restore", "key-status", "encryption-status", "result", "bootstrap-status", "installation-result", "installation-retention-status", "installation-native-review"].forEach(function (id) { get(id).textContent = ""; });
     controls();
     say(accessMessage); get("status").setAttribute("tabindex", "-1"); get("status").focus();
     channelEvent("denied");
@@ -703,7 +710,13 @@
   async function load(selected) {
     channelCurrent = false;
     clearEvidence();
+    nativeReview = null;
+    get("installation-native-review").textContent = "";
+    get("installation-confirm").checked = false;
+    get("installation-code").value = "";
+    clearIdentityTransition();
     installationPoints = [];
+    get("installation-point").replaceChildren();
     get("installation-retire-confirm").checked = false;
     get("installation-retire-point").replaceChildren();
     var result = await request("status");
@@ -726,6 +739,7 @@
     try {
       var installation = await request("installation");
       nativeReview = installation.native_review || null;
+      if (!currentNativeReview()) nativeReview = null;
       get("installation-native-review").textContent = nativeReview ? "Native release: " + nativeReview.release.version + ". Review expires " + new Date(nativeReview.expires_at * 1000).toLocaleString() + "." : "For a protected update, first select Check for updates in the native app, then refresh this page.";
       get("installation-point").replaceChildren();
       var choose = document.createElement("option"); choose.value = ""; choose.textContent = "Choose a completed upgrade"; get("installation-point").appendChild(choose);
@@ -1052,7 +1066,7 @@
     get("installation-code").value = "";
     var body = { confirm: true, confirm_all_workspaces: true, native_handoff: get("installation-handoff").checked };
     if (!rollback) {
-      if (!nativeReview || nativeReview.expires_at * 1000 <= Date.now()) throw new Error("Check for updates in the native app and refresh this page to review the exact release.");
+      if (!currentNativeReview()) throw new Error("Check for updates in the native app and refresh this page to review the exact release.");
       body.review_id = nativeReview.id;
     }
     if (rollback) { if (!get("installation-point").value) return; body.rollback_id = get("installation-point").value; }
@@ -1088,7 +1102,7 @@
   on("installation-authorize", function () { return authorizeInstallation(false); });
   on("installation-rollback", function () { return authorizeInstallation(true); });
   get("installation-confirm").addEventListener("change", controls);
-  get("installation-point").addEventListener("change", function () { get("installation-code").value = ""; controls(); });
+  get("installation-point").addEventListener("change", function () { get("installation-code").value = ""; get("installation-confirm").checked = false; controls(); });
   get("installation-retire-point").addEventListener("change", function () { get("installation-retire-confirm").checked = false; controls(); });
   get("installation-retire-confirm").addEventListener("change", controls);
   on("installation-retire", async function () {

@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(base, 'templates/workspace_recovery.html'
 const source = fs.readFileSync(path.join(base, 'static/lightwork-workspace-recovery.js'), 'utf8');
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-async function harness(handler, overrides = {}) {
+async function harness(handler, overrides = {}, installationOverrides = {}) {
   const dom = new JSDOM(html, { url: 'http://localhost/workspace/recovery', runScripts: 'outside-only' });
   const calls = [];
   const state = { tenant: 'acme', context: 'account-context', expected_tenant: 'acme', target: 'target-a', application_version: '1.0.0', key_id: 'key-id',
@@ -17,6 +17,7 @@ async function harness(handler, overrides = {}) {
   dom.window.fetch = async (url, init) => {
     calls.push({ url, init });
     const body = url.endsWith('/status') ? state : await handler(url, init);
+    if (url.endsWith('/installation') && !body.error) Object.assign(body, installationOverrides);
     return { ok: !body.error, status: body.error ? 409 : 200,
       json: async () => body.error ? { detail: body.error } : JSON.parse(JSON.stringify(body)),
       blob: async () => new dom.window.Blob([JSON.stringify(body)], { type: 'application/json' }) };
@@ -26,6 +27,11 @@ async function harness(handler, overrides = {}) {
   const get = name => dom.window.document.getElementById('wrec-' + name);
   function select() { get('snapshot').value = 'snapshot-a'; get('snapshot').dispatchEvent(new dom.window.Event('change')); }
   return { dom, calls, get, state, select };
+}
+
+function nativeReleaseReview() {
+  return { id: 'e'.repeat(32), expires_at: Date.now() / 1000 + 600, release_sha256: 'f'.repeat(64),
+    release: { version: '1.0.1', runtime_sha256: '1'.repeat(64), installer_sha256: '2'.repeat(64), signature: 'synthetic-release-signature' } };
 }
 
 test('channel review without a current typed form stays unresolved and never exposes editable identities', async () => {
@@ -341,19 +347,108 @@ test('normal dashboard never offers live restore and coverage is text-only', asy
 
 test('whole-home maintenance needs separate consent and returns only bounded private grant', async () => {
   const authorization = 'a'.repeat(32) + ':' + 'b'.repeat(64);
-  const h = await harness(async url => url.endsWith('/authorize') ? { authorization } : { recovery_points: [] });
+  const h = await harness(async url => url.endsWith('/authorize') ? { authorization } : { recovery_points: [] }, {}, { native_review: nativeReleaseReview() });
+  h.get('installation-handoff').checked = false; // Explicit manual-code fallback.
   assert.equal(h.get('installation-authorize').disabled, true);
   h.get('installation-confirm').checked = true;
   h.get('installation-confirm').dispatchEvent(new h.dom.window.Event('change'));
   h.get('installation-authorize').click(); await tick();
   const call = h.calls.find(c => c.url.endsWith('/authorize'));
-  assert.deepEqual(JSON.parse(call.init.body), { confirm: true, confirm_all_workspaces: true });
+  assert.deepEqual(JSON.parse(call.init.body), { confirm: true, confirm_all_workspaces: true, native_handoff: false, review_id: 'e'.repeat(32) });
   assert.equal(h.get('installation-code').value, authorization);
   assert.equal(h.get('installation-confirm').checked, false);
   assert.equal(h.calls.some(c => c.url.includes('execute')), false);
   h.state.context = 'different-account';
   h.get('refresh').click(); await tick(); await tick();
   assert.equal(h.get('installation-code').value, '');
+  h.dom.window.close();
+});
+
+for (const [label, change] of [
+  ['missing', () => null],
+  ['expired', row => ({ ...row, expires_at: Date.now() / 1000 - 1 })],
+  ['malformed identity', row => ({ ...row, id: 'unreviewed' })],
+  ['missing release', row => ({ ...row, release: {} })],
+]) test(`${label} native release review cannot authorize an update even through a programmatic click`, async () => {
+  const h = await harness(async () => ({}), {}, { native_review: change(nativeReleaseReview()) });
+  confirmInstallation(h);
+  assert.equal(h.get('installation-authorize').disabled, true);
+  h.get('installation-authorize').dispatchEvent(new h.dom.window.Event('click')); await tick();
+  assert.equal(h.calls.some(call => call.url.endsWith('/authorize')), false);
+  assert.match(h.get('status').textContent, /Check for updates/);
+  h.dom.window.close();
+});
+
+test('a release expiring while displayed is rechecked before any authorization request', async () => {
+  const review = nativeReleaseReview();
+  const h = await harness(async () => ({}), {}, { native_review: review });
+  confirmInstallation(h); assert.equal(h.get('installation-authorize').disabled, false);
+  h.dom.window.Date.now = () => review.expires_at * 1000 + 1;
+  h.get('installation-authorize').click(); await tick();
+  assert.equal(h.calls.some(call => call.url.endsWith('/authorize')), false);
+  assert.equal(h.get('installation-authorize').disabled, true);
+  h.dom.window.close();
+});
+
+test('failed review refresh removes old authority without changing protected handoff to manual code', async () => {
+  const h = await harness(async () => ({}), {}, { native_review: nativeReleaseReview() });
+  confirmInstallation(h); assert.equal(h.get('installation-authorize').disabled, false);
+  assert.equal(h.get('installation-handoff').checked, true);
+  let authorizations = 0;
+  h.dom.window.fetch = async url => {
+    if (url.endsWith('/authorize')) authorizations++;
+    return url.endsWith('/status') ? { ok: true, status: 200, json: async () => h.state }
+      : { ok: false, status: 503, json: async () => ({ detail: 'Native release review is unavailable.' }) };
+  };
+  h.get('refresh').click(); await tick(); await tick();
+  assert.equal(h.get('installation-confirm').checked, false);
+  assert.equal(h.get('installation-native-review').textContent, '');
+  assert.equal(h.get('installation-handoff').checked, true);
+  confirmInstallation(h);
+  h.get('installation-authorize').dispatchEvent(new h.dom.window.Event('click')); await tick();
+  assert.equal(authorizations, 0);
+  assert.equal(h.get('installation-authorize').disabled, true);
+  h.dom.window.close();
+});
+
+test('protected handoff carries the exact review and keeps the grant out of the page', async () => {
+  const h = await harness(async url => url.endsWith('/authorize')
+    ? { native_handoff: true, expires_at: Date.now() / 1000 + 60 } : {}, {}, { native_review: nativeReleaseReview() });
+  confirmInstallation(h); h.get('installation-authorize').click(); await tick();
+  const calls = h.calls.filter(call => call.url.endsWith('/authorize'));
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { confirm: true, confirm_all_workspaces: true, native_handoff: true, review_id: 'e'.repeat(32) });
+  assert.equal(h.get('installation-code').value, '');
+  assert.match(h.get('installation-result').textContent, /Nothing has been installed/);
+  assert.equal(h.calls.some(call => call.url.includes('execute')), false);
+  h.dom.window.close();
+});
+
+test('completed-upgrade rollback uses its selected point independently of an update review and needs fresh consent', async () => {
+  const point = 'a'.repeat(32);
+  let unavailable = false;
+  const h = await harness(async url => url.endsWith('/installation')
+    ? unavailable ? { error: 'Installation recovery points are unavailable.' }
+      : { recovery_points: [{ id: point, status: 'upgraded', old_version: '1.0.0', new_version: '1.0.1' }] }
+    : { native_handoff: true, expires_at: Date.now() / 1000 + 60 });
+  confirmInstallation(h);
+  h.get('installation-point').value = point;
+  h.get('installation-point').dispatchEvent(new h.dom.window.Event('change'));
+  assert.equal(h.get('installation-confirm').checked, false);
+  assert.equal(h.get('installation-rollback').disabled, true);
+  confirmInstallation(h);
+  assert.equal(h.get('installation-authorize').disabled, true);
+  assert.equal(h.get('installation-rollback').disabled, false);
+  h.get('installation-rollback').click(); await tick();
+  const call = h.calls.find(row => row.url.endsWith('/authorize'));
+  assert.deepEqual(JSON.parse(call.init.body), { confirm: true, confirm_all_workspaces: true, native_handoff: true, rollback_id: point });
+  unavailable = true;
+  h.get('refresh').click(); await tick(); await tick();
+  assert.equal(h.get('installation-point').options.length, 0);
+  confirmInstallation(h);
+  h.get('installation-rollback').dispatchEvent(new h.dom.window.Event('click')); await tick();
+  assert.equal(h.calls.filter(row => row.url.endsWith('/authorize')).length, 1);
+  assert.equal(h.get('installation-rollback').disabled, true);
   h.dom.window.close();
 });
 
@@ -424,7 +519,8 @@ for (const deniedStatus of [401, 403]) {
     const authorization = 'a'.repeat(32) + ':' + 'b'.repeat(64);
     const h = await harness(async url => url.endsWith('/authorize') ? { authorization } : { recovery_points: [
       { id: 'c'.repeat(32), status: 'authorized', old_version: '1.0.0', can_retire: true, record_sha256: 'd'.repeat(64) }
-    ] });
+    ] }, {}, { native_review: nativeReleaseReview() });
+    h.get('installation-handoff').checked = false;
     h.select();
     h.get('installation-confirm').checked = true;
     h.get('installation-confirm').dispatchEvent(new h.dom.window.Event('change'));
@@ -441,7 +537,7 @@ for (const deniedStatus of [401, 403]) {
     h.get('inspect').click(); await tick();
     assert.equal(parsed, 0, 'Access denial must clear state without parsing an HTML response.');
     for (const field of ['installation-code', 'key-input']) assert.equal(h.get(field).value, '');
-    for (const field of ['identity', 'result', 'installation-result', 'installation-retention-list']) assert.equal(h.get(field).textContent, '');
+    for (const field of ['identity', 'result', 'installation-result', 'installation-retention-list', 'installation-native-review']) assert.equal(h.get(field).textContent, '');
     assert.equal(h.get('snapshot').options.length, 0);
     assert.equal(h.get('installation-retire-point').options.length, 0);
     assert.equal(h.get('retire-confirm').checked, false);
@@ -886,7 +982,8 @@ function confirmInstallation(h, transition = false) {
   h.get(id).checked = true; h.get(id).dispatchEvent(new h.dom.window.Event('change'));
 }
 test('signing transition grant binds verified uploaded bytes and requires separate fresh consent', async () => {
-  const h = await harness(async url => url.endsWith('/identity-transition') ? transitionSummary() : url.endsWith('/authorize') ? { authorization: 'a'.repeat(32) + ':' + 'b'.repeat(64) } : {});
+  const h = await harness(async url => url.endsWith('/identity-transition') ? transitionSummary() : url.endsWith('/authorize') ? { authorization: 'a'.repeat(32) + ':' + 'b'.repeat(64) } : {}, {}, { native_review: nativeReleaseReview() });
+  h.get('installation-handoff').checked = false;
   chooseTransition(h); confirmInstallation(h);
   assert.equal(h.get('installation-authorize').disabled, true);
   h.get('installation-authorize').dispatchEvent(new h.dom.window.Event('click')); await tick();
@@ -897,7 +994,7 @@ test('signing transition grant binds verified uploaded bytes and requires separa
   assert.match(h.get('installation-transition-details').textContent, /Windows verifies each installer/);
   confirmInstallation(h, true); h.get('installation-authorize').click(); await settleCustody();
   const call = h.calls.find(call => call.url.endsWith('/authorize'));
-  assert.deepEqual(JSON.parse(call.init.body), { confirm: true, confirm_all_workspaces: true,
+  assert.deepEqual(JSON.parse(call.init.body), { confirm: true, confirm_all_workspaces: true, native_handoff: false, review_id: 'e'.repeat(32),
     identity_transition: '{"synthetic":true}', transition_sha256: 'a'.repeat(64), confirm_identity_transition: true });
   assert.equal(call.init.headers['X-Lightwork-Recovery-Context'], 'account-context');
   assert.equal(h.get('installation-transition-file').value, '');
@@ -916,7 +1013,7 @@ test('oversized bridge is not uploaded and a changed file cannot use a late tran
   assert.equal(h.get('installation-authorize').disabled, true); h.dom.window.close();
 });
 for (const status of [401, 403]) test(`HTML ${status} revokes bridge review before parsing and clears selected material`, async () => {
-  const h = await harness(async url => url.endsWith('/identity-transition') ? transitionSummary() : {});
+  const h = await harness(async url => url.endsWith('/identity-transition') ? transitionSummary() : {}, {}, { native_review: nativeReleaseReview() });
   chooseTransition(h); h.get('installation-transition-review').click(); await settleCustody();
   confirmInstallation(h); confirmInstallation(h, true);
   let parsed = 0;
