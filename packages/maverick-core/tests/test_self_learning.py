@@ -1070,7 +1070,7 @@ class TestGeneratedTools:
         assert events[-1][1] == {
             "agent": "self_learning",
             "operation": "generated_tool_authority_revoked",
-            "name": "delete_me",
+            "name_sha256": hashlib.sha256(b"delete_me").hexdigest(),
             "tenant": "shared",
             "source_sha256": digest,
             "consent_revoked": True,
