@@ -5,8 +5,8 @@
     "implementation_evidence": [
       "e18aa52: users.html requires an empty explicit role choice and previews built-in/custom permission atoms."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Keyboard, custom-role and authenticated browser acceptance remain unrun."
+    "validation": "Static review: users.html has required empty initial choices in both installation and workspace forms and lists built-in/custom powers. The 62-case identity acceptance batch does not establish keyboard submission of every custom role. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Final installed keyboard/custom-role grant acceptance remains to be exercised; the form does not preselect administrator."
   },
   {
     "id": "LW-092",
@@ -15,8 +15,8 @@
       "e18aa52: Use standard role action and success explicitly state access is not removed.",
       "access_explanations.standard_role and admin_pages reset preview/readback follow pinned administrator, verified-group mapping and fallback role; expected_standard binds the reviewed role and powers before clearing."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Group/default fallback, custom-role power change and keyboard confirmation regression acceptance remain unrun."
+    "validation": "The 62-case final identity batch passed test_first_login_defaults.py, including verified-group-before-default reset provenance. Static Users review confirms fallback powers before confirmation, revision binding and success readback. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Installed viewer-to-operator/custom-role reset confirmation and success interaction remain to be exercised; reset explicitly does not deactivate an account."
   },
   {
     "id": "LW-093",
@@ -24,8 +24,8 @@
     "implementation_evidence": [
       "e18aa52: admin_pages._users_context returns workspace membership controls before loading global roster, invitations or department grants; users.html gates global forms."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Authenticated tenant/global administrator acceptance remains unrun."
+    "validation": "The 62-case final batch passed the test proving workspace administrators never load installation roster/invitations. Local installed enterprise_lifecycle.spec.js also passed five actual invited roles and denial of installation-only controls to workspace/ordinary roles. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Final consolidated-build browser rerun remains; this does not claim every workspace membership edit or live IdP role migration has been qualified."
   },
   {
     "id": "LW-094",
@@ -38,8 +38,8 @@
       "All owned queued kinds and recurring schedule definitions inventoried; recurring definitions retired before cancellation. Exact verified-channel task scopes included, and linked inactive members denied new channel work even with sharing disabled.",
       "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed."
     ],
-    "validation": "45 local departure/identity/recurrence/dispatcher regression tests passed. Ruff import/bug/complexity checks and extracted inline JavaScript syntax passed. Installed authenticated browser/provider acceptance remains unrun.",
-    "remaining": "Installed offboarding with running work, OAuth consent and pending reviews must be qualified. Provider-side revocation and unlinked external identities remain explicit named retained obligations, never automatically verified."
+    "validation": "The 62-case final batch passed departure cases for stale review, incomplete deactivation, uncertain connection dispatch, fresh assigned custodians and new-item/reactivation refusal, plus shared-operation authority/recovery. Installed enterprise lifecycle passed real local departure and departed-cookie denial. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Live provider-side revocation and unlinked external identities remain explicit retained obligations assigned to named custodians. Their completion cannot be inferred from local secret removal; final consolidated-build departure/concurrent-work qualification remains."
   },
   {
     "id": "LW-095",
@@ -52,12 +52,13 @@
       "7f65700: canonical bundled/publication receipt/exact-owner template visibility across catalog, builders, workflow history, suggestions and consumers.",
       "Current follow-up: named employee donations refused; signed insight exchange and training corpus require known shared ownership and current nonexcluded source; 120 local regression tests passed.",
       "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed.",
-      "Shared harness lessons and harvested evaluation cases require durable exact-source lineage, current known-unowned ownership and stop-use authorization. Unknown legacy rows remain stored but are withheld from prompt/search/shared UI, trial reporting, transfer and evaluation; audit learning logs remove arbitrary lesson/model/phase text. Root separately closes learned capability/generated-tool metadata and execution paths.",
+      "Shared harness lessons and harvested evaluation cases require durable exact-source lineage, current known-unowned ownership and stop-use authorization. Unknown legacy rows remain stored but are withheld from prompt/search/shared UI, trial reporting, transfer and evaluation; audit learning logs remove arbitrary lesson/model/phase text. Integrated learning_content.py and source-bound generated-tool controls close the adjacent learned metadata/execution paths; unknown legacy lineage remains withheld.",
       "Root e363f91 + 6660857 bind learned-capability history and generated-tool discovery/execution/deletion to exact owner and current source digest. Personal My Data adds opaque source-bound generated-tool deletion requests and exact available lineage inventory without implying all retained derivatives are gone.",
-      "product_operations_personal_data.py shares 14 native ownership/revision/independent-review journeys, including identity proof, preference suppression, provenance, exclusions, owned exports and per-store deletion status."
+      "product_operations_personal_data.py shares 14 native ownership/revision/independent-review journeys, including identity proof, preference suppression, provenance, exclusions, owned exports and per-store deletion status.",
+      "9244cd9/current integration preserves policy actor/score/closed control metadata while withholding arbitrary audit content; current source-reviewed owner checks remain separate from global policy administration."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun. Learning closure:339 local core/privacy cases and13 dashboard learning cases passed;4 task-authority Node tests passed. Ruff and syntax checks passed. Personal-data completion:51 local Python tests and6 Node tests passed; Ruff, JavaScript syntax and whitespace passed.",
-    "remaining": "Final integrated registry/module qualification and authenticated cross-user installed/browser acceptance remain required. No live-provider, production or external-custodian deletion result is claimed."
+    "validation": "The 62-case final batch passed current employee-content privacy and exact approval-card grant cases. Prior audit metadata runs: 145 passed with two corrected assertions, then 47 passed across complete affected files; owner scoping 22 passed. Local installed five-role lifecycle and protected-pilot exact owner-approved grants passed. Core memory/privacy final rerun: 205 passed, 2 Windows symlink skips; prior learning/policy batch 158 passed. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Final consolidated-suite/browser and unavailable native/OS boundaries remain. Separate reported PR2530 claims about feedback/annotation tenancy, flow secret references, vendor markup and tenant-ID reuse are outside this 18-ID evidence update and must not be treated as resolved or as evidence that all privacy is qualified."
   },
   {
     "id": "LW-096",
@@ -69,8 +70,8 @@
       "Feature configuration and installer gate saved reviews. Effective status requires fresh actual permissions, while task/resource/consent/provider constraints remain explicitly separate.",
       "product_operations_identity.py provides native shared Copilot adapters with identical direct authorization, current source/request revision, explicit confirmation and exact recovery receipts; 29 local adapter/permission/content/departure regressions passed."
     ],
-    "validation": "Eight focused local permission/identity regressions passed. Ruff bug/import/complexity checks and JavaScript syntax passed. Installed browser acceptance remains unrun.",
-    "remaining": "Installed authenticated role/tool denial and permission-change acceptance remains unrun. Root-grant explanations explicitly distinguish separately evaluated task, resource, consent and provider constraints."
+    "validation": "The 62-case final batch passed permission requests for channel/user/role root ceilings, correct independent policy owner, stale-policy refusal and no implicit grant from review. Shared identity adapters use native authority and exact recovery receipts. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Final installed denied-action/permission-change journey remains; explanations intentionally distinguish root grants from separately evaluated task/resource/consent/provider gates."
   },
   {
     "id": "LW-097",
@@ -79,8 +80,8 @@
       "e18aa52: SSO installer recommends explicit viewer/no-departments baseline, emits empty default_suites and previews deliberate operator alternative. Existing runtime defaults preserved.",
       "first_login_defaults.py and Users provide current installation fallback role/powers/departments, deliberate migration confirmation covering existing unassigned accounts, revision check, effective readback, audit acknowledgement and rollback on override/failure. Settings clarifies empty-departments semantics."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Authored migration/conflict/audit-rollback tests and actual installer/upgrade/config-precedence acceptance remain unrun."
+    "validation": "The 62-case final batch passed explicit viewer/empty-departments migration, stale preview refusal, verified-group role provenance and audit-failure rollback. Source review confirms conservative fresh-installer recommendation and deliberate existing-policy migration. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Actual packaged fresh-install/upgrade and all deployment-override combinations remain release qualification; no existing policy was migrated in production."
   },
   {
     "id": "LW-098",
@@ -88,8 +89,8 @@
     "implementation_evidence": [
       "e18aa52: Account reports active_profile separately from actual enterprise_enabled and labels enterprise profile with boundary off as overridden."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Environment override and policy precedence acceptance remains unrun."
+    "validation": "Source review confirms feature_actions_api.me uses actual enterprise_enabled() independently of active_profile and emits profile_overridden; the account controller labels an enterprise profile whose boundary is off. The general identity batch does not prove every environment-precedence/readiness combination. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Explicit enterprise-profile plus mode=false installed account/readiness comparison remains; no blanket posture qualification is claimed."
   },
   {
     "id": "LW-099",
@@ -97,8 +98,8 @@
     "implementation_evidence": [
       "e18aa52: persistent workspace context, cross-tab change banner and mutation guard, fixed-binding picker disabled and server rejects changes while MAVERICK_TENANT is set."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Multiple-tab and fixed-binding browser acceptance remains unrun; no production workspace changes performed."
+    "validation": "The 62-case final identity batch passed fixed-workspace selection refusal. My Data/handoff controller tests passed context-mismatch clearing and read-only links; shared task authority passes four fresh-permission interaction cases. Source review confirms cross-tab context guard and fixed deployment selector. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "The exact two-tab workspace-switch draft/approval journey on the final installed build remains; component/context tests do not replace that browser scenario."
   },
   {
     "id": "LW-100",
@@ -108,8 +109,8 @@
       "Conversation worker shared authority script rechecks before click/submit and on focus/visibility; current SSR/API gate combines operate with exact task ownership, with native action revalidation.",
       "Initial send/stop/upload/planning/project/share/resume controls are disabled for read-only users before script execution. Project onchange now uses requestSubmit, so fresh authority checks cannot be bypassed; initial role-disabled state can recover only after a fresh allowed response."
     ],
-    "validation": "Four local Node permission tests passed, including mid-session project revocation preserving entered value, initial read-only controls, renewed authority and select interaction. Template Jinja parse, JavaScript syntax and whitespace passed; installed authenticated browser qualification remains unrun.",
-    "remaining": "Actual viewer/member/admin sessions, cross-owner approved read grants and mid-session role changes need installed authenticated browser acceptance; server ownership and permission checks remain authoritative."
+    "validation": "Four final task_authority.test.js cases passed: initial read-only controls, fresh reauthorization, mid-session project revocation preserving entered selection, and native select behavior. Installed enterprise lifecycle establishes cross-user private-task denial; server grant-only reads remain separate from mutations. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Final installed viewer/member/admin control matrix and mid-session role revocation remain; component tests are not a complete authenticated browser action matrix."
   },
   {
     "id": "LW-101",
@@ -117,8 +118,8 @@
     "implementation_evidence": [
       "e18aa52: auth_error.html branded accessible recovery; OIDC failure routes clear cookies and preserve only validated local return destinations; fresh login retry never replays old code."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Denied/expired/outage/state-mismatch and narrow keyboard/browser acceptance remain unrun."
+    "validation": "The 62-case final identity batch passed safe SSO failure rendering, local-only return destination and fresh restart. Source review confirms existing state/token validation and cookie clearing are retained; no old authorization code is reused. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Controlled IdP denial/expiry/token-exchange outage/invalid transaction/state mismatch with keyboard and narrow rendering remain. No live IdP or account-existence disclosure test is inferred."
   },
   {
     "id": "LW-102",
@@ -126,8 +127,8 @@
     "implementation_evidence": [
       "027751b: retention form sends explicit null, API distinguishes omitted from null and persists zero no-pruning value, reads effective global config back and refuses masked external overrides."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Mixed-field/all-field clearing and scheduler/config precedence regression acceptance remains unrun."
+    "validation": "Source review confirms explicit null serializes to no-pruning zero, omitted fields remain unchanged, effective global readback is compared after recorded save, and external overrides produce an explicit refusal. Retention-receipt tests below do not substitute for this settings matrix. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Mixed-field and all-field clearing from an existing 30-day policy, reload/scheduler state and externally enforced override browser acceptance remain; do not describe those as executed."
   },
   {
     "id": "LW-103",
@@ -137,8 +138,8 @@
       "Unsaved form edits invalidate preview; UI explicitly requires records-owner hold confirmation and names provenance dependency.",
       "Recorded privacy-rights holds now appear in per-workspace preview, invalidate review and block core/manual retention even when the optional ledger feature is disabled; complete integrity-checked scan, current authority/policy fence through deletion and required accepted-review audit acknowledgement."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Static checks only; authored hold, audit-failure and fenced-revocation regressions remain unrun. External holds require explicit records-owner confirmation; automatic discovery is not claimed."
+    "validation": "The 62-case final batch passed policy/scope review invalidation, hold refusal despite confirmation, required audit acknowledgment and revocation at the effect fence. Source review confirms actual saved scope/counts/dependencies and unsaved-edit invalidation. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Final installed active-tenant/global-administrator preview workflow and PostgreSQL/external preservation integration remain. External holds require an authorized records-owner attestation, never automatic discovery."
   },
   {
     "id": "LW-104",
@@ -147,7 +148,7 @@
       "027751b + 072ae1c: locked expired audit files report skipped/partial; missing signed purge tip remains unconfirmed.",
       "retention_runs.py writes per-workspace/store dispatch/outcomes persistently, retries unresolved only and retains uncertain prior effects/unconfirmed audit without false success."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Authored locked-file/partial/policy-conflict/unknown-retry regression tests remain unrun; PostgreSQL and filesystem interruption acceptance deferred."
+    "validation": "The 62-case final batch passed locked/error report truthfulness, persistent partial execution, completed-store exclusion from retries and preservation of earlier unknown effects. Earlier authored-but-unrun claims are superseded for these tests. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
+    "remaining": "Filesystem interruption/locked-file behavior across supported OSes and PostgreSQL remain release qualification. An ambiguous prior effect or failed audit acknowledgment stays unconfirmed."
   }
 ]
