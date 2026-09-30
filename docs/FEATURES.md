@@ -2822,7 +2822,17 @@ here.
 
 ## Channels
 
-17 wired channels (`packages/maverick-channels/`): Telegram, Discord, Slack,
+18 wired channels (`packages/maverick-channels/`): Telegram, Discord, Slack,
+**Microsoft Teams** (`teams.py`: Azure Bot Framework webhook — Bot Connector JWT
+verified fail-closed against Microsoft's OpenID keys, tenant + Entra object-id
+allowlists, mention stripping in channels/group chats, replies through the
+activity's service URL with a tenant-aware client-credentials token, and
+**approvals in Teams**: Adaptive Cards with the dashboard card's content,
+Approve/Reject/Ask-a-question, a second confirm card for high/critical risk,
+decided through the dashboard's own `approval_decisions` path with `channel =
+teams` in the audit, cards updated in place; Teams accounts are linked to
+Lightwork users on the Channels page or by a one-time `link <code>` in chat —
+see [docs/channels/teams.md](channels/teams.md)),
 Signal, Email, Matrix, Bluesky, Mastodon, Voice (Twilio), WhatsApp (Twilio),
 **WhatsApp Cloud API** (`whatsapp_cloud.py`: Meta's first-party Graph API —
 GET verification handshake, constant-time `X-Hub-Signature-256` HMAC,
@@ -2864,7 +2874,7 @@ messages pass through byte-identical. **Channel SDK v2** (RFC 0001 C2,
 `base.py`): handlers may return a structured `Reply` (text + attachments +
 thread_ref) instead of bare `str` — `as_reply` is the v1 shim (bare `str`
 accepted through the deprecation window), `Channel.dispatch`/`dispatch_text`
-normalize either contract, and all 18 in-tree adapters route through the
+normalize either contract, and all 19 in-tree adapters route through the
 dispatch path so a v2 handler works everywhere unchanged.
 
 ## Sandboxes

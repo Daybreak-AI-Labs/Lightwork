@@ -478,6 +478,7 @@ _CHANNEL_REQUIRED_FIELDS = {
         "smtp_password",
     ),
     "mattermost": ("url",),
+    "teams": ("app_id", "app_password", "tenant_id"),
 }
 
 _CHANNEL_MODULES = {
@@ -488,6 +489,7 @@ _CHANNEL_MODULES = {
     "sms": "maverick_channels.sms",
     "email": "maverick_channels.email",
     "mattermost": "maverick_channels.mattermost",
+    "teams": "maverick_channels.teams",
 }
 
 

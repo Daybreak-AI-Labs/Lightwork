@@ -989,6 +989,16 @@ def _episode_spend_from_row(row) -> EpisodeSpend:
     return EpisodeSpend(**_row_for(EpisodeSpend, d))
 
 
+def _notify_approval_created(approval_id: int, provenance: str | None) -> None:
+    """Best-effort chat notification (Teams approval cards); never raises."""
+    try:
+        from .approval_notify import approval_created
+
+        approval_created(int(approval_id), provenance=provenance)
+    except Exception:  # noqa: BLE001 -- the queue row is already durable
+        logging.getLogger(__name__).warning("approval notification failed", exc_info=True)
+
+
 def _approval_from_row(row) -> Approval:
     """Build an Approval from a row, decrypting the sealed action/scope/detail."""
     d = dict(row)
@@ -3020,7 +3030,9 @@ class WorldModel:
                  (requested_by or None), goal["id"] if goal else None,
                  goal["domain"] if goal else ""),
             )
-            return cur.lastrowid
+            approval_id = cur.lastrowid
+        _notify_approval_created(approval_id, provenance)
+        return approval_id
 
     def get_approval(self, approval_id: int) -> Approval | None:
         row = self._read_one(

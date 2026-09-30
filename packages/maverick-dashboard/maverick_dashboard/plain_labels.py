@@ -200,6 +200,10 @@ CHANNEL_FIELDS = {
     ("email", "smtp_port"): ("Outgoing mail port", "Usually 465. Some providers, such as Outlook, use 587.", True),
     ("mattermost", "url"): ("Server address", "The web address people use to open Mattermost, such as https://chat.example.com.", False),
     ("mattermost", "bot_token"): ("Bot access token", "From Mattermost's System Console, under Integrations > Bot Accounts, after you create a bot.", False),
+    ("teams", "app_id"): ("App ID", "The Microsoft App ID of your Azure Bot, shown on the bot's Configuration page in the Azure portal.", False),
+    ("teams", "app_password"): ("Client secret", "From the app registration in Microsoft Entra, under Certificates & secrets. Paste the secret value, not its id.", False),
+    ("teams", "tenant_id"): ("Tenant ID", "Your Microsoft Entra tenant id (Directory ID). Leave blank only for a multi-tenant app registration.", False),
+    ("teams", "port"): ("Listening port", "Only change this if your IT team asks you to. Your public HTTPS address must forward /webhook/teams to it.", True),
 }
 
 CHANNEL_HELP_LINKS = {
@@ -209,6 +213,7 @@ CHANNEL_HELP_LINKS = {
     "whatsapp_cloud": "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started",
     "sms": "https://console.twilio.com",
     "mattermost": "https://developers.mattermost.com/integrate/reference/bot-accounts/",
+    "teams": "https://learn.microsoft.com/azure/bot-service/bot-service-quickstart-registration",
 }
 
 

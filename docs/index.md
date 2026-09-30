@@ -40,7 +40,8 @@ Lightwork is proprietary, commercially licensed software (see
   caps) across all 2,031 packs with a non-vacuous fault-injection control
   (property-fuzzed up to 5,000 iterations),
   plus hostile-argument fuzzing of every connector and tool.
-  Email, Matrix, WhatsApp, SMS, iMessage — one config, all channels.
+  Email, Matrix, Microsoft Teams, WhatsApp, SMS, iMessage — one config, all
+  channels.
 - **Build an agent from a demonstration**: record a reviewed example of the job,
   then synthesize the agent that does it — `maverick learn-demo <file>`
   ingests that transcript, induces a profile through the same

@@ -125,6 +125,53 @@
     {% elif c.configured %}
     <p class="muted ch-help">To check replies, send a message to your {{ c.label }} bot. Lightwork answers in the same conversation.</p>
     {% endif %}
+
+    {% if c.name == 'teams' %}
+    <div class="section-head"><h3 id="teams-links">People linked to Teams</h3></div>
+    <p class="muted ch-help">Lightwork only knows a Teams user by their Microsoft Entra object ID. Link that ID
+      (or their sign-in address) to a Lightwork user so their messages and approval decisions are recorded
+      under the right person. Approvals from Teams also need <strong>Decide approvals in Microsoft Teams</strong>
+      turned on under All settings. Setup steps: <code>docs/channels/teams.md</code>.</p>
+    {% if teams_link_code %}
+    <div class="panel ch-saved" role="status"><strong>One-time code:</strong> <code>{{ teams_link_code }}</code>
+      — the person sends <code>link {{ teams_link_code }}</code> to the Lightwork bot in Teams.</div>
+    {% endif %}
+    {% if teams_links %}
+    <table>
+      <thead><tr><th scope="col">Teams account</th><th scope="col">Lightwork user</th><th scope="col">Can approve</th><th scope="col">Reachable</th><th scope="col"></th></tr></thead>
+      <tbody>
+      {% for link in teams_links %}
+        <tr>
+          <td><code>{{ link.teams_id }}</code>{% if link.upn %} <span class="muted">{{ link.upn }}</span>{% endif %}</td>
+          <td>{{ link.principal | identity }}</td>
+          <td>{% if link.approver %}<span class="badge active">Yes</span>{% else %}<span class="badge">No</span>{% endif %}</td>
+          <td>{% if link.can_be_reached %}<span class="badge active">Has chatted with the bot</span>{% else %}<span class="muted">Not yet</span>{% endif %}</td>
+          <td><form method="post" action="/channels/teams/unlink" data-channels-confirm="Remove this Teams link? The person can no longer decide approvals from Teams.">
+            <input type="hidden" name="teams_id" value="{{ link.teams_id }}" />
+            <button type="submit" class="btn btn--ghost">Remove</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">Nobody is linked yet.</p>
+    {% endif %}
+    <form method="post" action="/channels/teams/link" class="ch-form">
+      <label class="ch-field"><span>Teams account (Microsoft Entra object ID or sign-in address)</span>
+        <input class="input" type="text" name="teams_id" required placeholder="12345678-abcd-abcd-abcd-1234567890ab or alice@example.com" /></label>
+      <label class="ch-field"><span>Lightwork user</span>
+        <input class="input" type="text" name="principal" required list="teams-users" placeholder="user:alice" />
+        <datalist id="teams-users">{% for user in teams_users %}<option value="{{ user }}"></option>{% endfor %}</datalist></label>
+      <label class="ch-toggle"><input type="checkbox" name="approver" /> <span>Can approve requests from Teams</span></label>
+      <div class="ch-actions"><button type="submit" class="btn btn--primary">Link this account</button></div>
+    </form>
+    <form method="post" action="/channels/teams/link-code" class="ch-form">
+      <label class="ch-field"><span>Or create a one-time code for a Lightwork user to link themselves in chat</span>
+        <input class="input" type="text" name="principal" required list="teams-users" placeholder="user:alice" /></label>
+      <label class="ch-toggle"><input type="checkbox" name="approver" /> <span>Can approve requests from Teams</span></label>
+      <div class="ch-actions"><button type="submit" class="btn">Create a link code</button></div>
+    </form>
+    {% endif %}
   </div>
   {% endfor %}
 

@@ -372,6 +372,13 @@ CHANNELS: list[dict] = [
         {"key": "bot_token", "label": "Bot access token", "secret": True,
          "env": "MATTERMOST_BOT_TOKEN"},
     ]},
+    {"name": "teams", "label": "Microsoft Teams", "fields": [
+        {"key": "app_id", "label": "App ID", "secret": False},
+        {"key": "app_password", "label": "Client secret", "secret": True,
+         "env": "TEAMS_APP_PASSWORD"},
+        {"key": "tenant_id", "label": "Tenant ID", "secret": False},
+        {"key": "port", "label": "Webhook port", "secret": False, "type": "int"},
+    ]},
 ]
 _CHANNELS_BY_NAME = {c["name"]: c for c in CHANNELS}
 

@@ -104,11 +104,39 @@ def check_credentials(name: str, cfg: dict[str, Any]) -> tuple[bool, str]:
             smtp = _smtp(cfg)
             smtp.quit()
             ok = True
+        elif name == "teams":
+            return _teams_token_check(cfg)
         else:
             return False, "this chat app has no connection test"
     except Exception as exc:  # noqa: BLE001 -- summarized, never echoed
         return False, f"the connection test could not reach the service ({type(exc).__name__})"
     return ok, ("the service accepted the saved details" if ok else "the service did not accept the saved details")
+
+
+def _teams_token_check(cfg: dict[str, Any]) -> tuple[bool, str]:
+    """Ask Microsoft's sign-in service for a Bot Framework token with the saved
+    app id and secret (the same call the channel makes before every reply)."""
+    from maverick_channels.teams import (
+        TOKEN_SCOPE,
+        channel_config,
+        explain_token_failure,
+        token_endpoint,
+    )
+
+    settings = channel_config(cfg)
+    if not settings["app_id"] or not settings["app_password"]:
+        return False, "enter the app ID and client secret first"
+    response = _post(token_endpoint(settings["tenant_id"] or None),
+                     headers={"Content-Type": "application/x-www-form-urlencoded"},
+                     data={"grant_type": "client_credentials", "client_id": settings["app_id"],
+                           "client_secret": settings["app_password"], "scope": TOKEN_SCOPE})
+    try:
+        body = response.json() or {}
+    except ValueError:
+        body = {}
+    if response.status_code == 200 and body.get("access_token"):
+        return True, "Microsoft issued a Bot Framework token for the saved app id and secret"
+    return False, explain_token_failure(response.status_code, body)
 
 
 def send_test(name: str, cfg: dict[str, Any], to: str) -> tuple[bool, str]:

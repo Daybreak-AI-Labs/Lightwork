@@ -1088,6 +1088,7 @@ from .store_catalogs import router as store_catalogs_router  # noqa: E402
 from .support_api import router as support_router  # noqa: E402
 from .system_checks_api import router as system_checks_router  # noqa: E402
 from .tax_actions_api import router as tax_actions_router  # noqa: E402
+from .teams_links_api import router as teams_links_router  # noqa: E402
 from .tools_ops_api import build_router as build_tools_ops_router  # noqa: E402
 from .voice_setup_api import VoiceSetup  # noqa: E402
 from .voice_setup_api import router as voice_setup_router  # noqa: E402
@@ -1101,6 +1102,7 @@ app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)
 app.include_router(tax_actions_router)
 app.include_router(channel_check_router)
+app.include_router(teams_links_router)
 app.include_router(page_assets_router)
 app.include_router(mcp_presets_router)
 app.include_router(store_catalogs_router)
@@ -7967,7 +7969,7 @@ async def templates_market_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/channels", response_class=HTMLResponse)
-def channels_page(request: Request, saved: str = "") -> HTMLResponse:
+def channels_page(request: Request, saved: str = "", code: str = "") -> HTMLResponse:
     """Channels: manage the common ones (enable + credentials) from the form
     sections, plus a read-only, secret-redacted view of everything configured.
     Saved to the dashboard overlay, never config.toml; effective on the next
@@ -8045,8 +8047,12 @@ def channels_page(request: Request, saved: str = "") -> HTMLResponse:
         "test_failed": "The connection test failed. Check the details and try again.",
         "sent": "Test message sent. Check that it arrived.",
         "send_failed": "The test message could not be sent. Check the details and try again.",
+        "linked": "Teams account linked.",
+        "unlinked": "Teams link removed.",
+        "link_code": "One-time link code created. Give it to the person; it works once and "
+                     "expires in 15 minutes.",
     }.get(saved, "")
-    from . import plain_labels
+    from . import plain_labels, teams_links_api
     for channel in managed:
         for field in channel["fields"]:
             label, help_text, advanced = plain_labels.CHANNEL_FIELDS.get(
@@ -8064,6 +8070,7 @@ def channels_page(request: Request, saved: str = "") -> HTMLResponse:
             "saved": saved_msg,
             "saved_failed": saved in {"test_failed", "send_failed"},
             "sendable": ["email", "sms", "slack"],
+            **teams_links_api.page_context(code),
         },
     )
 
