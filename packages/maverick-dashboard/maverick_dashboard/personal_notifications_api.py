@@ -100,6 +100,7 @@ def _state_locked(request, *, seen_id=None):
     from maverick import config, experience_preferences as preferences
     from maverick.personal_notifications import PersonalInbox, validate_preferences
     from maverick.personal_notification_recipients import enroll, status
+    from maverick.personal_notification_delivery import status as delivery_status
     from .draft_api import context_for
     actor = _identity(request)
     enroll(actor)
@@ -115,7 +116,7 @@ def _state_locked(request, *, seen_id=None):
             "tasks": tasks, "projects": projects, "partial": limited,
             "critical_allowed": (config.load_config().get("notifications") or {}).get("personal_critical_bypass", False) is True,
             "background_enabled": (config.load_config().get("notifications") or {}).get("personal_background") is True,
-            "background": status(actor)}
+            "background": status(actor), "private_delivery": delivery_status(actor)}
 
 
 @router.get("/notifications")
@@ -149,10 +150,13 @@ def _binding(request, expected):
 def save_preferences(request: Request, response: Response, body: PreferencesIn):
     from maverick import experience_preferences as preferences
     from maverick.personal_notifications import validate_preferences
+    from maverick.personal_identity import linked_channels
     _binding(request, body.context)
     actor = _identity(request)
     try:
         choice = validate_preferences(body.preferences)
+        if set(choice["external_links"]) - {link["id"] for link in linked_channels(actor)}:
+            raise HTTPException(409, "A selected channel identity is no longer verified for your account. Refresh and review your linked identities.")
         _, tasks, projects, _ = _projection(request, actor)
         if (set(choice["muted_tasks"]) - {str(task["id"]) for task in tasks}
                 or set(choice["projects"]) - {project["id"] for project in projects}):

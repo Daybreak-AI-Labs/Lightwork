@@ -6245,6 +6245,11 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     )
     personal_config = {"personal_alerts": personal_alerts, "personal_critical_bypass": personal_critical_bypass,
                        "personal_background": personal_background}
+    if personal_background and _q_confirm(
+        "Allow people to opt into alerts in their verified Slack/Telegram private conversations? Requires My Data identity verification and configured bot channel allowlists.", default=False,
+    ):
+        personal_config["personal_external"] = True
+        personal_config["personal_dashboard_url"] = _q_text("HTTPS dashboard origin for authenticated notification links (no path):", default="")
     if not _q_confirm(
         "Get pinged when long runs finish? (ntfy / Pushover / Slack / Discord)",
         default=False,

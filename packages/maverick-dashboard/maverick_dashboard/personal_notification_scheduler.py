@@ -24,8 +24,8 @@ def _enabled() -> bool:
 
 
 def _tenants() -> list[str | None]:
-    from maverick.tenant.registry import list_tenants
     from maverick.paths import canonical_tenant_id
+    from maverick.tenant.registry import list_tenants
     floor = os.environ.get("MAVERICK_TENANT", "").strip()
     if floor:
         return [canonical_tenant_id(floor)]
@@ -36,12 +36,14 @@ def _tenants() -> list[str | None]:
 
 
 def observe(principal: str) -> bool:
-    from maverick import config, experience_preferences as preferences
+    from maverick import config
+    from maverick import experience_preferences as preferences
     from maverick.personal_identity import principal_current
     from maverick.personal_notification_recipients import observed, withdraw
     from maverick.personal_notifications import PersonalInbox, validate_preferences
     from maverick.tenant.registry import assert_tenant_active
-    from maverick.world_model import open_world, close_world_if_owned
+    from maverick.world_model import close_world_if_owned, open_world
+
     from .personal_notifications_api import _projection
     with authority_effect_fence():
         if _scheduler_stop.is_set() or not _enabled():
@@ -54,9 +56,12 @@ def observe(principal: str) -> bool:
         try:
             sources, _, _, _ = _projection(None, principal, world=world)
             choice = validate_preferences(preferences.state(principal)["values"].get("notification_preferences", {}))
-            PersonalInbox(principal).refresh(sources, choice,
+            inbox = PersonalInbox(principal).refresh(sources, choice,
                 allow_critical=(config.load_config().get("notifications") or {}).get("personal_critical_bypass") is True)
             observed(principal)
+            if (config.load_config().get("notifications") or {}).get("personal_external") is True and choice["external_links"]:
+                from maverick.personal_notification_delivery import dispatch
+                dispatch(principal, inbox, choice)
         finally:
             close_world_if_owned(world)
     return True
@@ -64,6 +69,7 @@ def observe(principal: str) -> bool:
 
 def cycle() -> None:
     """Fair cursor across enrolled tenants/accounts; never infer identities from files."""
+    from maverick.personal_notification_delivery import prune_expired
     from maverick.personal_notification_recipients import principals
     from maverick.tenant.registry import assert_tenant_active
     global _cursor
@@ -74,6 +80,7 @@ def cycle() -> None:
         with tenant_scope(tenant=tenant), authority_effect_fence():
             try:
                 assert_tenant_active(tenant)
+                prune_expired()
                 if _enabled():
                     pending.extend((tenant, principal) for principal in principals())
             except Exception as exc:

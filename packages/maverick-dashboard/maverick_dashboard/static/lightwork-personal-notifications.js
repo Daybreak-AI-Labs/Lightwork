@@ -11,6 +11,14 @@
   let snapshot = null, editSnapshot = null, dirty = false, busy = false, mutes = {}, timer = null, controller = null;
   const scalar = ['mode','timezone','digest_time','quiet_start','quiet_end'];
   const checks = ['quiet_enabled','critical_exceptions','watch_all_projects'];
+  function clearPrivate() {
+    items.replaceChildren(); form.reset(); form.hidden = true;
+    ['notification-project-watches','notification-mutes','personal-external-links','personal-delivery-receipts'].forEach(function (id) { document.getElementById(id).replaceChildren(); });
+    taskSelect.replaceChildren(); snapshot = null; editSnapshot = null; mutes = {}; dirty = false;
+    document.getElementById('personal-background-status').textContent = '';
+    document.getElementById('personal-external-status').textContent = '';
+    status.textContent = 'Private notification information was cleared. Reload after signing in to the intended account and workspace.';
+  }
   function renderMutes() {
     const container = document.getElementById('notification-mutes'); container.replaceChildren();
     Object.entries(mutes).forEach(function ([id, until]) {
@@ -24,10 +32,28 @@
   }
   function render(state, reset) {
     if (snapshot && snapshot.context !== state.context) {
-      items.replaceChildren(); form.reset(); mutes = {}; dirty = false;
+      clearPrivate();
       throw new Error('Your account or workspace changed. Reload this page before continuing.');
     }
     snapshot = state;
+    form.hidden = false;
+    const delivery = state.private_delivery || {note:'Private delivery is unavailable.', channels:[]};
+    document.getElementById('personal-external-status').textContent = delivery.note + ' Service acceptance does not mean a message was seen.';
+    const selected = dirty && !reset ? Array.from(form.querySelectorAll('[name="external_link"]:checked')).map(function (node) { return node.value; }) : (state.preferences.external_links || []);
+    const destinations = document.getElementById('personal-external-links'), receipts = document.getElementById('personal-delivery-receipts');
+    destinations.replaceChildren(); receipts.replaceChildren();
+    delivery.channels.forEach(function (channel) {
+      const label = document.createElement('label'), input = document.createElement('input');
+      input.type = 'checkbox'; input.name = 'external_link'; input.value = channel.id; input.checked = selected.includes(channel.id);
+      // Keep an existing choice removable even while organization policy is off.
+      input.disabled = !channel.available && !input.checked;
+      label.append(input, document.createTextNode(' ' + channel.channel + ' — ' + channel.sender_id + (channel.reason ? ': ' + channel.reason : '')));
+      destinations.append(label);
+      (channel.receipts || []).forEach(function (receipt) {
+        const row = document.createElement('p'); row.textContent = channel.channel + ': ' + receipt.message + ' (' + new Date(receipt.at * 1000).toLocaleString() + ')'; receipts.append(row);
+      });
+    });
+    if (!delivery.channels.length) { const note = document.createElement('p'); note.textContent = 'No verified private channel is available. You can keep using this inbox.'; destinations.append(note); }
     const observed = state.background && state.background.last_observed_at;
     document.getElementById('personal-background-status').textContent = state.background_enabled
       ? 'Background observation is enabled while the dashboard runs. ' + (observed ? 'Last completed observation: ' + new Date(observed * 1000).toLocaleString() + '.' : 'No completed background observation yet.')
@@ -72,7 +98,7 @@
       const response = await fetch(url, {method:body ? 'POST':'GET', credentials:'same-origin', signal:controller.signal, headers:body ? {'Content-Type':'application/json'}:{}, body:body ? JSON.stringify(body):undefined});
       let value; try { value = await response.json(); } catch (_) { throw new Error('Your inbox could not be read. Try refreshing.'); }
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) { items.replaceChildren(); form.hidden = true; taskSelect.replaceChildren(); document.getElementById('notification-project-watches').replaceChildren(); document.getElementById('notification-mutes').replaceChildren(); snapshot = null; editSnapshot = null; mutes = {}; }
+        if (response.status === 401 || response.status === 403) clearPrivate();
         throw new Error(typeof value.detail === 'string' ? value.detail : 'Your inbox is unavailable. Refresh before trying again.');
       }
       render(value, reset); if (reset) saveStatus.textContent = reset === true ? 'Your personal notification preferences were saved.' : 'Saved preferences reloaded.';
@@ -83,11 +109,12 @@
   form.addEventListener('change', function () { dirty = true; });
   form.addEventListener('submit', function (event) {
     event.preventDefault(); if (!editSnapshot || busy) return;
-    const preferences = {muted_tasks:mutes, events:[], projects:[]};
+    const preferences = {muted_tasks:mutes, events:[], projects:[], external_links:[]};
     scalar.forEach(function (name) { preferences[name] = form.elements[name].value; });
     checks.forEach(function (name) { preferences[name] = form.elements[name].checked; });
     form.querySelectorAll('[name="event"]:checked').forEach(function (element) { preferences.events.push(element.value); });
     form.querySelectorAll('[name="project"]:checked').forEach(function (element) { preferences.projects.push(Number(element.value)); });
+    form.querySelectorAll('[name="external_link"]:checked').forEach(function (element) { preferences.external_links.push(element.value); });
     request('/api/v1/notifications/personal/preferences', {context:editSnapshot.context, expected_revision:editSnapshot.revision, preferences:preferences}, true);
   });
   document.getElementById('notification-add-mute').addEventListener('click', function () {

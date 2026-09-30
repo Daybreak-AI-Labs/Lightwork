@@ -71,3 +71,5 @@ def withdraw(principal: str) -> None:
     inbox = data_dir("personal-notifications", hashlib.sha256(principal.encode()).hexdigest() + ".enc")
     with cross_process_lock(inbox):
         inbox.unlink(missing_ok=True)
+    from .personal_notification_delivery import remove_personal_history
+    remove_personal_history(principal)

@@ -17,8 +17,34 @@ current named-account authority, and the complete source projection (including
 budget warnings). Revoked membership stops observation and removes that
 account's enrollment and inbox state. At most 100 recipients are observed per
 cycle with a rotating cursor and 20-second work budget; busy deployments may
-observe less frequently than 30 seconds. External per-person delivery routing
-is still unfinished. Organization webhook alerts keep their separate policy.
+observe less frequently than 30 seconds. Organization webhook alerts keep their
+separate policy.
+
+Administrators can additionally enable `personal_external` and save an HTTPS
+dashboard origin in `personal_dashboard_url`. The installer exposes both. A
+person first proves and confirms a messaging identity in My Data, then selects
+that verified identity in personal notification preferences. Slack and Telegram
+private delivery reuse the configured channel bot and current sender allowlist;
+public room IDs and organization webhook destinations are refused. Delivery
+checks the bot account digest against the authenticated receipt that proved the
+link, and rechecks current identity/link/policy under the authority fence.
+
+Messages carry a count and exact authenticated task/approval links, without task
+titles, results or decision content. Opening links uses ordinary dashboard
+authentication. Slack opens a one-person conversation and checks its returned
+recipient before posting; Telegram accepts positive private sender IDs only.
+The provider mechanisms follow [Slack conversations.open](https://docs.slack.dev/reference/methods/conversations.open/)
+and [Telegram sendMessage](https://core.telegram.org/bots/api#sendmessage).
+
+Encrypted per-person/per-verified-link delivery records atomically claim semantic
+item IDs before sending. Accepted, refused, interrupted and uncertain sends are
+not automatically replayed. The inbox shows private delivery failures and service
+acceptance separately from its explicit Mark seen action. One provider send is
+attempted per recipient observation, oldest-attempted destination first. Daily
+digests claim all currently eligible unseen delivery IDs once per local day;
+critical exceptions still require both administrator policy and user opt-in.
+Records keep up to 1,000 consumed item IDs for seven days; capacity pauses new
+sends rather than evicting duplicate protection. Revoking a link stops its use.
 
 The projection reads the latest 200 owned tasks and a bounded assigned-approval
 list. Coverage limits are displayed. Semantic status/question/result versions
@@ -40,8 +66,8 @@ binding. Background reads retain unsaved form edits; conflicts require an
 explicit reload before editing the latest values. Muting one task does not
 mute other tasks. Unsubscribed/off periods do not queue a later replay.
 
-Remaining: durable event ingestion (including transitions between background
-observations), external recipient/channel binding and delivery receipts, complete
-history pagination, shared Copilot operations and runtime qualification. The
-authored DST, recipient-isolation, deduplication, mute and revocation regression
-tests have not been executed.
+Remaining: durable event ingestion for transitions between observations, complete
+history pagination, personal preference Copilot coverage and installed/provider
+qualification. Mock-only core policy/receipt/private-delivery/offline-policy
+tests passed 20/20, followed by 8/8 private-delivery regressions after path and scope hardening after the user authorized local tests. No live messages were
+sent during implementation or validation.

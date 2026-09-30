@@ -23,7 +23,7 @@ EVENTS = frozenset({"needs-decision", "blocked", "failed", "completed", "changed
 DEFAULTS = {"mode": "immediate", "timezone": "UTC", "quiet_enabled": False,
             "quiet_start": "22:00", "quiet_end": "08:00", "digest_time": "09:00",
             "critical_exceptions": False, "events": ["needs-decision", "blocked", "failed", "completed"],
-            "muted_tasks": {}, "watch_all_projects": True, "projects": []}
+            "muted_tasks": {}, "watch_all_projects": True, "projects": [], "external_links": []}
 _CLOCK = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]\Z")
 
 
@@ -55,6 +55,11 @@ def validate_preferences(value: object) -> dict:
     if not isinstance(projects, list) or len(projects) > 50 or any(type(p) is not int or p < 1 for p in projects):
         raise ValueError("Choose up to 50 available projects.")
     result["projects"] = sorted(set(projects))
+    links = result["external_links"]
+    if (not isinstance(links, list) or len(links) > 20
+            or any(not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{32}", value) for value in links)):
+        raise ValueError("Choose up to 20 verified personal channel links.")
+    result["external_links"] = sorted(set(links))
     mutes = result["muted_tasks"]
     if not isinstance(mutes, dict) or len(mutes) > 50:
         raise ValueError("Mute up to 50 tasks.")
