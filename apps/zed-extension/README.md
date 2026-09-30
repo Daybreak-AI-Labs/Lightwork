@@ -34,31 +34,15 @@ split; anything else would be pretending the sandbox isn't there.
   remain disabled until every Lightwork namespace is reserved and protected.
 - Zed (stable) with assistant/context-server support.
 
-## Building / installing as a dev extension
+## Building and qualification
 
-Requires **Rust** with the `wasm32-wasip1` target and the
-**`zed_extension_api`** crate (pulled by Cargo):
+**Preview:** the pinned Rust1.97.1 / `wasm32-wasip2` / API0.7.0 build and source
+bundle are supplied in [BUILDING.md](BUILDING.md). Run `python build.py` to compile
+the locked dependencies and produce an unsigned archive with the WASM component,
+source and checksum manifest. This source now compiles locally; no installed Zed
+host, authenticated MCP session or accessibility qualification is claimed.
 
-```bash
-rustup target add wasm32-wasip1
-# Zed builds the extension itself when you install it as a dev extension:
-# zed: Extensions -> Install Dev Extension -> select apps/zed-extension/
-```
-
-Zed compiles `src/lib.rs` against the WIT world for the pinned
-`zed_extension_api` version when installing a dev extension; you do not run
-`cargo build` by hand for normal installs.
-
-## Status — honest
-
-- **Not compiled or run here.** This environment has neither the Zed SDK
-  nor a `wasm32-wasip1` toolchain, so the extension was authored against the
-  documented `zed_extension_api` 0.2.x surface
-  (`Extension::context_server_command`) but has not been built or exercised
-  in Zed. Same posture as the other editor scaffolds in this repo: treat the
-  first dev-extension install as the smoke test.
-- The `zed_extension_api` pin in `Cargo.toml` may need a bump to match the
-  Zed release you install into; the API is versioned and Zed only loads
-  extensions built against versions it supports.
-- The extension does not install the Lightwork CLI; it assumes `maverick`
-  resolves on PATH and surfaces Zed's own error if it does not.
+An end-user marketplace release still requires the release owner's selected
+host matrix, distribution approval and installed-host evidence. For development,
+Zed's **Install Dev Extension** loads the source directory and builds it. The
+extension never installs the Lightwork CLI; `maverick` must already be on PATH.

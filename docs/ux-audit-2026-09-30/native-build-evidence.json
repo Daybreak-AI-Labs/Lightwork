@@ -1,0 +1,49 @@
+{
+  "audit_ids": [
+    "LW-184"
+  ],
+  "date": "2026-09-30",
+  "host": "Windows11 x86_64; task-local toolchains; no global installation",
+  "jetbrains": {
+    "java": "Temurin21.0.8+9",
+    "gradle": "8.13",
+    "gradle_plugin": "2.5.0",
+    "kotlin": "2.1.20",
+    "ide": "IntelliJ Community2024.3.6 build243.26574.91",
+    "commands": [
+      "check buildPlugin --write-locks",
+      "python build.py"
+    ],
+    "tests": "12 synthetic loopback JVM transport cases passed; compileKotlin/compileTestKotlin passed against real SDK",
+    "source_correction": "DashboardSettings.kt Connection name field explicitly uses this@DashboardConfigurable.name to avoid JPanel.name shadowing; parent applied exact one-line correction",
+    "wrapper_sha256": "81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f",
+    "gradle_distribution_sha256": "20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78",
+    "artifact": "lightwork-jetbrains-0.1.6.zip",
+    "artifact_sha256": "6421b8e7a2c349ac265a7ae8da7b8dd0842943ab0617ce5fb5c897544f220ce3",
+    "qualified": false
+  },
+  "zed": {
+    "rust": "1.97.1",
+    "host_compiler": "x86_64-pc-windows-gnullvm with bundled rust-lld",
+    "target": "wasm32-wasip2",
+    "api": "0.7.0 exact",
+    "dependency_lock": "apps/zed-extension/Cargo.lock",
+    "commands": [
+      "cargo build --locked --release --target wasm32-wasip2",
+      "python build.py"
+    ],
+    "wasm_sha256": "c8762f0e9f44be3e1449b6df791ea99ca5500b101f493e796086b591538bc52b",
+    "bundle_sha256": "2aaa43b596118d420d394625c43717e1105a4d09a71e8eb11777cb7e0e09743e",
+    "artifact": "lightwork-zed-preview.zip",
+    "qualified": false,
+    "bundle_manifest_verified": true
+  },
+  "limits": [
+    "Unsigned local artifacts only. No plugin installation, signing, publication, customer access, live provider calls or Lightwork CLI execution.",
+    "JetBrains test cases exercise transport with a synthetic loopback HTTP server; they do not qualify PasswordSafe, IDE lifecycle or accessibility.",
+    "Zed component builds and source/hash packaging are verified; actual Zed API compatibility, MCP discovery, auth/revocation, CLI absence and accessibility still need installed-host tests.",
+    "Apple watch/vision/iOS lack macOS/Xcode; Android lacks SDK. Mobile91 mocked cases and actual-dependency TypeScript pass; native generation/autolinking is not native compilation.",
+    "Gradle2.5 plugin emits deprecation/newer-version notices. Pins intentionally retain the validated Gradle8.13/IDE243 target; upgrade and qualify separately.",
+    "Signed end-user distribution and release-owner host/support/privacy/export gates are not completed or claimed."
+  ]
+}

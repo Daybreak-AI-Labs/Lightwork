@@ -1,5 +1,5 @@
 # Zed extension manifest. Zed extensions are Rust compiled to WASM
-# (wasm32-wasip1) against the zed_extension_api crate; see README.md for the
+# (wasm32-wasip2) against the zed_extension_api crate; see README.md for the
 # build/install steps and for what the WASI sandbox does and does not allow.
 id = "maverick"
 name = "Lightwork"

@@ -1,17 +1,15 @@
-# Lightwork JetBrains plugin (live-run scaffold)
+# Lightwork JetBrains plugin (preview)
 
 A minimal IntelliJ-platform plugin: a **Lightwork Runs** tool window that
 streams a run's events live from the self-hosted dashboard SSE endpoint
 (`GET /api/v1/goals/{id}/events/stream`), mirroring the VS Code extension's
 "Watch run live" command.
 
-**Build requirements (not possible in this repo's CI):** JetBrains
-IntelliJ Platform Gradle plugin (`org.jetbrains.intellij.platform`), JDK 17+.
-Create a Gradle project with these sources and Gson 2.11.0 on its plugin
-runtime classpath; use `runIde` for the later native qualification phase.
-The repository still does not contain a complete IntelliJ SDK build project.
-These source changes and the fixtures below have not been compiled or run
-against the installed IDE SDK during the requested testing deferral.
+**Preview build:** the repository now includes the pinned Gradle wrapper,
+IntelliJ SDK project and local packaging command. See [BUILDING.md](BUILDING.md)
+for `python build.py`, the installable unsigned plugin ZIP and the installed-IDE
+qualification gate. No manual source/SDK assembly is required. A successful build
+does not qualify PasswordSafe, an installed IDE or assistive technology.
 
 Open **Settings → Lightwork Dashboard**, enter a connection name and dashboard
 address, and save the token in **Replace access token**. Secrets use JetBrains
