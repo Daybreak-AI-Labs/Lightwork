@@ -14,6 +14,15 @@ import pytest
 from maverick import backup, config, control_plane_lease
 from maverick import installation_recovery as maintenance
 
+def reviewed_authorize(**kwargs):
+    from maverick.installation_handoff import save_review
+    if not kwargs.get("rollback_id"):
+        release = {"version": "1.0.1", "runtime_sha256": hashlib.sha256(b"new-runtime").hexdigest(),
+                   "installer_sha256": hashlib.sha256(b"new").hexdigest(), "signature": "fixture-reviewed-signature"}
+        kwargs["review_id"] = save_review(release)["id"]
+    return maintenance.authorize(**kwargs)
+
+
 PRODUCT_CODE = "{11111111-2222-3333-4444-555555555555}"
 PACKAGE_CODE = "{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}"
 PUBLISHER = "C" * 40
@@ -63,10 +72,10 @@ def installation(tmp_path, monkeypatch):
 
 def staged(installation, monkeypatch, *, prepare=True):
     home, runtime, active = installation
-    grant = maintenance.authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True)
+    grant = reviewed_authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True)
     directory = maintenance._directory(grant["id"])
     metadata = {"public_key": "fixture-only", "old": {"version": "1.0.0", "runtime_sha256": digest(b"old-runtime")},
-                "new": {"version": "1.0.1", "runtime_sha256": digest(b"new-runtime")}}
+                "new": {"version": "1.0.1", "runtime_sha256": digest(b"new-runtime"), "signature": "fixture-reviewed-signature"}}
     (directory / "downloads.json").write_text(json.dumps(metadata))
     for name in ("old", "new"):
         (directory / (name + ".msi")).write_bytes(name.encode())
@@ -436,7 +445,7 @@ def test_completed_upgrade_rollback_reinstalls_exact_old_binary_before_old_state
     active[0] = runtime
     (home / "tenants" / "alpha" / "ledger.json").write_text("new-v2-state")
     (home / "tenants" / "beta" / "after-upgrade.json").write_text("new file")
-    rollback = maintenance.authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
+    rollback = reviewed_authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
     maintenance.prepare(rollback["authorization"])
     with pytest.raises(maintenance.MaintenanceError, match="unfinished"):
         maintenance.assert_normal_start_allowed()
@@ -464,7 +473,7 @@ def test_failed_old_install_does_not_restore_state_or_allow_normal_start_and_can
     maintenance.execute(grant["authorization"])
     active[0] = runtime
     (home / "tenants" / "alpha" / "ledger.json").write_text("new-v2-state")
-    rollback = maintenance.authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
+    rollback = reviewed_authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
     maintenance.prepare(rollback["authorization"])
     active[0] = directory / "maverick.exe"
     def fail(*_):
@@ -497,8 +506,8 @@ def test_only_one_concurrent_execution_consumes_review(installation, monkeypatch
 
 def test_live_control_plane_and_missing_explicit_all_workspace_review_are_refused(installation):
     with pytest.raises(maintenance.MaintenanceError, match="global administrator"):
-        maintenance.authorize(actor="admin", isolated=True, confirm_all_workspaces=False)
-    grant = maintenance.authorize(actor="admin", isolated=True, confirm_all_workspaces=True)
+        reviewed_authorize(actor="admin", isolated=True, confirm_all_workspaces=False)
+    grant = reviewed_authorize(actor="admin", isolated=True, confirm_all_workspaces=True)
     control_plane_lease.acquire(role="workspace-recovery")
     with pytest.raises(maintenance.MaintenanceError, match="Pause"):
         maintenance.prepare(grant["authorization"])
@@ -506,7 +515,7 @@ def test_live_control_plane_and_missing_explicit_all_workspace_review_are_refuse
 
 def test_changed_source_and_expired_grant_refuse_before_installers(installation, monkeypatch):
     _, runtime, _ = installation
-    grant = maintenance.authorize(actor="admin", isolated=True, confirm_all_workspaces=True)
+    grant = reviewed_authorize(actor="admin", isolated=True, confirm_all_workspaces=True)
     runtime.write_bytes(b"changed")
     with pytest.raises(maintenance.MaintenanceError, match="source application changed"):
         maintenance.prepare(grant["authorization"])
@@ -1084,12 +1093,12 @@ def test_whole_home_archive_excludes_live_lease_and_nested_recovery_keys(install
 
 def test_two_grants_cannot_replace_an_active_operation_or_clear_its_startup_block(installation, monkeypatch):
     # Both approvals happen before either operation pauses the application.
-    earlier = maintenance.authorize(actor="admin", isolated=True, confirm_all_workspaces=True)
+    earlier = reviewed_authorize(actor="admin", isolated=True, confirm_all_workspaces=True)
     winner, _ = staged(installation, monkeypatch)
     with pytest.raises(maintenance.MaintenanceError, match="unfinished"):
         maintenance.prepare(earlier["authorization"])
     with pytest.raises(maintenance.MaintenanceError, match="unfinished"):
-        maintenance.authorize(actor="admin", isolated=True, confirm_all_workspaces=True)
+        reviewed_authorize(actor="admin", isolated=True, confirm_all_workspaces=True)
     assert maintenance._read(maintenance._store() / "active.json")["id"] == winner["id"]
 
 
@@ -1112,7 +1121,7 @@ def test_crash_after_completion_receipt_requires_verified_finalization(installat
     if rollback:
         maintenance.execute(grant["authorization"])
         active[0] = runtime
-        grant = maintenance.authorize(actor="admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
+        grant = reviewed_authorize(actor="admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
         maintenance.prepare(grant["authorization"])
         active[0] = directory / "maverick.exe"
     outcome = "rolled_back" if rollback else "upgraded"
@@ -1154,7 +1163,7 @@ def test_terminal_finalization_with_real_committed_wal_database(installation, mo
     if rollback:
         maintenance.execute(grant["authorization"])
         active[0] = runtime
-        grant = maintenance.authorize(actor="admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
+        grant = reviewed_authorize(actor="admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
         maintenance.prepare(grant["authorization"])
         active[0] = directory / "maverick.exe"
     outcome = "rolled_back" if rollback else "upgraded"
@@ -1213,3 +1222,13 @@ def test_native_logs_are_bounded_and_never_accept_a_client_path(installation, mo
     assert len(result["details"]) < 17000
     with pytest.raises(maintenance.MaintenanceError):
         maintenance.logs("../config.toml")
+
+
+def test_upgrade_requires_exact_review_and_rejects_changed_reviewed_bytes(installation, monkeypatch):
+    with pytest.raises(maintenance.MaintenanceError, match="exact release"):
+        maintenance.authorize(actor="admin", isolated=True, confirm_all_workspaces=True)
+    grant, directory = staged(installation, monkeypatch, prepare=False)
+    (directory / "new.msi").write_bytes(b"changed")
+    with pytest.raises(maintenance.MaintenanceError, match="exact native review"):
+        maintenance.prepare(grant["authorization"])
+    assert not (maintenance._store() / "active.json").exists()

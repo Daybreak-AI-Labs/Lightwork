@@ -164,11 +164,19 @@ def transition_installation(tmp_path, monkeypatch):
     control_plane_lease.release()
 
 
+def native_review(fixture):
+    from maverick.installation_handoff import save_review
+    return save_review({"version": fixture["sides"]["new"]["version"],
+                        "runtime_sha256": fixture["sides"]["new"]["runtime_sha256"],
+                        "installer_sha256": hashlib.sha256(b"new-msi").hexdigest(),
+                        "signature": fixture["old_sign"](b"new-msi")})["id"]
+
+
 def stage_bridge(fixture, *, authorized=True):
     maintenance = fixture["maintenance"]
     options = {"identity_transition": fixture["envelope"], "transition_sha256": transition.digest(fixture["envelope"]),
                "confirm_identity_transition": True} if authorized else {}
-    grant = maintenance.authorize(actor="named-global-admin", isolated=True, confirm_all_workspaces=True, **options)
+    grant = maintenance.authorize(actor="named-global-admin", isolated=True, confirm_all_workspaces=True, review_id=native_review(fixture), **options)
     directory = maintenance._directory(grant["id"])
     metadata = {"public_key": fixture["sides"]["old"]["public_key"], "identity_transition": fixture["envelope"]}
     for label in ("old", "new"):
@@ -223,7 +231,7 @@ def test_disabled_or_unconfirmed_transition_never_grants_trust(transition_instal
     from maverick import config
     fixture = transition_installation
     maintenance = fixture["maintenance"]
-    options = {"actor": "named-admin", "isolated": True, "confirm_all_workspaces": True,
+    options = {"actor": "named-admin", "isolated": True, "confirm_all_workspaces": True, "review_id": native_review(fixture),
                "identity_transition": fixture["envelope"], "transition_sha256": transition.digest(fixture["envelope"])}
     with pytest.raises(maintenance.MaintenanceError, match="confirm"):
         maintenance.authorize(**options)
