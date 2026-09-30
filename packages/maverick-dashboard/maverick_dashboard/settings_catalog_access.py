@@ -240,7 +240,7 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
                   "one can do everything an administrator can.",
           aliases="bearer token api access remote"),
         S("dashboard", "default_role", "Role for people without one",
-          "The role anyone who signs in gets until they are given a role of their own.",
+          "The fallback for accounts without an explicit role or verified group mapping. Existing unassigned accounts also inherit changes. Users offers a reviewed viewer/no-department migration.",
           "select", grp, "operator", "maverick_dashboard.rbac", subgroup=access,
           choices_from="roles", weaker="change",
           warning="Everyone without a role of their own will get this role's permissions.",

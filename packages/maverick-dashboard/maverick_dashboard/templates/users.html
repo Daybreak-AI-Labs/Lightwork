@@ -47,6 +47,18 @@
 
   {% if global_admin %}
   <p><a class="btn" href="/users/departures">Review employee departure</a> Deactivation and retained-work handoffs are separate from resetting a role.</p>
+  <section class="panel"><h2>Installation first-login baseline</h2>
+    <p>Current fallback: <strong>{{ first_login.role | role_label }}</strong>, with powers {{ first_login.permissions | join(', ') }}.
+    Departments: <strong>{% if first_login.departments is none %}Every department{% else %}{{ first_login.departments | join(', ') or 'None' }}{% endif %}</strong>.
+    Explicit account assignments, verified group mappings and workspace memberships take precedence. Tool and task limits still apply.</p>
+    {% if first_login.conservative %}<p>The viewer/no-department baseline is in effect.</p>{% else %}
+    <p>Upgrades keep the existing choice. You can deliberately change the fallback to <strong>Viewer with no departments</strong>: view owned work, no new task runs and no department specialists until access is assigned.</p>
+    <form action="/users/first-login-baseline" method="post" data-users-confirm="Apply viewer with no departments to the installation fallback? This also changes existing accounts that still inherit the default. Explicit roles and workspace memberships remain." data-users-ok="Apply reviewed baseline">
+      <input type="hidden" name="expected_revision" value="{{ first_login.revision }}">
+      <label><input type="checkbox" name="confirm" value="existing-unassigned" required> I reviewed that existing unassigned accounts also inherit this change.</label>
+      <button class="btn" type="submit">Apply viewer and no departments</button>
+    </form>{% endif %}
+  </section>
   <section class="panel"><h2>Employee content is private</h2><p>Administrator roles manage access and policy. They no longer open another employee's task text, files or chat by default. Existing employee-owned records use their recorded owner; unowned legacy work requires an explicit content review. Shared result packets keep their assigned reviewer access.</p><a class="btn" href="/content-access">Review or request content access</a></section>
   <div class="section-head"><h2>People</h2></div>
   <div class="panel">
@@ -69,9 +81,11 @@
           <td class="users-actions">
             <button type="submit" form="role-form-{{ loop.index }}" class="btn btn--primary" aria-label="Save role for {{ name_of(principal) }}">Save role</button>
             <form method="post" action="/users/remove" class="users-inline"
-                  data-users-confirm="Use the standard {{ default_role | role_label }} role for {{ name_of(principal) }}? This may add permissions and does not deactivate their account." data-users-ok="Use standard role">
+                  data-users-confirm="Use {{ standard_roles[principal].label }} from {{ standard_roles[principal].source }} for {{ name_of(principal) }}? Powers: {{ standard_roles[principal].permissions | join(', ') or 'none' }}. This may add permissions and does not deactivate their account." data-users-ok="Use standard role">
               <input type="hidden" name="principal" value="{{ principal }}" />
+              <input type="hidden" name="expected_standard" value="{{ standard_roles[principal].revision }}" />
               <button type="submit" class="btn" aria-label="Use standard role for {{ name_of(principal) }}">Use standard role</button>
+              <small>Becomes {{ standard_roles[principal].label }}; {{ standard_roles[principal].source }}. {{ standard_roles[principal].permissions | join(', ') or 'No active powers' }}.</small>
             </form>
           </td>
         </tr>

@@ -2216,7 +2216,7 @@ _POLICY: tuple[Setting, ...] = (
     # ------------------------------------------------------ people & access
     S("dashboard", "default_suites", "Departments a person may use by default",
       "People with no departments of their own can use only these. With none ticked, they "
-      "can use every department.", "multiselect", "People & access", [], "maverick.suite_grants",
+      "can use no departments. Removing the setting entirely restores every department.", "multiselect", "People & access", [], "maverick.suite_grants",
       subgroup="Departments", choices_from="suites", weaker="widen",
       warning="People with no departments of their own will be able to use more departments, "
               "or all of them."),

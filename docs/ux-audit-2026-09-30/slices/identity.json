@@ -10,12 +10,13 @@
   },
   {
     "id": "LW-092",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "e18aa52: Use standard role action and success explicitly state access is not removed."
+      "e18aa52: Use standard role action and success explicitly state access is not removed.",
+      "access_explanations.standard_role and admin_pages reset preview/readback follow pinned administrator, verified-group mapping and fallback role; expected_standard binds the reviewed role and powers before clearing."
     ],
     "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
-    "remaining": "Finish exact SCIM-derived fallback preview/readback; current wording names the configured default and can misdescribe group-derived fallback."
+    "remaining": "Group/default fallback, custom-role power change and keyboard confirmation regression acceptance remain unrun."
   },
   {
     "id": "LW-093",
@@ -52,19 +53,21 @@
     "id": "LW-096",
     "status": "partial-planned",
     "implementation_evidence": [
-      "e18aa52: Account exposes explicit allowed/blocked tool names, configured ceilings, broad policy source and administrator contact ownership."
+      "e18aa52: Account exposes explicit allowed/blocked tool names, configured ceilings, broad policy source and administrator contact ownership.",
+      "access_explanations follows actual pinned/workspace/explicit/group/default role ordering; role denials name the current ceiling and administrator owner. Account uses the actual dashboard channel/current user root grant and concrete file-read/file-write/command examples with effective denial reasons."
     ],
     "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
-    "remaining": "Finish exact role/department provenance and capability-specific denial reason/approver path; broad account summaries do not yet explain every runtime ceiling."
+    "remaining": "Account now explains base role/department/root-tool provenance and examples. A unified per-task explanation across attenuated agent roles, runtime consent/resource limits and a persisted access-request case remains open; base-grant guidance explicitly does not claim all task checks are resolved."
   },
   {
     "id": "LW-097",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "e18aa52: SSO installer recommends explicit viewer/no-departments baseline, emits empty default_suites and previews deliberate operator alternative. Existing runtime defaults preserved."
+      "e18aa52: SSO installer recommends explicit viewer/no-departments baseline, emits empty default_suites and previews deliberate operator alternative. Existing runtime defaults preserved.",
+      "first_login_defaults.py and Users provide current installation fallback role/powers/departments, deliberate migration confirmation covering existing unassigned accounts, revision check, effective readback, audit acknowledgement and rollback on override/failure. Settings clarifies empty-departments semantics."
     ],
     "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
-    "remaining": "Provide an explicit reviewed in-product migration choice for existing deployments and accurate effective readback; tests remain unrun."
+    "remaining": "Authored migration/conflict/audit-rollback tests and actual installer/upgrade/config-precedence acceptance remain unrun."
   },
   {
     "id": "LW-098",

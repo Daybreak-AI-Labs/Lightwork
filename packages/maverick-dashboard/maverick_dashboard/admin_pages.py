@@ -728,14 +728,21 @@ def _users_context(request: Request) -> dict:
         except Exception:
             bootstrap = []
     saved = {"set": "Role updated.", "removed": (
-                 f"Explicit role cleared. The standard {rbac.default_role()} role now applies; "
-                 "this person's access has not been removed."),
+                 "Explicit installation role cleared. Current group or standard-role rules now apply; "
+                 "this person's access has not been removed. Workspace memberships remain in effect."),
              "suites": "Department access updated.",
+             "first_login": "The effective installation fallback is now Viewer with no departments. Explicit roles, verified group mappings and workspace memberships remain in effect.",
              "suites_removed": "Department access removed.",
              "invite_revoked": "Invitation revoked.",
              "role_saved": "Custom role saved.",
              "role_deleted": "Custom role deleted."}.get(
         request.query_params.get("saved", ""), "")
+    if request.query_params.get("saved") == "removed" and request.query_params.get("reset_person"):
+        from .access_explanations import standard_role
+        effective = standard_role(request.query_params["reset_person"])
+        saved = (f"Explicit installation role cleared. {effective['label']} from {effective['source'].lower()} "
+                 f"now applies, with powers: {', '.join(effective['permissions']) or 'none'}. "
+                 "Access was not removed. Workspace memberships remain in effect.")
     from maverick.departments import department_title
 
     from . import invites, suite_grants
@@ -754,9 +761,12 @@ def _users_context(request: Request) -> dict:
     grants = suite_grants.list_grants()
     people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
     from .identity_format import role_label
+    from .access_explanations import standard_role
+    from .first_login_defaults import preview as first_login_preview
     defaults = set(default_suites) if default_suites is not None else None
     return {
         "global_admin": True,
+        "first_login": first_login_preview(),
         "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
         "people": people,
         "people_labels": {p["principal"]: p["label"] for p in people},
@@ -766,6 +776,7 @@ def _users_context(request: Request) -> dict:
             for principal, suites in grants.items()
         },
         "users": sorted(role_map.items()),
+        "standard_roles": {principal: standard_role(principal) for principal in role_map},
         "roles": rbac.known_roles(),
         "builtin_roles": rbac.ROLES,
         "custom_roles": custom_roles,
@@ -816,18 +827,35 @@ def users_set_role(
 
 
 @router.post("/users/remove")
-def users_remove(request: Request, principal: str = Form(...)) -> RedirectResponse:
+def users_remove(request: Request, principal: str = Form(...), expected_standard: str = Form(...)) -> RedirectResponse:
     """Remove a user's explicit role assignment (admin only). A bootstrap admin
     pinned in config is unaffected — it can't be removed here."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import rbac
+    from .access_explanations import standard_role
+    from maverick.authority_effects import authority_effect_fence
     try:
-        rbac.remove_user(principal.strip(),
-                         actor=auth.caller_principal(request) or "local")
+        with authority_effect_fence():
+            auth.require_global_permission(request, "admin")
+            if standard_role(principal.strip())["revision"] != expected_standard:
+                raise HTTPException(409, "The fallback role or its powers changed. Reload and review before resetting.")
+            rbac.remove_user(principal.strip(), actor=auth.caller_principal(request) or "local")
     except rbac.RecoveryAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return RedirectResponse("/users?saved=removed", status_code=303)
+    from urllib.parse import urlencode
+    return RedirectResponse("/users?" + urlencode({"saved": "removed", "reset_person": principal.strip()}), status_code=303)
+
+
+@router.post("/users/first-login-baseline")
+def users_first_login_baseline(request: Request, expected_revision: str = Form(...), confirm: str = Form(...)):
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    if confirm != "existing-unassigned":
+        raise HTTPException(422, "Review how existing unassigned accounts will change.")
+    from .first_login_defaults import apply_conservative
+    apply_conservative(request, expected_revision)
+    return RedirectResponse("/users?saved=first_login", status_code=303)
 
 
 @router.post("/users/roles/save")

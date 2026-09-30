@@ -543,7 +543,8 @@ def has_permission(request: Request, permission: str) -> bool:
 def require_permission(request: Request, permission: str) -> None:
     """Raise ``HTTPException(403)`` unless the caller's role grants ``permission``."""
     if not has_permission(request, permission):
-        raise HTTPException(status_code=403, detail="insufficient role for this action")
+        from .access_explanations import denial
+        raise HTTPException(status_code=403, detail=denial(request, permission))
 
 
 def has_global_permission(request: Request, permission: str) -> bool:
@@ -563,7 +564,8 @@ def has_global_permission(request: Request, permission: str) -> bool:
 def require_global_permission(request: Request, permission: str) -> None:
     """Raise ``HTTPException(403)`` unless the global role grants permission."""
     if not has_global_permission(request, permission):
-        raise HTTPException(status_code=403, detail="insufficient role for this action")
+        from .access_explanations import denial
+        raise HTTPException(status_code=403, detail=denial(request, permission, installation=True))
 
 
 def caller_suites(request: Request) -> frozenset[str] | None:

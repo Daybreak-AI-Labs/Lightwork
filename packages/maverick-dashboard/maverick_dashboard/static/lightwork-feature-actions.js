@@ -130,10 +130,11 @@
     fact('Access changes', 'Ask your ' + me.access_owner.toLowerCase() + '. Tool ceilings require an installation administrator.');
     if (me.workspace) fact('Workspace', me.workspace);
     fact('Departments', me.all_departments ? 'All departments' : (me.departments.join(', ') || 'None yet'));
+    fact('Departments set by', me.department_source);
     fact('Tools your tasks may use', me.tools + (me.blocked_tools ? ' (' + plural(me.blocked_tools, 'tool') + ' blocked)' : ''));
     fact('Riskiest action allowed', me.risk);
     fact('Tool limits', me.limits_enforced ? 'Enforced' : 'Advisory only (not enforced)');
-    fact('Allowed tools', me.allowed_tool_names.length ? me.allowed_tool_names.join(', ') : 'All tools within the remaining policy limits');
+    fact('Allowed tools', me.allowed_tool_names.length ? me.allowed_tool_names.join(', ') : me.allowed_tool_summary);
     fact('Blocked tools', me.blocked_tool_names.join(', ') || 'No named tool blocks');
     fact('Tool policy set by', me.tool_policy_source);
     fact('Deployment profile', me.profile + (me.profile_overridden ? ' — overridden: enterprise boundary is off' : ''));
@@ -149,6 +150,9 @@
     });
     root.appendChild(el('h2', null, 'What you can do'));
     root.appendChild(list);
+    root.appendChild(el('h2', null, 'Examples of your base tool limits'));
+    root.appendChild(el('p', 'muted', 'These examples describe the current dashboard grant. Task-specific permissions, file and network scope, consent and provider access are checked when the action runs.'));
+    (me.tool_examples || []).forEach(function (example) { root.appendChild(el('p', null, example.label + ': ' + (example.allowed ? 'Within the base grant. ' : 'Not currently available. ') + example.reason)); });
     if (me.installation_admin) root.appendChild(el('p', 'muted', 'You can also change settings for the whole installation.'));
   }
 
