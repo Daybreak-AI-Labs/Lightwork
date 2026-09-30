@@ -5086,11 +5086,15 @@ def pick_advanced() -> dict[str, Any]:
             "Off by default; leave off for SQLite or single-tenant installs.",
             default=False,
         ),
+        "copilot_operation_families": _q_checkbox(
+            "Which action families may Copilot open when enabled? Native permissions still apply.",
+            ["learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
+             "connections", "artifacts", "notifications", "models", "budget"], default=["learning"],
+        ),
         "allow_copilot_operations": _q_confirm(
-            "Let Copilot show a learning example's current status and open its "
-            "stop-use review? You confirm each decision in a protected form. "
-            "Other product actions are not included. Page controls remain available "
-            "when this is off.", default=False,
+            "Let Copilot open the native controls in your selected action families? "
+            "Changes require a fresh review and explicit confirmation. Native page "
+            "controls remain available when this is off.", default=False,
         ),
         "governed_pg_pool": _q_confirm(
             "Reuse one bounded Postgres connection for governed records? "
@@ -8260,6 +8264,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     _feature_locks = []
     if advanced.get("allow_copilot_operations") is True:
         _feature_locks.append("copilot_operations = true")
+        families = advanced.get("copilot_operation_families", ["learning"])
+        allowed_families = {"learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
+                            "connections", "artifacts", "notifications", "models", "budget"}
+        if not isinstance(families, list) or any(value not in allowed_families for value in families):
+            raise ValueError("Choose registered Copilot action families.")
+        lines.extend(["[copilot]", "operation_families = " + json.dumps(list(dict.fromkeys(families)))])
     if advanced.get("allow_workflow_readiness") is False:
         _feature_locks.append("workflow_readiness = false")
     if advanced.get("allow_project_reviews") is True:

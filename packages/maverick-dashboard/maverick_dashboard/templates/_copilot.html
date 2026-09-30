@@ -1,4 +1,4 @@
-<button class="mv-copilot__fab" id="mv-copilot-fab" type="button"
+<button class="{{ 'cs-item cs-item--button' if copilot_chat_shell else 'mv-copilot__fab' }}" id="mv-copilot-fab" type="button"
         aria-expanded="false" aria-controls="mv-copilot"
         aria-label="Open Lightwork Copilot" title="Copilot — need a hand?">
   <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-chat"></use></svg>
@@ -30,6 +30,12 @@
     <p id="mv-copilot-operation-status" role="status"></p>
     <div id="mv-copilot-operation-buttons" class="mv-copilot__operation-buttons"></div>
     <div id="mv-copilot-action" data-draft-recovery="off"></div>
+  </section>
+  <section id="mv-product-operations" class="mv-copilot__operations" aria-labelledby="mv-product-operations-title" hidden>
+    <h2 id="mv-product-operations-title">Available controls</h2>
+    <p id="mv-product-operation-status" role="status"></p>
+    <div id="mv-product-operation-buttons" class="mv-copilot__operation-buttons"></div>
+    <div id="mv-product-operation-form" data-draft-recovery="off"></div>
   </section>
   <div class="mv-copilot__log" id="mv-copilot-log"
        aria-live="polite" aria-relevant="additions text"></div>

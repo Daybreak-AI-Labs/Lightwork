@@ -212,6 +212,8 @@
     }
   }
 
+  document.addEventListener('lightwork:copilot-context-changed', function () { history = []; clear(log); catalog = null; if (controller()) controller().invalidate(); });
+
   function open() {
     generation += 1;
     opener = document.activeElement;
@@ -220,6 +222,7 @@
     loadContext();
     verifyScope(generation).catch(function () { note.textContent = "Current workspace could not be checked. Your draft will not be sent until access is confirmed."; });
     loadOperations(generation);
+    if (window.LightworkProductOperations) window.LightworkProductOperations.open();
     input.focus();
   }
 
@@ -227,6 +230,7 @@
     if (sending) note.textContent = "The earlier request may still finish on the server. Its reply will not appear after closing; sending again starts a new request.";
     generation += 1; sending = false; input.readOnly = false; sendButton.disabled = false; sendButton.removeAttribute('aria-busy');
     if (controller()) controller().release();
+    if (window.LightworkProductOperations) window.LightworkProductOperations.close();
     panel.hidden = true;
     fab.setAttribute("aria-expanded", "false");
     if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus();
@@ -245,7 +249,8 @@
   form.addEventListener("submit", async function (event) {
     event.preventDefault();
     var message = (input.value || "").trim();
-    if (!message || sending || actionBusy || (controller() && controller().isBusy())) return;
+    if (!message || sending || actionBusy || (controller() && controller().isBusy())
+        || (window.LightworkProductOperations && window.LightworkProductOperations.isBusy())) return;
     sending = true; var started = generation;
     // Keep the editable draft until its matching response succeeds.
     input.readOnly = true;
@@ -282,6 +287,10 @@
             : 'Here is the current learning example.');
           await openOperation(proposal.operation_id); return;
         }
+      }
+      if (window.LightworkProductOperations && await window.LightworkProductOperations.propose(message)) {
+        if (started === generation && !panel.hidden) addMessage('bot', 'Review the selected control and its current source below. Nothing has been changed.');
+        return;
       }
       var response = await deadlineFetch("/api/v1/copilot", {
         method: "POST",

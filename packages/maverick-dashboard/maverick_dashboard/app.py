@@ -1089,6 +1089,8 @@ from .cost_reconciliation_api import router as cost_reconciliation_router
 app.include_router(cost_reconciliation_router)
 from .task_diagnostics import router as task_diagnostics_router
 app.include_router(task_diagnostics_router)
+from .product_operations import router as product_operations_router
+app.include_router(product_operations_router)
 from .settings_experience import router as settings_experience_router
 app.include_router(settings_experience_router)
 templates.context_processors.append(_display_preference_context)

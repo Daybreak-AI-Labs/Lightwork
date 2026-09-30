@@ -215,7 +215,9 @@ def _file_review_revision(raw: bytes, layers: dict | None = None) -> str:
     import hashlib
     import json
     import os
+
     from maverick.config import _ENV_PATTERN
+
     from . import settings_all_page as page
     names = set(_ENV_PATTERN.findall(raw.decode("utf-8")))
     environment = {name: os.environ.get(name, "") for name in names}
@@ -274,7 +276,8 @@ def _other_file_impact(layers: dict, proposed_base: dict) -> list[dict]:
     """
     import os
 
-    from . import settings_catalog as catalog, settings_store
+    from . import settings_catalog as catalog
+    from . import settings_store
 
     def leaves(value, prefix=()):
         result = {}
@@ -306,10 +309,10 @@ def _other_file_impact(layers: dict, proposed_base: dict) -> list[dict]:
                 source, overridden = 'Deployment environment', True
         # Only boolean feature switches are interpreted as enabled/disabled.
         # Other values remain opaque, including lists of credentials or names.
-        def state(present, value):
+        def state(present, value, section=path[0]):
             if not present:
                 return 'Not present in file'
-            if path[0] in {'features', 'capabilities'} and isinstance(value, bool):
+            if section in {'features', 'capabilities'} and isinstance(value, bool):
                 return 'Enabled' if value else 'Disabled'
             return 'Present (value withheld)'
         result.append({'label': '.'.join(path), 'source': source,
@@ -338,7 +341,6 @@ def _install_reviewed(request: Request, raw: bytes, token: str) -> dict:
     from maverick.config import config_path, reset_config_cache
     from maverick.config_install import install_config_bytes
 
-    from . import settings_all_page as page
     from . import settings_store
     from .system_checks_api import _record
 
@@ -426,7 +428,8 @@ def reconcile_settings_file(request: Request, review: str):
     from fastapi.responses import JSONResponse
     from maverick.config import config_path
 
-    from . import app as app_module, settings_store
+    from . import app as app_module
+    from . import settings_store
     from .system_checks_api import _record
 
     app_module._require_same_origin(request)

@@ -84,6 +84,7 @@ class PreferenceUpdate(BaseModel):
     scope: str = "personal"
     thread: int | None = None
     changes: dict[str, Any]
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
 def _check_display(key: str, value: str) -> None:
@@ -98,6 +99,12 @@ def _check_display(key: str, value: str) -> None:
 
 @router.post('/api/v1/preferences')
 def update_preferences(request: Request, body: PreferenceUpdate) -> JSONResponse:
+    from maverick.authority_effects import authority_effect_fence
+    with authority_effect_fence():
+        return _update_preferences(request, body)
+
+
+def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONResponse:
     _app()._require_same_origin(request)
     principal = _principal(request)
     if body.thread is not None and body.scope != "personal":
@@ -124,7 +131,7 @@ def update_preferences(request: Request, body: PreferenceUpdate) -> JSONResponse
             raise HTTPException(422, "Choose an available Today card.")
     try:
         preferences.save(principal, scope=body.scope, changes=body.changes,
-                         expected_revision=body.expected_revision, thread=_thread(request, body.thread))
+                         expected_revision=body.expected_revision, thread=_thread(request, body.thread), operation_id=body.operation_id)
     except preferences.PreferenceConflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:

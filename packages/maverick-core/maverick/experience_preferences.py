@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 from contextlib import nullcontext
+from pathlib import Path
 
 from . import config
 from .crypto_at_rest import deployment_key_scope, seal, unseal
@@ -83,8 +83,8 @@ def state(principal: str, *, thread: int | None = None) -> dict:
         inherited = cfg.get("dashboard", {}).get(key)
         if inherited is not None:
             values[key], sources[key] = _validate(key, inherited), "installation settings"
-    from .styles import BUILTIN_STYLES, active_style_name
     from .persona import STYLES
+    from .styles import BUILTIN_STYLES, active_style_name
     style = active_style_name()
     style = style if style in BUILTIN_STYLES else ""
     if style:
@@ -98,7 +98,9 @@ def state(principal: str, *, thread: int | None = None) -> dict:
     policy = config.load_global_config().get("personalization", {})
     locks = set(policy.get("locked_fields", [])) & (DEFAULTS.keys() - PERSONAL_ONLY)
     effective_by_scope = {}
+    inherited_by_scope = {}
     for scope, record in layers:
+        inherited_by_scope[scope] = {"values": dict(values), "sources": dict(sources)}
         for key, value in record["values"].items():
             if key not in DEFAULTS or (scope != "personal" and scope != "conversation" and key in PERSONAL_ONLY):
                 continue
@@ -111,13 +113,13 @@ def state(principal: str, *, thread: int | None = None) -> dict:
             values[key], sources[key] = _validate(key, policy["defaults"][key]), "organization policy"
     digest = hashlib.sha256(json.dumps([current_tenant_id_strict(), principal, layers, policy, cfg.get("dashboard", {}), tone, style],
                                        sort_keys=True).encode()).hexdigest()
-    for snapshot in effective_by_scope.values():
+    for snapshot in [*effective_by_scope.values(), *inherited_by_scope.values()]:
         for key in locks:
             if key in policy.get("defaults", {}):
                 snapshot["values"][key] = _validate(key, policy["defaults"][key])
                 snapshot["sources"][key] = "organization policy"
     return {"values": values, "sources": sources, "locked": sorted(locks), "revision": digest,
-            "effective_by_scope": effective_by_scope,
+            "effective_by_scope": effective_by_scope, "inherited_by_scope": inherited_by_scope,
             "overrides": {scope: record["values"] for scope, record in layers}}
 
 
@@ -153,7 +155,7 @@ def _validate(key: str, value):
 
 
 def save(principal: str, *, scope: str, changes: dict, expected_revision: str,
-         thread: int | None = None) -> dict:
+         thread: int | None = None, operation_id: str | None = None) -> dict:
     if not enabled():
         raise ValueError("Personal preferences are turned off by your administrator.")
     # One installation fence serializes hierarchy writes against each other.
@@ -161,11 +163,21 @@ def save(principal: str, *, scope: str, changes: dict, expected_revision: str,
     ensure_private_directory(lock.parent)
     from .authority_effects import authority_effect_fence
     with authority_effect_fence(), cross_process_lock(config.dashboard_overrides_path(), strict=True), cross_process_lock(lock, strict=True):
+        path = _path(scope, principal, thread)
+        record = _read(path)
+        operation_digest = hashlib.sha256(json.dumps([scope, changes, expected_revision, thread], sort_keys=True).encode()).hexdigest()
+        if operation_id:
+            import re
+            if not re.fullmatch(r"[a-f0-9]{32}", operation_id):
+                raise ValueError("Use a valid preference operation ID.")
+            previous = record.get("last_operation") or {}
+            if previous.get("id") == operation_id:
+                if previous.get("digest") != operation_digest:
+                    raise PreferenceConflict("This operation was prepared for different preference values.")
+                return state(principal, thread=thread)
         before = state(principal, thread=thread)
         if before["revision"] != expected_revision:
             raise PreferenceConflict("Preferences changed. Your draft is kept; refresh and review before saving.")
-        path = _path(scope, principal, thread)
-        record = _read(path)
         values = dict(record["values"])
         for key, value in changes.items():
             if key in before["locked"]:
@@ -180,8 +192,18 @@ def save(principal: str, *, scope: str, changes: dict, expected_revision: str,
                 values[key] = _validate(key, value)
         ensure_private_directory(path.parent)
         with deployment_key_scope() if scope == "organization" else nullcontext():
-            atomic_write_bytes(path, seal(json.dumps({"revision": record["revision"] + 1, "values": values}).encode()), mode=0o600)
+            atomic_write_bytes(path, seal(json.dumps({"revision": record["revision"] + 1, "values": values,
+                                                   "last_operation": {"id": operation_id, "digest": operation_digest} if operation_id else None}).encode()), mode=0o600)
         return state(principal, thread=thread)
+
+
+def operation_confirmed(principal: str, *, scope: str, changes: dict, expected_revision: str,
+                        operation_id: str, thread: int | None = None) -> bool:
+    """Inspect the native atomic receipt; never reapply an uncertain preference save."""
+    record = _read(_path(scope, principal, thread))
+    digest = hashlib.sha256(json.dumps([scope, changes, expected_revision, thread], sort_keys=True).encode()).hexdigest()
+    previous = record.get("last_operation") or {}
+    return previous.get("id") == operation_id and previous.get("digest") == digest
 
 
 def erase_personal(principal: str) -> int:

@@ -172,7 +172,7 @@ FEATURE_INFO = {
         "companion history. Companions cannot take actions, use connected "
         "sources or create learned memory."
     ),
-    "copilot_operations": "Let Copilot show the current learning example and open its reviewed stop-use control. You confirm the decision in a protected form. Other product actions are not included; the page's own controls remain available when this is off.",
+    "copilot_operations": "Let Copilot open registered product controls in the action families enabled by your organization. Every change requires a fresh review and explicit confirmation; native controls remain available when this is off.",
     "support_center": "Allow installation administrators to prepare, review and download redacted diagnostics in Help. Reports are never sent automatically.",
     "workflow_readiness": "Show available workflows, their supported boundaries, and the live or platform validation still required. Enablement never establishes customer acceptance.",
     "project_reviews": "Share selected, fixed task results with assigned workspace reviewers. Review does not execute or sign off the live task.",

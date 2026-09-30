@@ -34,6 +34,15 @@ def entries(S, C, Column):
                         "These choices change presentation, never tools, memory collection, retention or approval permissions.",
                         "select" if key in options or key == "theme" else "text", default=DEFAULTS[key],
                         **extra, **common))
+    from maverick.product_operation_families import FAMILIES
+    result.append(S("copilot", "operation_families", "Actions available through Copilot",
+                    "Choose which registered native controls Copilot can open. Each change still requires "
+                    "current access, a fresh before-and-after review and explicit confirmation. Enable Copilot "
+                    "actions in Features first. A family with no adapter on a page adds no capability.",
+                    "multiselect", "People & access", ["learning"], "maverick_dashboard.product_operations",
+                    subgroup="Copilot actions", max_items=len(FAMILIES),
+                    choices=tuple((name, name.capitalize()) for name in FAMILIES),
+                    weaker="grow", warning="More native controls will be available through Copilot."))
     return result
 
 

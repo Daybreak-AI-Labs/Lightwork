@@ -90,6 +90,8 @@ def _sources() -> dict[str, Any]:
 
 def _revision(layers: dict[str, Any] | None = None) -> str:
     """Opaque review binding, including deployment overrides and environment."""
+    from . import settings_store
+
     sources = _sources() if layers is None else layers
     names = {name for setting in catalog.SETTINGS for name in setting.env}
     names.update(name for provider in settings_store.PROVIDERS for name in provider.get("env", ()))
@@ -1370,6 +1372,7 @@ def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=Fal
     _app()._require_same_origin(request)
     auth.require_global_permission(request, 'admin')
     from maverick.audit import AuditRefused
+
     from . import settings_governance_level, settings_store
     current = _revision()
     if body.expected_revision != current:
@@ -1417,7 +1420,7 @@ def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=Fal
     except (OSError, TypeError, settings_store.SecuritySuiteConfigUnavailable) as exc:
         raise HTTPException(status_code=503, detail='Settings could not be saved right now. Nothing was changed.') from exc
     try:
-        _record(changes, actor, body.confirm, frozenset((item['id'] for item in access)), current, _revision())
+        _record(changes, actor, body.confirm, frozenset(item['id'] for item in access), current, _revision())
     except AuditRefused as exc:
         try:
             settings_store.set_catalog_values(previous)
@@ -1431,7 +1434,7 @@ def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=Fal
         except (RuntimeError, OSError) as exc:
             raise HTTPException(status_code=503, detail='The settings were saved, but the learning systems for this level could not be turned on. Turn them on from the Learning page.') from exc
     state = _saved_state(before, asked)
-    return JSONResponse({'changed': [c['setting'].id for c in changes], 'restart': any((c['setting'].restart for c in changes)), **state}, headers={'Cache-Control': 'no-store'})
+    return JSONResponse({'changed': [c['setting'].id for c in changes], 'restart': any(c['setting'].restart for c in changes), **state}, headers={'Cache-Control': 'no-store'})
 
 # ---------------------------------------------------------------- checks
 class SettingCheck(BaseModel):

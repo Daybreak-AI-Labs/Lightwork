@@ -44,6 +44,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # --- fixed-key sections (unknown keys are flagged) ---
     "deployment": {"type", "allow_multiple_control_planes"},
     "personalization": {"locked_fields", "defaults"},
+    "copilot": {"operation_families"},
     "_dashboard_resets": None,  # Internal global-overlay reset metadata; removed before runtime config.
     "budget": {
         "task_limits_enabled",
