@@ -1,4 +1,4 @@
-"""Authored regression coverage; execution deliberately deferred by the owner."""
+"""Atomic reviewed result, child creation and task-map mutation regressions."""
 import pytest
 from maverick.goal_mutations import GoalMutationConflict, create_child, edit_result, edit_structure
 from maverick.world_model import WorldModel

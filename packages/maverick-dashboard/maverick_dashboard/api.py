@@ -14559,9 +14559,7 @@ def goal_tree_api(request: Request, limit: int = 300) -> dict:
 def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> None:
     """Rename a goal (graph editor).
 
-    Uses the world model's public ``set_goal_title`` so it works identically on
-    the SQLite and Postgres backends (the earlier raw-SQL path used SQLite-only
-    internals and 500'd under Postgres).
+    Uses the shared SQLite/Postgres revision and receipt transaction.
     """
     w = _world()
     g = w.get_goal(goal_id)
@@ -14573,9 +14571,12 @@ def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> None:
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
     from maverick.goal_mutations import GoalMutationConflict, edit_structure
+    from maverick.task_handoffs import require_open
 
     try:
-        edit_structure(w, goal_id, title=title[:200], expected_updated_at=payload.expected_updated_at)
+        require_open(w, goal_id)
+        edit_structure(w, goal_id, title=title[:200], expected_updated_at=payload.expected_updated_at,
+                       operation_id=payload.operation_id, actor=caller_principal(request) or "local administrator")
     except GoalMutationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -14609,10 +14610,13 @@ def reparent_goal(request: Request, goal_id: int, payload: ReparentIn) -> None:
                 detail="cannot re-parent a goal under its own descendant",
             )
     from maverick.goal_mutations import GoalMutationConflict, edit_structure
+    from maverick.task_handoffs import require_open
 
     try:
+        require_open(w, goal_id)
         edit_structure(w, goal_id, move=True, parent_id=new_parent,
-                       expected_updated_at=payload.expected_updated_at)
+                       expected_updated_at=payload.expected_updated_at,
+                       operation_id=payload.operation_id, actor=caller_principal(request) or "local administrator")
     except GoalMutationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

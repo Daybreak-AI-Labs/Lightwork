@@ -106,10 +106,52 @@ def edit_result(world, goal_id: int, *, text: str, expected_updated_at: float,
         return result
 
 
+def assert_move_boundary(world, goal_id: int, parent_id: int | None, *, execute=None) -> None:
+    """A map edit cannot remove or replace an inherited handoff budget ceiling."""
+    def read(sql, params):
+        if execute is not None:
+            return execute(sql, params).fetchone()
+        rows = world.query(sql, params)
+        return rows[0] if rows else None
+
+    def anchor(current):
+        seen = set()
+        while current is not None:
+            if current in seen or len(seen) >= 100:
+                raise GoalMutationConflict("Task ancestry is unavailable. Refresh the task map.")
+            seen.add(current)
+            if read("SELECT 1 FROM goal_mutation_receipts WHERE goal_id=? AND kind='handoff_lineage' LIMIT 1", (current,)):
+                return current
+            row = read("SELECT parent_id FROM goals WHERE id=?", (current,))
+            if row is None:
+                raise GoalMutationConflict("The parent task is no longer available.")
+            current = row[0]
+        return None
+
+    original = anchor(goal_id)
+    # A continuation keeps its own durable ceiling wherever it is placed.
+    if original != goal_id and original != anchor(parent_id):
+        raise GoalMutationConflict("This move would change an inherited handoff spending limit. Keep the task within its current governed continuation.")
+
+
 def edit_structure(world, goal_id: int, *, expected_updated_at: float,
                    title: str | None = None, parent_id: int | None = None,
-                   move: bool = False) -> None:
-    with _transaction(world, goal_id) as (execute, encode, _decode, postgres, _tenant):
+                   move: bool = False, operation_id: str | None = None,
+                   actor: str = "") -> dict:
+    digest = _fingerprint({"title": title, "parent_id": parent_id, "move": move,
+                           "expected_updated_at": expected_updated_at})
+    with _transaction(world, goal_id) as (execute, encode, decode, postgres, _tenant):
+        if operation_id is not None:
+            previous = _receipt(execute, decode, goal_id, "structure", operation_id, actor, digest)
+            if previous is not None:
+                return previous
+        from .task_handoffs import require_open
+
+        require_open(world, goal_id, execute=execute, decode=decode)
+        if move and parent_id is not None:
+            require_open(world, parent_id, execute=execute, decode=decode)
+        if move:
+            assert_move_boundary(world, goal_id, parent_id, execute=execute)
         row = execute("SELECT updated_at FROM goals WHERE id=?", (goal_id,)).fetchone()
         if row is None or float(row[0]) != expected_updated_at:
             raise GoalMutationConflict("This task changed. Review its current title and parent before saving your draft.")
@@ -129,6 +171,22 @@ def edit_structure(world, goal_id: int, *, expected_updated_at: float,
         execute("UPDATE goals SET " + column + "=?, updated_at=" + maximum +
                 "(updated_at + 0.000001, ?) WHERE id=? AND updated_at=?",
                 (value, time.time(), goal_id, expected_updated_at))
+        saved = execute("SELECT title,parent_id,updated_at FROM goals WHERE id=?", (goal_id,)).fetchone()
+        result = {"goal_id": goal_id, "title": decode(saved[0]), "parent_id": saved[1],
+                  "revision": float(saved[2]), "replayed": False}
+        if operation_id is not None:
+            _record(execute, encode, goal_id, "structure", operation_id, actor, digest, result)
+        return result
+
+
+def structure_receipt(world, goal_id: int, *, expected_updated_at: float,
+                      operation_id: str, actor: str, title: str | None = None,
+                      parent_id: int | None = None, move: bool = False) -> dict | None:
+    """Read an exact historical acknowledgement; never reapply an old edit."""
+    digest = _fingerprint({"title": title, "parent_id": parent_id, "move": move,
+                           "expected_updated_at": expected_updated_at})
+    with _transaction(world, goal_id) as (execute, _encode, decode, _postgres, _tenant):
+        return _receipt(execute, decode, goal_id, "structure", operation_id, actor, digest)
 
 
 def create_child(world, goal_id: int, *, title: str, description: str,
@@ -138,6 +196,9 @@ def create_child(world, goal_id: int, *, title: str, description: str,
         old_receipt = _receipt(execute, decode, goal_id, "child", operation_id, actor, digest)
         if old_receipt is not None:
             return old_receipt
+        from .task_handoffs import require_open
+
+        require_open(world, goal_id, execute=execute, decode=decode)
         now = time.time()
         columns = "parent_id,title,description,status,created_at,updated_at,owner"
         values = [goal_id, encode(title), encode(description), "pending", now, now, owner]

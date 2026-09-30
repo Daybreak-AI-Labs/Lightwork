@@ -703,11 +703,13 @@ class CachePurgeIn(BaseModel):
 
 class RetitleIn(BaseModel):
     expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
+    operation_id: str | None = Field(None, min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     title: str = Field(..., max_length=200)
 
 
 class ReparentIn(BaseModel):
     expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
+    operation_id: str | None = Field(None, min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     parent_id: int | None = None
 
 
