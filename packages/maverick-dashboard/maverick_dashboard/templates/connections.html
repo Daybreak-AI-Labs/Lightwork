@@ -398,7 +398,8 @@
   document.getElementById('cx-form').addEventListener('submit', function (e) { e.preventDefault(); save(false); });
   document.getElementById('cx-save-test').addEventListener('click', function () { save(true); });
 
-  load();
+  // While connections are off only the switch is shown; nothing to list yet.
+  if (!document.getElementById('cx-form').hidden) load();
 })();
 </script>
 <style>
