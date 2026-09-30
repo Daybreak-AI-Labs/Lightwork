@@ -181,3 +181,29 @@ def test_review_links_reach_registered_pages_with_bounded_references(monkeypatch
             assert response.status_code == 200, (path, response.text)
         assert client.get("/administration/document-vault?document=../secret").status_code == 404
         assert client.get("/third-party/executive-reports?report=../secret").status_code == 404
+
+
+def test_finder_knowledge_mode_delegates_current_native_acl_and_metadata_never_calls_it(monkeypatch):
+    from urllib.parse import unquote
+
+    from maverick_dashboard import knowledge_access_api as knowledge
+    context = "a" * 64
+    monkeypatch.setattr(api, "context_for", lambda request: context)
+    monkeypatch.setattr(api, "sources_for", lambda request, kind: {"vendors": lambda: search.Source([])})
+    calls = []
+    async def native(payload, request, response):
+        calls.append(payload)
+        return {"items": [{"reference": {"kind": "dataset", "asset_id": "source", "version": "v1", "manifest_sha256": "b" * 64}, "title": "Current source", "summary": "Approved passage", "eligibility": {"fresh_until": 2000000000}}], "complete": True, "next_cursor": None}
+    monkeypatch.setattr(knowledge, "search", native)
+    with TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Search-Context": context}) as client:
+        assert client.post("/api/v1/records/search", json={"query": "name"}).status_code == 200
+        assert calls == []
+        approved = client.post("/api/v1/records/search", json={"query": "name", "mode": "knowledge", "purpose": "business"})
+        assert approved.status_code == 200
+        assert calls[0].purpose == "business" and calls[0].context == context
+        row = approved.json()["items"][0]
+        assert json.loads(unquote(row["href"].split("#source=", 1)[1]))["reference"]["version"] == "v1"
+        async def revoked(*args):
+            raise HTTPException(409, "Current source access unavailable")
+        monkeypatch.setattr(knowledge, "search", revoked)
+        assert client.post("/api/v1/records/search", json={"query": "name", "mode": "knowledge", "purpose": "business"}).status_code == 409

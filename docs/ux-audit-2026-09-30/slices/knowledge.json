@@ -13,12 +13,16 @@
   {
     "id": "LW-113",
     "status": "planned",
-    "implementation_evidence": [],
+    "implementation_evidence": [
+      "Shared keyboard finder explicit business-metadata vs approved-knowledge modes; current-purpose picker; record_search_api delegates native knowledge ACL service and independently rechecks account/workspace before returning.",
+      "Exact-version deep link reopens through native governed detail; no source text in URL and no model called by either mode."
+    ],
     "validation": [
-      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+      "12 local record search tests passed, including metadata route never calling knowledge service, native ACL refusal and exact-version link. JS syntax passed; JS fixture execution awaiting shared jsdom dependencies."
     ],
     "remaining": [
-      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+      "Queued-use and new-task attachment current-source enforcement is being implemented in LW115; historical metadata paging remains LW114.",
+      "Browser/large-fixture qualification and JS fixtures pending."
     ]
   },
   {

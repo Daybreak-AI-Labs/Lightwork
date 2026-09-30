@@ -28,7 +28,8 @@
     {% if record_search_context %}
     <div class="navfinder-record-controls">
       <label for="navfinder-kind">Include records</label>
-      <select id="navfinder-kind" class="ctl"><option value="all">All types</option><option value="vendor">Vendors</option><option value="evidence">Evidence</option><option value="assessment">Assessments</option><option value="decision">Decisions</option><option value="task">Tasks</option><option value="report">Reports</option><option value="pages">Pages only</option></select>
+      <select id="navfinder-kind" class="ctl"><option value="all">Business record metadata</option><option value="knowledge">Approved knowledge content</option><option value="vendor">Vendors</option><option value="evidence">Evidence</option><option value="assessment">Assessments</option><option value="decision">Decisions</option><option value="task">Tasks</option><option value="report">Reports</option><option value="pages">Pages only</option></select>
+      <label id="navfinder-purpose-label" for="navfinder-purpose" hidden>Permitted use<select id="navfinder-purpose" class="ctl"></select></label>
       <button type="button" id="navfinder-search" class="btn">Search records</button>
     </div>
     <p id="navfinder-record-status" class="navfinder__count" role="status" aria-live="polite">Metadata search by name or reference. Document contents and private notes are excluded.</p>

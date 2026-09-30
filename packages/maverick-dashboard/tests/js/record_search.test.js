@@ -7,11 +7,11 @@ const context='a'.repeat(64),snapshot='b'.repeat(64);
 function row(id,title='Acme'){return {kind:'vendor',id,title,revision:'2',state:'approved',href:'/privacy/vendors/'+id};}
 function result(items,extra={}){return {context,snapshot,items,total:items.length,next_offset:null,complete:true,coverage:[{source:'vendors',state:'current',indexed:items.length}],...extra};}
 async function fixture(){
-  const dom=new JSDOM(`<meta name="lightwork-search-context" content="${context}"><button id="navfinder-open">Find</button><dialog id="navfinder-dialog"><button id="navfinder-close">Close</button><input id="navfinder-input"><p id="navfinder-count"></p><ul id="navfinder-results"><li><a id="page" href="/privacy" data-navfinder-target data-search="Privacy">Privacy</a></li></ul><p id="navfinder-empty" hidden></p><select id="navfinder-kind"><option value="all">All</option><option value="task">Tasks</option><option value="pages">Pages</option></select><button id="navfinder-search">Search records</button><p id="navfinder-record-status"></p><button id="navfinder-more" hidden>More</button><ul id="navfinder-coverage"></ul></dialog>`,{url:'https://lightwork.test/',runScripts:'outside-only'});
+  const dom=new JSDOM(`<meta name="lightwork-search-context" content="${context}"><button id="navfinder-open">Find</button><dialog id="navfinder-dialog"><button id="navfinder-close">Close</button><input id="navfinder-input"><p id="navfinder-count"></p><ul id="navfinder-results"><li><a id="page" href="/privacy" data-navfinder-target data-search="Privacy">Privacy</a></li></ul><p id="navfinder-empty" hidden></p><select id="navfinder-kind"><option value="all">All</option><option value="knowledge">Approved content</option><option value="task">Tasks</option><option value="pages">Pages</option></select><label id="navfinder-purpose-label" hidden><select id="navfinder-purpose"></select></label><button id="navfinder-search">Search records</button><p id="navfinder-record-status"></p><button id="navfinder-more" hidden>More</button><ul id="navfinder-coverage"></ul></dialog>`,{url:'https://lightwork.test/',runScripts:'outside-only'});
   const w=dom.window,d=w.document,dialog=d.getElementById('navfinder-dialog'),calls=[];
   dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;dialog.dispatchEvent(new w.Event('close'));};
   let handler=async()=>({ok:true,json:async()=>result([row('v1')])});
-  w.fetch=async(url,options)=>{calls.push({url,...options,body:JSON.parse(options.body)});return handler(url,options);};
+  w.fetch=async(url,options)=>{calls.push({url,...options,body:options.body?JSON.parse(options.body):null});return handler(url,options);};
   w.eval(read('lightwork-navfinder.js'));w.eval(read('lightwork-record-search.js'));await tick();
   d.getElementById('navfinder-open').click();
   const input=d.getElementById('navfinder-input');
@@ -84,4 +84,14 @@ test('review packet search accepts only a bounded exact packet fragment',async()
   await ui.search('Acme');assert.equal(ui.d.getElementById('navfinder-record-0').getAttribute('href'),href);
   ui.handler=async()=>({ok:true,json:async()=>result([{...row('packet'),kind:'decision',href:href+'&redirect=https://other.test/'}])});
   await ui.search('Acme');assert.equal(ui.d.getElementById('navfinder-record-0'),null);assert.match(ui.d.getElementById('navfinder-record-status').textContent,/could not be verified/);ui.dom.window.close();
+});
+
+
+test('approved-content mode requires current purposes and keeps metadata separate',async()=>{
+  const ui=await fixture();
+  ui.handler=async(url)=>url.endsWith('/purposes')?{ok:true,json:async()=>({context,items:[{code:'business'}]})}:{ok:true,json:async()=>result([{kind:'knowledge',id:'source',title:'Acme source',revision:'v1',state:'eligible',href:'/knowledge-access#source=%7B%7D'}],{mode:'knowledge',next_cursor:null})};
+  ui.input.value='Acme';const kind=ui.d.getElementById('navfinder-kind');kind.value='knowledge';kind.dispatchEvent(new ui.w.Event('change'));await tick();await tick();
+  assert.equal(ui.calls[0].url,'/api/v1/knowledge-access/purposes');assert.equal(ui.calls[1].body.mode,'knowledge');assert.equal(ui.calls[1].body.purpose,'business');
+  assert.match(ui.d.getElementById('navfinder-record-status').textContent,/approved content/);
+  kind.value='all';kind.dispatchEvent(new ui.w.Event('change'));await tick();assert.equal(ui.calls[2].body.mode,'metadata');assert.equal(ui.calls[2].body.purpose,'');ui.dom.window.close();
 });

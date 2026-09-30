@@ -1318,4 +1318,18 @@
       setBusy(false);
     }
   });
+  // Finder links carry references only. Opening always calls the native current
+  // authorization/detail service; neither URL state nor a search snippet grants use.
+  if (window.location.hash.startsWith('#source=')) {
+    try {
+      var rawSelection = window.location.hash.slice(8);
+      if (rawSelection.length > 6000) throw new Error('The selected source reference is too long.');
+      var selectedSource = JSON.parse(decodeURIComponent(rawSelection));
+      var exactSource = reference(selectedSource.reference);
+      if (!PURPOSE.test(selectedSource.purpose)) throw new Error('Choose a permitted use again.');
+      if (!Array.from(purposePicker.options).some(function(option){return option.value===selectedSource.purpose;})) throw new Error('This source use is no longer permitted. Choose current evidence.');
+      purposePicker.value=selectedSource.purpose;
+      openDetail(exactSource);
+    } catch(error) { announce(error.message || 'This source cannot be opened. Search current approved evidence.', true); }
+  }
 })();
