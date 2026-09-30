@@ -209,7 +209,7 @@ export function SettingsScreen(props: {
       <Text style={styles.fieldHelp}>A private code from your administrator. Leave it empty only if your administrator says sign-in is not needed.</Text>
       <Text style={styles.label}>Save offline task data on this device</Text>
       <Switch accessibilityLabel="Save offline task data for up to 24 hours" value={offlineEnabled} disabled={disabled} onValueChange={setOfflineEnabled} />
-      <Text style={styles.fieldHelp}>Saved task content can be sensitive. Up to 2 MB is kept for 24 hours; turn this off and save to remove the previous cache.</Text>
+      <Text style={styles.fieldHelp}>Saved task content can be sensitive. Your organization can disable offline saving or set a shorter limit. Copies never exceed 2 MB or 24 hours; turn this off and save to remove the previous cache.</Text>
       {!firstRun ? <Button label="Disconnect and remove saved data" kind="secondary" disabled={disabled || testing} onPress={disconnect} /> : null}
       <Button label={saving ? "Saving…" : loading ? "Loading…" : firstRun ? "Save and connect" : "Save"}
         disabled={disabled || testing} busy={saving} onPress={save} />

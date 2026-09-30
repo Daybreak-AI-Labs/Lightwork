@@ -92,10 +92,10 @@
   },
   {
     "id": "LW-056",
-    "status": "planned",
-    "implementation_evidence": "Explicit confirmed disconnect/reset purges app secure keys and app-owned caches; user offline opt-out, 24-hour/2MB bounds, profile switch cache purge and generation/retired-scope fences prevent late cache resurrection.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Administrator-specific retention ceilings/disablement are not yet projected into client offline metadata. Existing local bounds do not claim full organization retention-policy parity."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Existing confirmed disconnect/reset plus credential-scoped purge now remove all app offline-cache namespaces. mobile_offline_policy.py combines installation/workspace disablement and minimum age/byte ceilings, exposed in All settings and installer. Server bundle includes versioned policy and requires policy-aware client header. Mobile refuses missing/invalid policy, uses source-time expiry, invalidates live cached readers on policy/purge/expiry, serializes writes/removal and fences retired scopes/epochs/global reset. Readiness gives organization-policy message; user cannot relax ceilings.",
+    "validation": "2026-09-30: Python AST 6 files and TypeScript static analysis of all15 mobile source files passed (zero diagnostics). JavaScript regression source syntax and git diff --check passed. Policy ceiling/denial and cache expiry/late-write regressions authored unrun. No test suites/native/provider/browser tests run.",
+    "remaining": "Device storage/timer/background qualification is unrun. Offline devices learn changed policy only on reconnect; previously accepted policy expiry bounds that interval. Existing unqualified old clients must upgrade; server refuses bundle requests without the policy protocol header. No claims about retroactively deleting pre-upgrade copies on disconnected older builds."
   },
   {
     "id": "LW-057",

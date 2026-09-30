@@ -865,6 +865,17 @@ SETTINGS: tuple[Setting, ...] = (
       "toggle", "Data retention", False, "maverick.workspace_journal"),
 
     # ------------------------------------------------------------ Integrations
+    S("mobile_offline", "enabled", "Allow offline copies on mobile devices",
+      "Let current policy-aware companions keep a bounded offline task copy. People can turn saving off; workspace policy can only narrow this installation ceiling.",
+      "toggle", "Data retention", True, "maverick.mobile_offline_policy"),
+    S("mobile_offline", "max_age_seconds", "Keep mobile offline copies for at most",
+      "A cached copy expires after this time, even while the device is offline. Shorter workspace limits take precedence.",
+      "number", "Data retention", 86400, "maverick.mobile_offline_policy", minimum=1, maximum=1440,
+      scale=60, integer=True, unit="minutes"),
+    S("mobile_offline", "max_bytes", "Largest mobile offline copy",
+      "Refuse larger offline copies instead of silently dropping parts of them.",
+      "number", "Data retention", 2097152, "maverick.mobile_offline_policy", minimum=1, maximum=2048,
+      scale=1024, integer=True, unit="KB"),
     S("notifications", "personal_alerts", "Allow personal notification inboxes",
       "Let signed-in people choose subscriptions, quiet hours, daily digests and task mutes for their in-product inbox. Requires personal preferences. External personal delivery is not connected.",
       "toggle", "Integrations", False, "maverick.personal_notifications"),

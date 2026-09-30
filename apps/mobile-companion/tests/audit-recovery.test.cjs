@@ -47,9 +47,10 @@ test('retired cache cannot be recreated by an old in-flight write', async () => 
   };
   const cache = source('src/offlineCache.ts', {'@react-native-async-storage/async-storage': storage});
   const scope = '10000000-0000-4000-8000-000000000001';
-  const saving = cache.saveBundle({schema: 'maverick-offline/1', goals: []}, connection.baseUrl, scope);
-  await cache.purgeBundle(scope);
-  write.resolve(); await saving;
+  const saving = cache.saveBundle({schema: 'maverick-offline/1', as_of:Date.now()/1000, goals: [], cache_policy:{allowed:true,max_age_seconds:86400,max_bytes:2097152,revision:'a'.repeat(64)}}, connection.baseUrl, scope);
+  await Promise.resolve();
+  const purging = cache.purgeBundle(scope);
+  write.resolve(); await Promise.all([saving,purging]);
   assert.equal(values.size, 0);
 });
 

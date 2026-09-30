@@ -76,7 +76,10 @@ export type BundleGoal = {
   result: string | null;
 };
 
+export type OfflinePolicy = {allowed: boolean; max_age_seconds: number; max_bytes: number; revision: string; message?: string};
+
 export type OfflineBundle = {
+  cache_policy?: OfflinePolicy;
   schema: string; // "maverick-offline/1"
   as_of: number;
   glance: Glance;
@@ -155,6 +158,7 @@ async function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Pro
   }
   const base = cfg.baseUrl.trim().replace(/\/+$/, "");
   const headers: Record<string, string> = { Accept: "application/json" };
+  if (path === "/api/v1/offline/bundle") headers["X-Lightwork-Offline-Policy"] = "1";
   if (cfg.token) {
     headers.Authorization = `Bearer ${cfg.token.trim()}`;
   }

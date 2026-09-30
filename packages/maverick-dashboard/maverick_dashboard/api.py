@@ -14185,11 +14185,15 @@ def watch_glance(request: Request) -> dict:
 
 
 @router.get("/offline/bundle")
-async def offline_bundle(request: Request) -> dict:
+async def offline_bundle(request: Request, response: Response) -> dict:
     """Bounded, versioned snapshot (``maverick-offline/1``) for the mobile
     companion's offline cache. Read-only; owner-scoped like ``/goals``."""
     from maverick.offline_bundle import build_bundle
 
+    if request.headers.get("X-Lightwork-Offline-Policy") != "1":
+        raise HTTPException(status_code=403, detail="Update the companion to support organization offline-retention policy.")
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Authorization, Cookie, X-Lightwork-Offline-Policy"
     return await run_in_threadpool(
         build_bundle,
         _world(),

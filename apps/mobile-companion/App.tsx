@@ -113,7 +113,7 @@ export default function App(): React.JSX.Element {
       <StatusBar style="auto" />
       <View style={styles.fill}>{body}</View>
       {settings && !settings.needsSetup && tab !== 'settings' ? <Text style={styles.cacheStatus}>
-        {settings.offlineEnabled === false ? 'Offline saving is off' : cache.savedAt ? `Offline copy saved ${new Date(cache.savedAt).toLocaleTimeString()}` : 'Offline copy not ready'}
+        {settings.offlineEnabled === false ? 'Offline saving is off' : cache.policyMessage || (cache.savedAt ? `Offline copy saved ${new Date(cache.savedAt).toLocaleTimeString()}` : 'Offline copy not ready')}
       </Text> : null}
       {settings && !settingsError && !firstRun ? (
         <View style={styles.tabbar} accessibilityRole="tablist">

@@ -1,5 +1,8 @@
 # Lightwork mobile companion (read-only)
 
+**Preview source; native transport, packaging and installed-device behavior
+remain unqualified.**
+
 Watch your Lightwork swarm from a phone: runs list, run detail with a live
 event timeline, and an at-a-glance fleet summary — with an offline cache so
 losing the network shows "as of 12 min ago" instead of a blank screen.
@@ -17,7 +20,23 @@ From `packages/maverick-dashboard/maverick_dashboard/api.py`:
 | Tasks       | `GET /api/v1/goals?limit=50` |
 | Run detail  | `GET /api/v1/goals/{id}/events?since=0&limit=200` |
 | Overview    | `GET /api/v1/oversight/active` + `GET /api/v1/spend` |
-| Offline     | `GET /api/v1/offline/bundle` (optional; serves `maverick.offline_bundle.build_bundle`. Older dashboards without it still work — the offline cache just isn't refreshed) |
+| Offline     | `GET /api/v1/offline/bundle` with `X-Lightwork-Offline-Policy: 1` (optional; older dashboards still support online views, but snapshots without current retention policy are not saved) |
+
+Organization controls in **All settings → Data retention** can disable mobile
+offline copies or narrow their retention/size. Workspace policy cannot exceed
+the installation ceiling; people can opt out but cannot relax it. The installer
+offers the same offline-copy enablement choice. No copy exceeds 24 hours or
+2 MB, and the age is based on the source snapshot rather than download time.
+
+Missing/invalid policy, disablement, expiration and credential reset remove
+the eligible app cache and invalidate in-memory offline readers. Serialized
+cache mutation prevents delayed writes from resurrecting removed snapshots.
+The server refuses the bundle request from clients that do not declare support
+for the policy protocol. Upgrade older companion builds; no retroactive promise
+is made about copies already retained by unqualified old builds. A disconnected
+device cannot learn a new server policy until it reconnects, so the last accepted
+expiry remains the offline bound. Native timing/storage qualification is still
+deferred; regression tests are authored but unrun.
 
 Updates are plain polling (5–15s per screen) — dependency-light and
 battery-predictable; no SSE/websocket client to maintain.

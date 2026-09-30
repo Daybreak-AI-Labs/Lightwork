@@ -113,7 +113,9 @@ def build_bundle(
     events.sort(key=lambda e: (e.ts, e.id), reverse=True)
     events = events[:max_events]
 
+    from .mobile_offline_policy import effective_policy
     return {
+        "cache_policy": effective_policy(),
         "schema": SCHEMA,
         "as_of": as_of,
         "glance": build_offline_glance(world, now=as_of, owner=owner),
