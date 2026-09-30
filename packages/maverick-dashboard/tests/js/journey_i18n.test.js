@@ -17,6 +17,10 @@ function page(language='fr', locale='fr-CA') {
     'Review publication': {text:'Vérifier la publication',lang:'fr'},
     'Restore as draft': {text:'Restaurer comme brouillon',lang:'fr'},
     'No content changes.': {text:'Aucune modification du contenu.',lang:'fr'},
+    'Working through the steps…': {text:'Exécution des étapes…',lang:'fr'},
+    'An issue needs attention — open Show work for details.': {text:'Un problème nécessite votre attention.',lang:'fr'},
+    '{count} step': {text:'{count} étape',lang:'fr'},
+    '{count} steps': {text:'{count} étapes',lang:'fr'},
   };
   const dom = new JSDOM('<!doctype html><html lang="en"><head></head><body><div id="message"></div><div data-user-content dir="auto" lang="und"><span id="user" data-i18n="Save">Save</span></div><dialog id="dialog"><table><tr><th data-i18n="Save">Save</th><td data-user-content lang="und" dir="auto">مرحبا Save</td></tr></table></dialog><div id="stream" data-user-content dir="auto" lang="und"></div></body></html>', {runScripts:'outside-only'});
   const config=dom.window.document.createElement('script');config.id='lightwork-i18n-data';config.type='application/json';config.textContent=JSON.stringify({language,locale,catalog});dom.window.document.head.appendChild(config);
@@ -35,6 +39,24 @@ test('only explicitly marked product regions translate, including new dialogs',(
   assert.equal(doc.getElementById('stream').textContent,'Save');
   api.set(doc.getElementById('message'),'Missing translation');
   assert.equal(doc.getElementById('message').lang,'en');
+  dom.window.close();
+});
+
+test('live work summary localizes product status without changing streamed evidence',async()=>{
+  const dom=page(),w=dom.window,doc=w.document;
+  doc.body.insertAdjacentHTML('beforeend','<details id="work-activity"><p id="work-now"></p><p id="work-meta"></p><span id="work-spin"></span></details><div id="events" data-steps="1200"><div data-kind="observation">Save {"original":"مرحبا"}</div></div><span id="status" data-status="running">Working</span>');
+  const source=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/templates/chat_goal.html'),'utf8');
+  w.eval(source.slice(source.indexOf('    function cgText('),source.indexOf('    // Plain-language failure text')));
+  const start=source.indexOf('    (function () {',source.indexOf('// "Show work" strip'));
+  w.eval(source.slice(start,source.indexOf('    })();',start)+'    })();'.length));
+  const original=doc.getElementById('events').textContent;
+  doc.getElementById('events').append(doc.createElement('div'));
+  doc.getElementById('events').lastChild.dataset.kind='observation';
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(doc.getElementById('work-now').textContent,'Exécution des étapes…');
+  assert.equal(doc.getElementById('work-now').lang,'fr');
+  assert.equal(doc.getElementById('work-meta').textContent,new Intl.NumberFormat('fr-CA').format(1200)+' étapes');
+  assert.equal(doc.getElementById('events').textContent,original);
   dom.window.close();
 });
 

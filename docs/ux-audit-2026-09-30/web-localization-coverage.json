@@ -1,5 +1,5 @@
 {
-  "catalog_sources": 885,
+  "catalog_sources": 1055,
   "draft_languages": [
     "fr",
     "de",
@@ -18,16 +18,9 @@
       "remaining": []
     },
     "preferences.html": {
-      "literal_bindings": 68,
-      "remaining_literal_fragments": 1,
-      "remaining": [
-        {
-          "line": 30,
-          "kind": "text",
-          "source": "Choose the initial execution boundary while a task runs. Every message still shows its selected mode; administrator policy may disable a mode.",
-          "catalog_available": false
-        }
-      ]
+      "literal_bindings": 71,
+      "remaining_literal_fragments": 0,
+      "remaining": []
     },
     "_display_preferences.html": {
       "literal_bindings": 22,

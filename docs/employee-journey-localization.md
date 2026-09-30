@@ -64,3 +64,11 @@ revision/snapshot or exact receipt retry. Restart review localizes its consequen
 and USD display while keeping the task title isolated and its numeric limit
 unchanged. Tests exercise the current inbox and restart controllers, including
 permission loss and uncertain outcomes, with synthetic HTTP responses only.
+
+## Live conversation and preference controls
+
+The live conversation controller binds product messages explicitly: clarification changes, prepared-file state, exact answer receipts, stop and live-update recovery, work summaries and speech-input feedback. Source messages, tool output and filenames retain their own direction and remain verbatim. File counts, sizes, dates, step counts and the inherited restart ceiling use the selected regional formatter.
+
+Preference reviews now translate field/source labels and consequence copy while retaining exact before/after values and custom guidance. Saving interface language keeps the editor in place and records that the change applies on the next page load. Built-in theme labels are product copy; custom theme names are preserved exactly. Select options use text-only labels with explicit language metadata.
+
+This checkpoint contains 1055 source messages before the independent shared-shell, budget, answer and recovery catalogs are integrated. Draft catalogs remain subject to native-language and consequence-copy review; Arabic is still a community seed and English remains the only qualified complete-body language.

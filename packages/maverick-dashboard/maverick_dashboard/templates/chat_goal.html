@@ -430,7 +430,7 @@
           <div class="field">
             <label for="halt-resume-budget">{{ ui('Spending limit (USD, optional)') }}</label>
             <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling is not none %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling is not none %}{{ ut('Up to {amount}', amount='$' ~ spend_ceiling_text) }}{% else %}{{ ut('Optional task limit') }}{% endif %}" aria-describedby="halt-resume-budget-hint"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
-            <p id="halt-resume-budget-hint" class="muted">{{ ui("This limits the next attempt. Your organization’s spending and safety limits still apply.") }}{% if spend_ceiling %} {{ ui("Leave it empty to use your workspace’s spending limit of {amount}.", amount='$' ~ spend_ceiling_text) }}{% endif %}</p>
+            <p id="halt-resume-budget-hint" class="muted">{{ ui("This limits the next attempt. Your organization’s spending and safety limits still apply.") }}{% if spend_ceiling %} <span id="halt-inherited-limit">{{ ui("Leave it empty to use your workspace’s spending limit of {amount}.", amount='$' ~ spend_ceiling_text) }}</span>{% endif %}</p>
           </div>
         </details>
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
@@ -510,6 +510,12 @@
   <script src="/static/lightwork-planning-steps.js" defer></script>
   <script src="{{ asset('lightwork-read-aloud.js') }}"></script>
   <script>
+    // Explicit product bindings. Source text is passed only to textContent/renderers.
+    function cgText(source,values) { return window.LightworkI18n ? window.LightworkI18n.text(source,values) : String(source||'').replace(/\{(\w+)\}/g,function(whole,key){return values&&Object.prototype.hasOwnProperty.call(values,key)?String(values[key]):whole;}); }
+    function cgCopy(node,source,values) { if(window.LightworkI18n)window.LightworkI18n.set(node,source,values);else node.textContent=cgText(source,values); }
+    function cgAppend(node,source,values) { var span=document.createElement('span');cgCopy(span,source,values);node.append(' ',span); }
+    function cgNumber(value,options) { return window.LightworkI18n ? window.LightworkI18n.number(value,options) : String(value); }
+    function cgDate(value) { return window.LightworkI18n ? window.LightworkI18n.formatDate(value) : new Date(value*1000).toLocaleString(); }
     // Plain-language failure text for this page (no status codes or server text).
     function cgErr(failure, what) {
       return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
@@ -589,7 +595,7 @@
         currentStatus = status;
         statusEl.className = 'badge ' + status;
         statusEl.dataset.status = status;
-        statusEl.textContent = STATUS_LABELS[status] || status;
+        cgCopy(statusEl,STATUS_LABELS[status] || status);
       }
 
       function fmtAgent(a) {
@@ -610,7 +616,7 @@
         // have given up — otherwise transient blips stay silent.
         hidePlaceholder();
         if (streamErrorEl) {
-          streamErrorEl.textContent = text;
+          cgCopy(streamErrorEl,text);
           streamErrorEl.style.display = 'block';
         }
       }
@@ -623,14 +629,14 @@
         done = true;
         cancelBtn.disabled = true;
         // Keep any earlier result visible separately from the stop reason.
-        haltReasonEl.textContent = lastResult || 'The run stopped before producing a result.';
+        if(lastResult){haltReasonEl.textContent=lastResult;haltReasonEl.lang='und';haltReasonEl.dir='auto';haltReasonEl.dataset.userContent='';}else{delete haltReasonEl.dataset.userContent;cgCopy(haltReasonEl,'The run stopped before producing a result.');}
         haltCard.style.display = 'block';
       }
 
       let withheldRow = null;  // the one folded line standing in for withheld steps
       let stepCount = 0;
 
-      function stepRow(kind, label, text, agent) {
+      function stepRow(kind, label, text, agent, productText=false) {
         const row = document.createElement('div');
         row.className = 'step step--' + kind;
         row.dataset.kind = kind;
@@ -640,19 +646,19 @@
         const head = document.createElement('div');
         const lab = document.createElement('span');
         lab.className = 'step__label';
-        lab.textContent = label;
+        cgCopy(lab,label);
         head.appendChild(lab);
         if (agent && agent !== 'orchestrator') {
           const who = document.createElement('span');
           who.className = 'step__agent';
-          who.textContent = agent;
+          who.textContent = agent;who.lang='und';who.dir='auto';who.dataset.userContent='';
           head.appendChild(who);
         }
         body.appendChild(head);
         if (text) {
           const t = document.createElement('div');
           t.className = 'step__text';
-          t.textContent = text;
+          if(productText)cgCopy(t,text);else{t.textContent=text;t.lang='und';t.dir='auto';t.dataset.userContent='';}
           body.appendChild(t);
         }
         row.appendChild(body);
@@ -669,9 +675,9 @@
         if (WITHHELD.has(content.trim())) {
           const n = Number(eventsEl.dataset.withheld || 0) + 1;
           eventsEl.dataset.withheld = String(n);
-          const text = (n === 1 ? '1 step' : n + ' steps') + ' completed. Step details will appear when the answer is ready.';
-          if (!withheldRow) withheldRow = stepRow('withheld', KIND_LABELS.withheld, text, '');
-          else withheldRow.querySelector('.step__text').textContent = text;
+          const text = cgText(n===1?'{count} step completed. Step details will appear when the answer is ready.':'{count} steps completed. Step details will appear when the answer is ready.',{count:cgNumber(n)});
+          if (!withheldRow) withheldRow = stepRow('withheld', KIND_LABELS.withheld, text, '',true);
+          else cgCopy(withheldRow.querySelector('.step__text'),text);
           eventsEl.appendChild(withheldRow);  // stays the latest line
           return;
         }
@@ -681,7 +687,7 @@
         const tool = TOOL_LINE.exec(content);
         if (tool) {
           kind = 'observation';
-          label = tool[1] === 'ask_user' ? 'Asked you a question' : 'Used ' + humanTool(tool[1]);
+          label = tool[1] === 'ask_user' ? 'Asked you a question' : cgText('Used {tool}',{tool:humanTool(tool[1])});
           text = tool[2].trim();
         }
         eventsEl.appendChild(stepRow(kind, label, text, fmtAgent(e.agent)));
@@ -705,13 +711,13 @@
         if (!qaThread) return;
         const q = document.createElement('p');
         q.className = 'qa__q';
-        q.textContent = question;
+        q.textContent = question;q.lang='und';q.dir='auto';q.dataset.userContent='';
         qaThread.appendChild(q);
         const wrap = document.createElement('div');
         wrap.className = 'msg msg--user';
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
-        bubble.textContent = answer;
+        bubble.textContent = answer;bubble.lang='und';bubble.dir='auto';bubble.dataset.userContent='';
         wrap.appendChild(bubble);
         qaThread.appendChild(wrap);
       }
@@ -743,16 +749,16 @@
           if (!Array.isArray(j.open_questions)) throw new Error('The question response could not be read. Retry loading it.');
           const qs = ['cancelled', 'done', 'failed'].includes(currentStatus) ? [] : j.open_questions;
           if (submitting || (pendingClarification && pendingClarification.unconfirmed)) {
-            status.textContent = 'Check the pending answer receipt before answering another question.';
+            cgCopy(status,'Check the pending answer receipt before answering another question.');
             return;
           }
           if (!reviewChange && qs.length && currentQuestionId != null &&
               (qs[0].id !== currentQuestionId || qs[0].version !== currentQuestionVersion) && answerInput.value.trim()) {
             questionsFresh = false; retry.hidden = false;
-            status.textContent = 'The current question changed. Your draft is kept. Refresh and review the question before sending it.';
+            cgCopy(status,'The current question changed. Your draft is kept. Refresh and review the question before sending it.');
             return;
           }
-          questionsFresh = true; status.textContent = j.last_answer ? 'Earlier answer accepted with ' + j.last_answer.file_count + ' prepared file(s) on ' + new Date(j.last_answer.created_at * 1000).toLocaleString() + '. Any recovered composer draft is kept for you to review.' : ''; retry.hidden = true;
+          questionsFresh = true; if(j.last_answer)cgCopy(status,j.last_answer.file_count===1?'Earlier answer accepted with {count} prepared file on {time}. Any recovered composer draft is kept for you to review.':'Earlier answer accepted with {count} prepared files on {time}. Any recovered composer draft is kept for you to review.',{count:cgNumber(j.last_answer.file_count),time:cgDate(j.last_answer.created_at)});else cgCopy(status,''); retry.hidden = true;
           if (qs.length) {
             const changed = currentQuestionId !== qs[0].id;
             currentQuestionId = qs[0].id;
@@ -767,7 +773,7 @@
           syncComposer();
         } catch (e) {
           questionsFresh = false;
-          status.textContent = e.name === 'AbortError' ? 'Loading the question timed out. Your draft has been kept.' : (e.message || 'Could not load the question. Your draft has been kept.');
+          cgCopy(status,e.name === 'AbortError' ? 'Loading the question timed out. Your draft has been kept.' : (e.message || 'Could not load the question. Your draft has been kept.'));
           retry.hidden = false;
         } finally { clearTimeout(timeout); questionLoading = false; syncComposer(); }
       }
@@ -799,10 +805,10 @@
         return plain || cgErr(response, 'send your message');
       }
 
-      function composerMessage(text, danger) {
+      function composerMessage(text, danger, values) {
         if (!composerHint) return;
         composerHint.style.color = danger ? 'var(--danger)' : '';
-        composerHint.textContent = text || '';
+        cgCopy(composerHint,text || '',values);
       }
       // The composer follows the run: answer an open question, wait (Stop
       // available) while Lightwork works, or send the next message.
@@ -811,11 +817,11 @@
         const asking = currentQuestionId != null;
         const running = !done && !asking;
         const stoppable = ['pending', 'running', 'blocked'].includes(currentStatus);
-        if (replyAttach) { replyAttach.disabled = false; replyAttach.title = asking ? 'Attach a document, PDF, image or text file to your answer' : 'Attach files to your next message'; }
+        if (replyAttach) { replyAttach.disabled = false; replyAttach.title = cgText(asking ? 'Attach a document, PDF, image or text file to your answer' : 'Attach files to your next message'); }
         if (replyFiles) replyFiles.disabled = false;
-        answerInput.placeholder = asking ? 'Reply to Lightwork…'
+        answerInput.placeholder = cgText(asking ? 'Reply to Lightwork…'
           : running ? (window.mvConversationInbox && window.mvConversationInbox.available ? 'Add guidance, queue the next task, or start separate work…' : 'Lightwork is working… you can type while you wait')
-          : 'Message Lightwork…';
+          : 'Message Lightwork…');
         const inbox = window.mvConversationInbox;
         const inboxReady = !!(inbox && inbox.available);
         if (sendBtn) sendBtn.disabled = running && !inboxReady;
@@ -845,7 +851,7 @@
         replyAttach.addEventListener('click', function () { replyFiles.click(); });
         replyFiles.addEventListener('change', function () {
           const names = Array.prototype.map.call(replyFiles.files, function (f) { return f.name; });
-          composerMessage(names.length ? 'Attached: ' + names.join(', ') : '');
+          composerMessage(names.length ? 'Attached: {files}' : '',false,{files:names.join(', ')});
         });
       }
 
@@ -863,9 +869,9 @@
         pendingClarification = null; document.getElementById('answer-receipt-check').hidden = true;
         currentQuestionId = null; currentQuestionVersion = null; questionPanel.style.display = 'none';
         recordExchange(attempt.question, attempt.answer);
-        actionMsg.textContent = 'Answer and ' + receipt.attachment_ids.length + ' prepared file(s) accepted.' +
-          (receipt.admitted ? ' A restart was reserved; task updates show its actual progress.' : ' Waiting for the remaining question or current worker checkpoint.') +
-          (unchanged ? '' : ' Your newer draft has been kept.');
+        cgCopy(actionMsg,receipt.attachment_ids.length===1?'Answer and {count} prepared file accepted.':'Answer and {count} prepared files accepted.',{count:cgNumber(receipt.attachment_ids.length)});
+        cgAppend(actionMsg,receipt.admitted?'A restart was reserved; task updates show its actual progress.':'Waiting for the remaining question or current worker checkpoint.');
+        if(!unchanged)cgAppend(actionMsg,'Your newer draft has been kept.');
         if (receipt.admitted) resumeFollowing();
         else { await pollQuestions(); syncComposer(); }
       }
@@ -878,9 +884,9 @@
             {credentials:'same-origin',cache:'no-store',signal:controller.signal});
           const receipt = await response.json();
           if (response.ok && receipt.received && receipt.operation_id === attempt.operation) await acceptClarificationReceipt(receipt, attempt);
-          else if (response.ok) actionMsg.textContent = 'No accepted answer receipt is available yet. The original request may still be finishing. Keep the draft and retry the same answer to check safely.';
+          else if (response.ok) cgCopy(actionMsg,'No accepted answer receipt is available yet. The original request may still be finishing. Keep the draft and retry the same answer to check safely.');
           else window.mvRenderError(actionMsg,response,'check the answer receipt',receipt);
-        } catch (failure) { actionMsg.textContent = 'The answer receipt could not be checked. Keep the draft and retry this check.'; }
+        } catch (failure) { cgCopy(actionMsg,'The answer receipt could not be checked. Keep the draft and retry this check.'); }
         finally { clearTimeout(timeout); button.disabled = false; }
       });
       answerForm.addEventListener('submit', async function(ev) {
@@ -906,7 +912,7 @@
           const controls = Array.from(answerForm.querySelectorAll('input,select,textarea,button'));
           const before = controls.map(function (control) { return control.disabled; });
           controls.forEach(function (control) { control.disabled = true; });
-          submitting = true; actionMsg.textContent = 'Preparing the selected evidence and saving your answer.';
+          submitting = true; cgCopy(actionMsg,'Preparing the selected evidence and saving your answer.');
           const controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 45000);
           try {
             const r = await fetch('/api/v1/goals/' + goalId + '/answer-with-files', {
@@ -915,12 +921,12 @@
             const receipt = await r.json().catch(function () { return {}; });
             if (receipt.detail && receipt.detail.code === 'context_changed') {
               resetField(); pendingClarification = null;
-              actionMsg.textContent = 'Your signed-in workspace changed. Reopen the task before sending private content.';
+              cgCopy(actionMsg,'Your signed-in workspace changed. Reopen the task before sending private content.');
               return;
             }
             if (r.redirected) {
               attempt.unconfirmed = true; document.getElementById('answer-receipt-check').hidden = false;
-              actionMsg.textContent = 'Sign in again to check the answer receipt. Your draft and files have been kept.'; return;
+              cgCopy(actionMsg,'Sign in again to check the answer receipt. Your draft and files have been kept.'); return;
             }
             if (r.ok && receipt.received && receipt.operation_id === attempt.operation) {
               await acceptClarificationReceipt(receipt, attempt);
@@ -932,7 +938,7 @@
             }
           } catch (_) {
             attempt.unconfirmed = true; document.getElementById('answer-receipt-check').hidden = false;
-            actionMsg.textContent = 'The answer receipt is unconfirmed. Your text and files are kept. Check the receipt or retry the same answer; an accepted answer will not restart twice.';
+            cgCopy(actionMsg,'The answer receipt is unconfirmed. Your text and files are kept. Check the receipt or retry the same answer; an accepted answer will not restart twice.');
           } finally {
             clearTimeout(timeout); submitting = false;
             controls.forEach(function (control, index) { control.disabled = before[index]; }); syncComposer();
@@ -985,24 +991,24 @@
       });
 
       cancelBtn.addEventListener('click', async function() {
-        if (!(await mvConfirm('Stop this task? Lightwork will stop after the step it is on.', { okText: 'Stop task' }))) return;
+        if (!(await mvConfirm('Stop this task? Lightwork will stop after the step it is on.', { okText: 'Stop task',productCopy:true }))) return;
         cancelBtn.disabled = true;
-        actionMsg.textContent = 'Requesting stop…';
+        cgCopy(actionMsg,'Requesting stop…');
         let accepted = false;
         try {
           const r = await fetch('/api/v1/goals/' + goalId + '/cancel', { method: 'POST' });
           if (r.ok || r.status === 204) {
             accepted = true; stopRequested = true;
-            actionMsg.textContent = 'Stop requested. The current step may still be cleaning up. Already completed external changes are not undone.';
+            cgCopy(actionMsg,'Stop requested. The current step may still be cleaning up. Already completed external changes are not undone.');
             currentQuestionId = null; questionPanel.style.display = 'none';
             openPollingFallback(true); return;
           }
           const j = await r.json().catch(function () { return {}; });
           actionMsg.style.color = 'var(--danger)';
-          actionMsg.textContent = cgErr(r, 'stop the task');
+          cgCopy(actionMsg,cgErr(r, 'stop the task'));
         } catch (e) {
           actionMsg.style.color = 'var(--danger)';
-          actionMsg.textContent = 'The stop response was lost. Checking task state; the request may have been accepted.';
+          cgCopy(actionMsg,'The stop response was lost. Checking task state; the request may have been accepted.');
           openPollingFallback(true);
         } finally {
           if (!accepted) cancelBtn.disabled = false;
@@ -1075,8 +1081,8 @@
           cancelBtn.disabled = true;
         }
         if (['failed', 'cancelled'].includes(currentStatus)) renderHalted();
-        if (stopRequested && currentStatus === 'cancelled') actionMsg.textContent = 'Stop recorded. Cleanup may still be finishing; already completed changes are not undone.';
-        if (stopRequested && currentStatus === 'done') actionMsg.textContent = 'The task completed before the stop took effect. Review its result and any external changes.';
+        if (stopRequested && currentStatus === 'cancelled') cgCopy(actionMsg,'Stop recorded. Cleanup may still be finishing; already completed changes are not undone.');
+        if (stopRequested && currentStatus === 'done') cgCopy(actionMsg,'The task completed before the stop took effect. Review its result and any external changes.');
         syncComposer();
         document.dispatchEvent(new CustomEvent('lightwork:task-projection', {detail: {
           status: d.status, terminal: d.terminal === true, result: d.result,
@@ -1186,7 +1192,7 @@
       var SETTLED = { done: 'Complete', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped' };
 
       function stepTotal() { return Number(events.dataset && events.dataset.steps || 0) || events.children.length; }
-      function steps(n) { return n + (n === 1 ? ' step' : ' steps'); }
+      function steps(n) { return cgText(n===1?'{count} step':'{count} steps',{count:cgNumber(n)}); }
       function refreshFromEvents() {
         var lines = events.children;
         if (lines.length) {
@@ -1194,8 +1200,8 @@
           var progress = { plan: 'Planning the next step…', finding: 'Preparing an answer…',
             observation: 'Working through the steps…', error: 'An issue needs attention — open Show work for details.',
             verify: 'Checking the result…', artifact: 'Preparing a result…' };
-          nowEl.textContent = progress[kind] || 'Working…';
-          metaEl.textContent = steps(stepTotal());
+          cgCopy(nowEl,progress[kind] || 'Working…');
+          cgCopy(metaEl,steps(stepTotal()));
         }
       }
       function settle() {
@@ -1209,8 +1215,8 @@
         activity.open = false;
         if (nowEl.classList) nowEl.classList.remove('is-live');
         if (spin) spin.style.display = 'none';
-        nowEl.textContent = 'Work log: ' + steps(stepTotal());
-        metaEl.textContent = SETTLED[st] || (window.mvHuman ? window.mvHuman(st) : st);
+        cgCopy(nowEl,'Work log: {steps}',{steps:steps(stepTotal())});
+        cgCopy(metaEl,SETTLED[st] || (window.mvHuman ? window.mvHuman(st) : st));
         return true;
       }
 
@@ -1249,6 +1255,7 @@
       if (!panel || !list) return;
 
       function fmtSize(n) {
+        if(window.LightworkI18n)return window.LightworkI18n.number(n>=1048576?n/1048576:n>=1024?n/1024:n,{style:'unit',unit:n>=1048576?'megabyte':n>=1024?'kilobyte':'byte',unitDisplay:'short',maximumFractionDigits:n>=1048576?1:0});
         if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
         if (n >= 1024) return Math.round(n / 1024) + ' KB';
         return n + ' B';
@@ -1258,12 +1265,12 @@
       }
       function render(items) {
         list.textContent = '';
-        count.textContent = items.length;
+        count.textContent = cgNumber(items.length);count.lang=window.LightworkI18n?window.LightworkI18n.locale:'en';
         panel.style.display = 'block';
         if (!items.length) {
           var empty = document.createElement('li');
           empty.className = 'muted';
-          empty.textContent = 'No files attached to this task yet. Adding a file does not confirm the runner has read it.';
+          cgCopy(empty,'No files attached to this task yet. Adding a file does not confirm the runner has read it.');
           list.appendChild(empty);
         }
         items.forEach(function (a) {
@@ -1271,13 +1278,13 @@
           li.style.cssText = 'display:flex;align-items:center;gap:0.5rem;font-size:var(--text-sm);';
           var link = document.createElement('a');
           link.href = '/api/v1/goals/' + goalId + '/attachments/' + a.id + '/download';
-          link.textContent = a.filename;
+          link.textContent = a.filename;link.lang='und';link.dir='auto';link.dataset.userContent='';
           link.setAttribute('download', a.filename);
           li.appendChild(link);
           var meta = document.createElement('span');
           meta.className = 'muted';
           meta.style.fontSize = 'var(--text-xs)';
-          meta.textContent = fmtSize(a.size_bytes) + (isCompanion(a.filename) ? ' · auto-generated' : '');
+          if(isCompanion(a.filename))cgCopy(meta,'{size} · auto-generated',{size:fmtSize(a.size_bytes)});else{meta.textContent=fmtSize(a.size_bytes);meta.lang=window.LightworkI18n?window.LightworkI18n.locale:'en';}
           li.appendChild(meta);
           list.appendChild(li);
         });
@@ -1296,21 +1303,21 @@
             list.textContent = '';
             var failed = document.createElement('li');
             failed.className = 'muted';
-            failed.textContent = 'Attachments could not be loaded. You can still add a file or retry by reloading.';
+            cgCopy(failed,'Attachments could not be loaded. You can still add a file or retry by reloading.');
             list.appendChild(failed);
-            msg.textContent = String(error.message || error);
+            cgCopy(msg,String(error.message || error));
           });
       }
       if (addBtn && input) {
         addBtn.addEventListener('click', function () { input.click(); });
         var pending = [], uploading = false;
         var progress = document.createElement('ul');
-        progress.setAttribute('aria-label', 'Upload progress'); msg.after(progress);
+        progress.setAttribute('aria-label',cgText('Upload progress'));progress.lang=window.LightworkI18n?window.LightworkI18n.languageFor('Upload progress'):'en'; msg.after(progress);
         function row(item) {
-          item.row.replaceChildren(document.createTextNode(item.name + ' — ' + item.state + ' '));
+          cgCopy(item.row,'{name} — {state}',{name:item.name,state:cgText({queued:'Queued',uploading:'Uploading',complete:'Complete',failed:'Failed'}[item.state]||item.state)});
           if (item.state === 'failed') {
             var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn--ghost';
-            retry.textContent = 'Retry ' + item.name;
+            cgCopy(retry,'Retry {name}',{name:item.name});
             retry.addEventListener('click', function () { item.state = 'queued'; row(item); drain(); });
             item.row.append(retry);
           }
@@ -1330,9 +1337,9 @@
               } catch (_) { item.state = 'failed'; }
               row(item);
             }
-            msg.textContent = pending.some(function (i) { return i.state === 'failed'; })
+            cgCopy(msg,pending.some(function (i) { return i.state === 'failed'; })
               ? 'Some files were not confirmed. Retry only those files. Previously admitted files are preserved.'
-              : 'Files added to this task. Extracted text may still be preparing; this does not confirm the runner has read them.';
+              : 'Files added to this task. Extracted text may still be preparing; this does not confirm the runner has read them.');
             refresh();
           } finally { uploading = false; addBtn.disabled = false; }
         }
@@ -1380,7 +1387,7 @@
         function fallback() {
           if (!SpeechRec) return;
           var rec = new SpeechRec();
-          rec.lang = document.documentElement.lang || 'en';
+          rec.lang = window.LightworkI18n ? window.LightworkI18n.locale : document.documentElement.lang || 'en';
           setRec(true);
           rec.onresult = function (e) { fill(e.results[0][0].transcript); };
           rec.onend = function () { setRec(false); };
@@ -1394,7 +1401,7 @@
             onResult: fill,
           })
             .catch(function () {
-              if (window.mvToast) window.mvToast('We couldn\u2019t turn your recording into text. Try again, or type your answer.', { error: true });
+              if (window.mvToast) window.mvToast(cgText('We couldn\u2019t turn your recording into text. Try again, or type your answer.'), { error: true });
             })
             .finally(function () { busy = false; });
         }

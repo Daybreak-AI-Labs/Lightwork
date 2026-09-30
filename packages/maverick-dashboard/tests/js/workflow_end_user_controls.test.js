@@ -283,7 +283,9 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
   const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("    (function () {", source.indexOf('// "Show work" strip'));
   const end = source.indexOf("    })();", start) + "    })();".length;
-  vm.runInNewContext(source.slice(start, end), { MutationObserver, document: { getElementById: id => fields[id] } });
+  const context = { MutationObserver, window: {}, document: { getElementById: id => fields[id] } };
+  vm.runInNewContext(source.slice(source.indexOf('    function cgText('), source.indexOf('    // Plain-language failure text')), context);
+  vm.runInNewContext(source.slice(start, end), context);
   observers.get(events)();
   assert.equal(now.textContent.includes("internal_connector"), false);
   assert.equal(events.children[0].textContent, raw, "the complete work log remains available");

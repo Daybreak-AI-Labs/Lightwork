@@ -70,3 +70,38 @@ def test_browser_override_stays_bound_to_account_and_policy(monkeypatch):
     assert preferences_api.resolved_display(request(cookies={"mvk_lang": "fr", "mvk_pref_context": "alice-workspace"}), "interface_language") == "fr"
     monkeypatch.setattr(preferences_api.preferences, "state", lambda principal: {"locked": ["interface_language"], "values": {"interface_language": "ja"}})
     assert preferences_api.resolved_display(request(cookies={"mvk_lang": "fr", "mvk_pref_context": "alice-workspace"}), "interface_language") == "ja"
+
+
+def test_display_options_are_text_and_custom_theme_names_stay_verbatim(monkeypatch):
+    from html.parser import HTMLParser
+
+    from maverick_dashboard import app
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: None)
+    context = i18n_journeys.context(request(accept="fr-CA"), "fr")
+    rendered = app.templates.env.get_template('_display_preferences.html').render(
+        **context, lang="fr", page_lang="en", t=lambda key: i18n.t(key, "fr"),
+        display_signed_in=False, display_interface_language="fr", display_text_size="standard",
+        theme="Save", font="default", density="comfortable", custom_theme_names=["Save"])
+
+    class Options(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.active = False
+            self.nested = []
+
+        def handle_starttag(self, tag, attrs):
+            if self.active:
+                self.nested.append(tag)
+            if tag == "option":
+                self.active = True
+
+        def handle_endtag(self, tag):
+            if tag == "option":
+                self.active = False
+
+    parsed = Options()
+    parsed.feed(rendered)
+    assert not parsed.nested
+    assert '<option value="Save" lang="und" dir="auto" data-user-content selected>Save</option>' in rendered
+    assert 'lang="fr">Sombre</option>' in rendered

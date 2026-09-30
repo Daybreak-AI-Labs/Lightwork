@@ -35,7 +35,9 @@ def describe(request):
             label = "This dashboard account" if channel == "dashboard" else f"Verified {channel.replace('_', ' ').capitalize()} account {counts[channel]}"
             control = personal_memory.controls(channel, scope["user_id"])
             effective = allowed and control["recall"] is True and (source_control is None or source_control["recall"] is True)
-            rows.append({"label": label, "choice": "Allow within administrator policy" if control["recall"] else "Recall and collection off",
+            rows.append({"label": label, "channel_label": channel.replace('_', ' ').capitalize() if channel != "dashboard" else None,
+                         "account_number": counts[channel] if channel != "dashboard" else None,
+                         "choice": "Allow within administrator policy" if control["recall"] else "Recall and collection off",
                          "effective": "Allowed" if effective else "Off",
                          "source": "Your saved channel choice" if control["revision"] else "Product default, constrained by administrator policy"})
         if not personal_identity.principal_current(principal):

@@ -13,21 +13,21 @@
           <label class="prefs__row"><span>{{ ui("Theme") }}</span>
       <select class="ctl" id="theme-select" data-ui-preference="theme" aria-label="{{ ut('Theme') }}" lang="{{ ul('Theme') }}">
         <option value="" lang="{{ ul("Theme") }}">{{ ut("Theme") }}</option>
-        <option value="system" {% if theme == 'system' %}selected{% endif %}>{{ ui("Follow system") }}</option>
-        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>{{ ui("Dark") }}</option>
-        <option value="light" {% if theme == 'light' %}selected{% endif %}>{{ ui("Light") }}</option>
-        <option value="solarized" {% if theme == 'solarized' %}selected{% endif %}>{{ ui("Solarized") }}</option>
-        <option value="hicontrast" {% if theme == 'hicontrast' %}selected{% endif %}>{{ ui("High contrast") }}</option>
+        <option value="system" {% if theme == 'system' %}selected{% endif %} lang="{{ ul("Follow system") }}">{{ ut("Follow system") }}</option>
+        <option value="dark" {% if theme == 'dark' %}selected{% endif %} lang="{{ ul("Dark") }}">{{ ut("Dark") }}</option>
+        <option value="light" {% if theme == 'light' %}selected{% endif %} lang="{{ ul("Light") }}">{{ ut("Light") }}</option>
+        <option value="solarized" {% if theme == 'solarized' %}selected{% endif %} lang="{{ ul("Solarized") }}">{{ ut("Solarized") }}</option>
+        <option value="hicontrast" {% if theme == 'hicontrast' %}selected{% endif %} lang="{{ ul("High contrast") }}">{{ ut("High contrast") }}</option>
         {% for name in custom_theme_names %}
-        <option value="{{ name }}" {% if theme == name %}selected{% endif %}>{{ name }}</option>
+        <option value="{{ name }}" lang="und" dir="auto" data-user-content {% if theme == name %}selected{% endif %}>{{ name }}</option>
         {% endfor %}
       </select>
           </label>
           <label class="prefs__row"><span>{{ ui("Density") }}</span>
       <select class="ctl" id="density-select" data-ui-preference="density" aria-label="{{ ut('Density') }}" lang="{{ ul('Density') }}">
         <option value="" lang="{{ ul("Density") }}">{{ ut("Density") }}</option>
-        <option value="comfortable" {% if density == 'comfortable' %}selected{% endif %}>{{ ui("Comfortable") }}</option>
-        <option value="compact" {% if density == 'compact' %}selected{% endif %}>{{ ui("Compact") }}</option>
+        <option value="comfortable" {% if density == 'comfortable' %}selected{% endif %} lang="{{ ul("Comfortable") }}">{{ ut("Comfortable") }}</option>
+        <option value="compact" {% if density == 'compact' %}selected{% endif %} lang="{{ ul("Compact") }}">{{ ut("Compact") }}</option>
       </select>
           </label>
           <label class="prefs__row"><span{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('label.font') }}</span>
