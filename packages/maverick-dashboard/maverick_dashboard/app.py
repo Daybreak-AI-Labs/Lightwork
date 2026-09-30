@@ -7884,14 +7884,18 @@ async def cache_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/store", response_class=HTMLResponse)
-async def store_page(request: Request, saved: str = "") -> HTMLResponse:
-    """Skill Store: browse + install catalog skills without a terminal."""
-    from maverick.catalog import load_catalog
+def store_page(request: Request, saved: str = "") -> HTMLResponse:
+    """Skill Store: browse + install catalog skills without a terminal.
+
+    A plain ``def`` (thread-pooled): the catalog index is fetched over the
+    network, which must never run on the event loop.
+    """
+    from maverick.catalog import PAGE_FETCH_TIMEOUT, load_catalog
 
     from .store_catalogs import current_catalogs
 
     try:
-        entries = [e.to_dict() for e in load_catalog("skills")]
+        entries = [e.to_dict() for e in load_catalog("skills", timeout=PAGE_FETCH_TIMEOUT)]
     except Exception:
         entries = []
     installed = {s.name for s in _load_skills()}
