@@ -270,7 +270,7 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "toggle", grp, True, "maverick.workflow_versions", subgroup=access),
         S("workflows", "typed_inputs", "Author typed workflow inputs",
           "Let workflow authors add dates, choices, defaults and optional inputs. Existing saved definitions continue to validate when this is off.",
-          "toggle", grp, True, "maverick.templates", subgroup=access),
+          "toggle", grp, True, "maverick_dashboard.api", subgroup=access),
         S("connections", "allow_self_connect", "Let employees connect their own approved accounts",
           "Employees with permission to operate can sign in to administrator-approved account profiles. Accounts stay private; app registration and sharing remain administrator tasks.",
           "toggle", grp, False, "maverick.connection_oauth", subgroup=access, weaker=True,
