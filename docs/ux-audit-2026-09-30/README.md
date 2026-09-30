@@ -3,6 +3,11 @@
 This register tracks the requested consolidation into draft PR #2528. It is an
 implementation worklist, not acceptance or release evidence.
 
+Start with the [195-entry checklist](implementation-checklist.md); the complete
+JSON register retains the code evidence, validation and remaining criteria for
+each item. [Local qualification](local-qualification.md) distinguishes failed,
+focused and full-suite checkpoints.
+
 - Audit/main baseline: `6daa3165ff5a844320ec970553d5ecdec7e396c4`.
 - Preserved companion handoff: `d8904378537f0c04bd205a05446115687c2d0475`.
 - Source: **Lightwork UX improvement backlog.csv**, 195 distinct audit entries.

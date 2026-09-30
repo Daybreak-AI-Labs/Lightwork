@@ -71,10 +71,10 @@
   },
   {
     "id": "LW-029",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "implementation_evidence": "goal_tree nodes include updated_at; required expected revision in RetitleIn/ReparentIn; goal_mutations.edit_structure transaction CAS+cycle check; graph conflict reload preserves title/parent draft",
     "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Concurrent map/backend parity qualification unrun. Shared service available to authorized tool integrations; existing dashboard routes require reviewed versions."
+    "remaining": "Native graph edit CAS is implemented. Final acceptance review found the typed Copilot map-edit adapter and actual page selection handoff missing, and network acknowledgement unbounded. The native-authority adapter, bounded recovery and durable receipt are now in progress; no stub completion is claimed."
   },
   {
     "id": "LW-030",

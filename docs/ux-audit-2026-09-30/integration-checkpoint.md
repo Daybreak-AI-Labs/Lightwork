@@ -2,11 +2,9 @@
 
 This is an implementation checkpoint, not a release or final acceptance report.
 All 195 audit records retain all 24 source fields in source-backlog.json.
-The current register has 187 implemented entries awaiting consolidated
-acceptance, three active entries (LW-043 localization, LW-068 governed
-connection selection and LW-119 Facts Copilot operations), and five
-qualification entries. The final acceptance review reopened LW-068's requested
-picker and LW-119's promised native Copilot adapter. Current local results are in
+The generated [implementation checklist](implementation-checklist.md) contains
+the current per-ID dispositions. Final acceptance review reopened the requested
+LW-068 picker and the LW-029/LW-119 native Copilot adapters. Current local results are in
 `local-qualification.md`; the older focused checkpoint history below is retained
 as history, not a current full-suite result.
 No privacy-policy decision is pending. The user approved extending audit-only

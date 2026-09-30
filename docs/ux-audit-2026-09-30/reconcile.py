@@ -47,7 +47,25 @@ def main() -> None:
             previous[row["id"]] = value
     result = [previous[row["ID"]] for row in source]
     tracker.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(json.dumps(dict(collections.Counter(row["status"] for row in result)), sort_keys=True))
+    counts = collections.Counter(row["status"] for row in result)
+    lines = ["# Audit implementation checklist", "",
+             "Generated from the complete 195-entry register. Built means code is integrated;",
+             "it does not mean all acceptance checks or release qualification have passed.", "",
+             "[Full evidence and remaining criteria](implementation-tracker.json) · "
+             "[Original 24-field backlog](source-backlog.json) · "
+             "[Local qualification](local-qualification.md)", "",
+             "Current dispositions: " + ", ".join(f"{count} {status}" for status, count in sorted(counts.items())) + ".", "",
+             "| ID | Disposition | Audit item |", "| --- | --- | --- |"]
+    labels = {"implemented-test-needed": "Built; acceptance pending",
+              "already-fixed-test-needed": "Existing fix; acceptance pending",
+              "planned": "Active implementation", "test-needed": "Qualification required",
+              "implemented": "Implemented", "deferred-decision": "Decision required",
+              "blocked-source": "Source blocked"}
+    for row in result:
+        title = row["title"].replace("|", "\\|").replace("\n", " ")
+        lines.append(f"| {row['id']} | {labels.get(row['status'], row['status'])} | {title} |")
+    (ROOT / "implementation-checklist.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(json.dumps(dict(counts), sort_keys=True))
     print("Open:", ", ".join(row["id"] for row in result if row["status"] not in {
         "implemented-test-needed", "already-fixed-test-needed", "implemented", "test-needed"}))
 
