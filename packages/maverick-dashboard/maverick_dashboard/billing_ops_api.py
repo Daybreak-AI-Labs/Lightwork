@@ -138,11 +138,13 @@ def _period(since: date | None, until: date | None) -> tuple[str | None, str | N
     return (since.isoformat() if since else None, until.isoformat() if until else None)
 
 
-def _preview(workspace: str, since: date | None, until: date | None, markup: float, minimum: float) -> dict:
-    from maverick.billing_stripe import preview_charges
+def _preview(context: dict, workspace: str, since: date | None, until: date | None, markup: float, minimum: float) -> dict:
+    from . import billing_sync_reviews
     record = _workspace(workspace)
     start, end = _period(since, until)
-    prev = preview_charges(record.id, _card(markup, minimum), since=start, until=end)
+    review = billing_sync_reviews.prepare(context, {"workspace": record.id, "since": start, "until": end,
+                                                   "markup": float(markup), "minimum": float(minimum)})
+    prev = review["snapshot"]
     currency = str(prev["currency"]).upper()
     lines = [("The plan fee is set up in Stripe." if prev["platform_fee_configured"] else
               f"No Stripe price is set for the {_words(prev['plan'])} plan, so no plan fee would be charged.")]
@@ -155,7 +157,7 @@ def _preview(workspace: str, since: date | None, until: date | None, markup: flo
         lines.append("Stripe billing is off, so this is only a preview.")
     return {"workspace": record.display_name or record.id, "plan": _words(prev["plan"]),
             "summary": " ".join(lines), "usage_total": round(float(prev["metered_total"]), 2),
-            "currency": currency, "can_sync": bool(prev["billing_enabled"])}
+            "currency": currency, "can_sync": bool(prev["billing_enabled"]), **review}
 
 
 @router.get("/stripe/preview")
@@ -164,7 +166,11 @@ async def stripe_preview(request: Request, workspace: str = Query(..., min_lengt
                          markup: float = Query(0.0, ge=0.0, le=1000.0),
                          minimum: float = Query(0.0, ge=0.0, le=1_000_000.0)) -> dict:
     _admin(request)
-    return await run_in_threadpool(_preview, workspace, since, until, markup, minimum)
+    from . import app as app_module, billing_sync_reviews
+    app_module._require_same_origin(request)
+    result = await run_in_threadpool(_preview, billing_sync_reviews.scope(request), workspace, since, until, markup, minimum)
+    _admin(request)
+    return result
 
 
 class SyncIn(BaseModel):
@@ -175,20 +181,29 @@ class SyncIn(BaseModel):
     markup: float = Field(0.0, ge=0.0, le=1000.0)
     minimum: float = Field(0.0, ge=0.0, le=1_000_000.0)
     confirm: bool = Field(default=False, strict=True)
+    review_id: str = Field(min_length=48, max_length=48, pattern=r"^[a-f0-9]+$")
+    sha256: str = Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]+$")
 
 
-def _sync(body: SyncIn) -> dict[str, Any]:
-    from maverick.billing_stripe import sync_tenant_for_period
+def _sync(body: SyncIn, request: Request) -> dict[str, Any]:
+    from . import billing_sync_reviews
     record = _workspace(body.workspace)
     start, end = _period(body.since, body.until)
-    result = sync_tenant_for_period(record.id, _card(body.markup, body.minimum), since=start, until=end)
-    sub = result.get("subscription") or {}
-    items = result.get("usage_items")
-    summary = (f"{record.display_name or record.id} is set up in Stripe. Subscription: "
-               f"{_words(sub.get('status') or 'unknown').lower()} on the {_words(sub.get('plan') or record.plan)} plan. "
-               + (f"{len(items)} AI usage item(s) sent." if items is not None else "AI usage was not sent (plan fee only)."))
-    return {"summary": summary,
-            "technical": [{"level": "info", "text": f"Stripe customer {str(result.get('customer'))[:80]}"}]}
+    fields = {"workspace": record.id, "since": start, "until": end,
+              "markup": float(body.markup), "minimum": float(body.minimum)}
+    return billing_sync_reviews.execute(billing_sync_reviews.scope(request), fields, body.review_id, body.sha256,
+                                        lambda: _admin(request))
+
+
+@router.get("/stripe/receipt")
+async def stripe_receipt(request: Request, workspace: str = Query(..., min_length=1, max_length=128),
+                         offset: int = Query(0, ge=0)) -> dict:
+    _admin(request)
+    from . import billing_sync_reviews
+    await run_in_threadpool(_workspace, workspace)
+    result = await run_in_threadpool(billing_sync_reviews.receipt, billing_sync_reviews.scope(request), workspace, offset)
+    _admin(request)
+    return result
 
 
 @router.post("/stripe/sync")
@@ -199,14 +214,13 @@ async def stripe_sync(body: SyncIn, request: Request) -> dict:
     if body.confirm is not True:
         raise HTTPException(409, "Confirm to send this workspace to Stripe. Nothing was sent.")
     await run_in_threadpool(_workspace, body.workspace)
-    from .system_checks_api import _record
-    await run_in_threadpool(_record, request, "stripe_sync", workspace=body.workspace.strip())
     from maverick.billing_stripe import StripeError
     from maverick.tenant.registry import UnknownTenant
     try:
-        return await run_in_threadpool(_sync, body)
+        result = await run_in_threadpool(_sync, body, request)
+        _admin(request)
+        return result
     except UnknownTenant as exc:
         raise HTTPException(404, "Choose a workspace from the list.") from exc
     except StripeError as exc:
-        raise HTTPException(409, "Stripe billing isn't ready, or Stripe refused the request. Check the Stripe "
-                                 "status above. Nothing else was changed.") from exc
+        raise HTTPException(409, "Stripe billing could not finish. Read the retained stage receipt before retrying; earlier stages may have changed Stripe.") from exc

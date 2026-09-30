@@ -125,5 +125,29 @@
     ],
     "validation": "Static source review only.",
     "remaining": "Per-entry recorded/estimated/ceiling/reconciled provenance across spend view and all exports remains to implement."
+  },
+  {
+    "id": "LW-164",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "billing_sync_reviews.prepare/execute: sealed short-lived field/account/workspace/plan/connection/rated-content binding and frozen Invoice execution",
+      "lightwork-billing-ops.js: edit invalidation, exact reviewed details, explicit confirmed dispatch",
+      "tests/test_billing_sync_reviews.py: provider-free fault cases authored, unrun",
+      "docs/billing-review-recovery.md: detailed boundaries and recovery semantics"
+    ],
+    "validation": "Python 3.10 AST and JavaScript syntax passed; suites, provider calls and browser journeys not run.",
+    "remaining": "Runtime/browser/Stripe/distributed-fault qualification deferred. Unresolved provider outcomes remain explicitly held for reconciliation; no new invoice identity bypass."
+  },
+  {
+    "id": "LW-165",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "billing_sync_reviews: CAS workspace admission, per-stage and per-dispatch durable pending/confirmed/unknown receipts",
+      "Retained receipt UI/API, explicit same-attempt resume, unchanged native collection identities, conservative provider retry-window refusal",
+      "tests/test_billing_sync_reviews.py: provider-free fault cases authored, unrun",
+      "docs/billing-review-recovery.md: detailed boundaries and recovery semantics"
+    ],
+    "validation": "Python 3.10 AST and JavaScript syntax passed; suites, provider calls and browser journeys not run.",
+    "remaining": "Runtime/browser/Stripe/distributed-fault qualification deferred. Unresolved provider outcomes remain explicitly held for reconciliation; no new invoice identity bypass."
   }
 ]
