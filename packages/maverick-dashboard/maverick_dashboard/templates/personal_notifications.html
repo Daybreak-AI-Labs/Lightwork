@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Your notifications - Lightwork{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Your notifications</h1>
+  <p>Personal alerts for your own tasks and decisions assigned to you. Organization operational alerts keep their separate policy.</p>
+  <p><a href="/preferences">Your preferences</a> · <a href="/action-center">Action Center</a></p>
+  <p id="personal-notification-status" role="status" aria-live="polite">Loading your inbox.</p>
+  <p id="personal-notification-error" role="alert" hidden></p>
+  <button class="btn btn--ghost" id="personal-notification-refresh" type="button">Refresh inbox</button>
+  <p class="muted">Delivery channel: this in-product inbox. It refreshes while this page is open and catches up when you return. Email, phone push and background delivery are not connected to these personal preferences yet.</p>
+  <div id="personal-notification-items"></div>
+</section>
+<form class="panel" id="notification-preferences" tabindex="-1">
+  <h2>Personal notification preferences</h2>
+  <label>Delivery <select class="select" name="mode"><option value="immediate">As changes are observed</option><option value="digest">Daily digest</option><option value="off">Off</option></select></label>
+  <label>Time zone <input class="input" name="timezone" list="notification-timezones" maxlength="100" required></label>
+  <datalist id="notification-timezones"><option value="UTC"></option><option value="America/New_York"></option><option value="America/Los_Angeles"></option><option value="Europe/London"></option><option value="Asia/Tokyo"></option></datalist>
+  <label>Daily digest time <input class="input" type="time" name="digest_time" required></label>
+  <label><input type="checkbox" name="quiet_enabled"> Hold new personal alerts during quiet hours</label>
+  <label>Quiet hours start <input class="input" type="time" name="quiet_start" required></label>
+  <label>Quiet hours end <input class="input" type="time" name="quiet_end" required></label>
+  <p class="muted">Times follow the selected zone through daylight-saving changes. A digest is delivered at most once per local day, at the first eligible inbox refresh after its time.</p>
+  <label><input type="checkbox" name="critical_exceptions"> Let approval and deadline alerts bypass quiet hours and digest timing when organization policy permits</label>
+  <p class="muted" id="personal-critical-policy"></p>
+  <fieldset><legend>Notify me about</legend>
+    {% for value,label in [('needs-decision','Needs my answer or decision'),('blocked','Blocked work'),('failed','Work that did not finish'),('completed','Completed work'),('changed-result','Changed results'),('deadline','Approaching or overdue deadlines')] %}
+    <label><input type="checkbox" name="event" value="{{ value }}"> {{ label }}</label>
+    {% endfor %}
+  </fieldset>
+  <fieldset><legend>Project watches</legend>
+    <label><input type="checkbox" name="watch_all_projects"> Watch all of my tasks, including tasks without a project</label>
+    <div id="notification-project-watches"></div>
+    <p class="muted">When all-task watching is off, only the selected projects' tasks create alerts. Assigned approvals keep their own subscription.</p>
+  </fieldset>
+  <fieldset><legend>Temporarily mute a task</legend>
+    <select class="select" id="notification-mute-task" aria-label="Task to mute"></select>
+    <select class="select" id="notification-mute-duration" aria-label="Mute duration"><option value="3600">One hour</option><option value="86400">One day</option><option value="604700">Seven days</option></select>
+    <button class="btn btn--ghost" type="button" id="notification-add-mute">Add task mute to draft</button>
+    <div id="notification-mutes"></div>
+  </fieldset>
+  <button class="btn btn--primary" type="submit">Save personal notification preferences</button>
+  <button class="btn btn--ghost" type="button" id="notification-reload-preferences">Reload saved preferences</button>
+  <p id="personal-notification-save-status" role="status" aria-live="polite"></p>
+</form>
+<script src="/static/lightwork-personal-notifications.js" defer></script>
+{% endblock %}

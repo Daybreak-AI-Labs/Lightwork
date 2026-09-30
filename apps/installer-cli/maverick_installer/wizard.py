@@ -6202,11 +6202,19 @@ def pick_persona() -> dict[str, str]:
 
 def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     """Run-end notification webhook. Returns (config, env_vars_needed)."""
+    personal_alerts = _q_confirm(
+        "Allow signed-in people to use a personal in-product alert inbox with quiet hours and daily digests? Requires personal preferences; external personal delivery is not connected.",
+        default=False,
+    )
+    personal_critical_bypass = personal_alerts and _q_confirm(
+        "Allow people to opt approval/deadline alerts out of their quiet hours and digest timing?", default=False,
+    )
+    personal_config = {"personal_alerts": personal_alerts, "personal_critical_bypass": personal_critical_bypass}
     if not _q_confirm(
         "Get pinged when long runs finish? (ntfy / Pushover / Slack / Discord)",
         default=False,
     ):
-        return {}, []
+        return personal_config, []
     delivery_receipts = _q_confirm(
         "Keep content-free delivery results for seven days and enable in-product delivery tests?", default=True,
     )
@@ -6226,10 +6234,11 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
             "  ntfy topic (any unique string; treat as a password)",
             default="",
         ).strip()
-        return ({"backend": "ntfy", "ntfy_topic": topic, "delivery_receipts": delivery_receipts}, []) if topic else ({}, [])
+        return ({**personal_config, "backend": "ntfy", "ntfy_topic": topic, "delivery_receipts": delivery_receipts}, []) if topic else (personal_config, [])
     if backend == "pushover":
         return (
             {
+                **personal_config,
                 "backend": "pushover",
                 "delivery_receipts": delivery_receipts,
                 "user_key": "${PUSHOVER_USER_KEY}",
@@ -6239,12 +6248,12 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         )
     if backend == "slack":
         return (
-            {"backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
+            {**personal_config, "backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
             ["SLACK_NOTIFY_WEBHOOK"],
         )
     if backend == "discord":
         return (
-            {"backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
+            {**personal_config, "backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
             ["DISCORD_NOTIFY_WEBHOOK"],
         )
     return {}, []

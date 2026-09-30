@@ -10,7 +10,10 @@ from starlette.concurrency import run_in_threadpool
 
 from . import auth
 
+from .personal_notifications_api import router as personal_notifications_router
+
 router = APIRouter()
+router.include_router(personal_notifications_router)
 
 
 class TestRequest(BaseModel):

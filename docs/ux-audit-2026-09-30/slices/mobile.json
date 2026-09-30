@@ -8,17 +8,17 @@
   },
   {
     "id": "LW-044",
-    "status": "planned",
-    "implementation_evidence": "Shared in-place appearance flow is owned by settings_integrity; coordinated OS-system theme and text-size support there.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Settings worker commit6eaca67f1c16dd1b549e4969fb4827fa46b4fa92 supplies account/device in-place display preferences, OS system mode with live matchMedia changes, explicit theme override, shared base/chat display menu, font/density/text-size presets and rollback/Undo.",
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Integrate its implementation/evidence before updating this disposition."
+    "remaining": "Parent must integrate settings worker checkpoint with this slice. Browser/OS-follow/max-text qualification remains unrun."
   },
   {
     "id": "LW-045",
-    "status": "planned",
-    "implementation_evidence": "themes.py contrast_ratio/contrast_issues/readable_palette; settings_all_page._plan_table refuses unreadable palette saves; lightwork-theme-preview.js shows isolated form/focus/disabled/status/progress preview; legacy palettes derive readable fallback colors. test_theme_contrast.py and JS contrast regression authored.",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "themes.py contrast_ratio/contrast_issues/readable_palette; settings_all_page._plan_table refuses unreadable palette saves; lightwork-theme-preview.js shows isolated form/focus/disabled/status/progress preview; legacy palettes derive readable fallback colors. test_theme_contrast.py and JS contrast regression authored. Settings worker6eaca67 supplies shared prior-theme Undo through the same revision-bound preferences endpoint.",
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Prior-theme undo integration belongs to the shared preference flow and remains pending. Browser/background/contrast qualification unrun."
+    "remaining": "Integrate settings worker6eaca67 and mobile asset-registration38fcc2f together. Browser/background/contrast qualification remains unrun."
   },
   {
     "id": "LW-046",
@@ -177,9 +177,9 @@
   {
     "id": "LW-141",
     "status": "planned",
-    "implementation_evidence": "Reviewed notifications.py and existing batching: dispatch is organization configuration without recipient preference context. Existing behavior unchanged.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Implement recipient-scoped settings/service, timezone/DST quiet hours, subscriptions, task mute, critical exception policy, durable event dedupe and delivery receipts; depends on scoped preference foundation LW030."
+    "implementation_evidence": "personal_notifications.py validates recipient-scoped subscriptions, IANA quiet hours/daily digest, explicit organization+user critical exceptions, per-task mute and project watches; encrypted bounded personal inbox deduplicates semantic versions, rehydrates only current authorized source labels, purges revoked sources and separates available/seen. /notifications UI provides direct preference/CAS/recovery journey with own-task/assigned-decision projection. Config and installer controls added; foundation delegation supplied by settings e3ad241.",
+    "validation": "2026-09-30: Python AST 7 files, standalone JavaScript syntax 1 files and diff whitespace passed. Five DST/recipient/dedupe/mute/revocation regressions authored but unrun. No runtime/browser/provider tests or outgoing notifications executed.",
+    "remaining": "External per-person recipient/channel routing and receipts, request-less background event ingestion/delivery, transitions between page refreshes, full-history pagination and shared Copilot operation adapter remain unfinished. Implemented in-product inbox observes at most latest200 owned tasks plus bounded assigned decisions and explicitly explains visible-page polling/catch-up, not closed-page external delivery. Requires settings6eaca67 plus e3ad241 preference adapter integration."
   },
   {
     "id": "LW-142",

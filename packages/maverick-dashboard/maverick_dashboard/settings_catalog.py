@@ -865,6 +865,12 @@ SETTINGS: tuple[Setting, ...] = (
       "toggle", "Data retention", False, "maverick.workspace_journal"),
 
     # ------------------------------------------------------------ Integrations
+    S("notifications", "personal_alerts", "Allow personal notification inboxes",
+      "Let signed-in people choose subscriptions, quiet hours, daily digests and task mutes for their in-product inbox. Requires personal preferences. External personal delivery is not connected.",
+      "toggle", "Integrations", False, "maverick.personal_notifications"),
+    S("notifications", "personal_critical_bypass", "Allow personal approval and deadline exceptions",
+      "Let people explicitly allow approval and deadline alerts to bypass their personal quiet hours and digest timing. Organization operational alerts are unchanged.",
+      "toggle", "Integrations", False, "maverick.personal_notifications"),
     S("notifications", "delivery_receipts", "Keep notification delivery history",
       "Keep content-free delivery results for seven days, up to 1,000 attempts. View history and send a test on Notification delivery in Settings.",
       "toggle", "Integrations", True, "maverick.notification_receipts"),
