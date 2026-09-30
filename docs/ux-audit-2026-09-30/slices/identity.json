@@ -99,12 +99,14 @@
   },
   {
     "id": "LW-100",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "e18aa52 + 072ae1c: chat and trajectory contexts and fresh permissions endpoint combine operate with exact ownership; grant-only task reads stay read-only."
+      "e18aa52 + 072ae1c: chat and trajectory contexts and fresh permissions endpoint combine operate with exact ownership; grant-only task reads stay read-only.",
+      "Conversation worker shared authority script rechecks before click/submit and on focus/visibility; current SSR/API gate combines operate with exact task ownership, with native action revalidation.",
+      "Initial send/stop/upload/planning/project/share/resume controls are disabled for read-only users before script execution. Project onchange now uses requestSubmit, so fresh authority checks cannot be bypassed; initial role-disabled state can recover only after a fresh allowed response."
     ],
-    "validation": "Local mocked regression group for employee departures, employee-content privacy, secondary privacy surfaces, retention receipts, identity regressions and first-login defaults: 30 passed. Python AST, JavaScript syntax and whitespace checks passed. Installed/browser and live-provider acceptance remain unrun.",
-    "remaining": "Conversation worker owns actual chat template control gates and draft-preserving focus/submit revalidation; integrate and inspect their commit before marking implemented. Sessions/browser acceptance unrun."
+    "validation": "Four local Node permission tests passed, including mid-session project revocation preserving entered value, initial read-only controls, renewed authority and select interaction. Template Jinja parse, JavaScript syntax and whitespace passed; installed authenticated browser qualification remains unrun.",
+    "remaining": "Actual viewer/member/admin sessions, cross-owner approved read grants and mid-session role changes need installed authenticated browser acceptance; server ownership and permission checks remain authoritative."
   },
   {
     "id": "LW-101",

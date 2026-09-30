@@ -255,7 +255,7 @@
     {% if goal.status == 'draft' %}
     <p>AI work has not started. If all your files uploaded, try preparing the task again from this saved draft.</p>
     <form method="post" action="/chat/goal/{{ goal.id }}/recover-submission">
-      <button class="btn" type="submit">Retry preparation</button>
+      <button id="recover-submission-btn" class="btn" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Retry preparation</button>
     </form>
     {% endif %}
   </section>
@@ -293,10 +293,10 @@
     </summary>
     <ul id="attachments-list" style="list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1);"></ul>
     <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2);">
-      <button type="button" id="attach-add-btn" class="btn btn--ghost">+ Add file</button>
+      <button type="button" id="attach-add-btn" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>+ Add file</button>
       <input type="file" id="attach-add" multiple aria-label="Add files to this task"
              tabindex="-1"
-             style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
+             style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %} />
       <span id="attach-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-xs);"></span>
     </div>
   </details>
@@ -324,7 +324,7 @@
       <a href="/conversations">Browse, search and restore archived conversations</a>
     </details>
     <script src="/static/lightwork-conversation-organization.js" defer></script>
-    <p id="task-authority" role="status" data-goal="{{ goal.id }}" data-operate="{{ '1' if can_operate else '0' }}"></p>
+    <p id="task-authority" role="status" data-goal="{{ goal.id }}" data-operate="{{ '1' if can_operate else '0' }}">{% if not can_operate %}This task is read-only for your current account. Permission requests explains who can review access; your draft remains available.{% endif %}</p>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
     <details class="activity" id="work-activity"{% if goal.status == 'draft' %} hidden{% endif %}>
       <summary class="activity__bar" aria-label="Agent activity — expand to show the full work log">
@@ -360,12 +360,12 @@
         result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI,
         counts toward your spending limits and costs at most $2.00.</p>
       <label for="ps-passes">How many review rounds</label>
-      <select id="ps-passes" class="select">
+      <select id="ps-passes" class="select"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <option value="1">One round</option>
         <option value="2" selected>Up to two rounds</option>
         <option value="3">Up to three rounds</option>
       </select>
-      <button type="button" class="btn btn--primary" id="ps-run">Show planning steps</button>
+      <button type="button" class="btn btn--primary" id="ps-run"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Show planning steps</button>
       <p id="ps-status" role="status" aria-live="polite" tabindex="-1"></p>
       <div id="ps-result" hidden></div>
     </details>
@@ -374,26 +374,26 @@
     {% if projects %}
     <form method="post" action="/chat/goal/{{ goal.id }}/project" class="goal-project">
       <label class="muted" for="goal-project-sel">Project</label>
-      <select id="goal-project-sel" name="project_id" class="input" onchange="this.form.submit()">
+      <select id="goal-project-sel" name="project_id" class="input" onchange="this.form.requestSubmit()"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <option value="">— none —</option>
         {% for p in projects %}
           <option value="{{ p.id }}"{% if p.id == goal.project_id %} selected{% endif %}>{{ p.name or 'Untitled' }}</option>
         {% endfor %}
       </select>
-      <noscript><button type="submit" class="btn btn--ghost">Set</button></noscript>
+      <noscript><button type="submit" id="goal-project-save" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Set</button></noscript>
     </form>
     {% endif %}
     <div class="goal-share" data-goal="{{ goal.id }}">
       {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">Review task files</a>{% endif %}
       <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">Download or share full history</a>
-      <button type="button" id="share-create" class="btn btn--ghost">Review share link</button>
+      <button type="button" id="share-create" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Review share link</button>
       <input type="text" id="share-url" class="input" readonly aria-label="Share link"
              style="display: none; max-width: 28rem;" onclick="this.select()">
       <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
       <ul id="share-list" class="share-list">
         {% for s in share_links %}
           <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
-            <button type="button" class="btn btn--ghost share-revoke" data-id="{{ s.id }}">Revoke</button></li>
+            <button type="button" class="btn btn--ghost share-revoke"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %} data-id="{{ s.id }}">Revoke</button></li>
         {% endfor %}
       </ul>
     </div>
@@ -428,12 +428,12 @@
       </details>
       <script src="/static/lightwork-budget-guidance.js" defer></script>
       <form id="halt-resume-form" class="halt-card__row">
-        <button id="halt-resume" class="btn btn--primary" type="submit">{{ 'Start this task' if pilot_prepared else 'Try again' }}</button>
+        <button id="halt-resume" class="btn btn--primary" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ 'Start this task' if pilot_prepared else 'Try again' }}</button>
         <details class="halt-card__budget">
           <summary>Set a spending limit for this attempt</summary>
           <div class="field">
             <label for="halt-resume-budget">Spending limit (USD, optional)</label>
-            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling is not none %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling is not none %}Up to ${{ spend_ceiling_text }}{% else %}Optional task limit{% endif %}" aria-describedby="halt-resume-budget-hint">
+            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling is not none %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling is not none %}Up to ${{ spend_ceiling_text }}{% else %}Optional task limit{% endif %}" aria-describedby="halt-resume-budget-hint"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
             <p id="halt-resume-budget-hint" class="muted">This limits the next attempt.{% if spend_ceiling %} Leave it empty to use your workspace’s spending limit of ${{ spend_ceiling_text }}.{% endif %} Your organization’s spending and safety limits still apply.</p>
           </div>
         </details>
@@ -461,16 +461,16 @@
                 aria-label="Your answer to the agent's question, or your next message"
                 aria-describedby="question-text" class="ask__field"></textarea>
       <input type="file" name="files" id="reply-files" multiple aria-label="Attach files to your message" tabindex="-1"
-             style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
-      <button type="button" id="reply-attach" class="ask__icon" aria-label="Attach files">
+             style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %} />
+      <button type="button" id="reply-attach" class="ask__icon" aria-label="Attach files"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11.7 5.3 6 11a2 2 0 0 1-2.83-2.83l5.66-5.66a3 3 0 0 1 4.24 4.24l-5.65 5.66" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
       <button type="button" id="answer-mic" class="ask__icon" aria-label="Dictate by voice"
-              aria-pressed="false" hidden>
+              aria-pressed="false" hidden{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="6" y="1.5" width="4" height="8" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       </button>
-      <button id="cancel-btn" class="ask__stop" type="button"{% if not run_open %} hidden{% endif %}>Stop</button>
-      <button type="submit" id="answer-send" class="ask__send" aria-label="Send">
+      <button id="cancel-btn" class="ask__stop" type="button"{% if not run_open %} hidden{% endif %}{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Stop</button>
+      <button type="submit" id="answer-send" class="ask__send" aria-label="Send"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
           <path d="M9 14.5V4M9 4l-4.5 4.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>

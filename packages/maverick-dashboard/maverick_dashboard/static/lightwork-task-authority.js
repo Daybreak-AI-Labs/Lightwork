@@ -4,10 +4,11 @@
   var root = document.getElementById('task-authority');
   if (!root) return;
   var allowed = root.dataset.operate === '1', checking = null;
-  var selector = '#answer-send,#cancel-btn,#edit-toggle,#edit-save,#feedback-up,#feedback-down,#share-create,#share-confirm,.share-revoke,#signoff-approve,#signoff-reject,#attach-add-btn,#reply-attach,#reply-files,#halt-resume,#ps-run,#answer-mic';
+  var selector = '#answer-send,#cancel-btn,#edit-toggle,#edit-save,#feedback-up,#feedback-down,#share-create,#share-confirm,.share-revoke,#signoff-approve,#signoff-reject,#attach-add-btn,#reply-attach,#reply-files,#halt-resume,#ps-run,#ps-passes,#answer-mic,#attach-add,#goal-project-sel,#goal-project-save,#recover-submission-btn';
   var restoring = new WeakMap(), passed = new WeakSet();
   function project() {
     document.querySelectorAll(selector).forEach(function (node) {
+      if (node.dataset.permissionDisabled === '1') { restoring.set(node, false); delete node.dataset.permissionDisabled; }
       if (!allowed && !node.disabled) { restoring.set(node, false); node.disabled = true; }
       else if (allowed && restoring.has(node)) { node.disabled = restoring.get(node); restoring.delete(node); }
     });
@@ -28,14 +29,14 @@
   }
   document.addEventListener('click', async function (event) {
     var button = event.target.closest(selector);
-    if (!button) return;
+    if (!button || button.tagName === 'SELECT') return;
     if (passed.has(button)) { passed.delete(button); return; }
     event.preventDefault(); event.stopImmediatePropagation();
     if (await refresh()) { passed.add(button); button.click(); }
   }, true);
   document.addEventListener('submit', async function (event) {
     var form = event.target;
-    if (!form.matches('#answer-form,#halt-resume-form,.goal-project')) return;
+    if (!form.matches('#answer-form,#halt-resume-form,.goal-project,form[action$="/recover-submission"]')) return;
     if (passed.has(form)) { passed.delete(form); return; }
     event.preventDefault(); event.stopImmediatePropagation();
     if (await refresh()) { passed.add(form); form.requestSubmit(); }
