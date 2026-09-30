@@ -23,7 +23,7 @@ async function harness() {
     const at=overrides.findIndex(item=>item.match(call));
     if(at>=0) return overrides.splice(at,1)[0].run(call);
     if(url.includes("/episode-capture/withdrawal")) return response({...state.record,episode_sha256:"b".repeat(64),review_sha256:"c".repeat(64)});
-    if(url.includes("/copilot/context")) return response({boundaries:[],suggested_questions:[]});
+    if(url.includes("/copilot/context")) return response({client_context:"c".repeat(64),boundaries:[],suggested_questions:[]});
     if(url.includes("/copilot/operations?")) return response(envelope());
     if(url.endsWith("/prepare")) return response({...envelope(),operation_id:operationId,token:"sealed-review",expires_at:Date.now()/1000+600});
     if(url.endsWith("/execute")) {state.record=record({revision:4,status:"withdrawn",withdrawal_available:false});return response({...envelope(),operation_id:operationId,outcome:"confirmed"});}

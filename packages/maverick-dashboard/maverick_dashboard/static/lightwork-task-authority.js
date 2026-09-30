@@ -3,7 +3,7 @@
   'use strict';
   var root = document.getElementById('task-authority');
   if (!root) return;
-  var allowed = root.dataset.operate === '1', checking = null;
+  var allowed = root.dataset.operate === '1', checking = null, reason = '';
   var selector = '#answer-send,#cancel-btn,#edit-toggle,#edit-save,#feedback-up,#feedback-down,#share-create,#share-confirm,.share-revoke,#signoff-approve,#signoff-reject,#attach-add-btn,#reply-attach,#reply-files,#halt-resume,#halt-resume-budget,#ps-run,#ps-passes,#answer-mic,#attach-add,#goal-project-sel,#goal-project-save,#recover-submission-btn';
   var restoring = new WeakMap(), passed = new WeakSet();
   function project() {
@@ -12,7 +12,7 @@
       if (!allowed && !node.disabled) { restoring.set(node, false); node.disabled = true; }
       else if (allowed && restoring.has(node)) { node.disabled = restoring.get(node); restoring.delete(node); }
     });
-    var text = allowed ? '' : 'This task is read-only, or your current permission could not be confirmed. Your draft has been kept.';
+    var text = allowed ? '' : (reason || 'This task is read-only, or your current permission could not be confirmed. Your draft has been kept.');
     if (root.textContent !== text) root.textContent = text;
   }
   async function refresh() {
@@ -22,7 +22,8 @@
         var response = await fetch('/api/v1/chat/goal/' + root.dataset.goal + '/permissions', {credentials: 'same-origin', cache: 'no-store'});
         var body = response.ok ? await response.json() : null;
         allowed = !!(body && body.can_operate === true);
-      } catch (_) { allowed = false; }
+        reason = body && typeof body.reason === "string" ? body.reason : "";
+      } catch (_) { allowed = false; reason = ""; }
       project(); return allowed;
     })();
     try { return await checking; } finally { checking = null; }
