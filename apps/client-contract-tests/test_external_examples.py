@@ -1,4 +1,4 @@
-"""Controlled contracts for the maintained docs; authored, not executed in this audit."""
+"""Controlled contracts for maintained examples, using synthetic external boundaries."""
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace

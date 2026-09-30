@@ -19,6 +19,9 @@ The audit adds `native-ownership.test.cjs` for CLI timeout/cancellation, secure
 token migration, host/credential changes and safe external-client failures, plus
 `test_external_examples.py` for approval gating, truthful finish and REST receipt
 recovery. The latter uses pytest and requests from the Python development
-environment. Tests are authored **but not run**, following the user's instruction
-to build first and test later. No native SDK, browser, accessibility or live-provider
-qualification is implied by source review.
+environment. Local qualification is now authorized. All 60 Node cases and all 14 controlled
+external Python example cases passed on 2026-09-30; two CLI budget-preview cases
+also passed. The exact source, pinned dependency versions, log hashes and limits
+are in [native-client-qualification.json](../../docs/ux-audit-2026-09-30/native-client-qualification.json).
+These use controlled host/transport APIs, including real Lua source in Fengari.
+They do not qualify installed IDEs, devices, accessibility or live providers.
