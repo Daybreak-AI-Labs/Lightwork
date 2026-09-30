@@ -239,7 +239,7 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Programs using the old token will be refused, and anyone holding the new "
                   "one can do everything an administrator can.",
           aliases="bearer token api access remote"),
-        S("dashboard", "api_keys", "API keys for scripts and integrations",
+        S("dashboard", "api_keys", "Access keys for scripts and integrations",
           "Let people create their own keys on their account page, and administrators "
           "create service accounts for programs. A key does only what its scopes allow and "
           "never more than its owner's role, and it stops on its expiry date.",
@@ -247,7 +247,7 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           env=("MAVERICK_DASHBOARD_API_KEYS",), weaker=True,
           warning="Programs holding a key will be able to act as the key's owner, within "
                   "the key's scopes.",
-          aliases="api keys tokens scripts integrations service accounts"),
+          aliases="api keys access keys tokens scripts integrations service accounts"),
         S("dashboard", "api_key_default_days", "How long a new key lasts",
           "The number of days a key works unless the person creating it picks fewer.",
           "number", grp, 90, "maverick.config", subgroup=access,

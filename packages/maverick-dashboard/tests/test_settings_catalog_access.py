@@ -63,6 +63,10 @@ def audit_rows(monkeypatch):
     rows: list[dict] = []
 
     def capture(kind, **payload):
+        # The settings-change rows only: using the server token (as_token)
+        # also writes one rate-limited break-glass row per process.
+        if getattr(kind, "value", kind) == "break_glass_token_used":
+            return True
         rows.append({"kind": kind, **payload})
         return True
 
@@ -122,6 +126,7 @@ _TEXT = {
     "auth.saml.default_relay_state": "/goals",
     "auth.proxy.header": "X-Auth-User",
     "dashboard.public_url": "https://lightwork.example.com",
+    "dashboard.api_key_prefix": "acme_",  # pragma: allowlist secret - a sample prefix
     "kms.key_id": "arn:aws:kms:us-east-1:123:key/abc",
     "kms.region": "eu-west-1",
     "kms.address": "https://vault.example.com",

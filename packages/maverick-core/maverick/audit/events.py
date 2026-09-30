@@ -270,9 +270,9 @@ class EventKind:
     # role, actor. BREAK_GLASS_TOKEN_USED: the static dashboard token (not a
     # personal key) authenticated an API request; payload: path, client,
     # rate-limited to one row per process per hour.
-    API_KEY_CHANGED = "api_key_changed"
+    API_KEY_CHANGED = "api_key_changed"  # pragma: allowlist secret - an event name
     SERVICE_ACCOUNT_CHANGED = "service_account_changed"
-    BREAK_GLASS_TOKEN_USED = "break_glass_token_used"
+    BREAK_GLASS_TOKEN_USED = "break_glass_token_used"  # pragma: allowlist secret - an event name
     EXTERNAL_AGENT_ENROLLED = "external_agent_enrolled"
     EXTERNAL_CREDENTIAL_MINTED = "external_credential_minted"
     EXTERNAL_RUN_INGESTED = "external_run_ingested"
