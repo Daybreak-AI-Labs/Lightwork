@@ -294,19 +294,30 @@ def _unseal_config_tree(value: object) -> object:
     Dashboard-managed credentials are deployment-global configuration, so they
     must use the process/deployment key even when a request currently carries a
     tenant context.  Legacy plaintext remains readable; a genuine ciphertext
-    that cannot be authenticated fails closed through ``unseal_from_str``.
+    that cannot be authenticated fails closed through ``unseal_many_from_str``.
+    Each key is resolved once within this read, never cached across config
+    reads, so rotations and key-file permission changes remain observable.
     Re-entrant loads (see ``_UNSEALING``) receive the tokens unopened.
     """
     if not _tree_contains_sealed_value(value) or _UNSEALING.get():
         return value
     token = _UNSEALING.set(True)
     try:
+        sealed: dict[str, None] = {}
+
+        def collect(item: object) -> None:
+            if isinstance(item, str) and crypto_at_rest.is_sealed_str(item):
+                sealed[item] = None
+            elif isinstance(item, dict):
+                for child in item.values():
+                    collect(child)
+            elif isinstance(item, (list, tuple)):
+                for child in item:
+                    collect(child)
+
         def walk(item: object) -> object:
             if isinstance(item, str):
-                return (
-                    crypto_at_rest.unseal_from_str(item)
-                    if crypto_at_rest.is_sealed_str(item) else item
-                )
+                return opened.get(item, item)
             if isinstance(item, dict):
                 return {key: walk(child) for key, child in item.items()}
             if isinstance(item, list):
@@ -316,6 +327,8 @@ def _unseal_config_tree(value: object) -> object:
             return item
 
         with crypto_at_rest.deployment_key_scope():
+            collect(value)
+            opened = dict(zip(sealed, crypto_at_rest.unseal_many_from_str(list(sealed)), strict=True))
             return walk(value)
     finally:
         _UNSEALING.reset(token)
