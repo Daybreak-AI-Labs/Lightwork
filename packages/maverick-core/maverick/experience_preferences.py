@@ -20,8 +20,9 @@ DEFAULTS = {
     "output_style": "", "custom_style_name": "", "custom_style": "",
     "theme": "dark", "font": "default", "density": "comfortable", "text_size": "standard",
     "start_page": "/chat", "favorites": [], "today_cards": ["tasks", "decisions", "recent"],
+    "notification_preferences": {},
 }
-PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "start_page"})
+PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "start_page", "notification_preferences"})
 CHOICES = {"verbosity": {"brief", "balanced", "detailed"},
            "font": {"default", "dyslexic"}, "density": {"comfortable", "compact"},
            "text_size": {"standard", "large", "larger"}}
@@ -122,6 +123,9 @@ def _validate(key: str, value):
 
     if key not in DEFAULTS:
         raise ValueError("That preference is not supported. Permissions and security policies cannot be changed here.")
+    if key == "notification_preferences":
+        from .personal_notifications import validate_preferences
+        return validate_preferences(value)
     if key == "preferred_name":
         if not isinstance(value, str):
             raise ValueError("Enter a preferred name as text.")

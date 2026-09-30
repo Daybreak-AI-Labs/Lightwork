@@ -3,7 +3,7 @@
 {% block content %}
 {% from "_hero.html" import hero %}
 {{ hero('Your account', 'Your preferences', subtitle='Make Lightwork fit your work', lede='Choose writing and display preferences. These choices never grant tools or change security, memory retention, or approval rules.') }}
-<p><a class="btn btn--ghost" href="/account">Your account</a> <a class="btn btn--ghost" href="/today">Today</a></p>
+<p><a class="btn btn--ghost" href="/account">Your account</a> <a class="btn btn--ghost" href="/today">Today</a> <a class="btn btn--ghost" href="/notifications">Your notifications</a></p>
 {% if preference_thread %}<p class="panel">These response preferences apply to this conversation. Clear an override to follow your personal defaults.</p>{% endif %}
 <form id="preference-form" class="panel">
 <label>Apply changes to <select class="select" id="preference-scope">
