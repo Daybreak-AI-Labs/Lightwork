@@ -2552,8 +2552,18 @@ def export_ropa_art30() -> list[dict]:
 # DSAR request tracker -- over the real fulfillment machinery
 # --------------------------------------------------------------------------- #
 
-DSAR_KINDS = ("access", "portability", "erasure")
+#: Tracker kinds. The first three run through the real fulfillment
+#: machinery; the rest are handled by an operator and marked answered.
+DSAR_KINDS = (
+    "access", "portability", "erasure", "correction", "opt_out",
+    "limit_sensitive", "objection", "restriction", "withdraw_consent",
+)
+#: Fallback clock when a request carries no jurisdiction (the legacy
+#: dashboard form). Every request with a jurisdiction uses the verified
+#: regime table in :mod:`maverick.rights_deadlines` instead.
 DSAR_DUE_DAYS = 30  # GDPR Art. 12(3): one month
+DSAR_SOURCES = ("dashboard", "message", "public_form")
+DSAR_DUE_SOON_DAYS = 7
 _DSAR_EXPORT_SCHEMA = 1
 _DSAR_EXPORT_META = "_lightwork_export"
 _ERASURE_OPERATOR_INSTRUCTION = (
@@ -2666,21 +2676,98 @@ def _write_dsar_export_artifact(path: Path, intent: dict, bundle: dict) -> str:
     return digest
 
 
+def dsar_clock(record: dict, *, now: float | None = None) -> dict:
+    """The live clock fields for one request, computed from the stored
+    deadlines so the list, the detail page and the alerting (work package
+    I2) all read the same numbers.
+
+    ``effective_due_at`` is ``extended_until`` when an extension was recorded,
+    else ``due_at``; ``days_left`` counts to it; ``overdue`` and ``due_soon``
+    apply only while the request is still being worked (``open``,
+    ``unverified``, ``awaiting_erasure``); ``acknowledge_overdue`` fires when
+    a regime fixes an acknowledgement deadline that passed unacknowledged."""
+    moment = time.time() if now is None else float(now)
+    due = float(record.get("extended_until") or record.get("due_at") or moment)
+    days_left = int((due - moment) // 86400)
+    active = record.get("status") in ("open", "unverified", "awaiting_erasure")
+    ack_by = record.get("acknowledge_by")
+    return {
+        "effective_due_at": due,
+        "days_left": days_left,
+        "overdue": active and days_left < 0,
+        "due_soon": active and 0 <= days_left <= DSAR_DUE_SOON_DAYS,
+        "acknowledge_overdue": (
+            active and ack_by is not None and moment > float(ack_by)
+            and not record.get("acknowledged_at")
+        ),
+    }
+
+
+def _dsar_deadlines(
+    kind: str, jurisdiction: str, received_at: float, internal_target_days: int,
+) -> dict:
+    """``due_at`` and friends for a new request; the regime table when a
+    jurisdiction is recorded, else the legacy 30-day fallback."""
+    if not jurisdiction:
+        return {
+            "jurisdiction": "",
+            "due_at": received_at + DSAR_DUE_DAYS * 86400,
+            "due_basis": "fallback_30_days",
+            "acknowledge_by": None,
+            "extension_notice_by": None,
+        }
+    from . import rights_deadlines
+
+    clock = rights_deadlines.compute_clock(
+        jurisdiction, rights_deadlines.PUBLIC_TYPE.get(kind, kind), received_at,
+        internal_target_days=internal_target_days,
+    )
+    return {
+        "jurisdiction": jurisdiction,
+        "due_at": clock["due_at"],
+        "due_basis": clock["due_basis"],
+        "acknowledge_by": clock["acknowledge_by"],
+        "extension_notice_by": clock["extension_notice_by"],
+    }
+
+
 def open_dsar(
     subject_id: str,
     kind: str,
     *,
     channel: str = "",
     opened_by: str = "",
+    jurisdiction: str = "",
+    source: str = "dashboard",
+    status: str = "open",
+    requester: dict | None = None,
+    received_at: float | None = None,
+    internal_target_days: int = DSAR_DUE_DAYS,
     _intake: dict | None = None,
 ) -> dict:
+    """Open a tracked request.
+
+    ``jurisdiction`` selects the verified regime clock (``due_at``,
+    ``acknowledge_by`` and the allowed extension); without one the legacy
+    30-day fallback applies and ``due_basis`` says so. ``status`` may be
+    ``unverified`` for a request whose requester has not yet proved they
+    control the address (the public form); it becomes ``open`` through
+    :func:`verify_dsar`. ``requester`` carries what the requester typed
+    (name, relationship, message, authorised-agent flag), bounded here."""
     kind = (kind or "").strip().lower()
     if kind not in DSAR_KINDS:
         raise ValueError(f"kind must be one of {DSAR_KINDS}")
+    if source not in DSAR_SOURCES:
+        raise ValueError(f"source must be one of {DSAR_SOURCES}")
+    if status not in ("open", "unverified"):
+        raise ValueError("status must be open or unverified")
+    jurisdiction = (jurisdiction or "").strip().lower()[:32]
     now = time.time()
+    received = now if received_at is None else float(received_at)
     subject = (subject_id or "").strip()[:200]
     if not subject:
         raise ValueError("subject_id is required")
+    deadlines = _dsar_deadlines(kind, jurisdiction, received, internal_target_days)
     record = {
         "id": _DSAR.new_id(),
         "subject_id": subject,
@@ -2688,10 +2775,27 @@ def open_dsar(
         "kind": kind,
         "opened_by": _actor_label(opened_by),
         "created_at": now,
-        "due_at": now + DSAR_DUE_DAYS * 86400,
-        "status": "open",
+        "received_at": received,
+        **deadlines,
+        "extended_until": None,
+        "extension_reason": "",
+        "acknowledged_at": None,
+        "source": source,
+        "verification": (
+            {"status": "unverified"} if status == "unverified"
+            else {"status": "not_required"}
+        ),
+        "status": status,
         "fulfillment": None,
     }
+    if requester:
+        record["requester"] = {
+            "name": str(requester.get("name") or "")[:200],
+            "relationship": str(requester.get("relationship") or "")[:32],
+            "authorised_agent": bool(requester.get("authorised_agent")),
+            "message": str(requester.get("message") or "")[:4000],
+            "property": str(requester.get("property") or "")[:64],
+        }
     if _intake is not None:
         signals = _intake.get("signals") if isinstance(_intake, dict) else None
         excerpt = _intake.get("excerpt") if isinstance(_intake, dict) else None
@@ -2776,6 +2880,7 @@ def open_dsar_from_message(text: str, *, channel: str = "",
         hit["kind"],
         channel=channel,
         opened_by=opened_by,
+        source="message",
         _intake={
             "signals": hit["signals"],
             "excerpt": (text or "").strip()[:300],
@@ -2813,10 +2918,123 @@ def list_dsars() -> list[dict]:
         if "status" not in r:  # not a request record (defensive)
             continue
         r = dict(r)
-        r["days_left"] = int((float(r.get("due_at", now)) - now) // 86400)
-        r["overdue"] = r["status"] == "open" and r["days_left"] < 0
+        r.update(dsar_clock(r, now=now))
         out.append(r)
     return out
+
+
+def _dsar_mutation(
+    request_id: str, mutate, *, action: str, actor: str,
+) -> dict | None:
+    """Run one audited mutation on a request; ``None`` when it does not
+    exist. ``mutate`` returns True when it changed the record."""
+    changed = False
+
+    def _mut(record: dict) -> None:
+        nonlocal changed
+        if mutate(record):
+            _queue_audit(record, action, actor)
+            changed = True
+
+    saved = _DSAR.update(str(request_id or "")[:64], _mut)
+    if saved is not None and (
+        changed or isinstance(saved.get("_audit_pending"), (dict, list))
+    ):
+        saved = _audit_mutation(_DSAR, "dsar", saved)
+    return saved
+
+
+def verify_dsar(
+    request_id: str, *, method: str, reference: str, verified_by: str = "",
+) -> dict | None:
+    """Mark the requester verified and move an ``unverified`` request to
+    ``open``. ``method`` is the fulfillment vocabulary (``email_challenge``
+    when the requester used the single-use link the platform sent them --
+    the one method this platform performs itself)."""
+    from .dsar_fulfillment import IDENTITY_METHODS
+
+    if method not in IDENTITY_METHODS:
+        raise ValueError(f"method must be one of {IDENTITY_METHODS}")
+    note = (reference or "").strip()[:512]
+
+    def _verify(record: dict) -> bool:
+        if record.get("verification", {}).get("status") == "verified":
+            return False
+        record["verification"] = {
+            "status": "verified", "method": method, "reference": note,
+            "verified_at": time.time(), "verified_by": _actor_label(verified_by),
+        }
+        if record.get("status") == "unverified":
+            record["status"] = "open"
+        return True
+
+    return _dsar_mutation(request_id, _verify, action="verify", actor=verified_by)
+
+
+def acknowledge_dsar(request_id: str, *, acknowledged_by: str = "") -> dict | None:
+    """Record that receipt was confirmed to the requester (the CCPA's
+    10-business-day step; a courtesy elsewhere)."""
+
+    def _ack(record: dict) -> bool:
+        if record.get("acknowledged_at"):
+            return False
+        record["acknowledged_at"] = time.time()
+        record["acknowledged_by"] = _actor_label(acknowledged_by)
+        return True
+
+    return _dsar_mutation(request_id, _ack, action="acknowledge", actor=acknowledged_by)
+
+
+def extend_dsar(
+    request_id: str, *, reason: str, days: int | None = None,
+    extended_by: str = "",
+) -> dict | None:
+    """Record a response-period extension with its reason, validated against
+    the request's regime (length cap; notice before the first period ends).
+    A request without a jurisdiction may be extended by up to 60 days."""
+    why = (reason or "").strip()[:2000]
+    if not why:
+        raise ValueError("extension reason is required")
+    now = time.time()
+
+    def _extend(record: dict) -> bool:
+        if record.get("status") not in ("open", "unverified", "awaiting_erasure"):
+            raise ValueError("only a request still being worked can be extended")
+        if record.get("extended_until"):
+            raise ValueError("this request was already extended once")
+        if record.get("jurisdiction"):
+            from . import rights_deadlines
+
+            clock = rights_deadlines.compute_clock(
+                record["jurisdiction"],
+                rights_deadlines.PUBLIC_TYPE.get(record["kind"], record["kind"]),
+                float(record.get("received_at") or record.get("created_at")),
+            )
+            clock["due_at"] = float(record["due_at"])
+            until = rights_deadlines.extension_for(clock, days=days, now=now)["extended_until"]
+        else:
+            if days is None or not 1 <= int(days) <= 60:
+                raise ValueError("extension days must be 1-60")
+            until = float(record["due_at"]) + int(days) * 86400
+        record["extended_until"] = until
+        record["extension_reason"] = why
+        record["extended_at"] = now
+        record["extended_by"] = _actor_label(extended_by)
+        return True
+
+    return _dsar_mutation(request_id, _extend, action="extend", actor=extended_by)
+
+
+def annotate_dsar(request_id: str, mutate, *, action: str, actor: str = "") -> dict | None:
+    """Audited free-form annotation for sibling modules (the public form
+    stores its token digests and email log this way). ``mutate`` returns
+    True when it changed the record."""
+    return _dsar_mutation(request_id, mutate, action=action, actor=actor)
+
+
+def iter_dsar_records() -> list[dict]:
+    """Raw stored requests (no clock fields), for digest lookups."""
+    return [r for r in _DSAR.list() if "status" in r]
 
 
 def dsar_estate_worksheet(request_id: str) -> dict:
@@ -2974,6 +3192,18 @@ def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
                 "export_schema": _DSAR_EXPORT_SCHEMA,
                 "artifact_sha256": artifact_sha256,
             }
+            _queue_audit(record, "fulfill", fulfilled_by)
+            changed = True
+            return
+
+        if record.get("kind") != "erasure":
+            # Correction, opt-out, objection and the like are carried out by
+            # an operator in the systems concerned; the tracker records that
+            # a named person marked them answered.
+            record["status"] = "fulfilled"
+            record["fulfilled_at"] = time.time()
+            record["fulfilled_by"] = _actor_label(fulfilled_by)
+            record["fulfillment"] = {"handled": "manually"}
             _queue_audit(record, "fulfill", fulfilled_by)
             changed = True
             return
@@ -3292,7 +3522,9 @@ def program_report(assessment_types: set | None = None) -> dict:
 
 __all__ = [
     "AI_ACT_NOTE", "BREACH_NOTIFY_HOURS", "DPA_CHECKLIST", "DSAR_DUE_DAYS",
-    "DSAR_KINDS", "close_incident", "decide_incident_notification",
+    "DSAR_DUE_SOON_DAYS", "DSAR_KINDS", "DSAR_SOURCES", "acknowledge_dsar",
+    "annotate_dsar", "dsar_clock", "extend_dsar", "iter_dsar_records",
+    "verify_dsar", "close_incident", "decide_incident_notification",
     "list_incidents", "open_incident", "privacy_program_context_heads", "program_report",
     "ROPA_FIELDS", "RecordConflict", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
