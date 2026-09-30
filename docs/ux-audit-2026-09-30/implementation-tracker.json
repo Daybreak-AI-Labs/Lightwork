@@ -16,21 +16,33 @@
     "category": "Conversation and background work",
     "status": "planned",
     "implementation_evidence": [
-      "Existing typed learning-example operations remain preserved."
+      "Shared typed operation catalog foundation/settings adapter supplied by settings worker 5b22e3b.",
+      "product_operations_tasks.py registers native current task projection, text clarification admission/receipt recovery, CAS saved-result edit and fixed project-review responses. Explicit human confirmation, current owner/membership, source revision and exact native receipt replay remain shared with UI.",
+      "docs/ux-audit-2026-09-30/conversation-operation-matrix.md tracks actual behavior and limits."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Expand shared typed operation catalog to task/clarification/review/schedule/connection/artifact operations and carry freshness across interfaces."
+    "validation": "Ruff, AST and whitespace checks passed. Native regression tests authored; root coordinates full local suites after implementation per latest user authorization. No provider calls.",
+    "remaining": "Family coverage and remaining stop/restart, accepted transfer and selected bundle native adapters still in progress; do not count catalog infrastructure alone as full product parity."
   },
   {
     "id": "LW-003",
     "title": "Stop silently dropping attachments on clarification answers",
     "category": "Conversation and background work",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Clarification mode disables attachment selection, explains unsupported file answers and refuses to clear or silently submit a selected batch. Text/files remain intact."
+      "ChatThreads.answer_with_evidence atomically validates current owner/question fingerprint, admits verified prepared evidence, saves answer, reserves last-question restart and records actor-bound idempotent receipt using root v42 goal_mutation_receipts.",
+      "Multipart /answer-with-files stages and validates the complete batch; native local document extraction must finish before admission. Concurrent answers refuse before publication; transaction failures roll back metadata and clean attempt-exclusive unreferenced files when commit state is known.",
+      "Composer snapshots text/files before locking controls, preserves work on failures and uncertain responses, checks durable answer receipts, and replays the same operation without a second restart. Context mismatch clears private composer state; a changed question requires renewed review.",
+      "Question projection includes current question version and latest accepted answer receipt for reload recovery.",
+      "Question-file policy is explicit before selection: documents/PDFs/images/text are admitted; audio/video requires a separately reviewed transcription task, preventing automatic paid transcription or retry. Existing optional attachment S3 mirror semantics are preserved."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Atomic text+file clarification admission, extraction readiness, version-bound answer and replay receipt still required; mitigation is not full acceptance."
+    "validation": [
+      "Python AST for 8 changed/new units, 7 JavaScript syntax units and git whitespace passed. Native atomic-race/upload/replay/permission/context regression tests authored.",
+      "User has now authorized local suites after all requested implementation; root coordinates those suites. No suites or provider calls executed in this checkpoint."
+    ],
+    "remaining": [
+      "Run native SQLite/PostgreSQL admission/concurrency, authenticated browser retained-file and account-switch cases, and installed attachment readiness checks.",
+      "Verify configured multi-host attachment mirroring separately; existing mirror remains best-effort. A process crash with indeterminate database availability retains private evidence instead of risking deletion of committed files."
+    ]
   },
   {
     "id": "LW-004",
@@ -211,7 +223,7 @@
     "implementation_evidence": [
       "goal_mutations.edit_result; migration 42 on SQLite/Postgres; api.edit_deliverable; chat_goal comparison; tests/test_goal_mutations.py"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Runtime concurrency/parity and receipt fault-injection qualification remain unrun. Combine companion worker truthful learning receipt fields during integration."
   },
   {
@@ -222,7 +234,7 @@
     "implementation_evidence": [
       "settings_all_page._revision binds effective layers and catalog environment; _catalog_update_locked compares/revalidates/writes/audits under settings_store RLock+cross-process fence; client explicit conflict comparison"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Concurrent authenticated A/B and deployment-layer qualification unrun. Existing catalog test fixtures need reviewed revision fields for the new required API contract."
   },
   {
@@ -233,7 +245,7 @@
     "implementation_evidence": [
       "lightwork-settings-all.js dirty beforeunload for every loaded row; opt-in recovery only safe scalar/list/picker controls through encrypted draft service; secrets/documents/table content excluded"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Browser reload/navigation/cancel matrix unrun. Table edits receive loss warnings; policy/credential tables are deliberately not persisted in recovery."
   },
   {
@@ -244,7 +256,7 @@
     "implementation_evidence": [
       "lightwork-settings-all.js commit locks submitted inputs/selects/textareas/buttons, retains prior disabled states, preserves dirty unrelated rows"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Delay-response browser cases unrun."
   },
   {
@@ -255,7 +267,7 @@
     "implementation_evidence": [
       "settings.html section submit uses in-place fetch with submitted control lock, section-only dirty clearing/password clearing, explicit saved vs pending notice and partial appearance receipt"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Browser/provider form failure matrix unrun; no provider calls made."
   },
   {
@@ -266,7 +278,7 @@
     "implementation_evidence": [
       "preferences_api display POST; shared _display_preferences.html; lightwork-ui immediate class/text-size preview, persistence, rollback and Undo without navigation"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Scroll/focus/editor/reload browser qualification unrun."
   },
   {
@@ -277,7 +289,7 @@
     "implementation_evidence": [
       "lightwork-chat-drafts.js wraps main/followup composer with encrypted account/tenant/thread recovery and attachment reselection copy; successful main sends await draft clear, fields locked during dispatch"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Conversation worker must integrate followup acknowledged-send event AND await clear before navigation while locking submitted fields. Auth expiry/restart/multitab matrix unrun."
   },
   {
@@ -288,7 +300,7 @@
     "implementation_evidence": [
       "setup_guide prepare/install binds bytes + account/workspace + current sources and referenced environment; complete catalog and opaque dedicated-field impact rows include Added/Removed/Changed, inherited override/disabled flags and activation timing; exact receipts and conflict fence from 6eaca67"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Controlled config races and exact-byte/environment-reference scenarios authored, unrun. Unclassified dedicated fields withhold values and conservatively flag possible restart rather than claiming live activation."
   },
   {
@@ -299,7 +311,7 @@
     "implementation_evidence": [
       "setup_guide durable reviewed/pending/uncertain/confirmed receipts; install requested/confirmed audit stages; GET result + explicit POST reconcile observed current bytes; no-op distinguished; random backup suffix"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Filesystem/audit failure injection and lost-ack qualification unrun. Reconciliation records observed current bytes; it does not claim an uncertain original write occurred."
   },
   {
@@ -310,7 +322,7 @@
     "implementation_evidence": [
       "goal_mutations.create_child durable actor/op/payload receipt transaction; graph_editor pending guard/readonly title; per-account/tenant/parent/title session operation token; created child named+selected"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Browser lost acknowledgement/reload/double-click and Postgres qualification unrun."
   },
   {
@@ -321,7 +333,7 @@
     "implementation_evidence": [
       "goal_tree nodes include updated_at; required expected revision in RetitleIn/ReparentIn; goal_mutations.edit_structure transaction CAS+cycle check; graph conflict reload preserves title/parent draft"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Concurrent map/backend parity qualification unrun. Shared service available to authorized tool integrations; existing dashboard routes require reviewed versions."
   },
   {
@@ -330,10 +342,10 @@
     "category": "Personalization and settings",
     "status": "planned",
     "implementation_evidence": [
-      "Encrypted scoped hierarchy, global-only policy ceilings, named-account runtime, source/inherit controls and in-place conflict comparison; organization policy editor settings_catalog_personalization; display defaults and personal-only pins/cards; notification adapter e3ad241 + peer cdab036"
+      "Encrypted scoped hierarchy, global-only policy ceilings, named-account runtime, source/inherit controls and in-place conflict comparison; organization policy editor settings_catalog_personalization; display defaults and personal-only pins/cards; notification adapter e3ad241 + peer cdab036; typed shared Copilot preferences.status/update use native scope/context/CAS with encrypted atomic receipt and explicit before/after review"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Memory narrowing and erasure require verified dashboard-principal-to-channel/store mapping. Root owns template preference adapters and Today projections. Authorized Copilot preference journey remains to implement; no placeholder memory toggle."
+    "validation": "17 focused local Python tests passed (registry freshness/context/confirmation/idempotence and preference inheritance/receipts). Python AST, two JS node --check and targeted Ruff passed. No live provider calls. Broader integrated runtime/browser tests pending.",
+    "remaining": "Memory narrowing and erasure require verified dashboard-principal-to-channel/store mapping. Root owns template preference adapters and Today projections. Native Copilot writing/display preference journey implemented; no placeholder memory toggle."
   },
   {
     "id": "LW-031",
@@ -343,7 +355,7 @@
     "implementation_evidence": [
       "persona.style_choices generated from runtime STYLES; settings_catalog uses shared registry and descriptions"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Roundtrip catalog/runtime registry test authored below; runtime suite unrun."
   },
   {
@@ -354,7 +366,7 @@
     "implementation_evidence": [
       "/preferences named personal custom guidance, builtins, inheritance and per-conversation override; ChatThreads canonical root binding; agent dashboard-principal prompt projection with guidance treated as untrusted presentation data"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Two-user/multiple-conversation runtime qualification unrun. Custom guidance cannot mutate tool/policy/retention settings."
   },
   {
@@ -365,7 +377,7 @@
     "implementation_evidence": [
       "persona.render_persona_prompt no longer injects global user_name; personal-only preferred_name; explicit admin migration action on /preferences; legacy control removed from organization catalog"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Anonymous/service receive no preferred name. Single-user migration requires establishing a named account then explicitly migrating, documented; identity/tenant matrix unrun."
   },
   {
@@ -376,7 +388,7 @@
     "implementation_evidence": [
       "experience_preferences encrypted principal display; preferences_api.context-bound device cookies; lock precedence; base/chat display picker; persisted account style used by server rendering"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Two-device/shared-device logout/account/tenant qualification unrun."
   },
   {
@@ -387,30 +399,30 @@
     "implementation_evidence": [
       "Permission-aware settings_experience.search returns scoped role/source/effective metadata, aliases and exact provider/model/display/account/notification controls; lazy catalog id loading + input focus, workspace choice focus, personal results prioritized"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Browser focus/search/permission matrix unrun. Notification anchor supplied by peer cdab036 must be integrated. Plugin/connection/channel results link to their dedicated editors; exact provider/default-model/account targets included."
   },
   {
     "id": "LW-036",
     "title": "Show effective changes and runtime impact before saving",
     "category": "Personalization and settings",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "settings_experience review endpoint shares catalog coercion/governance/access plan under revision lock; settings-review modal before/after/source/scope/timing/dependencies; exclusions revalidated; saves audit before/after revisions"
+      "settings_experience.review + mixed immediate/next-task/restart metadata, exact before/after/source/affected module/scope; review exclusion preserves draft. runtime_configuration immutable first-read startup snapshots and heartbeats; native dashboard/worker/channels/gRPC lifecycle acknowledgements; admin runtime-status API and refreshable saved-vs-running UI."
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Persistent saved revision is implemented; running workers do not yet publish an applied-revision acknowledgement, so UI honestly says next configuration read/running tasks keep captured configuration. Full runtime acknowledgement plumbing remains."
+    "validation": "18 focused local tests passed for immutable startup/heartbeat, restart comparison, stale/wrong-consumer/tenant refusal, environment changes, malformed receipts, timing projection and installer choices. AST/Jinja, JS syntax, targeted Ruff and whitespace checks passed. No live providers or production processes. The slice settings catalog suite passed all 1,542 tests.",
+    "remaining": "Full integrated process restart/browser qualification pending. Coverage is explicitly limited to observed processes sharing this configuration data folder; tenant-scoped or manually overridden gRPC processes remain unconfirmed, and startup acknowledgement never claims service health or work success."
   },
   {
     "id": "LW-037",
     "title": "Distinguish restore product default from inherit configuration",
     "category": "Personalization and settings",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Explicit reset vs inherit controls and backend operations; inherited source preview; scalar built-in default differs correctly from installer; deployment locks rechecked"
+      "config_resets reviewed global-dashboard metadata implements product default for tables and absent/no-limit scalar defaults; ordinary writer derives/validates exact catalog paths; reset/inherit groups/rows explicitly labelled; source preview and sign-in guard use same merge; installer bytes untouched and operator precedence retained"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Core table overlays merge installer rows and cannot mask them. Reset with installer table rows now refuses clearly instead of pretending to restore product default; full table semantics require a reviewed tombstone/replacement contract or installer edit flow."
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "remaining": "Core merge, fixed-entry preservation, runtime/catalog parity, invalid metadata and writer-path tests authored but unrun. Metadata only interpreted in global dashboard overlay, never tenant or operator inputs; group actions exclude locked rows."
   },
   {
     "id": "LW-038",
@@ -420,7 +432,7 @@
     "implementation_evidence": [
       "Versioned selective organization profiles for approved voice/display/budget/model-preference keys plus personal named-style/display bundles; credential fields excluded and credential-like text rejected; unknown-version/key guidance; import validates ordinary dependencies/policy/review/CAS before writes"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Authored roundtrip/review-only/secret-exclusion/policy tests unrun. Only enumerated portable keys are accepted; other deployment controls remain explicit unsupported fields with migration guidance."
   },
   {
@@ -431,7 +443,7 @@
     "implementation_evidence": [
       "settings_experience.history reads bounded deployment audit, labels actor/time/before-after+new revision bindings; safe fields selective restore through ordinary review+CAS; no secret restoration"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Audit reader/rollback concurrency and policy-change qualification unrun. History coverage explicitly last100 changes/30days; legacy revision absent labeled."
   },
   {
@@ -442,7 +454,7 @@
     "implementation_evidence": [
       "settings_experience PRESETS bounded research and existing regulated governance; drift, tradeoffs, expanded exact preview, deselect requested fields, explicit save and normal locks/confirmations"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Preset dependency/locked field runtime matrix unrun. No claim of local-only routing without a configured local model."
   },
   {
@@ -453,7 +465,7 @@
     "implementation_evidence": [
       "Principal preferences favorites/start page; permission-filtered destinations at every read/write; keyboard Move up/down/remove; account-owned Today pins"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Cross-device/account/revocation and keyboard browser qualification unrun. Item-level recents/saved filters are not added; acceptance implemented for authorized page destinations."
   },
   {
@@ -464,7 +476,7 @@
     "implementation_evidence": [
       "/today composes own recent goals, in-flight tasks and results with source links/time labels; account-scoped cards/pins/landing page; mandatory Action Center reminder remains"
     ],
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Regression tests authored but NOT RUN, per user instruction; no suites, browser runs, migrations on a live database, or provider/model calls.",
+    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
     "remaining": "Root next wave: actual pending-decision projection, upcoming occurrences and pinned workspaces/templates; card ordering controls and narrow-screen/keyboard qualification. No independent work-state data model added."
   },
   {
@@ -497,7 +509,7 @@
     "implementation_evidence": [
       "themes.py contrast_ratio/contrast_issues/readable_palette; settings_all_page._plan_table refuses unreadable palette saves; lightwork-theme-preview.js shows isolated form/focus/disabled/status/progress preview; legacy palettes derive readable fallback colors. test_theme_contrast.py and JS contrast regression authored. Settings worker6eaca67 supplies shared prior-theme Undo through the same revision-bound preferences endpoint."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
     "remaining": "Integrate settings worker6eaca67 and mobile asset-registration38fcc2f together. Browser/background/contrast qualification remains unrun."
   },
   {
@@ -508,7 +520,7 @@
     "implementation_evidence": [
       "static/lightwork-read-aloud.js owns cancellable server/browser playback, complete 3000-character request chunks, pause/resume/stop, skip-code/tables option, visible preparation/failure state, URL cleanup, navigation stop and answer-ready invalidation. chat_goal.html binds it. JS cancellation/long-answer regression authored."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
     "remaining": "PR2529 has overlapping bounded-read implementation and dynamic answer changes; integrator must preserve current review gating when combining. Engine/autoplay/native acceptance unrun."
   },
   {
@@ -519,7 +531,7 @@
     "implementation_evidence": [
       "mobile SettingsScreen.tsx captures test generation, cancels on edits/unmount, clears prior result, guards stale responses and prevents save/test overlap; native ConnectionSettingsView.swift locks tested inputs/save and verifies current normalized candidate/visible lifetime."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Delayed-response, save/unmount and native-device acceptance remain unrun."
   },
   {
@@ -528,21 +540,21 @@
     "category": "Accessibility language and mobile",
     "status": "planned",
     "implementation_evidence": [
-      "settings.ts adds atomic secure named-profile record, list/save/switch/remove, legacy preservation, 20-profile bound and opaque isolated cache scopes. SettingsScreen exposes name/add/switch/remove with confirmation. Theme follows OS and interface truthfully remains English. Named-profile regression authored."
+      "settings.ts adds atomic secure named-profile record, list/save/switch/remove, legacy preservation, 20-profile bound and opaque isolated cache scopes. SettingsScreen exposes name/add/switch/remove with confirmation. Theme follows OS and interface truthfully remains English. Named-profile regression authored. Device appearance now explicitly selects System/Light/Dark, persists across connections and follows OS changes only in System mode; failed saves keep previous choice and show recovery."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Language preference parity depends on reviewed translation work in LW043; explicit device appearance override remains to be added. Profile lifecycle native acceptance unrun."
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "remaining": "Native display/language parity remains incomplete: the interface truthfully remains English pending LW043 catalogs/review. Installed two-profile/keychain/large-text platform acceptance still required; mock named-profile, appearance, race and cache tests pass."
   },
   {
     "id": "LW-049",
     "title": "Evolve mobile from read-only oversight to a least-privilege decision companion",
     "category": "Accessibility language and mobile",
-    "status": "deferred-decision",
+    "status": "planned",
     "implementation_evidence": [
       "README and native/mobile request client remain explicitly read-only; no mutation authority was added based on a broad bearer token."
     ],
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Needs qualified signed iOS/Android runtime, scoped account pairing/revocation contract and approved least-privilege mobile action scope. These prerequisites were explicitly required before writes in source recommendation and remain unavailable/unqualified."
+    "remaining": "Scoped pairing and current-authority mobile write handlers are being implemented. Signed-device acceptance remains a qualification prerequisite; no user policy decision is pending."
   },
   {
     "id": "LW-050",
@@ -563,7 +575,7 @@
     "implementation_evidence": [
       "InvalidSavedConnection distinguishes corrupt records; App offers explicit confirmed reset; resetSettings probes locked stores and removes only named app keys/cache. Swift ConnectionStore.reset probes secure storage and scoped delete; UI shows reset for DecodingError only and confirms."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Keychain/SecureStore native tests unrun. Node and Swift corrupt/reset regression tests authored."
   },
   {
@@ -574,7 +586,7 @@
     "implementation_evidence": [
       "RunsListScreen uses scoped server search/status and load-older offset pages with unique-ID merge, generation invalidation, scrollable search/status header, distinct empty-search copy and explicit 200-search-result bound; api.ts uses existing scoped endpoints."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "125-task, incoming-task scroll and permission runtime acceptance unrun."
   },
   {
@@ -585,7 +597,7 @@
     "implementation_evidence": [
       "RunDetailScreen expandable/selectable full bounded event content and selectable result; full-history browser handoff has only base URL+task path and no token; browser launch failure shown."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "20-line event/select-copy and separate browser authentication acceptance unrun."
   },
   {
@@ -596,7 +608,7 @@
     "implementation_evidence": [
       "App connection-owned offline-bundle projection supplies current authorized attention counts and as-of timestamp to online Overview. Online/saved active task rows open exact task; authenticated Action Center handoff supports approvals/questions."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Online/offline same-state and authority acceptance unrun."
   },
   {
@@ -607,7 +619,7 @@
     "implementation_evidence": [
       "useConnectionCache lives in App independently of tab; readiness indicator shows actual successful persistence, optional API failure never claims readiness. RunDetail reads matching cached goal/events with age and retains denial/unsupported suppression."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Tasks-first/offline detail/device storage lifecycle acceptance unrun."
   },
   {
@@ -618,7 +630,7 @@
     "implementation_evidence": [
       "Existing confirmed disconnect/reset plus credential-scoped purge now remove all app offline-cache namespaces. mobile_offline_policy.py combines installation/workspace disablement and minimum age/byte ceilings, exposed in All settings and installer. Server bundle includes versioned policy and requires policy-aware client header. Mobile refuses missing/invalid policy, uses source-time expiry, invalidates live cached readers on policy/purge/expiry, serializes writes/removal and fences retired scopes/epochs/global reset. Readiness gives organization-policy message; user cannot relax ceilings."
     ],
-    "validation": "2026-09-30: Python AST 6 files and TypeScript static analysis of all15 mobile source files passed (zero diagnostics). JavaScript regression source syntax and git diff --check passed. Policy ceiling/denial and cache expiry/late-write regressions authored unrun. No test suites/native/provider/browser tests run.",
+    "validation": "2026-09-30: Python AST 6 files and TypeScript static analysis of all15 mobile source files passed (zero diagnostics). JavaScript regression source syntax and git diff --check passed. Policy ceiling/denial and cache expiry/late-write regressions authored unrun. No test suites/native/provider/browser tests run. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Device storage/timer/background qualification is unrun. Offline devices learn changed policy only on reconnect; previously accepted policy expiry bounds that interval. Existing unqualified old clients must upgrade; server refuses bundle requests without the policy protocol header. No claims about retroactively deleting pre-upgrade copies on disconnected older builds."
   },
   {
@@ -630,7 +642,7 @@
       "No transport workaround weakening byte bounds added. README explicitly retains source-scaffold/native streaming qualification limitation."
     ],
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Real iOS/Android requests, chunked-body limit abort, cancellation and offline recovery are not run because user deferred testing; signed-device tooling still required."
+    "remaining": "Real iOS/Android chunked-body, cancellation and offline recovery qualification requires signed-device tooling. Local synthetic qualification is authorized and continues."
   },
   {
     "id": "LW-058",
@@ -640,7 +652,7 @@
     "implementation_evidence": [
       "theme.ts uses reactive system color scheme with shared readable light/dark tokens; screens/components use palette factories, minimum 48-unit buttons, wrapped actions and scrollable result/list headers; status remains text-labelled."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Device max-text/contrast/target measurements and screen-reader error announcements remain unrun."
   },
   {
@@ -651,7 +663,7 @@
     "implementation_evidence": [
       "App hardwareBackPress returns detail to Tasks and other tabs to Tasks. usePolling aborts/invalidate requests on inactive/background, blocks background automatic fetch, refreshes once on active and exposes last-success update time."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Native Back/background/resume qualification unrun. Stale-response/background regression authored."
   },
   {
@@ -662,7 +674,7 @@
     "implementation_evidence": [
       "settings.DEFAULT_BASE_URL and mobile README now use8765 matching dashboard CLI; README explains phone loopback, reachable organization HTTPS and intentional proxy ports."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Controlled setup acceptance unrun; no deployment address/config changed."
   },
   {
@@ -951,13 +963,14 @@
     "category": "Connections and extensibility",
     "status": "planned",
     "implementation_evidence": [
-      "Existing plugin permission, owned-process, approved-version and no-replay contracts retained; workbench implementation pending."
+      "plugin_workbench.py, sandbox/plugin_probe.py and plugin_workbench_api.py: implemented version/content/policy/image/harness-bound Python tool qualification, strict no-network container, actual schema/sample+expected result checks, durable no-replay ledger, timeout/cancel and cleanup receipts, scoped publication, owned task pins/migration, Plugins UI, Settings/installer. Tests authored unrun."
     ],
     "validation": [
       "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
     ],
     "remaining": [
-      "In progress: governed version-specific plugin contract workbench, effect-free schema/sample checks and pinned readiness records. Native cancellation/no-replay qualification remains unrun by user request."
+      "Partial implementation, not complete acceptance: add execution qualification adapters for TypeScript transports/channels/skills/personas and durable direct-flow action plugin pins; current scope labels refuse to qualify these contracts.",
+      "Run authored regressions and controlled container/native checks only during the user-authorized testing phase. No plugin, image or live service is qualified by this implementation."
     ]
   },
   {
@@ -1287,23 +1300,27 @@
     "id": "LW-107",
     "title": "Let employees inspect and correct remembered preferences",
     "category": "Memory knowledge and search",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "New note records carry source conversation, turn, time, source content version and source goal; tenant failures no longer fall back to legacy storage."
+      "personal_memory.py provides revision-bound owned note corrections, durable exact/topic suppression read by consolidation and recall; personal_data_api.py and My Data show source date/revision or legacy unavailable and re-authorize source reads.",
+      "Encrypted controls and metadata-only audit preserve administrator content privacy; feature knob, installer and Account entry provide the direct journey."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Still needs an owner-authorized notes page, exact source links, edit/delete, durable suppression that prevents regeneration, legacy unknown handling, and owner-bound audit projection. No cross-channel ownership is inferred."
+    "validation": "Local Python 3.12: 47 focused personal-data/recall/memory-tool tests passed; 144 broader recall/reflection/dreaming tests passed, six native-adapter cases skipped. Ruff import/bug/complexity checks passed. Integrated/browser acceptance remains pending.",
+    "remaining": "Local runtime and installed/browser acceptance remain unexecuted; global Copilot integration is tracked separately."
   },
   {
     "id": "LW-108",
     "title": "Offer explicit cross-channel personal preference scope",
     "category": "Memory knowledge and search",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Exact existing tenant/channel/user boundaries are retained; no inferred identity sharing added."
+      "personal_identity.py implements two-sided challenge proof, exact tenant/account/sender bindings, explicit dashboard confirmation, unlink and fresh membership checks.",
+      "Durable incoming account proof binds new channel conversations and goal owners without changing execution ACL principals; legacy accountless histories remain unverified.",
+      "My Data exposes explicit authoritative-source conflict choice and channel-only default; personal note and style recall consume current verified links.",
+      "memory_ownership.py, owner-filtered recall SQL, source-bound reflections/dream insights, generated skill lineage and owner-separated model memory prevent adjacent cross-account enrichment. Legacy unknown-source records are retained but not inherited."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Implement verified identity linkage and explicit consent scope, then recheck link revocation on every shared recall. Depends on the identity/settings workstream's verified ownership protocol."
+    "validation": "Local Python 3.12: 47 focused personal-data/recall/memory-tool tests passed; 144 broader recall/reflection/dreaming tests passed, six native-adapter cases skipped. Ruff import/bug/complexity checks passed. Integrated/browser acceptance remains pending.",
+    "remaining": "Installed multi-adapter and browser acceptance remains pending; source-bound unit and existing recall tests passed."
   },
   {
     "id": "LW-109",
@@ -1311,10 +1328,11 @@
     "category": "Memory knowledge and search",
     "status": "planned",
     "implementation_evidence": [
-      "Existing admin learning gates remain enforced; knowledge feedback explicitly separates training authority and facts removal explicitly distinguishes retained history."
+      "My Data separates personal recall and collection, organization lesson promotion, workflow examples, source-bound local training and prior/external derivatives.",
+      "Exact task owners can apply existing durable local-learning exclusions; user turns now bind goal_id for exclusion lineage. Personal choices cannot expand administrator ceilings or companion policy."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Still needs effective employee policy projection and narrowly enforced personal recall/source-exclusion controls across relevant stores, including admin ceilings and legal hold explanation. A no-op memory_use preference was deliberately not exposed."
+    "validation": "Local Python 3.12: 47 focused personal-data/recall/memory-tool tests passed; 144 broader recall/reflection/dreaming tests passed, six native-adapter cases skipped. Ruff import/bug/complexity checks passed. Integrated/browser acceptance remains pending.",
+    "remaining": "Complete current per-stage learning configuration presentation and account-bound capture review; prior/external unlearning remains explicitly outside the implemented control."
   },
   {
     "id": "LW-110",
@@ -1344,10 +1362,11 @@
     "category": "Memory knowledge and search",
     "status": "planned",
     "implementation_evidence": [
-      "Facts inspector now explains provenance and stop-use/history distinction; employee feedback provides narrow own status receipts. Shared facts excludes private reserved scopes. Existing erasure/companion policy foundations retained."
+      "Owner-only My Data inventory combines personal notes, exact verified conversation scopes, owned tasks, private draft metadata, companion retention and known preservation gates.",
+      "Selected-scope export uses strict existing subject-data export plus notes/controls; shared derivatives and external copies are labeled separately without false deletion claims."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Still needs unified per-item inventory over all in-scope stores with owner/source/use/expiry/dependencies, export/correction/stop-use links, held/retired/purged/external statuses and accurate shared/external limits. Coordinate identity/privacy and companion slices."
+    "validation": "Local Python 3.12: 47 focused personal-data/recall/memory-tool tests passed; 144 broader recall/reflection/dreaming tests passed, six native-adapter cases skipped. Ruff import/bug/complexity checks passed. Integrated/browser acceptance remains pending.",
+    "remaining": "Complete consolidated per-store deletion review/actions/receipts, personal preference erasure integration and authorized knowledge/packet derivative lineage."
   },
   {
     "id": "LW-113",
@@ -1479,7 +1498,7 @@
       "Existing project ownership and packet boundary preserved."
     ],
     "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Outcome/acceptance metadata, authorized context bundles, milestones/dependencies/latest accepted deliverable and freshness remain."
+    "remaining": "Project workspace implementation ownership transferred to settings_integrity worker; no duplicate edits here. Root must integrate their complete per-ID evidence."
   },
   {
     "id": "LW-125",
@@ -1551,12 +1570,21 @@
     "id": "LW-131",
     "title": "Live completion omits result actions, sign-off and newly produced artifacts",
     "category": "Review deliverables and collaboration",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "PR2529 head326402bf115a6d6de2adc255e3a1cc9d75fd37a9 implements authoritative completion panel refresh/actions/artifacts; inspected read-only via GitHub connector."
+      "Shared _chat_answer_panel.html renders current saved result, structured tables, artifact versions, owner-only mutations and current sign-off in both initial and live views.",
+      "GET /chat/goal/{goal_id}/answer-panel revalidates exact content authority and source twice; no-store context-bound projection refuses concurrent source changes.",
+      "lightwork-answer-panel.js updates on terminal/artifact events, focus and bounded polling; preserves composer/focus/scroll, defers replacement of unsaved edits/review notes, provides retry and clears private content on access/context changes.",
+      "Migrated root integrated deliverable CAS controller into idempotent panel lifecycle; preserved operation receipt, dirty edit, explicit conflict compare and no reload.",
+      "Independent overlapping implementation, reviewed against separate PR2529 at SHA 326402bf115a6d6de2adc255e3a1cc9d75fd37a9; that PR was neither imported, modified nor closed."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "Parent integration decision pending; not in this branch and no duplicate implementation claimed."
+    "validation": [
+      "Python AST, JavaScript syntax, Jinja parser when available and git whitespace checks. Authored test_answer_projection.py and js/answer_panel.test.js; not executed."
+    ],
+    "remaining": [
+      "Run authenticated running-to-completed parity, current permissions, sign-off/artifact freshness, keyboard focus, read-aloud lifecycle and narrow layout acceptance.",
+      "Root integration must preserve accessibility read-aloud lifecycle commit 5f84f082fcc763444e174981ca933b170e9df67b and merged identity gate."
+    ]
   },
   {
     "id": "LW-132",
@@ -1628,12 +1656,20 @@
     "id": "LW-138",
     "title": "“Download full history” is silently partial",
     "category": "Review deliverables and collaboration",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "build_goal_bundle requests cap+1 and visibly refuses10001events/201episodes; manifest has counts/scope/digest and archive copy no longer promises resumable/full universal history."
+      "goal_archive.py pins a SQLite read transaction or PostgreSQL REPEATABLE READ/READ ONLY transaction, applies native tenant scope, and reads event/episode records in bounded keyset pages.",
+      "Prepared archive enforces 10,000 events, 200 episodes, bounded individual records and a 20 MiB total; exceeding any limit refuses before releasing download bytes.",
+      "HTTP archive streams the completed private temporary file in 64 KiB chunks, rechecks current content authority and source ownership before release, and closes temporary storage on completion/cancellation.",
+      "Compatible v1 goal/events/episodes body retains canonical SHA-256; manifest records exact counts, scope and consistent snapshot. Offline viewer verifies counts and raw canonical payload checksum using local WebCrypto, or explicitly reports inability to verify."
     ],
-    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
-    "remaining": "True bounded streaming/chunking with one consistent database snapshot and large-history path remain; overflow is safe refusal but full acceptance is not claimed."
+    "validation": [
+      "Python AST, JavaScript syntax, Ruff on new archive/service modules and git whitespace checks passed. Native oversized/snapshot-concurrency/bounded-stream/checksum regression cases authored.",
+      "User authorized local suites after implementation; root coordinates integrated qualification. No suites or provider calls run in this checkpoint."
+    ],
+    "remaining": [
+      "Run native SQLite and PostgreSQL snapshot/concurrency qualification, authorized streaming/cancelled-download tests and offline browser checksum cases."
+    ]
   },
   {
     "id": "LW-139",
@@ -1663,21 +1699,21 @@
     "category": "Notifications models and costs",
     "status": "planned",
     "implementation_evidence": [
-      "personal_notifications.py validates recipient-scoped subscriptions, IANA quiet hours/daily digest, explicit organization+user critical exceptions, per-task mute and project watches; encrypted bounded personal inbox deduplicates semantic versions, rehydrates only current authorized source labels, purges revoked sources and separates available/seen. /notifications UI provides direct preference/CAS/recovery journey with own-task/assigned-decision projection. Config and installer controls added; foundation delegation supplied by settings e3ad241."
+      "personal_notifications.py validates recipient-scoped subscriptions, IANA quiet hours/daily digest, explicit organization+user critical exceptions, per-task mute and project watches; encrypted bounded personal inbox deduplicates semantic versions, rehydrates only current authorized source labels, purges revoked sources and separates available/seen. /notifications UI provides direct preference/CAS/recovery journey with own-task/assigned-decision projection. Config and installer controls added; foundation delegation supplied by settings e3ad241. Dashboard-owned personal_notification_scheduler now observes explicitly enrolled encrypted recipient records across active tenants with current named-account and assigned-decision authority, fair bounded recipient polling, lifecycle shutdown, status timestamps, policy/installer controls, and full source projection including budget warnings. Revocation withdraws exact account enrollment/inbox. personal_notification_delivery adds explicitly opted-in Slack/Telegram private routing bound to verified link id+time+provider account digest, current sender allowlist, named-account membership and policy; no room targets or organization webhook reuse. Minimal count/authenticated deep links, atomic encrypted per-link claims, once-per-local-day digests, visible accepted/failed/unknown distinct from seen, no automatic uncertain resend, account-local inventory/erasure and bounded expiry cleanup. Config+installer+UI private-channel choices included."
     ],
-    "validation": "2026-09-30: Python AST 7 files, standalone JavaScript syntax 1 files and diff whitespace passed. Five DST/recipient/dedupe/mute/revocation regressions authored but unrun. No runtime/browser/provider tests or outgoing notifications executed.",
-    "remaining": "External per-person recipient/channel routing and receipts, request-less background event ingestion/delivery, transitions between page refreshes, full-history pagination and shared Copilot operation adapter remain unfinished. Implemented in-product inbox observes at most latest200 owned tasks plus bounded assigned decisions and explicitly explains visible-page polling/catch-up, not closed-page external delivery. Requires settings6eaca67 plus e3ad241 preference adapter integration."
+    "validation": "2026-09-30: focused mock-only core receipts6 + private routing/ledger8 + personal-policy/DST5 + offline-policy2 =21 distinct tests (20 passed together; final8 delivery tests rerun after full scope-binding hardening); private inbox denial DOM1 and earlier accessibility DOM4 plus mobile mock75. Static AST/JS syntax/strict mobile TS and new-service Ruff checked. No live sends/provider calls; root integration and broader test run still pending.",
+    "remaining": "Durable event ingestion for transitions between observations, full-history pagination beyond latest200 owned tasks/bounded assigned decisions, and personal-preference Copilot adapter remain incomplete. Local mocked delivery is implemented for explicitly verified Slack/Telegram private identities; other channels unsupported. Requires personal_identity8429007, settings preference foundation, root budget_guidance, dashboard worker running. Native/provider-installed qualification remains required; no live outgoing notifications executed."
   },
   {
     "id": "LW-142",
     "title": "Show notification delivery health and test results",
     "category": "Notifications models and costs",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "notification_receipts.py persists bounded content-free tenant receipts with queued/sending/accepted/failed/unknown state, dedupe and three-attempt safe test retry ceiling. notifications.py records actual backend response, preserves tenant context in async workers and sanitizes secrets; notify tool says queued, PushRegistry waits for actual response. Authorized /settings/notifications direct UI + health/test/retry API + config/installer control added; sender rechecks current admin authority and config before dispatch."
+      "notification_receipts.py persists bounded content-free tenant receipts with queued/sending/accepted/failed/unknown state, dedupe and three-attempt safe test retry ceiling. notifications.py records actual backend response, preserves tenant context in async workers and sanitizes secrets; notify tool says queued, PushRegistry waits for actual response. Authorized /settings/notifications direct UI + health/test/retry API + config/installer control added; sender rechecks current admin authority and config before dispatch. product_operations_notifications.py registers authorized status, explicit reviewed test and safe bounded retry callbacks through the same native service, configuration/receipt revisions and durable receipt recovery. Capacity now refuses new sends rather than evicting accepted idempotency keys."
     ],
-    "validation": "2026-09-30: Python AST 10 files and JavaScript syntax 3 standalone/template blocks passed; git diff --check passed. Receipt/async queue/idempotency tests authored but unrun. No notification delivery/provider/browser calls or test suites run.",
-    "remaining": "Direct delivery UI/service implemented; Copilot operation catalog adapter absent (existing catalog supports only closed learning-example actions). Authenticated health/retry/browser and actual service delivery validation deferred. Personal preference/digest integration belongs to LW141."
+    "validation": "2026-09-30: adapter/core Python AST and whitespace pass; three adapter tests plus receipt-capacity regression authored. Python runtime tests pending root dependency setup/integration (this Python environment has no pytest); no live sends executed.",
+    "remaining": "Integrate settings worker product_operations registry before adapter import/runtime tests. Local Python tests and controlled delivery qualification remain; no provider calls or receipt success fabricated. Full capacity pauses new sends until retention expiry to preserve duplicate protection."
   },
   {
     "id": "LW-143",
@@ -1725,19 +1761,25 @@
     "id": "LW-147",
     "title": "Give employees safe task-level diagnostics",
     "category": "Onboarding support and qualification",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "task_diagnostics.py: encrypted immutable metadata-only owner reports, exact preview/download SHA, 15-minute link and required audit acknowledgement.",
+      "product_operations_diagnostics.py: current owner/feature/task checks and deterministic report recovery through shared Copilot operation.",
+      "Stopped-task result panel links native report UI."
+    ],
+    "validation": "4 local diagnostic tests passed and shared catalog/budget regression group20 passed; focused Ruff and Node syntax passed.",
+    "remaining": "Final integrated and authenticated browser qualification pending."
   },
   {
     "id": "LW-148",
     "title": "Replace recovery offsets with source lookup",
     "category": "Onboarding support and qualification",
-    "status": "planned",
-    "implementation_evidence": [],
-    "validation": "No tests executed; user deferred tests.",
-    "remaining": "Implementation review pending."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Global-admin isolated recovery source lookup uses configured exact-bound iMessage and Mastodon read adapters for dated numeric checkpoints, bounded explicit older pages and metadata-only evidence preview. Selection fills the existing review without resolving it. Disabled, changed, unauthorized or unavailable sources produce no guessed checkpoint. Current context and global permission rechecked after lookup; channel polling/admission/send/checkpoint/delivery receipt mutation never called. Existing human-date and delivery-receipt forms remain; source content is not exposed."
+    ],
+    "validation": "7 new local mocked/source-fixture tests passed; 25 existing channel recovery control/record tests passed; 26 workspace recovery API tests passed after updating exact-release review fixtures, including new current-permission recheck. Ruff F checks, Python3.10 AST and JS syntax passed. No live source/provider calls.",
+    "remaining": "Installed macOS Messages permissions, configured Mastodon access and browser/native customer qualification remain to run in a controlled test environment; no live source/provider calls made during implementation."
   },
   {
     "id": "LW-149",
@@ -1797,8 +1839,8 @@
     "implementation_evidence": [
       "Native desktop-runtime fixed-loopback HTTP handshake requires exact X-Lightwork-Service dashboard-v1 with HTTP200 or genuine setup503; 2-second socket/8-KiB header bounds. Desktop startup/recovery use bundled-only IPC instead of opaque CORS probes; conflicting listeners never launch/stop/adopt arbitrary processes. Rust and JS fixtures authored."
     ],
-    "validation": "Python3.10 AST for dashboard route; JS syntax checks for startup/recovery and fixtures; rustfmt syntax/format validation. Tests/native Tauri builds unrun.",
-    "remaining": "Native occupied-port/stuck-socket/independent-dashboard/onboarding qualification and regression execution remain deferred by user."
+    "validation": "Python3.10 AST, JS syntax and Rustfmt passed. Rust runtime compilation reached linker but could not execute: Microsoft C++ link.exe/toolchain is absent (vswhere confirms no installed VC tools).",
+    "remaining": "Native occupied-port/stuck-socket/independent-dashboard/onboarding qualification requires the supported Windows C++ build toolchain and installed release environment."
   },
   {
     "id": "LW-154",
@@ -1808,63 +1850,63 @@
     "implementation_evidence": [
       "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
     ],
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Exact signed release hashes, recognized publisher trust, clean Windows standard/admin/elevation/offline/interruption/repair/rollback matrix and actual adjacent release migration remain unrun. User explicitly deferred testing; no release acceptance is claimed."
+    "validation": "Source and implementation reviewed. Local mocked maintenance/recovery fixtures pass; real signed installation qualification has not run.",
+    "remaining": "Exact signed release hashes, recognized publisher trust, clean Windows standard/admin/elevation/offline/interruption/repair/rollback matrix and actual adjacent release migration require release artifacts and dedicated qualification hosts; no release acceptance is claimed."
   },
   {
     "id": "LW-155",
     "title": "Define and complete the supported non-Windows customer installation journey",
     "category": "Installation and desktop maintenance",
-    "status": "planned",
+    "status": "test-needed",
     "implementation_evidence": [
-      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+      "Owner confirmed existing Windows customer-candidate boundary; macOS/Linux remain explicitly engineering source setup. Their GUI now labels that scope and includes durable dependency/retry/OS-repair flow. scripts/verify_desktop_artifact.py authenticates a separately signed exact engineering manifest against an independently trusted Minisign key plus expected repository/commit/version/target/channel and streamed artifact hash/size, refusing wrong/stale/changed bytes. It never executes artifacts or claims platform signing/customer qualification."
     ],
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Supported non-Windows customer target set and production distribution/signing/notarization require owner decision. Current macOS/Linux engineering/private-source channel labels remain truthful; self-contained staging and verified release-channel engineering still required."
+    "validation": "Signature-process-mocked artifact identity fixtures passed in the 9-test new maintenance/artifact run. Python3.10 AST passed; official Minisign/Tauri guidance linked. No credentials/signing/publishing performed.",
+    "remaining": "Approved signed artifacts/key custody, macOS signing/notarization, Linux dependency advisory resolution and exact native acceptance remain release prerequisites. Self-contained non-Windows customer distribution is outside the owner-confirmed current supported target policy; no customer-ready claim."
   },
   {
     "id": "LW-156",
     "title": "Replace manual maintenance authorization transfer with a protected handoff",
     "category": "Installation and desktop maintenance",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+      "Private authenticated local review/handoff records bind the exact release version, runtime/MSI hash/signature or retained rollback point to the authenticated recovery administrator and 15-minute grant. The native helper revalidates the private grant; raw authorization remains in native state/pipe and private OS storage, never either webview. UI reviews administrator/action/scope/expiry with explicit final native action and manual fallback. Pending release metadata survives bundled-page navigation; expired approval is checked before consuming the reviewed update. Remote dashboard content has no new native capability."
     ],
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Build protected native handoff bound to reviewed release/recovery point and authenticated administrator; keep manual code fallback and final explicit native action."
+    "validation": "9 new local mocked maintenance/artifact tests passed; 104 existing installation recovery/accounting/retirement/identity-transition tests passed after adapting fixtures to mandatory exact-release review, including a new changed-reviewed-bytes denial. Python3.10 AST, JS syntax and Rustfmt passed. No MSI/provider/live service executed.",
+    "remaining": "Run Windows/Tauri browser navigation, expiry, tampering, clipboard-disabled, concurrent administrators and exact-release/rollback qualification."
   },
   {
     "id": "LW-157",
     "title": "Add a supported coordinated recovery path when protected rollback is refused",
     "category": "Installation and desktop maintenance",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+      "Native read-only recovery planner authenticates the retained snapshot and compares current protected state under the all-workspaces scope. Structured blocker codes and paged affected-file metadata explain accounting/database/action/resource incompatibility. In-product controls review current-version forward repair, open explicit isolated workspace export/drill confirmation, and save a coordination plan. No force rollback/accounting reset exists."
     ],
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Build structured blocker/recovery plan and direct supported forward-repair/export/drill actions without rollback bypass or accounting reset."
+    "validation": "9 new local mocked maintenance/artifact tests passed; 104 existing installation recovery/accounting/retirement/identity-transition tests passed after adapting fixtures to mandatory exact-release review, including a new changed-reviewed-bytes denial. Python3.10 AST, JS syntax and Rustfmt passed. No MSI/provider/live service executed.",
+    "remaining": "Native qualification and full post-spend/external-resource recovery matrix unrun; workspace export/drill remains scoped to each selected workspace and external owners must coordinate their services."
   },
   {
     "id": "LW-158",
     "title": "Support a verified repair option during network/update-feed outages",
     "category": "Installation and desktop maintenance",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+      "Native offline folder review copies exact local MSI into bounded private expiring storage; reuses Minisign, Authenticode, pinned update key, publisher, Windows registered product/package, exact installed version/runtime and existing repair preparation checks. Final explicit repair uses no network and can execute from the separately bundled recovery runtime when primary is damaged. Wrong-version/key and changed-cache regressions authored."
     ],
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Build locally admitted exact signed repair package path with complete product/publisher/version/signature checks and no network dependency."
+    "validation": "9 new local mocked maintenance/artifact tests passed; 104 existing installation recovery/accounting/retirement/identity-transition tests passed after adapting fixtures to mandatory exact-release review, including a new changed-reviewed-bytes denial. Python3.10 AST, JS syntax and Rustfmt passed. No MSI/provider/live service executed.",
+    "remaining": "Signed native release offline qualification, damaged-primary recovery, signature/tampering/publisher cases and expiry cleanup tests require a controlled signed-release qualification environment."
   },
   {
     "id": "LW-159",
     "title": "Source-bootstrap cancellation still needs a nontechnical partial-install recovery journey",
     "category": "Installation and desktop maintenance",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+      "Source bootstrap persists exact/current previous refs, phase/outcome and bounded dependency inventory atomically in local OS app data. Before install, native review binds a five-minute current inventory; interruptions require explicit dependency/elevation review. Owned bounded local probes never infer complete cleanup. OS application-management handoff clears review and requires return/recheck before retry; partial and unconfirmed states stay visible. Final installer dashboard navigation uses exact native readiness handshake. Svelte interruption/repair fixtures and Rust journal regression authored."
     ],
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Build persisted bootstrap phase/inventory and verified safe-resume/OS repair return; native cancellation/elevation matrix remains unrun."
+    "validation": "Installer pnpm check: 0 errors and 0 warnings. All 15 local Svelte tests passed. Rustfmt syntax/format passed; Rust execution cannot link because Microsoft C++ link.exe/toolchain is absent.",
+    "remaining": "Real package-manager/elevation/cancellation/restart and all-platform native acceptance require platform qualification; no full-machine rollback claim."
   },
   {
     "id": "LW-160",
@@ -1909,12 +1951,14 @@
     "id": "LW-163",
     "title": "Spend's “never estimated” claim contradicts pricing modes",
     "category": "Data reporting and observability",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Removed never-estimated claim, clarified runtime-pricing basis and missing cost categories, added statement export basis"
+      "cost_provenance.py preserves historical receipt basis, rate evidence identifiers, original period and reconciliation review; unknown stays unknown.",
+      "Spend row/source links, streaming cost/billing exports include full provenance manifest and exclusions without treating task-wide receipts as episode costs.",
+      "cost_reconciliation_api.py and cost_reconciliation.html compare owned runtime attempts, personal acknowledged usage and exact work-item reservations by their different scopes/periods, with drill-through and interrupted-settlement explanation."
     ],
-    "validation": "Static source review only.",
-    "remaining": "Per-entry recorded/estimated/ceiling/reconciled provenance across spend view and all exports remains to implement."
+    "validation": "Python 3.10 AST and whitespace checks. Four regression cases authored; local tests now authorized and pending environment setup.",
+    "remaining": "Run local regression suites and authenticated UI/revocation fixtures. No provider invoices verified and no live provider access required."
   },
   {
     "id": "LW-164",
@@ -2223,12 +2267,12 @@
     "id": "LW-190",
     "title": "Editor budgets and stop scope need direct controls",
     "category": "Native clients and developer integrations",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "VS Code reviews requested dollar/time caps and sends both CLI flags; selected authorized dashboard task cancel/resume are separate from accurately acknowledged local checkpoint emergency stop. Current UI explicitly does not label requested caps as effective."
+      "VS Code local starts run budget-preview --json in the identical launch cwd/environment before confirmation; core budget_guidance.preview resolves configured/clamped effective task ceilings without constructing Budget or guessing a principal. Person/workspace/provider headroom is shown separately as available/unknown; resume previews use the scoped dashboard endpoint for the selected goal. Requested values and launch enforcement remain intact; preview failure blocks confirmation with repair guidance."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Wire the administrator-resolved effective budget preview hook owned by the root budget workstream. Requested values are currently shown honestly; this ID remains planned until effective caps are visible."
+    "validation": "CLI Python3.10 AST and VS Code TypeScript syntax; CLI preview fixtures authored unrun. Core hook supplied in integration commit fb292c5.",
+    "remaining": "Execute policy/profile/cap-change/start/resume regressions and native confirmation qualification later per user."
   },
   {
     "id": "LW-191",
