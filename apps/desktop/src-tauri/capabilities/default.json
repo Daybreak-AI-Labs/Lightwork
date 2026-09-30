@@ -5,7 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "allow-retry-dashboard", "allow-dashboard-diagnostics", "allow-startup-support-report", "allow-switch-recovery-mode",
+    "allow-retry-dashboard", "allow-dashboard-diagnostics", "allow-dashboard-readiness", "allow-startup-support-report", "allow-switch-recovery-mode",
     "allow-maintenance-status", "allow-check-desktop-update", "allow-install-desktop-update", "allow-rollback-desktop-update",
     "allow-resume-desktop-maintenance", "allow-desktop-maintenance-logs"
   ]

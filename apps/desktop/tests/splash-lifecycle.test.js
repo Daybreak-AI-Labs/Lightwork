@@ -15,10 +15,10 @@ function harness() {
     performance: { now: () => now }, AbortController,
     setTimeout(fn, delay) { const id = ++next; timers.set(id, { fn, at: now + delay }); return id; },
     clearTimeout(id) { timers.delete(id); },
-    fetch(url, options) { return new Promise((resolve, reject) => calls.push({url, options, resolve, reject})); },
+
     document: {getElementById: id => nodes[id]}, navigator: {},
     window: {addEventListener(event, handler) { handlers[event] = handler; },
-      location: {replace(url) { navigation.push(url); }}, __TAURI__: {core: {invoke: async () => "Starting"}}}
+      location: {replace(url) { navigation.push(url); }}, __TAURI__: {core: {invoke: command => command === "dashboard_readiness" ? new Promise((resolve, reject) => calls.push({command, resolve, reject})) : Promise.resolve("Starting")}}}
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../ui/app.js"), "utf8"), context);
   async function flush() { await Promise.resolve(); await Promise.resolve(); }
@@ -39,7 +39,7 @@ test("never-settling probes abort and expose recovery by elapsed six seconds", a
   await app.advance(6000);
   assert.equal(app.nodes.trouble.style.display, "block");
   assert.ok(app.calls.length >= 2);
-  assert.equal(app.calls[0].options.signal.aborted, true);
+  assert.equal(app.calls[0].command, "dashboard_readiness");
   assert.notEqual(app.nodes.retry.disabled, true);
   app.calls[0].resolve({status: 200}); await app.flush();
   assert.deepEqual(app.navigation, []);
@@ -49,11 +49,11 @@ test("old success cannot navigate after retry but current usable onboarding does
   const app = harness();
   const old = app.calls[0];
   await app.handlers["retry:click"]();
-  assert.equal(old.options.signal.aborted, true);
+  assert.equal(old.command, "dashboard_readiness");
   old.resolve({status: 200}); await app.flush();
   assert.deepEqual(app.navigation, []);
-  // no-cors returns an opaque response for the usable unconfigured 503.
-  app.calls.at(-1).resolve({status: 0, type: "opaque"}); await app.flush();
+  // Only native identity confirmation admits genuine unconfigured onboarding.
+  app.calls.at(-1).resolve({service: "lightwork-dashboard", state: "setup_required"}); await app.flush();
   assert.deepEqual(app.navigation, ["http://127.0.0.1:8765/"]);
   await app.advance(10000);
   assert.equal(app.navigation.length, 1);
@@ -65,9 +65,9 @@ test("connection refusal retries and a slow startup recovers once", async () => 
   app.calls[0].reject(new Error("connection refused")); await app.flush();
   await app.advance(600);
   assert.equal(app.calls.length, 2);
-  app.calls[1].resolve({}); await app.flush();
+  app.calls[1].resolve({service: "lightwork-dashboard", state: "ready"}); await app.flush();
   assert.equal(app.navigation.length, 1);
-  assert.equal(app.calls[1].options.mode, "no-cors");
+  assert.equal(app.calls[1].command, "dashboard_readiness");
 });
 
 test("leaving splash cancels timers and old response authority", async () => {
@@ -76,6 +76,10 @@ test("leaving splash cancels timers and old response authority", async () => {
   app.calls[0].resolve({}); await app.flush();
   await app.advance(10000);
   assert.deepEqual(app.navigation, []);
-  assert.equal(app.calls[0].options.signal.aborted, true);
+  assert.equal(app.calls[0].command, "dashboard_readiness");
   assert.equal(app.calls.length, 1);
+});
+
+for (const result of [{status:200},{status:404},{status:500},{service:'other',state:'ready'},{service:'',state:'conflict'}]) test('unrecognized listener cannot navigate '+JSON.stringify(result),async()=>{
+  const app=harness();app.calls[0].resolve(result);await app.flush();assert.deepEqual(app.navigation,[]);
 });

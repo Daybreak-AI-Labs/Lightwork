@@ -42,6 +42,86 @@ pub fn listening() -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum Readiness {
+    Ready,
+    SetupRequired,
+    NotRunning,
+    Conflict,
+    Unavailable,
+}
+
+fn readiness_headers(headers: &[u8]) -> Readiness {
+    let Ok(text) = std::str::from_utf8(headers) else {
+        return Readiness::Conflict;
+    };
+    let mut lines = text.split("\r\n");
+    let first = lines.next().unwrap_or_default();
+    let status = first.split_whitespace().nth(1).unwrap_or_default();
+    if !first.starts_with("HTTP/1.") {
+        return Readiness::Conflict;
+    }
+    let identity: Vec<_> = lines
+        .filter_map(|line| line.split_once(':'))
+        .filter(|(name, _)| name.eq_ignore_ascii_case("x-lightwork-service"))
+        .map(|(_, value)| value.trim())
+        .collect();
+    if identity != ["dashboard-v1"] {
+        return Readiness::Conflict;
+    }
+    match status {
+        "200" => Readiness::Ready,
+        "503" => Readiness::SetupRequired,
+        _ => Readiness::Unavailable,
+    }
+}
+
+fn probe_address(address: SocketAddr) -> Readiness {
+    let started = Instant::now();
+    let mut stream = match TcpStream::connect_timeout(&address, Duration::from_millis(400)) {
+        Ok(stream) => stream,
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+            return Readiness::NotRunning
+        }
+        Err(_) => return Readiness::Unavailable,
+    };
+    let timeout = Some(Duration::from_millis(200));
+    if stream.set_read_timeout(timeout).is_err() || stream.set_write_timeout(timeout).is_err() {
+        return Readiness::Unavailable;
+    }
+    if stream.write_all(b"GET /healthz HTTP/1.1\r\nHost: 127.0.0.1:8765\r\nConnection: close\r\nCache-Control: no-cache\r\n\r\n").is_err() {
+        return Readiness::Unavailable;
+    }
+    let mut headers = Vec::new();
+    let mut chunk = [0u8; 512];
+    while started.elapsed() < Duration::from_millis(2000) && headers.len() <= 8192 {
+        match stream.read(&mut chunk) {
+            Ok(0) => return Readiness::Conflict,
+            Ok(count) => {
+                headers.extend_from_slice(&chunk[..count]);
+                if let Some(end) = headers.windows(4).position(|part| part == b"\r\n\r\n") {
+                    return readiness_headers(&headers[..end]);
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                ()
+            }
+            Err(_) => return Readiness::Unavailable,
+        }
+    }
+    Readiness::Unavailable
+}
+
+/// Fixed loopback identity handshake, bounded independently of the webview.
+pub fn dashboard_readiness() -> Readiness {
+    probe_address(SocketAddr::from(([127, 0, 0, 1], 8765)))
+}
+
 fn wait_for_listener_exit(mut is_listening: impl FnMut() -> bool, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
@@ -274,9 +354,17 @@ impl Dashboard {
         let child_environment = control.child_environment.clone();
         control.drain_timeout = Some(configured_drain_timeout(&child_environment)?);
         let recovery = control.recovery;
-        ensure_started(&mut control, listening, |logs| {
-            spawn_dashboard(logs, binary.as_deref(), recovery, &child_environment)
-        })
+        let verified = match dashboard_readiness() {
+            Readiness::Ready | Readiness::SetupRequired => true,
+            Readiness::NotRunning => false,
+            Readiness::Conflict => return Err("Port 8765 is occupied by an unrecognized service. No process was stopped. Close or reconfigure that service, then select Retry; use the support report if the conflict is unclear.".into()),
+            Readiness::Unavailable => return Err("The local service did not complete the Lightwork identity check. No process was stopped. Select Retry or create a support report.".into()),
+        };
+        ensure_started(
+            &mut control,
+            || verified,
+            |logs| spawn_dashboard(logs, binary.as_deref(), recovery, &child_environment),
+        )
     }
 
     /// Restart only this app's owned process into a fixed local mode. A
@@ -468,6 +556,42 @@ impl Drop for Dashboard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readiness_requires_exact_dashboard_identity_even_for_successful_http() {
+        for status in ["200", "404", "500"] {
+            assert_eq!(
+                readiness_headers(
+                    format!("HTTP/1.1 {status} fixture\r\nServer: unrelated").as_bytes()
+                ),
+                Readiness::Conflict
+            );
+        }
+        assert_eq!(
+            readiness_headers(b"HTTP/1.1 200 OK\r\nX-Lightwork-Service: dashboard-v1"),
+            Readiness::Ready
+        );
+        assert_eq!(
+            readiness_headers(b"HTTP/1.1 503 Setup\r\nx-lightwork-service: dashboard-v1"),
+            Readiness::SetupRequired
+        );
+        assert_eq!(readiness_headers(b"HTTP/1.1 200 OK\r\nx-lightwork-service: dashboard-v1\r\nX-Lightwork-Service: dashboard-v1"), Readiness::Conflict);
+    }
+
+    #[test]
+    fn stuck_native_identity_probe_has_an_overall_deadline() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            std::thread::sleep(Duration::from_secs(3));
+        });
+        let began = Instant::now();
+        assert_eq!(probe_address(address), Readiness::Unavailable);
+        assert!(began.elapsed() < Duration::from_millis(2600));
+        worker.join().unwrap();
+    }
 
     #[test]
     fn owned_stop_wait_observes_actual_socket_closure_before_continuing() {

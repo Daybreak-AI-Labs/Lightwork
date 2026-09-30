@@ -1,17 +1,4 @@
-// Splash controller for the Lightwork desktop shell.
-//
-// The Rust side (src/lib.rs) starts `maverick dashboard` on 127.0.0.1:8765 if
-// nothing is listening; this page waits for it and navigates in.
-//
-// IMPORTANT — why `mode: "no-cors"`: this page's origin is the Tauri webview
-// (tauri://localhost / http://tauri.localhost), so a request to the dashboard
-// at http://127.0.0.1:8765 is cross-origin. The dashboard emits no CORS header
-// for this origin, so a normal `fetch` is blocked and REJECTS — which made the
-// old splash poll forever and never connect. A `no-cors` probe instead RESOLVES
-// (opaque) the moment the server answers and only rejects on a refused
-// connection, which is exactly the signal we want. Top-level navigation
-// (location.replace) is not subject to CORS, so once we know the port answers
-// we just go there.
+// Native bounded identity/readiness handshake; opaque HTTP responses are never identity.
 
 (function () {
   "use strict";
@@ -121,13 +108,22 @@
       if (success) connect();
       else probeTimer = setTimeout(probe, phase === "trouble" ? SLOW_MS : FAST_MS);
     }
-    // Schedule the retry ourselves. A fetch implementation that ignores abort
-    // cannot suppress recovery controls or let a late response navigate.
+    // Native transport owns its socket deadline. This UI deadline independently
+    // prevents a late IPC response from navigating an obsolete page.
     var deadline = setTimeout(function () { controller.abort(); finish(false); }, PROBE_MS);
     probeDeadline = deadline;
-    fetch(DASH + "/healthz", { mode: "no-cors", cache: "no-store", signal: controller.signal })
-      .then(function () {
-        finish(true);
+    invoke("dashboard_readiness")
+      .then(function (result) {
+        if (finished || current !== generation || phase === "stopped") return;
+        if (result && result.service === "lightwork-dashboard" && ["ready", "setup_required"].indexOf(result.state) >= 0) {
+          finish(true);
+        } else {
+          if (result && result.state === "conflict") {
+            showTrouble(); clearTimeout(watchdogTimer);
+            setStatus("Port 8765 is occupied by an unrecognized service. No process was stopped. Close or reconfigure that service, then Retry or create a support report.");
+          }
+          finish(false);
+        }
       })
       .catch(function () {
         finish(false);

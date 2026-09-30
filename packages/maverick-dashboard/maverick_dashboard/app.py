@@ -12015,10 +12015,15 @@ def _health_should_redact() -> bool:
 @app.get("/healthz")
 async def healthz() -> JSONResponse:
     """Deep health: DB writable, LLM provider key present, runner alive."""
-    return await _health_response(
+    response = await _health_response(
         world_provider=_world,
         provider_key_set=_any_provider_key_set,
     )
+    # Fixed, non-secret identity for the native bounded loopback handshake.
+    # A provider-missing 503 still identifies a genuine onboarding dashboard.
+    response.headers["X-Lightwork-Service"] = "dashboard-v1"
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/readyz")

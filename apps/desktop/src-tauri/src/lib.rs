@@ -32,6 +32,33 @@ fn dashboard_diagnostics(state: tauri::State<'_, Dashboard>) -> Result<String, S
 }
 
 #[tauri::command]
+async fn dashboard_readiness(window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {
+    let url = window
+        .url()
+        .map_err(|_| "The startup window is unavailable.")?;
+    if url != bundled_splash_url()
+        && url != bundled_root_url()
+        && url != bundled_page_url("")
+        && url != bundled_page_url("recovery.html")
+    {
+        return Err("Open the native startup or recovery page to check readiness.".into());
+    }
+    let result =
+        tauri::async_runtime::spawn_blocking(lightwork_desktop_runtime::dashboard_readiness)
+            .await
+            .map_err(|_| "The readiness check could not complete.")?;
+    use lightwork_desktop_runtime::Readiness;
+    let (service, state) = match result {
+        Readiness::Ready => ("lightwork-dashboard", "ready"),
+        Readiness::SetupRequired => ("lightwork-dashboard", "setup_required"),
+        Readiness::NotRunning => ("", "not_running"),
+        Readiness::Conflict => ("", "conflict"),
+        Readiness::Unavailable => ("", "unavailable"),
+    };
+    Ok(serde_json::json!({"service": service, "state": state}))
+}
+
+#[tauri::command]
 fn startup_support_report(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Dashboard>,
@@ -199,6 +226,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             retry_dashboard,
             dashboard_diagnostics,
+            dashboard_readiness,
             startup_support_report,
             switch_recovery_mode,
             native_oauth::prepare_oauth_return,

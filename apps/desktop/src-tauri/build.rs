@@ -3,6 +3,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "retry_dashboard",
             "dashboard_diagnostics",
+            "dashboard_readiness",
             "startup_support_report",
             "switch_recovery_mode",
             "maintenance_status",
