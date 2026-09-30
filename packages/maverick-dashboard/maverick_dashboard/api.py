@@ -13097,7 +13097,11 @@ def list_approvals(request: Request) -> dict:
     """
     require_permission(request, "operate")
     w = _world()
-    return {"approvals": [_approval_api_row(a) for a in w.pending_approvals()]}
+    from .content_access import can_read_approval
+    rows = list(w.pending_approvals())
+    readable = [a for a in rows if can_read_approval(request, a, w)]
+    return {"approvals": [_approval_api_row(a) for a in readable],
+            "private_count": len(rows) - len(readable), "content_access_url": "/content-access"}
 
 
 def _approval_api_row(approval) -> dict:
@@ -13555,6 +13559,8 @@ def approval_state(request: Request, approval_id: int) -> dict:
     """N-of-M quorum progress for an approval (status, approvers so far vs.
     required) — the operator view of an in-flight multi-party decision."""
     require_permission(request, "operate")
+    from .content_access import require_approval_content
+    require_approval_content(request, approval_id)
     st = _world().approval_state(approval_id)
     if st is None:
         raise HTTPException(status_code=404, detail="no such approval")
@@ -13571,6 +13577,8 @@ def claim_approval(request: Request, approval_id: int) -> dict:
     # human-oversight queue, so a read-only `viewer` must not be able to lock
     # pending approvals (or learn the claiming supervisor's identity via the 409).
     require_permission(request, "operate")
+    from .content_access import require_approval_content
+    require_approval_content(request, approval_id)
     who = _supervisor(request)
     if _world().claim_approval(approval_id, who):
         return {"claimed_by": who}

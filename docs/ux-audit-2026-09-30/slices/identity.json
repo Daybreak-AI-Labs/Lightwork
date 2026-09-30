@@ -1,100 +1,134 @@
 [
   {
     "id": "LW-091",
-    "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Fresh form cannot submit admin without explicit choice; test keyboard submission and custom roles."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: users.html requires an empty explicit role choice and previews built-in/custom permission atoms."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Keyboard, custom-role and authenticated browser acceptance remain unrun."
   },
   {
     "id": "LW-092",
     "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Viewer-to-operator fallback is visible before confirmation and in success; never claim account removed."
+    "implementation_evidence": [
+      "e18aa52: Use standard role action and success explicitly state access is not removed."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Finish exact SCIM-derived fallback preview/readback; current wording names the configured default and can misdescribe group-derived fallback."
   },
   {
     "id": "LW-093",
-    "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Tenant admin sees actionable membership controls and no global roster/editor; presented controls do not lead to predictable 403; global admin retains both."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: admin_pages._users_context returns workspace membership controls before loading global roster, invitations or department grants; users.html gates global forms."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Authenticated tenant/global administrator acceptance remains unrun."
   },
   {
     "id": "LW-094",
     "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Employee with running work/OAuth/pending review cannot be marked fully offboarded until every item is transferred, revoked or explicitly retained with owner; retain legal holds."
+    "implementation_evidence": [
+      "ef7c5b6: employee_departures.py + API/template, config/installer feature and documented exact-owner cross-workspace inventory.",
+      "Reviewed identity/session retirement, generation-bound local credential removal, pending run-goal cancellation, durable dispatch/result steps and retained-data custodian.",
+      "Per-item human handoff reports remain explicitly unverified; no private-content ACL transfer."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Provider-side revocation, running and other-module work closure, safe uncertain-effect resume, and global Copilot operation integration remain open. Cases deliberately cannot claim complete offboarding."
   },
   {
     "id": "LW-095",
     "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Admin can manage policies but private employee content reads are denied; audit projection omits raw prompts/tool payloads; exceptional reads produce explicit scoped receipts."
+    "implementation_evidence": [
+      "027751b + 072ae1c: exact goal ownership, no shared-installation-credential bypass, resource-scoped independent expiring access with audit acknowledgement and reviewer membership checks.",
+      "Audit tail/search/export projections, governed subject export, feature/installer/UI and preservation of explicit result sharing.",
+      "Current checkpoint adds approval-card content fingerprints and governed reads independent of decision authority; shoring, safety, Cortex, replay and overview side-path privacy."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Complete consolidated route/model-recall review across sibling slices, integration of all embedded approval surfaces and global Copilot operations; authenticated cross-user acceptance remains unrun."
   },
   {
     "id": "LW-096",
     "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Denied action explains precise ceiling and appropriate approver without revealing inaccessible resources; explanation matches runtime decision."
+    "implementation_evidence": [
+      "e18aa52: Account exposes explicit allowed/blocked tool names, configured ceilings, broad policy source and administrator contact ownership."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Finish exact role/department provenance and capability-specific denial reason/approver path; broad account summaries do not yet explain every runtime ceiling."
   },
   {
     "id": "LW-097",
     "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Fresh enterprise setup cannot leave unexplained operator/all-department defaults; upgrades preserve chosen behavior and show migration choice."
+    "implementation_evidence": [
+      "e18aa52: SSO installer recommends explicit viewer/no-departments baseline, emits empty default_suites and previews deliberate operator alternative. Existing runtime defaults preserved."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Provide an explicit reviewed in-product migration choice for existing deployments and accurate effective readback; tests remain unrun."
   },
   {
     "id": "LW-098",
-    "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Enterprise named profile with mode=false visibly states overridden; account/readiness surfaces agree on actual enforcement."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: Account reports active_profile separately from actual enterprise_enabled and labels enterprise profile with boundary off as overridden."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Environment override and policy precedence acceptance remains unrun."
   },
   {
     "id": "LW-099",
-    "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Switch in tab A leaves tab B unable to act on new tenant silently; draft/approval shows clear context change and safe reopen; fixed deployment has no misleading switch."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: persistent workspace context, cross-tab change banner and mutation guard, fixed-binding picker disabled and server rejects changes while MAVERICK_TENANT is set."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Multiple-tab and fixed-binding browser acceptance remains unrun; no production workspace changes performed."
   },
   {
     "id": "LW-100",
     "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Viewer/member/admin sessions see only allowed task actions; permission changes disable stale affordances after fresh state; denial preserves entered work where lawful."
+    "implementation_evidence": [
+      "e18aa52 + 072ae1c: chat and trajectory contexts and fresh permissions endpoint combine operate with exact ownership; grant-only task reads stay read-only."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Conversation worker owns actual chat template control gates and draft-preserving focus/submit revalidation; integrate and inspect their commit before marking implemented. Sessions/browser acceptance unrun."
   },
   {
     "id": "LW-101",
-    "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Denial, expiry, token exchange outage, invalid transaction and state mismatch have safe actionable outcomes; keyboard focus and narrow layout work; no provider tokens, secrets or sensitive account-existence detail appear. Restart does not replay old codes."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "e18aa52: auth_error.html branded accessible recovery; OIDC failure routes clear cookies and preserve only validated local return destinations; fresh login retry never replays old code."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Denied/expired/outage/state-mismatch and narrow keyboard/browser acceptance remain unrun."
   },
   {
     "id": "LW-102",
-    "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Starting with a 30-day period, choosing indefinite removes the effective pruning period or clearly refuses an enforced external-policy override.\n2. Clearing all fields and clearing one while saving another both have explicit semantics.\n3. Readback and reload match effective state; policy-change audit and organizational ceilings remain intact."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "027751b: retention form sends explicit null, API distinguishes omitted from null and persists zero no-pruning value, reads effective global config back and refuses masked external overrides."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Mixed-field/all-field clearing and scheduler/config precedence regression acceptance remains unrun."
   },
   {
     "id": "LW-103",
     "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. Review a dry run containing actual effective periods, tenant scope, counts, holds and dependencies before deletion.\n2. Invalidate review if policy or scope changes; unsaved edits are saved/reviewed or explicitly excluded.\n3. Qualify global-administrator behavior with an active tenant; irreversible deletion uses current authority."
+    "implementation_evidence": [
+      "027751b: actual scope/workspaces/policies/counts in durable dry-run review; saved-policy fingerprint, frozen cutoff, expiry and fresh authority before store steps.",
+      "Unsaved form edits invalidate preview; UI explicitly requires records-owner hold confirmation and names provenance dependency."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Integrate known internal preservation holds and fence current authority with deletion; external hold discovery remains unavailable and requires explicit records-owner confirmation. Runtime acceptance unrun."
   },
   {
     "id": "LW-104",
-    "status": "partial-planned",
-    "implementation_evidence": [],
-    "validation": "Regression tests authored; suites, providers and browser acceptance intentionally unrun. Static checks only.",
-    "remaining": "1. An expired locked file cannot produce a nothing-old-enough success message.\n2. Return persistent per-store and workspace deleted, skipped, failed or unknown outcomes, including partial sequential execution.\n3. Retry only unresolved steps; never imply already removed data can be undone or an audit record succeeded without evidence."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "027751b + 072ae1c: locked expired audit files report skipped/partial; missing signed purge tip remains unconfirmed.",
+      "retention_runs.py writes per-workspace/store dispatch/outcomes persistently, retries unresolved only and retains uncertain prior effects/unconfirmed audit without false success."
+    ],
+    "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
+    "remaining": "Authored locked-file/partial/policy-conflict/unknown-retry regression tests remain unrun; PostgreSQL and filesystem interruption acceptance deferred."
   }
 ]

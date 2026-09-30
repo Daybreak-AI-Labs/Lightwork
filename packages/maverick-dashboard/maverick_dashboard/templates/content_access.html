@@ -2,13 +2,14 @@
 {% block title %}Content access · Lightwork{% endblock %}
 {% block content %}
 <h1>Content access</h1>
-<section class="panel"><p>Employee tasks and chats are private to their owner. Administrators govern policy and audit metadata. A specific task read or subject export needs a stated purpose, approval by a different administrator or the content owner, and an expiry of at most one hour. This never permits changing or publishing the employee's work or opening another task in its conversation.</p>
+<section class="panel"><p>Employee tasks and chats are private to their owner. Administrators govern policy and audit metadata. A specific task read, subject export or approval-card read needs a stated purpose, approval by a different administrator or the content owner, and an expiry of at most one hour. This never grants changing or publishing the employee's task or opening another task in its conversation.</p>
+<p>A person with permission to operate can request an exact approval-card read. The grant only reveals that reviewed card. Voting still independently requires the current review role, claim and separation-of-duties checks; changing the card invalidates the content grant.</p>
 <p>Shared result packets keep their assigned reviewer access. Existing employee-owned work uses its recorded owner. Unowned legacy tasks require a separate review; no employee ownership is guessed.</p>
 <p id="ca-status" role="status" aria-live="polite">Loading current access…</p><button type="button" class="btn" id="ca-refresh">Refresh</button></section>
 <section class="panel" id="ca-request-panel" hidden><h2>Request a specific read</h2>
 <p id="ca-window"></p><form id="ca-request" data-draft-recovery="off">
 <label>Record <select class="select" id="ca-resource" required><option value="">Choose a record</option></select></label>
-<label>Purpose <select class="select" id="ca-purpose"><option value="employee_support">Employee support</option><option value="incident_investigation">Incident investigation</option><option value="rights_request">Rights request</option></select></label>
+<label>Purpose <select class="select" id="ca-purpose"><option value="employee_support">Employee support</option><option value="incident_investigation">Incident investigation</option><option value="rights_request">Rights request</option><option value="action_review">Review an approval card</option></select></label>
 <label>Access duration <select class="select" id="ca-minutes"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">One hour</option></select></label>
 <button type="submit" class="btn btn--primary">Request independent review</button></form></section>
 <section class="panel"><h2>Requests and receipts</h2><div id="ca-records"></div></section>
@@ -45,6 +46,7 @@
       if (row.can_revoke && row.audit_pending) button(card, 'Retry activity recording', () => decide(row, 'retry_audit'));
       if (row.resource_kind === 'goal' && row.status === 'approved' && !row.expired && !row.audit_pending) { const a = document.createElement('a'); a.className = 'btn'; a.href = '/goals/' + encodeURIComponent(row.resource_id) + '/trajectory'; a.textContent = 'Open reviewed task'; card.appendChild(a); }
       if (row.resource_kind === 'subject_data' && row.status === 'approved' && !row.expired && !row.audit_pending) { const a = document.createElement('a'); a.href = '/compliance#cmp-people'; a.textContent = 'Open the governed data-export control'; card.appendChild(a); }
+      if (row.resource_kind === 'approval' && row.status === 'approved' && !row.expired && !row.audit_pending) { const a = document.createElement('a'); a.href = '/approvals'; a.textContent = 'Open authorized approval cards'; card.appendChild(a); }
       rows.appendChild(card);
     });
   }

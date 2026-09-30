@@ -158,7 +158,7 @@ CAPABILITY_INFO = {
                  "before shell commands run.",
 }
 FEATURE_INFO = {
-    "employee_content_access_requests": "Allow named administrators to request a specific employee task or subject export for a stated purpose. Another administrator or the content owner must approve; access expires within one hour and every exceptional read is recorded. Turning this off revokes use of existing approvals. Private content remains owner-only by default.",
+    "employee_content_access_requests": "Allow named administrators to request an employee task or subject export, and named operators to request an exact approval-card read. Another administrator or the content owner must approve; reads expire within one hour and are recorded. Reading a card grants no voting authority. Turning this off revokes use of existing grants. Private content remains owner-only by default.",
     "employee_departures": "Allow named installation administrators to preview employee work, revoke Lightwork access, remove reviewed local connection credentials, cancel pending run-goal schedules and record retained-data handoff owners. External provider consent, running work and other module queues remain explicit unresolved handoffs; this does not claim complete offboarding or transfer private-content access.",
     "employee_companions": (
         "Let workspace administrators enroll employees for a personal companion "

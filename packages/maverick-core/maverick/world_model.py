@@ -2090,13 +2090,13 @@ class WorldModel:
             )
             return cur.rowcount == 1
 
-    def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
+    def shoring_measurements(self, department: str, *, since: float, until: float, owner: str | None = None) -> dict:
         """Complete department totals in one read snapshot, without a row cap."""
         from .shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements
 
         row = self._read_one(
-            AGGREGATE_SQL + f" WHERE domain = ? AND {EVENT_TIME_SQL} >= ? AND {EVENT_TIME_SQL} <= ?",
-            (department, since, until),
+            AGGREGATE_SQL + f" WHERE domain = ? AND {EVENT_TIME_SQL} >= ? AND {EVENT_TIME_SQL} <= ?" + (" AND owner = ?" if owner is not None else ""),
+            (department, since, until, *([owner] if owner is not None else [])),
         )
         return measurements(row)
 

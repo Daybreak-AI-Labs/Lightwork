@@ -14,7 +14,7 @@ off by default. The installer and Settings expose it. Turning it off prevents
 use of existing approvals while keeping ordinary owner access available.
 
 A request binds a named requester, current workspace, one task or one exact
-channel/user export, a closed purpose and a duration of 5–60 minutes. A different
+channel/user export or approval card, a closed purpose and a duration of 5-60 minutes. A different
 installation administrator or the exact content owner must approve. Requests,
 decisions and revocations use the governed record store with compare-and-swap
 revisions and its audit outbox. Pending audit does not grant access. Every
@@ -23,6 +23,14 @@ scope, ownership, requester role, reviewer authority and expiry check is made
 when evaluating a read. A task read does not grant a whole conversation, mutation,
 external publication, or an employee companion conversation. Expired approvals
 must be requested again. Revocation and audit-retry controls stay available.
+
+Approval cards have a separate exact-record content grant available to a named
+operator. Its fingerprint includes the card, action, target, task and owner;
+changed content invalidates the grant. Every exceptional card read is recorded.
+The read grant adds no voting authority. Existing operate/reviewer authority,
+claim, current-card binding and separation-of-duties checks still determine
+whether a decision can be made, independently of permission to read the card.
+The queue lists readable cards and a minimized count/link for private ones.
 
 Audit tail, literal search and download/forward projections omit prompts, tool
 inputs, responses and task titles before matching and rendering. A projected

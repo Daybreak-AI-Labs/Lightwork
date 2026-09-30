@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
 from ._shared import _world
-from .auth import require_permission
+from .auth import goal_owner_filter, require_permission
 
 BOOK_SCHEMA = "lightwork.shoring-book.v1"
 SLA_SCHEMA = "lightwork.shoring-sla.v1"
@@ -64,22 +64,22 @@ def _require_enabled() -> None:
             detail="This feature is turned off.")
 
 
-def _book() -> dict:
+def _book(owner) -> dict:
     from maverick import shoring
 
-    return {"schema": BOOK_SCHEMA, "functions": shoring.book_status(_world())}
+    return {"schema": BOOK_SCHEMA, "functions": shoring.book_status(_world(), owner=owner)}
 
 
-def _sla(key: str) -> dict:
+def _sla(key: str, owner) -> dict:
     from maverick import shoring
 
     fn = next((f for f in shoring.load(strict=True) if f.key == key), None)
     if fn is None:
         raise HTTPException(status_code=404, detail="That business area is not in the book of work.")
-    return {"schema": SLA_SCHEMA, "function": shoring.function_status(fn, _world())}
+    return {"schema": SLA_SCHEMA, "function": shoring.function_status(fn, _world(), owner=owner)}
 
 
-def _upsert(body: FunctionIn) -> dict:
+def _upsert(body: FunctionIn, owner) -> dict:
     from maverick import shoring
 
     fn = shoring.Function(
@@ -88,7 +88,7 @@ def _upsert(body: FunctionIn) -> dict:
         slas=[shoring.SLATarget(s.name, s.metric, s.target) for s in body.slas],
     )
     shoring.upsert(fn)
-    return {"schema": SLA_SCHEMA, "function": shoring.function_status(fn, _world())}
+    return {"schema": SLA_SCHEMA, "function": shoring.function_status(fn, _world(), owner=owner)}
 
 
 def _remove(key: str) -> dict:
@@ -118,13 +118,13 @@ def create_shoring_router() -> APIRouter:
     async def book(request: Request):
         require_permission(request, "view")
         _require_enabled()
-        return await _call(_book)
+        return await _call(_book, goal_owner_filter(request))
 
     @router.get("/sla")
     async def sla(request: Request, key: Key):
         require_permission(request, "view")
         _require_enabled()
-        return await _call(_sla, key)
+        return await _call(_sla, key, goal_owner_filter(request))
 
     @router.post("/function")
     async def upsert_function(request: Request, body: FunctionIn):
@@ -132,7 +132,7 @@ def create_shoring_router() -> APIRouter:
         # centrally like every /api/v1 mutation).
         require_permission(request, "operate")
         _require_enabled()
-        return await _call(_upsert, body)
+        return await _call(_upsert, body, goal_owner_filter(request))
 
     @router.post("/turn-on")
     async def turn_on(request: Request):

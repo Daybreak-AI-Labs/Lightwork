@@ -3102,7 +3102,9 @@ def overview(request: Request) -> HTMLResponse:
     }
     # The executive board (charts, KPI deltas, recent list) renders client-side
     # from GET /api/v1/dashboards/overview; the page only needs the hero counts.
-    facts = w.get_facts()
+    # Reserved task/user memory is private; the overview is shared business context.
+    facts = {key: value for key, value in w.get_facts().items()
+             if not str(key).startswith(("goal:", "user:"))}
     skills = _load_skills()
     return templates.TemplateResponse(
         request,
@@ -6685,15 +6687,18 @@ async def safety_page(request: Request) -> HTMLResponse:
     from collections import Counter
 
     from maverick.audit import default_audit_log
+    from .content_access import audit_metadata
+
+    require_permission(request, "audit")
 
     try:
         n = max(1, min(int(request.query_params.get("n") or 1000), 5000))
     except (TypeError, ValueError):
         n = 1000
     day = safe_audit_day(request.query_params.get("day"))
-    blocks = [e for e in default_audit_log().tail(n, day=day) if e.get("kind") == "shield_block"]
+    blocks = [audit_metadata(e) for e in default_audit_log().tail(n, day=day) if e.get("kind") == "shield_block"]
     by_stage = Counter((e.get("stage") or "unknown") for e in blocks)
-    top_reasons = Counter((e.get("reason") or "unknown") for e in blocks).most_common(10)
+    top_reasons = [("Details are private; audit metadata only", len(blocks))] if blocks else []
     recent = list(reversed(blocks))[:100]
     return templates.TemplateResponse(
         request,
@@ -7812,12 +7817,16 @@ def approvals_page(request: Request) -> HTMLResponse:
     so a view-only caller must not read it via the HTML page either.
     """
     require_permission(request, "operate")
-    approvals = list(_world().pending_approvals())
+    from .content_access import can_read_approval
+    world = _world()
+    pending = list(world.pending_approvals())
+    approvals = [row for row in pending if can_read_approval(request, row, world)]
     return templates.TemplateResponse(
         request,
         "approvals.html",
         {
             "approvals": approvals,
+            "private_count": len(pending) - len(approvals),
             **_approval_queue_context(approvals),
         },
     )
@@ -7838,7 +7847,8 @@ def _recent_governance_holds(limit: int = 10) -> list[dict]:
         events = [e for e in default_audit_log().tail(500) if e.get("kind") == kind]
     except Exception:  # pragma: no cover - never 500 the console on a log error
         return []
-    return list(reversed(events))[:limit]
+    from .content_access import audit_metadata
+    return [audit_metadata(event) for event in reversed(events)][:limit]
 
 
 def _fleet_recent_runs(fleet_name: str, *, owner: str | None = None, limit: int = 12) -> list[dict]:

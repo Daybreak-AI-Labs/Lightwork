@@ -179,7 +179,8 @@ def _audit_tail(n: int) -> list[dict[str, Any]]:
     """The day's audit tail, exactly as the ``/audit`` page reads it."""
     from maverick.audit import default_audit_log
 
-    return default_audit_log().tail(n)
+    from .content_access import audit_metadata
+    return [audit_metadata(event) for event in default_audit_log().tail(n)]
 
 
 def _when(ts: Any) -> str:

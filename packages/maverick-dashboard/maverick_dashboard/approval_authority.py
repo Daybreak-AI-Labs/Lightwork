@@ -44,6 +44,12 @@ def require_approval_authority(
     from .auth import caller_principal, has_permission
 
     if has_permission(request, "operate"):
+        if action in {"approval.approve", "approval.deny", "approval.revise"}:
+            from .content_access import require_approval_content
+            row = require_approval_content(request, resource)
+            actor = caller_principal(request) or "operator"
+            if row.claimed_by and row.claimed_by != actor:
+                raise HTTPException(409, "Another reviewer holds this claim. Ask them to release it before deciding.")
         from maverick.paths import current_tenant_id_strict
 
         from .auth import auth_genuinely_off

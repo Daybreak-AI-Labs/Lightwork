@@ -74,7 +74,7 @@ def create_shoring_page_router(templates: Jinja2Templates) -> APIRouter:
         world = _world()
         try:
             report = await run_in_threadpool(savings_mod.compute, world, owner=goal_owner_filter(request))
-            functions = await run_in_threadpool(shoring.book_status, world)
+            functions = await run_in_threadpool(shoring.book_status, world, owner=goal_owner_filter(request))
         except (OSError, RuntimeError, ValueError) as exc:
             raise HTTPException(
                 status_code=503,

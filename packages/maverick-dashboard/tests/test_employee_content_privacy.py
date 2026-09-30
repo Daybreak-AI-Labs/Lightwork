@@ -81,3 +81,31 @@ def test_owner_approval_requires_current_workspace_membership(monkeypatch):
     assert not content_access._reviewer_current(row)
     monkeypatch.setattr(rbac, "get_tenant_role", lambda *_: "viewer")
     assert content_access._reviewer_current(row)
+
+
+def test_approval_read_is_exact_card_and_does_not_authorize_task_mutation(authority, monkeypatch):
+    import maverick.audit
+    monkeypatch.setattr(auth, "has_permission", lambda *_: True)
+    monkeypatch.setattr(maverick.audit, "record", lambda *_, **__: True)
+    approval = SimpleNamespace(id=9, requested_by="agent:worker", goal_id=12,
+        action="send", scope="one reviewed target", detail="private card", status="pending")
+    world = SimpleNamespace(get_goal=lambda _: SimpleNamespace(owner="user:employee"))
+    resource = content_access.approval_resource(approval, world)
+    monkeypatch.setattr(content_access.STORE, "list", lambda: [grant(**resource)])
+    assert content_access.can_read_approval(authority, approval, world)
+    authority.method = "POST"
+    assert not auth.can_access_goal(authority, SimpleNamespace(id=12, owner="user:employee"))
+    approval.detail = "changed private card"
+    assert not content_access.can_read_approval(authority, approval, world)
+
+
+def test_private_approval_has_no_ambient_administrator_read(authority, monkeypatch):
+    monkeypatch.setattr(auth, "has_permission", lambda *_: True)
+    monkeypatch.setattr(content_access.STORE, "list", lambda: [])
+    approval = SimpleNamespace(id=9, requested_by="user:employee", goal_id=None,
+        action="send", scope="one reviewed target", detail="private card", status="pending")
+    assert not content_access.can_read_approval(authority, approval, SimpleNamespace())
+
+
+def test_unidentified_caller_cannot_access_a_missing_record():
+    assert not auth.can_access_goal_principal(None, None)

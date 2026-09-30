@@ -7,6 +7,8 @@ This does not grant mutation, publishing, or access to another task in a thread.
 from __future__ import annotations
 
 import time
+import hashlib
+import json
 
 from fastapi import HTTPException
 from maverick.governed_records import GovernedRecordStore
@@ -42,7 +44,7 @@ def _reviewer_current(record: dict) -> bool:
     return "admin" in rbac.permissions_for(auth.global_role_for_principal(reviewer))
 
 
-def may_read_employee_content(request, owner: str, *, resource_kind: str, resource_id: str) -> bool:
+def may_read_employee_content(request, owner: str, *, resource_kind: str, resource_id: str, resource_revision: str | None = None) -> bool:
     from maverick.audit import record as record_audit
 
     from . import auth, scim_groups
@@ -54,7 +56,8 @@ def may_read_employee_content(request, owner: str, *, resource_kind: str, resour
         return not owner
     if owner and actor == owner:
         return True
-    if not enabled() or not auth.has_global_permission(request, "admin"):
+    eligible = auth.has_permission(request, "operate") if resource_kind == "approval" else auth.has_global_permission(request, "admin")
+    if not enabled() or not eligible:
         return False
     if scim_groups.active_for_principal(actor) is False:
         return False
@@ -63,6 +66,7 @@ def may_read_employee_content(request, owner: str, *, resource_kind: str, resour
             if (grant.get("tenant") != tenant() or grant.get("requester") != actor
                     or grant.get("owner") != owner or grant.get("resource_kind") != resource_kind
                     or grant.get("resource_id") != str(resource_id)
+                    or (resource_revision is not None and grant.get("resource_revision") != resource_revision)
                     or grant.get("status") != "approved" or grant.get("_audit_pending")
                     or grant.get("expires_at", 0) <= time.time() or not _reviewer_current(grant)):
                 continue
@@ -73,6 +77,43 @@ def may_read_employee_content(request, owner: str, *, resource_kind: str, resour
     except Exception:
         return False
     return False
+
+
+def approval_resource(approval, world) -> dict:
+    owner = approval.requested_by or ""
+    if approval.goal_id:
+        goal = world.get_goal(approval.goal_id)
+        if goal is None:
+            raise HTTPException(404, "No such approval.")
+        owner = goal.owner or ""
+    revision = hashlib.sha256(json.dumps([approval.id, owner, approval.goal_id,
+        approval.action, approval.scope, approval.detail], sort_keys=True).encode()).hexdigest()
+    return {"resource_kind": "approval", "resource_id": str(approval.id), "owner": owner,
+            "resource_revision": revision, "label": f"Approval {approval.id} — {approval.status}"}
+
+
+def can_read_approval(request, approval, world=None) -> bool:
+    if approval is None:
+        return False
+    if world is None:
+        from ._shared import _world
+        world = _world()
+    try:
+        resource = approval_resource(approval, world)
+    except HTTPException:
+        return False
+    return may_read_employee_content(request, resource["owner"], resource_kind="approval",
+        resource_id=resource["resource_id"], resource_revision=resource["resource_revision"])
+
+
+def require_approval_content(request, approval_id, world=None):
+    if world is None:
+        from ._shared import _world
+        world = _world()
+    row = world.get_approval(int(approval_id))
+    if not can_read_approval(request, row, world):
+        raise HTTPException(403, "This approval contains private employee content. Request its exact approval-card read in Content access; existing decision authority is still required.")
+    return row
 
 
 def require_employee_content(request, owner: str, *, resource_kind: str, resource_id: str) -> None:
@@ -86,7 +127,12 @@ def audit_metadata(event: dict) -> dict:
     Raw payloads, titles, tool arguments and arbitrary text never survive.
     These projected rows are not claimed to be the original signed bytes.
     """
-    safe = {key: event[key] for key in ("ts", "kind", "goal_id", "event_id", "hash", "prev_hash") if key in event}
+    safe = {key: event[key] for key in ("ts", "kind", "event_id", "hash", "prev_hash")
+            if key in event and isinstance(event[key], (str, int, float))}
+    if isinstance(event.get("goal_id"), int) and not isinstance(event["goal_id"], bool):
+        safe["goal_id"] = event["goal_id"]
+    if event.get("stage") in {"input", "tool", "output"}:
+        safe["stage"] = event["stage"]
     payload = event.get("payload")
     if isinstance(payload, dict):
         safe["payload"] = {key: payload[key] for key in (

@@ -4663,7 +4663,7 @@ def pick_advanced() -> dict[str, Any]:
         ),
         "allow_employee_content_access_requests": _q_confirm(
             "Employee tasks and chats are private to their owner. Enable exceptional "
-            "content-read requests with a separate reviewer, a stated purpose, "
+            "task/export reads and exact approval-card reads with a separate reviewer, a stated purpose, "
             "expiry within one hour and a recorded receipt for each read?", default=False,
         ),
         "allow_employee_departures": _q_confirm(

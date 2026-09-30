@@ -1615,7 +1615,7 @@ class PostgresWorldModel:
             cur.execute(sql, tuple(params))
             return cur.rowcount == 1
 
-    def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
+    def shoring_measurements(self, department: str, *, since: float, until: float, owner: str | None = None) -> dict:
         """Complete department totals, bound to this request's tenant."""
         from ..shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements
 
@@ -1623,8 +1623,10 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope()
         if frag:
             sql += " AND " + frag
+        if owner is not None:
+            sql += " AND owner = %s"
         with self._tx() as cur:
-            cur.execute(sql, tuple([department, since, until, *fparams]))
+            cur.execute(sql, tuple([department, since, until, *fparams, *([owner] if owner is not None else [])]))
             row = cur.fetchone()
         return measurements(row)
 

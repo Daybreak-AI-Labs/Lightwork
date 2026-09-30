@@ -28,9 +28,9 @@ async def _call(operation):
 
 class AccessIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    resource_kind: Literal["goal", "subject_data"]
+    resource_kind: Literal["goal", "subject_data", "approval"]
     resource_id: str = Field(min_length=1, max_length=400)
-    purpose: Literal["employee_support", "incident_investigation", "rights_request"]
+    purpose: Literal["employee_support", "incident_investigation", "rights_request", "action_review"]
     minutes: int = Field(default=15, ge=5, le=60)
 
 
@@ -61,11 +61,22 @@ def _public(record, actor, is_admin):
     return row
 
 
-def _resources():
+def _resources(*, approvals_only=False):
     from ._shared import _world
     from .compliance_controls_api import _list_people
 
-    resources = [{"resource_kind": "goal", "resource_id": str(goal.id),
+    world = _world()
+    resources = []
+    for approval in world.list_approvals(limit=500):
+        if approval.status != "pending":
+            continue
+        try:
+            resources.append(content_access.approval_resource(approval, world))
+        except HTTPException:
+            continue
+    if approvals_only:
+        return resources
+    resources += [{"resource_kind": "goal", "resource_id": str(goal.id),
                   "owner": goal.owner or "", "label": f"Task {goal.id} · {goal.status}"}
                  for goal in _world().list_goals(limit=500, order="desc")]
     for person in _list_people():
@@ -87,26 +98,27 @@ def access_page(request: Request):
 async def access_status(request: Request):
     actor = _actor(request)
     is_admin = auth.has_global_permission(request, "admin")
+    can_request = is_admin or auth.has_permission(request, "operate")
     def read():
         records = [_public(row, actor, is_admin) for row in content_access.STORE.list()
                    if row.get("tenant") == content_access.tenant()
                    and (is_admin or actor in {row.get("owner"), row.get("requester")} )]
-        return {"enabled": content_access.enabled(), "can_request": is_admin,
-                "records": records, "resources": _resources() if is_admin else [],
-                "resource_window": "The latest 500 tasks and up to 500 chat identities in the current workspace are listed. Task text is private."}
+        return {"enabled": content_access.enabled(), "can_request": can_request,
+                "records": records, "resources": _resources(approvals_only=not is_admin) if can_request else [],
+                "resource_window": "The latest 500 approval records are considered. Installation administrators may also request the latest 500 tasks and up to 500 chat identities. Content stays private until reviewed."}
     return await _call(read)
 
 
 @router.post("/api/v1/content-access")
 async def request_access(request: Request, body: AccessIn):
     actor = _actor(request, write=True)
-    auth.require_global_permission(request, "admin")
+    (auth.require_permission if body.resource_kind == "approval" else auth.require_global_permission)(request, "operate" if body.resource_kind == "approval" else "admin")
     if not content_access.enabled():
         raise HTTPException(403, "Content-access requests are disabled. An installation administrator can enable them in Settings.")
     def create():
         with authority_effect_fence():
-            auth.require_global_permission(request, "admin")
-            resource = next((row for row in _resources() if row["resource_kind"] == body.resource_kind
+            (auth.require_permission if body.resource_kind == "approval" else auth.require_global_permission)(request, "operate" if body.resource_kind == "approval" else "admin")
+            resource = next((row for row in _resources(approvals_only=body.resource_kind == "approval") if row["resource_kind"] == body.resource_kind
                              and row["resource_id"] == body.resource_id), None)
             if resource is None:
                 raise HTTPException(404, "The selected resource is no longer available. Refresh the list.")
@@ -115,6 +127,7 @@ async def request_access(request: Request, body: AccessIn):
                         and existing.get("requester") == actor
                         and existing.get("resource_kind") == body.resource_kind
                         and existing.get("resource_id") == body.resource_id
+                        and existing.get("resource_revision") == resource.get("resource_revision")
                         and existing.get("purpose") == body.purpose
                         and existing.get("minutes") == body.minutes
                         and existing.get("status") == "requested"):

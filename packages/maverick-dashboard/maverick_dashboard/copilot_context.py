@@ -88,10 +88,11 @@ _CONTEXTS = tuple(
         CopilotPageContext(
             path="/content-access", title="Employee content access",
             summary="Employee content stays private while administrators govern policy and audit metadata.",
-            capabilities=("Request a specific task read or exact chat-identity export for a stated purpose.",
+            capabilities=("Request a specific task, approval-card read or exact chat-identity export for a stated purpose.",
                           "Review, deny or revoke an independently requested read and inspect its receipts."),
             boundaries=("Another administrator or the current content owner must approve; approvals expire within an hour.",
                         "A read never grants mutation, publication, whole-conversation access or companion history.",
+                        "Reading an approval card does not grant a vote; current role, claim and separation-of-duties checks still apply.",
                         "Use the page controls; this guidance does not submit or approve requests."),
             next_steps=("Choose the exact record, purpose and duration, then request independent review.",
                         "Confirm the activity receipt before opening approved content."),

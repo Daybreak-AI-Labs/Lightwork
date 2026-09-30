@@ -673,6 +673,8 @@ def can_access_goal_principal(principal: str | None, goal) -> bool:
     ``None`` identifies no employee and may access only unowned local work.
     Named callers, including administrators, need exact ownership.
     """
+    if goal is None:
+        return False
     if principal is None:
         return not getattr(goal, "owner", "")
     return getattr(goal, "owner", "") == principal

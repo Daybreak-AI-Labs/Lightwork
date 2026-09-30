@@ -17,7 +17,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import caller_principal, require_global_permission, require_permission
+from .auth import assert_goal_access, caller_principal, can_access_goal_principal, require_global_permission, require_permission
 
 log = logging.getLogger(__name__)
 _MAX_DOC_ITEMS = 5000
@@ -124,7 +124,7 @@ def people_choices() -> list[dict]:
     return [{"value": p["principal"], "label": p["label"]} for p in people]
 
 
-def _recorded_goals(world) -> list[dict]:
+def _recorded_goals(world, principal) -> list[dict]:
     from maverick.immune import twin
     folder = twin.recording_path(0).parent
     ids: list[int] = []
@@ -135,6 +135,8 @@ def _recorded_goals(world) -> list[dict]:
     out = []
     for gid in sorted(ids, reverse=True)[:200]:
         goal = world.get_goal(gid) if world is not None else None
+        if goal is None or not can_access_goal_principal(principal, goal):
+            continue
         out.append({"id": gid, "title": (goal.title if goal else f"Task {gid}")[:200],
                     "status": goal.status if goal else ""})
     return out
@@ -150,33 +152,60 @@ def _decision_classes(world) -> list[str]:
     return seen[:100]
 
 
+class _OwnedApprovals:
+    """Only exact-owner approvals may supply private examples for a canary."""
+    def __init__(self, world, principal):
+        self.world, self.principal = world, principal
+
+    def list_approvals(self, **kwargs):
+        return [row for row in self.world.list_approvals(**kwargs)
+                if (row.requested_by or "") == (self.principal or "")
+                and (not row.goal_id or can_access_goal_principal(self.principal, self.world.get_goal(row.goal_id)))]
+
+    def create_approval(self, *args, **kwargs):
+        return self.world.create_approval(*args, **kwargs)
+
+
+def _background_authority(world, goal_id, principal):
+    from . import auth, rbac, scim_groups
+    goal = world.get_goal(goal_id)
+    if (goal is None or not can_access_goal_principal(principal, goal)
+            or (principal is not None and (scim_groups.active_for_principal(principal) is False
+                or "admin" not in rbac.permissions_for(auth.role_for_principal(principal))))):
+        raise PermissionError("Current task-owner authority is required for this replay")
+    return goal
+
+
 def _plain_problem(text: str) -> str:
     text = re.sub(r"[_]+", " ", str(text))
     return text[:1].upper() + text[1:300]
 
 
-def _replay_in_background(goal_id: int) -> None:
+def _replay_in_background(goal_id: int, principal) -> None:
     from maverick.immune import twin
     from maverick.runner import run_goal_in_thread
     from maverick.world_model import close_world_if_owned, open_world
     world = open_world()
     try:
+        _background_authority(world, goal_id, principal)
         twin.replay_goal(world, goal_id, lambda gid: run_goal_in_thread(
-            gid, **twin.run_kwargs(world.get_goal(gid))))
+            gid, **twin.run_kwargs(_background_authority(world, gid, principal))))
     except Exception as exc:  # noqa: BLE001 -- the replay ledger carries outcomes
         log.warning("practice re-run of goal %s did not finish (%s)", goal_id, type(exc).__name__)
     finally:
         close_world_if_owned(world)
 
 
-def _awareness_in_background(goal_ids: list[int]) -> None:
+def _awareness_in_background(goal_ids: list[int], principal) -> None:
     from maverick.immune import twin
     from maverick.runner import run_goal_in_thread
     from maverick.world_model import close_world_if_owned, open_world
     world = open_world()
     try:
+        for goal_id in goal_ids:
+            _background_authority(world, goal_id, principal)
         twin.awareness_probe(world, goal_ids, lambda gid: run_goal_in_thread(
-            gid, **twin.run_kwargs(world.get_goal(gid))))
+            gid, **twin.run_kwargs(_background_authority(world, gid, principal))))
     except Exception as exc:  # noqa: BLE001
         log.warning("awareness check did not finish (%s)", type(exc).__name__)
     finally:
@@ -198,8 +227,8 @@ async def choices(request: Request) -> dict:
     def _read() -> dict:
         settings = get_immune()
         return {"canaries": settings["canaries"], "twin_record": settings["twin_record"],
-                "decision_classes": _decision_classes(world),
-                "recorded_goals": _recorded_goals(world),
+                "decision_classes": _decision_classes(_OwnedApprovals(world, caller_principal(request))),
+                "recorded_goals": _recorded_goals(world, caller_principal(request)),
                 "people": people_choices() if can_admin else []}
     return await run_in_threadpool(_read)
 
@@ -227,8 +256,8 @@ async def plant_canaries(request: Request, body: CanaryIn) -> dict:
     planted = 0
     try:
         for _ in range(body.count):
-            await run_in_threadpool(oversight.generate_canary, world,
-                                    decision_class=body.decision_class or None)
+            await run_in_threadpool(oversight.generate_canary, _OwnedApprovals(world, caller_principal(request)),
+                                    decision_class=body.decision_class or None, requested_by=caller_principal(request))
             planted += 1
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail="Reviewer tests are turned off. Turn them on first.") from exc
@@ -253,12 +282,13 @@ async def record_drill(request: Request, body: DrillIn) -> dict:
 def replay(request: Request, goal_id: int, bg: BackgroundTasks) -> dict:
     require_permission(request, "admin")
     from maverick.immune import twin
-    if not twin.recording_path(goal_id).exists():
-        raise HTTPException(status_code=404, detail="That task has no recording to re-run.")
     world = _world()
     goal = world.get_goal(goal_id)
     if goal is None:
         raise HTTPException(status_code=404, detail="That task no longer exists.")
+    assert_goal_access(request, goal)
+    if not twin.recording_path(goal_id).exists():
+        raise HTTPException(status_code=404, detail="That task has no recording to re-run.")
     try:
         twin.run_kwargs(goal)
     except LookupError as exc:
@@ -266,13 +296,17 @@ def replay(request: Request, goal_id: int, bg: BackgroundTasks) -> dict:
             "This task ran as an automated service, so it cannot be re-run as a person.")) from exc
     _ai_ready()
     _audit(request, "practice_rerun", goal_id=goal_id)
-    bg.add_task(_replay_in_background, goal_id)
+    bg.add_task(_replay_in_background, goal_id, caller_principal(request))
     return {"started": True}
 
 @router.delete("/immune/twin/{goal_id}")
 async def forget(request: Request, goal_id: int) -> dict:
     require_permission(request, "admin")
     from maverick.immune import twin
+    goal = _world().get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(404, "No such task.")
+    assert_goal_access(request, goal)
     deleted = await run_in_threadpool(twin.forget, goal_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="That recording was already deleted.")
@@ -284,12 +318,17 @@ async def awareness(request: Request, body: AwarenessIn, bg: BackgroundTasks) ->
     require_permission(request, "admin")
     from maverick.immune import twin
     ids = sorted(set(body.goal_ids))
+    for goal_id in ids:
+        goal = _world().get_goal(goal_id)
+        if goal is None:
+            raise HTTPException(404, "No such task.")
+        assert_goal_access(request, goal)
     missing = [g for g in ids if not twin.recording_path(g).exists()]
     if missing:
         raise HTTPException(status_code=404, detail="Some chosen tasks have no recording.")
     _ai_ready()
     _audit(request, "awareness_check", goals=len(ids))
-    bg.add_task(_awareness_in_background, ids)
+    bg.add_task(_awareness_in_background, ids, caller_principal(request))
     return {"started": True, "runs": 2 * len(ids)}
 
 @router.post("/immune/rules/check")
