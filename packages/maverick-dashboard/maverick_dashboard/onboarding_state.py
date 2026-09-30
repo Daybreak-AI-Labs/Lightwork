@@ -79,10 +79,21 @@ def selected_model_route_state() -> dict[str, Any]:
     }
 
 
-def selected_model_routes_ready() -> bool:
-    """Compatibility boolean for offline selected-route configuration."""
+def workspace_readiness() -> dict[str, Any]:
+    """The one truth about whether an AI service is connected (see
+    :mod:`maverick_dashboard.provider_readiness`). Patch this in tests."""
+    from .provider_readiness import workspace_readiness as _workspace_readiness
 
-    return selected_model_route_state()["configured"] is True
+    return _workspace_readiness()
+
+
+def selected_model_routes_ready() -> bool:
+    """Whether AI work may start: the workspace verdict is not ``not_ready``.
+
+    A saved-but-untested key (``needs_test``) still admits work, exactly as
+    goal submission does; only a missing, blocked or failed provider blocks."""
+
+    return workspace_readiness()["verdict"] != "not_ready"
 
 
 def _has_user_template() -> bool:
@@ -185,7 +196,7 @@ def _with_plain_checks(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _preflight_state(profile: str) -> dict[str, Any]:
+def _preflight_state(profile: str, readiness: dict[str, Any] | None = None) -> dict[str, Any]:
     from maverick.operator_preflight import collect
 
     try:
@@ -210,7 +221,36 @@ def _preflight_state(profile: str) -> dict[str, Any]:
         })
     payload["ready"] = payload.get("ready") is True
     payload["status"] = "ready" if payload["ready"] else "incomplete"
-    return _with_plain_checks(payload)
+    return _with_provider_verdict(_with_plain_checks(payload), readiness)
+
+
+def _with_provider_verdict(payload: dict[str, Any], readiness: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Make the offline "provider" check tell the same truth as every other
+    page: a saved key that never passed a connection test is not "Ready", and
+    a failed test blocks. The kernel preflight stays network-free; the test
+    receipt comes from the dashboard's own readiness module."""
+    checks = payload.get("checks") or []
+    check = next((c for c in checks if c.get("id") == "provider"), None)
+    if check is None:
+        return payload
+    if readiness is None:
+        readiness = workspace_readiness()
+    verdict = readiness["verdict"]
+    if verdict == "ready":
+        check.update(status="ready", state_label=_STATUS_WORDS["ready"], summary="Ready.",
+                     detail=readiness["reason"], fix_label="", fix_href="", module="")
+    else:
+        status = "attention" if verdict == "needs_test" else "blocked"
+        action = readiness["next_action"] or {"label": "Open providers", "href": "/providers"}
+        check.update(status=status, state_label=_STATUS_WORDS[status], summary=readiness["reason"],
+                     detail=readiness["reason"], fix_label=action["label"], fix_href=action["href"],
+                     module="")
+        payload["ready"] = False
+        payload["status"] = "incomplete"
+    first = next((c for c in checks if c.get("status") == "blocked"), None) or next(
+        (c for c in checks if c.get("status") == "attention"), None)
+    payload["next_fix"] = first
+    return payload
 
 
 def build(
@@ -224,7 +264,9 @@ def build(
     """Build the activation checklist and deterministic install preflight."""
 
     model_route_state = selected_model_route_state()
-    provider_ok = model_route_state["configured"] is True
+    readiness = workspace_readiness()
+    provider_ok = readiness["verdict"] == "ready"
+    provider_action = readiness["next_action"] or {"label": "Open providers", "href": "/providers"}
     activated = _has_run(world, owner)
     built = _has_user_template() or _has_user_agent() or activated
     if reviewed_outcome is None:
@@ -235,16 +277,10 @@ def build(
         {
             "title": "Connect your AI service",
             "done": provider_ok,
-            "body": (
-                "Your selected AI services are configured. Test the connection "
-                "in Settings before starting your first task."
-                if provider_ok else
-                "Choose an AI service in Settings, add its access key, and "
-                "test the connection before starting your first task."
-            ),
-            "status": model_route_state["status"],
-            "cta": "/settings",
-            "cta_label": "Open Settings",
+            "body": readiness["reason"],
+            "status": readiness["verdict"],
+            "cta": provider_action["href"],
+            "cta_label": provider_action["label"],
             "allowed": bool(can_configure),
             "readonly_label": "Ask your administrator to connect an AI service.",
             "command": "maverick preflight",
@@ -297,6 +333,7 @@ def build(
         "total": len(steps),
         "next_step": next_step,
         "model_route_state": model_route_state,
+        "workspace": readiness,
         "can_operate": bool(can_operate),
         "can_configure": bool(can_configure),
         "needs_initial_settings": not config_path().exists(),
@@ -312,4 +349,4 @@ def build(
     }
 
 
-__all__ = ["build", "selected_model_route_state", "selected_model_routes_ready"]
+__all__ = ["build", "selected_model_route_state", "selected_model_routes_ready", "workspace_readiness"]

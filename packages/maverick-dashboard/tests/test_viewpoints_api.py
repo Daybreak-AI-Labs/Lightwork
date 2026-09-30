@@ -208,7 +208,11 @@ def test_chat_page_offers_two_viewpoints_plainly(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     dashboard._world_cache.clear()
-    monkeypatch.setattr(onboarding_state, "selected_model_routes_ready", lambda: True)
+    def verdict(name):
+        return lambda: {"verdict": name, "verdict_label": "", "badge_class": "ok", "reason": "", "next_action": None,
+                        "summary": "", "providers": [], "configured_count": 0, "connected_count": 0, "total": 0}
+
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", verdict("ready"))
     client = TestClient(dashboard.app)
     page = client.get("/chat")
     assert page.status_code == 200
@@ -218,5 +222,5 @@ def test_chat_page_offers_two_viewpoints_plainly(monkeypatch, tmp_path):
     assert developer_terms(page.text) == []
     script = client.get("/static/lightwork-viewpoints.js")
     assert script.status_code == 200 and "/api/v1/viewpoints" in script.text
-    monkeypatch.setattr(onboarding_state, "selected_model_routes_ready", lambda: False)
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", verdict("not_ready"))
     assert 'id="vp-form"' not in client.get("/chat").text

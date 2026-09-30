@@ -121,11 +121,12 @@ def _readiness() -> list[dict[str, Any]]:
         rows.append(_row("encryption", "Stored data is encrypted", False,
                          "The encryption setting could not be read.", "See encryption", "#maintenance-encryption"))
     try:
-        from maverick.config import any_provider_configured
-        ok = bool(any_provider_configured())
-        rows.append(_row("provider", "AI provider connected", ok,
-                         "At least one AI provider key is saved." if ok else "No AI provider key is saved yet.",
-                         "Add a provider key", "/settings#settings-integrations"))
+        from .provider_readiness import workspace_readiness
+        readiness = workspace_readiness()
+        ok = readiness["verdict"] == "ready"
+        action = readiness["next_action"] or {"label": "Open providers", "href": "/providers"}
+        rows.append(_row("provider", "AI provider connected", ok, readiness["reason"],
+                         action["label"], action["href"]))
     except Exception:  # noqa: BLE001
         rows.append(_row("provider", "AI provider connected", False,
                          "The provider settings could not be read.", "Open provider keys",

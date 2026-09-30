@@ -11898,6 +11898,11 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
     result["operations_enabled"] = get_features().get("copilot_operations") is True
     if not configured:
         result["provider_setup"] = _copilot_provider_setup(permissions)
+    from .provider_readiness import public_verdict, workspace_readiness
+
+    # The same verdict every page shows, so the panel can say plainly why AI
+    # answers are unavailable and where to fix it instead of sitting empty.
+    result["workspace_readiness"] = public_verdict(workspace_readiness())
     return result
 
 

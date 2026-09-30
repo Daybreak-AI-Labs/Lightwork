@@ -2,16 +2,14 @@
 {% block title %}Providers · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
-  {% from "_integration_readiness.html" import integration_readiness %}
-  {% set configured = inventory | selectattr('configured') | list %}
-  {% set verified = inventory | selectattr('readiness.live.status', 'equalto', 'verified') | list %}
+  {% from "_integration_readiness.html" import provider_status %}
   {% call hero('Integrations', 'Providers', subtitle='AI services',
                lede='Which AI services are set up, whether your organization
                      allows them, and whether their last connection test worked.') %}
-    {{ state('Current state', configured | length ~ ' set up · ' ~ verified | length ~ ' tested and working',
-             badge='Working' if verified else 'Not tested yet',
-             badge_class='ok' if verified else 'idle',
-             copy='Saving a key does not test it. Use Test connection to check each one.') }}
+    {{ state('Current state', workspace.summary,
+             badge=workspace.verdict_label,
+             badge_class=workspace.badge_class,
+             copy=(workspace.reason | e) ~ ((' <a href="' ~ workspace.next_action.href ~ '">' ~ workspace.next_action.label ~ '</a>') | safe if workspace.next_action else '')) }}
   {% endcall %}
 
   {% if tested %}
@@ -31,7 +29,7 @@
       <tr>
         <td>{{ label }}</td>
         <td>{% if provider.configured %}Saved, {{ provider.via | source_label or 'set up' }}{% else %}<span class="muted">Not set up</span>{% endif %}</td>
-        <td>{{ integration_readiness(provider.readiness) }}</td>
+        <td>{{ provider_status(provider) }}</td>
         <td class="prov-actions">
           {% if is_admin and provider.configured %}
           <form method="post" action="/settings/providers/test">

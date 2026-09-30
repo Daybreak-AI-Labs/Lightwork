@@ -112,6 +112,12 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         provider["readiness"] = provider_readiness(
             provider["name"], configured=provider["configured"]
         )
+    # The one truth about whether an AI service is connected: the header,
+    # each provider row and every other page read the same verdict.
+    from maverick_dashboard.provider_readiness import apply_to_rows, workspace_readiness
+
+    workspace = workspace_readiness()
+    apply_to_rows(cfg_state["providers"], workspace)
     # Grouped pickers: every model the configured keys can reach (cached live
     # discovery) plus the shipped catalog, capped by the allow-list.
     from maverick_dashboard import model_pickers
@@ -179,6 +185,7 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         "pinned_model": default_model_override(),
         **pickers,
         "providers": cfg_state["providers"],
+        "workspace": workspace,
         "capabilities": cfg_state["capabilities"],
         "features": cfg_state["features"],
         "budget": budget_override(),
