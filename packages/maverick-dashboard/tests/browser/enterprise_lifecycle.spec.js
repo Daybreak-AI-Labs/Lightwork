@@ -130,8 +130,8 @@ test('invited employee connects only an approved own account, shares a captured 
     const packet=await(await sent).json();
     await review.goto('/project-reviews#packet='+packet.id);await expect(review.locator('#pr-result')).toContainText('Synthetic captured artifact');
     await review.locator('#pr-action').selectOption('approve');await review.locator('#pr-response-note').fill('The synthetic captured artifact and limitations were reviewed.');
-    await review.locator('#pr-response-button').click();await review.getByRole('dialog',{name:/Save this approve decision/}).getByRole('button',{name:'Save decision',exact:true}).click();
-    await expect(review.locator('#pr-packet-summary')).toContainText('approved');
+    await review.locator('#pr-response-button').click();await review.getByRole('dialog',{name:'Save this Approve decision for the captured result? The live task will remain unchanged.'}).getByRole('button',{name:'Save decision',exact:true}).click();
+    await expect(review.locator('#pr-packet-summary')).toContainText('Approved');
     expect([403,404]).toContain((await manager.request.get('/chat/goal/'+fixture.goal)).status());
 
     console.info('Enterprise journey: personal export and departure');
