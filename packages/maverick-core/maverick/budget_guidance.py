@@ -215,12 +215,13 @@ def observe_warnings(principal, projection=None):
         for threshold in settings["warning_thresholds"]:
             if consumed < threshold:
                 continue
-            identity = "PBW-" + hashlib.sha256(f"{principal}|{day}|{name}|{threshold}".encode()).hexdigest()[:48]
+            period = row.get("period") or day
+            identity = "PBW-" + hashlib.sha256(f"{principal}|{period}|{name}|{threshold}".encode()).hexdigest()[:48]
             existing = store.get(identity)
             if existing is None:
                 try:
                     existing = store.create({"id": identity, "principal": principal, "day": day,
-                        "dimension": name, "threshold": threshold, "cap": cap, "remaining_at_notice": remaining,
+                        "period": period, "dimension": name, "threshold": threshold, "cap": cap, "remaining_at_notice": remaining,
                         "currency": "USD", "observed_at": view["observed_at"],
                         "basis": "Confirmed and reserved allowance; this is not an invoice or automatic increase."},
                         action="threshold_observed", actor=principal, max_records=10000)

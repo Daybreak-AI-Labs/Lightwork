@@ -1078,6 +1078,8 @@ app.include_router(draft_router)
 from .preferences_api import router as preferences_router
 from .preferences_api import display_context as _display_preference_context
 app.include_router(preferences_router)
+from .budget_guidance_api import router as budget_guidance_router
+app.include_router(budget_guidance_router)
 from .settings_experience import router as settings_experience_router
 app.include_router(settings_experience_router)
 templates.context_processors.append(_display_preference_context)

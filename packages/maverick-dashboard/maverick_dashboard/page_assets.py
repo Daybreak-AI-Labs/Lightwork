@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 router = APIRouter()
 _STATIC = Path(__file__).parent / "static"
 ASSETS = (
+    "lightwork-budget-guidance.js",
     "lightwork-read-aloud.js",
     "lightwork-theme-preview.js",
     "lightwork-model-guidance.js",

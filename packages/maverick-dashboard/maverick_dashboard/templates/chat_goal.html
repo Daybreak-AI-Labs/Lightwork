@@ -513,6 +513,11 @@
         review the spending limit, then start when you are ready.
       </p>
       {% endif %}
+      <details class="panel" data-budget-launch data-goal="{{ goal.id }}">
+        <summary>Review allowance before this attempt</summary><p role="status" aria-live="polite"></p>
+        <div data-budget-summary></div><button class="btn btn--ghost" type="button">Refresh budget</button>
+      </details>
+      <script src="/static/lightwork-budget-guidance.js" defer></script>
       <form id="halt-resume-form" class="halt-card__row">
         <button id="halt-resume" class="btn btn--primary" type="submit">{{ 'Start this task' if pilot_prepared else 'Try again' }}</button>
         <details class="halt-card__budget">

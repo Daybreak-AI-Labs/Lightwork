@@ -32,6 +32,12 @@
   </section>
   {% endif %}
   <p id="template-draft-notice" class="muted" role="status" hidden></p>
+  <details class="panel" data-budget-launch>
+    <summary>Check budget before starting</summary>
+    <p role="status" aria-live="polite"></p><div data-budget-summary></div>
+    <button class="btn btn--ghost" type="button">Refresh budget</button>
+  </details>
+  <script src="/static/lightwork-budget-guidance.js" defer></script>
   {% if model_route_ready %}
   <details class="panel cs-viewpoints" id="viewpoints">
     <summary>Weighing up a decision? Get two viewpoints first</summary>
