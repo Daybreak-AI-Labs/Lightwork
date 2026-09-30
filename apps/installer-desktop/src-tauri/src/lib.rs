@@ -15,12 +15,14 @@
 //! gnarly bits (winget/brew/apt, PATH, pipx, PEP 668). The shell stays
 //! tiny and there's a single source of truth for "how to install".
 
+mod bootstrap_recovery;
+
+use lightwork_desktop_runtime::{Dashboard, DASHBOARD_URL};
 use std::fs;
 use std::io::Write;
 use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::Duration;
-use lightwork_desktop_runtime::{Dashboard, DASHBOARD_URL};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
@@ -51,6 +53,7 @@ const INSTALL_SCRIPT: &str = include_str!(concat!(env!("OUT_DIR"), "/install.sh"
 /// close request or second invocation from mistaking "cancel requested" for
 /// "cleanup complete."
 struct InstallState {
+    inventory_busy: std::sync::atomic::AtomicBool,
     control: Mutex<InstallControl>,
 }
 
@@ -63,6 +66,7 @@ enum InstallControl {
 impl Default for InstallState {
     fn default() -> Self {
         Self {
+            inventory_busy: std::sync::atomic::AtomicBool::new(false),
             control: Mutex::new(InstallControl::Idle),
         }
     }
@@ -76,10 +80,22 @@ struct InstallCommandError {
 
 impl InstallState {
     fn begin(&self) -> Result<watch::Receiver<bool>, String> {
+        if self
+            .inventory_busy
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err("Wait for dependency inventory to finish.".into());
+        }
         let mut control = self
             .control
             .lock()
             .map_err(|_| "Installer state lock is poisoned.".to_string())?;
+        if self
+            .inventory_busy
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err("Wait for dependency inventory to finish.".into());
+        }
         match &*control {
             InstallControl::Running(_) => {
                 return Err("An installation is already running.".to_string())
@@ -636,6 +652,7 @@ where
     let mut reported_emit_error = false;
     let mut emitted = 0_usize;
     let mut suppression_reported = false;
+    let mut journal_error_reported = false;
 
     loop {
         let available = match reader.fill_buf().await {
@@ -676,6 +693,15 @@ where
             let mut text = String::from_utf8_lossy(&line).into_owned();
             if truncated {
                 text.push_str(" … [line truncated]");
+            }
+            if let Err(error) = bootstrap_recovery::progress(&app, &text) {
+                if !journal_error_reported {
+                    let _ = app.emit(
+                        "install-log",
+                        format!("[Recovery progress could not be saved: {error}]"),
+                    );
+                    journal_error_reported = true;
+                }
             }
             if emitted < MAX_LOG_EVENTS_PER_STREAM {
                 emitted += 1;
@@ -870,17 +896,38 @@ async fn run_bootstrap(app: AppHandle, mut cancel: watch::Receiver<bool>) -> Res
 async fn install(
     app: AppHandle,
     state: State<'_, InstallState>,
+    review: String,
+    confirm_dependencies_reviewed: bool,
 ) -> Result<(), InstallCommandError> {
     let cancel = state.begin().map_err(|message| InstallCommandError {
         code: "failed",
         message,
     })?;
-    let result = run_bootstrap(app, cancel).await;
+    if let Err(message) = bootstrap_recovery::begin(&app, &review, confirm_dependencies_reviewed) {
+        state.finish(true);
+        return Err(InstallCommandError {
+            code: "preflight_required",
+            message,
+        });
+    }
+    let result = run_bootstrap(app.clone(), cancel).await;
     let cleanup_verified = !matches!(
         &result,
         Err(message) if message.starts_with(CLEANUP_UNCERTAIN_PREFIX)
     );
     state.finish(cleanup_verified);
+    let outcome = if result.is_ok() {
+        "completed"
+    } else if !cleanup_verified {
+        "cleanup_uncertain"
+    } else if matches!(&result, Err(message) if message.starts_with("Installation cancelled;")) {
+        "cancelled"
+    } else {
+        "failed"
+    };
+    if let Err(message) = bootstrap_recovery::mark(&app, outcome) {
+        return Err(InstallCommandError { code: "inventory_unknown", message: format!("Installation result: {outcome}. Its durable recovery receipt could not be saved: {message}. Recheck installed dependencies before retrying.") });
+    }
     result.map_err(|message| InstallCommandError {
         code: if message.starts_with("Installation cancelled;") {
             "cancelled"
@@ -891,6 +938,70 @@ async fn install(
         },
         message,
     })
+}
+
+struct InventoryBusy<'a>(&'a std::sync::atomic::AtomicBool);
+impl Drop for InventoryBusy<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+#[tauri::command]
+async fn bootstrap_inventory(
+    app: AppHandle,
+    state: State<'_, InstallState>,
+) -> Result<bootstrap_recovery::Journal, String> {
+    state
+        .inventory_busy
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .map_err(|_| "A dependency check is already running.")?;
+    let _busy = InventoryBusy(&state.inventory_busy);
+    if state.is_active() {
+        return Err(
+            "Finish the owned installation and cleanup before checking dependencies.".into(),
+        );
+    }
+    bootstrap_recovery::inventory(&app).await
+}
+
+#[tauri::command]
+fn open_dependency_repair(state: State<'_, InstallState>) -> Result<(), String> {
+    if state.is_active()
+        || state
+            .inventory_busy
+            .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err("Finish the current local check or installer before opening OS repair.".into());
+    }
+    #[cfg(windows)]
+    let mut command = {
+        let root =
+            std::env::var_os("SystemRoot").ok_or("Windows system directory is unavailable.")?;
+        let mut cmd =
+            std::process::Command::new(std::path::PathBuf::from(root).join("explorer.exe"));
+        cmd.arg("ms-settings:appsfeatures");
+        cmd
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut cmd = std::process::Command::new("/usr/bin/open");
+        cmd.args(["-a", "System Settings"]);
+        cmd
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut cmd = std::process::Command::new("gnome-software");
+        cmd.args(["--mode", "installed"]);
+        cmd
+    };
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|_| "Could not open this platform's app manager. Open the OS application settings, review Git/Python/pipx, then select Recheck dependencies here.")?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -929,7 +1040,18 @@ async fn open_lightwork(
     // Give the Python app time to start. An unconfigured installation still
     // serves its onboarding page; no terminal wizard is needed here.
     for _ in 0..30 {
-        if lightwork_desktop_runtime::listening() {
+        let readiness =
+            tauri::async_runtime::spawn_blocking(lightwork_desktop_runtime::dashboard_readiness)
+                .await
+                .map_err(|e| e.to_string())?;
+        if matches!(readiness, lightwork_desktop_runtime::Readiness::Conflict) {
+            return Err("Another service occupies the dashboard address. Close that service or contact your administrator; it was not adopted.".into());
+        }
+        if matches!(
+            readiness,
+            lightwork_desktop_runtime::Readiness::Ready
+                | lightwork_desktop_runtime::Readiness::SetupRequired
+        ) {
             if let Some(window) = app.get_webview_window("dashboard") {
                 window.show().map_err(|error| error.to_string())?;
                 return window.set_focus().map_err(|error| error.to_string());
@@ -937,7 +1059,11 @@ async fn open_lightwork(
             tauri::WebviewWindowBuilder::new(
                 &app,
                 "dashboard",
-                tauri::WebviewUrl::External(DASHBOARD_URL.parse().map_err(|_| "Invalid dashboard address.")?),
+                tauri::WebviewUrl::External(
+                    DASHBOARD_URL
+                        .parse()
+                        .map_err(|_| "Invalid dashboard address.")?,
+                ),
             )
             .title("Lightwork")
             .inner_size(1280.0, 860.0)
@@ -958,6 +1084,8 @@ pub fn run() {
         .manage(Dashboard::default())
         .invoke_handler(tauri::generate_handler![
             install,
+            bootstrap_inventory,
+            open_dependency_repair,
             cancel_install,
             force_exit_after_cleanup_failure,
             open_lightwork,

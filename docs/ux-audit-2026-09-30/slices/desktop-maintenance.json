@@ -15,10 +15,10 @@
   },
   {
     "id": "LW-155",
-    "status": "planned",
-    "implementation_evidence": "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice.",
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Owner confirmed existing Windows-candidate support boundary. macOS/Linux engineering setup and signed-artifact verification remain in progress; production signing/notarization and customer qualification are not claimed."
+    "status": "test-needed",
+    "implementation_evidence": "Owner confirmed existing Windows customer-candidate boundary; macOS/Linux remain explicitly engineering source setup. Their GUI now labels that scope and includes durable dependency/retry/OS-repair flow. scripts/verify_desktop_artifact.py authenticates a separately signed exact engineering manifest against an independently trusted Minisign key plus expected repository/commit/version/target/channel and streamed artifact hash/size, refusing wrong/stale/changed bytes. It never executes artifacts or claims platform signing/customer qualification.",
+    "validation": "Python3.10 AST and signature-process-mocked artifact identity fixtures authored. Engineering signing commands documented from official Minisign/Tauri guidance; no credentials/signing/publishing performed.",
+    "remaining": "Approved signed artifacts/key custody, macOS signing/notarization, Linux dependency advisory resolution and exact native acceptance remain release prerequisites. Self-contained non-Windows customer distribution is outside the owner-confirmed current supported target policy; no customer-ready claim. Local mocked tests now authorized and pending run."
   },
   {
     "id": "LW-156",
@@ -43,9 +43,9 @@
   },
   {
     "id": "LW-159",
-    "status": "planned",
-    "implementation_evidence": "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice.",
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Build persisted bootstrap phase/inventory and verified safe-resume/OS repair return; native cancellation/elevation matrix remains unrun."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Source bootstrap persists exact/current previous refs, phase/outcome and bounded dependency inventory atomically in local OS app data. Before install, native review binds a five-minute current inventory; interruptions require explicit dependency/elevation review. Owned bounded local probes never infer complete cleanup. OS application-management handoff clears review and requires return/recheck before retry; partial and unconfirmed states stay visible. Final installer dashboard navigation uses exact native readiness handshake. Svelte interruption/repair fixtures and Rust journal regression authored.",
+    "validation": "Rustfmt syntax/format and extracted Svelte TypeScript syntax initially; local test execution now authorized after final implementation and pending environment setup.",
+    "remaining": "Run local fixtures/builds after integration. Real package-manager/elevation/cancellation/restart and all-platform native acceptance require platform qualification; no full-machine rollback claim."
   }
 ]
