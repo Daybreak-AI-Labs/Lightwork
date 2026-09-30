@@ -231,6 +231,8 @@ def test_departments_have_real_names_everywhere():
         assert " Cpg" not in title and "Esg" not in title and " Vc" not in title, key
     assert department_title("esg_sustainability") == "ESG & Sustainability"
     assert department_title("oil_gas") == "Oil & Gas"
+    from maverick_dashboard import rbac
+    rbac.set_role("user:pat@example.com", "viewer")  # the department picker needs a person to limit
     body = _client().get("/users").text
     assert "Food, Beverage &amp; Consumer Goods" in body and "Esg Sustainability" not in body
     assert "data-departments-filter" in body and "data-departments-all" in body
@@ -240,8 +242,8 @@ def test_workspaces_page_has_one_create_form_and_hides_plans_without_billing(mon
     from maverick import billing_stripe
     monkeypatch.setattr(billing_stripe, "enabled", lambda: False)
     body = _client().get("/tenants").text
-    assert body.count("<form") == 2  # create (with optional invite) + key rotation
-    assert "Set up a new client in one step" not in body
+    assert 'id="tenant-add"' in body and 'id="tenant-keys"' in body
+    assert 'id="tenant-onboard"' not in body and "Set up a new client in one step" not in body
     assert 'name="admin_email"' in body and 'id="tenant-invite"' in body
     assert 'name="plan"' not in body and "Enterprise" not in body
     assert "Advanced: workspace encryption keys" in body

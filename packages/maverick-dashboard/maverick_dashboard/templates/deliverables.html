@@ -25,7 +25,7 @@
     </p>
   {% endif %}
 
-  {% if not has_results and not role and not showing_all %}
+  {% if not has_results and not role and not showing_all and not showing_mine %}
     <div class="mv-empty">
       <p class="mv-empty__title">No results yet — start a task</p>
       <p class="mv-empty__body">When a task finishes, its result shows up here, filed by what it is and who it is for.
@@ -112,7 +112,7 @@
         </div>
       {% endfor %}
     </div>
-  {% elif has_results or role %}
+  {% elif has_results or role or showing_mine %}
     <div class="mv-empty">
       <p class="mv-empty__title">
         {%- if role %}No results for {{ role|humanize }}
