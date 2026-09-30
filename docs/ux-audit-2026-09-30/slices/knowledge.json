@@ -1,0 +1,68 @@
+[
+  {
+    "id": "LW-111",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": [
+      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+    ],
+    "remaining": [
+      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+    ]
+  },
+  {
+    "id": "LW-113",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": [
+      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+    ],
+    "remaining": [
+      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+    ]
+  },
+  {
+    "id": "LW-114",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": [
+      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+    ],
+    "remaining": [
+      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+    ]
+  },
+  {
+    "id": "LW-115",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": [
+      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+    ],
+    "remaining": [
+      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+    ]
+  },
+  {
+    "id": "LW-119",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": [
+      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+    ],
+    "remaining": [
+      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+    ]
+  },
+  {
+    "id": "LW-122",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": [
+      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+    ],
+    "remaining": [
+      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+    ]
+  }
+]
