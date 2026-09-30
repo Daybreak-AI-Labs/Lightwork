@@ -34,7 +34,8 @@
       "40": "406e54343164a5a7",
       "41": "c7a90236c1aa4ad5",
       "42": "2c22dea0a5f80cca",
-      "43": "ed68ddefb4cfd2b3"
+      "43": "ed68ddefb4cfd2b3",
+      "44": "19cae6a7d287c31c"
     },
     "sqlite": {
       "1": "532cbf653aedad0a",
@@ -75,6 +76,7 @@
       "41": "5b52ce95530ad795",
       "42": "2c22dea0a5f80cca",
       "43": "d9a43c877b0a0129",
+      "44": "b5b6792abc02af58",
       "5": "e3b0c44298fc1c14",
       "6": "e3b0c44298fc1c14",
       "7": "3caef377db594998",
@@ -83,7 +85,7 @@
     }
   },
   "heads": {
-    "postgres": 43,
-    "sqlite": 43
+    "postgres": 44,
+    "sqlite": 44
   }
 }

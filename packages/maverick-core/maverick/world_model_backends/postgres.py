@@ -42,6 +42,7 @@ from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_S
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
 from ..goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
 from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
+from ..personal_alert_revisions import POSTGRES_MIGRATION as _PERSONAL_ALERT_MIGRATION
 
 log = logging.getLogger(__name__)
 
@@ -713,6 +714,8 @@ MIGRATIONS.append((42, [_GOAL_MUTATION_SCHEMA]))
 MIGRATIONS.append((43, ["ALTER TABLE facts ADD COLUMN IF NOT EXISTS tags_json TEXT NOT NULL DEFAULT '[]'"]))
 
 # Highest migration version = the reported schema version.
+MIGRATIONS.append((44, _PERSONAL_ALERT_MIGRATION))
+
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 _MIGRATIONS_TABLE = (
@@ -2516,6 +2519,26 @@ class PostgresWorldModel:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
         return [_dec_goal_row(r) for r in rows]
+
+    def personal_alert_goals(self, owner: str, *, since: float, after_id: int = 0,
+                             limit: int = 250) -> list[tuple]:
+        """Tenant and owner predicates precede the bounded keyset page."""
+        sql = ("SELECT id,parent_id,title,description,status,created_at,updated_at,deadline,"
+               "result,owner,execution_principal,domain,project_id,alert_state_revision,"
+               "alert_result_revision FROM goals WHERE owner=%s AND id>%s AND "
+               "(status NOT IN ('done','cancelled') OR updated_at>=%s OR "
+               "EXISTS(SELECT 1 FROM questions q WHERE q.goal_id=goals.id AND q.answer IS NULL))")
+        params = [owner, after_id, since]
+        fragment, tenant_params = _tenant_scope()
+        if fragment:
+            sql += " AND " + fragment
+            params.extend(tenant_params)
+        sql += " ORDER BY id LIMIT %s"
+        params.append(max(1, min(500, limit)))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [(_dec_goal_row(row[:13]), int(row[13]), int(row[14])) for row in rows]
 
     def conversation_summaries(self, *, owner: str | None = None,
                                limit: int = 25, before_id: int | None = None):
@@ -5421,7 +5444,9 @@ class PostgresWorldModel:
     def schema_version(self) -> int:
         """Schema version, for parity with SQLite WorldModel.schema_version
         (read as a property by health.py + audit events). Derived from the
-        MIGRATIONS ladder (``_PG_SCHEMA_VERSION = MIGRATIONS[-1][0]``)."""
+        MIGRATIONS ladder (``MIGRATIONS.append((44, _PERSONAL_ALERT_MIGRATION))
+
+_PG_SCHEMA_VERSION = MIGRATIONS[-1][0]``)."""
         return _PG_SCHEMA_VERSION
 
     # ----- close -----

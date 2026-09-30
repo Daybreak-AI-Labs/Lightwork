@@ -29,6 +29,17 @@ def _identity(request):
     return principal
 
 
+def _goal_pages(world, actor):
+    """Unresolved old work survives, independent of recent completed volume."""
+    after, since = 0, time.time() - 7 * 86400
+    while True:
+        batch = world.personal_alert_goals(actor, since=since, after_id=after, limit=250)
+        if not batch:
+            return
+        yield from batch
+        after = batch[-1][0].id
+
+
 def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[dict], list[dict], bool]:
     world = world if world is not None else _app()._world()
     if request is None:
@@ -45,14 +56,12 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
     else:
         operate = auth.has_permission(request, "operate")
         suites = auth.caller_suites(request)
-    goals = world.list_goals(owner=actor, limit=201, order="desc")
-    limited = len(goals) > 200
-    # Own-task scope is deliberately explicit; a global administrator's normal
-    # ability to inspect other work does not subscribe them to everybody's work.
-    goals = [goal for goal in goals[:200] if goal.owner == actor]
-    sources, projects = [], {}
-    tasks = []
-    for goal in goals:
+    sources, tasks = [], []
+    projects = {project["id"]: {"id": project["id"], "name": project["name"]}
+                for project in world.list_projects(owner=actor) if project.get("owner") == actor}
+    for goal, state_revision, result_revision in _goal_pages(world, actor):
+        if goal.owner != actor:
+            continue
         if request is not None:
             auth.assert_goal_access(request, goal)
         tasks.append({"id": goal.id, "title": goal.title})
@@ -68,15 +77,18 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
             sources.append({"ref": f"goal:{goal.id}:{kind}", "version": str(version),
                             "category": category, "goal_id": goal.id, "project_id": project_id,
                             "title": goal.title, "label": label, "href": href or f"/chat/goal/{goal.id}"})
-        add("state", goal.status, {"blocked": "Needs attention", "failed": "Did not finish", "done": "Finished"}.get(goal.status, ""))
+        add("state", f"{goal.status}:{state_revision}", {"blocked": "Needs attention", "failed": "Did not finish", "done": "Finished"}.get(goal.status, ""))
         if goal.status == "done" and goal.result:
-            add("result", hashlib.sha256(str(goal.result).encode()).hexdigest(), "Result changed", category="changed-result")
-        for question in world.open_questions(goal.id)[:20]:
+            result_digest = hashlib.sha256(str(goal.result).encode()).hexdigest()
+            add("result", f"{result_digest}:{result_revision}", "Result changed", category="changed-result")
+            sources[-1]["semantic_digest"] = result_digest
+            sources[-1]["changed_after_completion"] = result_revision > 0
+        for question in world.open_questions(goal.id):
             add("question:" + str(question.id), question.id, "Needs your answer", category="needs-decision")
         if goal.deadline and goal.status not in {"done", "failed", "cancelled"} and goal.deadline <= time.time() + 3600:
             add("deadline", goal.deadline, "Deadline approaching or overdue", category="deadline")
     if operate:
-        for approval in world.pending_approvals()[:200]:
+        for approval in world.pending_approvals():
             if approval.claimed_by != actor:
                 continue
             if approval.department and suites is not None and approval.department not in suites:
@@ -89,7 +101,7 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
                             "href": f"/approvals#approval-{approval.id}", "goal_id": None, "project_id": None})
     from maverick.budget_guidance import warning_sources
     sources.extend(warning_sources(actor))
-    return sources, tasks, list(projects.values()), limited or len(sources) > 1000
+    return sources, tasks, list(projects.values()), False
 
 
 def _state(request, *, seen_id=None):
@@ -117,7 +129,7 @@ def _state_locked(request, *, seen_id=None):
     inbox = PersonalInbox(actor).refresh(sources, choice, seen_id=seen_id,
         allow_critical=(config.load_config().get("notifications") or {}).get("personal_critical_bypass", False) is True)
     return {**inbox, "preferences": choice, "context": context_for(request), "revision": state["revision"],
-            "tasks": tasks, "projects": projects, "partial": limited,
+            "tasks": tasks, "projects": projects, "partial": limited, "recent_history_days": 7,
             "critical_allowed": (config.load_config().get("notifications") or {}).get("personal_critical_bypass", False) is True,
             "background_enabled": (config.load_config().get("notifications") or {}).get("personal_background") is True,
             "background": status(actor), "private_delivery": delivery_status(actor)}
@@ -159,10 +171,16 @@ def validate_current_preferences(request, value):
     choice = validate_preferences(value)
     if set(choice["external_links"]) - {link["id"] for link in linked_channels(actor)}:
         raise HTTPException(409, "A selected channel identity is no longer verified for your account. Refresh and review your linked identities.")
-    _, tasks, projects, _ = _projection(request, actor)
-    if (set(choice["muted_tasks"]) - {str(task["id"]) for task in tasks}
-            or set(choice["projects"]) - {project["id"] for project in projects}):
-        raise HTTPException(409, "A selected task or project is no longer available. Refresh and review your preferences.")
+    world = _app()._world()
+    for task_id in choice["muted_tasks"]:
+        goal = world.get_goal(int(task_id))
+        if goal is None or goal.owner != actor:
+            raise HTTPException(409, "A selected task is no longer available. Refresh your preferences.")
+        auth.assert_goal_access(request, goal)
+    for project_id in choice["projects"]:
+        project = world.get_project(project_id)
+        if project is None or project.get("owner") != actor:
+            raise HTTPException(409, "A selected project is no longer available. Refresh your preferences.")
     return actor, choice
 
 

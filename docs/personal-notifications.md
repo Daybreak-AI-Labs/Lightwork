@@ -46,13 +46,29 @@ critical exceptions still require both administrator policy and user opt-in.
 Records keep up to 1,000 consumed item IDs for seven days; capacity pauses new
 sends rather than evicting duplicate protection. Revoking a link stops its use.
 
-The projection reads the latest 200 owned tasks and a bounded assigned-approval
-list. Coverage limits are displayed. Semantic status/question/result versions
-are deduplicated per named account in encrypted, tenant-scoped state. Current
-authorization is checked before projection/publication; missing sources are
-removed and current labels are hydrated anew, never stored in alert history.
-Deep links open the ordinary authenticated task/approval pages. Fetching an
-alert does not mark it seen; the person uses **Mark seen**.
+The projection walks owner/tenant-scoped keyset pages of all unresolved work,
+plus completed or cancelled tasks changed during the last seven days. Older
+unresolved work and all open questions/assigned approvals remain eligible;
+newer completed work cannot consume their page slots. Empty owned projects can
+be watched before their first task exists. Muted-task validation checks current
+ownership directly even after that task leaves the recent-activity window.
+
+Migration44 adds semantic status/result generations to the existing goal row.
+Database triggers advance them in the same native mutation transaction, including
+raw receipt/CAS writes; rollback also rolls back the generation. A blocked task
+that runs and becomes blocked again between observations therefore receives a
+new identity. Heartbeats and repeated streaming states do not. Saved-result
+changes count only after completion, and the decrypted content digest prevents
+identical result rewrites from generating a new alert. Intermediate states that
+resolve before observation are coalesced into current actionable state, as the
+UI explains; the inbox is not a historical event audit.
+
+Current authorization is checked before projection/publication; revoked sources
+are removed and labels are hydrated anew, never stored in alert history. The
+inbox no longer silently truncates eligible sources or dedupe state at 1,000.
+Deep links open ordinary authenticated pages. Fetching an alert does not mark it
+seen; the person uses **Mark seen**. Native and Copilot preference changes use the
+same current-source checks, exact revision and recoverable operation receipts.
 
 Digest release uses the person's IANA wall-clock time and remembers the local
 delivery date. A skipped DST clock time releases at the first eligible later
@@ -66,8 +82,8 @@ binding. Background reads retain unsaved form edits; conflicts require an
 explicit reload before editing the latest values. Muting one task does not
 mute other tasks. Unsubscribed/off periods do not queue a later replay.
 
-Remaining: durable event ingestion for transitions between observations, complete
-history pagination, personal preference Copilot coverage and installed/provider
-qualification. Mock-only core policy/receipt/private-delivery/offline-policy
-tests passed 20/20, followed by 8/8 private-delivery regressions after path and scope hardening after the user authorized local tests. No live messages were
-sent during implementation or validation.
+Local policy, delivery, semantic-generation, source paging, migration and
+Copilot-recovery regression group: 80 passed. These include rollback, repeat
+blocked transitions, more than 1,000 eligible sources, owner isolation, result
+rewrites and separate seen status. Native PostgreSQL, installed delivery and
+release qualification remain unclaimed. No live messages were sent.

@@ -106,7 +106,7 @@ class PersonalInbox:
         except FileNotFoundError:
             return {"known": {}, "items": [], "digest_day": "", "initialized": False}
         if (not isinstance(value, dict) or not isinstance(value.get("known"), dict)
-                or not isinstance(value.get("items"), list) or len(value["items"]) > 1000):
+                or not isinstance(value.get("items"), list)):
             raise ValueError("Personal notification history could not be read.")
         return value
 
@@ -116,7 +116,7 @@ class PersonalInbox:
         preferences = validate_preferences(preferences)
         # Source IDs and versions describe semantic changes, never streaming
         # timestamps. Authorized current sources also hydrate every display row.
-        current = {source["ref"]: source for source in sources[:1000]}
+        current = {source["ref"]: source for source in sources}
         ensure_private_directory(self.path.parent)
         with cross_process_lock(self.path):
             stored = self._read()
@@ -128,12 +128,16 @@ class PersonalInbox:
                      and item["ref"] in current and current[item["ref"]]["version"] == item["version"]
                      and subscribed(current[item["ref"]])]
             known = stored["known"]
+            known_digests = stored.get("semantic_digests", {})
             for ref, source in current.items():
                 if known.get(ref) == source["version"]:
                     continue
                 if not subscribed(source):
                     continue
-                if source["category"] == "changed-result" and ref not in known:
+                if (source.get("semantic_digest") and
+                        known_digests.get(ref) == source["semantic_digest"]):
+                    continue
+                if source["category"] == "changed-result" and ref not in known and not source.get("changed_after_completion"):
                     continue
                 # Opening an inbox for the first time does not replay every old
                 # completion. Current decisions/problems are useful immediately.
@@ -145,7 +149,7 @@ class PersonalInbox:
             eligible, explanation = delivery_window(preferences, now=now, last_digest_day=stored["digest_day"])
             digest_delivered = False
             visible = []
-            for item in items[-1000:]:
+            for item in items:
                 source = current[item["ref"]]
                 muted = preferences["muted_tasks"].get(str(source.get("goal_id")), 0) > now
                 critical, _ = delivery_window(preferences, now=now, last_digest_day=stored["digest_day"],
@@ -162,7 +166,9 @@ class PersonalInbox:
             if preferences["mode"] == "digest" and digest_delivered:
                 digest_day = datetime.fromtimestamp(now, timezone.utc).astimezone(ZoneInfo(preferences["timezone"])).date().isoformat()
             next_state = {"known": {ref: source["version"] for ref, source in current.items()},
-                          "items": items[-1000:], "digest_day": digest_day, "initialized": True}
+                          "semantic_digests": {ref: source["semantic_digest"] for ref, source in current.items()
+                                               if source.get("semantic_digest")},
+                          "items": items, "digest_day": digest_day, "initialized": True}
             atomic_write_bytes(self.path, seal(json.dumps(next_state, separators=(",", ":")).encode()), mode=0o600)
         return {"items": sorted(visible, key=lambda row: row["created_at"], reverse=True),
                 "delivery_note": explanation, "checked_at": now,

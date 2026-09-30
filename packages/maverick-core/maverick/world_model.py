@@ -38,6 +38,7 @@ from .file_lock import (
     prepare_private_directory,
 )
 from .goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
+from .personal_alert_revisions import SQLITE_MIGRATION as _PERSONAL_ALERT_MIGRATION
 from .paths import bind_tenant_namespace, current_tenant_id, data_dir
 
 log = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 43
+SCHEMA_VERSION = 44
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -423,6 +424,7 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    44: _PERSONAL_ALERT_MIGRATION,
     43: ["ALTER TABLE facts ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"],
     42: [_GOAL_MUTATION_SCHEMA],
     40: [statement for statement in _EVENT_ADMISSION_SCHEMA.split(";") if statement.strip()],
@@ -2241,6 +2243,17 @@ class WorldModel:
             params = params + (max(1, int(limit)), max(0, int(offset)))
         rows = self._read_all(sql, params)
         return [_goal_from_row(r) for r in rows]
+
+    def personal_alert_goals(self, owner: str, *, since: float, after_id: int = 0,
+                             limit: int = 250) -> list[tuple]:
+        """Page all current problems and recent changes, scoped before the limit."""
+        rows = self._read_all(
+            "SELECT * FROM goals WHERE owner=? AND id>? AND "
+            "(status NOT IN ('done','cancelled') OR updated_at>=? OR "
+            "EXISTS(SELECT 1 FROM questions q WHERE q.goal_id=goals.id AND q.answer IS NULL)) "
+            "ORDER BY id LIMIT ?", (owner, after_id, since, max(1, min(500, limit))))
+        return [(_goal_from_row(row), int(row["alert_state_revision"]),
+                 int(row["alert_result_revision"])) for row in rows]
 
     def conversation_summaries(self, *, owner: str | None = None,
                                limit: int = 25, before_id: int | None = None):

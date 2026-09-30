@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -37,13 +36,13 @@ def test_execution_uses_reviewed_cas_and_native_operation_receipt(monkeypatch):
 
 
 def test_recovery_uses_native_receipt_without_new_save(monkeypatch):
-    import sys
+    from maverick import experience_preferences
     monkeypatch.setattr(operations.native, "_identity", lambda request: "user:alice")
     checks = []
     def confirmed(actor, **kwargs):
         checks.append((actor, kwargs))
         return True
-    monkeypatch.setitem(sys.modules, "maverick.experience_preferences", SimpleNamespace(operation_confirmed=confirmed))
+    monkeypatch.setattr(experience_preferences, "operation_confirmed", confirmed)
     result = operations.recover(object(), {}, {}, {"revision": "a" * 64, "preferences": {"mode": "digest"}}, "b" * 32)
     assert result.status == "replayed"
     assert checks[0][0] == "user:alice"

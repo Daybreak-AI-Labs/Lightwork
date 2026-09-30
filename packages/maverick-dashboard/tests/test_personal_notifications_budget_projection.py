@@ -8,7 +8,8 @@ from maverick_dashboard import personal_notifications_api as api
 def test_budget_sources_preserve_current_owned_task_sources(monkeypatch):
     goal = SimpleNamespace(id=9, owner="user:alice", title="Own task", status="blocked",
                            result=None, deadline=None, project_id=None)
-    world = SimpleNamespace(list_goals=lambda **_: [goal], open_questions=lambda _: [])
+    world = SimpleNamespace(personal_alert_goals=lambda actor, **kw: [(goal, 1, 0)] if not kw['after_id'] else [],
+                            open_questions=lambda _: [], list_projects=lambda **_: [])
     warning = {"ref": "budget:warning", "version": "first", "category": "blocked",
                "title": "Budget needs attention", "label": "Monthly cap approaching",
                "href": "/budget", "goal_id": None, "project_id": None}
