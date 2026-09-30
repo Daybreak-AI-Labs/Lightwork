@@ -224,6 +224,37 @@
   .runmeta { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
     margin-top: var(--space-4); color: var(--muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
   .runmeta .zero { color: var(--accent); }
+  .answer-actions { margin-top: var(--space-3); display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+  .answer-actions .btn { font-size: var(--text-sm); }
+  .turn-copy-source { display: none !important; }
+  .print-heading { display: none; }
+  .share-panel { margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); }
+  .share-panel summary { cursor: pointer; font-weight: var(--font-medium); }
+  .share-panel__note { margin: var(--space-2) 0; font-size: var(--text-sm); }
+  @media print {
+    @page { margin: 18mm; }
+    html, body.chat-shell { display: block !important; height: auto !important; overflow: visible !important; background: #fff !important; color: #111 !important; }
+    body.chat-shell main, .cs-scroll, .cs-column { display: block !important; width: auto !important; max-width: none !important; height: auto !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; }
+    .cs-side, .cs-topbar, .cs-dock, .cs-backdrop, .navfinder, .mv-toasts, dialog,
+    .activity, .feedback, .answer-actions, .share-panel, .more, .planning-steps,
+    .halt-card, .goal-share, #edit-box, #attachments-panel, #goal-action-msg, #stream-error,
+    #answer-action-msg, #answer-refresh-notice, #loading-placeholder { display: none !important; }
+    .convo, .msg, .answer, .prose, .artifact, .deliverable { color: #111 !important; background: #fff !important; box-shadow: none !important; }
+    .print-heading { display: block; padding-bottom: 10mm; margin-bottom: 9mm; border-bottom: 1px solid #bbb; }
+    .print-heading h1 { margin: 2mm 0; color: #111; font-size: 20pt; line-height: 1.25; }
+    .print-heading p, .bubble__desc, .agent__label { color: #555 !important; }
+    .msg--user .bubble, .artifact, .deliverable { border-color: #bbb !important; background: #fff !important; color: #111 !important; box-shadow: none !important; }
+    .msg--user { display: block !important; }
+    .msg--user .bubble { max-width: none !important; border: 0 !important; border-inline-start: 3px solid #bbb !important; border-radius: 0 !important; padding: 0 0 0 6mm !important; }
+    .msg--user .bubble::before { content: 'You'; display: block; margin-bottom: 2mm; color: #555; font-size: 9pt; font-weight: 600; }
+    .agent__label, .artifact__head, .deliverable__head { break-after: avoid; }
+    .prose pre, .artifact__body, .deliverable__table-wrap { overflow: visible !important; max-height: none !important; }
+    .prose pre, .artifact__body pre { white-space: pre-wrap !important; overflow-wrap: anywhere; }
+    .prose table, .deliverable__table { width: 100% !important; table-layout: fixed; }
+    .prose th, .prose td, .deliverable__table th, .deliverable__table td { white-space: normal !important; overflow-wrap: anywhere; }
+    .qa { color: #111 !important; border-color: #bbb !important; }
+    .prose a { color: #111 !important; }
+  }
 </style>
 {% endblock %}
 
@@ -234,6 +265,11 @@
         <circle cx="11" cy="11" r="3.2" fill="none" stroke="#fff" stroke-width="1.8"/>
       </svg>
 {%- endmacro %}
+<header class="print-heading">
+  <span>Lightwork conversation</span>
+  <h1>{{ thread_title or goal.title }}</h1>
+  <p>Printed from your Lightwork workspace</p>
+</header>
 <div class="convo">
   {% if latest_chat_goal_id and latest_chat_goal_id != goal.id %}
   <p class="muted" id="newer-chat-turn">You are viewing an earlier message.
@@ -246,7 +282,7 @@
     {% if submission.detail.coverage %}
     <ul>{% for item in submission.detail.coverage %}<li>{{ item.filename }}: {% if item.status in ('ready', 'admitted', 'complete', 'ok') %}readable text ready{% elif item.status in ('pending', 'queued') %}still being read{% else %}could not be read ({{ item.status | humanize | lower }}){% endif %}</li>{% endfor %}</ul>
     {% endif %}
-    {% if goal.status == 'draft' %}
+    {% if goal.status == 'draft' and can_create_goal %}
     <p>AI work has not started. If all your files uploaded, try preparing the task again from this saved draft.</p>
     <form method="post" action="/chat/goal/{{ goal.id }}/recover-submission">
       <button class="btn" type="submit">Retry preparation</button>
@@ -263,11 +299,28 @@
   <div class="msg msg--user">
     <div class="bubble"><div class="bubble__text">{{ t.content }}</div></div>
   </div>
+  {% for exchange in (thread_questions or {}).get(t.goal_id, []) %}
+  <div class="qa">
+    <p class="qa__q">{{ exchange.question }}</p>
+    <div class="msg msg--user"><div class="bubble">{{ exchange.answer }}</div></div>
+  </div>
+  {% endfor %}
     {% else %}
   <div class="msg msg--agent">
     <div class="agent__label">{{ agent_mark() }} Lightwork</div>
     <div class="prose" data-markdown>{{ t.content }}</div>
-    {% if t.goal_id %}<p class="turn__meta muted"><a href="/chat/goal/{{ t.goal_id }}">Show the work behind this answer</a></p>{% endif %}
+    <div class="answer-actions" role="group" aria-label="Earlier answer actions">
+      <button type="button" class="btn btn--ghost turn-copy">Copy answer</button>
+      <button type="button" class="btn btn--ghost turn-print">Print conversation</button>
+      {% if t.goal_id %}
+      {% set download = (thread_downloads or {}).get(t.id, {}) %}
+      {% if download.allowed %}<a class="btn btn--ghost" href="/chat/goal/{{ t.goal_id }}/download.md?turn_id={{ t.id }}">Download answer</a>{% endif %}
+      <a class="btn btn--ghost" href="/chat/goal/{{ t.goal_id }}">Open answer</a>
+      {% if download.note %}<span class="muted">{{ download.note }}</span>{% endif %}
+      {% endif %}
+      <span class="muted turn-copy-status" role="status" aria-live="polite"></span>
+    </div>
+    <textarea class="turn-copy-source" hidden>{{ t.content }}</textarea>
   </div>
     {% endif %}
   {% endfor %}
@@ -287,8 +340,9 @@
     </summary>
     <ul id="attachments-list" style="list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1);"></ul>
     <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2);">
-      <button type="button" id="attach-add-btn" class="btn btn--ghost">+ Add file</button>
+      {% if can_create_goal %}<button type="button" id="attach-add-btn" class="btn btn--ghost">+ Add file</button>{% endif %}
       <input type="file" id="attach-add" multiple aria-label="Add files to this task"
+             {% if not can_create_goal %}disabled{% endif %}
              tabindex="-1"
              style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
       <span id="attach-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-xs);"></span>
@@ -321,8 +375,19 @@
         </p>
       </div>
     </details>
-    <div id="qa-thread" class="qa" aria-live="polite"></div>
+    <div id="qa-thread" class="qa" aria-live="polite">
+      {% for exchange in answered_questions or [] %}
+      <p class="qa__q">{{ exchange.question }}</p>
+      <div class="msg msg--user"><div class="bubble">{{ exchange.answer }}</div></div>
+      {% endfor %}
+    </div>
     <p id="stream-error" role="alert" class="muted" style="display: none; margin: 0 0 var(--space-4); color: var(--danger);"></p>
+    <p id="answer-refresh-notice" role="status" aria-live="polite" hidden>
+      <span id="answer-refresh-text"></span>
+      <button id="answer-refresh-retry" class="btn btn--ghost" type="button" hidden>Try again</button>
+      <a id="answer-refresh-open" href="/chat/goal/{{ goal.id }}" hidden>Open current conversation</a>
+    </p>
+    <div id="answer-panel" data-goal-id="{{ goal.id }}" data-status="{{ goal.status }}" data-updated-at="{{ goal.updated_at }}" data-structured="{{ 'true' if rendered and rendered.structured else 'false' }}" data-can-operate="{{ 'true' if can_create_goal else 'false' }}">
     <div id="result-section" class="answer" style="display: {% if goal.result %}block{% else %}none{% endif %};">
       {% if rendered and rendered.structured %}
         {% include "_deliverable.html" %}
@@ -343,7 +408,7 @@
             {% if signoff.decision == 'approved' and rendered.table %}
               <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">Download for hand-off (CSV)</a>
             {% endif %}
-          {% elif goal.status == 'done' %}
+          {% elif goal.status == 'done' and can_create_goal %}
             <p class="signoff__prompt">Needs <strong>{{ "a manager's approval" if deliverable.gate == 'approval' else "a reviewer's sign-off" }}</strong> before it's acted on.</p>
             <textarea id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
             <div class="signoff__actions">
@@ -351,30 +416,42 @@
               <button id="signoff-reject" class="btn btn--ghost" type="button" data-decision="rejected">Reject</button>
             </div>
             <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
+          {% elif goal.status == 'done' %}
+            <p class="signoff__prompt muted">An authorized reviewer must approve this result before it is acted on.</p>
           {% else %}
             <p class="signoff__prompt muted">{{ "Approval" if deliverable.gate == 'approval' else "Sign-off" }} opens when the result is finished.</p>
           {% endif %}
         </div>
       {% endif %}
-      {% if goal.status in ('done', 'blocked', 'failed') %}
+      {% if goal.status in ('done', 'completed', 'blocked', 'failed', 'cancelled', 'error') %}
         {# Always-available thumbs up/down (unlike the gated sign-off above): any
            finished result can be rated, and the verdict grounds a real outcome
            into the learning loop. #}
-        <div id="feedback" class="feedback" role="group" aria-label="Rate this result">
+        {% if can_create_goal %}<div id="feedback" class="feedback" role="group" aria-label="Rate this result">
           <span class="feedback__q muted">Was this useful?</span>
           <button id="feedback-up" class="btn btn--ghost" type="button"
                   data-rating="up" aria-label="Yes, useful">👍</button>
           <button id="feedback-down" class="btn btn--ghost" type="button"
                   data-rating="down" aria-label="No, not useful">👎</button>
-          <button id="copy-result" class="btn btn--ghost" type="button" aria-label="Copy the answer">⧉ Copy</button>
-          <button id="read-aloud" class="btn btn--ghost" type="button"
-                  data-voice-only="{{ '1' if voice_only else '0' }}"
-                  aria-label="Read the result aloud" aria-pressed="false">🔊 Read aloud</button>
-          <button id="edit-toggle" class="btn btn--ghost" type="button">✎ Edit &amp; save</button>
           <span id="feedback-msg" role="status" aria-live="polite" class="muted"
                 style="min-height: 1em;"></span>
+        </div>{% endif %}
+        {% if goal.result %}
+        <div class="answer-actions" role="group" aria-label="Answer actions">
+          <button id="copy-result" class="btn btn--ghost" type="button">Copy answer</button>
+          <button id="print-result" class="btn btn--ghost" type="button">Print conversation</button>
+          {% if can_download_chat_answer %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/download.md" download="lightwork-answer-{{ goal.id }}.md">Download answer</a>{% endif %}
+          <button id="read-aloud" class="btn btn--ghost" type="button"
+                  data-voice-only="{{ '1' if voice_only else '0' }}"
+                  aria-label="Read the result aloud" aria-pressed="false">Read aloud</button>
+          {% if can_create_goal %}<button id="edit-toggle" class="btn btn--ghost" type="button">Edit &amp; save</button>{% endif %}
+          {% if goal.status == 'done' and goal.result and can_create_goal %}<button id="share-open" class="btn btn--ghost" type="button" aria-controls="share-panel" aria-expanded="false">Share</button>{% endif %}
         </div>
-        <div id="edit-box" style="display:none; margin-top: var(--space-3);">
+        <textarea id="saved-answer-source" hidden>{{ chat_answer_text }}</textarea>
+        <span id="answer-action-msg" class="muted" role="status" aria-live="polite"></span>
+        {% if chat_answer_download_note %}<p class="muted">{{ chat_answer_download_note }}</p>{% endif %}
+        {% endif %}
+        {% if can_create_goal %}<div id="edit-box" style="display:none; margin-top: var(--space-3);">
           <textarea id="edit-text" class="input" rows="8" aria-label="Edit the deliverable"
                     style="width:100%;">{{ goal.result or '' }}</textarea>
           <div style="display:flex; gap:var(--space-2); margin-top: var(--space-2);">
@@ -382,9 +459,27 @@
             <span id="edit-msg" role="status" aria-live="polite" class="muted"></span>
           </div>
           <p class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">Your revisions train your workforce — how much you change tells it how close it got.</p>
-        </div>
+        </div>{% endif %}
       {% endif %}
     </div>
+    {% if can_create_goal and (share_links or (goal.status == 'done' and goal.result)) %}
+    <details class="share-panel" id="share-panel">
+      <summary>Share this answer</summary>
+      <p class="share-panel__note muted">A link lets anyone who can reach your workspace read this finished answer for seven days. You can revoke it here at any time.{% if deliverable and deliverable.gate and (not signoff or signoff.decision != 'approved') %} A reviewer must approve this result before a new link can be created.{% endif %}</p>
+      <div class="goal-share" data-goal="{{ goal.id }}">
+        {% if goal.status == 'done' and goal.result %}<button type="button" id="share-create" class="btn btn--ghost"{% if deliverable and deliverable.gate and (not signoff or signoff.decision != 'approved') %} disabled title="This result needs approval before sharing"{% endif %}>Create share link</button>{% endif %}
+        <input type="text" id="share-url" class="input" readonly aria-label="Share link" hidden onclick="this.select()">
+        <button type="button" id="share-copy" class="btn btn--ghost" hidden>Copy link</button>
+        <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
+        <ul id="share-list" class="share-list">
+          {% for s in share_links %}
+          <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
+            <button type="button" class="btn btn--ghost share-revoke" data-id="{{ s.id }}">Revoke</button></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </details>
+    {% endif %}
     {% if artifacts %}
     <div class="artifacts" aria-label="Files and results">
       <div class="artifacts__head">Files and results <span class="badge">{{ artifacts|length }}</span></div>
@@ -417,7 +512,8 @@
       {% endfor %}
     </div>
     {% endif %}
-    <details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
+    </div>
+    {% if can_create_goal %}<details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
       <summary>Show planning steps</summary>
       <p class="muted">See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the
         result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI,
@@ -431,10 +527,10 @@
       <button type="button" class="btn btn--primary" id="ps-run">Show planning steps</button>
       <p id="ps-status" role="status" aria-live="polite" tabindex="-1"></p>
       <div id="ps-result" hidden></div>
-    </details>
+    </details>{% endif %}
     <details class="more">
       <summary>More</summary>
-    {% if projects %}
+    {% if projects and can_create_goal %}
     <form method="post" action="/chat/goal/{{ goal.id }}/project" class="goal-project">
       <label class="muted" for="goal-project-sel">Project</label>
       <select id="goal-project-sel" name="project_id" class="input" onchange="this.form.submit()">
@@ -446,19 +542,9 @@
       <noscript><button type="submit" class="btn btn--ghost">Set</button></noscript>
     </form>
     {% endif %}
-    <div class="goal-share" data-goal="{{ goal.id }}">
+    <div class="cs-row">
       {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">Review task files</a>{% endif %}
-      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">Download or share full history</a>
-      <button type="button" id="share-create" class="btn btn--ghost">Create share link</button>
-      <input type="text" id="share-url" class="input" readonly aria-label="Share link"
-             style="display: none; max-width: 28rem;" onclick="this.select()">
-      <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
-      <ul id="share-list" class="share-list">
-        {% for s in share_links %}
-          <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
-            <button type="button" class="btn btn--ghost share-revoke" data-id="{{ s.id }}">Revoke</button></li>
-        {% endfor %}
-      </ul>
+      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">Download full history</a>
     </div>
     <div class="task-ops">
       <h3 class="task-ops__title">Task Health</h3>
@@ -468,13 +554,13 @@
       <div id="task-health-out"></div>
     </div>
     </details>
-    <details class="more" id="code-sandbox" data-goal="{{ goal.id }}">
+    {% if can_create_goal %}<details class="more" id="code-sandbox" data-goal="{{ goal.id }}">
       <summary>Run code for this task</summary>
       <p class="muted task-ops__note">Run small pieces of Python for this task in Lightwork's sandbox, step by step.
         Values carry over between steps. Every step is checked, recorded and counted against the task's limits.</p>
       <p id="code-sandbox-status" class="muted" role="status" aria-live="polite"></p>
       <div id="code-sandbox-body"></div>
-    </details>
+    </details>{% endif %}
     <div id="halt-card" class="halt-card" style="display: none;">
       {% set pilot_prepared = goal.result == 'Prepared for a workflow pilot. Start this task after the pilot plan is frozen.' %}
       <div class="halt-card__title">{{ 'Ready to start' if pilot_prepared else 'Lightwork stopped' }}</div>
@@ -485,7 +571,7 @@
         review the spending limit, then start when you are ready.
       </p>
       {% endif %}
-      <form id="halt-resume-form" class="halt-card__row">
+      {% if can_create_goal %}<form id="halt-resume-form" class="halt-card__row">
         <button id="halt-resume" class="btn btn--primary" type="submit">{{ 'Start this task' if pilot_prepared else 'Try again' }}</button>
         <details class="halt-card__budget">
           <summary>Set a spending limit for this attempt</summary>
@@ -496,7 +582,7 @@
           </div>
         </details>
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
-      </form>
+      </form>{% endif %}
     </div>
   </div>
 
@@ -508,11 +594,13 @@
      when there is one, and otherwise sends the next message of this thread
      (a follow-up goal run with the earlier turns as context). #}
   <div id="composer" class="ask">
+    <p id="chat-read-only" class="muted" role="status"{% if can_create_goal %} hidden{% endif %}>You can read this conversation. Ask a workspace administrator for permission to send messages or change its work.</p>
     <div id="question-panel" class="ask__question" style="display: none;" role="alert" aria-live="assertive">
       <p class="ask__eyebrow">Lightwork needs one thing from you</p>
       <p id="question-text" class="ask__text"></p>
     </div>
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
+      <fieldset id="composer-controls" style="display: contents;"{% if not can_create_goal %} disabled{% endif %}>
       <input type="hidden" name="submission_key" value="{{ submission_key }}" />
       <textarea id="answer-input" name="message" rows="1" required
                 placeholder="{{ 'Lightwork is working… you can type while you wait' if run_open|default(true) else 'Message Lightwork…' }}"
@@ -533,6 +621,7 @@
           <path d="M9 14.5V4M9 4l-4.5 4.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
+      </fieldset>
     </form>
     <p id="composer-hint" class="ask__hint" role="status" aria-live="polite"></p>
   </div>
@@ -564,13 +653,13 @@
       const placeholderEl = document.getElementById('loading-placeholder');
       const streamErrorEl = document.getElementById('stream-error');
       const statusEl = document.getElementById('status');
-      const resultEl = document.getElementById('result');  // null when structured
-      const resultSection = document.getElementById('result-section');
-      const deliverableStaleEl = document.getElementById('deliverable-stale');
+      let resultEl = document.getElementById('result');  // null when structured
+      let resultSection = document.getElementById('result-section');
+      let deliverableStaleEl = document.getElementById('deliverable-stale');
       // A structured deliverable (forecast/table/report) is rendered server-side
       // as a grid; the live stream can't re-parse it client-side, so on a live
       // change we prompt a reload rather than dumping raw text over the grid.
-      const STRUCTURED = {{ (rendered.structured if rendered else False)|tojson }};
+      let STRUCTURED = {{ (rendered.structured if rendered else False)|tojson }};
       const cancelBtn = document.getElementById('cancel-btn');
       const questionPanel = document.getElementById('question-panel');
       const questionText = document.getElementById('question-text');
@@ -587,7 +676,79 @@
       let pollDelay = 2000;
       let currentQuestionId = null;
       let currentStatus = {{ goal.status|tojson }};
+      let canOperate = {{ can_create_goal|tojson }};
       let lastResult = {{ (goal.result or '')|tojson }};
+      let answerNeedsRefresh = {{ run_open|default(true)|tojson }};
+      let answerRefreshInFlight = false;
+      const refreshNotice = document.getElementById('answer-refresh-notice');
+      const refreshText = document.getElementById('answer-refresh-text');
+      const refreshRetry = document.getElementById('answer-refresh-retry');
+      const refreshOpen = document.getElementById('answer-refresh-open');
+
+      function applyOperatePermission(allowed) {
+        canOperate = allowed;
+        syncComposer();
+        const readOnlyNote = document.getElementById('chat-read-only');
+        if (readOnlyNote) readOnlyNote.hidden = canOperate;
+        if (!canOperate) {
+          document.querySelectorAll('#attach-add-btn, #attach-add, #planning-steps button, #code-sandbox button, #halt-resume-form button, #submission-status form button').forEach(function (control) { control.disabled = true; });
+          document.querySelectorAll('#planning-steps, #code-sandbox, #halt-resume-form, .goal-project, #submission-status form').forEach(function (control) { control.hidden = true; });
+        }
+      }
+
+      async function refreshAnswerPanel() {
+        if (answerRefreshInFlight) return;
+        answerRefreshInFlight = true;
+        refreshNotice.hidden = false;
+        refreshText.textContent = 'Opening your answer actions…';
+        refreshRetry.hidden = true;
+        refreshOpen.hidden = true;
+        try {
+          const response = await fetch('/chat/goal/' + goalId, { credentials: 'same-origin', cache: 'no-store' });
+          if (response.status === 401 || response.status === 403 || response.redirected) {
+            applyOperatePermission(false);
+            const oldPanel = document.getElementById('answer-panel');
+            if (oldPanel) { oldPanel.replaceChildren(); oldPanel.hidden = true; }
+            refreshText.textContent = 'Your access has changed. Reopen this conversation to check your access.';
+            refreshOpen.hidden = false;
+            return;
+          }
+          if (!response.ok) throw new Error('answer view unavailable');
+          const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+          const fresh = page.getElementById('answer-panel');
+          if (!fresh || fresh.dataset.goalId !== String(goalId)) throw new Error('answer view unavailable');
+          if (!done || !['done', 'completed', 'blocked', 'failed', 'cancelled', 'error'].includes(currentStatus)) {
+            refreshNotice.hidden = true;
+            return;
+          }
+          if (!['done', 'completed', 'blocked', 'failed', 'cancelled', 'error'].includes(fresh.dataset.status)) {
+            refreshText.textContent = 'This task has restarted. Open its current view to follow its progress.';
+            refreshOpen.hidden = false;
+            return;
+          }
+          const oldPanel = document.getElementById('answer-panel');
+          if (!oldPanel) throw new Error('answer view unavailable');
+          const replacement = document.importNode(fresh, true);
+          oldPanel.replaceWith(replacement);
+          applyOperatePermission(replacement.dataset.canOperate === 'true');
+          resultEl = replacement.querySelector('#result');
+          resultSection = replacement.querySelector('#result-section');
+          deliverableStaleEl = replacement.querySelector('#deliverable-stale');
+          STRUCTURED = replacement.dataset.structured === 'true';
+          const saved = replacement.querySelector('#saved-answer-source');
+          lastResult = saved ? saved.value : '';
+          if (window.lwMarkdown) window.lwMarkdown.upgrade(replacement);
+          document.dispatchEvent(new CustomEvent('lightwork:answer-ready'));
+          refreshNotice.hidden = true;
+          answerNeedsRefresh = false;
+        } catch (_) {
+          refreshText.textContent = 'Your answer is finished, but its actions could not be loaded. Try again.';
+          refreshRetry.hidden = false;
+        } finally {
+          answerRefreshInFlight = false;
+        }
+      }
+      refreshRetry.addEventListener('click', refreshAnswerPanel);
 
       // Plain-words labels for the work log: one line per step, in the
       // language of a person reading along, never the kernel's event names.
@@ -753,6 +914,7 @@
         qaThread.appendChild(wrap);
       }
       function resumeFollowing() {
+        answerNeedsRefresh = true;
         // Answering the last open question restarts the run server-side; pick
         // the live stream back up so the page keeps following it in place.
         done = false;
@@ -819,9 +981,12 @@
         answerInput.placeholder = asking ? 'Reply to Lightwork…'
           : running ? 'Lightwork is working… you can type while you wait'
           : 'Message Lightwork…';
-        if (sendBtn) sendBtn.disabled = running;
-        cancelBtn.hidden = !running;
-        cancelBtn.disabled = !running;
+        if (sendBtn) sendBtn.disabled = running || !canOperate;
+        cancelBtn.hidden = !running || !canOperate;
+        cancelBtn.disabled = !running || !canOperate;
+        answerInput.disabled = !canOperate || submitting;
+        const controls = document.getElementById('composer-controls');
+        if (controls) controls.disabled = !canOperate;
         answerForm.dataset.mode = asking ? 'answer' : 'reply';
       }
       function resetField() {
@@ -850,7 +1015,7 @@
 
       answerForm.addEventListener('submit', async function(ev) {
         ev.preventDefault();
-        if (submitting) return;
+        if (submitting || !canOperate) return;
         const text = answerInput.value.trim();
         if (!text) return;
         if (currentQuestionId != null) {
@@ -912,6 +1077,7 @@
       });
 
       cancelBtn.addEventListener('click', async function() {
+        if (!canOperate) return;
         if (!(await mvConfirm('Stop this task? Lightwork will stop after the step it is on.', { okText: 'Stop task' }))) return;
         cancelBtn.disabled = true;
         actionMsg.textContent = '';
@@ -991,6 +1157,7 @@
         if (d.terminal === true) {
           done = true;
           cancelBtn.disabled = true;
+          if (answerNeedsRefresh) refreshAnswerPanel();
         }
         syncComposer();
       }
@@ -1104,46 +1271,53 @@
     // Deliverable sign-off: record the human certify/reject decision, then
     // reload to show the signed-off state (and the hand-off download).
     (function () {
-      document.querySelectorAll('.signoff [data-when]').forEach(function (el) {
-        var ts = parseFloat(el.getAttribute('data-when'));
-        if (ts) el.textContent = window.mvWhen(ts);
-      });
-      var approve = document.getElementById('signoff-approve');
-      var reject = document.getElementById('signoff-reject');
-      if (!approve && !reject) return;
-      var note = document.getElementById('signoff-note');
-      var msg = document.getElementById('signoff-msg');
-      var goalId = {{ goal.id }};
-      // Bind the decision to the exact deliverable this page rendered. The
-      // server rejects this version if a result or artifact changed meanwhile.
-      var reviewedUpdatedAt = {{ goal.updated_at }};
-      var btns = [approve, reject];
-      function submit(decision) {
-        btns.forEach(function (b) { if (b) b.disabled = true; });
-        msg.style.color = 'var(--muted)';
-        msg.textContent = 'Recording…';
-        fetch('/api/v1/goals/' + goalId + '/signoff', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            decision: decision,
-            expected_updated_at: reviewedUpdatedAt,
-            note: (note && note.value.trim()) || null,
-          }),
-        }).then(function (r) {
-          if (r.ok) { location.reload(); return; }
-          return r.json().catch(function () { return {}; }).then(function (j) {
+      function setupSignoff() {
+        document.querySelectorAll('.signoff [data-when]').forEach(function (el) {
+          var ts = parseFloat(el.getAttribute('data-when'));
+          if (ts) el.textContent = window.mvWhen(ts);
+        });
+        var approve = document.getElementById('signoff-approve');
+        var reject = document.getElementById('signoff-reject');
+        if (!approve && !reject) return;
+        var panel = document.getElementById('answer-panel');
+        if (!panel || panel.dataset.signoffBound) return;
+        panel.dataset.signoffBound = '1';
+        var note = document.getElementById('signoff-note');
+        var msg = document.getElementById('signoff-msg');
+        var goalId = {{ goal.id }};
+        // Bind the decision to the exact deliverable this page rendered. The
+        // server rejects this version if a result or artifact changed meanwhile.
+        var reviewedUpdatedAt = Number(panel.dataset.updatedAt);
+        var btns = [approve, reject];
+        function submit(decision) {
+          btns.forEach(function (b) { if (b) b.disabled = true; });
+          msg.style.color = 'var(--muted)';
+          msg.textContent = 'Recording…';
+          fetch('/api/v1/goals/' + goalId + '/signoff', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              decision: decision,
+              expected_updated_at: reviewedUpdatedAt,
+              note: (note && note.value.trim()) || null,
+            }),
+          }).then(function (r) {
+            if (r.ok) { location.reload(); return; }
+            return r.json().catch(function () { return {}; }).then(function (j) {
+              msg.style.color = 'var(--danger)';
+              msg.textContent = cgErr(r, 'record the sign-off');
+              btns.forEach(function (b) { if (b) b.disabled = false; });
+            });
+          }).catch(function (e) {
             msg.style.color = 'var(--danger)';
-            msg.textContent = cgErr(r, 'record the sign-off');
+            msg.textContent = cgErr(e, 'record the sign-off');
             btns.forEach(function (b) { if (b) b.disabled = false; });
           });
-        }).catch(function (e) {
-          msg.style.color = 'var(--danger)';
-          msg.textContent = cgErr(e, 'record the sign-off');
-          btns.forEach(function (b) { if (b) b.disabled = false; });
-        });
+        }
+        if (approve) approve.addEventListener('click', function () { submit('approved'); });
+        if (reject) reject.addEventListener('click', function () { submit('rejected'); });
       }
-      if (approve) approve.addEventListener('click', function () { submit('approved'); });
-      if (reject) reject.addEventListener('click', function () { submit('rejected'); });
+      setupSignoff();
+      document.addEventListener('lightwork:answer-ready', setupSignoff);
     })();
   </script>
 
@@ -1151,53 +1325,107 @@
     // Thumbs up/down feedback: grounds a real outcome into the learning loop for
     // any finished result. Reflects the current rating on load; textContent only.
     (function () {
-      var box = document.getElementById('feedback');
-      if (!box) return;
-      var up = document.getElementById('feedback-up');
-      var down = document.getElementById('feedback-down');
-      var msg = document.getElementById('feedback-msg');
-      var goalId = {{ goal.id }};
-      function show(rating) {
-        [up, down].forEach(function (b) { if (b) b.classList.remove('is-active'); });
-        if (rating === 'up' && up) up.classList.add('is-active');
-        if (rating === 'down' && down) down.classList.add('is-active');
-      }
-      fetch('/api/v1/goals/' + goalId + '/feedback').then(function (r) {
-        return r.ok ? r.json() : {};
-      }).then(function (j) {
-        if (j && j.feedback && j.feedback.rating) show(j.feedback.rating);
-      }).catch(function () {});
-      function submit(rating) {
-        [up, down].forEach(function (b) { if (b) b.disabled = true; });
-        msg.style.color = 'var(--muted)';
-        msg.textContent = 'Recording…';
-        fetch('/api/v1/goals/' + goalId + '/feedback', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({rating: rating}),
-        }).then(function (r) {
-          [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          if (r.ok) { show(rating); msg.textContent = 'Thanks — this trains your workforce.'; return; }
-          return r.json().catch(function () { return {}; }).then(function (j) {
+      function setupFeedback() {
+        var box = document.getElementById('feedback');
+        if (!box || box.dataset.bound) return;
+        box.dataset.bound = '1';
+        var up = document.getElementById('feedback-up');
+        var down = document.getElementById('feedback-down');
+        var msg = document.getElementById('feedback-msg');
+        var goalId = {{ goal.id }};
+        function show(rating) {
+          [up, down].forEach(function (b) { if (b) b.classList.remove('is-active'); });
+          if (rating === 'up' && up) up.classList.add('is-active');
+          if (rating === 'down' && down) down.classList.add('is-active');
+        }
+        fetch('/api/v1/goals/' + goalId + '/feedback').then(function (r) {
+          return r.ok ? r.json() : {};
+        }).then(function (j) {
+          if (j && j.feedback && j.feedback.rating) show(j.feedback.rating);
+        }).catch(function () {});
+        function submit(rating) {
+          [up, down].forEach(function (b) { if (b) b.disabled = true; });
+          msg.style.color = 'var(--muted)';
+          msg.textContent = 'Recording…';
+          fetch('/api/v1/goals/' + goalId + '/feedback', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({rating: rating}),
+          }).then(function (r) {
+            [up, down].forEach(function (b) { if (b) b.disabled = false; });
+            if (r.ok) { show(rating); msg.textContent = 'Thanks — this trains your workforce.'; return; }
+            return r.json().catch(function () { return {}; }).then(function (j) {
+              msg.style.color = 'var(--danger)';
+              msg.textContent = cgErr(r, 'save your feedback');
+            });
+          }).catch(function (e) {
+            [up, down].forEach(function (b) { if (b) b.disabled = false; });
             msg.style.color = 'var(--danger)';
-            msg.textContent = cgErr(r, 'save your feedback');
+            msg.textContent = cgErr(e, 'save your feedback');
           });
-        }).catch(function (e) {
-          [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          msg.style.color = 'var(--danger)';
-          msg.textContent = cgErr(e, 'save your feedback');
-        });
+        }
+        if (up) up.addEventListener('click', function () { submit('up'); });
+        if (down) down.addEventListener('click', function () { submit('down'); });
       }
-      if (up) up.addEventListener('click', function () { submit('up'); });
-      if (down) down.addEventListener('click', function () { submit('down'); });
-      var copy = document.getElementById('copy-result');
-      if (copy) copy.addEventListener('click', function () {
-        var src = document.getElementById('result') || document.getElementById('result-section');
-        var text = src ? (src.innerText || '').trim() : '';
-        if (!text || !navigator.clipboard) return;
-        navigator.clipboard.writeText(text).then(function () {
-          msg.style.color = 'var(--muted)'; msg.textContent = 'Copied.';
-        }).catch(function () {
-          msg.style.color = 'var(--danger)'; msg.textContent = 'Could not copy.';
+      setupFeedback();
+      document.addEventListener('lightwork:answer-ready', setupFeedback);
+    })();
+  </script>
+  <script>
+    // Saved answer actions also initialize when a live answer finishes.
+    (function () {
+      function setupAnswerActions() {
+        var copy = document.getElementById('copy-result');
+        var msg = document.getElementById('answer-action-msg');
+        if (!copy || !msg || copy.dataset.bound) return;
+        copy.dataset.bound = '1';
+        if (copy) copy.addEventListener('click', function () {
+          var source = document.getElementById('saved-answer-source');
+          var text = source ? source.value : '';
+          if (!text) { msg.textContent = 'There is no saved answer to copy yet.'; return; }
+          if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            msg.style.color = 'var(--danger)'; msg.textContent = 'Copy is unavailable here. Use Download answer instead.'; return;
+          }
+          navigator.clipboard.writeText(text).then(function () {
+            msg.style.color = 'var(--muted)'; msg.textContent = 'Copied.';
+          }).catch(function () {
+            msg.style.color = 'var(--danger)'; msg.textContent = 'Could not copy. Use Download answer instead.';
+          });
+        });
+        var print = document.getElementById('print-result');
+        if (print) print.addEventListener('click', function () { window.print(); });
+        var share = document.getElementById('share-open');
+        var panel = document.getElementById('share-panel');
+        if (share && panel) {
+          share.addEventListener('click', function () {
+            panel.open = true;
+            share.setAttribute('aria-expanded', 'true');
+            panel.scrollIntoView({block: 'nearest'});
+            var create = document.getElementById('share-create');
+            if (create && !create.disabled) create.focus(); else panel.querySelector('summary').focus();
+          });
+          panel.addEventListener('toggle', function () { share.setAttribute('aria-expanded', panel.open ? 'true' : 'false'); });
+        }
+      }
+      setupAnswerActions();
+      document.addEventListener('lightwork:answer-ready', setupAnswerActions);
+    })();
+  </script>
+  <script>
+    // Earlier answers retain the exact text shown in the conversation.
+    (function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.turn-copy, .turn-print'), function (button) {
+        button.addEventListener('click', function () {
+          if (button.classList.contains('turn-print')) { window.print(); return; }
+          var group = button.closest('.answer-actions');
+          var source = group && group.nextElementSibling;
+          var status = group && group.querySelector('.turn-copy-status');
+          if (!source || !status) return;
+          if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            status.textContent = 'Copy is unavailable here. Use Download answer instead.'; return;
+          }
+          navigator.clipboard.writeText(source.value).then(function () {
+            status.textContent = 'Copied.';
+          }).catch(function () { status.textContent = 'Could not copy. Use Download answer instead.'; });
         });
       });
     })();
@@ -1268,31 +1496,36 @@
     // Edit & save the deliverable: the human's revision replaces the result and
     // its distance from the agent's draft grounds a graded learning signal.
     (function () {
-      var toggle = document.getElementById('edit-toggle');
-      if (!toggle) return;
-      var box = document.getElementById('edit-box');
-      var textEl = document.getElementById('edit-text');
-      var saveBtn = document.getElementById('edit-save');
-      var editMsg = document.getElementById('edit-msg');
-      var goalId = {{ goal.id }};
-      toggle.addEventListener('click', function () {
-        box.style.display = box.style.display === 'none' ? 'block' : 'none';
-        if (box.style.display === 'block') textEl.focus();
-      });
-      saveBtn.addEventListener('click', function () {
-        saveBtn.disabled = true; editMsg.style.color = 'var(--muted)'; editMsg.textContent = 'Saving…';
-        fetch('/api/v1/goals/' + goalId + '/deliverable/edit', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({text: textEl.value}),
-        }).then(function (r) {
-          saveBtn.disabled = false;
-          if (r.ok) { editMsg.textContent = 'Saved — thanks, this trains your workforce.';
-                      setTimeout(function () { location.reload(); }, 900); return; }
-          return r.json().catch(function () { return {}; }).then(function (j) {
-            editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(r, 'save your edit');
-          });
-        }).catch(function (e) { saveBtn.disabled = false; editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(e, 'save your edit'); });
-      });
+      function setupEditing() {
+        var toggle = document.getElementById('edit-toggle');
+        if (!toggle || toggle.dataset.bound) return;
+        toggle.dataset.bound = '1';
+        var box = document.getElementById('edit-box');
+        var textEl = document.getElementById('edit-text');
+        var saveBtn = document.getElementById('edit-save');
+        var editMsg = document.getElementById('edit-msg');
+        var goalId = {{ goal.id }};
+        toggle.addEventListener('click', function () {
+          box.style.display = box.style.display === 'none' ? 'block' : 'none';
+          if (box.style.display === 'block') textEl.focus();
+        });
+        saveBtn.addEventListener('click', function () {
+          saveBtn.disabled = true; editMsg.style.color = 'var(--muted)'; editMsg.textContent = 'Saving…';
+          fetch('/api/v1/goals/' + goalId + '/deliverable/edit', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: textEl.value}),
+          }).then(function (r) {
+            saveBtn.disabled = false;
+            if (r.ok) { editMsg.textContent = 'Saved — thanks, this trains your workforce.';
+                        setTimeout(function () { location.reload(); }, 900); return; }
+            return r.json().catch(function () { return {}; }).then(function (j) {
+              editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(r, 'save your edit');
+            });
+          }).catch(function (e) { saveBtn.disabled = false; editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(e, 'save your edit'); });
+        });
+      }
+      setupEditing();
+      document.addEventListener('lightwork:answer-ready', setupEditing);
     })();
   </script>
 
@@ -1300,135 +1533,173 @@
     // Artifact version history: fetch on first expand, render newest-first with
     // a unified diff per version (server-computed). textContent throughout — no
     // untrusted content reaches innerHTML.
-    document.querySelectorAll('.artifact__history').forEach(function (d) {
-      d.addEventListener('toggle', function () {
-        if (!d.open || d.dataset.loaded) return;
-        d.dataset.loaded = '1';
-        const body = d.querySelector('.artifact__history-body');
-        body.textContent = 'Loading…';
-        body.classList.add('muted');
-        const url = '/api/v1/goals/' + encodeURIComponent(d.dataset.goal) +
-                    '/artifacts/history?title=' + encodeURIComponent(d.dataset.title);
-        // W3-75: a non-2xx (auth lapsed, goal gone, server error) used to
-        // render as "No history." or leave "Loading…" forever, and the loaded
-        // flag meant re-opening never retried. Check the status, and on any
-        // failure show why and clear the flag so the next toggle retries.
-        fetch(url).then(function (r) {
-          if (!r.ok) {
-            return r.json().catch(function () { return {}; }).then(function (j) {
-              throw new Error(cgErr(r, 'load earlier versions'));
-            });
-          }
-          return r.json();
-        }).then(function (j) {
-          body.textContent = '';
-          body.classList.remove('muted');
-          const versions = (j.versions || []).slice().reverse();  // newest first
-          if (!versions.length) { body.textContent = 'No history.'; return; }
-          versions.forEach(function (v) {
-            const wrap = document.createElement('div');
-            wrap.className = 'artifact__version';
-            const head = document.createElement('div');
-            head.className = 'artifact__version-head';
-            head.textContent = 'v' + v.version +
-              (v.created_at ? ' · ' + new Date(v.created_at * 1000).toLocaleString() : '');
-            wrap.appendChild(head);
-            if (v.diff) {
-              const pre = document.createElement('pre');
-              pre.className = 'artifact__diff';
-              v.diff.split('\n').forEach(function (line) {
-                const span = document.createElement('span');
-                if (line[0] === '+') span.className = 'add';
-                else if (line[0] === '-') span.className = 'del';
-                span.textContent = line + '\n';
-                pre.appendChild(span);
-              });
-              wrap.appendChild(pre);
-            } else {
-              const p = document.createElement('div');
-              p.className = 'muted';
-              p.textContent = '(initial version)';
-              wrap.appendChild(p);
-            }
-            body.appendChild(wrap);
-          });
-        }).catch(function (e) {
+    (function () {
+    function setupArtifactHistory() {
+      document.querySelectorAll('.artifact__history').forEach(function (d) {
+        if (d.dataset.historyBound) return;
+        d.dataset.historyBound = '1';
+        d.addEventListener('toggle', function () {
+          if (!d.open || d.dataset.loaded) return;
+          d.dataset.loaded = '1';
+          const body = d.querySelector('.artifact__history-body');
+          body.textContent = 'Loading…';
           body.classList.add('muted');
-          body.textContent = 'Could not load history: ' + String(e && e.message || e) +
-                             '. Close and reopen to retry.';
-          delete d.dataset.loaded;
+          const url = '/api/v1/goals/' + encodeURIComponent(d.dataset.goal) +
+                      '/artifacts/history?title=' + encodeURIComponent(d.dataset.title);
+          // W3-75: a non-2xx (auth lapsed, goal gone, server error) used to
+          // render as "No history." or leave "Loading…" forever, and the loaded
+          // flag meant re-opening never retried. Check the status, and on any
+          // failure show why and clear the flag so the next toggle retries.
+          fetch(url).then(function (r) {
+            if (!r.ok) {
+              return r.json().catch(function () { return {}; }).then(function (j) {
+                throw new Error(cgErr(r, 'load earlier versions'));
+              });
+            }
+            return r.json();
+          }).then(function (j) {
+            body.textContent = '';
+            body.classList.remove('muted');
+            const versions = (j.versions || []).slice().reverse();  // newest first
+            if (!versions.length) { body.textContent = 'No history.'; return; }
+            versions.forEach(function (v) {
+              const wrap = document.createElement('div');
+              wrap.className = 'artifact__version';
+              const head = document.createElement('div');
+              head.className = 'artifact__version-head';
+              head.textContent = 'v' + v.version +
+                (v.created_at ? ' · ' + new Date(v.created_at * 1000).toLocaleString() : '');
+              wrap.appendChild(head);
+              if (v.diff) {
+                const pre = document.createElement('pre');
+                pre.className = 'artifact__diff';
+                v.diff.split('\n').forEach(function (line) {
+                  const span = document.createElement('span');
+                  if (line[0] === '+') span.className = 'add';
+                  else if (line[0] === '-') span.className = 'del';
+                  span.textContent = line + '\n';
+                  pre.appendChild(span);
+                });
+                wrap.appendChild(pre);
+              } else {
+                const p = document.createElement('div');
+                p.className = 'muted';
+                p.textContent = '(initial version)';
+                wrap.appendChild(p);
+              }
+              body.appendChild(wrap);
+            });
+          }).catch(function (e) {
+            body.classList.add('muted');
+            body.textContent = 'Could not load history: ' + String(e && e.message || e) +
+                               '. Close and reopen to retry.';
+            delete d.dataset.loaded;
+          });
         });
       });
-    });
+    }
+    setupArtifactHistory();
+    document.addEventListener('lightwork:answer-ready', setupArtifactHistory);
+    })();
   </script>
 
   <script>
     // Share links: create (token shown once, in a copyable field) + revoke.
     (function () {
-      const wrap = document.querySelector('.goal-share');
-      if (!wrap) return;
-      const goal = wrap.dataset.goal;
-      const createBtn = document.getElementById('share-create');
-      const urlField = document.getElementById('share-url');
-      const msg = document.getElementById('share-msg');
-      const list = document.getElementById('share-list');
+      function setupSharing() {
+        const wrap = document.querySelector('.goal-share');
+        if (!wrap || wrap.dataset.bound) return;
+        wrap.dataset.bound = '1';
+        const goal = wrap.dataset.goal;
+        const createBtn = document.getElementById('share-create');
+        const urlField = document.getElementById('share-url');
+        const copyBtn = document.getElementById('share-copy');
+        const msg = document.getElementById('share-msg');
+        const list = document.getElementById('share-list');
 
-      createBtn.addEventListener('click', async function () {
-        createBtn.disabled = true;
-        msg.textContent = 'Creating…';
-        try {
-          const r = await fetch('/api/v1/goals/' + encodeURIComponent(goal) + '/share', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-          });
-          const j = await r.json().catch(function () { return {}; });
-          if (r.ok && j.url) {
-            urlField.value = j.url;
-            urlField.style.display = '';
-            urlField.focus();
-            urlField.select();
-            msg.textContent = 'Copy this link now — it is shown only once.';
-            if (j.id) addRow(j.id);
-          } else {
-            msg.textContent = cgErr(r, 'create the link');
+        if (createBtn) createBtn.addEventListener('click', async function () {
+          createBtn.disabled = true;
+          msg.textContent = 'Creating…';
+          try {
+            const r = await fetch('/api/v1/goals/' + encodeURIComponent(goal) + '/share', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+            });
+            const j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.url) {
+              urlField.value = j.url;
+              urlField.dataset.shareId = String(j.id || '');
+              urlField.dataset.localOnly = j.local_only ? '1' : '0';
+              urlField.hidden = false;
+              copyBtn.hidden = false;
+              urlField.focus();
+              urlField.select();
+              msg.textContent = j.local_only
+                ? 'This address is limited to this computer or its private network. Recipients need an address they can reach.'
+                : 'Copy this link now — it is shown only once.';
+              if (j.id) addRow(j.id);
+            } else {
+              msg.textContent = cgErr(r, 'create the link');
+            }
+          } catch (e) { msg.textContent = cgErr(e, 'create the link'); }
+          finally { createBtn.disabled = false; }
+        });
+
+        copyBtn.addEventListener('click', async function () {
+          if (!urlField.value) return;
+          try {
+            if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable');
+            await navigator.clipboard.writeText(urlField.value);
+            msg.textContent = urlField.dataset.localOnly === '1'
+              ? 'Link copied. This address is limited to this computer or its private network. Recipients need an address they can reach.'
+              : 'Link copied. Anyone who can reach your workspace can read this answer until it expires or you revoke it.';
+          } catch (_) {
+            urlField.focus(); urlField.select();
+            msg.textContent = 'Copy was unavailable. The link is selected; press Ctrl+C or Command+C.';
           }
-        } catch (e) { msg.textContent = cgErr(e, 'create the link'); }
-        finally { createBtn.disabled = false; }
-      });
+        });
 
-      function addRow(id) {
-        const li = document.createElement('li');
-        li.dataset.id = id;
-        li.appendChild(document.createTextNode('Link #' + id + ' (read-only) '));
-        const b = document.createElement('button');
-        b.type = 'button'; b.className = 'btn btn--ghost share-revoke';
-        b.dataset.id = id; b.textContent = 'Revoke';
-        li.appendChild(b);
-        list.appendChild(li);
-      }
+        function addRow(id) {
+          const li = document.createElement('li');
+          li.dataset.id = id;
+          li.appendChild(document.createTextNode('Read-only link '));
+          const b = document.createElement('button');
+          b.type = 'button'; b.className = 'btn btn--ghost share-revoke';
+          b.dataset.id = id; b.textContent = 'Revoke';
+          li.appendChild(b);
+          list.appendChild(li);
+        }
 
-      list.addEventListener('click', async function (ev) {
-        const btn = ev.target.closest('.share-revoke');
-        if (!btn) return;
-        if (!(await mvConfirm('Revoke this share link? Anyone using it will immediately lose access.', { okText: 'Revoke link' }))) return;
-        btn.disabled = true;
-        msg.textContent = '';
-        try {
-          const r = await fetch('/api/v1/goals/' + encodeURIComponent(goal) +
-                                '/share/' + encodeURIComponent(btn.dataset.id) + '/revoke',
-                                { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-          if (r.ok) {
-            const li = btn.closest('li');
-            if (li) li.remove();
-          } else {
-            const detail = await r.json().catch(function () { return {}; });
-            msg.textContent = cgErr(r, 'turn off the link');
+        list.addEventListener('click', async function (ev) {
+          const btn = ev.target.closest('.share-revoke');
+          if (!btn) return;
+          if (!(await mvConfirm('Revoke this share link? Anyone using it will immediately lose access.', { okText: 'Revoke link' }))) return;
+          btn.disabled = true;
+          msg.textContent = '';
+          try {
+            const r = await fetch('/api/v1/goals/' + encodeURIComponent(goal) +
+                                  '/share/' + encodeURIComponent(btn.dataset.id) + '/revoke',
+                                  { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            if (r.ok) {
+              const li = btn.closest('li');
+              if (li) li.remove();
+              if (urlField.dataset.shareId === btn.dataset.id) {
+                urlField.value = ''; delete urlField.dataset.shareId; delete urlField.dataset.localOnly;
+                urlField.hidden = true; copyBtn.hidden = true;
+              }
+              msg.textContent = 'Link revoked.';
+            } else {
+              const detail = await r.json().catch(function () { return {}; });
+              msg.textContent = cgErr(r, 'turn off the link');
+              btn.disabled = false;
+            }
+          } catch (e) {
+            msg.textContent = 'Could not turn off the link. Check your connection and try again.';
             btn.disabled = false;
           }
-        } catch (e) {
-          msg.textContent = 'Could not turn off the link. Check your connection and try again.';
-          btn.disabled = false;
-        }
-      });
+        });
+      }
+      setupSharing();
+      document.addEventListener('lightwork:answer-ready', setupSharing);
     })();
   </script>
   <script>
@@ -1592,41 +1863,117 @@
         });
       }
 
-      var speakBtn = document.getElementById('read-aloud');
-      if (!speakBtn) return;
-      var player = null;
-      speakBtn.addEventListener('click', function () {
-        if (player) { player.pause(); player = null; speakBtn.setAttribute('aria-pressed', 'false'); return; }
-        var src = document.getElementById('result') || document.getElementById('deliverable') || document.getElementById('result-section');
-        var text = src ? (src.innerText || '').trim().slice(0, 4096) : '';
-        if (!text) return;
-        speakBtn.disabled = true;
-        fetch('/api/v1/voice/speak', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: text }),
-        }).then(function (r) {
-          if (!r.ok) {
-            // No TTS backend / disabled: fall back to the browser — through
-            // the natural-voice layer (ranked voice, humanized text), never
-            // the bare default utterance.
-            if (window.lwVoice) { window.lwVoice.speak(text); }
-            else if ('speechSynthesis' in window) {
-              window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-            }
-            return null;
+    })();
+  </script>
+  <script>
+    // Read-aloud controls report errors and can stop preparation or playback.
+    (function () {
+      function setupReadAloud() {
+        var speakBtn = document.getElementById('read-aloud');
+        if (!speakBtn || speakBtn.dataset.bound) return;
+        speakBtn.dataset.bound = '1';
+        var msg = document.getElementById('answer-action-msg');
+        var panel = document.getElementById('answer-panel');
+        var player = null, audioUrl = null, controller = null, fallbackTimer = null;
+        var active = false, fallbackActive = false, sequence = 0;
+        function stopReading(message) {
+          sequence += 1;
+          if (controller) { controller.abort(); controller = null; }
+          if (player) { player.pause(); player = null; }
+          if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
+          if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null; }
+          if (fallbackActive) {
+            if (window.lwVoice) window.lwVoice.stop();
+            else if (window.speechSynthesis) window.speechSynthesis.cancel();
+            fallbackActive = false;
           }
-          return r.blob();
-        }).then(function (blob) {
-          if (!blob) return;
-          player = new Audio(URL.createObjectURL(blob));
+          active = false;
+          speakBtn.setAttribute('aria-pressed', 'false');
+          speakBtn.setAttribute('aria-label', 'Read the result aloud');
+          speakBtn.textContent = 'Read aloud';
+          if (msg && message) msg.textContent = message;
+        }
+        function browserRead(text, readingMessage, finishedMessage, requestSequence) {
+          if (sequence !== requestSequence) return;
+          var started = false;
+          try {
+            if (window.lwVoice) started = window.lwVoice.speak(text);
+            else if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+              var utterance = new window.SpeechSynthesisUtterance(text);
+              utterance.onend = function () { if (sequence === requestSequence) stopReading(finishedMessage); };
+              utterance.onerror = function () { if (sequence === requestSequence) stopReading('Could not read this answer aloud. Try again, or use Copy or Download.'); };
+              window.speechSynthesis.speak(utterance);
+              started = true;
+            }
+          } catch (_) { started = false; }
+          if (!started) {
+            stopReading('Read aloud is unavailable here. Use Copy or Download to read this answer elsewhere.');
+            return;
+          }
+          fallbackActive = true;
+          if (msg) msg.textContent = readingMessage;
+          if (window.speechSynthesis) {
+            fallbackTimer = setInterval(function () {
+              if (sequence === requestSequence && !window.speechSynthesis.speaking && !window.speechSynthesis.pending) stopReading(finishedMessage);
+            }, 500);
+          }
+        }
+        speakBtn.addEventListener('click', async function () {
+          if (active) { stopReading('Reading stopped.'); return; }
+          var src = document.getElementById('result') || document.getElementById('deliverable');
+          var fullText = src ? (src.innerText || src.textContent || '').trim() : '';
+          if (!fullText) { if (msg) msg.textContent = 'There is no answer to read aloud yet.'; return; }
+          var text = Array.from(fullText).slice(0, 4096).join('');
+          var readingMessage = fullText.length > text.length
+            ? 'Reading the first part of this answer. Copy or download the full answer.'
+            : 'Reading this answer.';
+          var finishedMessage = fullText.length > text.length
+            ? 'Finished reading the first part. Copy or download the full answer.'
+            : 'Finished reading.';
+          active = true;
+          sequence += 1;
+          var requestSequence = sequence;
           speakBtn.setAttribute('aria-pressed', 'true');
-          player.onended = function () { player = null; speakBtn.setAttribute('aria-pressed', 'false'); };
-          player.play();
-        }).catch(function () {}).finally(function () { speakBtn.disabled = false; });
-      });
-      // Voice-only mode: read the finished result aloud as soon as it is
-      // shown (the browser may still ask for a click before playing sound).
-      if (speakBtn.getAttribute('data-voice-only') === '1') speakBtn.click();
+          speakBtn.setAttribute('aria-label', 'Stop reading');
+          speakBtn.textContent = 'Stop reading';
+          if (msg) msg.textContent = 'Preparing audio…';
+          if (!panel || panel.dataset.canOperate !== 'true') {
+            browserRead(text, readingMessage, finishedMessage, requestSequence);
+            return;
+          }
+          controller = typeof AbortController === 'function' ? new AbortController() : null;
+          try {
+            var response = await fetch('/api/v1/voice/speak', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: text }), signal: controller ? controller.signal : undefined,
+            });
+            if (sequence !== requestSequence) return;
+            if (!response.ok) {
+              browserRead(text, readingMessage, finishedMessage, requestSequence);
+              return;
+            }
+            var blob = await response.blob();
+            if (sequence !== requestSequence) return;
+            if (!blob || !blob.size) throw new Error('empty audio');
+            audioUrl = URL.createObjectURL(blob);
+            player = new Audio(audioUrl);
+            player.onended = function () { if (sequence === requestSequence) stopReading(finishedMessage); };
+            player.onerror = function () { if (sequence === requestSequence) stopReading('Could not play the audio. Try again, or use Copy or Download.'); };
+            await player.play();
+            if (sequence === requestSequence && msg) msg.textContent = readingMessage;
+          } catch (error) {
+            if (sequence !== requestSequence || (error && error.name === 'AbortError')) return;
+            stopReading('Could not read this answer aloud. Check your connection and try again, or use Copy or Download.');
+          }
+        });
+        document.addEventListener('lightwork:answer-ready', function () { stopReading(); }, { once: true });
+        window.addEventListener('beforeunload', function () { stopReading(); }, { once: true });
+        // Voice-only mode: read the finished result aloud as soon as it is
+        // shown (the browser may still ask for a click before playing sound).
+        if (speakBtn.getAttribute('data-voice-only') === '1') speakBtn.click();
+      }
+      setupReadAloud();
+      document.addEventListener('lightwork:answer-ready', setupReadAloud);
     })();
   </script>
 {% endblock %}

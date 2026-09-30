@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const templates = path.resolve(__dirname, "../../maverick_dashboard/templates");
+const readTemplate = name => fs.readFileSync(path.join(templates, name), "utf8").replace(/\r\n/g, "\n");
 
 async function receiveTemplateFixture(draft, existing = {}, serverContext = "ctx") {
   const details = { open: false }, title = { value: existing.title || "" };
@@ -17,7 +18,7 @@ async function receiveTemplateFixture(draft, existing = {}, serverContext = "ctx
   const context = { Date, fetch: async () => typeof serverContext === "function" ? serverContext(title, description) : ({ ok: true, json: async () => ({ context: serverContext }) }),
     sessionStorage: { getItem: key => storage.get(key), removeItem: key => storage.delete(key) },
     document: { querySelector: () => form, getElementById: () => notice } };
-  const source = fs.readFileSync(path.join(templates, "chat.html"), "utf8");
+  const source = readTemplate("chat.html");
   const start = source.indexOf("  (async function receiveTemplateDraft()");
   await vm.runInNewContext(source.slice(start, source.indexOf("  })();", start) + 7), context);
   return { title, description, details, notice, storage, submits };
@@ -87,7 +88,7 @@ function scheduleFixture(value = "") {
     "fd-sched-time-row": { hidden: true }, "fd-sched-tz-row": { hidden: true },
   };
   const context = { Intl, document: { getElementById: id => fields[id], querySelectorAll: () => days } };
-  const source = fs.readFileSync(path.join(templates, "flow_designer.js"), "utf8");
+  const source = readTemplate("flow_designer.js");
   vm.runInNewContext(source.slice(source.indexOf("  // ---- schedule picker"),
     source.indexOf("  function fillTimeZones(")), context);
   return { fields, context, custom, days };
@@ -114,7 +115,7 @@ function authoringFixture(kind, handoff, fetchImpl = async () => ({ ok: true, js
     },
   };
   for (const field of ["elName", "elTitle", "elSteps", "pbName", "pbDesc", "pbPersona"]) context[field] = { value: "" };
-  const source = fs.readFileSync(path.join(templates, kind === "flow" ? "flow_designer.js" : "workflow_builder.html"), "utf8");
+  const source = readTemplate(kind === "flow" ? "flow_designer.js" : "workflow_builder.html");
   const begin = source.indexOf("async function receiveAuthoringHandoff(");
   const end = source.indexOf(kind === "flow" ? "  buildExamples();" : "    renderExamples();", begin);
   assert.ok(begin >= 0 && end > begin);
@@ -245,7 +246,7 @@ test("readable permission chips retain exact identifiers and remove only the sel
   const context = { pbAllow: allow, pbDeny: deny, Event,
     document: { createElement: () => new Element(), querySelector: () => browse,
       getElementById: id => id === "pb-allow-summary" ? allowed : blocked } };
-  const source = fs.readFileSync(path.join(templates, "workflow_builder.html"), "utf8");
+  const source = readTemplate("workflow_builder.html");
   const splitStart = source.indexOf("    function splitList(");
   const splitEnd = source.indexOf("\n    }", splitStart) + 6;
   vm.runInNewContext(source.slice(splitStart, splitEnd), context);
@@ -278,7 +279,7 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
     constructor(callback) { this.callback = callback; }
     observe(target) { observers.set(target, this.callback); }
   }
-  const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8");
+  const source = readTemplate("chat_goal.html");
   const start = source.indexOf("    (function () {", source.indexOf('// "Show work" strip'));
   const end = source.indexOf("    })();", start) + "    })();".length;
   vm.runInNewContext(source.slice(start, end), { MutationObserver, document: { getElementById: id => fields[id] } });
@@ -296,7 +297,7 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
 });
 
 test("a refused chat follow-up shows the server's plain sentence and never raw validation text", () => {
-  const source = fs.readFileSync(path.join(templates, "chat_goal.html"), "utf8");
+  const source = readTemplate("chat_goal.html");
   const start = source.indexOf("      function submissionError(");
   const end = source.indexOf("\n      }\n", source.indexOf("function replyFailureText(", start)) + "\n      }\n".length;
   assert.ok(start > 0 && end > start, "the follow-up failure helpers are present");

@@ -38,6 +38,52 @@ def test_customer_destination_labels(monkeypatch, tmp_path):
     }
 
 
+def test_chat_product_navigation_uses_current_role(monkeypatch, tmp_path):
+    from maverick_dashboard import rbac
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    rbac.set_role("user:customer", "operator")
+    _as(monkeypatch, "user:customer")
+    page = client.get("/chat")
+    assert page.status_code == 200
+    assert 'aria-label="Lightwork product"' in page.text
+    assert 'href="/goals"' in page.text
+    assert 'href="/settings"' not in page.text
+    assert 'href="/connections"' not in page.text
+    assert 'href="/chat"' in page.text
+
+
+@pytest.mark.parametrize("global_role,workspace_role", [("viewer", "viewer"), ("admin", "viewer")])
+def test_read_only_chat_projects_workspace_authority(monkeypatch, tmp_path, global_role, workspace_role):
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import app, rbac, ui_visibility
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    rbac.set_role("user:customer", global_role)
+    rbac.set_tenant_role("acme", "user:customer", workspace_role)
+    ui_visibility.set_visibility("/chat", "viewer", True)
+    _as(monkeypatch, "user:customer")
+    scope = set_tenant("acme")
+    try:
+        world = app._world()
+        gid = world.create_goal("Owned answer", "", owner="user:customer")
+        world.set_goal_status(gid, "done", result="saved answer")
+        page = client.get(f"/chat/goal/{gid}")
+        assert page.status_code == 200
+        assert 'id="chat-read-only" class="muted" role="status">' in page.text
+        assert 'id="copy-result"' in page.text
+        assert 'id="edit-toggle"' not in page.text
+        assert 'id="feedback-up"' not in page.text
+        assert 'id="share-open"' not in page.text
+        assert 'id="ps-run"' not in page.text
+        assert client.get(f"/chat/goal/{gid}/download.md").status_code == 200
+        assert client.post(f"/api/v1/goals/{gid}/deliverable/edit", json={"text": "change"}).status_code == 403
+    finally:
+        reset_tenant(scope)
+
+
 @pytest.mark.parametrize("path,title", [
     ("/goals", "Tasks"), ("/cortex", "Knowledge"), ("/deliverables", "Results"),
 ])

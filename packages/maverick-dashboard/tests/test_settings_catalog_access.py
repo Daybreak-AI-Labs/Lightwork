@@ -296,22 +296,29 @@ def test_every_access_row_refuses_invalid_values(setting, tmp_path, as_token, wo
 
 
 # ----------------------------------------------------------------- paths
-def test_paths_must_be_full_existing_readable_and_inside_allowed_places(tmp_path, as_token,
-                                                                        audit_rows):
+def test_paths_must_be_full_existing_readable_and_inside_allowed_places(
+    tmp_path, tmp_path_factory, monkeypatch, as_token, audit_rows,
+):
     key = "auth.saml.sp_key_file"
+    outside = tmp_path_factory.mktemp("outside-settings-root") / "status.txt"
+    outside.write_text("Synthetic outside-root file", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", str(tmp_path))
     cases = {
         "relative/key.pem": "full location",
         str(tmp_path / "nope.pem"): "nothing was found",
         str(tmp_path): "is a folder",
-        "/proc/self/status": "only uses locations",
+        str(outside): "only uses locations",
     }
     for value, words in cases.items():
         r = _save([{"id": key, "value": value}], confirm=True)
         assert r.status_code == 400, value
         assert words in r.json()["message"], (value, r.json()["message"])
     world_readable = _file(tmp_path, "open.key", mode=0o644)
-    r = _save([{"id": key, "value": str(world_readable)}], confirm=True)
-    assert r.status_code == 400 and "anyone on the server can read" in r.json()["message"]
+    # Windows does not implement POSIX other-read permission bits. Keep this
+    # real mode-based admission check on the platforms where chmod controls it.
+    if os.name != "nt":
+        r = _save([{"id": key, "value": str(world_readable)}], confirm=True)
+        assert r.status_code == 400 and "anyone on the server can read" in r.json()["message"]
     folder = _save([{"id": "workspace.snapshot_dir", "value": str(world_readable)}], confirm=True)
     assert folder.status_code == 400 and "Choose a folder" in folder.json()["message"]
     private = _file(tmp_path, "ok.key", mode=0o600)
@@ -319,11 +326,19 @@ def test_paths_must_be_full_existing_readable_and_inside_allowed_places(tmp_path
     assert _loaded()["auth"]["saml"]["sp_key_file"] == str(private)
 
 
-def test_a_link_cannot_lead_outside_the_allowed_places(tmp_path, monkeypatch, as_token,
-                                                       audit_rows):
+def test_a_link_cannot_lead_outside_the_allowed_places(
+    tmp_path, tmp_path_factory, monkeypatch, as_token, audit_rows,
+):
     link = tmp_path / "certs" / "sneaky.pem"
     link.parent.mkdir(parents=True, exist_ok=True)
-    link.symlink_to("/etc/hostname" if os.path.exists("/etc/hostname") else "/etc/passwd")
+    outside = tmp_path_factory.mktemp("outside-settings-link") / "key.pem"
+    outside.write_text("Synthetic outside-root file", encoding="utf-8")
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("This Windows account cannot create symbolic links")
+        raise
     monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", str(tmp_path))
     r = _save([{"id": "license.license_file", "value": str(link)}], confirm=True)
     assert r.status_code == 400 and "only uses locations" in r.json()["message"]

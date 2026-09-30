@@ -45,6 +45,7 @@ from fastapi.responses import (
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
+    Response,
     StreamingResponse,
 )
 from fastapi.templating import Jinja2Templates
@@ -10142,6 +10143,91 @@ def _goal_deliverable(g):
         return None, None
 
 
+def _require_chat_answer_download(w, goal) -> None:
+    """Apply the persisted deliverable release policy to a saved-answer export."""
+    from .api import _goal_gate
+
+    if not goal.result:
+        raise HTTPException(status_code=409, detail="this task has no answer to download yet")
+    gate = _goal_gate(goal.domain)
+    if gate is not None:
+        signoff = w.signoff_for(goal.id)
+        if signoff is None or signoff.get("decision") != "approved":
+            raise HTTPException(
+                status_code=403,
+                detail="a reviewer must approve this answer before it can be downloaded",
+            )
+
+
+def _chat_answer_text(goal) -> str:
+    """Export the same structured cells the person actually reviewed."""
+    _, rendered = _goal_deliverable(goal)
+    if rendered is None or rendered.table is None:
+        return goal.result or ""
+
+    def cell(value) -> str:
+        return (str(value).replace("\\", "\\\\").replace("|", "\\|")
+                .replace("\r\n", "<br>").replace("\r", "<br>").replace("\n", "<br>"))
+
+    table = rendered.table
+    lines = ["| " + " | ".join(cell(value) for value in table.headers) + " |"]
+    lines.append("| " + " | ".join("---" for _ in table.headers) + " |")
+    lines.extend("| " + " | ".join(cell(value) for value in row) + " |" for row in table.rows)
+    return "\n".join(lines)
+
+
+def _historical_chat_answer_text(w, goal, turn) -> str:
+    from .api import _goal_gate
+
+    if not turn.content:
+        raise HTTPException(status_code=409, detail="this message has no answer to download")
+    if _goal_gate(goal.domain) is None:
+        return turn.content
+    if turn.content != goal.result:
+        raise HTTPException(
+            status_code=409, detail="open the answer to download its current reviewed version",
+        )
+    _require_chat_answer_download(w, goal)
+    return _chat_answer_text(goal)
+
+
+def _chat_answer_download_state(w, goal) -> tuple[bool, str]:
+    """Explain export availability without relaxing a missing release policy."""
+    try:
+        _require_chat_answer_download(w, goal)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            return False, "A reviewer must approve this answer before it can be downloaded."
+        if not goal.result:
+            return False, "An answer will be available to download after Lightwork produces it."
+        return False, "Download is unavailable until this answer's review requirements can be checked."
+    except Exception:  # a failed approval read cannot expose an export affordance
+        return False, "Download is unavailable until this answer's review requirements can be checked."
+    return True, ""
+
+
+def _chat_history_download_states(request: Request, w, turns) -> dict:
+    """Only the current reviewed bytes qualify a gated historical snapshot."""
+    out = {}
+    goals = {}
+    for turn in turns:
+        if turn.role != "assistant":
+            continue
+        allowed, note = False, "Open answer to download its reviewed version."
+        try:
+            if turn.goal_id not in goals:
+                goals[turn.goal_id] = w.get_goal(turn.goal_id)
+            goal = goals[turn.goal_id]
+            if goal is not None:
+                assert_goal_access(request, goal)
+                _historical_chat_answer_text(w, goal, turn)
+                allowed, note = True, ""
+        except Exception:  # history never implies unavailable release authority
+            allowed = False
+        out[turn.id] = {"allowed": allowed, "note": note}
+    return out
+
+
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
 def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     w = _world()
@@ -10149,6 +10235,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
+    can_download_answer, download_note = _chat_answer_download_state(w, g)
     contract, rendered = _goal_deliverable(g)
     # The current sign-off, only for a gated deliverable (the panel that lets a
     # human certify it and hand it off). None elsewhere -> no panel.
@@ -10181,11 +10268,24 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     except Exception:  # pragma: no cover -- never 500 the goal page
         spend_ceiling = None
 
+    thread_turns = _thread_turns(w, g)
+    thread_questions = {}
+    for earlier_id in {turn.goal_id for turn in thread_turns}:
+        earlier = w.get_goal(earlier_id)
+        if earlier is not None and can_access_goal(request, earlier):
+            thread_questions[earlier_id] = [
+                q for q in w.all_questions(earlier_id) if q.answer is not None
+            ]
+
     return templates.TemplateResponse(
         request,
         "chat_goal.html",
         {
             "goal": g,
+            "can_download_chat_answer": can_download_answer,
+            "chat_answer_download_note": download_note,
+            "chat_answer_text": _chat_answer_text(g),
+            "answered_questions": [q for q in w.all_questions(goal_id) if q.answer is not None],
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),
             "spend_ceiling": spend_ceiling,
@@ -10194,7 +10294,9 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             ),
             "thread_title": root.title,
             "latest_chat_goal_id": ChatThreads(w).latest(g.id),
-            "thread_turns": _thread_turns(w, g),
+            "thread_turns": thread_turns,
+            "thread_downloads": _chat_history_download_states(request, w, thread_turns),
+            "thread_questions": thread_questions,
             "threads": _chat_threads(request, w, active_root=root_id),
             "run_open": g.status not in TERMINAL_RUN_STATUSES and g.status != "draft",
             "can_recover_task_files": bool(g.owner and g.owner.startswith("user:") and caller_principal(request) == g.owner),
@@ -10206,6 +10308,52 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),
             "voice_only": _voice_only_mode(),
+        },
+    )
+
+
+@app.get("/chat/goal/{goal_id}/download.md")
+def download_chat_answer(request: Request, goal_id: int, turn_id: int | None = None) -> Response:
+    """Download the saved answer, using the same goal access check as Chat."""
+    w = _world()
+    goal = w.get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, goal)
+    if turn_id is None:
+        _require_chat_answer_download(w, goal)
+        text = _chat_answer_text(goal)
+    else:
+        from maverick.chat_threads import ChatThreads
+
+        binding = ChatThreads(w).binding(goal_id)
+        if binding is None:
+            raise HTTPException(status_code=404, detail="no such answer")
+        turn = next((t for t in w.recent_turns(binding.conversation_id, limit=200)
+                     if t.id == turn_id and t.goal_id == goal_id and t.role == "assistant"), None)
+        if turn is None:
+            raise HTTPException(status_code=404, detail="no such answer")
+        text = _historical_chat_answer_text(w, goal, turn)
+    # Approval and the rendered answer must describe the same saved version.
+    # Recheck after materialization so an intervening edit/restart cannot pair
+    # old bytes with a newer approval (or a revoked one).
+    current = w.get_goal(goal_id)
+    if current is None or (current.updated_at, current.result, current.status, current.domain) != (
+        goal.updated_at, goal.result, goal.status, goal.domain,
+    ):
+        raise HTTPException(status_code=409, detail="this answer changed; reload before downloading")
+    assert_goal_access(request, current)
+    if turn_id is None:
+        _require_chat_answer_download(w, current)
+    else:
+        _historical_chat_answer_text(w, current, turn)
+    return Response(
+        text,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="lightwork-answer-{goal_id}.md"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 
@@ -10252,11 +10400,57 @@ def _goal_artifacts(w, goal_id: int) -> list[dict]:
 
 @app.get("/share/{token}", response_class=HTMLResponse)
 def shared_goal(request: Request, token: str) -> HTMLResponse:
+    """Resolve opaque workspace routing, then authenticate in its world store."""
+    from maverick.paths import reset_tenant, set_tenant
+
+    from .share_link_routing import ShareRouteError, resolve
+
+    try:
+        route = resolve(token)
+    except (ShareRouteError, OSError):
+        raise HTTPException(status_code=404, detail="not found") from None
+    # Existing tokens from the deployment's default scope stay valid.
+    scope_token = set_tenant(route.tenant) if route is not None else None
+    try:
+        return _shared_goal_in_scope(request, token)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=404, detail="not found") from None
+    finally:
+        if scope_token is not None:
+            reset_tenant(scope_token)
+
+
+def _shared_goal_in_scope(request: Request, token: str) -> HTMLResponse:
     """Public, read-only view of a goal's deliverable behind a share token.
 
     Auth-exempt (the token IS the credential): an unknown, revoked, or expired
     token 404s with no detail. Renders only the title + deliverable + artifacts
     -- never the worklog, spend, controls, or nav."""
+    from maverick import world_model
+    from maverick.paths import (
+        _tenant_segment,
+        canonical_tenant_id,
+        current_tenant_id_strict,
+        maverick_home,
+    )
+    from maverick.world_model_backends import is_postgres_configured
+
+    if not is_postgres_configured():
+        tenant = current_tenant_id_strict()
+        if tenant:
+            # Check existence before world_for_tenant can reserve/open storage.
+            # Canonical validation is read-only; namespace admission remains in
+            # _world once the persisted world is known to exist.
+            segment = _tenant_segment(canonical_tenant_id(tenant))
+            path = maverick_home() / "tenants" / segment / "world.db"
+        elif world_model.DEFAULT_DB is not world_model._INITIAL_DEFAULT_DB:
+            path = Path(world_model.DEFAULT_DB).expanduser()
+        else:
+            path = maverick_home() / "world.db"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="not found")
     w = _world()
     goal_id = w.resolve_share_link(token)
     if goal_id is None:
@@ -10269,7 +10463,7 @@ def shared_goal(request: Request, token: str) -> HTMLResponse:
     # Resolve-time authorization matters as much as mint-time authorization:
     # an edit/rerun/rejection invalidates approval but cannot recall a token
     # already copied. Fail closed without revealing whether a gate exists.
-    if g.status != "done":
+    if g.status != "done" or not g.result:
         raise HTTPException(status_code=404, detail="not found")
     try:
         from maverick.domain import (

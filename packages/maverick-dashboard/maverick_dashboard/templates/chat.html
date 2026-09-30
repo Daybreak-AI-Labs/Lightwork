@@ -31,6 +31,11 @@
     <a class="btn btn--primary" href="/start">Continue setup</a>
   </section>
   {% endif %}
+  {% if not can_create_goal %}
+  <section class="panel" role="status"><h2>Chat is read-only for your account</h2>
+    <p class="muted">You can review work you have access to. Ask a workspace administrator for permission to start or continue a chat.</p>
+  </section>
+  {% endif %}
   <p id="template-draft-notice" class="muted" role="status" hidden></p>
   {% if model_route_ready %}
   <details class="panel cs-viewpoints" id="viewpoints">
@@ -66,7 +71,7 @@
 {% block dock %}
 <form method="post" action="/chat/send" class="composer cs-anim" enctype="multipart/form-data">
   <input type="hidden" name="submission_key" value="{{ submission_key }}" />
-  <fieldset class="composer__controls"{% if not model_route_ready %} disabled{% endif %}>
+  <fieldset class="composer__controls"{% if not model_route_ready or not can_create_goal %} disabled{% endif %}>
   <legend class="sr-only">Start governed AI work</legend>
   <input
     type="text"

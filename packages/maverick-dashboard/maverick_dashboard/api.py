@@ -9725,10 +9725,10 @@ def create_goal_share(request: Request, goal_id: int) -> dict:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     require_permission(request, "operate")
-    if g.status != "done":
+    if g.status != "done" or not g.result:
         raise HTTPException(
             status_code=409,
-            detail="only a finished deliverable can be shared",
+            detail="only a finished answer can be shared",
         )
     gate = _goal_gate(g.domain)
     signoff = w.signoff_for(goal_id)
@@ -9737,11 +9737,30 @@ def create_goal_share(request: Request, goal_id: int) -> dict:
             status_code=403,
             detail=f"{gate} sign-off is required before sharing this deliverable",
         )
+    from . import share_link_routing
+
+    try:
+        base, local_only = share_link_routing.share_base_url(str(request.base_url))
+    except share_link_routing.ShareRouteError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="set Lightwork's address for others in Settings before creating a share link",
+        ) from exc
     link_id, token = w.create_share_link(
         goal_id, created_by=caller_principal(request) or "", ttl_seconds=_SHARE_TTL_SECONDS
     )
-    url = str(request.base_url).rstrip("/") + "/share/" + token
-    return {"id": link_id, "url": url}
+    try:
+        link = next(s for s in w.share_links_for_goal(goal_id) if s["id"] == link_id)
+        share_link_routing.register(token, expires_at=link["expires_at"])
+    except Exception as exc:
+        # Never return a link that an external reader cannot resolve. The
+        # destination store remains authoritative even if rollback fails.
+        w.revoke_share_link(link_id, goal_id=goal_id)
+        raise HTTPException(
+            status_code=503, detail="a share link could not be prepared; please try again",
+        ) from exc
+    url = base + "/share/" + token
+    return {"id": link_id, "url": url, "local_only": local_only}
 
 
 @router.post("/goals/{goal_id}/share/{link_id}/revoke")

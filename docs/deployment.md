@@ -31,6 +31,20 @@ files use the selected sandbox workspace. Guided setup proposes
 before reporting success. The dashboard and enabled server/channel adapters
 listen on their configured ports when started.
 
+Answer-sharing links use **Settings → Lightwork's address for others** (or the
+deployment-owned `MAVERICK_PUBLIC_URL`) when configured. The address must already
+reach this installation; saving it does not publish a local server. Without it,
+links use the address the page was opened at, and Chat explains when that address
+is limited to this computer or a private network.
+
+Named-workspace sharing keeps an opaque token-hash locator in the private,
+deployment-wide `MAVERICK_HOME/dashboard-share-routes` directory. The destination
+world store still checks the token's expiry, revocation and current review gate.
+Dashboard replicas must share this private control-plane state as well as their
+world backend for the same share links to work on every replica; PostgreSQL alone
+does not replicate these locators. Include the directory in application-state
+backups. Expired locators are pruned in bounded batches when new links are made.
+
 **Artifact status:** reviewed source is the dependable installation route
 today. A successful tagged release is configured to publish three single-file
 PyInstaller binaries, checksums, SBOMs, and Sigstore material; check the

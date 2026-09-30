@@ -9,13 +9,15 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
-const read = name => fs.readFileSync(path.join(folder, name), 'utf8');
+const read = name => fs.readFileSync(path.join(folder, name), 'utf8').replace(/\r\n?/g, '\n');
 const strip = html => html.replace(/\{%[\s\S]*?%\}/g, '').replace(/\{\{[\s\S]*?\}\}/g, '1').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 function slice(template, start, end) {
   const text = read('templates/' + template);
   const from = text.indexOf(start);
   assert.ok(from >= 0, start);
-  return text.slice(from, text.indexOf(end, from) + end.length);
+  const to = text.indexOf(end, from);
+  assert.ok(to > from, template + ': missing end marker ' + end);
+  return text.slice(from, to + end.length);
 }
 
 async function page(markup, script, reply, { confirm = true } = {}) {

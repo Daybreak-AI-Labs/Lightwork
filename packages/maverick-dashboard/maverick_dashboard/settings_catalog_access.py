@@ -266,7 +266,7 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="The browser extension will be able to act in Lightwork.",
           aliases="extension browser add-on"),
         S("dashboard", "public_url", "Lightwork's address for others",
-          "The address people use to reach Lightwork, used in invitation and approval links.",
+          "The address people use to reach Lightwork, used in invitation, approval and answer-sharing links.",
           "text", grp, "", "maverick_dashboard.automation_queue", subgroup=access,
           pattern=_HTTPS_OR_LOCAL, max_length=300, env=("MAVERICK_PUBLIC_URL",),
           aliases="public url link address"),

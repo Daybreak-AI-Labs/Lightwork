@@ -1,6 +1,6 @@
 # Post-install operation coverage
 
-Source review: September 28, 2026. This is a working gap register against the
+Source review: September 30, 2026. This is a working gap register against the
 [customer experience contract](./customer-experience-contract.md), not a claim
 that the entire platform has been inventoried or accepted. A working backend,
 command or settings file does not complete a customer operation.
@@ -66,6 +66,7 @@ specific gaps closed.
 | Backup and installation boundaries | Local backup/recovery and packaged Windows update/repair/rollback have substantial product controls. Shared/remote storage recovery and other deployment types have explicit blockers or separate procedures. | Provide the remaining coordinated administration paths; do not claim all deployment types are qualified from Windows/local acceptance. |
 | Diagnostic parity | Cache controls, readiness and support-report preparation exist. Selected circuit/rate-limit/health/trace CLI diagnostics have no equivalent dashboard callers found. | Give customers readable health, affected work and actual repair actions. Support export alone does not replace operational diagnostics. |
 | Global Copilot | The shared page guide still has a zero tool-call budget. A separate default-off, closed operation catalog covers current learning-example status and reviewed withdrawal on a flow run. A proposal opens the real form; it never supplies consent. Connected-service recovery has a separate restricted local form. These bounded operations do not constitute whole-platform coverage. | Extend the typed catalog and current state across every supported job, including work in another panel or background job. Preserve each native service's authority, result and recovery contract. |
+| Chat and answer actions | Chat exposes the dashboard's role-filtered product destinations. Live completion refreshes answer controls without losing a drafted reply and offers recovery on failure. Copy uses saved content; historical downloads select the stored turn and recheck access and review requirements. Structured exports use reviewed table cells. Print retains stored clarifications and wraps wide content. Expiring public links route to the selected workspace; existing links remain revocable during a rerun or empty result. Mobile navigation supports a visible Close button and contained keyboard focus. Local route, DOM and Chromium journeys exercise these paths with synthetic data. | Qualify the installed desktop and real customer content. Full ChatGPT/Claude interaction and whole-platform Copilot operation parity remain open; these answer actions do not establish either. |
 
 Implementation references:
 [recovery controls](../packages/maverick-dashboard/maverick_dashboard/static/lightwork-workspace-recovery.js),

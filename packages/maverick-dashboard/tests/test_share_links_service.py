@@ -51,6 +51,15 @@ def test_bad_token_404(tmp_path, monkeypatch):
     assert TestClient(app).get("/share/not-a-real-token").status_code == 404
 
 
+def test_empty_finished_answer_cannot_be_shared(tmp_path, monkeypatch):
+    w = _world(tmp_path, monkeypatch)
+    gid = w.create_goal("No answer yet", "")
+    w.set_goal_status(gid, "done", result="")
+    assert client.post(f"/api/v1/goals/{gid}/share").status_code == 409
+    _, token = w.create_share_link(gid, created_by="operator")
+    assert TestClient(app).get(f"/share/{token}").status_code == 404
+
+
 def test_existing_token_fails_closed_when_domain_policy_is_missing(
     tmp_path, monkeypatch,
 ):

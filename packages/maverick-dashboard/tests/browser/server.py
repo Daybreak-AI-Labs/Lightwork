@@ -293,6 +293,8 @@ def build_app(directory):
             provider_cost_cap.settle(hold, None)
         return {"synthetic": True, "provider_calls": 0}
 
+    from fixture_chat_actions import install as install_chat_actions_fixture
+    install_chat_actions_fixture(dashboard.app, world, tenant, principal)
     from fixture_pilot_learning import install as install_pilot_learning_fixture
     install_pilot_learning_fixture(dashboard.app, world, tenant, principal)
     from fixture_outcome_value import install as install_outcome_value_fixture

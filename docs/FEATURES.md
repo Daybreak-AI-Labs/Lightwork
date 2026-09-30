@@ -4219,7 +4219,18 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   (never the worklog, spend, controls, or nav; `noindex`), and 404s a bad token
   with no detail. Create/revoke are operator-role + goal-access-gated; the goal
   page grows a Sharing panel (create → copy-once link, list, revoke). 7-day default.
-  the deliverable their pack declares and scoped to the consumer role, so an
+- **Chat answer actions** — the conversation shows role-filtered product
+  navigation and puts Copy answer, Print conversation, Download answer,
+  Read aloud, Edit and Share beside a saved result under current permissions.
+  Actions appear when live work finishes without discarding the next message;
+  a failed refresh has an explicit retry. Copy uses the saved answer rather
+  than unsaved edits. Earlier answers have snapshot copy/download and an Open
+  answer link. Downloads recheck access and review requirements; structured
+  exports contain the reviewed table. Print includes stored clarifications and
+  wraps wide content. Sharing retains approval, expiry and revocation across
+  selected workspaces. Native desktop and real-customer acceptance remain open.
+- **Deliverables inbox (`/deliverables`)** — presents each team's results as
+  the deliverable their pack declares and scopes them to the consumer role, so an
   FP&A analyst sees "my forecasts" and a risk officer sees "assessments awaiting
   my sign-off" instead of the flat `/goals` stream. Filter chips per consumer
   role; a gated deliverable whose run has finished surfaces in an "Awaiting

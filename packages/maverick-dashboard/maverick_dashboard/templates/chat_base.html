@@ -1,9 +1,6 @@
 {% from "_assets.html" import asset -%}
 <!doctype html>
-{#- The chat shell: a chat list on the left, a clean canvas, the composer
-    docked at the bottom. Deliberately not the product shell (base.html): no
-    top bar, no product navigation, no footer, no floating helpers. The rest
-    of the product is one click away from the sidebar. -#}
+{#- Conversation and product work share one role-filtered navigation. -#}
 <html lang="{{ page_lang or 'en' }}" dir="{{ dir or 'ltr' }}">
 <head>
   <meta charset="utf-8" />
@@ -70,6 +67,20 @@
     .cs-list a.active { background: var(--surface-2); font-weight: var(--font-medium); }
     .cs-list li[hidden] { display: none; }
     .cs-empty { padding: var(--space-2) var(--space-3); color: var(--muted); font-size: var(--text-sm); }
+    .cs-product { flex: 0 1 48%; min-height: 9rem; overflow-y: auto; padding-block: var(--space-1) var(--space-2); border-block: 1px solid var(--hairline); }
+    .cs-product__heading { margin: var(--space-2) var(--space-3); }
+    .cs-product__heading strong { font-size: var(--text-sm); font-weight: var(--font-semibold); }
+    .cs-product__group { margin-block: 2px; }
+    .cs-product__group summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--space-2); padding: 0.35rem var(--space-3); color: var(--muted); font-size: var(--text-xs); font-weight: var(--font-semibold); border-radius: var(--radius-md); }
+    .cs-product__group summary::-webkit-details-marker { display: none; }
+    .cs-product__group summary::before { content: '›'; font-size: var(--text-md); line-height: 1; transition: transform .14s ease; }
+    .cs-product__group[open] summary::before { transform: rotate(90deg); }
+    .cs-product__group summary:hover { background: var(--row-hover); color: var(--text); }
+    .cs-product__group ul { list-style: none; padding: 0; margin: 0; }
+    .cs-product__group a { display: block; padding: .37rem var(--space-3) .37rem calc(var(--space-3) + 1rem); border-radius: var(--radius-md); color: var(--text); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cs-product__group a:hover { background: var(--row-hover); text-decoration: none; }
+    .cs-product__group a[aria-current="page"] { background: var(--brand-subtle); color: var(--brand-hi); font-weight: var(--font-medium); }
+    .cs-product__group a:focus-visible, .cs-product__group summary:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
     .cs-account { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-2) var(--space-1); border-top: 1px solid var(--hairline); margin-top: var(--space-2); }
     .cs-avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--text); }
     .cs-avatar svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -142,6 +153,7 @@
     /* ---- small screens: the sidebar becomes a drawer behind a Menu button ---- */
     .cs-topbar { display: none; }
     .cs-backdrop { display: none; }
+    .cs-side__close { display: none; margin-inline-start: auto; }
     @media (max-width: 860px) {
       body.chat-shell { grid-template-columns: 1fr; }
       body.chat-shell main { grid-column: 1; }
@@ -161,7 +173,6 @@
       body.cs-drawer-open .cs-backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim, rgba(0,0,0,.45)); }
       .cs-side__close { display: flex; }
     }
-    .cs-side__close { display: none; margin-inline-start: auto; }
     @media (prefers-reduced-motion: reduce) { .cs-side { transition: none !important; } }
     @media (prefers-reduced-motion: no-preference) {
       .cs-anim { opacity: 0; transform: translateY(8px); animation: csUp 0.4s ease forwards; }
@@ -181,32 +192,45 @@
       </a>
       <button type="button" class="btn btn--ghost cs-side__close" id="cs-menu-close">Close menu</button>
     </div>
-    <a class="cs-item" href="/chat">
+    {% if can_create_goal %}<a class="cs-item" href="/chat">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.5 2.5l2 2L6 12H4v-2z"/><path d="M2.5 13.5h11"/></svg>
       New chat
-    </a>
-    <label class="cs-search">
-      <svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></svg>
-      <input type="search" id="cs-filter" placeholder="Search chats" aria-label="Search chats" autocomplete="off" />
-    </label>
-    <a class="cs-item" href="/overview">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="2.6" width="4.8" height="4.8" rx="1.2"/><rect x="2.6" y="8.6" width="4.8" height="4.8" rx="1.2"/><rect x="8.6" y="8.6" width="4.8" height="4.8" rx="1.2"/></svg>
-      Dashboard
-    </a>
+    </a>{% endif %}
     <button type="button" class="cs-item cs-item--button" id="navfinder-open"
             aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg>
       Find a page
       <kbd aria-hidden="true" id="cs-find-kbd">Ctrl K</kbd>
     </button>
+    {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
+    {% set _chat_path = request.url.path if request else '/chat' %}
+    {% set _chat_groups = (nav_groups | selectattr('label', 'equalto', 'Operate') | list) + (nav_groups | rejectattr('label', 'equalto', 'Operate') | list) %}
+    <nav class="cs-product" aria-label="Lightwork product">
+      <div class="cs-product__heading"><strong>Explore Lightwork</strong></div>
+      {% for _group in _chat_groups %}
+      <details class="cs-product__group"{% if _group.label == 'Operate' %} open{% endif %}>
+        <summary>{{ _group_labels.get(_group.label, _group.label) }}</summary>
+        <ul>
+          {% for _link in _group.links %}
+          {% set _active = _chat_path == _link.href or _chat_path.startswith(_link.href ~ '/') %}
+          <li><a href="{{ _link.href }}"{% if _active %} aria-current="page"{% endif %}>{{ _link.label }}</a></li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endfor %}
+    </nav>
+    <label class="cs-search">
+      <svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></svg>
+      <input type="search" id="cs-filter" placeholder="Search chats" aria-label="Search chats" autocomplete="off" />
+    </label>
     <div class="cs-recents">
-      <div class="cs-label">Recents</div>
+      <div class="cs-label">Recent chats</div>
       {% from "_chat_threads.html" import chat_threads %}
       {{ chat_threads(threads or []) }}
     </div>
     <div class="cs-account">
       <span class="cs-avatar" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg></span>
-      <a href="/settings">Settings</a>
+      {% if show_settings_link %}<a href="/settings">Settings</a>{% endif %}
       <span class="cs-spacer"></span>
       {% if show_logout %}<a href="/auth/logout">Sign out</a>{% endif %}
     </div>
@@ -217,7 +241,7 @@
     <div class="cs-topbar">
       <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">Menu</button>
       <span class="cs-topbar__title">Lightwork</span>
-      <a class="btn btn--ghost" href="/chat">New chat</a>
+      {% if can_create_goal %}<a class="btn btn--ghost" href="/chat">New chat</a>{% endif %}
     </div>
     <div class="cs-scroll" id="cs-scroll">
       <div class="cs-column">
@@ -268,29 +292,70 @@
       var openBtn = document.getElementById('cs-menu'), closeBtn = document.getElementById('cs-menu-close');
       var backdrop = document.getElementById('cs-backdrop');
       if (!side || !openBtn) return;
+      var mq = window.matchMedia ? window.matchMedia('(max-width: 860px)') : {matches: true};
+      var covered = Array.prototype.map.call(document.querySelectorAll('body > main'), function (element) {
+        return {element: element, wasInert: element.hasAttribute('inert')};
+      });
       function isOpen() { return body.classList.contains('cs-drawer-open'); }
+      function syncAccess() {
+        var modal = mq.matches && isOpen();
+        covered.forEach(function (item) {
+          var inert = item.wasInert || modal;
+          item.element.inert = inert;
+          item.element.toggleAttribute('inert', inert);
+        });
+        var hidden = mq.matches && !isOpen();
+        side.inert = hidden;
+        side.toggleAttribute('inert', hidden);
+        if (hidden) {
+          side.setAttribute('aria-hidden', 'true');
+          if (side.contains(document.activeElement)) openBtn.focus();
+        } else side.removeAttribute('aria-hidden');
+      }
+      function focusable() {
+        return Array.prototype.filter.call(side.querySelectorAll('a[href], button, input, select, textarea, summary, [tabindex]'), function (element) {
+          if (element.disabled || element.tabIndex < 0 || element.closest('[hidden], [inert]')) return false;
+          for (var parent = element; parent && parent !== side; parent = parent.parentElement) {
+            var style = window.getComputedStyle(parent);
+            if (style.display === 'none' || style.visibility === 'hidden') return false;
+            if (parent.parentElement && parent.parentElement.tagName === 'DETAILS' && !parent.parentElement.open && parent.tagName !== 'SUMMARY') return false;
+          }
+          return true;
+        });
+      }
       function open() {
         body.classList.add('cs-drawer-open'); openBtn.setAttribute('aria-expanded', 'true');
-        var first = side.querySelector('a, button, input'); if (first) first.focus();
+        syncAccess();
+        var first = focusable()[0]; if (first) first.focus();
       }
       function close(refocus) {
         if (!isOpen()) return;
         body.classList.remove('cs-drawer-open'); openBtn.setAttribute('aria-expanded', 'false');
+        syncAccess();
         if (refocus !== false) openBtn.focus();
       }
       openBtn.addEventListener('click', function () { if (isOpen()) close(); else open(); });
       if (closeBtn) closeBtn.addEventListener('click', function () { close(); });
       if (backdrop) backdrop.addEventListener('click', function () { close(); });
-      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen()) { e.preventDefault(); close(); } });
+      document.addEventListener('keydown', function (e) {
+        if (!isOpen() || !mq.matches) return;
+        if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+        if (e.key !== 'Tab') return;
+        var items = focusable(), first = items[0], last = items[items.length - 1];
+        if (!first) { e.preventDefault(); return; }
+        if (!side.contains(document.activeElement) || (e.shiftKey && document.activeElement === first)) {
+          e.preventDefault(); (e.shiftKey ? last : first).focus();
+        } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      });
       // Opening "Find a page" from the drawer hands focus to its dialog.
       var finder = document.getElementById('navfinder-open');
       if (finder) finder.addEventListener('click', function () { close(false); });
       // Leaving the small-screen layout never leaves the page locked behind the drawer.
       if (window.matchMedia) {
-        var mq = window.matchMedia('(max-width: 860px)');
-        var onChange = function () { if (!mq.matches) close(false); };
+        var onChange = function () { if (!mq.matches) close(false); syncAccess(); };
         if (mq.addEventListener) mq.addEventListener('change', onChange); else if (mq.addListener) mq.addListener(onChange);
       }
+      syncAccess();
       var kbd = document.getElementById('cs-find-kbd');
       if (kbd && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')) kbd.textContent = '⌘K';
     })();

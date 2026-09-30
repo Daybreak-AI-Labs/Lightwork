@@ -63,7 +63,7 @@ def test_recents_reopens_latest_actual_turn_and_keeps_old_work_link(chat):
     assert "Budget BUDGET-ALPHA-731" in reopened.text
     assert "Original assistant answer" in reopened.text
     assert "Revise that report." in reopened.text and "Latest assistant answer" in reopened.text
-    assert f'href="/chat/goal/{root}">Show the work behind this answer' in reopened.text
+    assert f'href="/chat/goal/{root}">Open answer' in reopened.text
     old = client.get(f"/chat/goal/{root}")
     assert "Original assistant answer" in old.text
     assert "Latest assistant answer" not in old.text
