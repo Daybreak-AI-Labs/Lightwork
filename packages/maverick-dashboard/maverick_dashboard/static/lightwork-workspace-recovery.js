@@ -473,6 +473,47 @@
         "Copy the complete number from the source. " + (descriptor.minimum_position != null ? "It must be at least " + descriptor.minimum_position + "." : "Do not use the older saved position."));
       position.inputMode = "numeric"; position.maxLength = isMessage ? 4096 : 40;
       if (finishing) position.value = recorded.position;
+      if (!finishing) {
+        var manual = document.createElement("details"), manualTitle = document.createElement("summary");
+        manualTitle.textContent = "Manual source position (advanced)"; manual.append(manualTitle, position.parentNode); form.append(manual);
+        var lookupPanel = document.createElement("div"), lookupButton = document.createElement("button"), olderButton = document.createElement("button"), choices = document.createElement("select"), lookupStatus = document.createElement("p"), lookupLabel = document.createElement("label");
+        lookupButton.type = "button"; lookupButton.textContent = "Look up source checkpoints";
+        olderButton.type = "button"; olderButton.textContent = "Show older checkpoints"; olderButton.hidden = true;
+        choices.id = form.id + "-source-checkpoint"; lookupLabel.htmlFor = choices.id; lookupLabel.textContent = "Choose where collection resumes";
+        choices.hidden = true; lookupStatus.setAttribute("role", "status"); lookupStatus.setAttribute("aria-live", "polite");
+        lookupPanel.append(lookupButton, olderButton, lookupLabel, choices, lookupStatus); form.insertBefore(lookupPanel, manual);
+        var sourcePage = null;
+        async function lookupSource(before) {
+          if (busy || accessDenied) return;
+          var binding = state.context;
+          confirmation.checked = false; sourcePage = null; choices.replaceChildren(); choices.hidden = true; olderButton.hidden = true;
+          lookupStatus.textContent = "Reading checkpoint dates from this configured source. No message will be sent or replayed.";
+          await action(async function () {
+            var result = await request("operations/channel-source-lookup", { item_id: item.id, expected_review_token: descriptor.review_token, before: before });
+            if (!state || state.context !== binding || accessDenied || !channelDrafts.has(key)) return;
+            if (result.available !== true) { lookupStatus.textContent = result.notice || "The source is unavailable. Keep this item unresolved; no position was guessed."; return; }
+            if (result.review_token !== descriptor.review_token || !Array.isArray(result.candidates) || result.candidates.length > 50 || !Number.isFinite(Date.parse(result.observed_at))) throw new Error("The source lookup changed. Refresh and review again.");
+            sourcePage = result;
+            var prompt = document.createElement("option"); prompt.value = ""; prompt.textContent = "Select a dated checkpoint after reviewing its evidence"; choices.append(prompt);
+            result.candidates.forEach(function (candidate, candidateIndex) {
+              if (!/^[0-9]{1,40}$/.test(candidate.position) || !Number.isFinite(Date.parse(candidate.source_at)) || !/^[a-f0-9]{64}$/.test(candidate.evidence_digest || "") || typeof candidate.evidence_reference !== "string") throw new Error("The source evidence is incomplete. Keep this review unresolved.");
+              var option = document.createElement("option"); option.value = String(candidateIndex); option.textContent = (candidate.empty_source ? "Source confirmed empty at " : "Collect only after ") + new Date(candidate.source_at).toLocaleString() + " (evidence " + candidate.evidence_digest.slice(0, 12) + ")"; choices.append(option);
+            });
+            choices.hidden = !result.candidates.length; olderButton.hidden = !result.next_before;
+            lookupStatus.textContent = result.candidates.length ? result.notice : "No selectable current checkpoint was returned. Keep this item unresolved or review the original service; no checkpoint was guessed.";
+          });
+        }
+        lookupButton.addEventListener("click", function () { return lookupSource(null); });
+        olderButton.addEventListener("click", function () { if (sourcePage && sourcePage.next_before) return lookupSource(sourcePage.next_before); });
+        choices.addEventListener("change", function () {
+          if (busy || !sourcePage || choices.value === "") return;
+          var selected = sourcePage.candidates[Number(choices.value)];
+          if (!selected) return;
+          position.value = selected.position; checked.value = localTime(sourcePage.observed_at); reference.value = selected.evidence_reference;
+          edited();
+          lookupStatus.textContent = "Selected source evidence " + selected.evidence_digest + ". Collection will skip through this checkpoint. Delivery receipts and unknown outcomes remain unchanged. Review the date and explicitly confirm below.";
+        });
+      }
     } else if (descriptor.kind === "poll_time") {
       resume = field("resume_time", "Start checking for new posts from", "datetime-local", "Your local time (" + zone + "). Choose a time at or after restoration, verified against the service.");
       if (finishing) resume.value = localTime(recorded.resume_time);

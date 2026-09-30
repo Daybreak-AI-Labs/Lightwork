@@ -128,6 +128,25 @@ class ChannelReviewIn(ConfirmIn):
               | ChannelNotificationPositionAnswers | ChannelPollTimeAnswers | ChannelFinishAnswers) = Field(discriminator="kind")
 
 
+class ChannelLookupIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    item_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    expected_review_token: str = Field(pattern=r"^[a-f0-9]{64}$")
+    before: str | None = Field(default=None, pattern=r"^[0-9]{1,40}$", max_length=40)
+
+
+@router.post("/api/v1/recovery/operations/channel-source-lookup")
+async def lookup_channel_source(request: Request, body: ChannelLookupIn):
+    actor = _admit(request, mutation=True)
+    result = await _call(recovery.channel_checkpoint_lookup, body.item_id,
+                         expected_review_token=body.expected_review_token, before=body.before,
+                         isolated=isolated(request.app), actor=actor)
+    if _admit(request, mutation=True) != actor:
+        raise HTTPException(409, "Recovery access changed during lookup. Refresh and review again.")
+    return Response(json.dumps(result), media_type="application/json",
+                    headers={"Cache-Control": "private, no-store"})
+
+
 class RestoreIn(ConfirmIn):
     review: str = Field(pattern=r"^[0-9a-f]{32}$")
     target: str = Field(pattern=r"^[0-9a-f]{64}$")
