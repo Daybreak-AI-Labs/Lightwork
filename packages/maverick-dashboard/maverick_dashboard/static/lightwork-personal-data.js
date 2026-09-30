@@ -80,8 +80,13 @@
     el('pd-command').textContent = 'Send this text to Lightwork in a private conversation, then refresh this page: ' + result.command;
     return {message: 'Linking text created. It expires in ten minutes. Sharing is still off.'};
   }); });
+  el('pd-account-export').addEventListener('submit', event => { event.preventDefault(); action(async () => {
+    const result = await call('/account-export', {store: el('pd-export-store').value});
+    el('pd-export-link').replaceChildren(); const link = text(el('pd-export-link'), result.label, 'a'); link.href = result.href;
+    return {message: 'Private download prepared. The download rechecks current ownership and records an export receipt.'};
+  }, false); });
   el('pd-share').addEventListener('submit', event => { event.preventDefault(); action(() => call('/sharing', {source: el('pd-source').value || null, expected_revision: state.sharing.revision})); });
-  const deletionKinds = {preference_notes: 'Remembered preference notes (also stops personal recall)', conversation_history: 'Selected conversation closure and its task/attachment data', recovery_drafts: 'All my private editor recovery copies', companion_history: 'My employee companion history', experience_preferences: 'My account and thread display/style preferences', model_memory: 'Selected scope model-managed memory files', notification_receipts: 'My notification delivery receipts', diagnostic_reports: 'My diagnostic reports', activation_drafts: 'My activation drafts (keeps source tasks and erasure barriers)', project_defaults: 'My reusable personal project defaults (keeps existing projects)'};
+  const deletionKinds = {preference_notes: 'Remembered preference notes (also stops personal recall)', conversation_history: 'Selected conversation closure and its task/attachment data', recovery_drafts: 'All my private editor recovery copies', companion_history: 'My employee companion history', experience_preferences: 'My account and thread display/style preferences', model_memory: 'Selected scope model-managed memory files', notification_receipts: 'My notification delivery receipts', diagnostic_reports: 'My diagnostic reports', activation_drafts: 'My activation drafts (keeps source tasks and erasure barriers)', project_defaults: 'My reusable personal project defaults (keeps existing projects)', model_test_history: 'My model-test history (keeps no-replay and accounting receipts)', generated_tools: 'My current authorized generated tools (keeps withheld derivatives and evidence)', conversation_inbox: 'My queued conversation messages and files (keeps operation barriers and submitted tasks)'};
   Object.entries(deletionKinds).forEach(([key, label]) => {
     const row = text(el('pd-delete-stores'), '', 'label'); row.style.display = 'block';
     const input = document.createElement('input'); input.type = 'checkbox'; input.value = key;
@@ -140,7 +145,13 @@
       const row = text(el('pd-stores'), '', 'article'); text(row, store.name + ' - ' + store.state, 'h3');
       ['use', 'expiry', 'action'].forEach(key => { if (store[key]) text(row, store[key]); });
       if (store.stores) text(row, 'Included stores: ' + store.stores.join(', '));
-      if (store.inventory) text(row, store.inventory.saved + ' saved private drafts; ' + store.inventory.discarded + ' discarded copies awaiting retirement.');
+      if (store.inventory && store.inventory.saved !== undefined) text(row, store.inventory.saved + ' saved private drafts; ' + store.inventory.discarded + ' discarded copies awaiting retirement.');
+      if (store.inventory && store.inventory.tools) {
+        store.inventory.tools.forEach(tool => text(row, 'Current owned generated tool: ' + tool.name + '; source ' + (tool.goal_id ? 'task ' + tool.goal_id : 'explicit owner publication') + '.'));
+        store.inventory.learning_records.forEach(item => text(row, 'Retained owned ' + item.kind + ' learning record; source ' + (item.goal_id ? 'task ' + item.goal_id : 'explicit owner publication') + '; ' + new Date(item.date * 1000).toLocaleString() + '.'));
+        if (store.inventory.learning_records_truncated) text(row, 'Showing 500 current authorized learning records; older rows remain outside this window.');
+      }
+      if (store.blocked) text(row, store.blocked + ' records require reconciliation before erasure.');
       if (store.count !== undefined) text(row, store.count + ' retained entries.');
       if (store.href) { const link = text(row, 'Open its governed controls', 'a'); link.href = store.href; }
     });

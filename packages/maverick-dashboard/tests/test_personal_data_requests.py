@@ -147,3 +147,31 @@ def test_project_defaults_adapter_refuses_unconfirmed_receipt(monkeypatch):
     row = {"id": "PDR-case", "owner": "user:alice", "reviewer": "user:reviewer", "channel": "dashboard", "user_id": "alice"}
     with pytest.raises(ValueError, match="receipt is not confirmed"):
         deletion._erase_target(None, row, {"store": "project_defaults", "records": [{"id": "PWD-one", "revision": 1}]})
+
+
+def test_queued_inbox_preview_refuses_inflight_without_dispatch(monkeypatch):
+    from maverick import conversation_inbox
+    monkeypatch.setattr(deletion.personal_memory, "require_scope", lambda *a: None)
+    monkeypatch.setattr(conversation_inbox, "owned_inventory", lambda actor: [{"id": "CI-private", "revision": 2, "inflight": True}])
+    with pytest.raises(ValueError, match="consuming or dispatching"):
+        deletion.preview("user:a", "dashboard", "a", ["conversation_inbox"], None)
+
+
+def test_queued_inbox_erasure_uses_review_owner_revision_and_distinct_actor(monkeypatch):
+    from maverick import conversation_inbox
+    calls = []
+    monkeypatch.setattr(conversation_inbox, "erase_owned", lambda *a, **kw: calls.append((a, kw)) or {"status": "confirmed"})
+    result = deletion._erase_target(None, {"id": "PDR-one", "owner": "user:a", "reviewer": "user:b", "channel": "dashboard", "user_id": "a"},
+                                   {"store": "conversation_inbox", "records": [{"id": "CI-one", "revision": 3}]})
+    assert calls[0][0][:3] == ("user:a", "CI-one", 3)
+    assert calls[0][1] == {"actor": "user:b"}
+    assert result["state"] == "purged"
+    assert "tombstones" in result["retained"]
+
+
+def test_queued_inbox_unconfirmed_audit_never_claims_purge(monkeypatch):
+    from maverick import conversation_inbox
+    monkeypatch.setattr(conversation_inbox, "erase_owned", lambda *a, **kw: {"status": "unconfirmed"})
+    with pytest.raises(ValueError, match="unconfirmed"):
+        deletion._erase_target(None, {"id": "PDR-one", "owner": "user:a", "reviewer": "user:b", "channel": "dashboard", "user_id": "a"},
+                               {"store": "conversation_inbox", "records": [{"id": "CI-one", "revision": 3}]})

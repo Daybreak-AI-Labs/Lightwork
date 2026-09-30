@@ -21,7 +21,7 @@ from .draft_store import DraftStore
 
 STORE = GovernedRecordStore("personal_data_requests", "PDR", "personal_data_request")
 KINDS = {"preference_notes", "conversation_history", "recovery_drafts",
-         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults"}
+         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox"}
 DIAGNOSTICS = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
 EXCEPTIONS = [
     {"store": "audit_and_governance_evidence", "state": "retained", "reason": "Content-minimized activity, policy and deletion receipts follow their evidence retention policy."},
@@ -85,6 +85,27 @@ def _diagnostic_records(actor):
             for row in rows if row.get("owner") == actor]
 
 
+
+def _preview_owned_account(kind, actor):
+    target = {}
+    if kind == "conversation_inbox":
+        from maverick.conversation_inbox import owned_inventory
+        target["records"] = owned_inventory(actor)
+        target["count"] = len(target["records"])
+        if any(item["inflight"] for item in target["records"]):
+            raise ValueError("Some queued conversation work is consuming or dispatching. Reconcile it before reviewing erasure.")
+    elif kind == "generated_tools":
+        from maverick.personal_learning import reviewed_targets
+        target["records"] = reviewed_targets(actor)
+        target["count"] = len(target["records"])
+    elif kind == "model_test_history":
+        from maverick.model_test_retention import owned_inventory
+        target["inventory"] = owned_inventory(actor)
+        target["count"] = target["inventory"]["count"]
+        if target["inventory"]["blocked"]:
+            raise ValueError("Some model test outcomes are active or uncertain. Reconcile them before reviewing erasure.")
+    return target
+
 def preview(actor, channel, user_id, selected, world):
     personal_memory.require_scope(actor, channel, user_id)
     if not selected or len(selected) != len(set(selected)) or not set(selected) <= KINDS:
@@ -131,6 +152,8 @@ def preview(actor, channel, user_id, selected, world):
             target["records"] = owned_activation_inventory(actor, world=world)
             if any(record["blocked"] for record in target["records"]):
                 raise ValueError("Some activation drafts have active or uncertain task work. Reconcile them before reviewing draft erasure.")
+        elif kind in {"conversation_inbox", "generated_tools", "model_test_history"}:
+            target.update(_preview_owned_account(kind, actor))
         elif kind == "project_defaults":
             from maverick.project_workspaces import owned_defaults_inventory
             target["records"] = owned_defaults_inventory(actor)
@@ -189,6 +212,27 @@ def _erase_conversations(world, row, target):
             "retained": "Audit evidence, global caches, knowledge copies and derived-learning stores are separate exceptions, not covered by this database-closure proof."}
 
 
+
+def _erase_owned_account(row, target):
+    kind, actor = target["store"], row["owner"]
+    if kind == "conversation_inbox":
+        from maverick.conversation_inbox import erase_owned
+        for item in target["records"]:
+            result = erase_owned(actor, item["id"], item["revision"], _digest([row["id"], kind, item["id"]])[:32], actor=row["reviewer"])
+            if result["status"] not in {"confirmed", "replayed"}:
+                raise ValueError("Queued conversation erasure receipt is unconfirmed.")
+        return {"state": "purged", "removed": len(target["records"]), "retained": "Content-free operation tombstones, generation barriers, submitted tasks and accounting/audit receipts remain separately retained."}
+    if kind == "generated_tools":
+        from maverick.personal_learning import erase_reviewed
+        return erase_reviewed(actor, target["records"], actor=row["reviewer"])
+    if kind == "model_test_history":
+        from maverick.model_test_retention import erase_owned
+        result = erase_owned(actor, expected_version=target["inventory"]["version"], actor=row["reviewer"],
+                             operation_id=_digest([row["id"], kind])[:32])
+        return {"state": "purged" if result["status"] == "confirmed" else "unconfirmed",
+                "removed": result["removed"], "retained": target["inventory"]["retained"]}
+    raise ValueError("Unsupported owned account store")
+
 def _erase_target(world, row, target):
     kind, actor = target["store"], row["owner"]
     channel, user_id = row["channel"], row["user_id"]
@@ -231,6 +275,8 @@ def _erase_target(world, row, target):
             if result["status"] == "unconfirmed":
                 raise ValueError("Activation erasure receipt is not confirmed.")
         return {"state": "purged", "removed": len(target["records"]), "retained": "Content-free erasure tombstones, task/admission history, audit evidence and separately created owned workflows remain."}
+    if kind in {"conversation_inbox", "generated_tools", "model_test_history"}:
+        return _erase_owned_account(row, target)
     if kind == "project_defaults":
         from maverick.project_workspaces import erase_owned_defaults
         for item in target["records"]:

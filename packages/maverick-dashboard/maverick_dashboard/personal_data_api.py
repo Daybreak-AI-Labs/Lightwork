@@ -6,7 +6,7 @@ import hmac
 import json
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from maverick import personal_identity, personal_memory
 from maverick.authority_effects import authority_effect_fence
@@ -86,7 +86,7 @@ class ShareIn(RevisionIn):
 
 
 class DeletionPreviewIn(ScopeIn):
-    stores: list[str] = Field(min_length=1, max_length=10)
+    stores: list[str] = Field(min_length=1, max_length=20)
 
 
 class DeletionRequestIn(DeletionPreviewIn):
@@ -254,6 +254,31 @@ def _inventory(request):
                        "action": "Select Personal project defaults below; existing shared project plans remain."})
     except Exception:
         stores.append({"name": "Personal project defaults", "state": "unavailable", "action": "Select the workspace that owns these defaults; no zero count is claimed."})
+    try:
+        from maverick.model_test_retention import owned_inventory
+        model_history = owned_inventory(actor)
+        stores.append({"name": "Personal model-test history", "state": "available", "count": model_history["count"],
+                       "blocked": model_history["blocked"], "use": model_history["retained"],
+                       "action": "Select Model-test history for reviewed erasure; active or unknown outcomes need reconciliation."})
+    except Exception:
+        stores.append({"name": "Personal model-test history", "state": "unavailable", "action": "Its exact inventory could not be confirmed; no zero count is claimed."})
+    try:
+        from maverick.personal_learning import inventory as learning_inventory
+        learned = learning_inventory(actor)
+        stores.append({"name": "Owned generated tools and learning lineage", "state": learned["state"],
+                       "inventory": learned, "use": learned["limits"],
+                       "action": "Select Generated tools for reviewed current-source erasure. Exclude source tasks to stop future local reuse; retained ledger/model history is separate."})
+    except Exception:
+        stores.append({"name": "Owned generated tools and learning lineage", "state": "unavailable", "action": "Its exact inventory could not be confirmed; no zero count is claimed."})
+    try:
+        from maverick.conversation_inbox import owned_inventory as inbox_inventory
+        queued = inbox_inventory(actor)
+        stores.append({"name": "Queued conversation messages and files", "state": "available", "count": len(queued),
+                       "blocked": sum(bool(item["inflight"]) for item in queued),
+                       "use": "Encrypted queued message bodies, file bytes and original per-operation receipts; consuming or dispatching work must be reconciled before erasure.",
+                       "action": "Download Queued conversation work above or select it below for reviewed erasure; submitted task records stay separate."})
+    except Exception:
+        stores.append({"name": "Queued conversation messages and files", "state": "unavailable", "action": "Its exact inventory could not be confirmed; no zero count is claimed."})
     return {"context": context_for(request), "holds": holds, "scopes": scopes, "conversations": conversations,
             "tasks": tasks, "tasks_truncated": len(goals) > 5000, "stores": stores,
             "limits": "Links authorize this personal-data view, not task mutation. Copies, shared packets, external systems and prior trained derivatives are separate; nothing here claims they are deleted."}
@@ -337,4 +362,23 @@ def exclude_learning(request: Request, goal_id: int, body: ContextIn):
                 if record.get("_audit_pending"):
                     return {"state": "excluded-audit-pending", "message": "Future local learning is blocked, but its activity record remains unconfirmed."}
             return {"state": "excluded", "message": "Future automatic local reuse and learning are blocked for this task and descendants. Business history is retained; prior models, copied examples and external/manual datasets are not unlearned."}
+    return _call(operation)
+
+
+@router.get("/api/v1/my-data/download")
+def download_records(request: Request, token: str = Query(min_length=1, max_length=4096)):
+    from .personal_data_exports import download
+    return _call(lambda: download(request, token))
+
+
+class AccountExportIn(ContextIn):
+    store: Literal["model_test_history", "conversation_inbox"]
+
+
+@router.post("/api/v1/my-data/account-export")
+def account_export(request: Request, body: AccountExportIn):
+    from .personal_data_exports import link
+    def operation():
+        _write_actor(request, body)
+        return link(request, store=body.store)
     return _call(operation)
