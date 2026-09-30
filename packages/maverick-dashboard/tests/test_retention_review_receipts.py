@@ -54,3 +54,51 @@ def test_retry_skips_completed_store_and_preserves_unknown_receipt(isolated, mon
     assert calls == [{"events_days": 90}]
     assert result["status"] == "partial"  # prior ambiguous deletion cannot become proven zero
     assert retention_runs.read(review["id"], "user:admin")["steps"][0]["removed"] == 2
+
+
+def test_audit_failure_never_dispatches_deletion(isolated, monkeypatch):
+    from maverick import audit
+    from maverick.audit import retention
+    calls = []
+    monkeypatch.setattr(retention, "enforce", lambda **kw: calls.append(kw) or {})
+    review = retention_runs.preview("user:admin")
+    calls.clear()
+    monkeypatch.setattr(audit, "audit_event", lambda *_, **__: False)
+    with pytest.raises(HTTPException) as error:
+        retention_runs.apply(review["id"], "user:admin", confirm_holds=True, retry=False, authorize=lambda: None)
+    assert error.value.status_code == 503
+    assert calls == []
+
+
+def test_internal_hold_cannot_be_overridden_by_confirmation(isolated, monkeypatch):
+    from maverick.audit import retention
+    monkeypatch.setattr(retention_runs, "_scope", lambda: ("a", [{
+        "tenant": "a", "name": "A", "policy": {"messages_days": 30},
+        "preservation": {"blocked": True, "legal_holds": 1}}]))
+    calls = []
+    monkeypatch.setattr(retention, "enforce", lambda **kw: calls.append(kw) or {})
+    review = retention_runs.preview("user:admin")
+    assert review["blocked_by_hold"]
+    calls.clear()
+    with pytest.raises(HTTPException) as error:
+        retention_runs.apply(review["id"], "user:admin", confirm_holds=True, retry=False, authorize=lambda: None)
+    assert error.value.status_code == 409
+    assert calls == []
+
+
+def test_revocation_at_fence_blocks_effect(isolated, monkeypatch):
+    from maverick.audit import retention
+    calls = []
+    monkeypatch.setattr(retention, "enforce", lambda **kw: calls.append(kw) or {})
+    review = retention_runs.preview("user:admin")
+    calls.clear()
+    checks = 0
+    def authorize():
+        nonlocal checks
+        checks += 1
+        if checks == 3:
+            raise HTTPException(403, "Role removed")
+    with pytest.raises(HTTPException):
+        retention_runs.apply(review["id"], "user:admin", confirm_holds=True, retry=False, authorize=authorize)
+    assert calls == []
+    assert retention_runs.read(review["id"], "user:admin")["steps"][0]["status"] == "blocked"

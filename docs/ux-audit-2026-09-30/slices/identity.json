@@ -116,13 +116,14 @@
   },
   {
     "id": "LW-103",
-    "status": "partial-planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "027751b: actual scope/workspaces/policies/counts in durable dry-run review; saved-policy fingerprint, frozen cutoff, expiry and fresh authority before store steps.",
-      "Unsaved form edits invalidate preview; UI explicitly requires records-owner hold confirmation and names provenance dependency."
+      "Unsaved form edits invalidate preview; UI explicitly requires records-owner hold confirmation and names provenance dependency.",
+      "Recorded privacy-rights holds now appear in per-workspace preview, invalidate review and block core/manual retention even when the optional ledger feature is disabled; complete integrity-checked scan, current authority/policy fence through deletion and required accepted-review audit acknowledgement."
     ],
     "validation": "Python AST, JavaScript syntax and whitespace checks only. Regression tests authored; no suites, installed acceptance, live providers or native calls run.",
-    "remaining": "Integrate known internal preservation holds and fence current authority with deletion; external hold discovery remains unavailable and requires explicit records-owner confirmation. Runtime acceptance unrun."
+    "remaining": "Static checks only; authored hold, audit-failure and fenced-revocation regressions remain unrun. External holds require explicit records-owner confirmation; automatic discovery is not claimed."
   },
   {
     "id": "LW-104",

@@ -439,6 +439,19 @@ def enforce(
     now: float | None = None,
     _fleet_child: bool = False,
 ) -> dict:
+    from ..authority_effects import authority_effect_fence
+
+    # Hold changes and app-owned authority changes share this fence. Recheck
+    # preservation under it and retain it through each destructive operation.
+    with authority_effect_fence():
+        return _enforce(config=config, dry_run=dry_run, audit_dir=audit_dir,
+                        db_path=db_path, now=now, _fleet_child=_fleet_child)
+
+
+def _enforce(
+    *, config: dict | None, dry_run: bool, audit_dir: Path | None,
+    db_path: Path | None, now: float | None, _fleet_child: bool,
+) -> dict:
     """Apply every configured retention rule. Returns a per-rule report.
 
     ``audit_dir`` defaults to the writer's home/tenant-aware audit dir
@@ -486,7 +499,15 @@ def enforce(
     messages_days = cfg.get("messages_days")
     usage_days = cfg.get("usage_days")
 
-    report: dict = {"dry_run": dry_run}
+    from .preservation import preservation_snapshot
+
+    try:
+        preservation = preservation_snapshot()
+    except Exception as exc:
+        raise RetentionScopeError("Preservation holds could not be verified; no records were deleted.") from exc
+    if preservation["blocked"] and not dry_run:
+        raise RetentionScopeError("Recorded preservation holds block broad deletion in this workspace.")
+    report: dict = {"dry_run": dry_run, "preservation": preservation}
     if audit_days:
         report["audit"] = purge_audit_files(
             days=audit_days, audit_dir=audit_dir, dry_run=dry_run, now=now,

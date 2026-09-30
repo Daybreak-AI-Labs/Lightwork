@@ -157,6 +157,7 @@
   function retentionBusyState(busy) {
     retentionBusy = busy;
     [saveRet, applyRet, confirmRet].forEach(function (button) { if (button) button.disabled = busy; });
+    if (confirmRet && retentionReceipt && retentionReceipt.blocked_by_hold) confirmRet.disabled = true;
   }
   function showReceipt(receipt) {
     if (!retentionReview) return;
@@ -170,6 +171,10 @@
         return step.label + ': ' + human(step.days) + ', ' + step.eligible + ' eligible at review';
       }).join('; ') || 'No automatic deletion periods.';
       summary.appendChild(policy);
+      var preservation = target.preservation || {};
+      var holds = doc.createElement('p');
+      holds.textContent = preservation.blocked ? 'Deletion blocked: ' + preservation.legal_holds + ' recorded legal holds and ' + preservation.retention_blocks + ' retention restrictions. Resolve with your records owner; this confirmation cannot override them.' : 'No blocking holds found in the workspace privacy-rights ledger. Check external holds separately.';
+      summary.appendChild(holds);
     });
     (receipt.steps || []).forEach(function (step) {
       var line = doc.createElement('p');
@@ -182,6 +187,7 @@
     });
     confirmRet.hidden = receipt.status === 'completed' || !receipt.steps.length;
     confirmRet.textContent = receipt.status === 'review' ? 'Delete reviewed old records' : 'Retry unresolved stores only';
+    confirmRet.disabled = retentionBusy || !!receipt.blocked_by_hold;
     try { sessionStorage.setItem('lightwork-retention-receipt', receipt.id); } catch (_) {}
   }
   function loadRetention() {
@@ -230,7 +236,7 @@
     finally { retentionBusyState(false); }
   });
   if (confirmRet) confirmRet.addEventListener('click', async function () {
-    if (retentionBusy || !retentionReceipt || retentionDirty) return;
+    if (retentionBusy || !retentionReceipt || retentionDirty || retentionReceipt.blocked_by_hold) return;
     if (!$('cmp-retention-holds').checked) { say(retentionResult, 'Check preservation holds with your records owner first.'); return; }
     retentionBusyState(true);
     try {

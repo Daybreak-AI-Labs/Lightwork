@@ -80,6 +80,7 @@ def _policy() -> dict:
 
 
 def _scope() -> tuple[str | None, list[dict]]:
+    from maverick.audit.preservation import preservation_snapshot
     from maverick.paths import current_tenant_id, tenant_scope
     from maverick.tenant.registry import get_tenant, list_tenants
 
@@ -92,7 +93,11 @@ def _scope() -> tuple[str | None, list[dict]]:
         tenant = record.id if record else None
         with tenant_scope(tenant=tenant):
             policy = _policy()
-        targets.append({"tenant": tenant, "name": (record.display_name or record.id) if record else "Main workspace", "policy": policy})
+            try:
+                preservation = preservation_snapshot()
+            except Exception as exc:
+                raise HTTPException(503, "Preservation holds could not be verified. Nothing can be deleted.") from exc
+        targets.append({"tenant": tenant, "name": (record.display_name or record.id) if record else "Main workspace", "policy": policy, "preservation": preservation})
     return selected, targets
 
 
@@ -117,7 +122,8 @@ def preview(actor: str) -> dict:
     receipt = {"id": secrets.token_hex(16), "actor": actor, "created_at": now, "cutoff_time": now,
                "scope": selected, "policy_revision": _fingerprint(selected, targets),
                "targets": targets, "status": "review", "steps": [],
-               "holds": "This retention engine does not discover preservation holds in external systems. Confirm with your records owner before applying.",
+               "holds": "Recorded privacy-rights holds block broad workspace deletion. External holds require separate confirmation with your records owner.",
+               "blocked_by_hold": any(target.get("preservation", {}).get("blocked") for target in targets),
                "dependencies": "Task-history deletion removes provenance links from retained facts. Completed deletions cannot be undone."}
     for target in targets:
         with tenant_scope(tenant=target["tenant"]):
@@ -137,6 +143,7 @@ def preview(actor: str) -> dict:
 def apply(run_id: str, actor: str, *, confirm_holds: bool, retry: bool, authorize) -> dict:
     from maverick.audit import audit_event
     from maverick.audit.retention import enforce
+    from maverick.authority_effects import authority_effect_fence
     from maverick.file_lock import cross_process_lock
     from maverick.paths import tenant_scope
 
@@ -146,7 +153,9 @@ def apply(run_id: str, actor: str, *, confirm_holds: bool, retry: bool, authoriz
         receipt = read(run_id, actor)
         selected, targets = _scope()
         if _fingerprint(selected, targets) != receipt["policy_revision"]:
-            raise HTTPException(409, "Workspace or effective retention policy changed. Review a new preview.")
+            raise HTTPException(409, "Workspace, preservation holds or effective retention policy changed. Review a new preview.")
+        if any(target.get("preservation", {}).get("blocked") for target in targets):
+            raise HTTPException(409, "Recorded preservation holds block this deletion. The records owner must resolve the hold; confirmation cannot override it.")
         if receipt["status"] == "completed":
             return receipt
         if not retry and receipt["status"] != "review":
@@ -154,9 +163,11 @@ def apply(run_id: str, actor: str, *, confirm_holds: bool, retry: bool, authoriz
         if not retry and time.time() - receipt["created_at"] > 600:
             raise HTTPException(409, "This review expired. Review a fresh preview before deleting.")
         authorize()
-        audit_event("retention_review_accepted", agent="dashboard", _global=True,
+        acknowledged = audit_event("retention_review_accepted", agent="dashboard", _global=True,
                     actor=actor, review_id=run_id, policy_revision=receipt["policy_revision"],
                     holds_confirmed=True, retry=retry)
+        if acknowledged is not True:
+            raise HTTPException(503, "The review could not be recorded. No deletion was started.")
         receipt["status"] = "running"
         receipt["holds_confirmed_by"] = actor
         _write(receipt)
@@ -176,14 +187,27 @@ def apply(run_id: str, actor: str, *, confirm_holds: bool, retry: bool, authoriz
             step["status"] = "running"
             _write(receipt)
             try:
-                with tenant_scope(tenant=step["tenant"]):
-                    report = enforce(config={step["key"]: step["days"]}, now=receipt["cutoff_time"], _fleet_child=True)
+                with authority_effect_fence():
+                    authorize()
+                    current_scope, current_targets = _scope()
+                    if _fingerprint(current_scope, current_targets) != receipt["policy_revision"]:
+                        step["status"] = "blocked"
+                        receipt["status"] = "partial"
+                        _write(receipt)
+                        raise HTTPException(409, "Policy or preservation holds changed before deletion. Review again.")
+                    with tenant_scope(tenant=step["tenant"]):
+                        report = enforce(config={step["key"]: step["days"]}, now=receipt["cutoff_time"], _fleet_child=True)
                 outcome = report.get(step["store"], {})
                 step["removed"] = prior + _count(outcome)
                 step["skipped"] = len(outcome.get("skipped", []))
                 step["uncertain_prior"] = uncertain_prior
                 step["audit_record"] = "unconfirmed" if audit_unconfirmed else "recorded" if report.get("marker") else "not_needed" if not _count(outcome) else "unconfirmed"
                 step["status"] = "partial" if uncertain_prior or step["skipped"] or outcome.get("purge_marker") == "failed" or step["audit_record"] == "unconfirmed" else "completed"
+            except HTTPException:
+                step["status"] = "blocked"
+                receipt["status"] = "partial"
+                _write(receipt)
+                raise
             except Exception as exc:
                 # A backend can fail after a partial write. Do not manufacture
                 # a zero count or present it as an entirely failed deletion.
