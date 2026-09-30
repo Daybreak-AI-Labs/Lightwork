@@ -2118,6 +2118,10 @@ class Agent:
                 core = set(core_tool_names(self.role, extra=exposure["core_extra"]))
         hidden: set[str] = set()
         if cap is not None:
+            # Discovery reveals only what this grant permits: hidden names are
+            # excluded from find_tools' search space and from activate(), so a
+            # denied tool is never described, and activation never widens
+            # authority -- _capability_permits_denial still gates every call.
             hidden = {n for n in registered if not cap.permits(n)}
             core -= hidden
         return core, hidden

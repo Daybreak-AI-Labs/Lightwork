@@ -180,8 +180,39 @@ def test_pack_sees_its_allow_tools_and_nothing_else(ctx, monkeypatch, pack):
     # A denied tool is not discoverable either.
     assert all(t.name not in profile.deny_tools for t in agent.tools.deferred_tools())
     assert agent.tools.activate(list(profile.deny_tools)) == []
-    # Every offered tool is one the pack's capability lets it call.
+    # Every offered tool is one the pack's capability lets it call, and the
+    # pack can look up the deferred connectors its own grant allows.
     assert all(agent.capability.permits(n) for n in names)
+    assert "find_tools" in names and agent.capability.permits("find_tools")
+
+
+def test_find_tools_reveals_only_permitted_names_and_grants_no_authority(ctx, monkeypatch):
+    from maverick.capability import Capability
+    _config(monkeypatch)
+    cap = Capability(
+        principal="agent:pack", max_risk="medium",
+        allow_tools=frozenset({"read_file", "knowledge_search", "federal_register", "chaos_gameday"}),
+        deny_tools=frozenset({"chaos_gameday", "shell"}),
+    )
+    agent = _agent(ctx, "specialist", capability=cap)
+    # find_tools is on the coordination floor: visible and callable for the pack.
+    assert "find_tools" in _offered(agent)
+    searchable = {t.name for t in agent.tools.deferred_tools()}
+    assert searchable and all(cap.permits(n) for n in searchable)
+    assert "chaos_gameday" not in searchable and "shell" not in searchable
+    # A permitted deferred connector (the suite data long tail) is found; a
+    # denied one is neither found nor activated.
+    assert "federal_register" in agent.tools.deferrable_names and "federal_register" in searchable
+    out = agent.tools.get("find_tools").fn({"query": "federal register rules notices"})
+    assert "federal_register" in out and "federal_register" in _offered(agent)
+    out = agent.tools.get("find_tools").fn({"query": "chaos gameday fault injection drill"})
+    assert "chaos_gameday" not in out
+    assert agent.tools.activate(["chaos_gameday", "shell"]) == []
+    assert "chaos_gameday" not in _offered(agent)
+    # Discovery grants no execution authority: the call-time gate still denies.
+    assert agent._capability_permits_denial("chaos_gameday", cap) is not None
+    assert agent._capability_permits_denial("shell", cap) is not None
+    assert agent._capability_permits_denial("federal_register", cap) is None
 
 
 def test_pack_without_allow_list_uses_role_core(ctx, monkeypatch):
