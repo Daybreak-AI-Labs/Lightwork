@@ -20,10 +20,13 @@ here.
 ## Agent kernel & orchestration
 
 - **Employee companion preview** - default-off `[features] employee_companions`
-  adds an explicitly enrolled employee's private, read-only task-status
-  conversation and workspace-admin policy/metadata page. It uses current owned
-  task records and the existing supervision grammar without starting models or
-  agents. History retention is optional and encrypted; connector retrieval,
+  adds an explicitly enrolled employee's private conversation and workspace-admin
+  policy/metadata page. A separate policy grant enables draft replies through the
+  configured writer model, with optional permitted own-task context and bounded
+  retained history. Deterministic task status stays available alongside work.
+  No agent tools execute; request receipts prevent automatic paid replay, and
+  authority is rechecked before dispatch/publication. History retention is optional
+  and encrypted; connector retrieval,
   learned memory, actions and voice are unavailable. This increment is untested
   and does not change legacy administrator access to ordinary task/chat content.
   See [scope and qualification gaps](employee-companions.md).

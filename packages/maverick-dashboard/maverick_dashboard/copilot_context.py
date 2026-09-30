@@ -90,22 +90,26 @@ _CONTEXTS = tuple(
             title="Employee companions",
             summary=(
                 "Workspace administrators enroll employees and set the policy "
-                "for a bounded personal task-status companion."
+                "for personal task status and optional AI draft conversations."
             ),
             capabilities=(
                 "Enroll or disable a specific employee using the page's controls.",
                 "Allow access to the employee's own task status and choose conversation retention.",
+                "Separately allow an employee to request AI drafts using the installation's configured AI service.",
                 "Review policy and audit metadata for companions in this workspace.",
             ),
             boundaries=(
                 "Companion policy requires administrator authority in the current workspace and current employee membership.",
                 "Companion administration does not grant access to private companion history.",
-                "This version does not use AI providers, connected sources, shared memory or task actions.",
+                "AI drafts send messages, eligible retained history and permitted own-task titles and status to the configured AI service.",
+                "Retained context is checked against current source access; no-history drafts are stateless.",
+                "Companions cannot execute model tools or task actions, use connected sources, or create learned memory.",
                 "Copilot can explain these controls but cannot enroll employees or change companion policy.",
             ),
             next_steps=(
                 "Check whether employee companions are enabled in Settings.",
-                "Select an employee and review the allowed task access and retention before saving.",
+                "Select an employee and review task access, AI draft permission and retention before saving.",
+                "Before permitting AI drafts, confirm that the configured AI service is an approved destination for the employee's messages and allowed context.",
                 "Refresh the policy after a conflict before making another change.",
             ),
             suggested_questions=(
@@ -118,29 +122,33 @@ _CONTEXTS = tuple(
             path="/companion",
             title="My companion",
             summary=(
-                "Check your own task status alongside a personal conversation "
-                "without waiting for a running task to finish."
+                "Check your own task status and, when your administrator permits "
+                "it, ask for AI drafts alongside work that is still running."
             ),
             capabilities=(
                 "Read the status of your own tasks when your workspace policy allows it.",
+                "Ask the companion for an AI draft when your administrator has enabled draft conversations for you.",
                 "View your current companion policy and conversation retention.",
                 "Clear your retained companion conversation using the page's controls.",
             ),
             boundaries=(
                 "A workspace administrator must enroll you before you use a companion.",
-                "The companion returns bounded task-status replies, not general AI answers or actions.",
-                "It cannot read another employee's tasks, connected sources or shared memory.",
+                "AI drafts use the configured AI service, which receives your message, eligible retained history and permitted own-task titles and status.",
+                "Without task-source access, drafts use your current message only; without conversation retention, drafts do not carry history forward.",
+                "Retained context is rechecked against current source access before it is used.",
+                "Drafts may be wrong and need your review; the companion cannot execute tools or task actions.",
+                "It cannot read another employee's tasks, use connected sources or create learned memory.",
                 "Companion administration exposes policy and audit metadata, not private companion history.",
                 "Copilot explains this page; it cannot read or clear your companion conversation.",
             ),
             next_steps=(
-                "Review your access and retention policy before sending a message.",
-                "Ask about your task status and refresh to see later changes.",
-                "If access is unavailable, ask your workspace administrator to review enrollment and policy.",
+                "Review your access, AI draft permission, destination and retention policy before sending a message.",
+                "Ask about task status or request a draft, then review the reply and any task sources before using it.",
+                "If access is unavailable, ask your workspace administrator to review enrollment, policy or the configured AI service.",
             ),
             suggested_questions=(
                 "What can my companion do today?",
-                "Who can see my companion conversation?",
+                "What does the AI service receive?",
                 "How do I clear my conversation history?",
             ),
         ),

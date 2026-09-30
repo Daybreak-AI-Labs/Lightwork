@@ -4644,10 +4644,12 @@ def pick_advanced() -> dict[str, Any]:
         ),
         "allow_employee_companions": _q_confirm(
             "Enable personal companions for employees enrolled by a workspace "
-            "administrator? This first version shows only each person's own task "
-            "status. Administrators manage policy and audit metadata, without "
-            "access to private companion history. AI answers and actions are "
-            "not included.",
+            "administrator, with own-task status and optional AI drafts? An "
+            "administrator must permit drafts for each employee. The configured "
+            "AI service receives messages, eligible retained history and permitted "
+            "own-task titles and status. Administrators manage policy and audit "
+            "metadata, without access to private companion history. Companions "
+            "cannot take task actions or use connected sources.",
             default=False,
         ),
         "allow_outcome_measurement": _q_confirm(

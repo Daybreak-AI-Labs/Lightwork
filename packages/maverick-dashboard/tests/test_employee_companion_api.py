@@ -6,9 +6,11 @@ small app deliberately omits the production lifespan and its background jobs.
 """
 from __future__ import annotations
 
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Event
 
 import pytest
@@ -49,6 +51,10 @@ def _policy_body(owner=ALICE, revision=0, **changes):
     }
 
 
+def _request_id():
+    return f"{int(time.time() * 1000)}.{uuid.uuid4().hex}"
+
+
 @dataclass
 class Environment:
     client: TestClient
@@ -80,6 +86,64 @@ class Environment:
             headers=_headers(actor, tenant, context=snapshot["context"]),
             json={"message": message, "expected_revision": snapshot["policy"]["revision"]},
         )
+
+    def conversation(self, message="Help me draft a plan", *, actor=ALICE, tenant="acme",
+                     view=None, request_id=None, **changes):
+        snapshot = self.view(actor, tenant) if view is None else view
+        return self.client.post(
+            BASE + "/messages",
+            headers=_headers(actor, tenant, context=snapshot["context"]),
+            json={
+                "mode": "conversation", "message": message,
+                "request_id": request_id or _request_id(),
+                "expected_revision": snapshot["policy"]["revision"],
+                "expected_history_generation": snapshot["history_generation"],
+                **changes,
+            },
+        )
+
+    def request_status(self, request_id, *, actor=ALICE, tenant="acme"):
+        return _ok(self.client.get(
+            BASE + f"/requests/{request_id}", headers=_headers(actor, tenant),
+        ))
+
+
+@dataclass
+class DraftGeneration:
+    """A synchronous provider stand-in which honors the physical dispatch guard."""
+
+    calls: list[dict] = field(default_factory=list)
+    dispatched: list[dict] = field(default_factory=list)
+    reply: str = "A private draft to review."
+    before_dispatch: object = None
+    after_dispatch: object = None
+
+    def generate(self, *, actor, tenant, route, message, history, tasks, dispatch_guard):
+        call = {
+            "actor": actor, "tenant": tenant, "route": route,
+            "message": message, "history": history, "tasks": tasks,
+        }
+        self.calls.append(call)
+        if self.before_dispatch is not None:
+            self.before_dispatch()
+        dispatch_guard()
+        self.dispatched.append(call)
+        if self.after_dispatch is not None:
+            self.after_dispatch()
+        return self.reply
+
+
+@pytest.fixture
+def draft_generation(environment, monkeypatch):
+    model = companion.companion_model
+    draft = DraftGeneration()
+    monkeypatch.setattr(model, "prepare_route", lambda: model.CompanionModelRoute(
+        model="mock:companion-test-route", provider="mock", fingerprint="a" * 64,
+        tenant=current_tenant_id_strict(),
+    ))
+    monkeypatch.setattr(model, "validate_route", lambda _route: None)
+    monkeypatch.setattr(model, "generate_draft", draft.generate)
+    return draft
 
 
 @pytest.fixture
@@ -131,6 +195,7 @@ def environment(tmp_path, monkeypatch):
         with tenant_scope(tenant=tenant):
             worlds[tenant] = WorldModel(tmp_path / f"{tenant}-world.db")
     monkeypatch.setattr(dashboard, "_world", lambda: worlds[current_tenant_id_strict()])
+    monkeypatch.setattr(dashboard, "check_goal_rate_limit", lambda *_args, **_kwargs: None)
 
     def forbidden(*_args, **_kwargs):
         pytest.fail("The bounded companion must not invoke a provider, model, runner, or tool")
@@ -550,3 +615,417 @@ def test_personal_and_administrative_responses_are_not_cacheable(environment):
         response = environment.client.get(BASE + suffix, headers=_headers(actor))
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "private, no-store"
+
+
+def test_conversation_without_sources_uses_only_employee_prompt_and_history(
+    environment, draft_generation, monkeypatch,
+):
+    environment.worlds["acme"].create_goal("Do not include this task", owner=ALICE)
+    environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+
+    def no_sources(*_args, **_kwargs):
+        pytest.fail("Prompt-only conversation must not read task sources")
+
+    monkeypatch.setattr(companion, "_tasks", no_sources)
+    view = environment.view()
+    assert view["conversation_available"] is True
+    assert view["status_available"] is False
+    assert view["tasks"] == []
+    first = _ok(environment.conversation("Private first prompt", view=view))
+    assert first["message"]["content"] == draft_generation.reply
+    assert first["message"]["sources"] == []
+    assert draft_generation.calls[0]["message"] == "Private first prompt"
+    assert draft_generation.calls[0]["history"] == []
+    assert draft_generation.calls[0]["tasks"] == []
+    _ok(environment.conversation("Continue my draft"))
+    second = draft_generation.calls[1]
+    assert second["actor"] == ALICE
+    assert second["tenant"] == "acme"
+    assert "Private first prompt" in str(second["history"])
+    assert "Do not include this task" not in str(second)
+    assert len(draft_generation.dispatched) == 2
+
+
+@pytest.mark.parametrize("actor", [ALICE, ADMIN])
+def test_conversation_sources_respect_owner_tenant_department_and_project(
+    environment, draft_generation, actor,
+):
+    world = environment.worlds["acme"]
+    project = world.create_project("Owned finance project", owner=actor)
+    foreign_project = world.create_project("Foreign project", owner=BOB)
+    allowed = world.create_goal("Allowed task context", owner=actor, domain="finance_planning", project_id=project)
+    world.create_goal("Other employee secret", owner=BOB, domain="finance_planning")
+    world.create_goal("Other department secret", owner=actor, domain="legal_review")
+    world.create_goal("Other project secret", owner=actor, domain="finance_planning", project_id=foreign_project)
+    environment.worlds["globex"].create_goal("Other tenant secret", owner=actor, domain="finance_planning")
+    environment.suites[actor] = frozenset({"finance"})
+    environment.policy(actor, allowed_tools=["draft_reply", "task_status"])
+
+    reply = _ok(environment.conversation(actor=actor))
+    sent = draft_generation.dispatched[0]
+    assert sent["actor"] == actor
+    assert sent["tenant"] == "acme"
+    assert [task["goal_id"] for task in sent["tasks"]] == [allowed]
+    assert [task["goal_id"] for task in reply["message"]["sources"]] == [allowed]
+    for secret in ("Other employee secret", "Other department secret", "Other project secret", "Other tenant secret"):
+        assert secret not in str(sent)
+        assert secret not in str(reply)
+
+
+def test_model_history_never_crosses_employee_or_tenant_boundaries(environment, draft_generation):
+    conversations = (
+        (ALICE, "acme", "Alice Acme private conversation"),
+        (BOB, "acme", "Bob Acme private conversation"),
+        (ALICE, "globex", "Alice Globex private conversation"),
+        (ADMIN, "acme", "Administrator personal conversation"),
+    )
+    for actor, tenant, text in conversations:
+        environment.policy(actor, tenant, allowed_sources=[], allowed_tools=["draft_reply"])
+        _ok(environment.conversation(text, actor=actor, tenant=tenant))
+        call = draft_generation.calls[-1]
+        assert call["actor"] == actor
+        assert call["tenant"] == tenant
+        assert call["history"] == []
+        assert call["message"] == text
+    for actor, tenant, own_text in conversations:
+        _ok(environment.conversation("Continue my personal draft", actor=actor, tenant=tenant))
+        history = str(draft_generation.calls[-1]["history"])
+        assert own_text in history
+        for _, _, other_text in conversations:
+            if other_text != own_text:
+                assert other_text not in history
+
+
+@pytest.mark.parametrize("revocation", ["membership", "offboarding", "policy", "department"])
+@pytest.mark.parametrize("phase", ["before_dispatch", "after_dispatch"])
+def test_conversation_revalidates_authority_at_dispatch_and_before_publication(
+    environment, draft_generation, revocation, phase,
+):
+    from maverick.employee_companion import EmployeeCompanionStore
+
+    environment.worlds["acme"].create_goal("Sensitive finance task", owner=ALICE, domain="finance_planning")
+    environment.suites[ALICE] = frozenset({"finance"})
+    policy = environment.policy(allowed_tools=["draft_reply"])
+    view = environment.view()
+    request_id = _request_id()
+
+    def revoke():
+        if revocation == "membership":
+            del environment.memberships["acme"][ALICE]
+        elif revocation == "offboarding":
+            environment.active[ALICE] = False
+        elif revocation == "department":
+            environment.suites[ALICE] = frozenset()
+        else:
+            EmployeeCompanionStore().update_policy(
+                ALICE, actor=ADMIN, expected_revision=policy["revision"], enabled=False,
+                allowed_sources=policy["allowed_sources"], allowed_tools=policy["allowed_tools"],
+                retention_days=policy["retention_days"],
+            )
+
+    setattr(draft_generation, phase, revoke)
+    response = environment.conversation("Do not publish after revocation", view=view, request_id=request_id)
+    assert response.status_code in (403, 409), response.text
+    assert draft_generation.reply not in response.text
+    assert "Do not publish after revocation" not in response.text
+    expected_dispatches = 0 if phase == "before_dispatch" else 1
+    assert len(draft_generation.dispatched) == expected_dispatches
+    with tenant_scope(tenant="acme"):
+        store = EmployeeCompanionStore()
+        assert store.history(ALICE) == []
+        assert store.turn_status(ALICE, request_id)["state"] != "completed"
+
+
+@pytest.mark.parametrize("phase", ["before_dispatch", "after_dispatch"])
+def test_session_revocation_during_conversation_invalidates_admitted_reply(
+    environment, draft_generation, phase,
+):
+    from maverick.employee_companion import EmployeeCompanionStore
+    from maverick_dashboard import session_revocation
+
+    subject = ALICE.removeprefix("user:")
+    session_revocation.revoke_principal(subject, at=1000.0)
+    environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+    view = environment.view()
+    request_id = _request_id()
+
+    def revoke_existing_session():
+        # Two credential invalidations must not be confused with the epoch
+        # captured when this request was admitted. No credential is created.
+        session_revocation.revoke_principal(subject, at=2000.0)
+        session_revocation.revoke_principal(subject, at=3000.0)
+
+    setattr(draft_generation, phase, revoke_existing_session)
+    response = environment.conversation("Never publish this revoked-session reply", view=view, request_id=request_id)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "companion_context_changed"
+    assert draft_generation.reply not in response.text
+    assert session_revocation.revocation_epoch(subject) == 3000.0
+    assert len(draft_generation.dispatched) == (0 if phase == "before_dispatch" else 1)
+    with tenant_scope(tenant="acme"):
+        store = EmployeeCompanionStore()
+        assert store.history(ALICE) == []
+        assert store.turn_status(ALICE, request_id)["state"] != "completed"
+
+
+@pytest.mark.parametrize("phase", ["before_dispatch", "after_dispatch"])
+def test_workspace_switch_away_and_back_invalidates_admitted_generation(
+    environment, draft_generation, phase,
+):
+    from maverick.employee_companion import EmployeeCompanionStore
+    from maverick_dashboard import workspace_tenants
+
+    workspace_tenants.set_selection(ALICE, "acme")
+    admitted_binding = workspace_tenants.get_selection_binding(ALICE)
+    environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+    view = environment.view()
+    request_id = _request_id()
+
+    def switch_away_and_back():
+        # The final tenant and request context still say Acme; only the
+        # monotonic selection generation reveals the intervening switches.
+        workspace_tenants.set_selection(ALICE, "globex")
+        workspace_tenants.set_selection(ALICE, "acme")
+
+    setattr(draft_generation, phase, switch_away_and_back)
+    response = environment.conversation("Reply admitted before workspace switch", view=view, request_id=request_id)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "companion_context_changed"
+    assert draft_generation.reply not in response.text
+    selected_tenant, current_generation = workspace_tenants.get_selection_binding(ALICE)
+    assert selected_tenant == admitted_binding[0] == "acme"
+    assert current_generation == admitted_binding[1] + 2
+    assert len(draft_generation.dispatched) == (0 if phase == "before_dispatch" else 1)
+    with tenant_scope(tenant="acme"):
+        store = EmployeeCompanionStore()
+        assert store.history(ALICE) == []
+        assert store.turn_status(ALICE, request_id)["state"] != "completed"
+
+
+@pytest.mark.parametrize("phase", ["before_dispatch", "after_dispatch"])
+def test_other_employee_credential_changes_do_not_invalidate_own_conversation(
+    environment, draft_generation, phase,
+):
+    from maverick_dashboard import session_revocation, workspace_tenants
+
+    environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+    workspace_tenants.set_selection(BOB, "acme")
+
+    def change_other_employee_credentials():
+        session_revocation.revoke_principal(BOB.removeprefix("user:"), at=1000.0)
+        workspace_tenants.set_selection(BOB, None)
+        workspace_tenants.set_selection(BOB, "acme")
+
+    setattr(draft_generation, phase, change_other_employee_credentials)
+    reply = _ok(environment.conversation("Alice's own draft can finish"))
+    assert reply["message"]["content"] == draft_generation.reply
+    assert len(draft_generation.dispatched) == 1
+    assert reply["request"]["state"] == "completed"
+
+
+def test_clearing_history_while_generation_waits_discards_late_answer(
+    environment, draft_generation,
+):
+    environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+    view = environment.view()
+    request_id = _request_id()
+    model_started = Event()
+    release_model = Event()
+
+    def wait_for_clear():
+        model_started.set()
+        assert release_model.wait(timeout=10), "Test did not release the mocked model"
+
+    draft_generation.after_dispatch = wait_for_clear
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        conversation = workers.submit(
+            environment.conversation, "This pending text must not reappear", view=view, request_id=request_id,
+        )
+        try:
+            assert model_started.wait(timeout=5)
+            clear = workers.submit(
+                environment.client.delete, BASE + "/history",
+                headers=_headers(context=view["context"]),
+            )
+            assert _ok(clear.result(timeout=5))["history"] == []
+        finally:
+            release_model.set()
+        response = conversation.result(timeout=5)
+    assert response.status_code == 409
+    assert draft_generation.reply not in response.text
+    latest = environment.view()
+    assert latest["history"] == []
+    assert latest["history_generation"] > view["history_generation"]
+    assert latest["active_turn"] is None
+    assert environment.request_status(request_id)["request"]["state"] == "cancelled"
+
+
+def test_duplicate_pending_and_completed_requests_never_generate_twice(
+    environment, draft_generation,
+):
+    environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+    view = environment.view()
+    request_id = _request_id()
+    model_started = Event()
+    release_model = Event()
+
+    def wait_for_duplicate():
+        model_started.set()
+        assert release_model.wait(timeout=10), "Test did not release the mocked model"
+
+    draft_generation.after_dispatch = wait_for_duplicate
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first = workers.submit(
+            environment.conversation, "Draft once", view=view, request_id=request_id,
+        )
+        try:
+            assert model_started.wait(timeout=5)
+            duplicate = workers.submit(
+                environment.conversation, "Draft once", view=view, request_id=request_id,
+            )
+            pending = _ok(duplicate.result(timeout=5))
+            assert pending["request"]["state"] == "pending"
+            assert "message" not in pending
+            assert len(draft_generation.dispatched) == 1
+        finally:
+            release_model.set()
+        assert _ok(first.result(timeout=5))["message"]["content"] == draft_generation.reply
+    completed = _ok(environment.conversation("Draft once", view=view, request_id=request_id))
+    assert completed["request"]["state"] == "completed"
+    assert "message" not in completed
+    assert len(draft_generation.calls) == len(draft_generation.dispatched) == 1
+    assert len(environment.view()["history"]) == 2
+    changed_payload = environment.conversation("Different text using the same ID", view=view, request_id=request_id)
+    assert changed_payload.status_code == 409
+    assert len(draft_generation.calls) == 1
+
+
+def test_request_metadata_is_owner_and_tenant_scoped_without_private_content(
+    environment, draft_generation,
+):
+    environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+    request_id = _request_id()
+    private_message = "Employee-only medical conversation"
+    _ok(environment.conversation(private_message, request_id=request_id))
+
+    owner = environment.request_status(request_id)
+    assert owner["request"]["state"] == "completed"
+    assert private_message not in str(owner["request"])
+    assert draft_generation.reply not in str(owner["request"])
+    assert not {"token", "fingerprint", "message", "response", "history"}.intersection(owner["request"])
+    for actor, tenant in ((BOB, "acme"), (ADMIN, "acme"), (ALICE, "globex")):
+        foreign = environment.request_status(request_id, actor=actor, tenant=tenant)
+        assert foreign["request"]["state"] == "not_started"
+        assert foreign["history"] == []
+        assert private_message not in str(foreign)
+        assert draft_generation.reply not in str(foreign)
+    admin = environment.admin()
+    assert private_message not in str(admin)
+    assert draft_generation.reply not in str(admin)
+    assert any(event["action"] == "draft_reply" for event in admin["events"])
+    assert all(
+        not {"message", "response", "history", "token", "fingerprint"}.intersection(event)
+        for event in admin["events"]
+    )
+
+
+def test_provider_failure_is_generic_and_consumes_request_without_retry(
+    environment, draft_generation,
+):
+    environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+    view = environment.view()
+    request_id = _request_id()
+    exception_detail = "Provider rejected credential SECRET and private prompt bytes"
+
+    def fail_provider():
+        raise RuntimeError(exception_detail)
+
+    draft_generation.after_dispatch = fail_provider
+    response = environment.conversation("Sensitive prompt", view=view, request_id=request_id)
+    assert response.status_code == 503
+    assert exception_detail not in response.text
+    assert "Sensitive prompt" not in response.text
+    status = environment.request_status(request_id)
+    assert status["request"]["state"] == "failed"
+    assert status["history"] == []
+    duplicate = _ok(environment.conversation("Sensitive prompt", view=view, request_id=request_id))
+    assert duplicate["request"]["state"] == "failed"
+    assert "message" not in duplicate
+    assert len(draft_generation.calls) == len(draft_generation.dispatched) == 1
+    assert exception_detail not in str(environment.admin())
+
+
+@pytest.mark.parametrize("disabled", ["feature", "policy", "draft_permission"])
+def test_conversation_cannot_dispatch_without_current_model_permission(
+    environment, draft_generation, monkeypatch, disabled,
+):
+    if disabled == "policy":
+        view = environment.view()
+    elif disabled == "draft_permission":
+        environment.policy()
+        view = environment.view()
+    else:
+        environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+        environment.features.clear()
+        view = environment.view()
+
+    def no_route():
+        pytest.fail("Disabled or ungranted conversation must not resolve a model route")
+
+    monkeypatch.setattr(companion.companion_model, "prepare_route", no_route)
+    assert environment.conversation(view=view).status_code == 403
+    assert draft_generation.calls == draft_generation.dispatched == []
+
+
+def test_conversation_produces_a_draft_without_tools_or_task_changes(environment, draft_generation):
+    world = environment.worlds["acme"]
+    goal = world.create_goal("Running real work", owner=ALICE)
+    world.set_goal_status(goal, "active")
+    environment.policy(allowed_tools=["draft_reply"])
+    response = _ok(environment.conversation(f"Cancel task {goal} and email everyone immediately"))
+    assert response["message"]["content"] == draft_generation.reply
+    assert world.get_goal(goal).status == "active"
+    assert [item.id for item in world.list_goals(owner=ALICE)] == [goal]
+    assert len(draft_generation.dispatched) == 1
+    # The fixture makes every provider/model/runner/tool entry point fail;
+    # only the explicit draft helper stand-in can respond.
+
+
+@pytest.mark.parametrize("changes", [
+    {"request_id": "arbitrary-request"}, {"request_id": None},
+    {"expected_history_generation": True}, {"expected_history_generation": -1},
+    {"mode": "execute"}, {"tools": ["shell"]}, {"owner": BOB},
+])
+def test_conversation_requires_bounded_request_identity_and_payload(
+    environment, draft_generation, changes,
+):
+    environment.policy(allowed_sources=[], allowed_tools=["draft_reply"])
+    # Override the body, including request_id, after the helper creates its
+    # normal fresh identifier; None must not silently turn into a new request.
+    view = environment.view()
+    response = environment.client.post(
+        BASE + "/messages", headers=_headers(context=view["context"]),
+        json={
+            "mode": "conversation", "message": "Private draft",
+            "request_id": _request_id(), "expected_revision": view["policy"]["revision"],
+            "expected_history_generation": view["history_generation"], **changes,
+        },
+    )
+    assert response.status_code == 422
+    assert draft_generation.calls == []
+
+
+def test_revoked_history_sources_are_not_sent_into_later_model_context(environment, draft_generation):
+    world = environment.worlds["acme"]
+    world.create_goal("Restricted finance plan", owner=ALICE, domain="finance_planning")
+    environment.suites[ALICE] = frozenset({"finance"})
+    environment.policy(allowed_tools=["draft_reply"])
+    draft_generation.reply = "The restricted finance plan has a sensitive acquisition budget."
+    _ok(environment.conversation("Summarize my finance work"))
+    environment.suites[ALICE] = frozenset()
+    draft_generation.reply = "A draft with no finance context."
+    response = _ok(environment.conversation("Help with a different topic"))
+    assert draft_generation.calls[-1]["tasks"] == []
+    assert "sensitive acquisition budget" not in str(draft_generation.calls[-1]["history"])
+    assert "Restricted finance plan" not in str(draft_generation.calls[-1])
+    assert "sensitive acquisition budget" not in str(response["history"])

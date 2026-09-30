@@ -1026,8 +1026,11 @@ def get_features() -> dict:
     Draft recovery, record search, Action Center, guided onboarding and workflow
     readiness default on. Workspace recovery, project reviews and outcome
     measurement and employee companions require explicit opt-in. The older
-    switches default on. Employee companions expose only the enrolled person's
-    task status and private companion history controls; they do not enable agent work.
+    switches default on. Employee companions expose the enrolled person's task
+    status, private companion history controls and optional administrator-permitted
+    AI drafts through the existing writer role. Drafts may use eligible retained
+    history and currently permitted own-task titles/status; they do not enable
+    model tools, task actions, connected sources or learned memory.
     """
     cfg = load_config().get("features", {}) or {}
     return {

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -378,7 +379,7 @@ def test_corrupt_authority_is_refused_without_resetting_policy(store, corruption
 def test_duplicate_json_fields_are_refused(store):
     _enable(store)
     raw = file_lock.atomic_read_text(store._path(ALICE))
-    file_lock.atomic_write_text(store._path(ALICE), raw.replace('"version":1', '"version":1,"version":1'))
+    file_lock.atomic_write_text(store._path(ALICE), raw.replace('"version":2', '"version":2,"version":2'))
     with pytest.raises(CompanionError):
         store.policy(ALICE)
 
@@ -420,3 +421,390 @@ def test_exchange_size_and_source_reference_contract(store, override):
     with pytest.raises(CompanionValidationError):
         _reply(store, **override)
     assert file_lock.atomic_read_text(store._path(ALICE)) == before
+
+
+def _enable_draft(store, owner=ALICE, **overrides):
+    values = {"allowed_sources": [], "allowed_tools": ["draft_reply"]}
+    values.update(overrides)
+    return _enable(store, owner, **values)
+
+
+def _request_id(at=None):
+    return f"{int((employee_companion.time.time() if at is None else at) * 1000)}.{uuid.uuid4().hex}"
+
+
+def _reserve(store, owner=ALICE, **overrides):
+    values = {"request_id": _request_id(), "expected_revision": store.policy(owner)["revision"],
+              "expected_history_generation": store.conversation_state(owner)["history_generation"],
+              "fingerprint": "ab" * 32}
+    values.update(overrides)
+    return store.reserve_turn(owner, **values)
+
+
+def _ticket_args(ticket):
+    return {"request_id": ticket["request_id"], "token": ticket["token"],
+            "expected_revision": ticket["revision"], "history_generation": ticket["history_generation"]}
+
+
+def _finish(store, ticket, owner=ALICE, **overrides):
+    values = {**_ticket_args(ticket), "message": "Help draft my plan", "response": "Draft: outline next steps.",
+              "source_refs": [], "model_route": "configured-provider/configured-model"}
+    values.update(overrides)
+    return store.finish_turn(owner, **values)
+
+
+def test_legacy_records_are_read_without_enabling_drafts_and_upgrade_on_write(store):
+    _enable(store)
+    _reply(store)
+    state = _state(store)
+    history = store.history(ALICE)
+    for entry in history:
+        entry.pop("kind")
+        entry.pop("model_route")
+    store._set_history(state, history)
+    for field in ("turns", "turn_clock", "history_generation"):
+        state.pop(field)
+    state["version"] = 1
+    _write_state(store, state)
+    before = file_lock.atomic_read_text(store._path(ALICE))
+    assert store.policy(ALICE)["allowed_tools"] == ["task_status"]
+    assert store.history(ALICE)[0]["kind"] == "task_status"
+    assert store.history(ALICE)[0]["model_route"] is None
+    assert store.conversation_state(ALICE) == {"history_generation": 0, "active_turn": None}
+    assert file_lock.atomic_read_text(store._path(ALICE)) == before
+    with pytest.raises(CompanionPolicyDenied):
+        _reserve(store)
+    store.clear_history(ALICE, actor=ALICE)
+    assert _state(store)["version"] == 2
+    assert _state(store)["history_generation"] == 1
+
+
+def test_draft_permission_is_separate_from_task_status_and_task_sources(store):
+    _enable(store)
+    with pytest.raises(CompanionPolicyDenied):
+        _reserve(store)
+    _enable_draft(store)
+    ticket = _reserve(store)
+    result = _finish(store, ticket)
+    assert result["response"] == "Draft: outline next steps."
+    assert result["trace"]["action"] == "draft_reply"
+    assert result["history"][-1]["kind"] == "draft"
+    assert result["history"][-1]["model_route"] == "configured-provider/configured-model"
+    with pytest.raises(CompanionPolicyDenied):
+        _reply(store)
+
+
+def test_draft_task_context_requires_own_tasks_but_not_status_tool(store):
+    _enable_draft(store)
+    denied = _reserve(store)
+    with pytest.raises(CompanionPolicyDenied):
+        _finish(store, denied, source_refs=["task:17"])
+    store.abandon_turn(ALICE, request_id=denied["request_id"], token=denied["token"])
+    _enable_draft(store, allowed_sources=["own_tasks"])
+    allowed = _reserve(store)
+    assert _finish(store, allowed, source_refs=["task:17"])["source_refs"] == ["task:17"]
+
+
+def test_duplicate_request_never_gets_another_dispatch_ticket(store):
+    _enable_draft(store)
+    ticket = _reserve(store)
+    duplicate = _reserve(store, request_id=ticket["request_id"])
+    assert ticket["acquired"] is True
+    assert duplicate["acquired"] is False
+    assert duplicate["state"] == "pending"
+    assert "token" not in duplicate
+    with pytest.raises(CompanionConflictError, match="another message"):
+        _reserve(store, request_id=ticket["request_id"], fingerprint="cd" * 32)
+    with pytest.raises(CompanionConflictError, match="still replying"):
+        _reserve(store)
+    assert len(_state(store)["turns"]) == 1
+
+
+def test_independent_workers_admit_only_one_dispatch_for_duplicate_request(store):
+    _enable_draft(store)
+    request_id = _request_id()
+    barrier = Barrier(2)
+
+    def reserve(_index):
+        with tenant_scope(tenant="companion-acme"):
+            independent = EmployeeCompanionStore()
+            barrier.wait(timeout=30)
+            return _reserve(independent, request_id=request_id)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(reserve, [0, 1]))
+    assert sum(result["acquired"] for result in results) == 1
+    assert len([event for event in store.events() if event["action"] == "turn_started"]) == 1
+
+
+def test_success_is_published_once_and_completed_id_cannot_dispatch_again(store):
+    _enable_draft(store)
+    ticket = _reserve(store)
+    assert store.validate_turn(ALICE, **_ticket_args(ticket))["state"] == "pending"
+    result = _finish(store, ticket)
+    assert len(result["history"]) == 1
+    assert store.turn_status(ALICE, ticket["request_id"])["state"] == "completed"
+    assert store.conversation_state(ALICE)["active_turn"] is None
+    with pytest.raises(CompanionConflictError):
+        _finish(store, ticket)
+    duplicate = _reserve(store, request_id=ticket["request_id"])
+    assert duplicate["state"] == "completed"
+    assert duplicate["acquired"] is False
+    assert "token" not in duplicate
+    assert len(store.history(ALICE)) == 1
+
+
+def test_turn_ticket_is_bound_to_employee_and_secret(store):
+    _enable_draft(store)
+    _enable_draft(store, BOB)
+    ticket = _reserve(store)
+    with pytest.raises(CompanionConflictError):
+        store.validate_turn(BOB, **_ticket_args(ticket))
+    with pytest.raises(CompanionConflictError):
+        _finish(store, ticket, token="cd" * 16)
+    assert store.turn_status(BOB, ticket["request_id"])["state"] == "not_started"
+    assert store.history(BOB) == []
+
+
+def test_clearing_empty_history_cancels_pending_reply_and_refuses_queued_old_generation(store):
+    _enable_draft(store, retention_days=0)
+    ticket = _reserve(store)
+    store.clear_history(ALICE, actor=ALICE)
+    generation = store.conversation_state(ALICE)["history_generation"]
+    assert generation == ticket["history_generation"] + 1
+    assert store.turn_status(ALICE, ticket["request_id"])["state"] == "cancelled"
+    with pytest.raises(CompanionConflictError):
+        store.validate_turn(ALICE, **_ticket_args(ticket))
+    with pytest.raises(CompanionConflictError):
+        _finish(store, ticket)
+    with pytest.raises(CompanionConflictError):
+        _reserve(store, expected_history_generation=ticket["history_generation"])
+    assert store.history(ALICE) == []
+    assert _state(store)["history"] is None
+
+
+@pytest.mark.parametrize("override", [
+    {"enabled": False}, {"allowed_tools": []}, {"retention_days": 7}, {},
+])
+def test_every_policy_change_invalidates_pending_model_turn(store, override):
+    _enable_draft(store)
+    ticket = _reserve(store)
+    _enable_draft(store, **override)
+    assert store.turn_status(ALICE, ticket["request_id"])["state"] == "cancelled"
+    with pytest.raises(CompanionConflictError):
+        _finish(store, ticket)
+    assert store.history(ALICE) == []
+    assert _reserve(store, request_id=ticket["request_id"])["acquired"] is False
+
+
+def test_failed_turn_is_consumed_and_does_not_retry(store):
+    _enable_draft(store)
+    ticket = _reserve(store)
+    failed = store.abandon_turn(ALICE, request_id=ticket["request_id"], token=ticket["token"])
+    assert failed["state"] == "failed"
+    assert _reserve(store, request_id=ticket["request_id"])["acquired"] is False
+    with pytest.raises(CompanionConflictError):
+        _finish(store, ticket)
+    assert _reserve(store)["acquired"] is True
+
+
+def test_expired_lease_is_consumed_and_late_completion_cannot_publish(store, monkeypatch):
+    clock = [1000000.0]
+    monkeypatch.setattr(employee_companion.time, "time", lambda: clock[0])
+    _enable_draft(store)
+    ticket = _reserve(store)
+    clock[0] += employee_companion.TURN_LEASE_SECONDS
+    assert store.turn_status(ALICE, ticket["request_id"])["state"] == "expired"
+    assert store.conversation_state(ALICE)["active_turn"] is None
+    assert _reserve(store, request_id=ticket["request_id"])["acquired"] is False
+    with pytest.raises(CompanionConflictError):
+        _finish(store, ticket)
+    assert store.history(ALICE) == []
+
+
+def test_lease_expiring_during_encryption_cannot_publish_a_reply(store, monkeypatch):
+    clock = [1000000.0]
+    monkeypatch.setattr(employee_companion.time, "time", lambda: clock[0])
+    _enable_draft(store)
+    ticket = _reserve(store)
+    seal = crypto_at_rest.seal_bound
+
+    def delayed_seal(*args, **kwargs):
+        blob = seal(*args, **kwargs)
+        clock[0] = ticket["expires_at"]
+        return blob
+
+    monkeypatch.setattr(crypto_at_rest, "seal_bound", delayed_seal)
+    with pytest.raises(CompanionConflictError, match="expired"):
+        _finish(store, ticket)
+    assert store.history(ALICE) == []
+    assert store.turn_status(ALICE, ticket["request_id"])["state"] == "expired"
+
+
+def test_context_expiring_during_model_call_invalidates_completion(store, monkeypatch):
+    clock = [1000000.0]
+    monkeypatch.setattr(employee_companion.time, "time", lambda: clock[0])
+    _enable_draft(store)
+    first = _reserve(store)
+    _finish(store, first)
+    clock[0] += 86400 - 30
+    second = _reserve(store)
+    clock[0] += 30
+    with pytest.raises(CompanionConflictError):
+        _finish(store, second)
+    assert store.history(ALICE) == []
+    assert store.turn_status(ALICE, second["request_id"])["state"] == "cancelled"
+
+
+def test_context_expiring_during_reply_sealing_invalidates_completion(store, monkeypatch):
+    clock = [1000000.0]
+    monkeypatch.setattr(employee_companion.time, "time", lambda: clock[0])
+    _enable_draft(store)
+    first = _reserve(store)
+    _finish(store, first)
+    clock[0] += 86400 - 1
+    second = _reserve(store)
+    seal = crypto_at_rest.seal_bound
+
+    def delayed_seal(*args, **kwargs):
+        blob = seal(*args, **kwargs)
+        clock[0] += 1
+        return blob
+
+    monkeypatch.setattr(crypto_at_rest, "seal_bound", delayed_seal)
+    with pytest.raises(CompanionConflictError, match="context expired"):
+        _finish(store, second)
+    assert store.history(ALICE) == []
+    assert store.turn_status(ALICE, second["request_id"])["state"] == "cancelled"
+    assert len([event for event in store.events() if event["action"] == "draft_reply"]) == 1
+
+
+def test_status_write_prunes_expired_context_and_rejects_old_queued_draft_generation(store, monkeypatch):
+    clock = [1000000.0]
+    monkeypatch.setattr(employee_companion.time, "time", lambda: clock[0])
+    _enable_draft(store, allowed_sources=["own_tasks"], allowed_tools=["task_status", "draft_reply"])
+    _reply(store)
+    old_generation = store.conversation_state(ALICE)["history_generation"]
+    clock[0] += 86400
+    _reply(store, message="Current task status")
+    assert store.conversation_state(ALICE)["history_generation"] == old_generation + 1
+    assert [item["message"] for item in store.history(ALICE)] == ["Current task status"]
+    with pytest.raises(CompanionConflictError):
+        _reserve(store, expected_history_generation=old_generation)
+
+
+@pytest.mark.parametrize("offset", [-901, 61])
+def test_stale_or_excessively_future_request_id_is_refused(store, monkeypatch, offset):
+    clock = 1000000.0
+    monkeypatch.setattr(employee_companion.time, "time", lambda: clock)
+    _enable_draft(store)
+    with pytest.raises(CompanionConflictError, match="identifier expired"):
+        _reserve(store, request_id=_request_id(clock + offset))
+    assert _state(store)["turns"] == []
+
+
+def test_pruning_old_receipts_and_clock_rollback_cannot_make_old_id_dispatchable(store, monkeypatch):
+    clock = [1000000.0]
+    monkeypatch.setattr(employee_companion.time, "time", lambda: clock[0])
+    _enable_draft(store, retention_days=0)
+    ticket = _reserve(store)
+    store.abandon_turn(ALICE, request_id=ticket["request_id"], token=ticket["token"])
+    clock[0] += employee_companion.TURN_RECEIPT_SECONDS
+    assert store.turn_status(ALICE, ticket["request_id"])["state"] == "not_started"
+    assert _state(store)["turns"] == []
+    clock[0] -= employee_companion.TURN_RECEIPT_SECONDS
+    with pytest.raises(CompanionConflictError, match="identifier expired"):
+        _reserve(store, request_id=ticket["request_id"])
+
+
+def test_receipt_capacity_refuses_new_paid_request_without_evicting_live_dedup_records(store, monkeypatch):
+    monkeypatch.setattr(employee_companion, "MAX_TURN_RECEIPTS", 2)
+    _enable_draft(store)
+    tickets = []
+    for _index in range(2):
+        ticket = _reserve(store)
+        tickets.append(ticket)
+        store.abandon_turn(ALICE, request_id=ticket["request_id"], token=ticket["token"])
+    with pytest.raises(CompanionError, match="capacity"):
+        _reserve(store)
+    assert _reserve(store, request_id=tickets[0]["request_id"])["acquired"] is False
+    assert len(_state(store)["turns"]) == 2
+
+
+@pytest.mark.parametrize("phase", ["reserve", "finish"])
+def test_turn_state_and_required_audit_publish_atomically(store, monkeypatch, phase):
+    _enable_draft(store)
+    ticket = _reserve(store) if phase == "finish" else None
+    before = file_lock.atomic_read_text(store._path(ALICE))
+
+    def failed_write(*args, **kwargs):
+        raise OSError("simulated unavailable durable audit")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(file_lock, "atomic_write_text", failed_write)
+        with pytest.raises(CompanionError):
+            if ticket:
+                _finish(store, ticket)
+            else:
+                _reserve(store)
+    assert file_lock.atomic_read_text(store._path(ALICE)) == before
+    if ticket:
+        duplicate = _reserve(store, request_id=ticket["request_id"])
+        assert duplicate["state"] == "pending" and duplicate["acquired"] is False
+    else:
+        assert store.conversation_state(ALICE)["active_turn"] is None
+
+
+def test_zero_retention_draft_receipts_and_admin_events_never_store_text_or_lease_secrets(store):
+    _enable_draft(store, retention_days=0)
+    ticket = _reserve(store)
+    result = _finish(store, ticket)
+    assert result["history"] == []
+    state = _state(store)
+    assert state["history"] is None
+    raw = json.dumps(state)
+    assert "Help draft my plan" not in raw
+    assert "Draft: outline next steps." not in raw
+    metadata = json.dumps({"policies": store.policies(), "events": store.events(),
+                           "conversation": store.conversation_state(ALICE),
+                           "status": store.turn_status(ALICE, ticket["request_id"])})
+    assert ticket["token"] not in metadata
+    assert "ab" * 32 not in metadata
+
+
+@pytest.mark.parametrize("model_route", ["", "provider/model?api_key=secret", "x" * 161, ["model"]])
+def test_model_route_provenance_accepts_only_safe_bounded_identifiers(store, model_route):
+    _enable_draft(store)
+    ticket = _reserve(store)
+    with pytest.raises(CompanionValidationError):
+        _finish(store, ticket, model_route=model_route)
+    assert store.turn_status(ALICE, ticket["request_id"])["state"] == "pending"
+
+
+def test_task_status_cannot_append_while_model_reply_is_pending(store):
+    _enable_draft(store, allowed_sources=["own_tasks"], allowed_tools=["task_status", "draft_reply"])
+    _reserve(store)
+    with pytest.raises(CompanionConflictError, match="still replying"):
+        _reply(store)
+    assert store.history(ALICE) == []
+
+
+@pytest.mark.parametrize("corruption", ["generation", "overlap", "token", "clock"])
+def test_corrupt_turn_authority_is_refused_without_issuing_another_ticket(store, corruption):
+    _enable_draft(store)
+    ticket = _reserve(store)
+    state = _state(store)
+    if corruption == "generation":
+        state["turns"][0]["history_generation"] += 1
+    elif corruption == "overlap":
+        other = dict(state["turns"][0], request_id=_request_id(), token=uuid.uuid4().hex)
+        state["turns"].append(other)
+    elif corruption == "token":
+        state["turns"][0]["token"] = "not-a-secret-ticket"
+    else:
+        state["turn_clock"] = 0
+    _write_state(store, state)
+    with pytest.raises(CompanionError):
+        store.turn_status(ALICE, ticket["request_id"])
+    with pytest.raises(CompanionError):
+        _reserve(store)

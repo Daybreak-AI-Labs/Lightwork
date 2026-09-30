@@ -48,6 +48,9 @@ def test_installer_prompt_and_serialization_are_explicit_default_off(monkeypatch
     assert result["allow_employee_companions"] is True
     chosen = [default for prompt, default in prompts if "Enable personal companions" in prompt]
     assert chosen == [False]
+    companion_prompt = next(prompt for prompt, _ in prompts if "Enable personal companions" in prompt)
+    assert "must permit drafts for each employee" in companion_prompt
+    assert "configured AI service receives" in companion_prompt
     document = tomllib.loads("\n".join(wizard._cfg_advanced(result, [])))
     assert document["features"]["employee_companions"] is True
     assert "allow_employee_companions" not in wizard._EXPRESS_ADVANCED
@@ -81,7 +84,7 @@ def test_companion_navigation_has_separate_employee_and_workspace_admin_floors()
     assert not ui_visibility.eligible(admin, "operator")
 
 
-def test_companion_copilot_guidance_is_scoped_and_does_not_claim_action_support():
+def test_companion_copilot_guidance_distinguishes_ai_drafts_from_actions():
     employee = copilot_context.context_for_page("/companion")
     admin = copilot_context.context_for_page("/companion/admin")
     assert employee.title == "My companion"
@@ -89,3 +92,7 @@ def test_companion_copilot_guidance_is_scoped_and_does_not_claim_action_support(
     assert any("cannot read or clear" in boundary for boundary in employee.boundaries)
     assert any("cannot enroll" in boundary for boundary in admin.boundaries)
     assert any("private companion history" in boundary for boundary in admin.boundaries)
+    assert any("configured AI service" in boundary for boundary in employee.boundaries)
+    assert any("current message only" in boundary for boundary in employee.boundaries)
+    assert any("cannot execute tools or task actions" in boundary for boundary in employee.boundaries)
+    assert any("administrator has enabled" in capability for capability in employee.capabilities)

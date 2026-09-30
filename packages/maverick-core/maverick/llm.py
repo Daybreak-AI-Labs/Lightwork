@@ -25,7 +25,7 @@ import sys
 import threading
 import uuid
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -449,6 +449,33 @@ class LLMResponse:
 
 class ModelNotAllowedError(PermissionError):
     """A requested model is outside the operator's active hard allow-list."""
+
+
+class ProviderDispatchDenied(ModelNotAllowedError):
+    """A current-authority guard or physical-attempt limit refused dispatch.
+
+    This is a model-policy control signal so existing retry/failover policy
+    never treats a revoked authorization as a provider outage.
+    """
+
+
+def _check_dispatch_guard(guard: Callable[[], None] | None) -> None:
+    if guard is None:
+        return
+    try:
+        guard()
+    except Exception:
+        # A callback may carry private source/identity details in its error.
+        # Keep the boundary's public error independent of those details.
+        raise ProviderDispatchDenied("Provider dispatch is no longer authorized.") from None
+
+
+def _require_tool_free_guarded_dispatch(tools, dispatch_guard, max_physical_attempts) -> None:
+    # OpenAI's tool-reasoning compatibility retry can resend inside one
+    # observed attempt. Until adapters expose every such resend, this opt-in
+    # authority boundary must not advertise physical-call control for tools.
+    if tools and (dispatch_guard is not None or max_physical_attempts is not None):
+        raise ProviderDispatchDenied("Guarded provider dispatch supports tool-free requests only.")
 
 
 def _allowed_model_specs() -> set[str]:
@@ -921,15 +948,20 @@ class _ProviderAttemptSequence:
         operation_id: str,
         category: str,
         service: str | None,
+        max_physical_attempts: int | None = None,
     ):
         self.operation_id = operation_id
         self.category = category
         self.service = service
+        self.max_physical_attempts = max_physical_attempts
         self._attempt_no = 0
         self._lock = threading.Lock()
 
     def next(self, *, default_service: str) -> dict[str, object]:
         with self._lock:
+            if (self.max_physical_attempts is not None
+                    and self._attempt_no >= self.max_physical_attempts):
+                raise ProviderDispatchDenied("The physical provider attempt limit was reached.")
             self._attempt_no += 1
             attempt_no = self._attempt_no
         return {
@@ -945,10 +977,14 @@ def _new_provider_attempt_sequence(
     *,
     default_category: str,
     operation_prefix: str,
+    max_physical_attempts: int | None = None,
 ) -> _ProviderAttemptSequence:
     from .provider_cost_cap import current_provider_operation
 
     context = current_provider_operation()
+    if (max_physical_attempts is not None
+            and (type(max_physical_attempts) is not int or max_physical_attempts < 1)):
+        raise ValueError("max_physical_attempts must be a positive integer or None")
     return _ProviderAttemptSequence(
         operation_id=(
             context.operation_id
@@ -957,6 +993,7 @@ def _new_provider_attempt_sequence(
         ),
         category=context.category if context is not None else default_category,
         service=context.service if context is not None else None,
+        max_physical_attempts=max_physical_attempts,
     )
 
 
@@ -1082,6 +1119,7 @@ class _ProviderAttemptTracker:
         *,
         sequence: _ProviderAttemptSequence,
         service: str,
+        dispatch_guard: Callable[[], None] | None = None,
     ):
         self.provider = provider
         self.model = model
@@ -1090,12 +1128,16 @@ class _ProviderAttemptTracker:
         self.projected = projected
         self.sequence = sequence
         self.service = service
+        self.dispatch_guard = dispatch_guard
         self.initial_ticket = self._new_ticket()
         self.initial_used = False
         self.pending: _ProviderAttemptTicket | None = None
         self.finalized = False
 
     def _new_ticket(self):
+        # Also protects adapters without retry instrumentation: the initial
+        # ticket is allocated immediately before entering the provider adapter.
+        _check_dispatch_guard(self.dispatch_guard)
         return _ProviderAttemptTicket(
             hold=_reserve_provider_call(
                 self.provider,
@@ -1111,6 +1153,19 @@ class _ProviderAttemptTracker:
         if not self.initial_used:
             ticket = self.initial_ticket
             self.initial_used = True
+            try:
+                # The adapter may have built its request since the envelope
+                # was admitted. Revalidate at its physical send boundary.
+                _check_dispatch_guard(self.dispatch_guard)
+            except BaseException:
+                ticket.finished = True
+                if ticket.hold is not None:
+                    from .provider_cost_cap import settle
+
+                    # No request was sent. Unlike a transport failure, its
+                    # external cost is known to be zero, not unknown spend.
+                    settle(ticket.hold, 0.0, attempt_state="failed")
+                raise
         else:
             ticket = self._new_ticket()
         return ticket
@@ -1886,10 +1941,26 @@ class LLM:
         tool_choice: dict | None = None,
         _no_failover: bool = False,
         _provider_sequence: _ProviderAttemptSequence | None = None,
+        dispatch_guard: Callable[[], None] | None = None,
+        max_physical_attempts: int | None = None,
     ) -> LLMResponse:
+        """Complete with optional current-authority checks at dispatch.
+
+        ``dispatch_guard`` may run more than once before the first request and
+        before every retry observed by the provider adapter. It must raise to
+        refuse; it must not retain a lock across network I/O. Uninstrumented
+        adapters receive an envelope check only. ``max_physical_attempts``
+        bounds admitted attempts across retries, hedges and model failover;
+        callers needing one attempt should also set ``_no_failover=True``.
+        Either option requires a tool-free request; provider tool-compatibility
+        resends are not yet individually observed, so tools fail closed here.
+        """
+        _require_tool_free_guarded_dispatch(tools, dispatch_guard, max_physical_attempts)
+        _check_dispatch_guard(dispatch_guard)
         _provider_sequence = _provider_sequence or _new_provider_attempt_sequence(
             default_category="inference",
             operation_prefix="llm",
+            max_physical_attempts=max_physical_attempts,
         )
         raw_requested_model = model or self.model
         requested_model = require_model_allowed(raw_requested_model)
@@ -1913,7 +1984,9 @@ class LLM:
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
                         model=m, on_delta=_attempt_delta(on_delta), effort=effort,
                         tool_choice=tool_choice, _no_failover=True,
-                        _provider_sequence=_provider_sequence)))
+                        _provider_sequence=_provider_sequence,
+                        dispatch_guard=dispatch_guard,
+                        max_physical_attempts=max_physical_attempts)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(requested_model)
@@ -2017,6 +2090,7 @@ class LLM:
                     _est_cost,
                     sequence=_provider_sequence,
                     service=_price_spec,
+                    dispatch_guard=dispatch_guard,
                 )
                 _provider_started = True
                 from .retry import observe_physical_attempts
@@ -2078,10 +2152,16 @@ class LLM:
         on_delta=None,
         _no_failover: bool = False,
         _provider_sequence: _ProviderAttemptSequence | None = None,
+        dispatch_guard: Callable[[], None] | None = None,
+        max_physical_attempts: int | None = None,
     ) -> LLMResponse:
+        """Async twin of :meth:`complete`, with the same dispatch guards."""
+        _require_tool_free_guarded_dispatch(tools, dispatch_guard, max_physical_attempts)
+        _check_dispatch_guard(dispatch_guard)
         _provider_sequence = _provider_sequence or _new_provider_attempt_sequence(
             default_category="inference",
             operation_prefix="llm",
+            max_physical_attempts=max_physical_attempts,
         )
         raw_requested_model = model or self.model
         requested_model = require_model_allowed(raw_requested_model)
@@ -2101,7 +2181,9 @@ class LLM:
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
                         model=m, effort=effort, tool_choice=tool_choice,
                         on_delta=_attempt_delta(on_delta), _no_failover=True,
-                        _provider_sequence=_provider_sequence)))
+                        _provider_sequence=_provider_sequence,
+                        dispatch_guard=dispatch_guard,
+                        max_physical_attempts=max_physical_attempts)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(requested_model)
@@ -2194,6 +2276,7 @@ class LLM:
                         _est_cost,
                         sequence=_provider_sequence,
                         service=_price_spec,
+                        dispatch_guard=dispatch_guard,
                     )
                     try:
                         from .retry import observe_physical_attempts
@@ -2208,7 +2291,10 @@ class LLM:
                     finally:
                         tracker.finalize(response, sys.exc_info()[1])
 
-                hedge = _hedge_ms_for(on_delta)
+                hedge = (
+                    None if _provider_sequence.max_physical_attempts == 1
+                    else _hedge_ms_for(on_delta)
+                )
                 if hedge is None:
                     _resp = await _call()
                     return _resp

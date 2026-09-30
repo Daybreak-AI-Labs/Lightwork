@@ -27,6 +27,12 @@
 .ec-task-list .muted { display: block; font-size: var(--text-sm); margin-top: var(--space-1); }
 .ec-clear-confirm { padding: var(--space-4); background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius-md); }
 .ec-clear-confirm p { margin-top: 0; }
+.ec-quick-status { border-top: 1px solid var(--hairline); margin-top: var(--space-5); padding-top: var(--space-4); }
+.ec-reply-state { border-inline-start: 3px solid var(--accent); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); background: var(--surface-1); }
+.ec-reply-state p { margin-top: 0; }
+.ec-reply-state[data-pending="true"]::before { content: ""; display: inline-block; width: .7rem; height: .7rem; margin-inline-end: var(--space-2); border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: ec-spin 1s linear infinite; }
+.ec-message-actions { display: flex; gap: var(--space-2); align-items: center; margin-top: var(--space-3); flex-wrap: wrap; }
+@keyframes ec-spin { to { transform: rotate(360deg); } }
 .ec-table-wrap { overflow: auto; }
 .ec-table-wrap :where(th, td) { overflow-wrap: anywhere; }
 .ec-shell [hidden] { display: none !important; }

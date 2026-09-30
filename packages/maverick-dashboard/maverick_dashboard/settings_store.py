@@ -156,10 +156,13 @@ CAPABILITY_INFO = {
 FEATURE_INFO = {
     "employee_companions": (
         "Let workspace administrators enroll employees for a personal companion "
-        "that reads only their own task status. Administrators control access "
-        "and conversation retention, and see policy and audit metadata without "
-        "private companion history. AI answers, external connections and "
-        "task actions are not included."
+        "with own-task status and optional AI draft conversations. AI drafts "
+        "require a separate grant for each employee and send messages, eligible "
+        "retained history and permitted own-task titles and status to the "
+        "installation's configured AI service. Administrators control access "
+        "and retention, and see policy and audit metadata without private "
+        "companion history. Companions cannot take actions, use connected "
+        "sources or create learned memory."
     ),
     "copilot_operations": "Let Copilot show the current learning example and open its reviewed stop-use control. You confirm the decision in a protected form. Other product actions are not included; the page's own controls remain available when this is off.",
     "support_center": "Allow installation administrators to prepare, review and download redacted diagnostics in Help. Reports are never sent automatically.",

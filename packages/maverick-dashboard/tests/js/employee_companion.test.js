@@ -12,9 +12,10 @@ const script = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const policy = overrides => ({owner: "user:employee@example.test", revision: 3, enabled: true,
   allowed_sources: ["own_tasks"], allowed_tools: ["task_status"], retention_days: 0, ...overrides});
-const snapshot = overrides => ({context: CONTEXT, available: true, policy: policy(), history: [], tasks: [], ...overrides});
-const reply = overrides => ({context: CONTEXT, policy: policy(), history: [],
-  message: {role: "assistant", content: "One task is running.", sources: []}, ...overrides});
+const snapshot = overrides => ({context: CONTEXT, available: true, conversation_available: false,
+  status_available: true, history_generation: 0, active_turn: null, policy: policy(), history: [], tasks: [], ...overrides});
+const reply = overrides => ({context: CONTEXT, policy: policy(), history: [], history_generation: 0,
+  message: {role: "assistant", kind: "task_status", content: "One task is running.", sources: []}, ...overrides});
 const adminSnapshot = overrides => ({context: CONTEXT, available: true,
   employees: [{principal: "user:employee@example.test", label: "Employee One"}],
   policies: [policy()], events: [], ...overrides});
@@ -60,10 +61,11 @@ test("unsaved conversations show both turns safely and bind requests to the rend
   assert.equal(ui.el("ec-messages").querySelector("img"), null);
   assert.equal(ui.el("ec-messages").querySelectorAll("a").length, 1);
   assert.equal(ui.el("ec-messages").querySelector("a").getAttribute("href"), "/chat/goal/9");
+  assert.match(ui.el("ec-messages").querySelector("a").textContent, /Task 9/);
   assert.equal(ui.calls[0].options.headers["X-Lightwork-Companion-Context"], CONTEXT);
   assert.equal(ui.calls[1].options.headers["X-Lightwork-Companion-Context"], CONTEXT);
   assert.equal(ui.calls[1].options.credentials, "same-origin");
-  assert.deepEqual(JSON.parse(ui.calls[1].options.body), {message: "What is running?", expected_revision: 3});
+  assert.deepEqual(JSON.parse(ui.calls[1].options.body), {message: "What is running?", mode: "task_status", expected_revision: 3, expected_history_generation: 0});
   assert.equal(ui.el("ec-message").value, "");
   assert.equal(ui.window.localStorage.length, 0);
   assert.equal(ui.el("ec-message-form").closest('[data-draft-recovery="off"]'), ui.el("ec-root"));
@@ -169,4 +171,132 @@ test("admin activity only renders approved metadata fields", async t => {
   assert.match(ui.el("ec-events").textContent, /Companion question answered/);
   assert.doesNotMatch(ui.el("ec-events").textContent, /Private/);
   assert.equal(ui.el("ec-policy-form").closest('[data-draft-recovery="off"]'), ui.el("ec-root"));
+});
+
+test("AI draft request is bound to history and refresh remains available while it runs", async t => {
+  const modelPolicy = policy({allowed_tools: ["task_status", "draft_reply"]});
+  const current = snapshot({policy: modelPolicy, conversation_available: true, history_generation: 12});
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const ui = await setup([current, () => pending, current]);
+  t.after(() => ui.dom.window.close());
+  const copied = [];
+  Object.defineProperty(ui.window.navigator, "clipboard", {value: {writeText: async text => { copied.push(text); }}});
+  ui.el("ec-message").value = "Draft a team update";
+  submit(ui, "ec-message-form");
+  const body = JSON.parse(ui.calls[1].options.body);
+  assert.equal(body.mode, "conversation");
+  assert.equal(body.expected_history_generation, 12);
+  assert.match(body.request_id, /^\d{13}\.[a-f0-9]{32}$/);
+  assert.equal(ui.el("ec-send").disabled, true);
+  assert.equal(ui.el("ec-refresh").disabled, false);
+  assert.equal(ui.document.querySelector("[data-question]").disabled, true);
+  ui.el("ec-refresh").click();
+  await tick();
+  assert.equal(ui.calls.length, 3);
+  assert.equal(ui.el("ec-message").value, "Draft a team update");
+  release(response(reply({policy: modelPolicy, history_generation: 12, request_id: body.request_id,
+    message: {role: "assistant", kind: "draft", content: "<script>Review this draft</script>", sources: [
+      {goal_id: 2, href: "/chat/goal/2", status: "active", checked_at: 1700000000}
+    ]}})));
+  await tick();
+  assert.match(ui.el("ec-messages").textContent, /AI draft/);
+  assert.match(ui.el("ec-messages").textContent, /Task context provided/);
+  assert.equal(ui.el("ec-messages").querySelector("script"), null);
+  ui.el("ec-messages").querySelector("button").click();
+  await tick();
+  assert.deepEqual(copied, ["<script>Review this draft</script>"]);
+  assert.equal(ui.el("ec-send").disabled, false);
+});
+
+test("ambiguous model failure checks its receipt without resending a paid turn", async t => {
+  const modelPolicy = policy({allowed_tools: ["draft_reply"], allowed_sources: []});
+  let requestId;
+  const ui = await setup([
+    snapshot({policy: modelPolicy, conversation_available: true, status_available: false}),
+    (_url, options) => { requestId = JSON.parse(options.body).request_id; return response({detail: "Provider connection lost"}, 503); },
+    () => response({context: CONTEXT, request: {request_id: requestId, state: "completed"}, history: [], history_generation: 0, active_turn: null})
+  ]);
+  t.after(() => ui.dom.window.close());
+  ui.el("ec-message").value = "Prepare a draft";
+  submit(ui, "ec-message-form");
+  await tick();
+  assert.equal(ui.el("ec-send").disabled, true);
+  assert.equal(ui.el("ec-message").value, "Prepare a draft");
+  submit(ui, "ec-message-form");
+  assert.equal(ui.calls.length, 2);
+  ui.el("ec-check-reply").click();
+  await tick();
+  assert.equal(ui.calls.length, 3);
+  assert.equal(ui.calls[2].options.method, "GET");
+  assert.match(ui.calls[2].url, /\/requests\//);
+  assert.match(ui.el("ec-reply-status").textContent, /cannot be recovered because history is not saved/);
+  assert.match(ui.el("ec-reply-status").textContent, /new charge/);
+  assert.equal(ui.el("ec-send").textContent, "Start a new reply");
+  assert.match(ui.el("ec-retention").textContent, /follow-ups do not include earlier messages/);
+});
+
+test("clearing history prevents a late model response from repopulating the conversation", async t => {
+  const modelPolicy = policy({allowed_tools: ["draft_reply"]});
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const ui = await setup([snapshot({policy: modelPolicy, conversation_available: true}), () => pending,
+    {context: CONTEXT, history: [], history_generation: 1, active_turn: null}]);
+  t.after(() => ui.dom.window.close());
+  ui.el("ec-message").value = "Private draft request";
+  submit(ui, "ec-message-form");
+  ui.el("ec-clear").click();
+  ui.el("ec-clear-yes").click();
+  await tick();
+  release(response(reply({policy: modelPolicy, message: {role: "assistant", kind: "draft", content: "Late private answer", sources: []}})));
+  await tick();
+  assert.doesNotMatch(ui.el("ec-messages").textContent, /Late private answer|Private draft request/);
+  assert.equal(ui.el("ec-send").disabled, false);
+});
+
+test("loading an existing active turn requires reconciliation without starting another model call", async t => {
+  const id = "1800000000000." + "a".repeat(32);
+  const ui = await setup([snapshot({policy: policy({allowed_tools: ["draft_reply"]}), conversation_available: true,
+    active_turn: {request_id: id, expires_at: 1800000300}}),
+  {context: CONTEXT, request: {request_id: id, state: "pending"}, history: [], history_generation: 0, active_turn: {request_id: id}}]);
+  t.after(() => ui.dom.window.close());
+  assert.equal(ui.el("ec-send").disabled, true);
+  ui.el("ec-check-reply").click();
+  await tick();
+  assert.equal(ui.calls.length, 2);
+  assert.equal(ui.calls.every(call => call.options.method === "GET"), true);
+  assert.match(ui.el("ec-reply-status").textContent, /still being prepared/);
+});
+
+test("an administrator can allow drafts independently from tasks and sources", async t => {
+  const saved = policy({revision: 4, allowed_tools: ["draft_reply"], allowed_sources: []});
+  const ui = await setup([adminSnapshot(), {context: CONTEXT, policy: saved}, adminSnapshot({policies: [saved]})], true);
+  t.after(() => ui.dom.window.close());
+  ui.el("ec-owner").value = saved.owner;
+  ui.el("ec-owner").dispatchEvent(new ui.window.Event("change"));
+  ui.el("ec-tool").checked = false;
+  ui.el("ec-source").checked = false;
+  ui.el("ec-draft-tool").checked = true;
+  submit(ui, "ec-policy-form");
+  await tick();
+  const body = JSON.parse(ui.calls[1].options.body);
+  assert.deepEqual(body.allowed_tools, ["draft_reply"]);
+  assert.deepEqual(body.allowed_sources, []);
+  assert.match(ui.el("ec-model-help").textContent, /provider's retention policy/);
+});
+
+test("refresh clears unsaved task-derived text without losing an unsent question", async t => {
+  const ui = await setup([snapshot(), reply({message: {role: "assistant", kind: "task_status",
+    content: "Previously visible task detail", sources: [{goal_id: 9, href: "/chat/goal/9", status: "active", checked_at: 1700000000}]}}), snapshot()]);
+  t.after(() => ui.dom.window.close());
+  ui.el("ec-message").value = "What is running?";
+  submit(ui, "ec-message-form");
+  await tick();
+  assert.match(ui.el("ec-messages").textContent, /Previously visible task detail/);
+  ui.el("ec-message").value = "Unsent question";
+  ui.el("ec-refresh").click();
+  await tick();
+  assert.doesNotMatch(ui.el("ec-messages").textContent, /Previously visible task detail/);
+  assert.equal(ui.el("ec-message").value, "Unsent question");
+  assert.match(ui.el("ec-retention").textContent, /Refresh clears unsaved conversation/);
 });
