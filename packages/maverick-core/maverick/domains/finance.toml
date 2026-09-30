@@ -25,7 +25,7 @@ allow_tools = [
     "get_account_summary",
     "get_account_positions",
 ]
-deny_tools = ["create_order_instruction", "delete_order_instruction", "shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["create_order_instruction", "delete_order_instruction", "shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 max_risk = "medium"
 allow_hosts = ["*.interactivebrokers.com", "*.interactivebrokers.co.uk"]
 

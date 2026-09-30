@@ -17,7 +17,7 @@ allow_tools = [
 ]
 deny_tools = [
     "post_journal_entry", "stage_journal_entry", "release_payment", "run_payroll",
-    "shell", "write_file", "apply_patch", "str_edit", "browser",
+    "shell", "write_file", "apply_patch", "str_replace_editor", "browser",
 ]
 max_risk = "low"
 effort = "high"

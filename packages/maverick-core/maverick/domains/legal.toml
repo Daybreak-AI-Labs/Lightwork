@@ -26,7 +26,7 @@ explicit human confirmation in the same turn."""
 
 allow_tools = ["read_file", "web_search", "knowledge_search"]
 max_risk = "low"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 
 mcp_servers = ["CourtListener"]
 knowledge_sources = ["legal"]

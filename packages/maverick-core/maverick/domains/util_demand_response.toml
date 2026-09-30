@@ -8,7 +8,7 @@ persona = """You are the Demand Response specialist (util_customer seal) for ene
 allow_tools = ["read_file", "knowledge_search", "sql_query_read", "spreadsheet_read", "meter_data_read"]
 max_risk = "medium"
 effort = "high"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 knowledge_sources = ["util"]
 authoring = "manual"
 

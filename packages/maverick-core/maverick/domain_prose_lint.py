@@ -12,8 +12,11 @@ It fails on the defect classes a content teardown found across the roster:
   specialists);
 * a persona or description too short to be a working instruction set;
 * an empty TOML field (a declared-but-blank contract);
-* a tool name that exists nowhere: not in the built-in registry, not in the
-  risk catalog, and not one of the audited operator-provisioned adapters.
+* a tool name (allowed, used in a workflow step, or denied) that exists
+  nowhere: not in the built-in registry, not in the risk catalog, not one of
+  the audited operator-provisioned adapters, not a deliberately unregistered
+  tool such as ``self_edit``; and a deny written against a module name
+  (``str_edit``) instead of the registered tool (``str_replace_editor``).
 
 ``--fix`` rewrites the mechanical classes (quotes, articles) in place without
 re-serialising the TOML, so comments and layout survive. Everything else needs
@@ -85,6 +88,15 @@ _ARTICLE_RE = re.compile(
 # deployment prerequisites (``docs/audits/customer-readiness-consolidation``).
 # This is a ratchet: a new adapter name is a deliberate addition here, not a
 # typo that slips through.
+# Real tools that are deliberately NOT in the default registry but that a
+# pack may (and builders must) name in deny_tools: ``self_edit`` lives in
+# ``tools/self_edit.py`` and is kept importable for offline diff proposals only.
+UNREGISTERED_TOOLS = frozenset({"self_edit"})
+# Deny-list names that were written against a module name or an abbreviation
+# instead of the registered tool name. A deny of a name that no tool carries
+# is a no-op, so the fix is mechanical and the lint fails until it is applied.
+TOOL_RENAMES: dict[str, str] = {"str_edit": "str_replace_editor"}
+_RENAME_RE = re.compile(r'"(' + "|".join(map(re.escape, TOOL_RENAMES)) + r')"')
 SWARM_TOOLS = frozenset({
     "send_to_agent", "recv_from_agent", "delegate_to_agent", "spawn_subagent",
     "spawn_swarm", "spawn_specialist", "list_specialists", "learn_capability",
@@ -178,7 +190,7 @@ def known_tool_names() -> set[str]:
     names |= set(_risk._DEFAULT_RISK)
     names |= set(_risk._read_connector_names())
     names |= set(_risk._enterprise_connector_names())
-    return names | SWARM_TOOLS | ABSTRACT_ADAPTERS
+    return names | SWARM_TOOLS | ABSTRACT_ADAPTERS | UNREGISTERED_TOOLS
 
 
 # --- per-field text checks ---------------------------------------------------
@@ -214,6 +226,7 @@ def fix_text(text: str) -> str:
     text = QUOTE_CORRUPTION.sub("'", text)
     for bad, good in SMART_QUOTES.items():
         text = text.replace(bad, good)
+    text = _RENAME_RE.sub(lambda m: f'"{TOOL_RENAMES[m.group(1)]}"', text)
     return _ARTICLE_RE.sub(_fix_article, text)
 
 
@@ -253,11 +266,18 @@ def lint_pack(profile: DomainProfile, *, known_tools: set[str] | None = None,
                            "the roster and router act on"))
     if raw is not None:
         out.extend(Finding(name, path, "empty field") for path in _empty_fields(raw))
+    for tool in sorted(set(profile.deny_tools) & set(TOOL_RENAMES)):
+        out.append(Finding(name, "deny_tools", f"{tool!r} is not a tool name; deny "
+                           f"{TOOL_RENAMES[tool]!r} (--fix renames it)"))
     if known_tools is not None:
         declared = set(profile.allow_tools) | {t for s in profile.workflow for t in s.tools}
         for tool in sorted(declared - known_tools):
             out.append(Finding(name, "allow_tools", f"unknown tool {tool!r}: not in the "
                                "registry, the risk catalog, or ABSTRACT_ADAPTERS"))
+        # A deny of a name no tool carries is a no-op that reads like a control.
+        for tool in sorted(set(profile.deny_tools) - known_tools - set(TOOL_RENAMES)):
+            out.append(Finding(name, "deny_tools", f"unknown tool {tool!r}: denying a "
+                               "name nothing is registered under denies nothing"))
     return out
 
 
