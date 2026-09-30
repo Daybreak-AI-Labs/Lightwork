@@ -10,11 +10,11 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import subprocess
 import tempfile
+from pathlib import Path
 
 MAX_ARTIFACT_BYTES = 4 * 1024**3
 TARGETS = {"aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"}
@@ -55,7 +55,8 @@ def verify(*, manifest: Path, signature: Path, artifact: Path, public_key: str,
         raise ValueError("Select an exact supported engineering target, full commit and release version.")
     if not re.fullmatch(r"[A-Za-z0-9+/]{56}", public_key):
         raise ValueError("Supply the owner's independently trusted Minisign public key, not a key from this download.")
-    regular(manifest, 65536); regular(signature, 16384)
+    regular(manifest, 65536)
+    regular(signature, 16384)
     # Verify immutable private copies so a swapped manifest cannot be parsed
     # after its different predecessor was authenticated.
     with manifest.open("rb") as stream:
@@ -67,7 +68,8 @@ def verify(*, manifest: Path, signature: Path, artifact: Path, public_key: str,
     with tempfile.TemporaryDirectory(prefix="lightwork-artifact-review-") as temporary:
         checked_manifest = Path(temporary) / "release.json"
         checked_signature = Path(temporary) / "release.minisig"
-        checked_manifest.write_bytes(payload); checked_signature.write_bytes(signature_bytes)
+        checked_manifest.write_bytes(payload)
+        checked_signature.write_bytes(signature_bytes)
         subprocess.run(["minisign", "-V", "-m", str(checked_manifest), "-x", str(checked_signature), "-P", public_key], check=True, timeout=30, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     row = json.loads(payload)
     if not isinstance(row, dict) or row.get("schema") != "lightwork.signed-engineering-artifact.v1":

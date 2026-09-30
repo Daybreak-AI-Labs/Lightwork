@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import time
 
-from . import backup, installation_recovery as recovery
+from . import backup
+from . import installation_recovery as recovery
 
 
 def plan(identifier: str, *, offset: int = 0) -> dict:

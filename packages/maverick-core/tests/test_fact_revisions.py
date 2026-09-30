@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 import pytest
-
 from maverick.fact_revision import FactConflict
 from maverick.world_model import WorldModel
 

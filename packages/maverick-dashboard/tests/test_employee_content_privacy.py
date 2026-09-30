@@ -28,7 +28,7 @@ def grant(**updates):
 
 
 def test_admin_role_alone_does_not_reveal_task(authority, monkeypatch):
-    monkeypatch.setattr(content_access.STORE, "list", lambda: [])
+    monkeypatch.setattr(content_access.STORE, "list", list)
     goal = SimpleNamespace(id=12, owner="user:employee")
     assert auth.goal_owner_filter(authority) == "user:admin"
     assert not auth.can_access_goal(authority, goal)
@@ -101,7 +101,7 @@ def test_approval_read_is_exact_card_and_does_not_authorize_task_mutation(author
 
 def test_private_approval_has_no_ambient_administrator_read(authority, monkeypatch):
     monkeypatch.setattr(auth, "has_permission", lambda *_: True)
-    monkeypatch.setattr(content_access.STORE, "list", lambda: [])
+    monkeypatch.setattr(content_access.STORE, "list", list)
     approval = SimpleNamespace(id=9, requested_by="user:employee", goal_id=None,
         action="send", scope="one reviewed target", detail="private card", status="pending")
     assert not content_access.can_read_approval(authority, approval, SimpleNamespace())

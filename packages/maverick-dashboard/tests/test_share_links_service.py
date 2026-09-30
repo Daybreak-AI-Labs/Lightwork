@@ -9,7 +9,7 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 def _world(tmp_path, monkeypatch):
-    from maverick import world_model, config, audit
+    from maverick import audit, config, world_model
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     (tmp_path / "config.toml").write_text("", encoding="utf-8")

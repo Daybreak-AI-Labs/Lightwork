@@ -1,6 +1,5 @@
 """Typed input defaults and validation; deliberately no provider calls."""
 import pytest
-
 from maverick.template_parameters import normalize_schema, resolve_parameters
 from maverick.templates import Template, load_template, save_user_template
 

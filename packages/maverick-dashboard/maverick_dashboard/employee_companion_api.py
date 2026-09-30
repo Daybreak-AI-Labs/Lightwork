@@ -16,7 +16,8 @@ from collections.abc import Callable
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from maverick import config, employee_companion_model as companion_model
+from maverick import config
+from maverick import employee_companion_model as companion_model
 from maverick.authority_effects import authority_effect_fence
 from maverick.conversational_supervisor import DEFAULT_GRAMMAR, parse_utterance
 from maverick.domain import suite_for

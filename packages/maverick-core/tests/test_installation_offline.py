@@ -1,6 +1,7 @@
 """Offline repair trust regressions; no native inspector or provider executes."""
 import contextlib
 import json
+
 import pytest
 from maverick import installation_offline as offline
 

@@ -1,6 +1,5 @@
 """Structured remedy construction; authored now, execution deferred."""
 import pytest
-
 from maverick_dashboard.product_errors import error_detail, next_action, product_error
 
 

@@ -2,9 +2,8 @@
 import hashlib
 
 import pytest
-
-from maverick.attachments import Stored
 from maverick.attachment_submissions import SubmissionConflict
+from maverick.attachments import Stored
 from maverick.chat_threads import ChatThreads, question_version
 from maverick.world_model import WorldModel
 

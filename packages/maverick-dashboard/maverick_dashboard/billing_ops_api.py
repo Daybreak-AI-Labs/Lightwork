@@ -166,7 +166,8 @@ async def stripe_preview(request: Request, workspace: str = Query(..., min_lengt
                          markup: float = Query(0.0, ge=0.0, le=1000.0),
                          minimum: float = Query(0.0, ge=0.0, le=1_000_000.0)) -> dict:
     _admin(request)
-    from . import app as app_module, billing_sync_reviews
+    from . import app as app_module
+    from . import billing_sync_reviews
     app_module._require_same_origin(request)
     result = await run_in_threadpool(_preview, billing_sync_reviews.scope(request), workspace, since, until, markup, minimum)
     _admin(request)

@@ -1,6 +1,5 @@
 """Atomic schedule management invariants; no worker or provider is invoked."""
 import pytest
-
 from maverick.job_queue import JobQueue
 from maverick.schedule_definitions import change_definition, list_definitions
 

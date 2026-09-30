@@ -5,7 +5,6 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-
 from maverick import llm as llm_module
 from maverick.llm import LLM, LLMResponse, ProviderDispatchDenied
 

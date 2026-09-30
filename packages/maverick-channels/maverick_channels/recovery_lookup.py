@@ -6,12 +6,12 @@ Only timestamps and stable evidence digests leave this module, never message tex
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import hashlib
 import json
 import re
 import sqlite3
 import time
+from datetime import datetime, timezone
 
 from .polling import parse_timestamp
 
@@ -76,8 +76,9 @@ def imessage_page(channel, *, minimum: str, before: str | None) -> dict:
 
 
 async def mastodon_page(channel, *, minimum: str, before: str | None) -> dict:
-    import httpx
     from urllib.parse import urlsplit
+
+    import httpx
     origin = urlsplit(channel._base_url)
     if origin.scheme != "https" or not origin.hostname or origin.username or origin.password or origin.query or origin.fragment:
         raise ValueError("The configured source address is not an approved HTTPS account origin.")

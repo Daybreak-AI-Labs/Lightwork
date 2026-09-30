@@ -93,9 +93,15 @@ from .auth import (
     stored_automation_identity,
     websocket_caller_principal,
 )
-from .draft_api import page_context as _draft_page_context
+from .budget_guidance_api import router as budget_guidance_router
+from .conversation_organization import present_title as _conversation_title
+from .conversation_organization import router as conversation_organization_router
+from .cost_reconciliation_api import router as cost_reconciliation_router
+from .deliverable_bundles_api import router as deliverable_bundles_router
 from .draft_api import context_for as _conversation_context
+from .draft_api import page_context as _draft_page_context
 from .draft_api import router as draft_router
+from .employee_activation import router as employee_activation_router
 from .health_routes import (
     health_response as _health_response,
 )
@@ -105,19 +111,25 @@ from .health_routes import (
 from .health_routes import (
     readiness_response as _readiness_response,
 )
+from .my_work_api import router as my_work_router
 from .oidc_login import router as oidc_login_router
 from .outcome_accounting_api import router as outcome_accounting_router
 from .outcome_pilot_costs_api import router as outcome_pilot_costs_router
 from .outcome_pilots_api import router as outcome_pilots_router
+from .preferences_api import display_context as _display_preference_context
+from .preferences_api import router as preferences_router
+from .product_operations import router as product_operations_router
 from .project_reviews_api import router as project_reviews_router
-from .deliverable_bundles_api import router as deliverable_bundles_router
 from .project_workspaces_api import router as project_workspaces_router
-from .task_handoffs_api import router as task_handoffs_router
 from .record_search_api import page_context as _record_search_page_context
 from .record_search_api import router as record_search_router
 from .route_identity import (
     stabilize_effective_route_names as _stabilize_effective_route_names,
 )
+from .settings_experience import router as settings_experience_router
+from .settings_runtime_status import router as settings_runtime_router
+from .task_diagnostics import router as task_diagnostics_router
+from .task_handoffs_api import router as task_handoffs_router
 
 _MAX_USER_SPEND_METRIC_SERIES = _health_routes.MAX_USER_SPEND_METRIC_SERIES
 _USER_SPEND_OVERFLOW_LABEL = _health_routes.USER_SPEND_OVERFLOW_LABEL
@@ -1089,24 +1101,15 @@ install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
 app.include_router(draft_router)
-from .preferences_api import display_context as _display_preference_context
-from .preferences_api import router as preferences_router
 
 app.include_router(preferences_router)
-from .budget_guidance_api import router as budget_guidance_router
 app.include_router(budget_guidance_router)
-from .cost_reconciliation_api import router as cost_reconciliation_router
 app.include_router(cost_reconciliation_router)
-from .task_diagnostics import router as task_diagnostics_router
 app.include_router(task_diagnostics_router)
-from .employee_activation import router as employee_activation_router
 app.include_router(employee_activation_router)
-from .product_operations import router as product_operations_router
 app.include_router(product_operations_router)
-from .settings_experience import router as settings_experience_router
 
 app.include_router(settings_experience_router)
-from .settings_runtime_status import router as settings_runtime_router
 app.include_router(settings_runtime_router)
 templates.context_processors.append(_display_preference_context)
 app.include_router(record_search_router)
@@ -1118,11 +1121,8 @@ app.include_router(project_reviews_router)
 app.include_router(deliverable_bundles_router)
 app.include_router(project_workspaces_router)
 app.include_router(task_handoffs_router)
-from .my_work_api import router as my_work_router
 
 app.include_router(my_work_router)
-from .conversation_organization import present_title as _conversation_title
-from .conversation_organization import router as conversation_organization_router
 app.include_router(conversation_organization_router)
 from .in_app_routes import router as in_app_router  # noqa: E402
 
@@ -1465,6 +1465,7 @@ from .personal_data_api import router as personal_data_router  # noqa: E402
 app.include_router(content_access_router)
 app.include_router(employee_departures_router)
 from .permission_requests_api import router as permission_requests_router  # noqa: E402
+
 app.include_router(permission_requests_router)
 app.include_router(personal_data_router)
 # Settings > License (/settings/license + its install, sign and key-pair API).
@@ -5722,8 +5723,9 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             import csv
             import io
 
-            from .audit_actions_api import csv_safe
             from maverick.cost_provenance import EXPORT_HEADERS, export_fields
+
+            from .audit_actions_api import csv_safe
             buf = io.StringIO()
             writer = csv.writer(buf)
             writer.writerow(["Run", "Task", "Started", "Finished", "Result", "Cost (USD)",
@@ -10334,8 +10336,9 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     except Exception:  # pragma: no cover -- never 500 the goal page
         spend_ceiling = None
 
-    from maverick.task_handoffs import apply_ceiling, closure
     from types import SimpleNamespace
+
+    from maverick.task_handoffs import apply_ceiling, closure
     handed_off = closure(w, goal_id)
     handoff_budget = SimpleNamespace(max_dollars=spend_ceiling)
     apply_ceiling(w, goal_id, handoff_budget)

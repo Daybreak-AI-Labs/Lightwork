@@ -14,6 +14,7 @@ import pytest
 from maverick import backup, config, control_plane_lease
 from maverick import installation_recovery as maintenance
 
+
 def reviewed_authorize(**kwargs):
     from maverick.installation_handoff import save_review
     if not kwargs.get("rollback_id"):

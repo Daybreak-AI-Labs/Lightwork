@@ -6,8 +6,8 @@ from copy import deepcopy
 
 import pytest
 from fastapi import HTTPException
-
-from maverick_dashboard import auth, employee_departures as departures, scim
+from maverick_dashboard import auth, scim
+from maverick_dashboard import employee_departures as departures
 
 
 class Store:
@@ -98,7 +98,7 @@ def test_departure_closure_requires_all_items_and_fresh_active_owners(reviewed, 
     assert result["status"] == "closed_with_retained_obligations"
     assert result["closure"]["external_verification"] == "human_attestation"
     assert result["closure"]["private_content_access"] == "unchanged"
-    monkeypatch.setattr(departures, "candidates", lambda: [])
+    monkeypatch.setattr(departures, "candidates", list)
     assert departures.closure_preview(row["id"], result["revision"])["can_close"] is False
 
 

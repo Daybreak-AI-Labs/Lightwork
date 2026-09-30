@@ -491,6 +491,7 @@ def test_staged_replacement_fences_both_versions_and_preserves_old_receipts():
 def test_capability_probe_uses_one_fixed_read_and_persists_no_provider_payload(monkeypatch):
     import contextlib
     import json
+
     from maverick.connection_capabilities import probe
 
     saved = connections.set_connection("drive", connector="gdrive", base_url="https://www.googleapis.com", token="fixture", owner="user:a")

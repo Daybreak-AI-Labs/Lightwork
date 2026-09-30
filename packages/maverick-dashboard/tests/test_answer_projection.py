@@ -1,10 +1,9 @@
 """Native saved-result projection regression coverage; execution deferred."""
 import pytest
 from fastapi import HTTPException
-from starlette.requests import Request
-
 from maverick.world_model import WorldModel
 from maverick_dashboard import answer_projection as projection
+from starlette.requests import Request
 
 
 @pytest.fixture

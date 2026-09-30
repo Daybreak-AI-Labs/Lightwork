@@ -290,7 +290,7 @@ def to_dict(v: WorkforceValue) -> dict:
         return {"available": False, "incomplete": True, "unavailable_reason": v.unavailable_reason,
                 "window_days": v.window_days, "by_department": [], "governance": v.governance,
                 "coverage_trend": [], "improvement": None,
-                **{key: None for key in ("deliverables", "agent_cost", "human_baseline", "cost_avoided", "roi_multiple")}}
+                **dict.fromkeys(("deliverables", "agent_cost", "human_baseline", "cost_avoided", "roi_multiple"))}
     return {
         "available": True, "incomplete": v.incomplete, "unavailable_reason": "",
         "window_days": v.window_days,

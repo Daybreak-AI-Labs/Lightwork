@@ -1,10 +1,10 @@
 """Source checkpoint lookup never admits, delivers or changes channel work."""
-import asyncio
 import json
 import sqlite3
+
 import pytest
-from maverick_channels import recovery_lookup as lookup
 from maverick_channels import imessage
+from maverick_channels import recovery_lookup as lookup
 
 
 def test_imessage_dates_and_identity_without_private_content_or_writes(tmp_path, monkeypatch):

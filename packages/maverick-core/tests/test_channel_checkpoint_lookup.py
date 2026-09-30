@@ -1,10 +1,11 @@
 """Recovery source lookup binds actor, held item and current configured account."""
 import contextlib
 from types import SimpleNamespace
+
 import pytest
 from maverick import channel_recovery_controls as controls
-from maverick import workspace_recovery as recovery
 from maverick import config
+from maverick import workspace_recovery as recovery
 from maverick_channels import recovery_lookup as sources
 
 

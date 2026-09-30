@@ -130,7 +130,7 @@ def to_dict(r: SavingsReport) -> dict:
         return {"available": False, "incomplete": True, "unavailable_reason": r.unavailable_reason,
                 "currency": "USD", "window_days": r.window_days, "by_department": [],
                 "assumptions": {"hourly_rate": None, "hours_per_task": None},
-                **{key: None for key in ("deliverables", "agent_cost", "human_hours", "human_cost", "saved", "roi_multiple")}}
+                **dict.fromkeys(("deliverables", "agent_cost", "human_hours", "human_cost", "saved", "roi_multiple"))}
     return {
         "available": True, "incomplete": r.incomplete, "unavailable_reason": "",
         "window_days": r.window_days,

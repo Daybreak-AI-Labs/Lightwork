@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 def preview():
     from maverick import config
+
     from . import rbac
     cfg = config.load_global_config()
     if config.config_source_errors():
@@ -31,6 +32,7 @@ def preview():
 def apply_conservative(request, expected_revision):
     from maverick import config
     from maverick.audit import audit_event
+
     from . import auth, settings_store
     with settings_store._locked(strict=True):
         auth.require_global_permission(request, "admin")

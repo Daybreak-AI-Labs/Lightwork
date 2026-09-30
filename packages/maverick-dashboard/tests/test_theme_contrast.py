@@ -3,7 +3,7 @@ from maverick_dashboard.themes import contrast_issues, contrast_ratio, readable_
 
 
 def test_white_on_white_is_refused_with_human_readable_reasons():
-    palette = {key: "#ffffff" for key in ("bg", "panel", "text", "accent")}
+    palette = dict.fromkeys(("bg", "panel", "text", "accent"), "#ffffff")
     assert any("Text against page background" in issue for issue in contrast_issues(palette))
     assert contrast_ratio("#fff", "#000") == 21
 

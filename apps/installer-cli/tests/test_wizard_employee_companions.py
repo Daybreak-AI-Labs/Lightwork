@@ -21,7 +21,7 @@ def test_employee_companions_require_literal_true(monkeypatch, value):
 
 def test_employee_companions_default_off_and_explicitly_enabled(monkeypatch):
     monkeypatch.setattr(config, "config_source_errors", lambda **kw: {})
-    monkeypatch.setattr(config, "load_config", lambda: {})
+    monkeypatch.setattr(config, "load_config", dict)
     assert config.get_features()["employee_companions"] is False
     monkeypatch.setattr(config, "load_config", lambda: {"features": {"employee_companions": True}})
     assert config.get_features()["employee_companions"] is True

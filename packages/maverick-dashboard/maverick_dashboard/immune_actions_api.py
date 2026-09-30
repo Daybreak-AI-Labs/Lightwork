@@ -17,7 +17,13 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import assert_goal_access, caller_principal, can_access_goal_principal, require_global_permission, require_permission
+from .auth import (
+    assert_goal_access,
+    caller_principal,
+    can_access_goal_principal,
+    require_global_permission,
+    require_permission,
+)
 
 log = logging.getLogger(__name__)
 _MAX_DOC_ITEMS = 5000

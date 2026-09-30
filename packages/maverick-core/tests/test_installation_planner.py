@@ -1,5 +1,6 @@
 """Planner is evidence; it cannot bypass protected-state admission."""
 import contextlib
+
 from maverick import installation_planner as planner
 
 
@@ -9,7 +10,7 @@ def test_protected_differences_offer_forward_options(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_scope", contextlib.nullcontext)
     monkeypatch.setattr(core, "_directory", lambda identifier: tmp_path)
     monkeypatch.setattr(core, "_runtime", lambda: tmp_path / "runtime")
-    monkeypatch.setattr(core, "blockers", lambda: [])
+    monkeypatch.setattr(core, "blockers", list)
     monkeypatch.setattr(core, "_read", lambda path: {"status": "upgraded", "before": {"sha256": "sha"}, "new_runtime_sha256": "sha", "old_version": "1.0.0", "new": {"version": "1.2.3"}})
     monkeypatch.setattr(planner.backup, "_sha256", lambda path: "sha")
     monkeypatch.setattr(planner.backup, "compare_backup", lambda path: {"protected_changes": 1, "items": [{"path": "tenant/world.db", "protected": True, "change": "changed"}], "live_state_sha256": "new"})

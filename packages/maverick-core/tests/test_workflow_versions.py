@@ -1,7 +1,7 @@
 """Workflow publication contracts; authored for the later validation phase."""
 import pytest
-
-from maverick import templates, workflow_versions as versions
+from maverick import templates
+from maverick import workflow_versions as versions
 
 
 @pytest.fixture

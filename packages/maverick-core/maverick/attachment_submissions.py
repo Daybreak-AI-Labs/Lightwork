@@ -270,6 +270,7 @@ class SubmissionStore:
                     paths[identity] = str(record.path)
                 elif verify_existing:
                     from pathlib import Path
+
                     from .attachments import _verify_stored_attachment
                     try:
                         _verify_stored_attachment(Path(paths[identity]), identity[3])

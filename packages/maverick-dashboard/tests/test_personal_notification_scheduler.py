@@ -11,6 +11,7 @@ def test_fixed_workspace_does_not_scan_other_tenants(monkeypatch):
 
 def test_revoked_identity_withdraws_before_reading_private_sources(monkeypatch):
     from contextlib import nullcontext
+
     from maverick import personal_identity, personal_notification_recipients, world_model
     from maverick.tenant import registry
     monkeypatch.setattr(scheduler, "authority_effect_fence", nullcontext)

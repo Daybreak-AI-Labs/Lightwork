@@ -9664,6 +9664,7 @@ def cancel_goal(request: Request, goal_id: int) -> None:
     if g.status in ("done", "cancelled", "failed"):
         return
     from uuid import uuid4
+
     from .reviewed_stop import StopInput, apply
     # Legacy direct controls use the same atomic native primitive. New reviewed
     # clients retain their operation ID and expected revision across retries.
@@ -9682,6 +9683,7 @@ def goal_open_questions(request: Request, goal_id: int) -> dict:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick.chat_threads import question_version
+
     from .clarification_submission import latest_receipt
     qs = w.open_questions(goal_id=goal_id)
     return {

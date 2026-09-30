@@ -3194,8 +3194,10 @@ def channel_checkpoint_lookup(item_id: str, *, expected_review_token: str, befor
     if not isolated or not isinstance(item_id, str) or not _ID.fullmatch(item_id):
         raise RecoveryError("Look up a held connection only in isolated workspace recovery.")
     from datetime import datetime, timezone
-    from . import config, channel_recovery_controls
+
     from maverick_channels import recovery_lookup
+
+    from . import channel_recovery_controls, config
 
     def current():
         marker = _read_bootstrap(actor=actor)

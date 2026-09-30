@@ -3,12 +3,12 @@ import hashlib
 
 import pytest
 from fastapi import HTTPException, Response
-from starlette.requests import Request
 from maverick import audit, config
 from maverick.attachment_submissions import SubmissionStore
 from maverick.paths import tenant_scope
 from maverick.world_model import WorldModel
 from maverick_dashboard import conversation_organization as organization
+from starlette.requests import Request
 
 
 @pytest.fixture

@@ -4,11 +4,11 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import HTTPException
+from maverick.governed_operations import digest
 from pydantic import Field
 
 from .auth import caller_principal, goal_owner_filter, require_permission
 from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
-from maverick.governed_operations import digest
 
 
 class ConnectionInput(StrictInput):
@@ -51,6 +51,7 @@ class ScheduleInput(StrictInput):
 def _schedules(request):
     from maverick.job_queue import JobQueue
     from maverick.schedule_definitions import list_definitions
+
     from .api import _require_scheduling
 
     require_permission(request, "operate")
@@ -94,6 +95,7 @@ def schedule_recover(request, selection, arguments, native, operation):
 def schedule_execute(request, selection, arguments, native, operation):
     from maverick.job_queue import JobQueue
     from maverick.schedule_definitions import change_definition
+
     from .app import _require_same_origin
 
     _require_same_origin(request)

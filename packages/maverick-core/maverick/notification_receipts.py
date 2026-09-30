@@ -7,7 +7,12 @@ import time
 import uuid
 from pathlib import Path
 
-from .file_lock import atomic_read_text, atomic_write_text, cross_process_lock, ensure_private_directory
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+)
 
 
 class DeliveryReceipts:

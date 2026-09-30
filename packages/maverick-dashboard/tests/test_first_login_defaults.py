@@ -4,8 +4,14 @@ from copy import deepcopy
 
 import pytest
 from fastapi import HTTPException
-
-from maverick_dashboard import access_explanations, auth, first_login_defaults, rbac, scim_groups, settings_store
+from maverick_dashboard import (
+    access_explanations,
+    auth,
+    first_login_defaults,
+    rbac,
+    scim_groups,
+    settings_store,
+)
 
 
 def test_role_reset_previews_verified_group_before_standard_default(monkeypatch):
@@ -24,7 +30,7 @@ def defaults(monkeypatch):
     from maverick import config
     overlay = {}
     monkeypatch.setattr(config, "load_global_config", lambda: deepcopy(overlay))
-    monkeypatch.setattr(config, "config_source_errors", lambda: [])
+    monkeypatch.setattr(config, "config_source_errors", list)
     monkeypatch.setattr(config, "reset_config_cache", lambda: None)
     monkeypatch.setattr(settings_store, "_locked", lambda **_: nullcontext())
     monkeypatch.setattr(settings_store, "_load_overlay_for_update", lambda: deepcopy(overlay))

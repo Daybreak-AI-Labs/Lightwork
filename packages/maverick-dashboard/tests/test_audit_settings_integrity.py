@@ -1,9 +1,8 @@
 """Settings review and file-install regression cases; do not use live providers."""
 import pytest
 from fastapi.testclient import TestClient
-
-from maverick_dashboard.app import app
 from maverick_dashboard import settings_all_page as page
+from maverick_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -86,6 +85,7 @@ def test_review_does_not_write_and_export_excludes_credentials():
 
 def test_display_cookie_cannot_cross_account_or_override_locked_policy(monkeypatch):
     from types import SimpleNamespace
+
     from maverick_dashboard import preferences_api
 
     monkeypatch.setattr(preferences_api.auth, 'caller_principal', lambda request: 'user:bob')
@@ -154,6 +154,7 @@ def test_review_conflict_never_calls_the_catalog_writer(monkeypatch):
 def test_personal_profile_import_is_review_only_and_rejects_authority(monkeypatch):
     import json
     from types import SimpleNamespace
+
     from maverick_dashboard import preferences_api
     current = {'values': {'tone': 'formal'}, 'locked': [], 'revision': 'a' * 64, 'context': 'alice'}
     monkeypatch.setattr(preferences_api, '_profiles_allowed', lambda request: None)
@@ -176,8 +177,9 @@ def test_personal_profile_import_is_review_only_and_rejects_authority(monkeypatc
 
 def test_personal_profile_excludes_identity_and_credential_like_guidance(monkeypatch):
     import json
-    from maverick_dashboard import preferences_api
+
     from maverick.experience_preferences import DEFAULTS
+    from maverick_dashboard import preferences_api
     monkeypatch.setattr(preferences_api, '_profiles_allowed', lambda request: None)
     monkeypatch.setattr(preferences_api, '_state', lambda request: {'values': {
         **DEFAULTS, 'preferred_name': 'Private Alice', 'output_style': 'custom',
@@ -191,8 +193,9 @@ def test_personal_profile_excludes_identity_and_credential_like_guidance(monkeyp
 def test_member_search_finds_exact_personal_fields_without_admin_settings(monkeypatch):
     import json
     from types import SimpleNamespace
-    from maverick_dashboard import settings_experience
+
     from maverick import experience_preferences
+    from maverick_dashboard import settings_experience
     monkeypatch.setattr(settings_experience.auth, 'require_permission', lambda *args: None)
     monkeypatch.setattr(settings_experience.auth, 'has_global_permission', lambda *args: False)
     monkeypatch.setattr(settings_experience.auth, 'caller_principal', lambda request: 'user:alice')
@@ -228,7 +231,7 @@ def test_file_review_binds_new_environment_references(monkeypatch):
 
 
 def test_table_reset_and_inherit_match_actual_runtime_merge(monkeypatch):
-    from maverick.config import load_global_config, config_path
+    from maverick.config import config_path, load_global_config
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('[rate_limits]\nshell="2/minute"\ncustom="3/minute"\n', encoding='utf-8')
@@ -245,8 +248,8 @@ def test_table_reset_and_inherit_match_actual_runtime_merge(monkeypatch):
 
 
 def test_internal_reset_metadata_cannot_target_an_arbitrary_path():
-    from maverick_dashboard import settings_store
     from maverick.config_resets import METADATA
+    from maverick_dashboard import settings_store
     with pytest.raises(ValueError):
         settings_store.set_catalog_values({(METADATA, 'rate_limits.other'): {
             'path': ['dashboard', 'admins'], 'keep': [], 'entries': False, 'preserve_tables': False, 'remove_value': False}})

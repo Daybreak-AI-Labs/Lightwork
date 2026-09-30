@@ -2310,8 +2310,8 @@ from . import (  # noqa: E402 -- the row and column types must exist first
     settings_catalog_governance,
     settings_catalog_integrations,
     settings_catalog_learning,
-    settings_catalog_privacy,
     settings_catalog_personalization,
+    settings_catalog_privacy,
     settings_catalog_runtime,
     settings_catalog_structured,
 )

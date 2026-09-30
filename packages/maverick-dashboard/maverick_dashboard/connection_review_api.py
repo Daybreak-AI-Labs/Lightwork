@@ -7,7 +7,12 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import has_global_permission, has_permission, require_global_permission, require_permission
+from .auth import (
+    has_global_permission,
+    has_permission,
+    require_global_permission,
+    require_permission,
+)
 from .connection_dependencies import impact, owned_connections, require_review
 from .draft_api import context_for
 
@@ -136,7 +141,8 @@ async def rebind_source(request: Request, name: str, body: RebindIn):
     from maverick import connections, privacy_discovery_credentials
 
     from .api import _request_identity
-    from .privacy_data_discovery_api import _actor_ref, _authority as discovery_authority
+    from .privacy_data_discovery_api import _actor_ref
+    from .privacy_data_discovery_api import _authority as discovery_authority
 
     _authority(request, body)
     require_global_permission(request, "admin")

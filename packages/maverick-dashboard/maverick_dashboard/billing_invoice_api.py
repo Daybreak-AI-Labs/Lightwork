@@ -42,7 +42,8 @@ def _who(principal: str) -> str:
 def _display_amounts(inv):
     """Use the same deterministic currency allocation as actual collection."""
     from decimal import Decimal
-    from maverick.billing_stripe import _rated_usage_items, _ZERO_DECIMAL
+
+    from maverick.billing_stripe import _ZERO_DECIMAL, _rated_usage_items
     currency = inv.currency.lower()
     factor = 1 if currency in _ZERO_DECIMAL and currency != "ugx" else 100
     places = 0 if currency in _ZERO_DECIMAL or currency == "isk" else 2

@@ -8,7 +8,8 @@ import secrets
 import time
 from pathlib import Path
 
-from . import backup, file_lock, installation_recovery as recovery
+from . import backup, file_lock
+from . import installation_recovery as recovery
 from .installation_handoff import _release
 
 

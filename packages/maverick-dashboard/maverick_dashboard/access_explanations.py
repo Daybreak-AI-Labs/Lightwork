@@ -7,6 +7,7 @@ import json
 
 def role(principal, *, installation=False, without_explicit=False):
     from maverick.paths import current_tenant_id
+
     from . import auth, rbac, scim_groups
 
     if not principal:

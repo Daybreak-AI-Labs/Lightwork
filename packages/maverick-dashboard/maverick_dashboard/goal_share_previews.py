@@ -8,7 +8,12 @@ import secrets
 import time
 
 from maverick.crypto_at_rest import is_sealed, seal, unseal
-from maverick.file_lock import atomic_read_bytes, atomic_write_bytes, cross_process_lock, ensure_private_directory
+from maverick.file_lock import (
+    atomic_read_bytes,
+    atomic_write_bytes,
+    cross_process_lock,
+    ensure_private_directory,
+)
 from maverick.paths import data_dir
 from maverick.run_share import build_gist_payload, resolve_token, upload_payload
 
@@ -86,7 +91,6 @@ def attempts(context, goal_id):
 
 def send(context, goal_id, identifier, digest):
     import httpx
-
     from maverick.audit import audit_event
 
     token = resolve_token()

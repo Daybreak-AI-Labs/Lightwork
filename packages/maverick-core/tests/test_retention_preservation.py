@@ -4,7 +4,6 @@ import json
 import sqlite3
 
 import pytest
-
 from maverick.audit import preservation, retention
 
 

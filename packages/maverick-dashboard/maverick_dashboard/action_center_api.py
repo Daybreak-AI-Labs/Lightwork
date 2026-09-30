@@ -125,9 +125,10 @@ def _model(request):
     if config.get_features().get("vendor_onboarding") is True:
         def vendor_reconciliations():
             return _vendor_reconciliation_rows(request)
-    from .content_access import can_read_approval
-    from .auth import can_access_goal
     from maverick.domain import suite_for
+
+    from .auth import can_access_goal
+    from .content_access import can_read_approval
     def connection_attention():
         from .connection_dependencies import connection_attention as owned_connections
         return owned_connections(request)

@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "verify_desktop_artifact.py"
@@ -15,8 +16,10 @@ def bundle(tmp_path):
     artifact = tmp_path / "engineering.tar.gz"
     artifact.write_bytes(b"selected engineering artifact")
     row = {"schema": "lightwork.signed-engineering-artifact.v1", "repository": "Daybreak-AI-Labs/Lightwork", "commit": "a" * 40, "version": "1.2.3", "target": "aarch64-apple-darwin", "support_channel": "engineering", "artifact_filename": artifact.name, "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(), "size_bytes": artifact.stat().st_size}
-    manifest = tmp_path / "release.json"; manifest.write_text(json.dumps(row))
-    signature = tmp_path / "release.minisig"; signature.write_text("fake signature")
+    manifest = tmp_path / "release.json"
+    manifest.write_text(json.dumps(row))
+    signature = tmp_path / "release.minisig"
+    signature.write_text("fake signature")
     return dict(manifest=manifest, signature=signature, artifact=artifact, public_key="A" * 56, expected_commit="a" * 40, expected_version="1.2.3", target="aarch64-apple-darwin")
 
 

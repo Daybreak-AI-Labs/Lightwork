@@ -2,7 +2,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from maverick.config import _deep_merge_config
 from maverick.config_resets import METADATA, merge_dashboard, reset_spec
 

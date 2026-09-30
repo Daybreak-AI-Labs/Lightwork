@@ -16,7 +16,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from . import auth
-
 from .notification_health import router as notification_health_router
 
 router = APIRouter()
@@ -760,9 +759,9 @@ def _users_context(request: Request) -> dict:
     labels = _invite_labels(all_invites)
     grants = suite_grants.list_grants()
     people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
-    from .identity_format import role_label
     from .access_explanations import standard_role
     from .first_login_defaults import preview as first_login_preview
+    from .identity_format import role_label
     defaults = set(default_suites) if default_suites is not None else None
     return {
         "global_admin": True,
@@ -832,9 +831,10 @@ def users_remove(request: Request, principal: str = Form(...), expected_standard
     pinned in config is unaffected — it can't be removed here."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    from maverick.authority_effects import authority_effect_fence
+
     from . import rbac
     from .access_explanations import standard_role
-    from maverick.authority_effects import authority_effect_fence
     try:
         with authority_effect_fence():
             auth.require_global_permission(request, "admin")

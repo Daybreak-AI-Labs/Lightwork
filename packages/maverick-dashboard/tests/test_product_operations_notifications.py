@@ -2,7 +2,6 @@ from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
-
 from maverick_dashboard import product_operations_notifications as operations
 
 

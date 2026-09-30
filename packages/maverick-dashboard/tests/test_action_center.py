@@ -519,5 +519,5 @@ def test_owned_questions_are_grouped_and_a_changed_question_invalidates_snooze()
 
 def test_approval_source_refuses_content_without_explicit_authority_callback():
     result = center.collect(World(), principal="user:alice", owner="user:alice", specs=[],
-                            assessments=lambda: [], assessment_allowed=lambda row: False)
+                            assessments=list, assessment_allowed=lambda row: False)
     assert not any(row["kind"] == "approval" for row in result["items"])

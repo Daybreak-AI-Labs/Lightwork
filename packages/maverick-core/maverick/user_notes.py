@@ -100,8 +100,8 @@ def _preference_rows(world: Any, conversations: list, ts: float,
         if len(group) < max(1, max_conversations):
             group.append(conv)
     notes: list[dict] = []
-    from .pilot_learning import excluded
     from .personal_memory import collection_allowed
+    from .pilot_learning import excluded
     from .safety.secret_detector import redact
     for (channel, user_id), group in grouped.items():
         turns = []

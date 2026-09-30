@@ -17,7 +17,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from .auth import caller_principal, can_access_goal_principal, has_global_permission, has_permission, require_permission
+from .auth import (
+    caller_principal,
+    can_access_goal_principal,
+    has_global_permission,
+    has_permission,
+    require_permission,
+)
 from .evolution_ledger_page import _HEADERS
 
 IMMUNE_PATH = "/immune"

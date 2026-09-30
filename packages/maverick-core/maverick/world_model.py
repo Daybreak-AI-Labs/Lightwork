@@ -38,8 +38,8 @@ from .file_lock import (
     prepare_private_directory,
 )
 from .goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
-from .personal_alert_revisions import SQLITE_MIGRATION as _PERSONAL_ALERT_MIGRATION
 from .paths import bind_tenant_namespace, current_tenant_id, data_dir
+from .personal_alert_revisions import SQLITE_MIGRATION as _PERSONAL_ALERT_MIGRATION
 
 log = logging.getLogger(__name__)
 

@@ -3,7 +3,6 @@ import contextlib
 import copy
 
 import pytest
-
 from maverick import installation_handoff as handoff
 
 

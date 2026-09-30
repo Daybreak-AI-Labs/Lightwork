@@ -29,7 +29,8 @@ def test_threshold_receipt_deduplicates_same_person_and_provider_period(monkeypa
     monkeypatch.setattr(guidance, '_warnings_store', lambda: store)
     monkeypatch.setattr(guidance, 'policy', lambda: {'guidance': True, 'warnings': True, 'warning_thresholds': [.8]})
     guidance.observe_warnings('user:a', view())
-    later = view(); later['observed_at'] += 86400
+    later = view()
+    later['observed_at'] += 86400
     guidance.observe_warnings('user:a', later)
     assert store.created == 1
     guidance.observe_warnings('user:b', later)

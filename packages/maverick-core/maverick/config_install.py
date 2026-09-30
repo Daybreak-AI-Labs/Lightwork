@@ -85,9 +85,9 @@ def _install_config_bytes_locked(data: bytes, dst: Path | None = None, *,
         return {"path": dst, "unchanged": True, "backup": None}
     saved = None
     if backup and dst.is_file():
+        import secrets
         import shutil
         import time
-        import secrets
 
         saved = dst.with_name(f"{dst.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(4)}")
         shutil.copy2(dst, saved)

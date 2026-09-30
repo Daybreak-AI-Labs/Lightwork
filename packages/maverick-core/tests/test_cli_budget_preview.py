@@ -1,8 +1,9 @@
 """Native preview transport must not infer an employee or reserve budget."""
 import json
+
 from click.testing import CliRunner
-from maverick.cli import main
 from maverick import budget_guidance
+from maverick.cli import main
 
 
 def test_cli_preview_uses_local_policy_without_identity(monkeypatch):

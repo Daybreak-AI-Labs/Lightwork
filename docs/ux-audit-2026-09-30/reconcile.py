@@ -12,11 +12,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 LAYERS = (
-    "memory", "settings", "mobile", "identity", "connections",
-    "conversation", "reporting", "support", "native-integrations",
+    "memory", "settings", "mobile", "connections", "conversation",
+    "identity", "reporting", "support", "native-integrations",
     "desktop-maintenance", "knowledge", "personal-memory", "budget",
     "today", "task-diagnostics", "source-checkpoint-lookup", "activation",
     "plugin-adapters", "project-workspaces", "personal-notifications",
+    "preference-scopes", "model-tests",
 )
 
 
