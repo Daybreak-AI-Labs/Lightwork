@@ -140,6 +140,7 @@ def domains_lint(ci: bool, show_warnings: bool) -> None:
     domains dir are linted alongside the built-ins.
     """
     from ..domain import available_domains, lint_profile
+    from ..domain_prose_lint import known_tool_names, lint_profiles
     domains = available_domains()
     n_err = n_warn = 0
     for name in sorted(domains):
@@ -151,6 +152,14 @@ def domains_lint(ci: bool, show_warnings: bool) -> None:
         if show_warnings:
             for w in warnings:
                 click.echo(f"warn   {name}: {w}")
+    # The prose lint (text defects, duplicate personas, unknown tools) is part
+    # of the same gate: a pack that reads wrong is as broken as one that is
+    # envelope-unsafe. Mechanical classes fix with
+    # ``python -m maverick.domain_prose_lint --fix``.
+    prose = lint_profiles(domains, known_tools=known_tool_names())
+    n_err += len(prose)
+    for f in prose:
+        click.echo(f"ERROR  {f}", err=True)
     click.echo(f"{len(domains)} pack(s): {n_err} error(s), {n_warn} warning(s)"
                + ("" if show_warnings else " (use --warnings to list them)"))
     if ci and n_err:

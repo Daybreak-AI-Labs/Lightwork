@@ -121,6 +121,7 @@ fi
 
 echo "== custom CI gates =="
 run "plugin_matrix --ci"      python -m maverick.plugin_matrix --ci
+run "domain_prose_lint --ci"  python -m maverick.domain_prose_lint --ci
 run "deprecations --ci"       python -m maverick.deprecations --ci
 run "grpc contract --check"   python -m maverick.grpc_api.contract --check
 run "a11y_audit --ci"         python -m maverick.a11y_audit --ci

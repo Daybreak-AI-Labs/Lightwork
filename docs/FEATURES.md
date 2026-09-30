@@ -513,6 +513,15 @@ here.
   `output.gate` lighter than the playbook's final sign-off). All 2,031 built-in
   packs lint clean (0 errors, 0 warnings); every pack carries at least a
   suite-level `knowledge_sources` grounding fallback.
+- **Pack prose lint** — `python -m maverick.domain_prose_lint [--ci --fix]`
+  (`domain_prose_lint`), run inside `domains-lint` so the CI catalog gate
+  covers the words as well as the envelope. Errors: quote corruption
+  (`company"s`), smart-quote/mojibake damage, the wrong article before a
+  curated term list (`a IT/GRC`, `a HR`, `an SaaS`), two packs sharing one
+  persona, a persona under 300 or a description under 30 characters, an
+  empty TOML field, and a tool name absent from the registry, the risk
+  catalog, and the audited abstract-adapter list. `--fix` rewrites the
+  mechanical classes in place without re-serialising the TOML.
 - **Pack deployment prerequisites** — tool-risk checks preserve the declared
   risk ceilings and denylists. Read-only workflows use `sql_query_read` and
   `spreadsheet_read`; these tools do not expose their mutable siblings' write
