@@ -57,8 +57,8 @@ def record(request: Request, response: Response, key: str = Query(..., max_lengt
 
 
 def tags_enabled() -> bool:
-    from maverick.config import load_config
-    return load_config().get("memory", {}).get("fact_tags", False) is True
+    from maverick.fact_revision import tags_enabled as enabled
+    return enabled()
 
 
 class TagsIn(BaseModel):

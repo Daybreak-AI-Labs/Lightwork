@@ -61,13 +61,20 @@
   },
   {
     "id": "LW-122",
-    "status": "planned",
-    "implementation_evidence": [],
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "knowledge_reindex_jobs.py durable per-account/workspace operation journal, private shadow vectors, exact collection/model/limit review, Budget+durable deadline, 64-passage cancellation boundaries, atomic live-index source compare-and-replace, checkpoint resume and publish reconciliation.",
+      "knowledge_library_api.py and lightwork-knowledge-library.js native admin review/start/status/cancel/continue/archive; retained idempotency receipts; actual model/cost/size warning.",
+      "knowledge.reindex_jobs and bounded limits settings/installer; product_operations_knowledge.py shared native Copilot adapter; docs/knowledge-reindex-jobs.md."
+    ],
     "validation": [
-      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+      "9 focused local reindex/API/installer tests passed;13 prior focused reindex/catalog tests passed; full catalogue run found19 unrelated integrated configuration registry issues reported to root.",
+      "Deterministic temporary SQLite used only; no live providers. JS syntax and focused Ruff passed.",
+      "Final six core rebuild regression tests passed, including source mutation between preview and source reread; no suites required live providers."
     ],
     "remaining": [
-      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+      "Integrated registry tests pending; PostgreSQL, browser, installed local-model qualification pending.",
+      "Paid/custom embedding intentionally fails admission closed until adapter supplies verified per-request price and usage projection; no configured provider or credentials changed."
     ]
   }
 ]

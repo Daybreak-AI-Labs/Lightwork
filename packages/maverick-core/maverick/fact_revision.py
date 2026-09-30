@@ -32,3 +32,8 @@ def normalize_tags(tags: list[str]) -> list[str]:
             raise ValueError("Tags cannot contain control characters.")
         result.add(tag.strip().casefold())
     return sorted(result)
+
+
+def tags_enabled() -> bool:
+    from .config import load_config
+    return load_config().get("memory", {}).get("fact_tags", False) is True

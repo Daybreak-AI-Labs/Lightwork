@@ -1591,6 +1591,7 @@ def pick_knowledge() -> dict[str, Any]:
     if not _q_confirm("Enable per-domain knowledge RAG?", default=False):
         return {"enable": False}
     out: dict[str, Any] = {"enable": True}
+    out["reindex_jobs"] = _q_confirm("Enable bounded search index rebuilds with review, progress and cancellation? Paid embedding requires verified cost admission.", default=False)
     embedder = _q_select(
         "  Embedder:",
         [
