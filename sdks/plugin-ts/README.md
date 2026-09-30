@@ -19,6 +19,37 @@ await servePlugin([greet]);
 ```
 
 Compile it (`npm run build` here is just `tsc`) and you have a plugin.
+For a complete project, use [examples/minimal](examples/minimal), including its
+package manifest, TypeScript settings and validated handler. From this SDK folder:
+
+```sh
+npm install
+npm run build
+cd examples/minimal
+npm install
+npm run build
+npm run describe
+```
+
+The example pins TypeScript 7.0.2 and Node type declarations 26.0.0, matching the
+SDK's declared development toolchain. Use a compatible Node runtime with ES2022
+support. Register the resulting absolute `examples/minimal/dist/plugin.js` path
+below. Build/load commands are provided for later qualification and were not run
+during the audit implementation's explicit testing deferral.
+
+`inputSchema` describes the wire contract; `defineTool` does **not** enforce a
+JSON Schema dialect on standalone calls. Legacy handlers still receive an object
+(non-object arguments normalize to `{}`) and must validate it. New integrations
+can use `defineValidatedTool({ ..., parseArgs, handler })`: the synchronous parser
+accepts `unknown`, returns a typed object or throws, and runs before handler entry.
+Use a reviewed schema library's parser as an adapter if needed. A parser rejection
+is `effect: "not_started"` in protocol 2 and does not include parser error text or
+private arguments. Host-side validation remains a separate boundary.
+
+If `--describe` cannot load the SDK, build the SDK first, install the example's
+local dependency, and verify the generated `dist` paths. If the host reports an
+unknown effect, reconcile the external operation instead of rerunning it.
+
 Handlers return a string (or a promise of one); a thrown error becomes an
 `"ERROR: <tool> failed: <message>"` result string, the same convention
 Lightwork's built-in Python tools use. Log to stderr (`console.error`) only —

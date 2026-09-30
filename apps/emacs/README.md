@@ -25,5 +25,16 @@ Add to `load-path` and require:
 | `M-x maverick-logs` | recent run logs |
 | `M-x maverick-halt` | arm the killswitch (confirms first) |
 | `M-x maverick-unhalt` | clear the killswitch |
+| `M-x maverick-cancel-control` | stop local status/halt supervision; outcome remains unconfirmed |
+
+Status and halt controls use asynchronous owned processes. Editing remains
+available while they wait. `maverick-control-timeout` defaults to 30 seconds
+(bounded to 0.1–120 seconds), and responses are limited to 64 KiB. Timeout,
+cancellation and nonzero exit never claim that external effects stopped; inspect
+local state before another action. Late callbacks cannot replace a newer result.
+The halt acknowledgement still requires exact local scope and checkpoint semantics.
+
+Deferred regression fixtures are in `tests/maverick-control-tests.el`; run them
+with Emacs ERT during the later testing phase. They have not been run for this audit.
 
 See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

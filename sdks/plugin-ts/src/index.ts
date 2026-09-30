@@ -33,6 +33,8 @@ export interface ToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** Optional synchronous validation before handler entry. Throws on invalid input. */
+  parseArgs?: (input: unknown) => Record<string, unknown>;
   handler: (args: Record<string, unknown>, context: InvocationContext) => string | Promise<string>;
 }
 
@@ -49,7 +51,23 @@ export function defineTool(def: ToolDef): ToolDef {
   if (typeof def.handler !== "function") {
     throw new TypeError(`defineTool(${def.name}): handler must be a function`);
   }
+  if (def.parseArgs !== undefined && typeof def.parseArgs !== "function") {
+    throw new TypeError(`defineTool(${def.name}): parseArgs must be a function`);
+  }
   return def;
+}
+
+/** Adapt a typed parser (including a schema library's parse) without a dependency.
+ * inputSchema advertises the contract; parseArgs enforces it before any effect.
+ */
+export function defineValidatedTool<T extends Record<string, unknown>>(def: {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  parseArgs: (input: unknown) => T;
+  handler: (args: T, context: InvocationContext) => string | Promise<string>;
+}): ToolDef {
+  return defineTool({ ...def, handler: (args, context) => def.handler(args as T, context) });
 }
 
 type Effect = "not_started" | "completed" | "unknown";
@@ -103,6 +121,18 @@ async function answer(byName: Map<string, ToolDef>, line: string): Promise<WireR
   if (deadline !== null && deadline <= Date.now()) {
     return reply("not_started", { error: "invocation deadline expired before dispatch" });
   }
+  let args: Record<string, unknown>;
+  try {
+    args = tool.parseArgs ? tool.parseArgs(req.args) :
+      (typeof req.args === "object" && req.args !== null && !Array.isArray(req.args) ? req.args : {}) as Record<string, unknown>;
+    if (typeof args !== "object" || args === null || Array.isArray(args)) throw new TypeError("invalid arguments");
+  } catch {
+    // Validation messages may contain credentials or private argument values.
+    return reply("not_started", { error: "invalid tool arguments; handler was not started" });
+  }
+  if (deadline !== null && deadline <= Date.now()) {
+    return reply("not_started", { error: "invocation deadline expired during argument validation" });
+  }
   const controller = new AbortController();
   const context: InvocationContext = {
     requestId: typeof id === "string" || typeof id === "number" ? id : null,
@@ -112,7 +142,6 @@ async function answer(byName: Map<string, ToolDef>, line: string): Promise<WireR
     () => controller.abort(new Error("invocation deadline exceeded")),
     Math.min(deadline - Date.now(), 2147483647),
   );
-  const args = (typeof req.args === "object" && req.args !== null && !Array.isArray(req.args) ? req.args : {}) as Record<string, unknown>;
   try {
     // Do not race the handler against a timeout and then start another effect:
     // retain serial ownership until it settles. The host owns hard termination.

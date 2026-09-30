@@ -6,6 +6,8 @@
   self-hosted dashboard's SSE event feed).</description>
   <depends>com.intellij.modules.platform</depends>
   <extensions defaultExtensionNs="com.intellij">
+    <applicationConfigurable id="lightwork.dashboard" displayName="Lightwork Dashboard"
+                             instance="dev.maverick.DashboardConfigurable"/>
     <toolWindow id="Lightwork Runs" anchor="bottom"
                 factoryClass="dev.maverick.RunsToolWindowFactory"/>
   </extensions>

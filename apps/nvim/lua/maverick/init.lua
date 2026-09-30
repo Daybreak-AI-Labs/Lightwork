@@ -18,6 +18,7 @@ local M = {}
 M.config = {
   cli = "maverick",
   max_dollars = nil, -- when set, passed to `maverick start --max-dollars`
+  control_timeout_ms = 30000,
 }
 
 function M.setup(opts)
@@ -60,22 +61,69 @@ function M.logs()
   term_run({ "logs" })
 end
 
+local control, generation = nil, 0
+
+function M.cancel_control(silent)
+  generation = generation + 1
+  local prior = control
+  control = nil
+  if prior then
+    if prior.timer then vim.fn.timer_stop(prior.timer) end
+    if prior.job and prior.job > 0 then vim.fn.jobstop(prior.job) end
+    if not silent then vim.notify("Local command supervision stopped; its outcome is unconfirmed. Check local state before retrying.", vim.log.levels.ERROR) end
+  end
+end
+
 local function checked_halt(command, present)
-  local ok, output = pcall(vim.fn.system, { M.config.cli, command, "--json" })
-  local status = vim.v.shell_error
-  if not ok or status ~= 0 then
-    vim.notify("Lightwork outcome unconfirmed (exit " .. tostring(status) .. "). Check local state before retrying.", vim.log.levels.ERROR)
+  if control then
+    vim.notify("A local control request is still running. Use :MaverickCancelControl to stop waiting, then inspect state.", vim.log.levels.ERROR)
     return
   end
-  local parsed, result = pcall(vim.fn.json_decode, output)
-  if not parsed or type(result) ~= "table" or result.command ~= command
-    or result.acknowledged ~= true or result.scope ~= "local"
-    or result.halt_file_present ~= present or result.work_stopped ~= false then
-    vim.notify("Local halt-file state was not confirmed. Check the CLI before retrying.", vim.log.levels.ERROR)
-    return
+  generation = generation + 1
+  local mine, output, bytes = generation, "", 0
+  local owner = {}
+  control = owner
+  vim.notify("Waiting for checked local halt state; :MaverickCancelControl stops supervision.", vim.log.levels.INFO)
+  local function fail(message)
+    if mine ~= generation or control ~= owner then return end
+    M.cancel_control(true)
+    vim.notify(message .. " Outcome unconfirmed; check local state before retrying.", vim.log.levels.ERROR)
   end
-  vim.notify(present and "Local kill switch armed. Running work stops at its next checkpoint."
-    or "Local kill switch cleared. Prior tasks were not restarted.", vim.log.levels.INFO)
+  local ok, job = pcall(vim.fn.jobstart, { M.config.cli, command, "--json" }, {
+    stdout_buffered = false, stderr_buffered = false,
+    on_stdout = function(_, data)
+      if mine ~= generation or control ~= owner then return end
+      local chunk = table.concat(data or {}, "\n")
+      bytes = bytes + #chunk
+      if bytes > 65536 then fail("The command response exceeded the supported size.") else output = output .. chunk end
+    end,
+    on_stderr = function(_, data)
+      if mine ~= generation or control ~= owner then return end
+      bytes = bytes + #table.concat(data or {}, "\n")
+      if bytes > 65536 then fail("The command response exceeded the supported size.") end
+    end,
+    on_exit = function(_, status)
+      if mine ~= generation or control ~= owner then return end
+      if status ~= 0 then fail("The local command did not confirm success."); return end
+      local parsed, result = pcall(vim.fn.json_decode, output)
+      if not parsed or type(result) ~= "table" or result.command ~= command
+        or result.acknowledged ~= true or result.scope ~= "local"
+        or result.halt_file_present ~= present or result.work_stopped ~= false then
+        fail("Local halt-file state was not confirmed."); return
+      end
+      if owner.timer then vim.fn.timer_stop(owner.timer) end
+      control = nil
+      vim.notify(present and "Local kill switch armed. Running work stops at its next checkpoint."
+        or "Local kill switch cleared. Prior tasks were not restarted.", vim.log.levels.INFO)
+    end,
+  })
+  if not ok or type(job) ~= "number" or job <= 0 then fail("The local command could not start."); return end
+  owner.job = job
+  if control == owner then
+    owner.timer = vim.fn.timer_start(math.max(100, math.min(120000, tonumber(M.config.control_timeout_ms) or 30000)), function()
+      fail("The local command exceeded its deadline.")
+    end)
+  end
 end
 
 function M.halt()

@@ -4,7 +4,7 @@
   "description": "Sidebar view + commands for Lightwork from inside VS Code.",
   "version": "0.1.0",
   "publisher": "cdayAI",
-  "license": "MIT",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "homepage": "https://github.com/Daybreak-AI-Labs/Lightwork",
   "bugs": {
     "url": "https://github.com/Daybreak-AI-Labs/Lightwork/issues"
@@ -46,7 +46,7 @@
       },
       {
         "command": "maverick.halt",
-        "title": "Lightwork: Halt all running goals"
+        "title": "Lightwork: Arm local emergency stop (checkpoints)"
       },
       {
         "command": "maverick.unhalt",
@@ -68,6 +68,34 @@
       {
         "command": "maverick.stopWatch",
         "title": "Lightwork: Stop live watch"
+      },
+      {
+        "command": "maverick.selectWorkspace",
+        "title": "Lightwork: Select local workspace"
+      },
+      {
+        "command": "maverick.configureDashboard",
+        "title": "Lightwork: Configure or rotate dashboard connection"
+      },
+      {
+        "command": "maverick.testDashboard",
+        "title": "Lightwork: Test dashboard connection"
+      },
+      {
+        "command": "maverick.disconnectDashboard",
+        "title": "Lightwork: Disconnect dashboard"
+      },
+      {
+        "command": "maverick.cancelTask",
+        "title": "Lightwork: Cancel selected dashboard task"
+      },
+      {
+        "command": "maverick.resumeTask",
+        "title": "Lightwork: Resume selected dashboard task"
+      },
+      {
+        "command": "maverick.runActions",
+        "title": "Lightwork: Choose local task action"
       }
     ],
     "viewsContainers": {
@@ -93,6 +121,18 @@
         {
           "command": "maverick.refreshRuns",
           "when": "view == maverick.runs",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "maverick.openExport",
+          "when": "view == maverick.runs && viewItem == maverickRun",
+          "group": "inline"
+        },
+        {
+          "command": "maverick.watchRun",
+          "when": "view == maverick.runs && viewItem == maverickRun",
           "group": "navigation"
         }
       ]
@@ -122,7 +162,28 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Access token provided by your dashboard administrator. This computer setting cannot be overridden by workspace files."
+          "description": "Access token provided by your dashboard administrator. This computer setting cannot be overridden by workspace files.",
+          "deprecationMessage": "Use Lightwork: Configure or rotate dashboard connection. Legacy values migrate to SecretStorage and are removed only after confirmed secure storage."
+        },
+        "maverick.dashboardName": {
+          "type": "string",
+          "default": "My dashboard",
+          "scope": "machine",
+          "description": "Name shown with the exact dashboard address in task selection and connection checks."
+        },
+        "maverick.maxDollars": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0.01,
+          "maximum": 100,
+          "description": "Requested per-run spending cap. Reviewed before every local start; deployment policy still applies."
+        },
+        "maverick.maxWallSeconds": {
+          "type": "integer",
+          "default": 1800,
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "Requested per-run time limit, reviewed before every local start."
         }
       }
     }

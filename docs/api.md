@@ -65,8 +65,8 @@ Server-Sent Events at `GET /api/v1/goals/{id}/events/stream` (supports
 
 | Method | Path | Description |
 |---|---|---|
-| `GET`  | `/api/v1/facts` | All facts as `{key: value}`. |
-| `POST` | `/api/v1/facts` | Upsert. Body: `{"key": str, "value": str}`. |
+| `GET`  | `/api/v1/facts` | Shared business facts as `{key: value}`; private task/personal namespaces are excluded. |
+| `POST` | `/api/v1/facts` | Create with expected revision `0`; replace with the revision and account/workspace context from `GET /facts/record?key=...`. Stale changes return 409. |
 
 ### Skills
 
@@ -82,55 +82,66 @@ Server-Sent Events at `GET /api/v1/goals/{id}/events/stream` (supports
 |---|---|---|
 | `GET` | `/api/v1/spend` | Total spend + per-episode breakdown. |
 
-## Example: start a goal
+## Example: start a goal and recover its receipt
+
+Persist one random request key **before** sending, scoped to the current dashboard,
+account and workspace. Keep the original input and key through a timeout or reload;
+do not generate a new key to retry uncertain work. The maintained
+[REST lifecycle example](clients/examples/rest_lifecycle.py) sends at most one POST
+and switches to receipt GET on uncertainty.
 
 ```bash
-curl -X POST http://127.0.0.1:8765/api/v1/goals \
+# REQUEST_KEY must be your previously persisted key for this logical request.
+curl --fail-with-body --max-time 15 -X POST http://127.0.0.1:8765/api/v1/goals \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN" \
-  -d '{
-    "title": "Compare pgvector and Qdrant",
-    "description": "Side by side, write to report.md",
-    "max_dollars": 2.0,
-    "max_wall_seconds": 1800
-  }'
+  -H "Idempotency-Key: $REQUEST_KEY" \
+  -d '{"title":"Compare pgvector and Qdrant","description":"Write to report.md",
+       "max_dollars":2.0,"max_wall_seconds":1800}'
 ```
 
-Response::
-
-```json
-{
-  "id": 42,
-  "status": "pending",
-  "title": "Compare pgvector and Qdrant",
-  "description": "Side by side, write to report.md",
-  "result": null
-}
-```
-
-## Example: poll for events
+A goal ID acknowledges admission, **not execution**. Inspect its current task state.
+If the request times out, loses its reply, or has an uncertain server error, use
+only this read with the same key, account and workspace:
 
 ```bash
-since=0
-while true; do
-  resp=$(curl -s "http://127.0.0.1:8765/api/v1/goals/42/events?since=$since" \
-    -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN")
-  echo "$resp" | jq '.events[]'
-  since=$(echo "$resp" | jq '.next_id')
-  status=$(echo "$resp" | jq -r '.status')
-  [ "$status" = "done" ] || [ "$status" = "blocked" ] && {
-    # Final pass to flush tail events committed after status flipped.
-    sleep 1
-    curl -s "http://127.0.0.1:8765/api/v1/goals/42/events?since=$since" \
-      -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN" | jq '.events[]'
-    break
-  }
-  sleep 2
-done
+curl --fail-with-body --max-time 15 \
+  'http://127.0.0.1:8765/api/v1/goal-submissions/receipt?kind=api' \
+  -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN" \
+  -H "Idempotency-Key: $REQUEST_KEY" -H 'Cache-Control: no-cache'
 ```
 
-The final-pass after terminal status flushes any events the agent
-committed between the last poll and goal completion.
+The receipt distinguishes `state` (`accepted` or `not_dispatched`),
+`submission_state`, the goal, and `execution_confirmed: false`. Admission/dispatch
+is not proof of a completed provider or external action. A 409 means that the same
+key's reviewed input or effective execution limits differ; review the existing
+request. A missing/unavailable receipt leaves the start unresolved. A 401/403
+requires restoring authorized access. None of these conditions permits a new-key
+POST. See the [full recovery contract](client-request-lifecycle.md#starting-work-and-halting-it).
+
+## Example: poll every event page through terminal acknowledgement
+
+```python
+import requests
+from rest_lifecycle import poll_events
+
+result = poll_events(
+    requests.Session(), "http://127.0.0.1:8765",
+    {"Authorization": "Bearer " + token}, goal_id=42,
+    emit=lambda event: print(event), since=last_persisted_cursor,
+    deadline_seconds=1800, cancelled=lambda: user_cancelled,
+)
+# Persist result["since"]. terminal=False means supervision ended, not that work stopped.
+```
+
+Copy [rest_lifecycle.py](clients/examples/rest_lifecycle.py) alongside this script.
+It drains `has_more` pages immediately, advances only after displaying each event,
+ignores repeated IDs, and stops only on the server's `terminal: true` with no
+remaining backlog. It handles every terminal status, including failed/cancelled,
+without assuming contiguous event IDs. Authentication/permission errors stop with
+a remedy. Other errors stop without inventing a cursor; resume from the last
+accepted cursor after reviewing the error. A bounded polling deadline or local
+cancel stops supervision and does not cancel the server task.
 
 ## Example: answer a queued question
 
@@ -145,9 +156,13 @@ Returns 204 No Content on success, 404 if no matching open question.
 
 ## Example: use a template
 
+Persist a separate request key for this template submission using the same recovery contract above.
+
 ```bash
-curl -X POST http://127.0.0.1:8765/api/v1/goals \
+curl --fail-with-body --max-time 15 -X POST http://127.0.0.1:8765/api/v1/goals \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN" \
+  -H "Idempotency-Key: $REQUEST_KEY" \
   -d '{
     "template": "trip-plan",
     "title": "",
