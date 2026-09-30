@@ -572,3 +572,15 @@ test('a tampered active hold carrying release material fails closed', async () =
   assert.doesNotMatch(ui.document.getElementById('ka-requests').textContent, /matter-tampered/);
   ui.dom.window.close();
 });
+
+
+test('currently opened source selection reaches Copilot without content and clears when its purpose changes',async()=>{
+  const ui=await setup([requestList(),searchPayload(),{context:CONTEXT,...item()}]);const selections=[];
+  ui.document.addEventListener('lightwork:copilot-selection',event=>selections.push(JSON.parse(JSON.stringify(event.detail.selection))));
+  ui.document.getElementById('ka-search-form').dispatchEvent(new ui.window.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  ui.document.querySelector('#ka-results button').click();await tick();
+  assert.deepEqual(selections.at(-1),{kind:'knowledge_source',reference:ref(),purpose:'product_research'});
+  assert.equal(JSON.stringify(selections).includes('governed summary'),false);
+  ui.document.getElementById('ka-purpose').dispatchEvent(new ui.window.Event('input'));
+  assert.deepEqual(selections.at(-1),{});ui.dom.window.close();
+});

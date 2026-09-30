@@ -312,8 +312,13 @@ def _binding(
 
 
 async def _call(function, *args, **kwargs):
+    return await run_in_threadpool(call_native, function, *args, **kwargs)
+
+
+def call_native(function, *args, **kwargs):
+    """Shared sanitized native boundary for HTTP handlers and reviewed actions."""
     try:
-        return await run_in_threadpool(function, *args, **kwargs)
+        return function(*args, **kwargs)
     except (ResearchRegistryNotFound, KnowledgeRequestNotFound) as exc:
         raise HTTPException(404, "Knowledge record was not found in this workspace") from exc
     except (ResearchRegistryDenied, KnowledgeAccessDenied) as exc:

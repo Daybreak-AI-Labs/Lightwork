@@ -84,3 +84,16 @@ def test_even_admin_content_access_cannot_relabel_another_owners_thread(thread, 
     with pytest.raises(HTTPException) as denied:
         organization.organization(request(), world, root)
     assert denied.value.status_code == 403
+
+
+def test_content_only_match_beyond_recent_25_is_found_without_other_owner(thread):
+    world, root, _ = thread
+    store = SubmissionStore(world)
+    for number in range(26):
+        store.create(token=f"later-{number}", fingerprint=hashlib.sha256(f"later-{number}".encode()).hexdigest(),
+                     owner="user:alice", title=f"Later chat {number}", description="", manifest=[], chat_text="Current discussion")
+    store.create(token="foreign", fingerprint=hashlib.sha256(b"foreign").hexdigest(), owner="user:bob",
+                 title="Other owner", description="", manifest=[], chat_text="Find the old ledger")
+    found = organization.conversations(request(), Response(), q="ledger", before_id=None, view="all")
+    assert [row["root_id"] for row in found["items"]] == [root]
+    assert found["items"][0]["matched_goal_id"] == root

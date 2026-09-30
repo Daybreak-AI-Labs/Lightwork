@@ -232,7 +232,8 @@ def precedent_prepare(request, selection, arguments):
 
 
 def entries():
-    return (Adapter("knowledge.assessment_precedents", "Review precedent answers and sources", "learning", "/privacy", ("/privacy", "/finance", "/security", "/approvals", "/knowledge-access"), PrecedentInput, precedent_snapshot, precedent_prepare),
+    from .product_operations_knowledge_feedback import feedback_entries
+    return (*feedback_entries(), Adapter("knowledge.assessment_precedents", "Review precedent answers and sources", "learning", "/privacy", ("/privacy", "/finance", "/security", "/approvals", "/knowledge-access"), PrecedentInput, precedent_snapshot, precedent_prepare),
             Adapter("knowledge.source_analysis", "Analyze an approved source", "learning", "/knowledge-access#source-analysis", ("/knowledge-access",), AnalysisInput, analysis_snapshot, analysis_prepare, analysis_execute, analysis_recover),
             Adapter("knowledge.rebuild", "Rebuild document search", "learning", "/knowledge-access", ("/knowledge-access",), RebuildInput, rebuild_snapshot, rebuild_prepare, rebuild_execute, rebuild_recover),
             Adapter("knowledge.rebuild_job", "Review or control rebuild progress", "learning", "/knowledge-access", ("/knowledge-access",), JobInput, job_snapshot, job_prepare, job_execute))

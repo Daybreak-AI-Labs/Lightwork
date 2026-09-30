@@ -596,3 +596,78 @@ def test_operator_feedback_does_not_grant_admin_decision_or_lineage_access(custo
         "context": context, "confirm": True, "expected_revision": 1,
         "decision": "approve", "evidence_sha256": "a" * 64,
     }).status_code == 403
+
+
+FEEDBACK_OPS_BASE = "/api/v1/copilot/product-operations"
+
+
+@pytest.fixture
+def enabled(customer, monkeypatch):
+    # Keep the real account, workspace binding, feature sources and native
+    # authority; only enable this existing optional feature in the local fixture.
+    original = config.load_global_config
+    features = config.get_features()
+    monkeypatch.setattr(config, "load_global_config", lambda: original() | {"features": original().get("features", {}) | {"copilot_operations": True}})
+    monkeypatch.setattr(config, "get_features", lambda: features | {"copilot_operations": True})
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    return customer
+
+
+def feedback_review(client, selection, operation="knowledge.feedback", arguments=None):
+    catalog = client.post(FEEDBACK_OPS_BASE + "/catalog", json={"page": "/knowledge-access", "selection": selection})
+    assert catalog.status_code == 200, catalog.text
+    payload = catalog.json()
+    entry = next(row for row in payload["operations"] if row["id"] == operation)
+    return client.post(FEEDBACK_OPS_BASE + "/prepare", json={"page": "/knowledge-access", "selection": selection,
+                       "operation": operation, "context": payload["context"], "revision": entry["revision"],
+                       "arguments": arguments or {}})
+
+
+def test_feedback_uses_native_exact_source_and_owned_status_without_admin_side_effect(enabled):
+    client, service, registry, rights = enabled
+    source = _dataset(registry, rights, "knowledge-a", "source-for-feedback")
+    selected = {"kind": "knowledge_source", "reference": _ref(source), "purpose": PURPOSE}
+    before = registry.inspect("knowledge-a", source)
+    prepared = feedback_review(client, selected, arguments={"request_type": "correction", "reason": "The hours changed.", "correction": "Open at ten."})
+    assert prepared.status_code == 200, prepared.text
+    body = {"token": prepared.json()["token"], "confirmed": True}
+    response = client.post(FEEDBACK_OPS_BASE + "/execute", json=body)
+    assert response.status_code == 200 and response.json()["status"] == "confirmed", response.text
+    result = response.json()["details"]
+    assert result["status"] == "submitted" and "derivatives" not in result and "retention_hold" not in result
+    again = client.post(FEEDBACK_OPS_BASE + "/execute", json=body)
+    assert again.status_code == 200 and again.json()["details"]["id"] == result["id"], again.text
+    assert len(service.feedback_requests("knowledge-a", OWNER)) == 1
+    assert registry.inspect("knowledge-a", source)["state"] == before["state"] == "approved"
+    service.submit_request("knowledge-a", "user:someone-else", source, request_type="exclusion", reason="Another private request", request_key="other")
+    own = feedback_review(client, {}, operation="knowledge.my_feedback")
+    assert own.status_code == 200 and own.json()["read_only"], own.text
+    assert len(own.json()["details"]["items"]) == 1 and "Another private request" not in own.text
+
+
+def test_revoked_source_or_workspace_switch_refuses_queued_feedback(enabled):
+    client, service, registry, rights = enabled
+    source = _dataset(registry, rights, "knowledge-a", "changing-source")
+    selected = {"kind": "knowledge_source", "reference": _ref(source), "purpose": PURPOSE}
+    prepared = feedback_review(client, selected, arguments={"request_type": "exclusion", "reason": "Review current policy", "correction": ""})
+    assert prepared.status_code == 200, prepared.text
+    body = {"token": prepared.json()["token"], "confirmed": True}
+    rights[("knowledge-a", "changing-source")]["allowed"] = False
+    assert client.post(FEEDBACK_OPS_BASE + "/execute", json=body).status_code == 409
+    assert service.feedback_requests("knowledge-a", OWNER) == []
+    rights[("knowledge-a", "changing-source")]["allowed"] = True
+    _select(client, "knowledge-b")
+    assert client.post(FEEDBACK_OPS_BASE + "/execute", json=body).status_code in {404, 409}
+    assert service.feedback_requests("knowledge-b", OWNER) == []
+
+
+def test_feedback_catalog_requires_exact_selection_and_correction_information(enabled):
+    client, _, registry, rights = enabled
+    catalog = client.post(FEEDBACK_OPS_BASE + "/catalog", json={"page": "/knowledge-access"}).json()
+    feedback = next(row for row in catalog["operations"] if row["id"] == "knowledge.feedback")
+    assert feedback["available"] is False
+    source = _dataset(registry, rights, "knowledge-a", "correction-source")
+    selected = {"kind": "knowledge_source", "reference": _ref(source), "purpose": PURPOSE}
+    assert feedback_review(client, selected, arguments={"request_type": "correction", "reason": "Changed", "correction": ""}).status_code == 422
+    from maverick_dashboard.product_operations_knowledge_feedback import feedback_entries
+    assert len(feedback_entries()) == 2

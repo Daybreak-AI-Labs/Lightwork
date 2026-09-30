@@ -462,6 +462,7 @@
 
   function clearRequestInputs() {
     selectedReference = null;
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:{}}}));
     if (requestSource) { requestSource.textContent = "Open a source detail to select its exact version."; }
     if (requestForm) {
       requestForm.reset();
@@ -666,6 +667,7 @@
     });
     detail.appendChild(use);
     selectedReference = value.reference;
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:{kind:'knowledge_source',reference:value.reference,purpose:value.eligibility.purpose}}}));
     if (requestSource) {
       requestSource.textContent = value.title + " · version " + value.reference.version;
     }
