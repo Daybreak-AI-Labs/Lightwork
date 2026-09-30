@@ -58,7 +58,7 @@ class Review(StrictInput):
 
 
 class AccountExport(StrictInput):
-    store: Literal["model_test_history", "conversation_inbox"]
+    store: Literal["model_test_history", "conversation_inbox", "saved_views_and_pins"]
 
 
 def _authority(request, *, write=False):
@@ -128,7 +128,7 @@ def _fields(state, action, requests):
     if action == "export_scope":
         return _scope_fields(state)
     if action == "export_account":
-        return [_field("store", "Owned account store", "select", choices=_choices((("model_test_history", "Model-test history"), ("conversation_inbox", "Queued conversation messages and files"))))]
+        return [_field("store", "Owned account store", "select", choices=_choices((("model_test_history", "Model-test history"), ("conversation_inbox", "Queued conversation messages and files"), ("saved_views_and_pins", "Saved views and task pins"))))]
     return []
 
 

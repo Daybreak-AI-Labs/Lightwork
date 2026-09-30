@@ -21,9 +21,10 @@ from .draft_store import DraftStore
 
 STORE = GovernedRecordStore("personal_data_requests", "PDR", "personal_data_request")
 KINDS = {"preference_notes", "conversation_history", "recovery_drafts",
-         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox"}
+         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox", "saved_views_and_pins"}
 DIAGNOSTICS = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
 EXCEPTIONS = [
+    {"store": "workspace_gallery_curation", "state": "retained", "reason": "Gallery curation is a separate workspace record. Erasing an account's saved views and task pins does not delete featured task content or curator history."},
     {"store": "task_feedback_and_trace_annotations", "state": "retained", "reason": "Task verdicts and trace annotations are separate workspace records; conversation deletion does not erase them. Historical deployment-wide feedback and legacy UX files lack reliable workspace lineage and are unavailable to normal reads; they require a separate records-custodian review, not automatic reassignment."},
     {"store": "fact_operation_receipts", "state": "retained", "reason": "Shared fact action receipts retain the actor, review digest and outcome only, without fact names or values. These replay barriers are not automatically erased or expired; removal could let an old create action recreate deleted data."},
     {"store": "audit_and_governance_evidence", "state": "retained", "reason": "Content-minimized activity, policy and deletion receipts follow their evidence retention policy."},
@@ -92,7 +93,11 @@ def _diagnostic_records(actor):
 
 def _preview_owned_account(kind, actor):
     target = {}
-    if kind == "conversation_inbox":
+    if kind == "saved_views_and_pins":
+        from maverick.ux_store import shared
+        target["inventory"] = shared().owned_navigation_inventory(actor)
+        target["count"] = target["inventory"]["count"]
+    elif kind == "conversation_inbox":
         from maverick.conversation_inbox import owned_inventory
         target["records"] = owned_inventory(actor)
         target["count"] = len(target["records"])
@@ -156,7 +161,7 @@ def preview(actor, channel, user_id, selected, world):
             target["records"] = owned_activation_inventory(actor, world=world)
             if any(record["blocked"] for record in target["records"]):
                 raise ValueError("Some activation drafts have active or uncertain task work. Reconcile them before reviewing draft erasure.")
-        elif kind in {"conversation_inbox", "generated_tools", "model_test_history"}:
+        elif kind in {"conversation_inbox", "generated_tools", "model_test_history", "saved_views_and_pins"}:
             target.update(_preview_owned_account(kind, actor))
         elif kind == "project_defaults":
             from maverick.project_workspaces import owned_defaults_inventory
@@ -219,6 +224,9 @@ def _erase_conversations(world, row, target):
 
 def _erase_owned_account(row, target):
     kind, actor = target["store"], row["owner"]
+    if kind == "saved_views_and_pins":
+        from maverick.ux_store import shared
+        return shared().erase_owned_navigation(actor, expected_version=target["inventory"]["version"])
     if kind == "conversation_inbox":
         from maverick.conversation_inbox import erase_owned
         for item in target["records"]:
@@ -279,7 +287,7 @@ def _erase_target(world, row, target):
             if result["status"] == "unconfirmed":
                 raise ValueError("Activation erasure receipt is not confirmed.")
         return {"state": "purged", "removed": len(target["records"]), "retained": "Content-free erasure tombstones, task/admission history, audit evidence and separately created owned workflows remain."}
-    if kind in {"conversation_inbox", "generated_tools", "model_test_history"}:
+    if kind in {"conversation_inbox", "generated_tools", "model_test_history", "saved_views_and_pins"}:
         return _erase_owned_account(row, target)
     if kind == "project_defaults":
         from maverick.project_workspaces import erase_owned_defaults

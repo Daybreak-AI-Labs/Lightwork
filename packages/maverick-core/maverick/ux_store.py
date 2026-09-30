@@ -47,15 +47,21 @@ class UxStore:
 
     # -- persistence ------------------------------------------------------
 
-    def _load(self) -> dict[str, Any]:
+    def _load(self, *, strict: bool = False) -> dict[str, Any]:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 raise ValueError("ux_store must be a JSON object")
             for k in ("pins", "views", "annotations", "gallery"):
                 data.setdefault(k, {})
+                if strict and not isinstance(data[k], dict):
+                    raise ValueError("UX storage has an invalid inventory; no empty state is claimed")
             return data
+        except FileNotFoundError:
+            return {"pins": {}, "views": {}, "annotations": {}, "gallery": {}}
         except (OSError, ValueError):
+            if strict:
+                raise
             return {"pins": {}, "views": {}, "annotations": {}, "gallery": {}}
 
     def _save(self, data: dict[str, Any]) -> None:
@@ -106,7 +112,7 @@ class UxStore:
     def view_snapshot(self, principal: str | None) -> dict:
         """Return one locked view inventory and its compare-and-swap version."""
         with self._lock:
-            views = self._load()["views"].get(_principal_key(principal), {})
+            views = self._load(strict=True)["views"].get(_principal_key(principal), {})
             return {"views": views, "revision": self._view_revision(views)}
 
     def view_revision(self, principal: str | None) -> str:
@@ -124,7 +130,7 @@ class UxStore:
         clean = {str(k)[:64]: str(v)[:256] for k, v in params.items()}
         key = _principal_key(principal)
         with self._lock:
-            data = self._load()
+            data = self._load(strict=expected_revision is not None)
             views = data["views"].setdefault(key, {})
             if expected_revision is not None and expected_revision != self._view_revision(views):
                 raise ViewConflict("Saved views changed. Refresh them and review your changes again.")
@@ -141,7 +147,7 @@ class UxStore:
                     *, expected_revision: str | None = None) -> bool:
         key = _principal_key(principal)
         with self._lock:
-            data = self._load()
+            data = self._load(strict=expected_revision is not None)
             views = data["views"].get(key, {})
             if expected_revision is not None and expected_revision != self._view_revision(views):
                 raise ViewConflict("Saved views changed. Refresh them and review removal again.")
@@ -149,6 +155,54 @@ class UxStore:
             if existed:
                 self._save(data)
             return existed
+
+    # -- exact-owner My Data inventory/export/erasure ------------------------
+
+    def _owned_navigation(self, data: dict, principal: str) -> dict:
+        if not isinstance(principal, str) or not principal or principal != principal.strip() or principal == _ANON:
+            raise ValueError("A named exact account is required for owned navigation records")
+        pins, views = data["pins"].get(principal, []), data["views"].get(principal, {})
+        if (not isinstance(pins, list) or len(pins) > MAX_PINS
+                or any(type(value) is not int or value <= 0 for value in pins)
+                or not isinstance(views, dict) or len(views) > MAX_VIEWS):
+            raise ValueError("Owned navigation records exceed or invalidate the exact inventory")
+        material = {"owner": principal, "pins": pins, "views": views}
+        version = self._view_revision({"storage": str(self.path.resolve()), **material})
+        return {**material, "version": version}
+
+    def owned_navigation_inventory(self, principal: str) -> dict:
+        """Content-free review metadata; never expose filters to a reviewer."""
+        with self._lock:
+            records = self._owned_navigation(self._load(strict=True), principal)
+            return {"version": records["version"], "pin_count": len(records["pins"]),
+                    "view_count": len(records["views"]), "count": len(records["pins"]) + len(records["views"]),
+                    "retained": NAVIGATION_RETAINED}
+
+    def export_owned_navigation(self, principal: str) -> dict:
+        """Return only the requesting owner's records, without dereferencing tasks."""
+        with self._lock:
+            return {**self._owned_navigation(self._load(strict=True), principal),
+                    "store": "saved_views_and_pins", "limits": NAVIGATION_RETAINED}
+
+    def erase_owned_navigation(self, principal: str, *, expected_version: str) -> dict:
+        """One locked exact-owner mutation after native preservation review.
+
+        The caller owns durable intent and audit receipts. A failed write or
+        readback propagates, so its per-store result remains unconfirmed.
+        """
+        with self._lock:
+            data = self._load(strict=True)
+            records = self._owned_navigation(data, principal)
+            if records["version"] != expected_version:
+                raise ViewConflict("Saved views or task pins changed. Review a fresh exact deletion request.")
+            data["pins"].pop(principal, None)
+            data["views"].pop(principal, None)
+            self._save(data)
+            after = self._owned_navigation(self._load(strict=True), principal)
+            if after["pins"] or after["views"]:
+                raise RuntimeError("Owned navigation erasure readback is unconfirmed")
+            return {"state": "purged", "removed": len(records["pins"]) + len(records["views"]),
+                    "retained": NAVIGATION_RETAINED}
 
     # -- trace annotations ----------------------------------------------------
 
@@ -226,6 +280,14 @@ class UxStore:
 
 class ViewConflict(ValueError):
     """A reviewed saved-view inventory no longer matches current storage."""
+
+
+NAVIGATION_RETAINED = (
+    "Only this account's saved dashboard filters and pinned task references are included. "
+    "Task content, other accounts, page/template favorites, privacy restrictions, "
+    "workspace trace annotations, gallery curation and audit evidence remain separate. "
+    "Legacy UX files without reliable workspace lineage stay outside this inventory."
+)
 
 
 _shared: dict[Path, UxStore] | None = None

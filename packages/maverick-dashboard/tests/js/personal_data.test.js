@@ -29,6 +29,16 @@ test("store inventory distinguishes draft counts from owned learning provenance"
 test("new stores have explicit independently reviewed deletion choices",()=>{
   const ui=fixture({}); const rendered=content(ui.el("pd-delete-stores"));
   assert.match(rendered,/model-test history/);assert.match(rendered,/current authorized generated tools/);assert.match(rendered,/queued conversation messages/);
+  assert.match(rendered,/saved dashboard views and task pins/);assert.match(rendered,/keeps tasks, annotations and gallery/);
+});
+
+test("owned navigation inventory names counts and retained shared records without reading filters",async()=>{
+  const ui=fixture({holds:{blocked:false},limits:"Exact account store only",tasks:[],stores:[{
+    name:"Saved views and task pins",state:"available",count:3,
+    inventory:{view_count:2,pin_count:1,retained:"Annotations and gallery are retained separately."}}]});
+  await ui.click("pd-inventory");const rendered=content(ui.el("pd-stores"));
+  assert.match(rendered,/2 saved dashboard views; 1 pinned task references/);
+  assert.match(rendered,/Annotations and gallery are retained/);assert.doesNotMatch(rendered,/undefined/);
 });
 test("owned local copies show expiry limits and safe native links without treating expiry as erasure",async()=>{
   const ui=fixture({holds:{blocked:false},limits:"Specific stores only",tasks:[],stores:[{

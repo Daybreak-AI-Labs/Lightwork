@@ -206,6 +206,16 @@ def _inventory(request):
     from .personal_shared_inventory import inventory as shared_inventory
     stores.extend(shared_inventory(request, actor))
     try:
+        from maverick.ux_store import shared
+        navigation = shared().owned_navigation_inventory(actor)
+        stores.append({"name": "Saved dashboard views and pinned tasks", "state": "available", "inventory": navigation,
+                       "count": navigation["count"], "use": "Private named task filters and task bookmark references in this workspace.",
+                       "action": "Download Saved views and task pins above or select them below for independently reviewed deletion.",
+                       "expiry": "Until you remove them or a reviewed erasure completes; annotations and gallery remain separate."})
+    except Exception:
+        stores.append({"name": "Saved dashboard views and pinned tasks", "state": "unavailable",
+                       "action": "The exact owned inventory could not be read; no zero count or erasure is claimed."})
+    try:
         draft_inventory = DraftStore(context_for(request)).inventory()
         stores.append({"name": "Private editor recovery copies", "state": "available", "inventory": draft_inventory,
                        "use": "Recover your drafts; not automatic memory", "action": "Open the original editor to restore/discard; retire discarded copies in recovery storage"})
@@ -374,7 +384,7 @@ def download_records(request: Request, token: str = Query(min_length=1, max_leng
 
 
 class AccountExportIn(ContextIn):
-    store: Literal["model_test_history", "conversation_inbox"]
+    store: Literal["model_test_history", "conversation_inbox", "saved_views_and_pins"]
 
 
 @router.post("/api/v1/my-data/account-export")

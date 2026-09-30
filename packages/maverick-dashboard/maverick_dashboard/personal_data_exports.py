@@ -21,7 +21,7 @@ def link(request, *, channel=None, user_id=None, store=None):
     actor = native._actor(request)
     if store is None:
         personal_memory.require_scope(actor, channel, user_id)
-    elif store not in {"model_test_history", "conversation_inbox"}:
+    elif store not in {"model_test_history", "conversation_inbox", "saved_views_and_pins"}:
         raise ValueError("Choose an available owned account store.")
     token = crypto_at_rest.seal_to_str(json.dumps({"purpose": PURPOSE, "owner": actor,
         "context": context_for(request), "channel": channel, "user_id": user_id,
@@ -55,6 +55,9 @@ def download(request, token):
             bundle["personal_notes"] = personal_memory.records(channel, user_id)
             bundle["memory_controls"] = personal_memory.controls(channel, user_id)
             bundle["limits"] = "Selected verified conversation scope only; account stores, derivatives, shared packets and external copies are separate."
+        elif store == "saved_views_and_pins":
+            from maverick.ux_store import shared
+            bundle = shared().export_owned_navigation(actor)
         elif store == "model_test_history":
             from maverick.model_test_retention import export_owned
             bundle = export_owned(actor)
