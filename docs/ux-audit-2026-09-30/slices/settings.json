@@ -120,10 +120,10 @@
   },
   {
     "id": "LW-036",
-    "status": "planned",
-    "implementation_evidence": "settings_experience review endpoint shares catalog coercion/governance/access plan under revision lock; settings-review modal before/after/source/scope/timing/dependencies; exclusions revalidated; saves audit before/after revisions",
-    "validation": "Python AST and JavaScript syntax/whitespace review only. Historical checkpoint: regression suites were deferred; user has now authorized local tests and root is coordinating integrated runs; no suites, browser runs, migrations on a live database, or provider/model calls.",
-    "remaining": "Persistent saved revision is implemented; running workers do not yet publish an applied-revision acknowledgement, so UI honestly says next configuration read/running tasks keep captured configuration. Full runtime acknowledgement plumbing remains."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "settings_experience.review + mixed immediate/next-task/restart metadata, exact before/after/source/affected module/scope; review exclusion preserves draft. runtime_configuration immutable first-read startup snapshots and heartbeats; native dashboard/worker/channels/gRPC lifecycle acknowledgements; admin runtime-status API and refreshable saved-vs-running UI.",
+    "validation": "18 focused local tests passed for immutable startup/heartbeat, restart comparison, stale/wrong-consumer/tenant refusal, environment changes, malformed receipts, timing projection and installer choices. AST/Jinja, JS syntax, targeted Ruff and whitespace checks passed. No live providers or production processes. The slice settings catalog suite passed all 1,542 tests.",
+    "remaining": "Full integrated process restart/browser qualification pending. Coverage is explicitly limited to observed processes sharing this configuration data folder; tenant-scoped or manually overridden gRPC processes remain unconfirmed, and startup acknowledgement never claims service health or work success."
   },
   {
     "id": "LW-037",

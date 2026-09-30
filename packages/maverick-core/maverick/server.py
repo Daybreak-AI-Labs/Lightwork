@@ -101,6 +101,8 @@ class Server:
         self._owns_sandbox = (
             created_sandbox if owns_sandbox is None else bool(owns_sandbox)
         )
+        self._runtime_receipt = None
+        self._runtime_configuration_native = False
         self._resources_closed = False
         self._stopping = False
         self._stopped = False
@@ -508,6 +510,8 @@ class Server:
                         channel.start(), name=f"channel-{channel.name}",
                     )
                 )
+            from .runtime_configuration import start as start_runtime_receipt
+            self._runtime_receipt = start_runtime_receipt("channels") if self._runtime_configuration_native else None
             results = await asyncio.gather(*self._tasks, return_exceptions=True)
             for c, result in zip(self._channels, results, strict=False):
                 if isinstance(result, Exception):
@@ -546,6 +550,8 @@ class Server:
         if self._resources_closed:
             return
         self._resources_closed = True
+        if self._runtime_receipt is not None:
+            self._runtime_receipt.close()
         if self._owns_sandbox:
             close = getattr(self.sandbox, "close", None)
             if callable(close):
@@ -937,6 +943,7 @@ def build_from_config() -> Server:
             owns_world=True,
             owns_sandbox=True,
         )
+        server._runtime_configuration_native = True
 
         channels_cfg = cfg.get("channels", {})
         for name, wire in _WIRES.items():

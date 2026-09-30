@@ -32,7 +32,8 @@ TTL = 600
 PURPOSE = "lightwork.product-operation.v1"
 ADAPTER_MODULES = ("product_operations_preferences", "product_operations_tasks",
                    "product_operations_connections", "product_operations_notifications",
-                   "product_operations_budget", "product_operations_models", "product_operations_diagnostics")
+                   "product_operations_budget", "product_operations_models", "product_operations_diagnostics",
+                   "product_operations_knowledge")
 
 
 @dataclass(frozen=True)
@@ -250,8 +251,11 @@ def prepare(request: Request, body: PrepareInput):
                 "selection": body.selection, "context": body.context, "revision": state.revision,
                 "arguments": arguments, "native": preview.native,
                 "operation_id": secrets.token_hex(16), "expires_at": time.time() + TTL}
+    encoded = json.dumps(material, sort_keys=True, allow_nan=False)
+    if len(encoded.encode("utf-8")) > 45000:
+        raise HTTPException(422, "This review is too large for Copilot. Your draft is kept; use the native editor for the complete content.")
     try:
-        token = crypto_at_rest.seal_to_str(json.dumps(material, sort_keys=True, allow_nan=False))
+        token = crypto_at_rest.seal_to_str(encoded)
         if not crypto_at_rest.is_sealed_str(token):
             raise ValueError("sealed preparation required")
     except Exception as exc:

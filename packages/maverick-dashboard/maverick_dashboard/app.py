@@ -704,6 +704,7 @@ async def _lifespan(app: FastAPI):
 
     from ._lifecycle import ShutdownSupervisor, register_main_components, shutdown_seconds
 
+    runtime_receipt = None
     previous = getattr(app.state, "lifecycle_supervisor", None)
     if previous is not None:
         previous.assert_restart_allowed()
@@ -819,8 +820,12 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("voice STT warm-up not started")
         supervisor.phase = "running"
+        from maverick.runtime_configuration import start as start_runtime_receipt
+        runtime_receipt = start_runtime_receipt("dashboard")
         yield
     finally:
+        if runtime_receipt is not None:
+            runtime_receipt.close()
         await supervisor.stop()
 
 
@@ -1093,6 +1098,8 @@ from .product_operations import router as product_operations_router
 app.include_router(product_operations_router)
 from .settings_experience import router as settings_experience_router
 app.include_router(settings_experience_router)
+from .settings_runtime_status import router as settings_runtime_router
+app.include_router(settings_runtime_router)
 templates.context_processors.append(_display_preference_context)
 app.include_router(record_search_router)
 app.include_router(action_center_router)

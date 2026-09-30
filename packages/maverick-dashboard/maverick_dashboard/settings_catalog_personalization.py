@@ -43,6 +43,11 @@ def entries(S, C, Column):
                     subgroup="Copilot actions", max_items=len(FAMILIES),
                     choices=tuple((name, name.capitalize()) for name in FAMILIES),
                     weaker="grow", warning="More native controls will be available through Copilot."))
+    result.append(S("settings", "runtime_status", "Show configuration startup acknowledgements",
+                    "Compare saved settings with the configuration acknowledged by running dashboard, worker, "
+                    "channel and gRPC processes sharing this data folder. Stale or missing acknowledgements stay "
+                    "unconfirmed. This reports startup configuration, separately from service health.",
+                    "toggle", "People & access", True, "maverick.runtime_configuration", subgroup="Configuration status"))
     return result
 
 

@@ -127,6 +127,8 @@ FEATURE_DEFAULTS = {
     "draft_recovery": True,
     "personal_preferences": True,
     "configuration_profiles": True,
+    "employee_task_diagnostics": True,
+    "employee_activation": True,
     "support_center": True,
     "record_search": True,
     "workspace_recovery": False,
@@ -172,6 +174,8 @@ FEATURE_INFO = {
         "companion history. Companions cannot take actions, use connected "
         "sources or create learned memory."
     ),
+    "employee_task_diagnostics": "Show bounded diagnostics and support guidance for the signed-in person's own tasks. No diagnostic control grants access to another person's work.",
+    "employee_activation": "Guide each signed-in person through their allowed first task and readiness checks. Existing policy, cost limits and provider configuration stay in force.",
     "copilot_operations": "Let Copilot open registered product controls in the action families enabled by your organization. Every change requires a fresh review and explicit confirmation; native controls remain available when this is off.",
     "support_center": "Allow installation administrators to prepare, review and download redacted diagnostics in Help. Reports are never sent automatically.",
     "workflow_readiness": "Show available workflows, their supported boundaries, and the live or platform validation still required. Enablement never establishes customer acceptance.",
@@ -1493,8 +1497,9 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
     value of each path (``REMOVE`` when absent) so a caller can undo the save
     if the change cannot be recorded in the audit trail.
     """
-    from .settings_catalog import SETTINGS
     from maverick.config_resets import METADATA, reset_spec
+
+    from .settings_catalog import SETTINGS
 
     by_path = {s.path: s for s in SETTINGS if s.key_kind != "entries"}
     # "entries" tables (usage limits for any tool) own every other key of

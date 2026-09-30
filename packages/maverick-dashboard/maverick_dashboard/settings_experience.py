@@ -10,7 +10,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import auth, settings_all_page as page, settings_catalog as catalog, settings_store
+from . import auth, settings_store
+from . import settings_all_page as page
+from . import settings_catalog as catalog
 
 router = APIRouter()
 HEADERS = {"Cache-Control": "private, no-store"}
@@ -45,6 +47,11 @@ def _allowed(request: Request, *, feature: bool = False):
 def _can_export(setting) -> bool:
     return (setting.id in PORTABLE and not setting.secret and not page._secret_columns(setting)
             and setting.control in {"text", "number", "toggle", "select", "list", "multiselect"})
+
+
+def _impact(setting):
+    from .settings_runtime_status import impact
+    return impact(setting)
 
 
 @router.post('/api/v1/settings/catalog/review')
@@ -87,8 +94,10 @@ def review(request: Request, body: page.CatalogUpdate):
                 'after': page._audit_value(setting, change['new']),
                 'source': page._resolve(setting, layers)['source'], 'resulting_source': resulting_source,
                 'scope': 'Organization / installation', 'restart': setting.restart,
+                'affected': 'Authorized workspaces inheriting this organization setting',
+                'module': setting.reader,
                 'automatic': requested is None,
-                'timing': 'After restart' if setting.restart else 'Next configuration read; running tasks keep their captured configuration',
+                **_impact(setting),
             })
         return JSONResponse({'items': items, 'warnings': warnings, 'revision': current,
                              'learning': [spec['label'] for spec in learning]}, headers=HEADERS)

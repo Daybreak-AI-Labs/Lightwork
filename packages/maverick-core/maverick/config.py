@@ -545,6 +545,8 @@ def load_global_config() -> dict:
     overlay = os.environ.get(CONFIG_OVERLAY_ENV)
     if overlay:
         cfg = _deep_merge_config(cfg, _load_config_file(Path(overlay).expanduser()))
+    from .runtime_configuration import remember
+    remember(cfg, valid=not bool(config_source_errors(include_tenant=False)))
     return cfg
 
 
@@ -1043,6 +1045,8 @@ def get_features() -> dict:
         "draft_recovery": cfg.get("draft_recovery", True) is True,
         "personal_preferences": cfg.get("personal_preferences", True) is True,
         "configuration_profiles": cfg.get("configuration_profiles", True) is True,
+        "employee_task_diagnostics": cfg.get("employee_task_diagnostics", True) is True,
+        "employee_activation": cfg.get("employee_activation", True) is True,
         "support_center": cfg.get("support_center", True) is True,
         "record_search": cfg.get("record_search", True) is True,
         "workspace_recovery": cfg.get("workspace_recovery", False) is True,

@@ -45,6 +45,9 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "deployment": {"type", "allow_multiple_control_planes"},
     "personalization": {"locked_fields", "defaults"},
     "copilot": {"operation_families"},
+    "settings": {"runtime_status"},
+    "mobile_offline": {"enabled", "max_age_seconds", "max_bytes"},
+    "workflows": {"versioning", "typed_inputs"},
     "_dashboard_resets": None,  # Internal global-overlay reset metadata; removed before runtime config.
     "budget": {
         "task_limits_enabled",

@@ -27,7 +27,7 @@
       });
       plan.items.forEach(function (item) {
         var section = document.createElement('section'), title = document.createElement('h3'); title.textContent = item.label + (item.automatic ? ' (dependent change)' : ''); section.appendChild(title);
-        var detail = document.createElement('p'); detail.textContent = item.scope + ': ' + item.source + ' to ' + item.resulting_source + '. ' + item.timing; section.appendChild(detail);
+        var detail = document.createElement('p'); detail.textContent = item.scope + ': ' + item.source + ' to ' + item.resulting_source + '. ' + item.timing + '. Affects: ' + item.affected + '. Module: ' + item.module; section.appendChild(detail);
         var before = document.createElement('pre'); before.textContent = 'Before: ' + shown(item.before) + '\nAfter: ' + shown(item.after); section.appendChild(before); dialog.appendChild(section);
       });
       plan.warnings.forEach(function (warning) { var p = document.createElement('p'); p.textContent = warning.label + ': ' + warning.warning; dialog.appendChild(p); });
@@ -69,11 +69,13 @@
     var reviewed = await window.mvReviewSettings(changes,revision); if (!reviewed) return;
     try {
       var result = await call('/api/v1/settings/catalog',{changes:reviewed.changes,expected_revision:reviewed.revision});
+      if (!result.quorum) document.dispatchEvent(new CustomEvent('lightwork:settings-saved', {detail: {ids: result.changed || []}}));
       status.textContent = result.quorum ? result.message : 'Settings saved. Reload this page when your other drafts are saved to see their current values.';
     } catch (failure) {
       if (failure.status !== 409 || !Array.isArray(failure.data.confirm)) throw failure;
       if (!(await window.mvConfirm(failure.data.confirm.map(function (item) { return item.label + ': ' + item.warning; }).join('\n'),{okText:'Confirm changes'}))) return;
       var confirmed = await call('/api/v1/settings/catalog',{changes:reviewed.changes,expected_revision:reviewed.revision,confirm:true});
+      if (!confirmed.quorum) document.dispatchEvent(new CustomEvent('lightwork:settings-saved', {detail: {ids: confirmed.changed || []}}));
       status.textContent = confirmed.quorum ? confirmed.message : 'Settings saved. Other drafts on this page were kept; they will require conflict review.';
     }
   }

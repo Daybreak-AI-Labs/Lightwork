@@ -71,6 +71,12 @@
 
   <div class="panel" role="status" aria-live="polite" id="settings-all-status" hidden></div>
 
+  <section class="panel" id="settings-runtime-status" aria-labelledby="settings-runtime-title">
+    <h2 id="settings-runtime-title">Saved and running configuration</h2>
+    <p data-runtime-summary role="status">Check which running services have acknowledged saved changes.</p>
+    <button class="btn btn--ghost" type="button" data-runtime-refresh>Check configuration status</button>
+    <div data-runtime-items></div>
+  </section>
   <p><label><input type="checkbox" id="settings-recovery-opt"> Keep encrypted recovery copies of ordinary settings drafts</label>
     <span class="muted">Credentials, policy controls and imported documents are excluded. Review recovered drafts before saving.</span></p>
   <div id="settings-all-groups" data-rows-url="/settings/all/rows"
@@ -146,6 +152,7 @@
   </div>
 
   <p class="muted" id="settings-all-empty" hidden>No settings match. Clear the search to see every setting.</p>
+  <script src="/static/lightwork-settings-runtime.js" defer></script>
   <script src="/static/lightwork-settings-review.js" defer></script>
   <script src="/static/lightwork-settings-all.js" defer></script>
   <script src="/static/lightwork-theme-preview.js" defer></script>

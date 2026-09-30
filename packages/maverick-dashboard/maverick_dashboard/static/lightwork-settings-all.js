@@ -347,11 +347,12 @@
         if (!changed(row)) row.dataset.revision = result.data.revision || row.dataset.revision;
       });
       if (recovery) { recovery.changed(); recovery.save(); }
+      document.dispatchEvent(new CustomEvent('lightwork:settings-saved', {detail: {ids: result.data.changed || []}}));
       var done = (result.data.changed || []).length;
       var text = done ? 'Saved.' : 'Nothing changed.';
-      if (result.data.restart) text += ' Some changes take effect after Lightwork restarts.';
+      if (result.data.restart) text += ' Check configuration status below for the services that need a restart.';
       busyRows.forEach(function (row) { say(row, text); });
-      announce(done ? (done === 1 ? '1 setting saved.' : done + ' settings saved.') + (result.data.restart ? ' Some changes take effect after Lightwork restarts.' : '') : '');
+      announce(done ? (done === 1 ? '1 setting saved.' : done + ' settings saved.') + (result.data.restart ? ' Check configuration status below for the services that need a restart.' : '') : '');
       updateFilter();
     } catch (failure) {
       var text2 = errorText(failure, action);

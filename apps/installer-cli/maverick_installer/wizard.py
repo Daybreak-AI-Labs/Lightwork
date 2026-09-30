@@ -4620,6 +4620,15 @@ def pick_advanced() -> dict[str, Any]:
             "weaken the safety envelope. Turn off to lock the agent roster.",
             default=True,
         ),
+        "allow_runtime_configuration_status": _q_confirm(
+            "Show saved versus startup-acknowledged configuration for running services? Missing or stale service evidence remains unconfirmed.", default=True,
+        ),
+        "allow_employee_task_diagnostics": _q_confirm(
+            "Show employees bounded diagnostics and support guidance for their own tasks? No additional record access is granted.", default=True,
+        ),
+        "allow_employee_activation": _q_confirm(
+            "Guide signed-in employees through readiness checks and their first allowed task? Existing policy and budget limits still apply.", default=True,
+        ),
         "allow_configuration_profiles": _q_confirm(
             "Allow reviewed, secret-free configuration profiles and outcome presets? "
             "Import previews every change and keeps current policy checks.", default=True,
@@ -8269,6 +8278,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     # and as ONE [features] table (two tables would be a duplicate-key TOML
     # error). The kernel reads these via config.get_features.
     _feature_locks = []
+    if advanced.get("allow_runtime_configuration_status") is False:
+        lines.extend(["[settings]", "runtime_status = false"])
+    if advanced.get("allow_employee_task_diagnostics") is False:
+        _feature_locks.append("employee_task_diagnostics = false")
+    if advanced.get("allow_employee_activation") is False:
+        _feature_locks.append("employee_activation = false")
     if advanced.get("allow_copilot_operations") is True:
         _feature_locks.append("copilot_operations = true")
         families = advanced.get("copilot_operation_families", ["learning"])
@@ -8276,7 +8291,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                             "connections", "artifacts", "notifications", "models", "budget"}
         if not isinstance(families, list) or any(value not in allowed_families for value in families):
             raise ValueError("Choose registered Copilot action families.")
-        lines.extend(["[copilot]", "operation_families = " + json.dumps(list(dict.fromkeys(families)))])
+        lines.append("[copilot]")
+        _emit_kv(lines, "operation_families", list(dict.fromkeys(families)))
     if advanced.get("allow_workflow_readiness") is False:
         _feature_locks.append("workflow_readiness = false")
     if advanced.get("allow_project_reviews") is True:
