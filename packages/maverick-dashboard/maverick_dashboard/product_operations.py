@@ -151,12 +151,14 @@ def _adapter_modules():
         product_operations_projects,
         product_operations_record_history,
         product_operations_stop,
+        product_operations_task_map,
         product_operations_tasks,
         product_operations_today,
     )
     return (
         product_operations_preferences,
         product_operations_tasks,
+        product_operations_task_map,
         product_operations_connections,
         product_operations_notifications,
         product_operations_budget,

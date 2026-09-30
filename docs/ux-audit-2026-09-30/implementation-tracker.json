@@ -540,7 +540,9 @@
       "Workflow builder static controls, reviewed publication/restoration, version history, semantic samples, scheduling and trigger feedback now use explicit product bindings. Stored names, field labels, choices, instructions and diffs remain verbatim; canonical tool/parameter identifier examples remain literal.",
       "Current conversation001 and restart UI: static composer/mode/receipt controls and dynamic durable inbox states, exact-payload reviews, guidance decisions, file limits, unconfirmed receipt recovery and explicit restart reviews use product bindings. Source text/acknowledgements/filenames and prior turns remain escaped/verbatim; dates, file sizes and restart USD are locale-formatted.",
       "Live chat clarification, exact answer acknowledgement, prepared-file upload states, stop/live-update recovery, work summaries, speech-input feedback and inherited restart USD use explicit product bindings and locale formatting. User questions, answers, tool output, trace text, filenames and prior drafts remain verbatim.",
-      "Preference effective-source/lock state, reviewed saves/profile operations, closed validation failures and channel-memory posture use explicit product bindings. Interface-language saves retain the current editor and apply on the next page load. Theme names and custom guidance remain verbatim; select options contain valid text-only labels."
+      "Preference effective-source/lock state, reviewed saves/profile operations, closed validation failures and channel-memory posture use explicit product bindings. Interface-language saves retain the current editor and apply on the next page load. Theme names and custom guidance remain verbatim; select options contain valid text-only labels.",
+      "First-task composer dynamic template review, file-selection controls and microphone feedback use explicit translations; file names, MIME values and dictated text remain verbatim. Browser DOM regressions caught and fixed two malformed title-input selectors in template/voice handling. Shared voice first-use setup feedback is localized without changing transcription data.",
+      "Coverage scanner now parses literal Jinja ui/ut arguments and separately lists any bound source missing a catalog; the selected journey templates have no missing bound-source translations in this checkpoint. Remaining literal brand/canonical identifier examples stay unchanged."
     ],
     "validation": [
       "47 selected Python tests passed: new locale/identity/escaping checks, catalog/portal, preferences, activation and project-review APIs.",
@@ -549,7 +551,8 @@
       "Ruff, Python 3.10 AST, changed controller Node syntax, Jinja parsing and whitespace checks passed.",
       "Workflow follow-on: 85 focused Python cases and 36 browser-controller cases passed, including publication/source isolation and localized classified request failures; Python 3.10 AST, Ruff, Jinja, Node syntax and whitespace checks passed.",
       "Conversation follow-on: 60 unique focused Python cases passed across initial55 passes plus22-case targeted rerun including repaired explicit-lang link assertion and four new draft-language route cases. 54 DOM cases passed, including source/attachment/acknowledgement preservation, exact receipt retries, current-state guidance and restart admission. Ruff, AST3.10, Jinja parsing, Node syntax and whitespace passed.",
-      "Live chat/preferences follow-on: 27 focused chat/stream/attachment Python cases passed; 31 locale/catalog/memory Python cases passed, followed by 13 targeted cases after the added select/custom-theme regression. Browser checks: 41 existing workflow/authority/CLI cases, 9 locale/preferences cases and 5 final preferences/restart cases passed. These reruns overlap and are not a unique-test total. Ruff, AST3.10, Jinja parsing, inline/external JavaScript syntax and whitespace checks passed."
+      "Live chat/preferences follow-on: 27 focused chat/stream/attachment Python cases passed; 31 locale/catalog/memory Python cases passed, followed by 13 targeted cases after the added select/custom-theme regression. Browser checks: 41 existing workflow/authority/CLI cases, 9 locale/preferences cases and 5 final preferences/restart cases passed. These reruns overlap and are not a unique-test total. Ruff, AST3.10, Jinja parsing, inline/external JavaScript syntax and whitespace checks passed.",
+      "First-task follow-on: 19 focused Python cases passed; 29 DOM cases passed including actual file review, SpeechRecognition and prepared-template input selectors plus existing workflow handoff and draft integrity checks. Earlier locale/file-selection cohort passed 11 DOM cases before added real-composer cases. AST3.10, Jinja, actual inline JavaScript syntax, Ruff and whitespace passed."
     ],
     "remaining": [
       "Integrate shared shell/navigation, answer/planning/viewpoints, budget and recovery/review/voice worker checkpoints; regenerate the combined inventory and run the final integrated journey cohort. The 1055-source local inventory excludes those additive catalogs and is not end-to-end journey qualification.",
@@ -1431,11 +1434,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "user_notes._preference_rows groups exact channel/user before applying each person's conversation cap; consolidate locks the full rebuild; test_user_notes quiet-person/coworker and source-erasure cases."
+      "user_notes._preference_rows groups by exact channel/user before its per-person 20-conversation window; rebuilds preserve current sources, source erasure and durable personal suppression."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Runtime retention/erasure acceptance remains unrun.",
-    "evidence_slice": "slices/memory.json"
+    "validation": [
+      "test_user_notes quiet-person/twenty-one-coworker, exact-scope erasure and concurrent-erasure tests passed in the 441-case batch.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Learned preference extraction remains deliberately bounded and heuristic; unsupported paraphrases are not promised to be semantically equivalent.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ],
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. After A states a preference and coworkers create over 20 newer conversations, A retains it until their own expiry/retraction; erasure still removes it.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-106",
@@ -1443,11 +1455,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "user_notes orders actual source turns newest first, normalizes preference topic without polarity, retains exact conversation/turn/time/content hash, and rebuilds from current sources. Source changes disappear; failed scans preserve prior complete store. Regression cases cover opposite preferences and source edits."
+      "user_notes orders real source turns newest first and resolves overlapping preference topics without treating opposite polarity as interchangeable old content; source conversation/turn/time/hash enables edit/delete invalidation."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Runtime acceptance, cross-process erasure races and adversarial phrase variants remain unrun.",
-    "evidence_slice": "slices/memory.json"
+    "validation": [
+      "Latest-opposite preference, source-edit, deleted conversation and failed-source-rebuild regressions passed in the 441-case batch.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Semantic interpretation beyond the supported explicit preference phrases remains a product limit; source-authorized manual correction/suppression is available through My Data.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ],
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. Always respond with short bullet point summaries followed by Never respond with short bullet point summaries yields current preference; deletion/edit invalidates old source; no arbitrary old instruction wins.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-107",
@@ -1500,11 +1521,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "KnowledgeAccessService.submit_feedback first authorizes exact source/version/purpose, bounds pending submissions, and uses existing durable request engine. feedback_requests returns requester-only limited receipts. API/UI allow operators to submit and see own status while global admin review/apply/holds remain separately gated."
+      "KnowledgeAccessService.submit_feedback checks current exact reference/purpose and requester, bounds intake, and uses the durable existing independent rights-request engine. Native request status is requester scoped. product_operations_knowledge_feedback adds the same narrow feedback and own-status journey with authenticated selection; even administrators use employee intake through this adapter."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Regression tests for source denial, requester/tenant isolation, unchanged source approval, and operator/admin boundaries authored and unrun.",
-    "evidence_slice": "slices/memory.json"
+    "validation": [
+      "Native Knowledge API/operator boundaries plus three real local-cookie Copilot feedback tests passed in the 27-case final batch. Tests cover duplicate request identity, source revocation before dispatch, account/workspace binding, private other-requester exclusion, unchanged source approval and no review/apply rights. Knowledge source-selection JS passed.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Independent review, legal holds, processor application and separate training rights remain administrative workflows; this implementation does not certify downstream external deletion.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ],
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. Operator flags authorized source/version without deletion rights; derivative checks/independent approval retained; no inaccessible source disclosure.\n2. An ordinary user can submit a visible source/version and business reason, then receive request status.\n3. Submitting a request grants no approval or apply authority, shared-memory change or training-policy change.\n4. Administrators retain independent approval, legal-hold handling and control of separate training rights.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-111",
@@ -1512,19 +1542,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "assessment_memory.py ties a suggested note and supporting provenance to the winning answer; keeps dissent separate; agreement explicitly differs from certainty. Current approved, stale and unreviewed states use exact pinned questionnaire/current policy digest, review/renewal expiry and named approval.",
-      "Assessment review per-question source panel opens exact saved answer or current comparison; source-date/version/approval/reuse explanation; rejecting one suggestion leaves other questions unchanged; explicit reviewed use rechecks exact source then changes only local draft. Existing assessments.learn gate controls suggestions.",
-      "Native precedent API rechecks current department/context, exact revision and private no-store response; shared typed Copilot read adapter delegates native suggestion service."
+      "assessment_memory.source_evidence binds suggestions to exact saved answers, pinned questionnaire/policy revision, approval owner and current/stale/unreviewed state. Supporting and dissenting evidence are distinct. The per-answer panel opens exact fragments, compares current source and independently rejects or reviews one suggested value."
     ],
     "validation": [
-      "28 local Python assessment-memory/discovery tests passed, including dissenting-note regression, policy/expiry staleness, current department and exact fragment checks.",
-      "12 per-answer JS fixtures plus12 assessment mutation-lifecycle fixtures passed (latter fixture updated to evaluate its intended first script after a second script was added to approval queue).",
-      "Focused Ruff and diff whitespace passed; no models or external providers called."
+      "Assessment-memory regressions passed in the 441-case batch; all 12 assessment answer-editor JS tests passed in the 42-case controller batch, including independent rejection and exact-source recheck.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
     ],
     "remaining": [
-      "Integrated suites and real-browser/installed-product accessibility qualification remain."
+      "Agreement among precedents is displayed as agreement, not factual certainty. Human assessment and accessibility review remain necessary.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
     ],
-    "evidence_slice": "slices/knowledge.json"
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. Stale precedent differs visibly from current approved evidence; reviewer opens exact fragment and rejects one value independently.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-112",
@@ -1551,17 +1582,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Shared keyboard finder explicit business-metadata vs approved-knowledge modes; current-purpose picker; record_search_api delegates native knowledge ACL service and independently rechecks account/workspace before returning.",
-      "Exact-version deep link reopens through native governed detail; no source text in URL and no model called by either mode.",
-      "LW115 exact selected-source task admission rechecks current ACL/purpose/source at queue start, provider dispatch and private output read; no metadata search sends content to a model."
+      "The shared finder exposes distinct business-metadata and approved-knowledge modes. Approved knowledge delegates the current purpose-aware native service and exact-version detail. Metadata stays content-free and model-free; selected-source analysis rechecks current ACL before new use."
     ],
     "validation": [
-      "12 local record-search Python tests and 7 shared-finder JS fixtures passed; native denied sources never supply snippets/counts; metadata mode never calls knowledge service."
+      "Knowledge core/API and exact-source runtime/admission tests passed in the 441-case batch; shared finder controller checks passed in the 42-case batch. Existing dedicated record-search tests were previously passed by the knowledge slice.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
     ],
     "remaining": [
-      "Integrated real-browser and installed PostgreSQL qualification; historical metadata scale is tracked independently in LW114."
+      "This does not authorize indiscriminate enterprise full-text indexing or source access. Live processors and external permission systems are not qualified by local fixtures.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
     ],
-    "evidence_slice": "slices/knowledge.json"
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. denied source contributes no snippet/count; revocation invalidates search and queued use; metadata-only mode never sends content to a model; stale source cannot be attached to new work without recheck",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-114",
@@ -1569,22 +1603,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "record_history.py shared current-authority metadata service; native SQLite/PostgreSQL owner/date task/project/fact pages, governed vault/report windows, bounded questionnaire metadata windows, sealed tenant/context/filter cursors, honest current/partial/unavailable coverage and source-recovery links.",
-      "Shared finder historical source, UTC dates, oldest/newest and20/50 page controls reach beyond former1000/500-head caps. Added workflows/templates, automations, projects, exact-owner connections and shared fact-key adapters, native detail links and typed Copilot knowledge.history with same service.",
-      "Formal additive migration45 owner/date indexes on both backends; release1–44 hashes preserved.50k metadata/250 returned-head/cooperative3s scan bounds; no persistent content index, model, connector call or private notes/results/fact values projected. Existing record-search Settings+installer gate retained.",
-      "Canonical template publication/ownership and exact flow-owner metadata filtering preserved; native source details reauthorize. docs/record-search.md includes customer controls, scope, budgets, rollback and qualification limits."
+      "record_history source-native historical windows reach beyond old current-head caps, with exact-owner metadata adapters for tasks, workflows/templates, automations, projects, connections and shared facts. Sealed source/context/filter cursors, date/order controls, bounded scans, unavailable/partial coverage and source recovery links preserve policy. Additive owner/date indexes exist for both database backends."
     ],
     "validation": [
-      "20 focused history Python checks passed after final bounded questionnaire/cursor repair;10,050-task fixture returned250 metadata heads in0.172–0.235s. Actual1005-questionnaire,501-vault and501-report beyond-cap fixtures pass; native SQLite owner/date index query plan verified.",
-      "Prior integration run passed12 existing record-search checks and31 migration-governance checks; no released migration altered. 43 finder/connection JS tests pass (including nine finder tests), including empty-window continuation, source recovery links, current context, stale paging and new exact native destinations.",
-      "Focused Ruff and changed JS syntax/whitespace pass. Existing integrated app.py import-order/E402 findings are reported to root for its shared cleanup.",
-      "Real VerifiedPrincipal exact-owner fixture passes without patching native auth; cursor confidentiality and cross-tenant rejection pass. No provider/native application execution or production calls."
+      "All record-history tests passed in the 441-case batch, including beyond-cap records, current principal authority, cursor tenant binding, source denial and budgets. Earlier knowledge-slice measurement used 10,050 tasks: 250 metadata heads in 0.172-0.235s; 1,005 questionnaires, 501 vault records and 501 reports reached beyond former caps. Finder JS passed.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
     ],
     "remaining": [
-      "Installed PostgreSQL concurrency/performance and real-browser rendering/accessibility remain qualification work; local fixtures do not certify those environments.",
-      "Current metadata only; no optional full-text ingestion enabled. Very large or slow source inventories visibly require narrower dates under scan budgets. Native governed catalog capacity and retention boundaries remain authoritative."
+      "Those performance numbers are earlier controlled SQLite fixture measurements, not installed PostgreSQL or production benchmarks. Large/slow inventories require explicit date narrowing; private contents are not indexed.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
     ],
-    "evidence_slice": "slices/knowledge.json"
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. seeded record beyond initial cap can be found via targeted query; source failures remain visible; pagination after permission change is refused; performance budget measured on large fixtures\n2. Find the oldest accessible record beyond every current cap through source-side filtered/paged search.\n3. Paging remains stable across concurrent edits and rechecks permission; available, partial and unavailable sources are distinct.\n4. Inaccessible content is absent from counts and snippets.\n5. Stage historical task lookup before broader indexing; new metadata adapters and direct source-recovery links retain performance, tenant and retention boundaries.\n6. Optional scoped full-text search requires deliberate data policy; private notes/document contents stay excluded by default.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-115",
@@ -1592,20 +1624,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "knowledge_task_context.py immutable owner/tenant/brief/exact-version binding, atomic source-analysis admission marker, existing Budget/provider authority, one tool-free physical model attempt, current source revalidation at dispatch/publication/read, no automatic paid retry.",
-      "Native Knowledge source picker (up to five), purpose/freshness review, private analysis with exact source links, unknown-submission reconciliation and explicit saved-draft cancellation; ordinary task history/export stores only status and link, so task copies cannot inherit content access.",
-      "knowledge_access.task_context Settings/installer gate default false; product_operations_knowledge.py typed native source-analysis operation; docs/knowledge-source-analysis.md."
+      "knowledge_task_context stores immutable encrypted source-reference/purpose/owner bindings for an explicit tool-free source-analysis task. Queue admission, provider dispatch, publication and private output read recheck source access. Result links identify exact versions; ordinary task history/export/copy retains status/link without inheriting source contents or rights. Existing task_context configuration/installer gates remain."
     ],
     "validation": [
-      "21 focused local Python tests passed for source runtime/admission, installer and original receipt reconciliation; fake models only.",
-      "24 Knowledge/source-analysis JS fixtures passed after source-analysis fixture repair; additional 7 shared-finder JS tests passed.",
-      "Typed operation dependency loaded from committed settings foundation for local verification only; focused Ruff and JS syntax passed."
+      "Core knowledge_task_context and native knowledge_task_admission tests passed in the 441-case batch; native source-analysis JS was qualified earlier by the knowledge slice. Model effects are mocked; source revocation and uncertain dispatch do not cause paid auto-retry.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
     ],
     "remaining": [
-      "Integrated suites, live browser rendering and PostgreSQL concurrency qualification remain; no actual provider or production calls made.",
-      "General action agents do not accept selected-source bindings: this implemented workflow is explicitly a tool-free source analysis. Already-transmitted provider content cannot be recalled."
+      "This is the explicitly labelled source-analysis workflow; arbitrary action agents do not accept these source bindings. Already-transmitted provider content cannot be recalled.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
     ],
-    "evidence_slice": "slices/knowledge.json"
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. selecting source does not make private content available outside its ACL; stale/revoked source blocks or requests replacement before use; resulting answer links exact version; task copy cannot silently retain revoked source access",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-116",
@@ -1613,11 +1645,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "chat_base labels the control Filter recent chats, states its 25-title scope, adds live no-match/match status and links existing /goals search for older and content-only matches."
+      "Recent chat filtering states its 25-title scope and offers broader discovery. The conversation library searches persisted current-owner message content with bounded continuation and honest loading/empty/error states; it does not confer other-owner thread access."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Runtime checks for 26th chat/content-only discovery, loading/error recovery and unchanged role boundaries remain unrun.",
-    "evidence_slice": "slices/memory.json"
+    "validation": [
+      "New test_conversation_organization content-only match older than 26 new chats passed in the 441-case batch; a matching other-owner thread was excluded. Existing organization tests preserved exact root identity and archived views.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Library pages are bounded and require explicit continuation for older windows. Installed-browser performance and accessibility are not inferred from Python/controller tests.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ],
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. A 26th older chat and content-only match are reachable; empty/loading/error states disclose search scope; access boundaries remain identical.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-117",
@@ -1625,11 +1666,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Both WorldModel backends compare durable revisions under write locks before any mutation/history write, including delete/recreate protection. kv_memory tracks observed revisions and cannot bypass with supplied null; supervisor priority also compares. Dashboard expected revision + account/workspace binding protects edits/deletes, preserves draft and shows current comparison."
+      "SQLite/PostgreSQL and agent fact mutation paths compare durable observed revision before changing value/history. Direct native editor preserves drafts with current-value comparison. The seven shared fact operations reuse native write/delete/tag helpers, current context and permissions, exact selection and actual global database revision. Governed metadata-only receipts prevent a retried create from resurrecting subsequently deleted data; unknown writes never redispatch."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "SQLite concurrency, PostgreSQL parity, stale delete/edit, agent race, unrelated keys and dashboard context tests authored and unrun. Trusted internal unconditional maintenance writers remain explicit optional-revision callers.",
-    "evidence_slice": "slices/memory.json"
+    "validation": [
+      "Native facts/core/CAS checks passed in the 319-pass batch; all 12 new shared fact tests passed in the final 27-case batch, including stale edit/delete/tag, actual revision, lost response, audit failure, post-delete replay, selection/role/context changes and shared token recovery. All 19 form JS cases passed.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Real PostgreSQL concurrency remains unqualified. Explicit trusted maintenance writers can still omit expected revision by design. Receipt recovery classification is a separate integration dependency; minimal barriers are retained and disclosed in My Data.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ],
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. Stale edits and deletes refuse on expected-revision mismatch while independent facts remain editable.\n2. Show readable current-versus-draft comparison and preserve the unsaved draft.\n3. Apply the concurrency contract to SQLite, PostgreSQL and agent writes; history retention is not a substitute for lost-update prevention.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-118",
@@ -1637,28 +1687,41 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Facts inspector exposes source/author, run reference, date, trust, sensitivity and available version history; historical detail can become a reviewed CAS-protected draft. Removal explains stop-use versus retained history. Shared/private namespaces are separated and exact tenant ownership applies to history."
+      "Native fact detail/history and Copilot inspection expose recorded author/source/run, update time, trust/sensitivity and retained versions. Restore creates a newly reviewed CAS edit. Both removal previews distinguish stopping recall from erasing retained history. Personal/task reserved namespaces are excluded by the same read boundary as current values."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Runtime privacy/history/restore checks unrun. No individual expiry is recorded in the existing fact model; UI states this and describes governing workspace retention rather than inventing an expiry or deletion guarantee.",
-    "evidence_slice": "slices/memory.json"
+    "validation": [
+      "Exact historical restore, current-role/context refusal and private-prefix refusal passed in the final 27-case batch; direct editor restore and retained-history UI were included in existing form/source tests.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "The fact schema has no individual expiry; the UI explicitly says this and identifies workspace retention. No expiry, permanent erasure or override of administrator policy is invented.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ],
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "proposal",
+    "source_acceptance_criteria": "1. Expose source/run, author, last update, trust/sensitivity, version comparison or restore, and expiry where policy permits.\n2. Explain stop-use versus permanent removal and any retained temporal history before removing an existing fact.\n3. Historical and sensitive values retain equal access control; personal actions cannot override administrator memory policies.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-119",
     "title": "Facts page does not scale to a large business memory",
     "category": "Memory knowledge and search",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "facts_api.py shared-only server-filtered query/source/date/tag pages with context+revision-bound snapshot; 409 on changed sequence.",
-      "world_model.py and postgres.py additive43 tags_json metadata, CAS writes advance existing fact revision; values remain encrypted, private namespaces excluded.",
-      "Facts page tag editing/current detail/history/bulk review; memory.fact_tags config, Settings toggle, installer question."
+      "Shared-only server query/source/date/tag filtering and 50-record paging avoid loading all values into the page; current-context/catalog-revision snapshot guards continuation. Tags are governed by memory.fact_tags with existing Settings and installer controls. Explicit multi-selection is read-only, and single-record mutation uses the current page selection in native Copilot actions."
     ],
     "validation": [
-      "14 focused local tests passed (Python3.12, unique workspace basetemp), including10000-record late match/tag filter, stale writes, private namespace exclusion, stale snapshots, installer parity.",
-      "Migration governance43/43 and JS syntax passed."
+      "The real 10,000-fact late-match/bounded-page regression passed in the facts/core batch; tag/filter, private-prefix and stale snapshot checks passed. Final shared tests include a second search page, exact tags and blocked multi-record mutation; 19 form JS cases include selection and context clearing.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
     ],
-    "remaining": "Native Facts search, detail, tags and CAS/restore UI are implemented. Final acceptance review confirmed the promised typed Copilot fact-operation callback was not yet registered. A native-authority adapter and actual page selection handoff are now in progress; no stub completion is claimed.",
-    "evidence_slice": "slices/knowledge.json"
+    "remaining": [
+      "No destructive bulk mutation is provided. Installed-browser scale/accessibility and PostgreSQL performance remain environment qualifications; selection and response size limits remain explicit.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ],
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. A 10,000-fact synthetic dataset renders one bounded page and reliably finds a late item.\n2. Provide scoped search, pagination, tag/source/age filters and bulk review with explicit selection.\n3. Keep draft and new-fact workflows simple; do not allow cross-tenant queries or casual destructive bulk operations.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-120",
@@ -1666,11 +1729,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "available_purposes traverses complete source-native registry pagination and runs live detail authorization for each approved purpose before returning it. UI retry/loading state is explicit; current search authorization remains in force."
+      "KnowledgeAccessService.available_purposes traverses the complete native paged registry and performs current detail authorization before exposing each purpose. It no longer derives choices from only the first 250 registered datasets."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Authored beyond-250/revoked-only regression and existing cross-workspace picker coverage unrun; large-corpus runtime/UI qualification pending.",
-    "evidence_slice": "slices/memory.json"
+    "validation": [
+      "Purpose inventory beyond 251 newer revoked sources passed in the 441-case batch; revoking the remaining authorized old source removes the purpose. Native API and controller state tests passed.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Authorization remains current-source/purpose based; discovering a purpose does not approve any inaccessible dataset or permit later use after revocation.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ],
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. Dataset 251's unique approved purpose is selectable through a distinct-purpose query or complete authorized pagination.\n2. Revoked or disallowed purposes remain unusable; loading or availability is explicit.\n3. Unauthorized source names and purposes are not disclosed.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-121",
@@ -1678,11 +1750,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Purpose page has distinct available/empty/unavailable state. API propagates sanitized backend failure as 503; UI offers Refresh available uses, preserves query on temporary failure, routes responses through current-context/access handling and distinguishes denial."
+      "Native purpose discovery distinguishes unavailable from empty and sanitizes storage failures. The Knowledge page renders explicit loading/empty/unavailable states and retry while retaining query on transient failures; access/context loss clears private content."
     ],
-    "validation": "Python 3.10 AST, node --check for the changed dashboard scripts, and git diff --check passed. Regression tests authored but not run; no suites, browser qualification, live providers, migrations or performance measurements were run.",
-    "remaining": "Injected outage/recovery API regression authored and unrun; interactive retry/access-change behavior requires later browser qualification.",
-    "evidence_slice": "slices/memory.json"
+    "validation": [
+      "Injected registry-failure API and Knowledge controller tests passed in the 441-case and 41-case final batches. Current-source denial and malformed response tests preserve the fail-closed boundary.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+    ],
+    "remaining": [
+      "Unavailable backends still require service recovery. The UI does not expose backend internals or treat an outage as an authoritative empty inventory.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+    ],
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. An injected registry failure cannot show an authoritative empty inventory.\n2. Unavailable, loading, empty and no-access states are distinct, with safe retry and preserved query.\n3. Errors do not reveal backend internals or inaccessible sources.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-122",
@@ -1690,20 +1771,20 @@
     "category": "Memory knowledge and search",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "knowledge_reindex_jobs.py durable per-account/workspace operation journal, private shadow vectors, exact collection/model/limit review, Budget+durable deadline, 64-passage cancellation boundaries, atomic live-index source compare-and-replace, checkpoint resume and publish reconciliation.",
-      "knowledge_library_api.py and lightwork-knowledge-library.js native admin review/start/status/cancel/continue/archive; retained idempotency receipts; actual model/cost/size warning.",
-      "knowledge.reindex_jobs and bounded limits settings/installer; product_operations_knowledge.py shared native Copilot adapter; docs/knowledge-reindex-jobs.md."
+      "knowledge_reindex_jobs provides durable bounded jobs, exact collection/model/limit preview, a zero-provider-cost local ceiling, 64-passage cancellation checkpoints, private shadow vectors and source-CAS atomic publication. Interrupted jobs recover status and explicitly resume saved work; native admin controls and shared Copilot use the same service. Settings/installer gates and caps are implemented."
     ],
     "validation": [
-      "9 focused local reindex/API/installer tests passed;13 prior focused reindex/catalog tests passed; full catalogue run found19 unrelated integrated configuration registry issues reported to root.",
-      "Deterministic temporary SQLite used only; no live providers. JS syntax and focused Ruff passed.",
-      "Final six core rebuild regression tests passed, including source mutation between preview and source reread; no suites required live providers."
+      "All six core reindex job tests passed in the 441-case batch: atomic publication, duplicate start, cancellation preserving live index, current authority/source rechecks, paid-adapter refusal before dispatch and checkpoint resume without repeating saved batches.",
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
     ],
     "remaining": [
-      "Integrated registry tests pending; PostgreSQL, browser, installed local-model qualification pending.",
-      "Paid/custom embedding intentionally fails admission closed until adapter supplies verified per-request price and usage projection; no configured provider or credentials changed."
+      "Only the supported deterministic/local embedding adapters are admitted. Paid/custom embedding is deliberately unavailable without a verified per-request price/usage ceiling; no provider config or credentials changed. Installed local-model and PostgreSQL qualification remain pending.",
+      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
     ],
-    "evidence_slice": "slices/knowledge.json"
+    "evidence_slice": "slices/memory-knowledge-final-qualification.json",
+    "source_evidence_status": "code-supported",
+    "source_acceptance_criteria": "1. Provide a durable bounded job with previewed collection size and cost ceiling, progress, safe-boundary cancellation and recoverable status after disconnect.\n2. A synthetic interruption recovers the existing job status without blindly reindexing again.\n3. Cancellation cannot corrupt the live index; preserve existing administrator confirmation and AI cost warning.",
+    "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d"
   },
   {
     "id": "LW-123",
@@ -2433,8 +2514,8 @@
     "implementation_evidence": [
       "docs/clients/examples/external_agent_loop.py copies and screens complete arguments, waits with bounded heartbeat for exact approval ID/binding/expiry, and performs zero actions for pending/denied/stale/expired approval; Python fixtures authored."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30:14 controlled external-agent/REST example cases passed, covering approval denial/expiry/staleness/halt, single truthful finish, paginated terminal acknowledgement, auth loss and original-key receipt recovery. Two native CLI budget-preview callback cases also passed; no provider or paid work.",
+    "remaining": "Live-service/customer lifecycle qualification remains separate; the local examples used synthetic gateway, HTTP, LLM and email boundaries. Integrated final-source regression still applies.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2445,8 +2526,8 @@
     "implementation_evidence": [
       "run_tool_loop tracks completion/halt/denial/exception separately, emits supported success/failure with truthful reason and calls finish once using the original stable report key; regression fixtures cover all outcomes."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30:14 controlled external-agent/REST example cases passed, covering approval denial/expiry/staleness/halt, single truthful finish, paginated terminal acknowledgement, auth loss and original-key receipt recovery. Two native CLI budget-preview callback cases also passed; no provider or paid work.",
+    "remaining": "Live-service/customer lifecycle qualification remains separate; the local examples used synthetic gateway, HTTP, LLM and email boundaries. Integrated final-source regression still applies.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2457,8 +2538,8 @@
     "implementation_evidence": [
       "docs/clients/examples/rest_lifecycle.py drains every has_more page, advances only after accepted events, handles replay/noncontiguous IDs, uses server terminal acknowledgement for every terminal status, and stops on access errors; pagination fixtures authored."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30:14 controlled external-agent/REST example cases passed, covering approval denial/expiry/staleness/halt, single truthful finish, paginated terminal acknowledgement, auth loss and original-key receipt recovery. Two native CLI budget-preview callback cases also passed; no provider or paid work.",
+    "remaining": "Live-service/customer lifecycle qualification remains separate; the local examples used synthetic gateway, HTTP, LLM and email boundaries. Integrated final-source regression still applies.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2469,7 +2550,7 @@
     "implementation_evidence": [
       "ConnectionStore.mayRetainSnapshot permits only explicit transient failures; both Apple models clear private data/receivedAt on 401/403 and other ineligible errors. Vision selection derives from current forest and clears when absent. Watch/vision denial and transient-retention regression sources authored."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
+    "validation": "2026-09-30: Apple source review, bounded transport/retention/cancellation regressions and supplied shared Swift plus hosted watch/vision XCTest targets. The pinned XcodeGen project and entry points now remove manual target assembly. macOS/Xcode/Apple SDKs are unavailable on this Windows host, so these Swift targets have not compiled or executed. Separate91 mobile Node mocks and TypeScript/generation results do not qualify Apple behavior; see native-build-evidence.json and native-client-qualification.json.",
     "remaining": "Native mock-denial and retained-snapshot qualification remains unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2481,8 +2562,8 @@
     "implementation_evidence": [
       "eventWatch.assertDashboardTransport rejects remote HTTP bearer transport before headers/request creation; DashboardConnections applies the same rule before migration/consent; safe HTTPS and exact loopback regression cases authored."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash.",
+    "remaining": "Installed editor/native credential-store/accessibility and actual host lifecycle qualification remain open. Mock contracts are passed; local tests are authorized and are not deferred by user instruction.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2493,7 +2574,7 @@
     "implementation_evidence": [
       "GlanceView labels actual source date, UTC reporting day and source timestamp, marks failed-refresh data as a saved snapshot, removes Today wording and disables refresh while busy."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
+    "validation": "2026-09-30: Apple source review, bounded transport/retention/cancellation regressions and supplied shared Swift plus hosted watch/vision XCTest targets. The pinned XcodeGen project and entry points now remove manual target assembly. macOS/Xcode/Apple SDKs are unavailable on this Windows host, so these Swift targets have not compiled or executed. Separate91 mobile Node mocks and TypeScript/generation results do not qualify Apple behavior; see native-build-evidence.json and native-client-qualification.json.",
     "remaining": "Yesterday-date, timezone and watch render acceptance remain unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2505,7 +2586,7 @@
     "implementation_evidence": [
       "PlanTreeVolume stores only selectedId and derives the selected node from model.forest; removal/revocation clears ID; errors render independently of selection. PlanTreeModelTests covers changed status then denial."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
+    "validation": "2026-09-30: Apple source review, bounded transport/retention/cancellation regressions and supplied shared Swift plus hosted watch/vision XCTest targets. The pinned XcodeGen project and entry points now remove manual target assembly. macOS/Xcode/Apple SDKs are unavailable on this Windows host, so these Swift targets have not compiled or executed. Separate91 mobile Node mocks and TypeScript/generation results do not qualify Apple behavior; see native-build-evidence.json and native-client-qualification.json.",
     "remaining": "Native selection/error/accessibility acceptance remains unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2517,7 +2598,7 @@
     "implementation_evidence": [
       "PlanTreeVolume provides a searchable, status-labelled text hierarchy with 50-row pages for all received nodes, accessible task selection and selected-card focus, plus fit/zoom controls. Spatial rendering caps at 200 and labels the complete alternate list."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
+    "validation": "2026-09-30: Apple source review, bounded transport/retention/cancellation regressions and supplied shared Swift plus hosted watch/vision XCTest targets. The pinned XcodeGen project and entry points now remove manual target assembly. macOS/Xcode/Apple SDKs are unavailable on this Windows host, so these Swift targets have not compiled or executed. Separate91 mobile Node mocks and TypeScript/generation results do not qualify Apple behavior; see native-build-evidence.json and native-client-qualification.json.",
     "remaining": "1/100/1000-node, VoiceOver and comfort/performance qualification remain unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2529,7 +2610,7 @@
     "implementation_evidence": [
       "dashboardData streams URLSession bytes under a hard cap (64 KiB watch, 2 MiB tree), checks cancellation and resource timeout, and invalidates the session. Models own one request, reject concurrent refresh, cancel on connection change/disposal/background and fence late responses. Cap and rapid-refresh/cancellation regression sources authored."
     ],
-    "validation": "2026-09-30: Source review and git diff --check only for Apple changes. Swift compiler/Xcode unavailable on this Windows executor. Shared Swift byte-limit/error/reset tests and watch/vision model regressions authored but not run; app model tests await a native Xcode test target. Native compilation/installed-host checks could not run because Xcode/Swift and platform hosts are unavailable; no signing or live provider calls were made.",
+    "validation": "2026-09-30: Apple source review, bounded transport/retention/cancellation regressions and supplied shared Swift plus hosted watch/vision XCTest targets. The pinned XcodeGen project and entry points now remove manual target assembly. macOS/Xcode/Apple SDKs are unavailable on this Windows host, so these Swift targets have not compiled or executed. Separate91 mobile Node mocks and TypeScript/generation results do not qualify Apple behavior; see native-build-evidence.json and native-client-qualification.json.",
     "remaining": "Actual URLSession cancellation/streaming and native disposal acceptance remain unrun.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2541,7 +2622,7 @@
     "implementation_evidence": [
       "Apple project.yml plus pinned XcodeGen2.42.0, application entry points and four app/hosted-test targets remove manual source/target assembly. mobile npm lock, exact Expo52 template version+SHA512, build-native.cjs and local Swift/Kotlin bounded no-redirect transport provide reproducible local native generation and build commands. Previews and support/signing gates remain explicit in native-companion-release.md; watch complication promise stays removed. JetBrains now has complete pinned Gradle8.13 wrapper/checksum, SDK2024.3.6 project, Kotlin2.1.20/Gson2.11.0 dependency lock, local loopback check and unsigned installable ZIP plus SHA/input manifest. Zed exact API0.7.0/Cargo lock/Rust1.97.1 WASIp2 build emits source+component preview archive with compiler/input hashes. Both documented commands build without manual project assembly; compatibility remains deliberately preview and target-specific."
     ],
-    "validation": "2026-09-30:91 mobile mocks and installed-dependency TypeScript passed; Android native generation twice and Apple/Android autolinking passed. JetBrains real IntelliJ SDK compile and all12 local synthetic JVM transport cases passed; check buildPlugin and python build.py generated unsigned ZIP. Zed locked release WASIp2 compile and python build.py succeeded; component header and every bundled input hash verified. Python Ruff and git whitespace checks passed. Exact toolchain pins, commands and artifact hashes are in native-build-evidence.json. No installed-editor/device or signed-release qualification is implied.",
+    "validation": "2026-09-30:91 mobile mocks and installed-dependency TypeScript passed; Android native generation twice and Apple/Android autolinking passed. JetBrains real IntelliJ SDK compile and all12 local synthetic JVM transport cases passed; check buildPlugin and python build.py generated unsigned ZIP. Zed locked release WASIp2 compile and python build.py succeeded; component header and every bundled input hash verified. Python Ruff and git whitespace checks passed. Exact toolchain pins, commands and artifact hashes are in native-build-evidence.json. No installed-editor/device or signed-release qualification is implied. Current evidence consolidation: native-client-qualification.json records60 Node and16 Python client cases, separately from core686-per-posture and native-platform259-per-posture groups; none substitutes for installed-device/editor qualification.",
     "remaining": "Qualification remains open: Apple/iOS native SDK compilation requires macOS/Xcode; Android SDK unavailable; installed IDE/device auth, revocation, protected storage, accessibility and host lifecycle tests remain unrun. Zed host must support API0.7.0; JetBrains compatibility is limited to compile target243 until installed tests pass. Release owner must select/approve distribution/signing and privacy/export/support gates. No signed end-user installer or publication is delivered; this row is test-needed, not completed distribution.",
     "evidence_slice": "slices/mobile.json"
   },
@@ -2553,8 +2634,8 @@
     "implementation_evidence": [
       "Mobile detail and vision selection now hand off exact task paths to separately authenticated dashboard browsers without tokens in URLs; denied access clears native private views. Task browsing remains read-only; mobile action scope is separately explicit under LW049. device_pairing.py/API and /devices implement five-minute code approval bound to exact named principal/tenant, encrypted bounded registry, closed own-task route credentials, current SCIM/membership/session revocation checks, explicit removal and rotating renewal with sixty-second exact-generation recovery. Admin paired devices remain own-work scoped. Mobile and shared Apple settings pair/save/renew in secure storage; no proof or credential appears in navigation URLs. Config, installer and direct status/removal UI included; product_operations_devices.py supplies the same-service reviewed own-device Copilot status/removal adapter."
     ],
-    "validation": "2026-09-30: mocked Python pairing/auth regressions11/11; mobile mock suite79/79 including four pairing protocol/lifecycle/save failures; strict TypeScript zero diagnostics; Python AST/Ruff and JavaScript syntax checks passed. Apple protocol/persistence regressions authored; Swift/Xcode unavailable, so native builds and installed-device qualification unrun.",
-    "remaining": "Registry registration is integrated by root (c97de06); root is running consolidated auth/middleware validation. Real keychain, TLS transport, installed-device, signing, accessibility and revocation/cache timing qualification remain. Pairing uses a human-readable expiring device code; no QR scanner is required. Full offline revocation cannot reach a disconnected device before its previously accepted retention expiry.",
+    "validation": "2026-09-30: pairing/auth Python11/11 and mobile79/79 at the pairing checkpoint; later mobile suite91/91 plus actual-dependency TypeScript and native generation/autolinking passed, as recorded in native-build-evidence.json. Apple XCTest targets are supplied but require macOS/Xcode. Local tests are authorized; native TLS/keychain/device qualification remains unavailable on this host.",
+    "remaining": "Registry integration is complete. Integrated final-source auth/middleware qualification is owned by the consolidated PR. Real keychain, TLS transport, installed-device, signing, accessibility and revocation/cache timing remain separate checks. Pairing uses an expiring human-readable device code. Offline revocation cannot reach a disconnected device before its previously accepted retention expiry.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -2565,8 +2646,8 @@
     "implementation_evidence": [
       "ownedCli owns a direct child, cancellation, deadline and output bound; extension tracks all owners for deactivate, fences duplicate start dialogs/work, preserves unknown-start metadata and parsed task ID, and reports nonzero/signal/timeout as unconfirmed without replay."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash.",
+    "remaining": "Installed editor/native credential-store/accessibility and actual host lifecycle qualification remain open. Mock contracts are passed; local tests are authorized and are not deferred by user instruction.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2577,8 +2658,8 @@
     "implementation_evidence": [
       "extension chooses current-editor or explicit multi-root workspace; each RunItem captures its local cwd; titled authorized task pickers plus sidebar watch/export avoid retyping IDs; local CLI and remote dashboard targets are explicitly distinguished before use."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash.",
+    "remaining": "Installed editor/native credential-store/accessibility and actual host lifecycle qualification remain open. Mock contracts are passed; local tests are authorized and are not deferred by user instruction.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2589,8 +2670,8 @@
     "implementation_evidence": [
       "DashboardConnections binds protected tokens to exact base addresses with SecretStorage; named configure/test/rotate/disconnect commands, migration readback before legacy deletion, usable failed-store recovery, host/token generation guards and private-view invalidation are implemented."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash.",
+    "remaining": "Installed editor/native credential-store/accessibility and actual host lifecycle qualification remain open. Mock contracts are passed; local tests are authorized and are not deferred by user instruction.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2601,8 +2682,8 @@
     "implementation_evidence": [
       "JetBrains DashboardConfigurable registers native Settings with PasswordSafe background I/O and confirmed save; tool window adds named connection/test, authorized content/title search, labeled task picker/optional ID/remedies and accessible status descriptions; connection changes invalidate old requests, output and cursors."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral. Complete IntelliJ SDK build project, installed-IDE/PasswordSafe and screen-reader qualification remain required; authored checklist records exact probes.",
+    "validation": "2026-09-30: real IntelliJ Community2024.3.6/build243 SDK compile and12 synthetic loopback JVM transport tests passed; Gradle8.13 check/buildPlugin and python build.py produced the unsigned ZIP. Exact dependency locks, commands and hashes: native-build-evidence.json.",
+    "remaining": "Installed IDE/PasswordSafe, credential revocation, disposal, screen-reader and supported-host compatibility qualification remains open. Pinned build project is supplied and has built; no signed release or installed IDE is claimed.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2613,8 +2694,8 @@
     "implementation_evidence": [
       "VS Code local starts run budget-preview --json in the identical launch cwd/environment before confirmation; core budget_guidance.preview resolves configured/clamped effective task ceilings without constructing Budget or guessing a principal. Person/workspace/provider headroom is shown separately as available/unknown; resume previews use the scoped dashboard endpoint for the selected goal. Requested values and launch enforcement remain intact; preview failure blocks confirmation with repair guidance."
     ],
-    "validation": "CLI Python3.10 AST and VS Code TypeScript syntax; CLI preview fixtures authored unrun. Core hook supplied in integration commit fb292c5.",
-    "remaining": "Execute policy/profile/cap-change/start/resume regressions and native confirmation qualification later per user.",
+    "validation": "2026-09-30: both test_cli_budget_preview.py cases passed through CliRunner (local policy without guessed principal; disabled policy refusal). 2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash.",
+    "remaining": "Installed extension confirmation, real policy/profile changes between preview and start/resume, and selected-task cancellation qualification remain separate. A mock callback test is not production budget enforcement qualification.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2625,8 +2706,8 @@
     "implementation_evidence": [
       "Neovim halt/unhalt use bounded async jobstart with progress, owned cancellation and generation guards; Emacs status/halt use bounded make-process with timeout/cancel and owner guards; exact halt acknowledgement preserved. Lua/ERT fixtures authored."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash.",
+    "remaining": "Actual Lua source passed in Fengari with a controlled vim API. Native Neovim and Emacs/ERT, UI responsiveness, cancellation and editor lifecycle still need installed-host qualification.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2637,8 +2718,8 @@
     "implementation_evidence": [
       "docs/api.md persists a stable Idempotency-Key before start and demonstrates exact receipt lookup; rest_lifecycle.start_or_reconcile issues one POST then GET-only reconciliation after uncertain admission, preserves key on conflict/access/missing receipt, and distinguishes acceptance from execution."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30:14 controlled external-agent/REST example cases passed, covering approval denial/expiry/staleness/halt, single truthful finish, paginated terminal acknowledgement, auth loss and original-key receipt recovery. Two native CLI budget-preview callback cases also passed; no provider or paid work.",
+    "remaining": "Live-service/customer lifecycle qualification remains separate; the local examples used synthetic gateway, HTTP, LLM and email boundaries. Integrated final-source regression still applies.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2649,8 +2730,8 @@
     "implementation_evidence": [
       "Maintained docs/clients/examples/lightwork.ts owns request abort deadlines, bounded streamed body and disposal; typed recovery errors retain safe HTTP status/retry guidance/request ID, suppress private details and never retry writes. Fake-fetch regression cases authored."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash.",
+    "remaining": "Installed editor/native credential-store/accessibility and actual host lifecycle qualification remain open. Mock contracts are passed; local tests are authorized and are not deferred by user instruction.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2661,8 +2742,8 @@
     "implementation_evidence": [
       "SDK defineValidatedTool and optional parseArgs reject malformed/missing arguments before handler entry with protocol not_started; deadline rechecked after parsing; sanitized error and legacy declaration-only behavior documented; typed regression cases authored."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral.",
+    "validation": "2026-09-30: actual SDK TypeScript7.0.2 compilation and all24 compiled Node protocol tests passed on source dfb2905; @types/node26.6.3. Two earlier built-Node interoperability cases are separately recorded in slices/plugin-adapters.json. All60 maintained client contracts also passed with controlled host APIs. Exact commands, dependencies and scope: native-client-qualification.json.",
+    "remaining": "Published package installation and customer plugin-host qualification remain separate from local compiled protocol fixtures; no installed external plugin was invoked.",
     "evidence_slice": "slices/native-integrations.json"
   },
   {
@@ -2673,8 +2754,8 @@
     "implementation_evidence": [
       "VS Code README command matrix covers actual manifest commands and implemented SSE; manifest license points to governing root LICENSE per owner decision, retaining prior-release grants. Complete pinned-toolchain minimal TypeScript plugin project and build/describe instructions supplied."
     ],
-    "validation": "Static review: Python 3.10 AST for three added Python files; Node 24 syntax-only checks for eight TypeScript files and three JavaScript fixtures; JSON/XML parsing, manifest command-to-README coverage, Emacs lexical delimiter review and git diff --check. No tests, provider calls, native builds, installed-editor qualification, accessibility probes or performance checks executed.",
-    "remaining": "Regression/runtime acceptance remains unrun under the user testing deferral. Packaging/build/describe qualification with the pinned development toolchain has not been executed.",
+    "validation": "2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash. The SDK compiled and all24 protocol cases passed. The minimal example installed pinned TypeScript7.0.2 and @types/node26.0.0 with scripts disabled, compiled, and returned protocol2/greet metadata through npm run describe; no tool invocation. Dependency lock and compiled entry hashes are in native-client-qualification.json.",
+    "remaining": "Published package installation, packaged clean-host IDE installation and distribution qualification remain separate. Local build/describe and controlled host tests do not establish installed IDE, device or accessibility acceptance.",
     "evidence_slice": "slices/native-integrations.json"
   }
 ]

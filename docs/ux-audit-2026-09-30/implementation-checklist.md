@@ -5,7 +5,7 @@ it does not mean all acceptance checks or release qualification have passed.
 
 [Full evidence and remaining criteria](implementation-tracker.json) · [Original 24-field backlog](source-backlog.json) · [Local qualification](local-qualification.md)
 
-Current dispositions: 186 implemented-test-needed, 4 planned, 5 test-needed.
+Current dispositions: 187 implemented-test-needed, 3 planned, 5 test-needed.
 
 | ID | Disposition | Audit item |
 | --- | --- | --- |
@@ -127,7 +127,7 @@ Current dispositions: 186 implemented-test-needed, 4 planned, 5 test-needed.
 | LW-116 | Built; acceptance pending | “Search chats” searches only 25 recent titles |
 | LW-117 | Built; acceptance pending | Shared facts can overwrite a newer edit or delete a changed fact |
 | LW-118 | Built; acceptance pending | Facts hide provenance, age, history and retention consequences |
-| LW-119 | Active implementation | Facts page does not scale to a large business memory |
+| LW-119 | Built; acceptance pending | Facts page does not scale to a large business memory |
 | LW-120 | Built; acceptance pending | Knowledge purpose picker only inspects 250 registered datasets |
 | LW-121 | Built; acceptance pending | Knowledge picker backend failure masquerades as no approved uses |
 | LW-122 | Built; acceptance pending | Knowledge reindex lacks bounded job supervision |

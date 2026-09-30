@@ -18,7 +18,7 @@ LAYERS = (
     "today", "task-diagnostics", "source-checkpoint-lookup", "activation",
     "plugin-adapters", "project-workspaces", "personal-notifications",
     "preference-scopes", "model-tests", "web-localization", "conversation-inbox", "browser",
-    "identity-final-qualification",
+    "identity-final-qualification", "memory-knowledge-final-qualification",
 )
 
 
