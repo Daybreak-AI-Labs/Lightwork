@@ -3,6 +3,11 @@
 **Preview source; native transport, packaging and installed-device behavior
 remain unqualified.**
 
+Settings offers **Follow device**, **Light**, and **Dark** appearance, saved on
+this device across connection profiles. Text respects device accessibility size.
+The interface is currently English; task and result text stays verbatim. A failed
+appearance save leaves the previous choice active and offers a visible retry.
+
 Watch your Lightwork swarm from a phone: runs list, run detail with a live
 event timeline, and an at-a-glance fleet summary — with an offline cache so
 losing the network shows "as of 12 min ago" instead of a blank screen.

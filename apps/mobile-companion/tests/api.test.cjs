@@ -23,7 +23,7 @@ test('request guard uses the same secure addresses accepted by connection setup'
     await api.listGoals({ baseUrl, token: 'synthetic-token' });
   }
   assert.equal(calls.length, 3);
-  assert.equal(calls[0][0], 'https://dashboard.example.test/api/v1/goals?limit=50');
+  assert.equal(calls[0][0], 'https://dashboard.example.test/api/v1/goals?limit=50&offset=0&status=');
   assert.equal(calls[0][1].method, 'GET');
   assert.equal(calls[0][1].headers.Authorization, 'Bearer synthetic-token');
 });

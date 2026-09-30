@@ -11,7 +11,7 @@ test('edited connection cannot inherit a delayed successful test', async () => {
   let app;
   await act(async () => { app = create(React.createElement(SettingsScreen, {onSaved() {}})); });
   await act(async () => { button(app, 'Test connection').props.onPress(); });
-  await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText(newer.baseUrl); });
+  await act(async () => { app.root.findAllByType('TextInput').find(input => input.props.accessibilityLabel === 'Dashboard address').props.onChangeText(newer.baseUrl); });
   await act(async () => { pending.resolve({goals: []}); });
   assert.doesNotMatch(text(app), /Connected\. Save/);
   app.unmount();

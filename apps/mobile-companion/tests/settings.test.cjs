@@ -99,18 +99,18 @@ test('keychain read errors are not treated as missing credentials', async () => 
 
 test('overlapping saves and reads complete in call order', async () => {
   const f = fixture(legacy);
-  const firstWrite = deferred();
+  const firstWrite = deferred(), enteredWrite = deferred();
   const write = f.secure.setItemAsync;
   let calls = 0;
   f.secure.setItemAsync = async (key, value) => {
-    if (++calls === 1) await firstWrite.promise;
+    if (++calls === 1) { enteredWrite.resolve(); await firstWrite.promise; }
     await write(key, value);
   };
   const settings = f.load();
   const first = settings.saveSettings(connection);
   const second = settings.saveSettings(newer);
   const after = settings.loadSettings();
-  await Promise.resolve();
+  await enteredWrite.promise;
   assert.equal(calls, 1);
   firstWrite.resolve();
   await Promise.all([first, second]);

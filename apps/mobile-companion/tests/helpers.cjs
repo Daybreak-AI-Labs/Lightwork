@@ -47,6 +47,7 @@ function source(relative, mocks = {}) {
     }
     if (name === 'react') return React;
     if (name === 'react-native') return native;
+    if (name === '@react-native-async-storage/async-storage') return {getItem: async () => null, setItem: async () => {}};
     if (name === 'expo-status-bar') return { StatusBar: 'StatusBar' };
     if (name.endsWith('/connectionValidation')) return source('src/connectionValidation.ts', mocks);
     if (name.endsWith('/api')) return source('src/api.ts', mocks);

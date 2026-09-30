@@ -8,7 +8,7 @@ import { getActive } from "../api";
 import { Button } from "../components/ui";
 import { activateProfile, listProfiles, loadSettings, removeProfile, resetSettings, saveProfile, saveSettings, type ConnectionProfile } from "../settings";
 import { connectionValidationError } from "../connectionValidation";
-import { useTheme, type Palette } from "../theme";
+import { useTheme, useAppearance, saveAppearance, type AppearanceChoice, type Palette } from "../theme";
 
 // People often type "lightwork.example.com"; assume the secure scheme.
 export function withScheme(address: string): string {
@@ -21,6 +21,8 @@ export function SettingsScreen(props: {
   firstRun?: boolean;
 }): React.JSX.Element {
   const theme = useTheme(), styles = stylesFor(theme);
+  const appearance = useAppearance();
+  const [appearanceBusy, setAppearanceBusy] = useState(false), [appearanceNote, setAppearanceNote] = useState('');
   const { firstRun = false } = props;
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]), [profileId, setProfileId] = useState<string | undefined>();
   const [profileName, setProfileName] = useState("");
@@ -153,6 +155,19 @@ export function SettingsScreen(props: {
 
   const disabled = loading || loadFailed || saving;
 
+  async function chooseAppearance(value: AppearanceChoice): Promise<void> {
+    if (appearanceBusy) return;
+    setAppearanceBusy(true); setAppearanceNote('');
+    try {
+      await saveAppearance(value);
+      if (mounted.current) setAppearanceNote('Appearance saved on this device.');
+    } catch {
+      if (mounted.current) setAppearanceNote('Appearance could not be saved. Your previous choice is still active. Try again.');
+    } finally {
+      if (mounted.current) setAppearanceBusy(false);
+    }
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.fill} keyboardShouldPersistTaps="handled">
       <Text style={styles.heading} accessibilityRole="header">{firstRun ? "Connect to Lightwork" : "Settings"}</Text>
@@ -165,13 +180,25 @@ export function SettingsScreen(props: {
       {loadFailed ? (
         <Button label="Retry loading settings" onPress={() => setLoadAttempt(loadAttempt + 1)} />
       ) : null}
+      <Text style={styles.label} accessibilityRole="header">Appearance on this device</Text>
+      <View accessibilityRole="radiogroup">
+        {(['system', 'light', 'dark'] as AppearanceChoice[]).map(value => (
+          <Pressable key={value} accessibilityRole="radio" accessibilityState={{checked: appearance.value === value, disabled: appearanceBusy}}
+            disabled={appearanceBusy} style={styles.show} onPress={() => void chooseAppearance(value)}>
+            <Text style={styles.showText}>{appearance.value === value ? 'Selected: ' : ''}{value === 'system' ? 'Follow device' : value === 'light' ? 'Light' : 'Dark'}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.fieldHelp}>This device preference applies to every saved connection. Text follows device accessibility size. Interface language is currently English; your task content is kept as written.</Text>
+      {appearance.error ? <Text style={styles.error} accessibilityRole="alert">{appearance.error}</Text> : null}
+      {appearanceNote ? <Text style={styles.help} accessibilityLiveRegion="polite">{appearanceNote}</Text> : null}
       {profiles.length ? <Text style={styles.label}>Saved connections</Text> : null}
       {profiles.map(profile => <Button key={profile.id} label={(profileId === profile.id ? 'Current: ' : 'Switch to ') + profile.name} kind="secondary" disabled={disabled || testing || profileId === profile.id} onPress={() => switchProfile(profile.id)} />)}
       {profileId ? <Button label="Remove this saved connection" kind="secondary" disabled={disabled || testing} onPress={removeSelected} /> : null}
       <Button label="Add another connection" kind="secondary" disabled={disabled || testing} onPress={() => edited(() => {setProfileId(undefined); setProfileName(''); setBaseUrl(''); setToken('');})} />
       <Text style={styles.label}>Connection name (optional for a single connection)</Text>
       <TextInput style={styles.input} accessibilityLabel="Connection name" maxLength={80} editable={!disabled} value={profileName} onChangeText={setProfileName} />
-      <Text style={styles.fieldHelp}>Choose a name to keep this connection securely alongside your other deployments. The app follows your device appearance and text size; interface language is currently English.</Text>
+      <Text style={styles.fieldHelp}>Choose a name to keep this connection securely alongside your other deployments.</Text>
       <Text style={styles.label} nativeID="address-label">Dashboard address</Text>
       <TextInput
         style={styles.input}

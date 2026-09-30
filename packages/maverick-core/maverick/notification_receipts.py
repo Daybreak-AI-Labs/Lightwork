@@ -44,7 +44,7 @@ class DeliveryReceipts:
         ident = self.key(event, backend)
         ensure_private_directory(self.path.parent)
         with cross_process_lock(self.path):
-            rows = self._load()
+            rows = [row for row in self._load() if row["updated_at"] >= time.time() - 7 * 86400]
             previous = next((row for row in rows if row["id"] == ident), None)
             if previous is not None:
                 if not (retry and previous["kind"] == "test" and previous["state"] == "failed"
@@ -55,6 +55,8 @@ class DeliveryReceipts:
             else:
                 if retry:
                     return ident, False
+                if len(rows) >= 1000:
+                    raise ValueError("Delivery history is full; new sends are paused to preserve duplicate protection.")
                 rows.append({"id": ident, "backend": backend, "kind": kind, "state": "queued",
                              "request_id": event if kind == "test" else None,
                              "updated_at": time.time(), "created_at": time.time(), "attempts": 1,

@@ -17,29 +17,29 @@
     "id": "LW-045",
     "status": "implemented-test-needed",
     "implementation_evidence": "themes.py contrast_ratio/contrast_issues/readable_palette; settings_all_page._plan_table refuses unreadable palette saves; lightwork-theme-preview.js shows isolated form/focus/disabled/status/progress preview; legacy palettes derive readable fallback colors. test_theme_contrast.py and JS contrast regression authored. Settings worker6eaca67 supplies shared prior-theme Undo through the same revision-bound preferences endpoint.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
     "remaining": "Integrate settings worker6eaca67 and mobile asset-registration38fcc2f together. Browser/background/contrast qualification remains unrun."
   },
   {
     "id": "LW-046",
     "status": "implemented-test-needed",
     "implementation_evidence": "static/lightwork-read-aloud.js owns cancellable server/browser playback, complete 3000-character request chunks, pause/resume/stop, skip-code/tables option, visible preparation/failure state, URL cleanup, navigation stop and answer-ready invalidation. chat_goal.html binds it. JS cancellation/long-answer regression authored.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
     "remaining": "PR2529 has overlapping bounded-read implementation and dynamic answer changes; integrator must preserve current review gating when combining. Engine/autoplay/native acceptance unrun."
   },
   {
     "id": "LW-047",
     "status": "implemented-test-needed",
     "implementation_evidence": "mobile SettingsScreen.tsx captures test generation, cancels on edits/unmount, clears prior result, guards stale responses and prevents save/test overlap; native ConnectionSettingsView.swift locks tested inputs/save and verifies current normalized candidate/visible lifetime.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Delayed-response, save/unmount and native-device acceptance remain unrun."
   },
   {
     "id": "LW-048",
     "status": "planned",
-    "implementation_evidence": "settings.ts adds atomic secure named-profile record, list/save/switch/remove, legacy preservation, 20-profile bound and opaque isolated cache scopes. SettingsScreen exposes name/add/switch/remove with confirmation. Theme follows OS and interface truthfully remains English. Named-profile regression authored.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
-    "remaining": "Language preference parity depends on reviewed translation work in LW043; explicit device appearance override remains to be added. Profile lifecycle native acceptance unrun."
+    "implementation_evidence": "settings.ts adds atomic secure named-profile record, list/save/switch/remove, legacy preservation, 20-profile bound and opaque isolated cache scopes. SettingsScreen exposes name/add/switch/remove with confirmation. Theme follows OS and interface truthfully remains English. Named-profile regression authored. Device appearance now explicitly selects System/Light/Dark, persists across connections and follows OS changes only in System mode; failed saves keep previous choice and show recovery.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
+    "remaining": "Native display/language parity remains incomplete: the interface truthfully remains English pending LW043 catalogs/review. Installed two-profile/keychain/large-text platform acceptance still required; mock named-profile, appearance, race and cache tests pass."
   },
   {
     "id": "LW-049",
@@ -59,42 +59,42 @@
     "id": "LW-051",
     "status": "implemented-test-needed",
     "implementation_evidence": "InvalidSavedConnection distinguishes corrupt records; App offers explicit confirmed reset; resetSettings probes locked stores and removes only named app keys/cache. Swift ConnectionStore.reset probes secure storage and scoped delete; UI shows reset for DecodingError only and confirms.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Keychain/SecureStore native tests unrun. Node and Swift corrupt/reset regression tests authored."
   },
   {
     "id": "LW-052",
     "status": "implemented-test-needed",
     "implementation_evidence": "RunsListScreen uses scoped server search/status and load-older offset pages with unique-ID merge, generation invalidation, scrollable search/status header, distinct empty-search copy and explicit 200-search-result bound; api.ts uses existing scoped endpoints.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "125-task, incoming-task scroll and permission runtime acceptance unrun."
   },
   {
     "id": "LW-053",
     "status": "implemented-test-needed",
     "implementation_evidence": "RunDetailScreen expandable/selectable full bounded event content and selectable result; full-history browser handoff has only base URL+task path and no token; browser launch failure shown.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "20-line event/select-copy and separate browser authentication acceptance unrun."
   },
   {
     "id": "LW-054",
     "status": "implemented-test-needed",
     "implementation_evidence": "App connection-owned offline-bundle projection supplies current authorized attention counts and as-of timestamp to online Overview. Online/saved active task rows open exact task; authenticated Action Center handoff supports approvals/questions.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Online/offline same-state and authority acceptance unrun."
   },
   {
     "id": "LW-055",
     "status": "implemented-test-needed",
     "implementation_evidence": "useConnectionCache lives in App independently of tab; readiness indicator shows actual successful persistence, optional API failure never claims readiness. RunDetail reads matching cached goal/events with age and retains denial/unsupported suppression.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Tasks-first/offline detail/device storage lifecycle acceptance unrun."
   },
   {
     "id": "LW-056",
     "status": "implemented-test-needed",
     "implementation_evidence": "Existing confirmed disconnect/reset plus credential-scoped purge now remove all app offline-cache namespaces. mobile_offline_policy.py combines installation/workspace disablement and minimum age/byte ceilings, exposed in All settings and installer. Server bundle includes versioned policy and requires policy-aware client header. Mobile refuses missing/invalid policy, uses source-time expiry, invalidates live cached readers on policy/purge/expiry, serializes writes/removal and fences retired scopes/epochs/global reset. Readiness gives organization-policy message; user cannot relax ceilings.",
-    "validation": "2026-09-30: Python AST 6 files and TypeScript static analysis of all15 mobile source files passed (zero diagnostics). JavaScript regression source syntax and git diff --check passed. Policy ceiling/denial and cache expiry/late-write regressions authored unrun. No test suites/native/provider/browser tests run.",
+    "validation": "2026-09-30: Python AST 6 files and TypeScript static analysis of all15 mobile source files passed (zero diagnostics). JavaScript regression source syntax and git diff --check passed. Policy ceiling/denial and cache expiry/late-write regressions authored unrun. No test suites/native/provider/browser tests run. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Device storage/timer/background qualification is unrun. Offline devices learn changed policy only on reconnect; previously accepted policy expiry bounds that interval. Existing unqualified old clients must upgrade; server refuses bundle requests without the policy protocol header. No claims about retroactively deleting pre-upgrade copies on disconnected older builds."
   },
   {
@@ -108,21 +108,21 @@
     "id": "LW-058",
     "status": "implemented-test-needed",
     "implementation_evidence": "theme.ts uses reactive system color scheme with shared readable light/dark tokens; screens/components use palette factories, minimum 48-unit buttons, wrapped actions and scrollable result/list headers; status remains text-labelled.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Device max-text/contrast/target measurements and screen-reader error announcements remain unrun."
   },
   {
     "id": "LW-059",
     "status": "implemented-test-needed",
     "implementation_evidence": "App hardwareBackPress returns detail to Tasks and other tabs to Tasks. usePolling aborts/invalidate requests on inactive/background, blocks background automatic fetch, refreshes once on active and exposes last-success update time.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Native Back/background/resume qualification unrun. Stale-response/background regression authored."
   },
   {
     "id": "LW-060",
     "status": "implemented-test-needed",
     "implementation_evidence": "settings.DEFAULT_BASE_URL and mobile README now use8765 matching dashboard CLI; README explains phone loopback, reachable organization HTTPS and intentional proxy ports.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral.",
+    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff unavailable (No module named ruff). Regression tests authored but not executed; no native/device/browser/provider tests executed per user deferral. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
     "remaining": "Controlled setup acceptance unrun; no deployment address/config changed."
   },
   {
@@ -183,10 +183,10 @@
   },
   {
     "id": "LW-142",
-    "status": "planned",
-    "implementation_evidence": "notification_receipts.py persists bounded content-free tenant receipts with queued/sending/accepted/failed/unknown state, dedupe and three-attempt safe test retry ceiling. notifications.py records actual backend response, preserves tenant context in async workers and sanitizes secrets; notify tool says queued, PushRegistry waits for actual response. Authorized /settings/notifications direct UI + health/test/retry API + config/installer control added; sender rechecks current admin authority and config before dispatch.",
-    "validation": "2026-09-30: Python AST 10 files and JavaScript syntax 3 standalone/template blocks passed; git diff --check passed. Receipt/async queue/idempotency tests authored but unrun. No notification delivery/provider/browser calls or test suites run.",
-    "remaining": "Direct delivery UI/service implemented; Copilot operation catalog adapter absent (existing catalog supports only closed learning-example actions). Authenticated health/retry/browser and actual service delivery validation deferred. Personal preference/digest integration belongs to LW141."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "notification_receipts.py persists bounded content-free tenant receipts with queued/sending/accepted/failed/unknown state, dedupe and three-attempt safe test retry ceiling. notifications.py records actual backend response, preserves tenant context in async workers and sanitizes secrets; notify tool says queued, PushRegistry waits for actual response. Authorized /settings/notifications direct UI + health/test/retry API + config/installer control added; sender rechecks current admin authority and config before dispatch. product_operations_notifications.py registers authorized status, explicit reviewed test and safe bounded retry callbacks through the same native service, configuration/receipt revisions and durable receipt recovery. Capacity now refuses new sends rather than evicting accepted idempotency keys.",
+    "validation": "2026-09-30: adapter/core Python AST and whitespace pass; three adapter tests plus receipt-capacity regression authored. Python runtime tests pending root dependency setup/integration (this Python environment has no pytest); no live sends executed.",
+    "remaining": "Integrate settings worker product_operations registry before adapter import/runtime tests. Local Python tests and controlled delivery qualification remain; no provider calls or receipt success fabricated. Full capacity pauses new sends until retention expiry to preserve duplicate protection."
   },
   {
     "id": "LW-143",

@@ -1,6 +1,8 @@
 import json
 from uuid import uuid4
 
+import pytest
+
 from maverick.notification_receipts import DeliveryReceipts
 
 
@@ -33,6 +35,17 @@ def test_receipt_has_no_event_content_or_destination(tmp_path):
     saved = json.loads(receipts.path.read_text())
     assert 'private task title' not in json.dumps(saved)
     assert saved[0]['request_id'] is None
+
+
+def test_capacity_does_not_evict_accepted_delivery_and_allow_a_duplicate(tmp_path, monkeypatch):
+    receipts = DeliveryReceipts(tmp_path / 'receipts.json')
+    ident, _ = receipts.claim('first', 'ntfy')
+    receipts.update(ident, 'delivered', 'Accepted')
+    first = receipts._load()[0]
+    receipts._save([first, *[{**first, 'id': str(index)} for index in range(999)]])
+    with pytest.raises(ValueError, match='full'):
+        receipts.claim('another event', 'ntfy')
+    assert receipts.claim('first', 'ntfy') == (ident, False)
 
 
 def test_async_queue_is_not_delivery_and_failed_backend_visible(tmp_path, monkeypatch):
