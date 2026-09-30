@@ -50,3 +50,25 @@ test('white-on-white preview warns while preserving the editor palette', () => {
   assert.equal(window.document.body.style.background, '');
   dom.window.close();
 });
+
+test('answer replacement cancels pending audio and binds the new result once without autoplay', async t => {
+  const ui = readingFixture('Previous answer'); t.after(() => ui.dom.window.close());
+  let release, signal, requests = 0;
+  ui.window.fetch = (_url, options) => {
+    requests += 1; signal = options.signal;
+    return new Promise(resolve => { release = resolve; });
+  };
+  ui.button.click();
+  ui.window.document.dispatchEvent(new ui.window.Event('lightwork:answer-panel-before-update'));
+  assert.equal(signal.aborted, true);
+  ui.window.document.body.innerHTML = '<div id="result">Current answer</div><button id="read-aloud" data-voice-only="1"></button>';
+  ui.window.document.dispatchEvent(new ui.window.Event('lightwork:answer-panel-updated'));
+  ui.window.document.dispatchEvent(new ui.window.Event('lightwork:answer-panel-updated'));
+  assert.equal(requests, 1);
+  assert.equal(ui.window.document.querySelectorAll('[role="status"]').length, 1);
+  release({ok: false}); await settle();
+  assert.equal(ui.spoken.length, 0);
+  ui.window.fetch = async () => { throw Error('unreachable'); };
+  ui.window.document.getElementById('read-aloud').click(); await settle();
+  assert.equal(ui.spoken[0].text, 'Current answer');
+});

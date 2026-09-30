@@ -1,8 +1,10 @@
 /* A single cancellable playback owner across server and browser voices. */
 (function () {
   'use strict';
+  var owner = null;
   window.lwReadAloud = function (button) {
     if (!button || button.dataset.readAloudBound) return;
+    if (owner) owner.dispose();
     button.dataset.readAloudBound = "true";
     var generation = 0, active = false, paused = false, player = null, url = null, request = null;
     var parts = [], index = 0, browserOnly = false, utterance = null;
@@ -95,8 +97,20 @@
       if (player) { if (paused) player.pause(); else player.play().catch(function () { stop('Playback blocked. Select Read aloud to retry.'); }); }
       if (window.speechSynthesis) { if (paused) window.speechSynthesis.pause(); else window.speechSynthesis.resume(); }
     });
-    document.addEventListener('lightwork:answer-ready', function () { stop(); }, {once: true});
-    window.addEventListener('pagehide', function () { stop(); });
+    owner = {stop: stop, dispose: function () {
+      stop(); pause.remove(); options.remove(); status.remove();
+    }};
     if (button.getAttribute('data-voice-only') === '1') button.click();
   };
+  document.addEventListener('lightwork:answer-ready', function () { if (owner) owner.stop(); });
+  document.addEventListener('lightwork:answer-panel-before-update', function () {
+    if (owner) owner.dispose(); owner = null;
+  });
+  document.addEventListener('lightwork:answer-panel-updated', function () {
+    var button = document.getElementById('read-aloud');
+    // Refresh never starts another paid voice request without a new click.
+    if (button) button.removeAttribute('data-voice-only');
+    window.lwReadAloud(button);
+  });
+  window.addEventListener('pagehide', function () { if (owner) owner.stop(); });
 })();

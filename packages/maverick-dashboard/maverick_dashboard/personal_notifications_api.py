@@ -71,6 +71,8 @@ def _projection(request, actor: str) -> tuple[list[dict], list[dict], list[dict]
             sources.append({"ref": f"approval:{approval.id}", "version": str(approval.requested_at),
                             "category": "needs-decision", "title": "Assigned approval", "label": "Needs your decision",
                             "href": f"/approvals#approval-{approval.id}", "goal_id": None, "project_id": None})
+    from maverick.budget_guidance import warning_sources
+    sources.extend(warning_sources(actor))
     return sources, tasks, list(projects.values()), limited or len(sources) > 1000
 
 
