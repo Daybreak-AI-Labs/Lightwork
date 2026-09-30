@@ -1,0 +1,1757 @@
+[
+  {
+    "id": "LW-001",
+    "title": "Keep conversation responsive while governed tasks run",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-002",
+    "title": "Graduate page-help Copilot into a shared product operation interface",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-003",
+    "title": "Stop silently dropping attachments on clarification answers",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-004",
+    "title": "Give each employee a private background-work control center",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-005",
+    "title": "Join Action Center and task questions into one actionable inbox",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-006",
+    "title": "Preserve failed Copilot questions and context safely",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-007",
+    "title": "Stop disappears while a task waits for the user",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-008",
+    "title": "Failed and cancelled tasks cannot reach their existing restart control",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-009",
+    "title": "Reconnecting live streams can fail silently forever",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-010",
+    "title": "Clarification fetch failures silently remove the useful next step",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-011",
+    "title": "Accepted cancellation has no acknowledgement or cleanup state",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-012",
+    "title": "Generic error wording hides the actual remedy",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-013",
+    "title": "Long conversation history disappears without an explanation",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-014",
+    "title": "File selections have no remove/review controls",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-015",
+    "title": "Adding a file to an initially fileless task is hidden",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-016",
+    "title": "Partial multi-file upload failures have no selective retry",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-017",
+    "title": "Add conversation organization without deleting audit evidence",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-018",
+    "title": "Give live plan polling a bounded lifetime and truthful access/retry state",
+    "category": "Conversation and background work",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-019",
+    "title": "Add conflict-safe deliverable revisions",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-020",
+    "title": "Prevent stale and concurrent settings overwrites",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-021",
+    "title": "Protect unsaved All Settings edits",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-022",
+    "title": "Do not erase edits typed while saving",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-023",
+    "title": "Save main Settings sections without discarding other sections",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-024",
+    "title": "Make preference changes previewable without navigation",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-025",
+    "title": "Chat drafts lack the recovery offered to other editors",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-026",
+    "title": "Settings-file check and install are not bound to one reviewed change",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-027",
+    "title": "Settings-file activity claims installation before the write succeeds",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-028",
+    "title": "Fence duplicate child-task creation in the task map",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-029",
+    "title": "Protect task-map edits from overwriting another user's current state",
+    "category": "Save integrity and draft protection",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-030",
+    "title": "Define personal workspace and organization preference scopes",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-031",
+    "title": "Expose all supported persona styles consistently",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-032",
+    "title": "Add personal and per-conversation custom output styles",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-033",
+    "title": "Make the preferred user name truly per-user",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-034",
+    "title": "Sync safe display preferences across devices",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-035",
+    "title": "Unify settings discovery across dedicated pages",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-036",
+    "title": "Show effective changes and runtime impact before saving",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-037",
+    "title": "Distinguish restore product default from inherit configuration",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-038",
+    "title": "Portable configuration profiles without secrets",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-039",
+    "title": "Expose settings history and safe selective rollback",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-040",
+    "title": "Save and compare outcome-oriented configuration presets",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-041",
+    "title": "Personal favorites and saved navigation views",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-042",
+    "title": "Create a configurable daily work home from existing projections",
+    "category": "Personalization and settings",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-043",
+    "title": "Localize complete employee journeys",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-044",
+    "title": "Add follow-system appearance and readable text scaling",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-045",
+    "title": "Make custom themes accessible before applying them",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-046",
+    "title": "Make read-aloud complete and reliably stoppable",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-047",
+    "title": "Bind mobile connection test feedback to the tested inputs",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-048",
+    "title": "Multiple named mobile connections and safe preference parity",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-049",
+    "title": "Evolve mobile from read-only oversight to a least-privilege decision companion",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-050",
+    "title": "Every question poll steals keyboard focus",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-051",
+    "title": "Corrupt saved connection has no UI reset",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-052",
+    "title": "Older tasks unreachable",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-053",
+    "title": "Event explanation clipped without expand",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-054",
+    "title": "Online overview omits offline attention counts",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-055",
+    "title": "Offline readiness depends on Overview; detail ignores cache",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-056",
+    "title": "No sign-out/cache purge/retention controls",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-057",
+    "title": "Native streaming transport not qualified",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-058",
+    "title": "Native preferences/large-text/targets need qualification",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-059",
+    "title": "Android Back/background lifecycle not modeled",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-060",
+    "title": "Mobile docs use wrong default port",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-061",
+    "title": "Restore a visible Close menu control on phone chat",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-062",
+    "title": "Keep focus out of obscured chat content while its mobile drawer is open",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-063",
+    "title": "Make the task-plan text alternative work with scripts enabled and graph dependencies unavailable",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-064",
+    "title": "Keep the embeddable widget within narrow viewports",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-065",
+    "title": "Bring widget interaction and announcements to the dashboard's accessibility baseline",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-066",
+    "title": "Honor reduced-motion preferences for programmatic scrolling",
+    "category": "Accessibility language and mobile",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-067",
+    "title": "Compose template search and suggested filters",
+    "category": "Workflow templates and schedules",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-068",
+    "title": "Typed workflow-template inputs",
+    "category": "Workflow templates and schedules",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-069",
+    "title": "Promote workflows through draft, test, version and publish",
+    "category": "Workflow templates and schedules",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-070",
+    "title": "Accept ordinary office documents when drafting workflows",
+    "category": "Workflow templates and schedules",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-071",
+    "title": "Make schedule-list failures visible and preserve last good state",
+    "category": "Workflow templates and schedules",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-072",
+    "title": "Promote schedules from pending queue entries to durable managed objects",
+    "category": "Workflow templates and schedules",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-073",
+    "title": "Complete in-app recurring-job recovery without unsafe replay",
+    "category": "Workflow templates and schedules",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-074",
+    "title": "Make workflow templates earn trust through measured outcomes",
+    "category": "Workflow templates and schedules",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-075",
+    "title": "Do not render Connections outages as an empty vault",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-076",
+    "title": "Show connection test freshness and coverage",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-077",
+    "title": "Allow employees to connect approved own accounts",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-078",
+    "title": "Preview connection dependencies and guide safe rebinding",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-079",
+    "title": "Publish a qualified OAuth/platform support matrix",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-080",
+    "title": "Guide connection setup by the job and required capabilities",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-081",
+    "title": "Add a governed extension qualification workbench",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-082",
+    "title": "Conflict recovery can overwrite another administrator's connection edits",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-083",
+    "title": "Editing a saved non-preset connector can erase its tool binding",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-084",
+    "title": "“Not working” conflates bad credentials with unproven or unreachable readiness",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-085",
+    "title": "Key connection requests allow duplicate submissions and have no bounded waiting state",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-086",
+    "title": "Account management is fragmented across Connections and Automations",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-087",
+    "title": "Connector help still directs normal setup to terminal/environment editing",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-088",
+    "title": "AWS connection region picker excludes backend-admitted regions without an escape path",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-089",
+    "title": "Replace extension setup's configuration-file instructions with the existing in-product setting",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-090",
+    "title": "Show and explain exactly what “Send this page” will share",
+    "category": "Connections and extensibility",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-091",
+    "title": "Make new role grants least-privileged",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-092",
+    "title": "Separate resetting role from removing access",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-093",
+    "title": "Scope Users page to tenant admin authority",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-094",
+    "title": "Create complete employee departure workflow",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-095",
+    "title": "Define and enforce admin audit-metadata-only default",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-096",
+    "title": "Explain effective permissions and their owner",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-097",
+    "title": "Make enterprise first-login defaults explicit",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-098",
+    "title": "Show effective posture, not just profile name",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-099",
+    "title": "Make multi-tab workspace switches explicit",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-100",
+    "title": "View-only users receive active mutation controls",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-101",
+    "title": "Failed SSO ends at a plain-text “login failed” dead end",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-102",
+    "title": "“Keep until I choose” cannot disable an existing retention period",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-103",
+    "title": "Retention deletion needs an impact preview tied to saved effective policy",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-104",
+    "title": "Retention result hides skipped records and partial execution",
+    "category": "Identity administration and privacy",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-105",
+    "title": "Stop coworkers' activity evicting personal memory",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-106",
+    "title": "Resolve contradictory and retracted preferences",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-107",
+    "title": "Let employees inspect and correct remembered preferences",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-108",
+    "title": "Offer explicit cross-channel personal preference scope",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-109",
+    "title": "Separate remembering, organizational reuse and training controls",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-110",
+    "title": "Let employees report knowledge errors without deletion power",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-111",
+    "title": "Bring source confidence and freshness into reused answers",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-112",
+    "title": "Unify my-data export, retention and deletion status",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-113",
+    "title": "Unify discovery across business metadata and governed knowledge",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-114",
+    "title": "Make search scale limits useful to employees",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-115",
+    "title": "Connect governed knowledge selection directly to task context",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-116",
+    "title": "“Search chats” searches only 25 recent titles",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-117",
+    "title": "Shared facts can overwrite a newer edit or delete a changed fact",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-118",
+    "title": "Facts hide provenance, age, history and retention consequences",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-119",
+    "title": "Facts page does not scale to a large business memory",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-120",
+    "title": "Knowledge purpose picker only inspects 250 registered datasets",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-121",
+    "title": "Knowledge picker backend failure masquerades as no approved uses",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-122",
+    "title": "Knowledge reindex lacks bounded job supervision",
+    "category": "Memory knowledge and search",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-123",
+    "title": "Tell the truth about feedback and learning",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-124",
+    "title": "Make projects useful workspaces, not only task groupings",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-125",
+    "title": "Turn team review into a complete revise-and-resubmit loop",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-126",
+    "title": "Make approval quorum progress actionable",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-127",
+    "title": "Provide requester-scoped decision history",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-128",
+    "title": "Clarify different kinds of approved/completed",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-129",
+    "title": "Transfer tasks with selected evidence and explicit acceptance",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-130",
+    "title": "Package reviewed artifacts for the recipient's actual job",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-131",
+    "title": "Live completion omits result actions, sign-off and newly produced artifacts",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-132",
+    "title": "Share-link audience, prerequisites and expiry are not visible before creation",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-133",
+    "title": "Gist failures incorrectly promise nothing was shared",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-134",
+    "title": "Gist evidence errors are misreported as missing credentials",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-135",
+    "title": "Separate stopping a task from rating its quality",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-136",
+    "title": "Preview the exact history payload before uploading it",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-137",
+    "title": "Qualify the promised receiving journey for portable task history",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-138",
+    "title": "“Download full history” is silently partial",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-139",
+    "title": "Data export needs a readable business handoff alongside technical bundles",
+    "category": "Review deliverables and collaboration",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-140",
+    "title": "Help users choose models by capability and tradeoff",
+    "category": "Notifications models and costs",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-141",
+    "title": "Add personal notification preferences and quiet hours",
+    "category": "Notifications models and costs",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-142",
+    "title": "Show notification delivery health and test results",
+    "category": "Notifications models and costs",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-143",
+    "title": "Show usable budget headroom before work starts",
+    "category": "Notifications models and costs",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-144",
+    "title": "Warn before budgets pause important schedules",
+    "category": "Notifications models and costs",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-145",
+    "title": "Route provider accounting blocks to responsible admin",
+    "category": "Notifications models and costs",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-146",
+    "title": "Add job-specific employee activation paths",
+    "category": "Onboarding support and qualification",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-147",
+    "title": "Give employees safe task-level diagnostics",
+    "category": "Onboarding support and qualification",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-148",
+    "title": "Replace recovery offsets with source lookup",
+    "category": "Onboarding support and qualification",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-149",
+    "title": "Qualify actual enterprise employee journeys",
+    "category": "Onboarding support and qualification",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-150",
+    "title": "Failure pages need a support reference tied to the actual failure",
+    "category": "Onboarding support and qualification",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-151",
+    "title": "Review support-report content locally before it leaves Lightwork",
+    "category": "Onboarding support and qualification",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-152",
+    "title": "Make older failed tasks selectable in Help",
+    "category": "Onboarding support and qualification",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-153",
+    "title": "A different service on the desktop port is treated as Lightwork",
+    "category": "Installation and desktop maintenance",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-154",
+    "title": "Establish customer-release evidence for the Windows installer candidate",
+    "category": "Installation and desktop maintenance",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-155",
+    "title": "Define and complete the supported non-Windows customer installation journey",
+    "category": "Installation and desktop maintenance",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-156",
+    "title": "Replace manual maintenance authorization transfer with a protected handoff",
+    "category": "Installation and desktop maintenance",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-157",
+    "title": "Add a supported coordinated recovery path when protected rollback is refused",
+    "category": "Installation and desktop maintenance",
+    "status": "planned",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Implementation review pending."
+  },
+  {
+    "id": "LW-158",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-159",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-160",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-161",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-162",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-163",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-164",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-165",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-166",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-167",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-168",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-169",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-170",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-171",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-172",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-173",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-174",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-175",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-176",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-177",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-178",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-179",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-180",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-181",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-182",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-183",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-184",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-185",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-186",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-187",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-188",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-189",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-190",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-191",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-192",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-193",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-194",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  },
+  {
+    "id": "LW-195",
+    "title": "Awaiting complete source row",
+    "category": "Awaiting source",
+    "status": "blocked-source",
+    "implementation_evidence": [],
+    "validation": "No tests executed; user deferred tests.",
+    "remaining": "Library text extraction truncated; full row requested."
+  }
+]
