@@ -133,13 +133,14 @@
     "id": "LW-077",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "71c1142/f3c7716: admin-approved fixed OAuth profiles and workspace app registration; operators consent only for their own private account; callback/refresh recheck current self-connect policy. Config/installer controls default off."
+      "71c1142/f3c7716: admin-approved fixed OAuth profiles and workspace app registration; operators consent only for their own private account; callback/refresh recheck current self-connect policy. Config/installer controls default off.",
+      "e5421ea: configured own-account authorization also governs Connections page floor/default and finder; explicit admin visibility override still wins. Native provider-application controls remain global-admin-only."
     ],
     "validation": [
-      "Python AST and standalone/inline JavaScript syntax checked; regression tests authored where relevant. No suites, app/native tests, or live-provider calls executed."
+      "Installed local Chrome enterprise journey: actual invited employee completes approved own Google Drive authorization with synthetic local token exchange and cannot register provider application; colleague cannot see the connection. One page-policy unit test and all ten real workspace/connection workflow regressions pass."
     ],
     "remaining": [
-      "Execute acceptance and regression tests during the user-authorized testing phase."
+      "Live provider consent/refresh/revocation qualification requires approved sandbox accounts; no provider contacted."
     ]
   },
   {

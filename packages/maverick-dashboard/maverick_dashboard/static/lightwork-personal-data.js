@@ -1,22 +1,44 @@
 (function () {
   'use strict';
   const el = id => document.getElementById(id);
-  let state = JSON.parse(el('pd-bootstrap').textContent), busy = false, dirty = false;
+  let state = JSON.parse(el('pd-bootstrap').textContent), busy = false, dirty = false, locked = false;
+  const expectedContext = state.context;
   function say(message) { el('pd-status').textContent = message; }
   function text(parent, value, tag = 'p') { const node = document.createElement(tag); node.textContent = value; parent.appendChild(node); return node; }
   function button(parent, label, handler) { const node = text(parent, label, 'button'); node.type = 'button'; node.className = 'btn'; node.addEventListener('click', handler); return node; }
+  function lock() {
+    locked = true; dirty = false; state = null;
+    el('pd-bootstrap').textContent = '{}';
+    document.querySelectorAll('[id^="pd-"] input, [id^="pd-"] textarea, [id^="pd-"] select, [id^="pd-"] button, input[id^="pd-"], textarea[id^="pd-"], select[id^="pd-"], button[id^="pd-"]').forEach(control => {
+      control.disabled = true;
+      if ('value' in control) control.value = '';
+      if ('checked' in control) control.checked = false;
+      if (control.tagName === 'SELECT') control.replaceChildren();
+    });
+    ['pd-command', 'pd-links', 'pd-proofs', 'pd-ceiling', 'pd-memory', 'pd-policy',
+      'pd-stores', 'pd-tasks', 'pd-delete-preview', 'pd-delete-requests', 'pd-source-text',
+      'pd-export-link'].forEach(id => { if (el(id)) el(id).replaceChildren(); });
+    return new Error('Your sign-in, permissions or workspace changed. Private data was cleared. Reload My Data to continue.');
+  }
   async function call(path, data) {
+    if (locked) throw lock();
     const response = await fetch('/api/v1/my-data' + path, {method: data ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
-      headers: {'Content-Type': 'application/json'}, body: data ? JSON.stringify({...data, context: state.context}) : undefined});
-    const result = await response.json();
-    if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Access changed or this operation is unavailable. Your draft is kept. Refresh saved state before retrying.');
+      headers: {'Content-Type': 'application/json'}, body: data ? JSON.stringify({...data, context: expectedContext}) : undefined});
+    if (locked || [401, 403].includes(response.status) || response.redirected) throw lock();
+    let result;
+    try { result = await response.json(); }
+    catch (_) { throw new Error('Personal data could not be confirmed. Refresh saved state before retrying.'); }
+    const detail = result && typeof result.detail === 'string' ? result.detail : '';
+    if (response.status === 409 && /account or workspace changed|workspace changed since/i.test(detail)) throw lock();
+    if (result && result.context !== undefined && result.context !== expectedContext) throw lock();
+    if (!response.ok) throw new Error(detail || 'This operation is unavailable. Refresh saved state before retrying.');
     return result;
   }
   async function action(work, refresh = true) {
-    if (busy) return;
+    if (busy || locked) return;
     busy = true;
     try { const result = await work(); if (refresh) { state = await call(''); dirty = false; render(); } say(result && result.message ? result.message : 'Saved state confirmed.'); return result; }
-    catch (error) { say(error.message + ' Current editor text has been kept.'); }
+    catch (error) { say(error.message + (locked ? '' : ' Current editor text has been kept.')); }
     finally { busy = false; }
   }
   function scopeBody(scope) { return {channel: scope.channel, user_id: scope.user_id, expected_revision: scope.revision}; }

@@ -1,0 +1,19 @@
+[
+  {
+    "id": "LW-149",
+    "status": "test-needed",
+    "implementation_evidence": [
+      "Installed Chrome/Playwright browser qualification against isolated real dashboard and encrypted local stores; docs/ux-audit-2026-09-30/browser-qualification.md records exact evidence and limits.",
+      "enterprise_server.py and enterprise_lifecycle.spec.js exercise actual invitation/session/RBAC/own-account/knowledge/review/export/departure flows for five roles with socket-blocked synthetic provider/source boundaries.",
+      "Production fixes:23 advertised static assets and current companion navigation; lazy ordinary-record search; approved employee Connections page policy; My Data private state clears/locks on revoked sign-in, permission loss or proven context mismatch."
+    ],
+    "validation": [
+      "Original69-case complete run:64passed5failed. Four corrected/environment-qualified cases pass targeted rerun; independent pilot GET now succeeds only after four owner-approved five-minute content grants, with POST source-read review fix pending separate root checkpoint.",
+      "New enterprise lifecycle passes55.0s. Seven controller access-loss/preservation regressions pass; ten native workspace/connection regressions and own-connect visibility regression pass.174 advertised asset HTTP/MIME contracts pass."
+    ],
+    "remaining": [
+      "Re-run independent pilot after its explicit read-only source resolver fix, then qualify final consolidated commit.",
+      "Approved real IdP/provider sandbox accounts were not supplied or invoked. Live consent/refresh/revocation, provider-grounded model answer quality, actual paid-cost reconciliation, packaged desktop/native OS integration and customer acceptance remain unqualified. Captured artifact and provider exchange in the local enterprise journey are explicitly synthetic; no real model was run."
+    ]
+  }
+]
