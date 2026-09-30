@@ -11,11 +11,12 @@ const shell='<div id="conversation-send-options"><select id="conversation-send-m
 const tick=async()=>{for(let i=0;i<14;i++)await new Promise(resolve=>setImmediate(resolve));};
 const item={id:'CI-one',revision:1,mode:'queue',text:'Saved next work',files:[{id:'file-one',filename:'first.txt',mime:'text/plain',size_bytes:3},{id:'file-two',filename:'second.txt',mime:'text/plain',size_bytes:5}],state:'queued',message:'Waiting for current task',goal_id:null,acknowledgement:null,created_at:1};
 function state(items=[]){return {context:'context',root_id:4,enabled:true,policy:{modes:['guidance','queue','independent'],max_pending:30,max_files:10,max_file_bytes:4194304,max_total_bytes:4194304},items,defaults:{mode:'queue',detail:'detailed'},target:{id:4,title:'Current task',description:'Original task brief',status:'active'},guidance_review_version:'current-review'};}
-function page(initial=state(), pointer=null){const dom=new JSDOM(panel+shell,{url:'https://lightwork.invalid/chat/goal/4',runScripts:'outside-only'});const calls=[];let current=initial,allowed=true,handler=null,clears=0;
+function page(initial=state(), pointer=null, catalog=null){const dom=new JSDOM(panel+shell,{url:'https://lightwork.invalid/chat/goal/4',runScripts:'outside-only'});const calls=[];let current=initial,allowed=true,handler=null,clears=0;
  dom.window.fetch=async(url,options={})=>{calls.push({url:String(url),options});if(String(url).endsWith('/permissions'))return {ok:true,status:200,json:async()=>({can_operate:allowed})};if(handler)return handler(String(url),options);return {ok:true,status:200,json:async()=>current};};
  dom.window.mvBusinessError=body=>body.detail&&body.detail.schema==='lightwork.error.v1'?body.detail:null;
  const form=dom.window.document.getElementById('answer-form');form.mvRecovery={clear:async()=>{clears++;}};
  if(pointer)dom.window.sessionStorage.setItem('lightwork:pending-message:context:4',pointer);
+ if(catalog){const payload=dom.window.document.createElement('script');payload.id='lightwork-i18n-data';payload.type='application/json';payload.textContent=JSON.stringify({language:'fr',locale:'fr-CA',catalog});dom.window.document.head.append(payload);dom.window.eval(fs.readFileSync(path.join(root,'static/lightwork-i18n.js'),'utf8'));}
  dom.window.eval(script);
  return {dom,doc:dom.window.document,calls,api:dom.window.mvConversationInbox,form,set(fn){handler=fn;},allow(value){allowed=value;},current(value){current=value;handler=null;},get clears(){return clears;},response(value,status=200){return {ok:status>=200&&status<300,status,json:async()=>value};}};
 }
@@ -51,3 +52,30 @@ test('independent work binds the explicitly shown snapshot instead of a later po
 
 
 test('partial task admission offers cancellation instead of rewriting its durable request',async()=>{const blocked={...item,state:'blocked',goal_id:9,may_edit:false};const p=page(state([blocked]));await tick();assert.equal(button(p,'Edit pending text or files'),undefined);assert.ok(button(p,'Cancel this pending message'));p.dom.window.close();});
+
+test('localized guidance review preserves exact employee text, attachments and acknowledged payloads',async()=>{
+ const catalog={
+   'Guidance for this task':{text:'Consignes pour cette tâche',lang:'fr'},
+   'Waiting for your guidance decision':{text:'En attente de votre décision',lang:'fr'},
+   '{mode} — {state}':{text:'{mode} — {state}',lang:'fr'},
+   'Review guidance before approving':{text:'Vérifier avant d’approuver',lang:'fr'},
+   'Save':{text:'Enregistrer',lang:'fr'},
+   '{name} — {bytes} bytes':{text:'{name} — {bytes} octets',lang:'fr'},
+ };
+ const exact='Save <img src=x> مرحبا';
+ const guidance={...item,mode:'guidance',state:'needs_decision',text:exact,files:[{id:'private',filename:'Save',size_bytes:12345}]};
+ const old={...item,id:'old',mode:'guidance',state:'consumed',acknowledgement:{text:'Save',files:[],checkpoint:'first',at:1}};
+ const initial=state([guidance,old]);initial.target.description='Save';
+ const p=page(initial,null,catalog);await tick();
+ const heading=p.doc.querySelector('.conversation-message h3');assert.equal(heading.lang,'fr');assert.match(heading.textContent,/Consignes pour cette tâche/);
+ assert.equal(p.doc.querySelector('.conversation-message details p').textContent,exact);
+ assert.equal(p.doc.querySelector('.conversation-message details p').lang,'und');
+ assert.equal(p.doc.querySelector('.conversation-message li bdi').textContent,'Save');
+ assert.match(p.doc.querySelector('.conversation-message li').textContent,/12\s?345 octets/);
+ button(p,'Vérifier avant d’approuver').click();
+ const review=p.doc.getElementById('conversation-inbox-guidance-review');
+ assert.ok([...review.querySelectorAll('[data-user-content]')].some(node=>node.textContent==='Save'));
+ assert.ok([...review.querySelectorAll('[data-user-content]')].some(node=>node.textContent===exact));
+ assert.equal(review.querySelector('img'),null);assert.equal(p.calls.filter(call=>call.options.method==='PATCH').length,0);
+ p.dom.window.close();
+});

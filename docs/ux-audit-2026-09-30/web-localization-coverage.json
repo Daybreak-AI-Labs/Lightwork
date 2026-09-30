@@ -1,5 +1,5 @@
 {
-  "catalog_sources": 644,
+  "catalog_sources": 885,
   "draft_languages": [
     "fr",
     "de",
@@ -18,9 +18,16 @@
       "remaining": []
     },
     "preferences.html": {
-      "literal_bindings": 66,
-      "remaining_literal_fragments": 0,
-      "remaining": []
+      "literal_bindings": 68,
+      "remaining_literal_fragments": 1,
+      "remaining": [
+        {
+          "line": 30,
+          "kind": "text",
+          "source": "Choose the initial execution boundary while a task runs. Every message still shows its selected mode; administrator policy may disable a mode.",
+          "catalog_available": false
+        }
+      ]
     },
     "_display_preferences.html": {
       "literal_bindings": 22,
@@ -28,220 +35,26 @@
       "remaining": []
     },
     "chat.html": {
-      "literal_bindings": 1,
-      "remaining_literal_fragments": 35,
+      "literal_bindings": 39,
+      "remaining_literal_fragments": 0,
+      "remaining": []
+    },
+    "chat_goal.html": {
+      "literal_bindings": 80,
+      "remaining_literal_fragments": 1,
       "remaining": [
         {
-          "line": 25,
+          "line": 309,
           "kind": "text",
-          "source": "What should Lightwork take on?",
-          "catalog_available": false
-        },
-        {
-          "line": 28,
-          "kind": "text",
-          "source": "Finish connecting AI",
-          "catalog_available": false
-        },
-        {
-          "line": 29,
-          "kind": "text",
-          "source": "This workspace is not ready to start AI work yet. Finish the connection setup and readiness checks before starting a task.",
-          "catalog_available": false
-        },
-        {
-          "line": 31,
-          "kind": "text",
-          "source": "Continue setup",
-          "catalog_available": false
-        },
-        {
-          "line": 36,
-          "kind": "text",
-          "source": "Check budget before starting",
-          "catalog_available": false
-        },
-        {
-          "line": 38,
-          "kind": "text",
-          "source": "Refresh budget",
-          "catalog_available": false
-        },
-        {
-          "line": 43,
-          "kind": "text",
-          "source": "Weighing up a decision? Get two viewpoints first",
-          "catalog_available": false
-        },
-        {
-          "line": 45,
-          "kind": "text",
-          "source": "Question or decision",
-          "catalog_available": false
-        },
-        {
-          "line": 48,
-          "kind": "text",
-          "source": "How thorough",
-          "catalog_available": false
-        },
-        {
-          "line": 50,
-          "kind": "text",
-          "source": "Quick: one argument from each side",
-          "catalog_available": false
-        },
-        {
-          "line": 51,
-          "kind": "text",
-          "source": "Standard: two arguments from each side",
-          "catalog_available": false
-        },
-        {
-          "line": 52,
-          "kind": "text",
-          "source": "Thorough: three arguments from each side",
-          "catalog_available": false
-        },
-        {
-          "line": 55,
-          "kind": "text",
-          "source": "What each side argues (optional)",
-          "catalog_available": false
-        },
-        {
-          "line": 56,
-          "kind": "text",
-          "source": "The side for argues that…",
-          "catalog_available": false
-        },
-        {
-          "line": 57,
-          "kind": "placeholder",
-          "source": "Leave blank for: the answer is yes, the idea is sound",
-          "catalog_available": false
-        },
-        {
-          "line": 58,
-          "kind": "text",
-          "source": "The side against argues that…",
-          "catalog_available": false
-        },
-        {
-          "line": 59,
-          "kind": "placeholder",
-          "source": "Leave blank for: the answer is no, the idea is flawed",
-          "catalog_available": false
-        },
-        {
-          "line": 61,
-          "kind": "text",
-          "source": "One side argues for, the other argues against, and a neutral judge weighs them up. This uses AI, counts toward your spending limits and costs at most $1.00 each time. Nothing else is started.",
-          "catalog_available": false
-        },
-        {
-          "line": 63,
-          "kind": "text",
-          "source": "Get two viewpoints",
-          "catalog_available": false
-        },
-        {
-          "line": 76,
-          "kind": "text",
-          "source": "Start governed AI work",
-          "catalog_available": false
-        },
-        {
-          "line": 77,
-          "kind": "placeholder",
-          "source": "Message Lightwork…",
-          "catalog_available": false
-        },
-        {
-          "line": 77,
-          "kind": "aria-label",
-          "source": "Describe a task for Lightwork to do",
-          "catalog_available": false
-        },
-        {
-          "line": 88,
-          "kind": "text",
-          "source": "Add details",
-          "catalog_available": false
-        },
-        {
-          "line": 97,
-          "kind": "text",
-          "source": "How much it may do on its own",
-          "catalog_available": false
-        },
-        {
-          "line": 99,
-          "kind": "text",
-          "source": "As usual (your settings decide)",
-          "catalog_available": false
-        },
-        {
-          "line": 105,
-          "kind": "text",
-          "source": "Director mode plans first and checks in with you as the level says. It never goes above your spending limit or your approval rules.",
-          "catalog_available": false
-        },
-        {
-          "line": 108,
-          "kind": "aria-label",
-          "source": "Attach files to this task",
-          "catalog_available": false
-        },
-        {
-          "line": 111,
-          "kind": "aria-label",
-          "source": "Attach files",
-          "catalog_available": false
-        },
-        {
-          "line": 114,
-          "kind": "aria-label",
-          "source": "Dictate a task by voice",
-          "catalog_available": false
-        },
-        {
-          "line": 118,
-          "kind": "text",
-          "source": "What should Lightwork create?",
-          "catalog_available": false
-        },
-        {
-          "line": 119,
-          "kind": "aria-label",
-          "source": "What should Lightwork create?",
-          "catalog_available": false
-        },
-        {
-          "line": 120,
-          "kind": "text",
-          "source": "Run this task",
-          "catalog_available": false
-        },
-        {
-          "line": 121,
-          "kind": "text",
-          "source": "Draft a workflow",
-          "catalog_available": false
-        },
-        {
-          "line": 122,
-          "kind": "text",
-          "source": "Draft an agent",
-          "catalog_available": false
-        },
-        {
-          "line": 134,
-          "kind": "text",
-          "source": "Lightwork runs your request within your budget and pauses for your approval where it matters.",
+          "source": "Lightwork",
           "catalog_available": false
         }
       ]
+    },
+    "_conversation_inbox_panel.html": {
+      "literal_bindings": 16,
+      "remaining_literal_fragments": 0,
+      "remaining": []
     },
     "_chat_answer_panel.html": {
       "literal_bindings": 26,

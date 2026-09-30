@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "packages/maverick-dashboard/maverick_dashboard"
 JOURNEYS = ("employee_activation.html", "preferences.html", "_display_preferences.html",
-            "chat.html", "_chat_answer_panel.html", "project_reviews.html",
+            "chat.html", "chat_goal.html", "_conversation_inbox_panel.html", "_chat_answer_panel.html", "project_reviews.html",
             "task_file_recovery.html", "workflow_builder.html")
 
 

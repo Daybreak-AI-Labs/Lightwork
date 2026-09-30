@@ -228,7 +228,7 @@
 {% endblock %}
 
 {% block chat %}
-{% if display_signed_in %}<p><a class="btn btn--ghost" href="/preferences?thread={{ goal.id }}">Conversation response style</a></p>{% endif %}
+{% if display_signed_in %}<p><a class="btn btn--ghost" href="/preferences?thread={{ goal.id }}">{{ ui('Conversation response style') }}</a></p>{% endif %}
 {% macro agent_mark() -%}
       <svg width="16" height="16" viewBox="0 0 22 22" aria-hidden="true">
         <rect x="1" y="1" width="20" height="20" rx="6.5" fill="var(--brand)"/>
@@ -237,25 +237,25 @@
 {%- endmacro %}
 <div class="convo">
   <div id="earlier-history" data-goal="{{ goal.id }}" data-before="{{ thread_turns[0].id if thread_turns else '' }}">
-    <button type="button" class="btn btn--ghost" id="history-load">Load earlier conversation</button>
-    <p id="history-status" role="status" aria-live="polite">Earlier conversation is loaded in pages.</p>
+    <button type="button" class="btn btn--ghost" id="history-load">{{ ui('Load earlier conversation') }}</button>
+    <p id="history-status" role="status" aria-live="polite">{{ ui('Earlier conversation is loaded in pages.') }}</p>
     <div id="history-turns"></div>
   </div>
   {% if latest_chat_goal_id and latest_chat_goal_id != goal.id %}
-  <p class="muted" id="newer-chat-turn">You are viewing an earlier message.
-    <a href="/chat/goal/{{ latest_chat_goal_id }}">Open the latest message in this chat</a>.</p>
+  <p class="muted" id="newer-chat-turn">{{ ui('You are viewing an earlier message.') }}
+    <a href="/chat/goal/{{ latest_chat_goal_id }}">{{ ui('Open the latest message in this chat') }}</a>.</p>
   {% endif %}
   {% if submission and (goal.status == 'draft' or submission.detail.coverage) %}
   <section class="panel" id="submission-status" role="status">
-    {% if goal.status == 'draft' %}<h2>Submission saved as a draft</h2>{% endif %}
+    {% if goal.status == 'draft' %}<h2>{{ ui('Submission saved as a draft') }}</h2>{% endif %}
     <p>{{ submission.detail.message }}</p>
     {% if submission.detail.coverage %}
-    <ul>{% for item in submission.detail.coverage %}<li>{{ item.filename }}: {% if item.status in ('ready', 'admitted', 'complete', 'ok') %}readable text ready{% elif item.status in ('pending', 'queued') %}still being read{% else %}could not be read ({{ item.status | humanize | lower }}){% endif %}</li>{% endfor %}</ul>
+    <ul>{% for item in submission.detail.coverage %}<li><bdi lang="und" dir="auto" data-user-content>{{ item.filename }}</bdi>: {% if item.status in ('ready', 'admitted', 'complete', 'ok') %}{{ ui("Readable text ready") }}{% elif item.status in ('pending', 'queued') %}{{ ui("Still being read") }}{% else %}{{ ui("Could not be read ({status})", status=item.status|humanize|lower) }}{% endif %}</li>{% endfor %}</ul>
     {% endif %}
     {% if goal.status == 'draft' %}
-    <p>AI work has not started. If all your files uploaded, try preparing the task again from this saved draft.</p>
+    <p>{{ ui('AI work has not started. If all your files uploaded, try preparing the task again from this saved draft.') }}</p>
     <form method="post" action="/chat/goal/{{ goal.id }}/recover-submission">
-      <button id="recover-submission-btn" class="btn" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Retry preparation</button>
+      <button id="recover-submission-btn" class="btn" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Retry preparation') }}</button>
     </form>
     {% endif %}
   </section>
@@ -267,34 +267,34 @@
   {% for t in thread_turns or [] %}
     {% if t.role == 'user' %}
   <div class="msg msg--user">
-    <div class="bubble"><div class="bubble__text">{{ t.content }}</div></div>
+    <div class="bubble"><div class="bubble__text" lang="und" dir="auto" data-user-content>{{ t.content }}</div></div>
   </div>
     {% else %}
   <div class="msg msg--agent">
     <div class="agent__label">{{ agent_mark() }} Lightwork</div>
-    <div class="prose" data-markdown>{{ t.content }}</div>
-    {% if t.goal_id %}<p class="turn__meta muted"><a href="/chat/goal/{{ t.goal_id }}">Show the work behind this answer</a></p>{% endif %}
+    <div class="prose" lang="und" dir="auto" data-user-content data-markdown>{{ t.content }}</div>
+    {% if t.goal_id %}<p class="turn__meta muted"><a href="/chat/goal/{{ t.goal_id }}">{{ ui('Show the work behind this answer') }}</a></p>{% endif %}
   </div>
     {% endif %}
   {% endfor %}
 
   <div class="msg msg--user">
     <div class="bubble">
-      <div class="bubble__title">{{ goal.title }}</div>
+      <div class="bubble__title" lang="und" dir="auto" data-user-content>{{ goal.title }}</div>
       {% if goal.description and goal.description != goal.title %}
-      <div class="bubble__desc">{{ goal.description }}</div>
+      <div class="bubble__desc" lang="und" dir="auto" data-user-content>{{ goal.description }}</div>
       {% endif %}
     </div>
   </div>
 
   <details id="attachments-panel" style="display: none; margin: var(--space-2) 0;">
     <summary style="cursor: pointer; color: var(--muted); font-size: var(--text-sm); width: max-content;">
-      📎 Attachments (<span id="attachments-count">0</span>)
+      📎 {{ ui('Attachments') }} (<span id="attachments-count" data-product-number="0">0</span>)
     </summary>
     <ul id="attachments-list" style="list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1);"></ul>
     <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2);">
-      <button type="button" id="attach-add-btn" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>+ Add file</button>
-      <input type="file" id="attach-add" multiple aria-label="Add files to this task"
+      <button type="button" id="attach-add-btn" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('+ Add file') }}</button>
+      <input type="file" id="attach-add" multiple aria-label="{{ ut('Add files to this task') }}"
              tabindex="-1"
              style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %} />
       <span id="attach-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-xs);"></span>
@@ -309,132 +309,128 @@
       </svg>
       Lightwork
     </div>
-    <p><a href="/my-work">View my background work</a></p>
-    <details><summary>Organize this conversation</summary>
-      <p>Names, pins and archive status apply to all its turns. Archive hides it from recents without deleting task or audit history; workspace retention still applies. You can pin up to 20 conversations.</p>
+    <p><a href="/my-work">{{ ui('View my background work') }}</a></p>
+    <details><summary>{{ ui('Organize this conversation') }}</summary>
+      <p>{{ ui('Names, pins and archive status apply to all its turns. Archive hides it from recents without deleting task or audit history; workspace retention still applies. You can pin up to 20 conversations.') }}</p>
       <form id="conversation-organization" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}" data-draft-recovery="off">
-        <label for="conversation-name">Conversation name</label><input id="conversation-name" class="input" maxlength="200" autocomplete="off">
-        <label><input id="conversation-pin" type="checkbox"> Pin this conversation</label>
-        <label><input id="conversation-archive" type="checkbox"> Archive from recents</label>
-        <button id="conversation-save" type="submit" class="btn" disabled>Save organization</button>
-        <button id="conversation-refresh" type="button" class="btn btn--ghost">Refresh saved values</button>
-        <button id="conversation-undo" type="button" class="btn btn--ghost" hidden>Undo last organization change</button>
+        <label for="conversation-name">{{ ui('Conversation name') }}</label><input id="conversation-name" class="input" maxlength="200" autocomplete="off">
+        <label><input id="conversation-pin" type="checkbox"> {{ ui('Pin this conversation') }}</label>
+        <label><input id="conversation-archive" type="checkbox"> {{ ui('Archive from recents') }}</label>
+        <button id="conversation-save" type="submit" class="btn" disabled>{{ ui('Save organization') }}</button>
+        <button id="conversation-refresh" type="button" class="btn btn--ghost">{{ ui('Refresh saved values') }}</button>
+        <button id="conversation-undo" type="button" class="btn btn--ghost" hidden>{{ ui('Undo last organization change') }}</button>
         <p id="conversation-organization-status" role="status" aria-live="polite"></p>
       </form>
-      <a href="/conversations">Browse, search and restore archived conversations</a>
+      <a href="/conversations">{{ ui('Browse, search and restore archived conversations') }}</a>
     </details>
     <script src="/static/lightwork-conversation-organization.js" defer></script>
     <p id="task-authority" role="status" data-goal="{{ goal.id }}" data-operate="{{ '1' if can_operate else '0' }}">{% if not can_operate %}This task is read-only for your current account. Permission requests explains who can review access; your draft remains available.{% endif %}</p>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
     <details class="activity" id="work-activity"{% if goal.status == 'draft' %} hidden{% endif %}>
-      <summary class="activity__bar" aria-label="Agent activity — expand to show the full work log">
+      <summary class="activity__bar" aria-label="{{ ut('Agent activity — expand to show the full work log') }}">
         <span class="spinner" id="work-spin" aria-hidden="true"></span>
-        <span class="activity__now is-live" id="work-now">Working…</span>
+        <span class="activity__now is-live" id="work-now">{{ ui('Working…') }}</span>
         <span class="activity__meta" id="work-meta"></span>
-        <span class="activity__toggle">Show work
+        <span class="activity__toggle">{{ ui('Show work') }}
           <svg class="activity__caret" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </span>
       </summary>
       <div class="worklog">
-        <div id="events" role="log" aria-live="polite" aria-label="Goal progress" tabindex="0"
+        <div id="events" role="log" aria-live="polite" aria-label="{{ ut('Goal progress') }}" tabindex="0"
              class="steps" data-steps="0" data-withheld="0"></div>
         <p id="loading-placeholder" class="muted" aria-busy="true" style="margin: 0;">
-          <span class="spinner" aria-hidden="true"></span> Working…
+          <span class="spinner" aria-hidden="true"></span> {{ ui('Working…') }}
         </p>
       </div>
     </details>
     <div id="qa-thread" class="qa" aria-live="polite"></div>
-    <button type="button" id="stream-retry" class="btn btn--ghost" hidden>Reconnect updates</button>
+    <button type="button" id="stream-retry" class="btn btn--ghost" hidden>{{ ui('Reconnect updates') }}</button>
     <p id="question-status" role="status" aria-live="polite"></p>
-    <button type="button" id="question-retry" class="btn btn--ghost" hidden>Retry loading question</button>
-    <button type="button" id="answer-receipt-check" class="btn btn--ghost" hidden>Check answer receipt</button>
-    <p class="muted">Question answers can include documents, PDFs, images and text. Audio and video need a separately reviewed transcription task.</p>
+    <button type="button" id="question-retry" class="btn btn--ghost" hidden>{{ ui('Retry loading question') }}</button>
+    <button type="button" id="answer-receipt-check" class="btn btn--ghost" hidden>{{ ui('Check answer receipt') }}</button>
+    <p class="muted">{{ ui('Question answers can include documents, PDFs, images and text. Audio and video need a separately reviewed transcription task.') }}</p>
     <p id="stream-error" role="alert" class="muted" style="display: none; margin: 0 0 var(--space-4); color: var(--danger);"></p>
     <p id="answer-refresh-status" class="muted" role="status" aria-live="polite"></p>
-    <button type="button" id="answer-refresh" class="btn btn--ghost" hidden>Refresh saved result and controls</button>
+    <button type="button" id="answer-refresh" class="btn btn--ghost" hidden>{{ ui('Refresh saved result and controls') }}</button>
     {% include "_chat_answer_panel.html" %}
     <script src="/static/lightwork-answer-panel.js" defer></script>
     <details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
-      <summary>Show planning steps</summary>
-      <p class="muted">See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the
-        result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI,
-        counts toward your spending limits and costs at most $2.00.</p>
-      <label for="ps-passes">How many review rounds</label>
+      <summary>{{ ui('Show planning steps') }}</summary>
+      <p class="muted">{{ ui('See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI, counts toward your spending limits and costs at most $2.00.') }}</p>
+      <label for="ps-passes">{{ ui('How many review rounds') }}</label>
       <select id="ps-passes" class="select"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
-        <option value="1">One round</option>
-        <option value="2" selected>Up to two rounds</option>
-        <option value="3">Up to three rounds</option>
+        <option value="1" lang="{{ ul('One round') }}">{{ ut('One round') }}</option>
+        <option value="2" selected lang="{{ ul('Up to two rounds') }}">{{ ut('Up to two rounds') }}</option>
+        <option value="3" lang="{{ ul('Up to three rounds') }}">{{ ut('Up to three rounds') }}</option>
       </select>
-      <button type="button" class="btn btn--primary" id="ps-run"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Show planning steps</button>
+      <button type="button" class="btn btn--primary" id="ps-run"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Show planning steps') }}</button>
       <p id="ps-status" role="status" aria-live="polite" tabindex="-1"></p>
       <div id="ps-result" hidden></div>
     </details>
     <details class="more">
-      <summary>More</summary>
+      <summary>{{ ui('More') }}</summary>
     {% if projects %}
     <form method="post" action="/chat/goal/{{ goal.id }}/project" class="goal-project">
-      <label class="muted" for="goal-project-sel">Project</label>
+      <label class="muted" for="goal-project-sel">{{ ui('Project') }}</label>
       <select id="goal-project-sel" name="project_id" class="input" onchange="this.form.requestSubmit()"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
-        <option value="">— none —</option>
+        <option value="" lang="{{ ul('— none —') }}">{{ ut('— none —') }}</option>
         {% for p in projects %}
           <option value="{{ p.id }}"{% if p.id == goal.project_id %} selected{% endif %}>{{ p.name or 'Untitled' }}</option>
         {% endfor %}
       </select>
-      <noscript><button type="submit" id="goal-project-save" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Set</button></noscript>
+      <noscript><button type="submit" id="goal-project-save" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Set') }}</button></noscript>
     </form>
     {% endif %}
     <div class="goal-share" data-goal="{{ goal.id }}">
-      {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">Review task files</a>{% endif %}
-      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">Download or share full history</a>
-      <button type="button" id="share-create" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Review share link</button>
-      <input type="text" id="share-url" class="input" readonly aria-label="Share link"
+      {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">{{ ui('Review task files') }}</a>{% endif %}
+      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">{{ ui('Download or share full history') }}</a>
+      <button type="button" id="share-create" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Review share link') }}</button>
+      <input type="text" id="share-url" class="input" readonly aria-label="{{ ut('Share link') }}"
              style="display: none; max-width: 28rem;" onclick="this.select()">
       <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
       <ul id="share-list" class="share-list">
         {% for s in share_links %}
           <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
-            <button type="button" class="btn btn--ghost share-revoke"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %} data-id="{{ s.id }}">Revoke</button></li>
+            <button type="button" class="btn btn--ghost share-revoke"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %} data-id="{{ s.id }}">{{ ui('Revoke') }}</button></li>
         {% endfor %}
       </ul>
     </div>
     <div class="task-ops">
-      <h3 class="task-ops__title">Task Health</h3>
-      <p class="muted task-ops__note">A score out of 100 from how the task went: whether it finished, tool errors, and how much AI it used.</p>
-      <button type="button" class="btn btn--ghost" id="task-health-check" data-goal="{{ goal.id }}">Check this task's health</button>
+      <h3 class="task-ops__title">{{ ui('Task Health') }}</h3>
+      <p class="muted task-ops__note">{{ ui('A score out of 100 from how the task went: whether it finished, tool errors, and how much AI it used.') }}</p>
+      <button type="button" class="btn btn--ghost" id="task-health-check" data-goal="{{ goal.id }}">{{ ui("Check this task's health") }}</button>
       <p id="task-health-status" class="muted" role="status" aria-live="polite"></p>
       <div id="task-health-out"></div>
     </div>
     </details>
     <details class="more" id="code-sandbox" data-goal="{{ goal.id }}">
-      <summary>Run code for this task</summary>
-      <p class="muted task-ops__note">Run small pieces of Python for this task in Lightwork's sandbox, step by step.
-        Values carry over between steps. Every step is checked, recorded and counted against the task's limits.</p>
+      <summary>{{ ui('Run code for this task') }}</summary>
+      <p class="muted task-ops__note">{{ ui("Run small pieces of Python for this task in Lightwork's sandbox, step by step. Values carry over between steps. Every step is checked, recorded and counted against the task's limits.") }}</p>
       <p id="code-sandbox-status" class="muted" role="status" aria-live="polite"></p>
       <div id="code-sandbox-body"></div>
     </details>
     <div id="halt-card" class="halt-card" style="display: none;">
       {% set pilot_prepared = goal.result == 'Prepared for a workflow pilot. Start this task after the pilot plan is frozen.' %}
-      <div class="halt-card__title">{{ 'Ready to start' if pilot_prepared else 'Lightwork stopped' }}</div>
+      <div class="halt-card__title">{{ ui('Ready to start' if pilot_prepared else 'Lightwork stopped') }}</div>
       <p id="halt-reason" class="muted" style="margin: var(--space-1) 0 0;"></p>
       {% if pilot_prepared %}
       <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">
-        This task was prepared without running it. Freeze your <a href="/outcome-pilots">workflow pilot plan</a>,
-        review the spending limit, then start when you are ready.
+        {{ ui('This task was prepared without running it. Review and freeze its workflow pilot plan and spending limit before starting.') }} <a href="/outcome-pilots">{{ ui('Workflow pilot plan') }}</a>
       </p>
       {% endif %}
       <details class="panel" data-budget-launch data-goal="{{ goal.id }}">
-        <summary>Review allowance before this attempt</summary><p role="status" aria-live="polite"></p>
-        <div data-budget-summary></div><button class="btn btn--ghost" type="button">Refresh budget</button>
+        <summary>{{ ui('Review allowance before this attempt') }}</summary><p role="status" aria-live="polite"></p>
+        <div data-budget-summary></div><button class="btn btn--ghost" type="button">{{ ui('Refresh budget') }}</button>
       </details>
       <script src="/static/lightwork-budget-guidance.js" defer></script>
       <form id="halt-resume-form" class="halt-card__row" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}">
-        <button id="halt-resume" class="btn btn--primary" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ 'Start this task' if pilot_prepared else 'Try again' }}</button>
+        <button id="halt-resume" class="btn btn--primary" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Start this task' if pilot_prepared else 'Try again') }}</button>
         <details class="halt-card__budget">
-          <summary>Set a spending limit for this attempt</summary>
+          <summary>{{ ui('Set a spending limit for this attempt') }}</summary>
           <div class="field">
-            <label for="halt-resume-budget">Spending limit (USD, optional)</label>
-            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling is not none %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling is not none %}Up to ${{ spend_ceiling_text }}{% else %}Optional task limit{% endif %}" aria-describedby="halt-resume-budget-hint"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
-            <p id="halt-resume-budget-hint" class="muted">This limits the next attempt.{% if spend_ceiling %} Leave it empty to use your workspace’s spending limit of ${{ spend_ceiling_text }}.{% endif %} Your organization’s spending and safety limits still apply.</p>
+            <label for="halt-resume-budget">{{ ui('Spending limit (USD, optional)') }}</label>
+            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling is not none %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling is not none %}{{ ut('Up to {amount}', amount='$' ~ spend_ceiling_text) }}{% else %}{{ ut('Optional task limit') }}{% endif %}" aria-describedby="halt-resume-budget-hint"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
+            <p id="halt-resume-budget-hint" class="muted">{{ ui("This limits the next attempt. Your organization’s spending and safety limits still apply.") }}{% if spend_ceiling %} {{ ui("Leave it empty to use your workspace’s spending limit of {amount}.", amount='$' ~ spend_ceiling_text) }}{% endif %}</p>
           </div>
         </details>
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
@@ -452,39 +448,40 @@
      (a follow-up goal run with the earlier turns as context). #}
   <div id="composer" class="ask">
     <div id="conversation-send-options" hidden>
-      <label for="conversation-send-mode">Use this message to</label>
+      <label for="conversation-send-mode">{{ ui('Use this message to') }}</label>
       <select id="conversation-send-mode" class="input" aria-describedby="conversation-send-explanation"{% if not can_operate %} disabled{% endif %}>
-        <option value="guidance">Send guidance to this task</option>
-        <option value="queue">Queue the next task</option>
-        <option value="independent">Start a separate task</option>
+        <option value="guidance" lang="{{ ul('Send guidance to this task') }}">{{ ut('Send guidance to this task') }}</option>
+        <option value="queue" lang="{{ ul('Queue the next task') }}">{{ ut('Queue the next task') }}</option>
+        <option value="independent" lang="{{ ul('Start a separate task') }}">{{ ut('Start a separate task') }}</option>
       </select>
-      <label for="conversation-independent-context" id="conversation-independent-context-label" hidden>Context for separate task</label>
+      <label for="conversation-independent-context" id="conversation-independent-context-label" hidden>{{ ui('Context for separate task') }}</label>
       <select id="conversation-independent-context" class="input" hidden{% if not can_operate %} disabled{% endif %}>
-        <option value="none">Only this message and selected files</option><option value="conversation_snapshot">Include this authorized conversation snapshot</option>
+        <option value="none" lang="{{ ul('Only this message and selected files') }}">{{ ut('Only this message and selected files') }}</option><option value="conversation_snapshot" lang="{{ ul('Include this authorized conversation snapshot') }}">{{ ut('Include this authorized conversation snapshot') }}</option>
       </select>
       <p id="conversation-send-explanation" class="ask__hint"></p>
     </div>
     <div id="question-panel" class="ask__question" style="display: none;" role="alert" aria-live="assertive">
-      <p class="ask__eyebrow">Lightwork needs one thing from you</p>
-      <p id="question-text" class="ask__text" role="status" aria-live="polite"></p>
+      <p class="ask__eyebrow">{{ ui('Lightwork needs one thing from you') }}</p>
+      <p id="question-text" lang="und" dir="auto" data-user-content class="ask__text" role="status" aria-live="polite"></p>
     </div>
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
       <input type="hidden" name="submission_key" value="{{ submission_key }}" />
-      <textarea id="answer-input" name="message" rows="1" required
-                placeholder="{{ 'Lightwork is working… you can type while you wait' if run_open|default(true) else 'Message Lightwork…' }}"
-                aria-label="Your answer to the agent's question, or your next message"
+      <label id="answer-input-label" class="sr-only" for="answer-input">{{ ui("Your answer to the agent's question, or your next message") }}</label>
+      <textarea id="answer-input" lang="und" dir="auto" data-user-content name="message" rows="1" required
+                placeholder="{{ ut('Lightwork is working… you can type while you wait' if run_open|default(true) else 'Message Lightwork…') }}"
+                aria-labelledby="answer-input-label"
                 aria-describedby="question-text" class="ask__field"></textarea>
-      <input type="file" name="files" id="reply-files" multiple aria-label="Attach files to your message" tabindex="-1"
+      <input type="file" name="files" id="reply-files" multiple aria-label="{{ ut('Attach files to your message') }}" tabindex="-1"
              style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %} />
-      <button type="button" id="reply-attach" class="ask__icon" aria-label="Attach files"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
+      <button type="button" id="reply-attach" class="ask__icon" aria-label="{{ ut('Attach files') }}"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11.7 5.3 6 11a2 2 0 0 1-2.83-2.83l5.66-5.66a3 3 0 0 1 4.24 4.24l-5.65 5.66" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button type="button" id="answer-mic" class="ask__icon" aria-label="Dictate by voice"
+      <button type="button" id="answer-mic" class="ask__icon" aria-label="{{ ut('Dictate by voice') }}"
               aria-pressed="false" hidden{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="6" y="1.5" width="4" height="8" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       </button>
-      <button id="cancel-btn" class="ask__stop" type="button"{% if not run_open %} hidden{% endif %}{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>Stop</button>
-      <button type="submit" id="answer-send" class="ask__send" aria-label="Send"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
+      <button id="cancel-btn" class="ask__stop" type="button"{% if not run_open %} hidden{% endif %}{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Stop') }}</button>
+      <button type="submit" id="answer-send" class="ask__send" aria-label="{{ ut('Send') }}"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
           <path d="M9 14.5V4M9 4l-4.5 4.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>

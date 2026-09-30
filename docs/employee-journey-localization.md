@@ -56,3 +56,11 @@ the actual language when a translated status is passed between controllers.
 The three remaining literal workflow examples are canonical parameter/tool
 identifiers, not prose. They remain unchanged because changing them would change
 what the workflow references.
+
+Conversation inbox controls use explicit product constructors; stored messages,
+acknowledged payloads, file names and task briefs use a separate verbatim source
+constructor. Localization never changes the operation ID, selected mode, reviewed
+revision/snapshot or exact receipt retry. Restart review localizes its consequence
+and USD display while keeping the task title isolated and its numeric limit
+unchanged. Tests exercise the current inbox and restart controllers, including
+permission loss and uncertain outcomes, with synthetic HTTP responses only.

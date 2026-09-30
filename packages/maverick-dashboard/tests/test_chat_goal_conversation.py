@@ -91,3 +91,24 @@ def test_markdown_renderer_is_served_as_javascript(page_env):
     assert response.headers["content-type"].startswith("application/javascript")
     assert "innerHTML" not in response.text
     assert "root.lwMarkdown = api" in response.text
+
+
+@pytest.mark.parametrize("language, label", [
+    ("fr", "Envoyer des consignes pour cette tâche"),
+    ("de", "Hinweise an diese Aufgabe senden"),
+    ("ja", "このタスクに指示を送る"),
+    ("zh", "向此任务发送指导"),
+])
+def test_conversation_localizes_governed_controls_without_translating_source(page_env, language, label):
+    client, world = page_env
+    goal_id = world.create_goal("Save مرحبا", "Save <img src=x>")
+    world.set_goal_status(goal_id, "done", result="Save مرحبا")
+    response = client.get(f"/chat/goal/{goal_id}", params={"lang": language})
+    assert response.status_code == 200
+    assert f'lang="{language}">{label}</option>' in response.text
+    assert '<html lang="en" dir="ltr">' in response.text
+    assert '<div class="bubble__title" lang="und" dir="auto" data-user-content>Save مرحبا</div>' in response.text
+    assert 'data-user-content>Save &lt;img src=x&gt;</div>' in response.text
+    assert 'data-product-copy>Messages and task receipts</span>' not in response.text
+    assert 'id="conversation-inbox"' in response.text
+    assert '"review_status": "draft_partial"' in response.text
