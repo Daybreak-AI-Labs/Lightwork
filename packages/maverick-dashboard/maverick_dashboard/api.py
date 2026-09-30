@@ -5369,6 +5369,11 @@ def list_facts(request: Request) -> dict[str, str]:
 
 @router.post("/facts", status_code=204)
 def set_fact(request: Request, payload: FactIn) -> None:
+    save_fact(request, payload)
+
+
+def save_fact(request: Request, payload: FactIn) -> int:
+    """Native save boundary, returning the actual global database revision."""
     require_permission(request, "operate")
     key = (payload.key or "").strip()
     if not key:
@@ -5383,8 +5388,8 @@ def set_fact(request: Request, payload: FactIn) -> None:
     ):
         raise HTTPException(409, "Your account or workspace changed. Reload before saving.")
     try:
-        _world().upsert_fact(key, payload.value, expected_revision=payload.expected_revision,
-                             source=caller_principal(request) or "dashboard")
+        return _world().upsert_fact(key, payload.value, expected_revision=payload.expected_revision,
+                                   source=caller_principal(request) or "dashboard")
     except FactConflict as exc:
         raise HTTPException(409, "This fact changed. Compare the current value with your draft.") from exc
 

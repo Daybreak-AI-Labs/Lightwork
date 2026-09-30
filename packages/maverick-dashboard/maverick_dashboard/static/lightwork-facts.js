@@ -13,9 +13,13 @@
   function node(tag, text) { var element = document.createElement(tag); element.textContent = text; return element; }
   function date(value) { return value ? new Date(value * 1000).toLocaleString() : 'Not recorded'; }
   function label(value) { return String(value).replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }); }
+  function selectFacts(keys) {
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:keys.length ? {kind:'facts',keys:keys} : {}}}));
+  }
   function clearPrivate() {
     table.querySelector('tbody').replaceChildren(); body.replaceChildren(); inspector.hidden = true;
     if (form) form.reset(); if (conflict) conflict.hidden = true;
+    selectFacts([]);
   }
   async function request(url, options) {
     var response = await fetch(url, Object.assign({cache:'no-store', credentials:'same-origin'}, options || {}));
@@ -40,8 +44,10 @@
     form.reset(); name.readOnly = false; revision = 0; conflict.hidden = true;
     document.getElementById('fact-cancel').hidden = true;
     document.getElementById('fact-editor-title').textContent = 'Add a fact';
+    selectFacts([]);
   }
   function render(items) {
+    selectFacts([]);
     var tbody = table.querySelector('tbody'); tbody.replaceChildren();
     items.forEach(function (item) {
       var row = document.createElement('tr'); row.dataset.key = item.key; row.dataset.revision = item.revision;
@@ -83,6 +89,7 @@
   }
   function showRecord(payload) {
     var item = payload.item, section = document.createElement('section');
+    selectFacts([item.key]);
     section.append(node('h3', label(item.key)), node('p', item.value));
     section.append(node('p', 'Tags: ' + ((item.tags || []).join(', ') || 'None')));
     if (canEdit && payload.tags_enabled) {
@@ -132,13 +139,14 @@
     var selected = Array.from(table.querySelectorAll('[data-select-fact]:checked')).map(function (input) { return input.closest('tr').dataset.key; });
     if (!selected.length) { status.textContent = 'Select the facts you want to review on this page.'; return; }
     setBusy(true); body.replaceChildren();
-    try { for (var key of selected) showRecord(await current(key)); document.getElementById('fact-inspector-title').focus(); }
+    try { for (var key of selected) showRecord(await current(key)); selectFacts(selected); document.getElementById('fact-inspector-title').focus(); }
     catch (error) { body.replaceChildren(); inspector.hidden = true; status.textContent = error.message; }
     finally { setBusy(false); }
   });
   table.addEventListener('click', async function (event) {
     var button = event.target.closest('button'), row = button && button.closest('tr'); if (!row || busy) return;
     var key = row.dataset.key;
+    selectFacts([key]);
     if (button.hasAttribute('data-edit-fact')) {
       name.value = key; detail.value = row.querySelector('.fact-value').textContent; revision = Number(row.dataset.revision); name.readOnly = true;
       document.getElementById('fact-cancel').hidden = false; document.getElementById('fact-editor-title').textContent = 'Edit fact'; conflict.hidden = true; detail.focus(); return;

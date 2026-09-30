@@ -99,9 +99,8 @@ def set_tags(request: Request, payload: TagsIn):
     return {"context": context_for(request), "revision": revision}
 
 
-@router.delete("/{key:path}", status_code=204)
-async def delete_fact(request: Request, key: str, expected_revision: int = Query(..., ge=1),
-                      context: str = Query(..., min_length=64, max_length=64)) -> Response:
+def remove_fact(request: Request, key: str, expected_revision: int, context: str) -> None:
+    """One native scope/CAS boundary for direct deletion and reviewed Copilot."""
     require_permission(request, "operate")
     name = (key or "").strip()
     if not name:
@@ -112,13 +111,17 @@ async def delete_fact(request: Request, key: str, expected_revision: int = Query
         raise HTTPException(409, "Your account or workspace changed. Reload before removing.")
     from .api import _world
     try:
-        removed = await run_in_threadpool(
-            lambda: _world().delete_fact(name, expected_revision=expected_revision)
-        )
+        removed = _world().delete_fact(name, expected_revision=expected_revision)
     except FactConflict as exc:
         raise HTTPException(409, "This fact changed. Review its current value before removing.") from exc
     if not removed:
         raise HTTPException(404, "no such fact")
+
+
+@router.delete("/{key:path}", status_code=204)
+async def delete_fact(request: Request, key: str, expected_revision: int = Query(..., ge=1),
+                      context: str = Query(..., min_length=64, max_length=64)) -> Response:
+    await run_in_threadpool(remove_fact, request, key, expected_revision, context)
     return Response(status_code=204)
 
 

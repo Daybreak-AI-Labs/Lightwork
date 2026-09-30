@@ -175,3 +175,33 @@ test('revocation during confirmed-save list refresh keeps private content cleare
   assert.equal(calls,3);assert.equal(d.getElementById('fact-detail').value,'');
   assert.equal(d.querySelector('#fact-list tbody').textContent,'');assert.match(d.getElementById('fact-status').textContent,/Access changed/);dom.window.close();
 });
+
+
+test('Facts current selection reaches Copilot without copying values and clears on reset or access loss',async()=>{
+  let denied=false;
+  const dom=fixture(factsHTML,'lightwork-facts.js',async(url)=>denied?response({},403):response(String(url).includes('/records?')?factPage('Sensitive value'):Object.assign(factRecord('Sensitive value'),{history:[],history_notice:'Retained',tags_enabled:false})));
+  const w=dom.window,d=w.document,selections=[];
+  d.addEventListener('lightwork:copilot-selection',event=>selections.push(JSON.parse(JSON.stringify(event.detail.selection))));
+  d.getElementById('fact-search').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();await tick();
+  d.querySelector('[data-edit-fact]').click();
+  assert.deepEqual(selections.at(-1),{kind:'facts',keys:['Office hours']});
+  assert.equal(JSON.stringify(selections).includes('Sensitive value'),false);
+  d.getElementById('fact-cancel').click();assert.deepEqual(selections.at(-1),{});
+  d.querySelector('[data-view-fact]').click();await tick();assert.deepEqual(selections.at(-1),{kind:'facts',keys:['Office hours']});
+  denied=true;d.getElementById('fact-search').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
+  assert.deepEqual(selections.at(-1),{});assert.equal(d.getElementById('fact-inspector-body').textContent,'');w.close();
+});
+
+test('Facts bulk review sends the current exact key selection and workspace switch clears it',async()=>{
+  const dom=fixture(factsHTML,'lightwork-facts.js',async(url)=>{
+    if(String(url).includes('/records?'))return response({context:'workspace',snapshot:'v1',has_more:false,items:['a','b'].map(key=>({key,value:'detail',revision:1}))});
+    const key=new URL(url,'http://localhost').searchParams.get('key');return response({context:'workspace',item:{key,value:'detail',revision:1},history:[],history_notice:'Retained',tags_enabled:false});
+  });
+  const w=dom.window,d=w.document,selections=[];
+  d.addEventListener('lightwork:copilot-selection',event=>selections.push(JSON.parse(JSON.stringify(event.detail.selection))));
+  d.getElementById('fact-search').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
+  d.querySelectorAll('[data-select-fact]').forEach(input=>input.checked=true);
+  d.getElementById('fact-review-selection').click();await tick();await tick();
+  assert.deepEqual(selections.at(-1),{kind:'facts',keys:['a','b']});
+  d.dispatchEvent(new w.Event('lightwork:workspace-changed'));assert.deepEqual(selections.at(-1),{});w.close();
+});

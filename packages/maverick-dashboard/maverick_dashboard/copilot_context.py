@@ -86,6 +86,18 @@ _CONTEXTS = tuple(
     _ensure_read_only(context)
     for context in (
         CopilotPageContext(
+            path="/facts", title="Shared business facts",
+            summary="Browse shared facts by name, source, tag and age, then inspect exact current details and recorded versions.",
+            capabilities=("Search bounded server pages and select facts for read-only review.",
+                          "Review an exact single-fact edit, tag change, historical restore or removal through native controls and authorized Copilot actions."),
+            boundaries=("Shared facts are visible to workspace viewers; personal and task working notes are excluded.",
+                        "An edit needs current operate permission and the reviewed version. A read grant cannot grant a write.",
+                        "Removal stops new recall; retained history and minimal operation receipts are not permanent erasure."),
+            next_steps=("Choose Details and history on one fact to set the current Copilot selection.",
+                        "Compare the saved value with your draft if another person changed the fact."),
+            suggested_questions=("Find shared business facts", "Review selected facts and history", "Edit the selected fact's tags"),
+        ),
+        CopilotPageContext(
             path="/content-access", title="Employee content access",
             summary="Employee content stays private while administrators govern policy and audit metadata.",
             capabilities=("Request a specific task, approval-card read or exact chat-identity export for a stated purpose.",

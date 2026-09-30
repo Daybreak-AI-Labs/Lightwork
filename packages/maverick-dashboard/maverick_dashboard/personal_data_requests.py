@@ -24,6 +24,7 @@ KINDS = {"preference_notes", "conversation_history", "recovery_drafts",
          "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox"}
 DIAGNOSTICS = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
 EXCEPTIONS = [
+    {"store": "fact_operation_receipts", "state": "retained", "reason": "Shared fact action receipts retain the actor, review digest and outcome only, without fact names or values. These replay barriers are not automatically erased or expired; removal could let an old create action recreate deleted data."},
     {"store": "audit_and_governance_evidence", "state": "retained", "reason": "Content-minimized activity, policy and deletion receipts follow their evidence retention policy."},
     {"store": "local_selected_result_bundles", "state": "retained", "reason": "Captured local copies and review receipts are separate from their original tasks. My Data lists currently readable owned copies. Revoking future access does not delete saved or downloaded copies.", "href": "/deliverable-bundles"},
     {"store": "local_responsibility_handoffs", "state": "retained", "reason": "Offer and acceptance evidence remains separate. Withdraw outstanding offers in Handoffs; an accepted recipient's independent task is not yours to erase.", "href": "/task-handoffs"},
