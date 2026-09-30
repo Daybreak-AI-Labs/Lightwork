@@ -1,7 +1,8 @@
-{# The Ctrl+K page finder: every destination the caller may open, rendered
-   from the same role-filtered registry as the sidebar (plus pages folded
-   out of the rail). Shared by the product shell (base.html) and the chat
-   shell (chat_base.html); JavaScript only filters these existing links. #}
+{# The Ctrl+K page finder's dialog shell, shared by the product shell
+   (base.html) and the chat shell (chat_base.html). Its destinations (every
+   page the caller may open, from the same role-filtered registry as the
+   sidebar plus pages folded out of the rail) are fetched from /nav/finder on
+   first open; JavaScript only filters those server-rendered links. #}
 {# Group labels as the rail shows them; defined here so the partial renders
    the same from either shell. #}
 {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
@@ -33,22 +34,10 @@
     </div>
     <p id="navfinder-record-status" class="navfinder__count" role="status" aria-live="polite">Search by name or reference. Document contents and private notes are excluded.</p>
     {% endif %}
-    <ul class="navfinder__results" id="navfinder-results" role="listbox" aria-label="Navigation pages">
-      {% for _group in finder_pages %}
-        {% set _navfinder_group_index = loop.index0 %}
-        {% for _link in _group.links %}
-          <li role="none">
-            <a id="navfinder-option-{{ _navfinder_group_index }}-{{ loop.index0 }}"
-               href="{{ _link.href }}" role="option" tabindex="-1"
-               aria-selected="false" data-navfinder-target
-               data-search="{{ _link.label }} {{ _group_labels.get(_group.label, _group.label) }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }}">
-              <span class="navfinder__label">{{ _link.label }}</span>
-              <span class="navfinder__group">{{ _group_labels.get(_group.label, _group.label) }}</span>
-            </a>
-          </li>
-        {% endfor %}
-      {% endfor %}
-    </ul>
+    {# Destinations arrive from GET /nav/finder (the _navfinder_items.html
+       partial) the first time the finder opens; see lightwork-navfinder.js. #}
+    <ul class="navfinder__results" id="navfinder-results" role="listbox" aria-label="Navigation pages"
+        data-navfinder-src="/nav/finder"></ul>
     <p class="navfinder__empty" id="navfinder-empty" hidden>No matching pages. Try a broader search.</p>
     {% if record_search_context %}
     <button type="button" id="navfinder-more" class="btn" hidden>More records</button>

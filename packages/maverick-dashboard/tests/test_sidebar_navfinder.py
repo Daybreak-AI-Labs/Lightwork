@@ -55,10 +55,20 @@ def _client(monkeypatch, tmp_path) -> TestClient:
 
 
 def _overview_markup(monkeypatch, tmp_path) -> _NavFinderMarkup:
-    response = _client(monkeypatch, tmp_path).get("/overview")
+    client = _client(monkeypatch, tmp_path)
+    response = client.get("/overview")
     assert response.status_code == 200
     markup = _NavFinderMarkup()
     markup.feed(response.text)
+    # The finder's destinations are not in the page: the dialog fetches them
+    # from /nav/finder on first open (the same role-filtered registry).
+    assert markup.finder_hrefs == []
+    items = client.get("/nav/finder")
+    assert items.status_code == 200
+    fragment = _NavFinderMarkup()
+    fragment.feed('<dialog id="navfinder-dialog">' + items.text + "</dialog>")
+    markup.finder_hrefs = fragment.finder_hrefs
+    markup.finder_search = fragment.finder_search
     return markup
 
 

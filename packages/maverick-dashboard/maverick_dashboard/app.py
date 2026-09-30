@@ -3268,10 +3268,48 @@ async def perf_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "perf.html", {})
 
 
+@app.get("/nav/finder", response_class=HTMLResponse, include_in_schema=False)
+def nav_finder_items(request: Request) -> HTMLResponse:
+    """The page finder's destinations for the caller, as the ``<li>`` items of
+    its listbox (``_navfinder_items.html``), fetched on the finder's first open.
+
+    Every page embedded this list (81 KB, 125 groups) in its HTML; now it is
+    one small request per session, privately cacheable and revalidated by
+    ETag. It renders through the same context processor as the shell, so the
+    role, overrides and lockout policy are exactly the sidebar's.
+    """
+    rendered = templates.TemplateResponse(request, "_navfinder_items.html", {})
+    body = bytes(rendered.body)
+    etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+    headers = {
+        "Cache-Control": "private, max-age=60",
+        "ETag": etag,
+        "Vary": "Cookie, Authorization",
+    }
+    candidates = {t.strip().removeprefix("W/") for t in request.headers.get("if-none-match", "").split(",")}
+    if etag in candidates:
+        return HTMLResponse(status_code=304, headers=headers)
+    return HTMLResponse(body, headers=headers)
+
+
+#: Rows the Tasks page renders before "Show more" (the API's default page).
+GOALS_PAGE_SIZE = 50
+
+
 @app.get("/goals", response_class=HTMLResponse)
 def goals_page(request: Request) -> HTMLResponse:
-    goals = _world().list_goals(owner=goal_owner_filter(request), limit=200, order="desc")
-    return templates.TemplateResponse(request, "goals.html", {"goals": goals})
+    """The Tasks page: the newest page of goals; the rest load on demand from
+    ``/api/v1/goals`` (rendering all 200 was 104 KB of rows per visit)."""
+    goals = _world().list_goals(
+        owner=goal_owner_filter(request), limit=GOALS_PAGE_SIZE + 1, order="desc",
+    )
+    has_more = len(goals) > GOALS_PAGE_SIZE
+    return templates.TemplateResponse(request, "goals.html", {
+        "goals": goals[:GOALS_PAGE_SIZE],
+        "page_size": GOALS_PAGE_SIZE,
+        "has_more": has_more,
+        "next_offset": GOALS_PAGE_SIZE if has_more else 0,
+    })
 
 
 @app.get("/projects", response_class=HTMLResponse)
