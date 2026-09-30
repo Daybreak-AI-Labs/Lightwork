@@ -24,3 +24,8 @@ These findings do not justify weakening authentication, changing deployment
 credentials, bypassing record preservation, or assuming administrator content
 access. Any coordinated follow-up must use synthetic regression coverage and
 the approved audit-only administrative privacy policy.
+
+The user subsequently approved fixing these five findings in the same draft PR.
+[Current separate implementation register](additional-security-fixes.json) records
+the repairs and independent review follow-ups. This does not adopt the other735
+claims or imply completed full-suite qualification.

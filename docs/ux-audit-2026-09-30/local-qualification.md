@@ -12,7 +12,9 @@ No deployment configuration or credentials were changed.
 | `b0a7eea` | 36,262 passed, 3,102 failed, 195 errors, 551 skipped | Failed initial ordinary Python qualification. Retained as failure evidence, not acceptance. |
 | `d822db99ee48aab4fdded47fc799486e8e5ea44f` | All 1,594 dashboard JavaScript cases passed | Complete JavaScript run at this checkpoint. Later controller changes require integrated requalification. |
 | `9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c` | Ordinary run stopped during collection | Its long native temporary path was replaced after Windows file tests demonstrated a bounded environment requirement. No pass/fail total is claimed. |
-| `cfa16bfc6659b59d4e855beb024914409cad44a7` | Ordinary Python run in progress | Immutable checkout, matching-source virtual environment, six file-distributed workers, short private pytest path and short workspace native scratch path. |
+| `cfa16bfc6659b59d4e855beb024914409cad44a7` | Incomplete; stopped after worker crash and scheduler stall at99% | Read-only stack inspection showed all workers waiting, not executing tests. No final JUnit or pass/fail total exists; progress dots are not acceptance. The actual assertion failures remain unresolved. |
+| `f036cef90a6d6fd1ddaa3f76bd857b9ca9bd4c3e` | All1,680 dashboard JavaScript tests passed across176 files | Zero failures/skips/cancellations. Exact manifests and source boundaries: dashboard-javascript-qualification.md. |
+| `12ff6b8ad9e42f73a13467c3514f9687ba57465f` | Fresh ordinary Python run in progress | Immutable source, matching environment, streamed per-test/failure reports and bounded worker restarts. No completed result claimed. |
 
 The initial failures are not dismissed as a single fixture problem. Production
 repairs include exact ownership for local schedules, employee content reads in
@@ -57,5 +59,12 @@ signed release trust and clean-machine installation, installed IDE behavior,
 dedicated PostgreSQL/distributed failure scenarios, and human language review
 remain separate evidence requirements. Local JetBrains and Zed builds are
 recorded in `native-build-evidence.json`; they are not distribution approval.
-The five independent current-code findings from PR2530 remain reported in
-`concurrent-audit-comparison.md`, separate from the original 195-entry register.
+The five independently traced PR2530 findings were separately approved.
+`additional-security-fixes.json` records implementation, regression evidence and
+the outstanding tenant restore-boundary repair, separate from the195-entry register.
+
+At cfa16bf,15 of16 offline contract gates and all8 package wheels passed. The
+remaining constraint check required pip26.2.1 rather than the installed25.0.1.
+After the incomplete suite was stopped, only that pinned local tool was upgraded;
+constraint closure then passed with91 exactly pinned external distributions.
+Final-source contracts/builds remain pending.

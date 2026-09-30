@@ -498,11 +498,11 @@
     "category": "Personalization and settings",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Existing account preferences provide permission-filtered page/template pins, keyboard reorder/remove, starting page and owned Today recents. f6ac623 completes missing saved task filters using existing UxStore and /api/v1/views, typed native/Copilot operations, same-owner context/CAS, explicit replacement/removal, safe generated links and bounded uncertain readback. Existing personal-preferences feature and installer step cover the journey; parent registers product_operations_task_views."
+      "Existing preferences provide permission-filtered page/template pins, keyboard ordering and starting page; Today supplies current owned recents. f6ac623 completes saved task filters over existing UxStore/native endpoints and reviewed Copilot adapters. The My Data follow-on inventories/exports exact owned views and task pins and routes snapshot-bound deletion through existing independent review, preservation holds, durable dispatch and audit state. It retains other accounts, task data, shared annotations/gallery and legacy UX files. The adapter requires root's trusted ux_store-v2.json constructor/factory correction and never scans or migrates old UX files."
     ],
-    "validation": "Saved-view native/core/legacy suite29 passed; final8 passed again after incompatible legacy-name collision protection. New6 saved-view jsdom cases and editor/forms/settings follow-up total41 passed. Existing preference/Today scope and revoked-template cases passed in63 focused cases. Detailed provenance and limits: docs/ux-audit-2026-09-30/settings-final-qualification.md. Local test authorization superseded the earlier deferral; no live provider or production changes.",
-    "remaining": "Final installed cross-device/keyboard/revocation qualification remains. Filters explicitly cover200 recent or100 matching search rows. UxStore is the existing deployment-local store; distributed/cross-process qualification and complete My Data store inventory remain separate integration concerns.",
-    "evidence_slice": "slices/settings.json"
+    "validation": "Saved-view checkpoint29 native/core/legacy and41 selected JS tests passed. Follow-on71 local Python tests passed across exact-owner storage, My Data adapters/receipts/exports/Copilot and views. Eleven My Data controller cases passed. Ruff, JS syntax and whitespace checks passed. Counts overlap and are not a cumulative unique total. Exact source/limits: docs/ux-audit-2026-09-30/saved-views-personal-data-qualification.md.",
+    "remaining": "Final consolidated trusted-store migration/registry qualification and installed cross-device, keyboard, revocation and multi-process checks remain. Task filters state their200recent/100search result coverage. Deployment-local storage is not distributed storage; legacy files with unverified workspace lineage remain a separate records-custodian concern. The former missing owned UX My Data adapter is implemented.",
+    "evidence_slice": "slices/settings-personal-data.json"
   },
   {
     "id": "LW-042",
