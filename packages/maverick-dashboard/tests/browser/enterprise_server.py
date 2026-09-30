@@ -27,17 +27,21 @@ def build(directory):
     os.environ["MAVERICK_DASHBOARD_ADMINS"] = "user:admin@browser.example.test"
     block_outbound()
 
+    from maverick.tenant import registry
+
+    # Provision before app imports initialize tenant-bound stores. Namespace
+    # reservations are deliberately immutable, including in disposable homes.
+    tenant, admin = "browser-enterprise", "user:admin@browser.example.test"
+    registry.create_tenant(tenant, display_name="Synthetic enterprise workspace")
+
     from maverick import config, connection_oauth, world_model
     from maverick.paths import tenant_scope
-    from maverick.tenant import registry
     from maverick_dashboard import app as dashboard
     from maverick_dashboard import auth, invites, rbac, session_revocation
 
     config.reset_config_cache()
-    tenant, admin = "browser-enterprise", "user:admin@browser.example.test"
     employee, manager = "employee@browser.example.test", "manager@browser.example.test"
     auditor, tenant_admin = "auditor@browser.example.test", "workspace-admin@browser.example.test"
-    registry.create_tenant(tenant, display_name="Synthetic enterprise workspace")
     rbac.set_role(admin, "admin")
     rbac.set_tenant_role(tenant, admin, "admin", actor=admin)
     _, administrator_invite = invites.create_invite("admin@browser.example.test", "admin", created_by=admin, tenant=tenant)
