@@ -184,3 +184,13 @@ relevant existing authentication/chat/settings regressions. Repeat under
 Review desktop/narrow layouts, keyboard use, stale tabs, policy revocation,
 retention changes, missing encryption support, corrupted stores and account
 switches in an authenticated local application before enabling the feature.
+
+### Local regression checkpoint
+
+The draft coordinator now separates source admission and durable turn reservation
+into `_prepare_draft_turn`; model I/O still occurs outside authority locks, and
+physical dispatch and publication retain their existing current-authority checks.
+The companion API, model and store regression files passed locally: **190 tests**,
+using mocked providers and isolated workspace data. Ruff, Python 3.10 syntax and
+whitespace checks passed for the refactor. This is local regression evidence,
+not installed-app, live-provider or customer qualification.

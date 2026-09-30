@@ -3,7 +3,7 @@
 Draft conversations use the configured model facade without agent tools. Closed
 supervision intents read the caller's current tasks; existing durable chat/runner
 admission is unchanged. Companion text never becomes a goal or an ordinary audit
-payload, where legacy administrator content access still exists.
+payload. Companion content remains within its separate owner-bound policy.
 """
 from __future__ import annotations
 
@@ -302,6 +302,49 @@ async def message(request: Request, response: Response, body: MessageIn):
     return await _call(request, response, operation, write=True)
 
 
+def _prepare_draft_turn(request, body, text, actor, tenant, context, store):
+    """Bind source access and consume one request receipt before model I/O."""
+    credentials = _credential_binding(request, actor, tenant)
+    policy = store.policy(actor)
+    if not _conversation_available(policy):
+        raise CompanionPolicyDenied("model conversation disabled")
+    # Prune expired history before checking the browser's generation.
+    history = _eligible_history(store, actor)
+    tasks = _tasks(actor) if "own_tasks" in policy["allowed_sources"] else []
+    refs = {f"task:{task['goal_id']}" for task in tasks}
+    selected = []
+    # Bound both the prompt and the complete transitive source provenance.
+    for exchange in reversed(history[-6:]):
+        combined = refs | set(exchange["source_refs"])
+        if len(combined) <= 50:
+            selected.insert(0, exchange)
+            refs = combined
+    sources = _sources(actor, sorted(refs))
+    if set(sources) != refs:
+        raise CompanionPolicyDenied("task source permission changed")
+    fingerprint = hashlib.sha256(json.dumps(
+        [tenant, actor, text, body.expected_revision, body.expected_history_generation],
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode()).hexdigest()
+    ticket = store.reserve_turn(actor, request_id=body.request_id,
+                                expected_revision=body.expected_revision,
+                                expected_history_generation=body.expected_history_generation,
+                                fingerprint=fingerprint)
+    if not ticket["acquired"]:
+        return {"duplicate": {**_snapshot(store, actor, context), "request": store.turn_status(actor, body.request_id)}}
+    try:
+        from .app import check_goal_rate_limit
+
+        check_goal_rate_limit(request, source="employee_companion")
+        route = companion_model.prepare_route()
+    except Exception:
+        store.abandon_turn(actor, request_id=body.request_id, token=ticket["token"])
+        raise
+    return {"actor": actor, "tenant": tenant, "context": context, "ticket": ticket,
+            "route": route, "history": selected, "sources": list(sources.values()), "refs": sorted(refs),
+            "credentials": credentials}
+
+
 async def _draft_message(request: Request, response: Response, body: MessageIn):
     """Reserve briefly, perform model I/O outside authority locks, then publish.
 
@@ -313,45 +356,7 @@ async def _draft_message(request: Request, response: Response, body: MessageIn):
         raise HTTPException(422, "A message, request identifier, and current conversation generation are required.")
 
     def prepare(actor, tenant, context, store):
-        credentials = _credential_binding(request, actor, tenant)
-        policy = store.policy(actor)
-        if not _conversation_available(policy):
-            raise CompanionPolicyDenied("model conversation disabled")
-        # Prune expired history before checking the browser's generation.
-        history = _eligible_history(store, actor)
-        tasks = _tasks(actor) if "own_tasks" in policy["allowed_sources"] else []
-        refs = {f"task:{task['goal_id']}" for task in tasks}
-        selected = []
-        # Bound both the prompt and the complete transitive source provenance.
-        for exchange in reversed(history[-6:]):
-            combined = refs | set(exchange["source_refs"])
-            if len(combined) <= 50:
-                selected.insert(0, exchange)
-                refs = combined
-        sources = _sources(actor, sorted(refs))
-        if set(sources) != refs:
-            raise CompanionPolicyDenied("task source permission changed")
-        fingerprint = hashlib.sha256(json.dumps(
-            [tenant, actor, text, body.expected_revision, body.expected_history_generation],
-            ensure_ascii=False, separators=(",", ":"),
-        ).encode()).hexdigest()
-        ticket = store.reserve_turn(actor, request_id=body.request_id,
-                                    expected_revision=body.expected_revision,
-                                    expected_history_generation=body.expected_history_generation,
-                                    fingerprint=fingerprint)
-        if not ticket["acquired"]:
-            return {"duplicate": {**_snapshot(store, actor, context), "request": store.turn_status(actor, body.request_id)}}
-        try:
-            from .app import check_goal_rate_limit
-
-            check_goal_rate_limit(request, source="employee_companion")
-            route = companion_model.prepare_route()
-        except Exception:
-            store.abandon_turn(actor, request_id=body.request_id, token=ticket["token"])
-            raise
-        return {"actor": actor, "tenant": tenant, "context": context, "ticket": ticket,
-                "route": route, "history": selected, "sources": list(sources.values()), "refs": sorted(refs),
-                "credentials": credentials}
+        return _prepare_draft_turn(request, body, text, actor, tenant, context, store)
 
     admitted = await _call(request, response, prepare, write=True)
     if "duplicate" in admitted:
