@@ -44,7 +44,7 @@
       out.appendChild(section);
     });
     if (value.task_receipts && value.task_receipts.length) {
-      out.appendChild(node('h2', 'This task’s provider receipts'));
+      out.appendChild(node('h2', "This task's provider receipts"));
       value.task_receipts.forEach(function (row) { paragraph(out, row.reference + ': ' + row.provider + ', ' + row.period + ', ' + row.state + '; projected ' + money(row.projected) + ', recorded ' + money(row.actual) + ' ' + row.currency + '; basis ' + row.cost_basis + '.'); });
     }
     var forecast = document.getElementById('budget-forecast'); forecast.replaceChildren();
@@ -67,6 +67,11 @@
         paragraph(card, row.id + ': ' + row.state + '. Assigned to: ' + (row.assigned_to || 'installation administrator queue'));
         paragraph(card, row.verification); if (row._audit_pending) paragraph(card, 'Audit delivery is pending; this is not a completed audited review.');
         if (data.admin) {
+          var choose = node('button', 'Review this request with Copilot'); choose.type = 'button'; choose.className = 'btn btn--ghost';
+          choose.addEventListener('click', function () {
+            document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: {case_id: row.id, goal_id: current.goal_id}}}));
+            if (window.LightworkProductOperations) window.LightworkProductOperations.open();
+          }); card.appendChild(choose);
           [['claim','Assign to me'],['request_evidence','Request final receipt evidence'],['verify','Verify original-period accounting']].forEach(function (action) {
             var button = node('button', action[1]); button.type = 'button'; button.className = 'btn btn--ghost';
             button.addEventListener('click', function () { mutate('/api/v1/budget/cases/' + encodeURIComponent(row.id), {expected_revision: row.revision, action: action[0]}, button); }); card.appendChild(button);

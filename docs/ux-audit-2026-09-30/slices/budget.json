@@ -1,35 +1,38 @@
 [
   {
     "id": "LW-143",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "fb292c5: maverick.budget_guidance uses launch resolver and scoped non-additive ledgers; durable threshold notices.",
       "budget_guidance_api.py, budget_guidance.html, lightwork-budget-guidance.js: owned previews, local/UTC reset, due-work forecast and CAS audited accounting escalation with original-period verification.",
-      "docs/budget-guidance.md; core/tests/test_budget_guidance.py authored unrun."
+      "docs/budget-guidance.md; core/tests/test_budget_guidance.py authored unrun.",
+      "product_operations_budget.py: same native preview/help/CAS accounting controls in sealed, typed, reviewed Copilot catalog; named-case selection in budget UI."
     ],
-    "validation": "Python 3.10 AST, JavaScript syntax and whitespace only. No suites/provider calls.",
-    "remaining": "Shared product-operation/Copilot adapter remains to be integrated; runtime/browser/revocation/concurrency qualification intentionally unrun."
+    "validation": "Local budget/core, billing and cost provenance tests: 12 passed. Budget adapter, diagnostics and shared catalog tests: 20 passed. Node syntax and focused Ruff passed.",
+    "remaining": "Final integrated suites and authenticated browser qualification pending; no live provider calls or hosted CI."
   },
   {
     "id": "LW-144",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "fb292c5: maverick.budget_guidance uses launch resolver and scoped non-additive ledgers; durable threshold notices.",
       "budget_guidance_api.py, budget_guidance.html, lightwork-budget-guidance.js: owned previews, local/UTC reset, due-work forecast and CAS audited accounting escalation with original-period verification.",
-      "docs/budget-guidance.md; core/tests/test_budget_guidance.py authored unrun."
+      "docs/budget-guidance.md; core/tests/test_budget_guidance.py authored unrun.",
+      "product_operations_budget.py: same native preview/help/CAS accounting controls in sealed, typed, reviewed Copilot catalog; named-case selection in budget UI."
     ],
-    "validation": "Python 3.10 AST, JavaScript syntax and whitespace only. No suites/provider calls.",
-    "remaining": "Shared product-operation/Copilot adapter remains to be integrated; runtime/browser/revocation/concurrency qualification intentionally unrun."
+    "validation": "Local budget/core, billing and cost provenance tests: 12 passed. Budget adapter, diagnostics and shared catalog tests: 20 passed. Node syntax and focused Ruff passed.",
+    "remaining": "Final integrated suites and authenticated browser qualification pending; no live provider calls or hosted CI."
   },
   {
     "id": "LW-145",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
       "fb292c5: maverick.budget_guidance uses launch resolver and scoped non-additive ledgers; durable threshold notices.",
       "budget_guidance_api.py, budget_guidance.html, lightwork-budget-guidance.js: owned previews, local/UTC reset, due-work forecast and CAS audited accounting escalation with original-period verification.",
-      "docs/budget-guidance.md; core/tests/test_budget_guidance.py authored unrun."
+      "docs/budget-guidance.md; core/tests/test_budget_guidance.py authored unrun.",
+      "product_operations_budget.py: same native preview/help/CAS accounting controls in sealed, typed, reviewed Copilot catalog; named-case selection in budget UI."
     ],
-    "validation": "Python 3.10 AST, JavaScript syntax and whitespace only. No suites/provider calls.",
-    "remaining": "Shared product-operation/Copilot adapter remains to be integrated; runtime/browser/revocation/concurrency qualification intentionally unrun."
+    "validation": "Local budget/core, billing and cost provenance tests: 12 passed. Budget adapter, diagnostics and shared catalog tests: 20 passed. Node syntax and focused Ruff passed.",
+    "remaining": "Final integrated suites and authenticated browser qualification pending; no live provider calls or hosted CI."
   }
 ]

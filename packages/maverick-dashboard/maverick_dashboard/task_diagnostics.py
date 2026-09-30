@@ -77,25 +77,51 @@ class PrepareIn(BaseModel):
 
 @router.post("/api/v1/tasks/{goal_id}/diagnostics")
 def prepare(request: Request, goal_id: int, body: PrepareIn):
+    return prepare_report(request, goal_id, body)
+
+
+def report_result(request, row):
+    owner, _ = _goal(request, row["goal_id"])
+    if row["owner"] != owner or row["context"] != context_for(request):
+        raise product_error(403, "diagnostic_context_mismatch", "This report belongs to another account or workspace context.")
+    if row["expires_at"] <= time.time():
+        raise product_error(410, "diagnostic_link_expired", "Prepare a new report; this report link has expired.")
+    document = crypto_at_rest.unseal_from_str(row["sealed"])
+    if not hmac.compare_digest(hashlib.sha256(document.encode()).hexdigest(), row["sha256"]):
+        raise product_error(409, "diagnostic_preview_changed", "This stored report could not be verified. Prepare a new report.")
+    return {"id": row["id"], "preview": document, "sha256": row["sha256"], "expires_at": row["expires_at"],
+        "download_href": "/api/v1/task-diagnostics/" + row["id"] + "/download?sha256=" + row["sha256"],
+        "audit_pending": bool(row.get("_audit_pending"))}
+
+
+def prepare_report(request, goal_id, body, *, operation_id=None):
     with authority_effect_fence():
         _app()._require_same_origin(request)
         if not hmac.compare_digest(body.context, context_for(request)):
             raise product_error(409, "diagnostic_context_changed", "Your account or workspace changed. Reopen this task before preparing a report.")
         owner, goal = _goal(request, goal_id)
-        identity = "OTD-" + secrets.token_hex(16)
+        identity = "OTD-" + (hashlib.sha256(operation_id.encode()).hexdigest()[:48] if operation_id else secrets.token_hex(16))
+        existing = REPORTS.get(identity) if operation_id else None
+        if existing:
+            return report_result(request, existing)
         document = json.dumps(_document(_app()._world(), goal, identity), indent=2, ensure_ascii=False) + "\n"
         if len(document.encode()) > 256000:
             raise product_error(409, "diagnostic_report_limit", "This report exceeds the safe preview size. Keep the task reference and contact support through the approved channel.")
         sealed = crypto_at_rest.seal_to_str(document)
         if not crypto_at_rest.is_sealed_str(sealed):
             raise product_error(503, "diagnostic_storage_unavailable", "Encrypted report storage is unavailable. Nothing was shared.")
-        row = REPORTS.create({"id": identity, "owner": owner, "goal_id": goal_id,
+        record = {"id": identity, "owner": owner, "goal_id": goal_id,
             "context": body.context, "sealed": sealed, "sha256": hashlib.sha256(document.encode()).hexdigest(),
-            "expires_at": time.time() + TTL}, action="prepare_report", actor=owner or "local", max_records=10000)
+            "expires_at": time.time() + TTL}
+        from maverick.privacy_ops import RecordConflict
+        try:
+            row = REPORTS.create(record, action="prepare_report", actor=owner or "local", max_records=10000)
+        except RecordConflict:
+            row = REPORTS.get(identity)
+            if row is None:
+                raise product_error(409, "diagnostic_report_changed", "The report changed while saving. Refresh its status.") from None
         _goal(request, goal_id)
-        return {"id": identity, "preview": document, "sha256": row["sha256"], "expires_at": row["expires_at"],
-            "download_href": "/api/v1/task-diagnostics/" + identity + "/download?sha256=" + row["sha256"],
-            "audit_pending": bool(row.get("_audit_pending"))}
+        return report_result(request, row)
 
 
 @router.get("/api/v1/task-diagnostics/{identity}/download")

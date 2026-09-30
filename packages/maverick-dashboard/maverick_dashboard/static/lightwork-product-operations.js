@@ -13,7 +13,7 @@
   function button(text, parent, handler) { var control = node('button', text, parent); control.type = 'button'; control.className = 'btn btn--ghost'; control.addEventListener('click', handler); return control; }
   function context() {
     if (overrideSelection) return overrideSelection;
-    var goal = window.location.pathname.match(/^\/chat\/goal\/(\d+)(?:\/|$)/);
+    var goal = window.location.pathname.match(/^\/(?:chat\/goal|tasks)\/(\d+)(?:\/|$)/);
     if (goal) return {kind: 'goal', id: Number(goal[1]), goal_id: Number(goal[1])};
     var query = new URLSearchParams(window.location.search);
     var selectedGoal = query.get('goal_id');
