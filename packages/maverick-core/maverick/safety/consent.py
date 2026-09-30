@@ -1267,6 +1267,13 @@ def _decide_via_dashboard(
         log.warning("consent: cannot queue approval, falling back: %s", e)
         close_world_if_owned(wm)
         return None
+    try:
+        # Chat channels get the same card with decision buttons (best-effort).
+        from ..channel_approvals import announce_new_approval
+
+        announce_new_approval(wm, approval_id)
+    except Exception:  # pragma: no cover -- an announcement never blocks consent
+        log.debug("consent: approval announcement failed", exc_info=True)
 
     # monotonic for the elapsed-time window: a wall-clock jump must not collapse
     # the human-approval window (timing out a risky-action prompt early) or

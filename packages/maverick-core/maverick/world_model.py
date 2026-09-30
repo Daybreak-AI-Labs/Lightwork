@@ -2525,9 +2525,12 @@ class WorldModel:
             )
             return int(cur.rowcount or 0)
 
-    def total_spend(self, owner: str | None = None) -> dict[str, float]:
+    def total_spend(self, owner: str | None = None, *,
+                    since: float | None = None) -> dict[str, float]:
         """Aggregate spend. ``owner`` scopes to one principal's runs (join to
         the owning goal); ``None`` is the deployment-wide admin / auth-off view.
+        ``since`` keeps only runs that started at or after that time (the
+        "this month" figure on the My work page and in the daily summary).
         """
         join = ("FROM episodes e JOIN goals g ON e.goal_id = g.id "
                 if owner is not None else "FROM episodes e ")
@@ -2536,6 +2539,9 @@ class WorldModel:
         if owner is not None:
             where += " AND g.owner = ?"
             params = (owner,)
+        if since is not None:
+            where += " AND e.started_at >= ?"
+            params = (*params, float(since))
         row = self._read_one(
             "SELECT COALESCE(SUM(e.cost_dollars), 0) AS dollars, "
             "COALESCE(SUM(e.input_tokens), 0) AS in_tok, "

@@ -107,6 +107,62 @@
     {% endif %}
   </div>
 
+  <div class="section-head"><h2 id="chat-accounts">Chat accounts</h2></div>
+  <div class="panel">
+    <p class="muted">Tie a Slack, Teams or email account to a person so their approvals and
+      questions from that chat app count as theirs. People can also link their own account with a
+      code from their <a href="/me">My work</a> page.</p>
+    {% if channel_links %}
+    <table>
+      <thead><tr><th scope="col">Person</th><th scope="col">Chat app</th><th scope="col">Account</th><th scope="col">Actions</th></tr></thead>
+      <tbody>
+      {% for principal, links in channel_links %}
+        {% for l in links %}
+        <tr>
+          <td>{{ who(principal) }}</td>
+          <td>{{ l.channel | capitalize }}</td>
+          <td><code>{{ l.external_id }}</code></td>
+          <td>
+            <form method="post" action="/users/channels/unlink" class="users-inline"
+                  data-users-confirm="Unlink this {{ l.channel }} account from {{ name_of(principal) }}?" data-users-ok="Unlink">
+              <input type="hidden" name="channel" value="{{ l.channel }}" />
+              <input type="hidden" name="external_id" value="{{ l.external_id }}" />
+              <button type="submit" class="btn btn--danger" aria-label="Unlink {{ l.channel }} account {{ l.external_id }}">Unlink</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No chat accounts are linked yet.</p>
+    {% endif %}
+    <h3 class="users-subhead">Link a chat account</h3>
+    <form method="post" action="/users/channels/link" class="users-row-form">
+      <label class="users-field">
+        <span>Person</span>
+        <select class="select" name="principal" required>
+          <option value="" disabled selected>Choose a person…</option>
+          {{ person_options() }}
+        </select>
+      </label>
+      <label class="users-field">
+        <span>Chat app</span>
+        <select class="select" name="channel">
+          <option value="slack">Slack</option>
+          <option value="teams">Microsoft Teams</option>
+          <option value="email">Email</option>
+        </select>
+      </label>
+      <label class="users-field">
+        <span>Account id (Slack member id such as U01ABCDEF, Teams user id, or email address)</span>
+        <input class="input" type="text" name="external_id" required placeholder="U01ABCDEF" />
+      </label>
+      <button type="submit" class="btn btn--primary">Link account</button>
+    </form>
+  </div>
+
   {% if invites_on %}
   <div class="section-head"><h2 id="invite-email">Invite someone by email</h2></div>
   <div class="panel">

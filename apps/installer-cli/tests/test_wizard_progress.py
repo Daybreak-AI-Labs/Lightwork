@@ -6,7 +6,7 @@ from __future__ import annotations
 
 def test_steps_list_is_ordered_and_unique():
     from maverick_installer import wizard
-    assert len(wizard.STEPS) == 38
+    assert len(wizard.STEPS) == 39
     keys = [k for k, _ in wizard.STEPS]
     assert keys[0] == "deployment"
     assert keys[-1] == "a2a"

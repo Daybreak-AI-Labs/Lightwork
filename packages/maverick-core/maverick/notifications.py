@@ -6,13 +6,24 @@ Wraps the most common consumer push services:
     [notifications] user_key + app_token saved on the All settings page)
   - Discord webhook (DISCORD_NOTIFY_WEBHOOK_URL)
   - Slack webhook (SLACK_NOTIFY_WEBHOOK_URL)
+  - Email over SMTP (the platform mail backend; also carries the daily
+    summary from maverick.daily_digest)
 
 Config (in ~/.maverick/config.toml):
 
     [notifications]
-    backend = "ntfy"             # ntfy | pushover | discord | slack | none
+    backend = "ntfy"             # ntfy | pushover | discord | slack | email | none
     ntfy_topic = "${MAVERICK_NTFY_TOPIC}"
     ntfy_server = "https://ntfy.sh"
+
+    [notifications.email]
+    host = "smtp.example.com"
+    port = 587
+    user = "alerts@example.com"
+    password = "${MAVERICK_SMTP_PASSWORD}"   # or the sealed All settings value
+    from_address = "Lightwork <alerts@example.com>"
+    tls = "starttls"             # starttls | ssl | none
+    to = "ops@example.com"       # where run alerts go (the digest picks its own recipient)
 
 Use:
 
@@ -176,6 +187,109 @@ def _send_slack(title: str, body: str, url: str) -> bool:
         return False
 
 
+_EMAIL_TLS_MODES = ("starttls", "ssl", "none")
+_EMAIL_TIMEOUT = 15.0
+
+
+def _email_config(cfg: dict | None = None) -> dict:
+    """The ``[notifications.email]`` table with defaults and the password
+    resolved through the secret provider (``MAVERICK_SMTP_PASSWORD`` wins over
+    the sealed value saved on the All settings page)."""
+    from .secret_provider import get_secret_or_saved
+
+    section = _load_config() if cfg is None else cfg
+    raw = section.get("email") if isinstance(section.get("email"), dict) else {}
+    port = raw.get("port", 587)
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        port = 587
+    tls = str(raw.get("tls") or "starttls").strip().lower()
+    if tls not in _EMAIL_TLS_MODES:
+        tls = "starttls"
+    saved_password = _resolve_env_ref(raw.get("password")) if isinstance(raw.get("password"), str) else None
+    return {
+        "host": str(_resolve_env_ref(raw.get("host")) or "").strip(),
+        "port": port,
+        "user": str(_resolve_env_ref(raw.get("user")) or "").strip(),
+        "password": get_secret_or_saved("MAVERICK_SMTP_PASSWORD", saved_password) or "",
+        "from_address": str(_resolve_env_ref(raw.get("from_address")) or "").strip(),
+        "tls": tls,
+        "to": str(_resolve_env_ref(raw.get("to")) or "").strip(),
+    }
+
+
+def email_configured(cfg: dict | None = None) -> bool:
+    """A dedicated ``[notifications.email]`` server, or else the platform
+    mailer's ``[email]`` account (the one invitations already use)."""
+    mail = _email_config(cfg)
+    if mail["host"] and mail["from_address"]:
+        return True
+    try:
+        from .mailer import configured
+
+        return configured()
+    except Exception:  # noqa: BLE001 -- an unreadable mailer config means "not set up"
+        return False
+
+
+def _smtp_session(mail: dict):
+    import smtplib
+    import ssl
+
+    if mail["tls"] == "ssl":
+        return smtplib.SMTP_SSL(mail["host"], mail["port"], timeout=_EMAIL_TIMEOUT,
+                                context=ssl.create_default_context())
+    return smtplib.SMTP(mail["host"], mail["port"], timeout=_EMAIL_TIMEOUT)
+
+
+def send_email(to: str, subject: str, text_body: str, *, html_body: str | None = None,
+               cfg: dict | None = None) -> bool:
+    """Send one message through ``[notifications.email]``. False when mail is
+    not set up or the server refuses; never raises. Logs the failure type only
+    (an SMTP error can echo credentials)."""
+    import smtplib
+    import ssl
+    from email.message import EmailMessage
+    from email.utils import formatdate, make_msgid
+
+    mail = _email_config(cfg)
+    recipient = " ".join(str(to or "").split())
+    if not recipient or "@" not in recipient:
+        return False
+    if not mail["host"] or not mail["from_address"]:
+        # No dedicated alert server: the platform mailer's [email] account
+        # (invitations use it) carries the plain-text version.
+        try:
+            from .mailer import MailerError, configured, send
+
+            if not configured():
+                return False
+            send(recipient, str(subject or "Lightwork"), str(text_body or ""))
+            return True
+        except MailerError as e:
+            log.warning("notify email failed: %s", type(e).__name__)
+            return False
+    message = EmailMessage()
+    message["From"] = mail["from_address"]
+    message["To"] = recipient
+    message["Subject"] = " ".join(str(subject or "Lightwork").split())[:200]
+    message["Date"] = formatdate(localtime=True)
+    message["Message-ID"] = make_msgid(domain="lightwork.local")
+    message.set_content(str(text_body or ""))
+    if html_body:
+        message.add_alternative(str(html_body), subtype="html")
+    try:
+        with _smtp_session(mail) as smtp:
+            if mail["tls"] == "starttls":
+                smtp.starttls(context=ssl.create_default_context())
+            if mail["user"]:
+                smtp.login(mail["user"], mail["password"])
+            refused = smtp.send_message(message)
+        return not refused
+    except (OSError, smtplib.SMTPException, ssl.SSLError) as e:
+        log.warning("notify email failed: %s", type(e).__name__)
+        return False
+
+
 def notify(
     body: str,
     *,
@@ -245,6 +359,12 @@ def notify(
             url = _resolve_env_ref(cfg.get("slack_webhook") or _legacy_url(cfg, "slack")) or \
                   os.environ.get("SLACK_NOTIFY_WEBHOOK_URL")
             return _send_slack(title, body, url or "")
+        if backend == "email":
+            mail = _email_config(cfg)
+            if not mail["to"]:
+                log.debug("notify email: no [notifications.email] to address configured")
+                return False
+            return send_email(mail["to"], title, body, cfg=cfg)
         log.warning("notify: unknown backend %r", backend)
         return False
 
@@ -261,4 +381,4 @@ def notify(
     return fired
 
 
-__all__ = ["notify"]
+__all__ = ["email_configured", "notify", "send_email"]

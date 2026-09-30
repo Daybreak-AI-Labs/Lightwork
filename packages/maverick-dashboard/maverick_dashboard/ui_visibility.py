@@ -55,6 +55,10 @@ PAGES: tuple[dict, ...] = (
     # proposals awaiting approval. Read-only; merges run after approval.
     {"path": "/code", "label": "Code", "group": "Operate", "icon": "tools",
      "floor": "operate", "default": "operate", "in_nav": True},
+    # The personal "My work" page: my approvals, questions, results, spending,
+    # chat accounts and daily summary. Every signed-in person, so view floor.
+    {"path": "/me", "label": "My work", "group": "Operate", "icon": "users",
+     "floor": "view", "default": "view"},
     {"path": "/outcome-pilots", "label": "Workflow pilots", "group": "Operate",
      "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
     {"path": "/research", "ready": False, "label": "Research lab", "aliases": "experiments candidates evaluation",

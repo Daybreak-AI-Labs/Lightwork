@@ -13023,88 +13023,14 @@ def _supervisor(request: Request) -> str:
     return caller_principal(request) or "operator"
 
 
-def _deliver_approval_audit_event(world, event) -> bool:
-    """Deliver exactly one queued vote and persist its delivery marker."""
-    if event.delivered_at is not None:
-        return True
-
-    from maverick.audit import AuditRefused, EventKind, audit_event
-
-    try:
-        written = audit_event(
-            EventKind.APPROVAL_DECISION,
-            approval_event_id=event.event_id,
-            approval_id=int(event.approval_id),
-            status=event.status,
-            decided_by=event.decided_by,
-            occurred_at=float(event.created_at),
-        )
-    except AuditRefused as exc:
-        # This is not refusal swallowing: no approval becomes effective. The
-        # exact event remains in the durable outbox for a policy/key repair and
-        # idempotent retry.
-        log.error(
-            "approval audit refused; decision remains non-effective (event_id=%s): %s",
-            event.event_id,
-            exc,
-        )
-        return False
-    if not written:
-        log.error(
-            "approval audit write failed; decision remains non-effective (event_id=%s)",
-            event.event_id,
-        )
-        return False
-
-    try:
-        return bool(world.mark_approval_audit_delivered(event.event_id))
-    # The signed append may have succeeded while the delivery-marker commit
-    # acknowledgement failed. Reconcile instead of returning an error that
-    # invites an unsafe, differently-keyed retry.
-    # failure-policy: fail_soft_with_audit
-    except Exception:
-        log.exception(
-            "approval audit was written but delivery finalization failed (event_id=%s)",
-            event.event_id,
-        )
-        try:
-            reconciled = world.get_approval_audit_event(event.event_id)
-        except Exception:
-            return False
-        return bool(reconciled and reconciled.delivered_at is not None)
-
-
-def _audit_approval_decision(world, event) -> bool:
-    """Deliver an approval's queued votes in durable occurrence order.
-
-    The world-model outbox is the authority seam: an audit refusal leaves every
-    later vote durable but non-effective. A retry uses stable event ids and
-    resumes at the oldest undelivered row, so a quorum-reaching vote cannot
-    overtake an earlier sign-off in the signed chain.
-    """
-    try:
-        pending = world.pending_approval_audit_events(
-            approval_id=event.approval_id,
-            limit=1000,
-        )
-    # The vote/outbox commit already succeeded. A read failure here is an
-    # explicit audit-pending response, not a 500 that falsely invites a new
-    # decision.
-    # failure-policy: fail_soft_with_audit
-    except Exception:
-        log.exception(
-            "approval audit outbox could not be read (event_id=%s)",
-            event.event_id,
-        )
-        return False
-    for queued in pending:
-        if not _deliver_approval_audit_event(world, queued):
-            return False
-    try:
-        current = world.get_approval_audit_event(event.event_id)
-    except Exception:
-        return False
-    return bool(current and current.delivered_at is not None)
+# Signed-audit delivery of approval votes lives in maverick.channel_approvals so
+# a decision from Slack/Teams and one from this page share ONE implementation.
+from maverick.channel_approvals import (  # noqa: E402
+    audit_approval_decision as _audit_approval_decision,
+)
+from maverick.channel_approvals import (  # noqa: E402
+    deliver_approval_audit_event as _deliver_approval_audit_event,
+)
 
 
 def _record_vote_or_raise(world, approval_id: int, status: str, who: str):

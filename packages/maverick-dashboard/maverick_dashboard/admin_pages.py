@@ -703,7 +703,9 @@ def _users_context(request: Request) -> dict:
              "suites_removed": "Department access removed.",
              "invite_revoked": "Invitation revoked.",
              "role_saved": "Custom role saved.",
-             "role_deleted": "Custom role deleted."}.get(
+             "role_deleted": "Custom role deleted.",
+             "channel_linked": "Chat account linked.",
+             "channel_unlinked": "Chat account unlinked."}.get(
         request.query_params.get("saved", ""), "")
     from maverick.departments import department_title
 
@@ -724,7 +726,13 @@ def _users_context(request: Request) -> dict:
     people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
     from .identity_format import role_label
     defaults = set(default_suites) if default_suites is not None else None
+    try:
+        from maverick import channel_identities
+        channel_links = sorted(channel_identities.all_links().items())
+    except Exception:  # noqa: BLE001 -- an unreadable store must not hide the roster
+        channel_links = []
     return {
+        "channel_links": channel_links,
         "people": people,
         "people_labels": {p["principal"]: p["label"] for p in people},
         "role_labels": {r: role_label(r) for r in rbac.known_roles()},

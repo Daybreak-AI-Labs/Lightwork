@@ -4,9 +4,24 @@ Set up:
   1. Create a Slack app at https://api.slack.com/apps
   2. Enable Socket Mode; copy the App-Level Token to ${SLACK_APP_TOKEN}
   3. Install to your workspace; copy the Bot Token to ${SLACK_BOT_TOKEN}
-  4. Subscribe to `message.im` events; add `chat:write`, `im:history` scopes
-     (+ `files:read` if users will share files with the bot — shared files
-     become goal attachments)
+  4. Bot token scopes: `chat:write`, `commands`, `im:history`,
+     `channels:history`, `groups:history`, `app_mentions:read`, `users:read`,
+     `im:write` (daily summary DMs); `files:read` if people share files
+     (shared files become goal attachments)
+  5. Subscribe to bot events `message.im`, `message.channels`,
+     `message.groups`, `app_mention`; turn on Interactivity; add the slash
+     command `/lightwork`
+  6. For the HTTP (non-Socket) deployment, point Interactivity and the slash
+     command at ``https://<dashboard>/webhook/slack/interactions`` and
+     ``/webhook/slack/commands`` and save the signing secret as
+     ``[channels.slack] signing_secret`` (see docs/channels/slack.md)
+
+Direct messages behave as before (a message is a task). In channels and
+groups the bot answers when it is mentioned. Approval cards carry Approve /
+Reject / Ask a question buttons (High/Critical confirm twice) and slash
+commands ``/lightwork approve|reject|status|help|ask|link`` work everywhere;
+the decision logic is ``maverick.channel_approvals`` (shared with the
+dashboard), the card and payload handling ``maverick.slack_interactive``.
 
 Requires::
 
@@ -17,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 
 from .base import Channel, IncomingMessage, is_allowed, normalize_allowlist
 from .delivery import DeliveryNotSent, DeliveryUnknown, delivery_active, send_chunk
@@ -43,6 +59,8 @@ class SlackChannel(Channel):
         bot_token: str | None = None,
         allowed_user_ids=None,
         thread_replies: bool | None = None,
+        world=None,
+        approvals_channel: str | None = None,
     ):
         super().__init__(handler)
         if not _HAVE_SLACK:
@@ -75,6 +93,13 @@ class SlackChannel(Channel):
         self._stop_event = asyncio.Event()
         self._account_id = ""
         self._team_id = ""
+        self._bot_user_id = ""
+        # The world holding the approval queue (the server passes its own);
+        # opened lazily otherwise so a channels-only process still starts.
+        self._world = world
+        # [channels.slack] approvals_channel: where new approval cards are posted.
+        self.approvals_channel = (approvals_channel
+                                  or os.environ.get("SLACK_APPROVALS_CHANNEL", "")).strip()
 
     def _authorized(self, msg, account):
         return bool(account and account == self._account_id
@@ -132,11 +157,112 @@ class SlackChannel(Channel):
                 })
         return out
 
+    # ---- approvals, buttons and slash commands ------------------------------
+
+    def _approval_world(self):
+        if self._world is None:
+            from maverick.world_model import WorldModel
+
+            self._world = WorldModel()
+        return self._world
+
+    @staticmethod
+    def _principal_for(user_id: str):
+        from maverick.channel_identities import principal_for
+
+        return principal_for("slack", user_id)
+
+    async def _ack(self, client, req, payload=None):
+        kwargs = {"envelope_id": req.envelope_id}
+        if payload is not None:
+            kwargs["payload"] = payload
+        await client.send_socket_mode_response(SocketModeResponse(**kwargs))
+
+    async def _on_interactive(self, client, req):
+        """A button press: ack within Slack's 3 seconds, decide, update in place."""
+        from maverick.slack_interactive import handle_block_action, respond
+
+        payload = req.payload if isinstance(req.payload, dict) else {}
+        await self._ack(client, req)
+        user_id = str((payload.get("user") or {}).get("id") or "")
+        if payload.get("type") != "block_actions" or not is_allowed(user_id, self.allowed_user_ids):
+            return None
+        result = await asyncio.to_thread(
+            handle_block_action, payload, world=self._approval_world(),
+            principal_for=self._principal_for,
+        )
+        if result is not None:
+            await asyncio.to_thread(respond, str(payload.get("response_url") or ""), result)
+        return result
+
+    async def _ask_from_slash(self, form: dict) -> str:
+        """``/lightwork ask <goal>`` runs the same handler as a chat message."""
+        from maverick.slack_interactive import parse_slash_text
+
+        _verb, goal = parse_slash_text(form.get("text"))
+        msg = IncomingMessage(user_id=str(form.get("channel_id") or ""), text=goal,
+                              channel=self.name, sender_id=str(form.get("user_id") or ""))
+        return await self.dispatch_text(msg)
+
+    async def _on_slash_command(self, client, req):
+        from maverick.slack_interactive import handle_slash_command, parse_slash_text, respond
+
+        form = req.payload if isinstance(req.payload, dict) else {}
+        await self._ack(client, req)
+        user_id = str(form.get("user_id") or "")
+        if not is_allowed(user_id, self.allowed_user_ids):
+            return None
+        verb, rest = parse_slash_text(form.get("text"))
+        if verb == "ask" and rest and self._principal_for(user_id):
+            answer = await self._ask_from_slash(form)
+            result = {"response_type": "ephemeral", "replace_original": False,
+                      "text": str(answer)[:3000]}
+        else:
+            result = await asyncio.to_thread(
+                handle_slash_command, form, world=self._approval_world(),
+                principal_for=self._principal_for, ask=None,
+            )
+        await asyncio.to_thread(respond, str(form.get("response_url") or ""), result)
+        return result
+
+    def _strip_mention(self, text: str) -> str:
+        if not self._bot_user_id:
+            return text
+        return re.sub(rf"<@{re.escape(self._bot_user_id)}(\|[^>]*)?>", " ", text).strip()
+
+    def _addressed_to_bot(self, event: dict) -> bool:
+        """DMs always; channels and groups only when the bot is mentioned."""
+        if event.get("type") == "app_mention":
+            return True
+        channel = str(event.get("channel") or "")
+        if event.get("channel_type") == "im" or channel.startswith("D"):
+            return True
+        return bool(self._bot_user_id and f"<@{self._bot_user_id}" in str(event.get("text") or ""))
+
+    async def post_approval_card(self, channel: str, approval, *, dashboard_url: str = ""):
+        """Post one approval as a Block Kit card with decision buttons."""
+        from maverick.channel_approvals import card_content
+        from maverick.slack_interactive import approval_blocks
+
+        content = card_content(approval)
+        blocks = approval_blocks(content, dashboard_url=dashboard_url)
+        result = await self._web.chat_postMessage(
+            channel=channel, text=f"Approval needed: {content['action']} (#{content['id']})",
+            blocks=blocks,
+        )
+        return result.get("ts") if isinstance(result, dict) or hasattr(result, "get") else None
+
     async def _on_request(self, client, req):
+        if req.type == "interactive":
+            return await self._on_interactive(client, req)
+        if req.type == "slash_commands":
+            return await self._on_slash_command(client, req)
         event = req.payload.get("event", {}) if req.type == "events_api" else {}
         sender = event.get("user", "")
-        accepted = (event.get("type") == "message" and "bot_id" not in event
-                    and is_allowed(sender, self.allowed_user_ids))
+        accepted = (event.get("type") in ("message", "app_mention") and "bot_id" not in event
+                    and event.get("subtype") in (None, "file_share")
+                    and is_allowed(sender, self.allowed_user_ids)
+                    and self._addressed_to_bot(event))
         if accepted:
             # auth_test binds this transport to its immutable workspace/bot.
             # Persist only the envelope before ACK; file downloads and agent
@@ -147,13 +273,19 @@ class SlackChannel(Channel):
             files = [{key: value for key, value in item.items() if key in {
                 "id", "name", "mimetype", "size", "url_private", "url_private_download",
             }} for item in (event.get("files") or [])[:10]]
+            text = self._strip_mention(event.get("text") or "")
             msg = IncomingMessage(
-                user_id=event["channel"], text=event.get("text") or
+                user_id=event["channel"], text=text or
                 ("Process the attached file(s)." if files else ""), channel=self.name,
                 sender_id=sender, message_id=event["ts"],
             )
             account = self._account_id
-            route = {"reply_to": event["ts"] if self.thread_replies else None, "files": files}
+            # A mention in a channel or group answers in its thread so the
+            # room is not flooded; DMs keep the configured threading.
+            in_room = not (event.get("channel_type") == "im" or event["channel"].startswith("D"))
+            thread = event.get("thread_ts") or event["ts"]
+            route = {"reply_to": thread if (self.thread_replies or in_room) else None,
+                     "files": files}
             external_id = event["channel"] + ":" + event["ts"]
             receipt = await self.admit_message(msg, external_id=external_id, account=account,
                 authorize=lambda: self._authorized(msg, account), route=route)
@@ -171,6 +303,7 @@ class SlackChannel(Channel):
         if not identity.get("team_id") or not identity.get("user_id"):
             raise PermissionError("Slack account identity unavailable")
         self._team_id = identity["team_id"]
+        self._bot_user_id = str(identity["user_id"])
         self._account_id = self._team_id + ":" + identity["user_id"]
         account = self._account_id
         await self._sm.connect()

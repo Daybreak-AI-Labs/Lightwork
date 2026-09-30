@@ -344,6 +344,9 @@ CHANNELS: list[dict] = [
     {"name": "slack", "label": "Slack", "fields": [
         {"key": "app_token", "label": "App-level token", "secret": True},
         {"key": "bot_token", "label": "Bot token", "secret": True},
+        {"key": "signing_secret", "label": "Signing secret", "secret": True,
+         "env": "SLACK_SIGNING_SECRET"},
+        {"key": "approvals_channel", "label": "Approvals channel", "secret": False},
     ]},
     {"name": "whatsapp_cloud", "label": "WhatsApp (Cloud API)", "fields": [
         {"key": "access_token", "label": "Access token", "secret": True},
