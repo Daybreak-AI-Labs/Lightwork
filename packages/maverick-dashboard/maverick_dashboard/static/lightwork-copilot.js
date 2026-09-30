@@ -148,20 +148,20 @@
       var pending = validCatalog(result.body) && result.body.record && result.body.record.status === 'audit_pending';
       if ((!result.ok && !pending) || !validCatalog(result.body)) {
         var hadContext = !!catalog;
-        history = []; clear(log);
+        history = []; input.value = ""; clear(log);
         catalog = null; clear(operationButtons); operations.hidden = false;
         operationStatus.textContent = 'Actions are unavailable here. You can still ask for guidance.';
         if (hadContext || actionHost.contains(document.getElementById('le-card'))) current.invalidate();
         return null;
       }
       if (catalog && catalog.scope !== result.body.scope) {
-        current.invalidate(); history = []; clear(log);
+        current.invalidate(); history = []; input.value = ""; clear(log);
         note.textContent = 'Your workspace or access changed. Earlier questions and reviews have been cleared.';
       }
       catalog = result.body; renderOperations(catalog); return catalog;
     } catch (_) {
       if (started === generation && !panel.hidden) {
-        history = []; clear(log);
+        history = []; input.value = ""; clear(log);
         catalog = null; clear(operationButtons); operations.hidden = false;
         operationStatus.textContent = 'We could not check available actions. Close and reopen Copilot to try again.';
       }
@@ -197,7 +197,7 @@
   }
 
   function close() {
-    generation += 1; sending = false; sendButton.disabled = false; sendButton.removeAttribute('aria-busy');
+    generation += 1; sending = false; input.readOnly = false; sendButton.disabled = false; sendButton.removeAttribute('aria-busy');
     if (controller()) controller().release();
     panel.hidden = true;
     fab.setAttribute("aria-expanded", "false");
@@ -219,7 +219,8 @@
     var message = (input.value || "").trim();
     if (!message || sending || actionBusy || (controller() && controller().isBusy())) return;
     sending = true; var started = generation;
-    input.value = "";
+    // Keep the editable draft until its matching response succeeds.
+    input.readOnly = true;
     note.textContent = "";
     addMessage("user", message);
     sendButton.disabled = true;
@@ -234,7 +235,7 @@
           && proposed.body.record.status === 'audit_pending';
         if ((!proposed.ok && !pendingProposal) || !validCatalog(proposed.body)
             || proposed.body.scope !== catalog.scope) {
-          controller().invalidate(); history = []; clear(log); catalog = null;
+          controller().invalidate(); history = []; input.value = ""; clear(log); catalog = null;
           note.textContent = 'Your current work could not be confirmed. Reopen Copilot and review again.'; return;
         }
         if (pendingProposal) {
@@ -264,6 +265,7 @@
       catch (_error) { payload = {detail: "The server returned an unreadable response."}; }
       if (started !== generation || panel.hidden) return;
       if (!response.ok || !payload.reply) throw new Error('unavailable');
+      input.value = "";
       addMessage("bot", payload.reply);
       // Only prior user questions return to the server. Model replies stay in
       // this browser log and can never be replayed as caller-supplied assistant
@@ -281,10 +283,10 @@
           "AI answers can be wrong — check them against what the page shows before acting.";
       }
     } catch (error) {
-      if (started === generation && !panel.hidden) note.textContent = 'Copilot could not answer. Please try again.';
+      if (started === generation && !panel.hidden) note.textContent = 'Copilot could not answer. Your question is still here; edit it or press Send to retry.';
     } finally {
       if (started === generation) {
-        sending = false; sendButton.disabled = false;
+        sending = false; input.readOnly = false; sendButton.disabled = false;
         sendButton.removeAttribute("aria-busy");
         if (!panel.hidden && !actionHost.contains(document.activeElement)) input.focus();
       }

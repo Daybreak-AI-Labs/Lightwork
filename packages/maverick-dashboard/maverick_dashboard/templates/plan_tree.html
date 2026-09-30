@@ -124,34 +124,43 @@
       window.location.href = "/chat/goal/" + encodeURIComponent(ev.target.id());
     });
 
-    let timer = null;
-    async function refresh() {
-      try {
-        const r = await fetch(API, { headers: { "Accept": "application/json" } });
-        if (!r.ok) { statusEl.textContent = "Could not load the steps. Trying again…"; return null; }
-        const tree = await r.json();
-        cy.elements().remove();
-        cy.add(toElements(tree));
-        cy.layout({ name: "breadthfirst", directed: true, padding: 20 }).run();
-        return tree.status || "";
-      } catch (e) {
-        statusEl.textContent = "Can't reach Lightwork. Trying again…";
-        return null;
-      }
-    }
-
+    let timer = null, controller = null, busy = false, stopped = false, failures = 0, lastRefresh = null;
+    const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn--ghost';
+    retry.textContent = 'Refresh plan'; statusEl.after(retry);
     async function tick() {
-      const status = await refresh();
-      if (status === null) { timer = setTimeout(tick, POLL_MS); return; }
-      if (TERMINAL.indexOf(status) !== -1) {
-        statusEl.textContent = "Finished — " + String(status).replace(/_/g, " ");
-        return; // stop polling once the root goal is terminal
+      if (busy || stopped || document.visibilityState === 'hidden') return;
+      clearTimeout(timer); busy = true; controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      try {
+        const r = await fetch(API, {headers: {Accept: 'application/json'}, credentials: 'same-origin', cache: 'no-store', signal: controller.signal});
+        if ([401, 403, 404].includes(r.status) || r.redirected) {
+          stopped = true; cy.elements().remove();
+          statusEl.textContent = r.status === 401 || r.redirected ? 'Sign in again to view the plan, then choose Refresh plan.' : 'This plan is no longer available to your account.';
+          return;
+        }
+        if (!r.ok) throw new Error('unavailable');
+        const tree = await r.json();
+        if (!tree || !Number.isInteger(tree.id)) throw new Error('invalid');
+        cy.elements().remove(); cy.add(toElements(tree));
+        cy.layout({name: 'breadthfirst', directed: true, padding: 20}).run();
+        lastRefresh = new Date().toLocaleTimeString(); failures = 0;
+        stopped = TERMINAL.includes(tree.status);
+        statusEl.textContent = (stopped ? 'Task ' : 'Live — ') + String(tree.status || 'running').replace(/_/g, ' ') + '. Refreshed ' + lastRefresh + '.';
+      } catch (e) {
+        failures++;
+        statusEl.textContent = (e.name === 'AbortError' ? 'Plan refresh timed out.' : 'Plan updates unavailable.')
+          + (lastRefresh ? ' Showing older data from ' + lastRefresh + '.' : ' No current plan was loaded.') + ' Choose Refresh plan to retry.';
+        if (failures >= 5) stopped = true;
+      } finally {
+        clearTimeout(timeout); busy = false; controller = null;
+        if (!stopped) timer = setTimeout(tick, Math.min(30000, POLL_MS * Math.max(1, failures)));
       }
-      statusEl.textContent = "Live · " + String(status || "running").replace(/_/g, " ");
-      timer = setTimeout(tick, POLL_MS);
     }
+    retry.addEventListener('click', () => { stopped = false; failures = 0; tick(); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') clearTimeout(timer); else tick(); });
+    window.addEventListener('online', tick);
+    window.addEventListener('pagehide', () => { stopped = true; clearTimeout(timer); if (controller) controller.abort(); });
     tick();
-    window.addEventListener("beforeunload", () => { if (timer) clearTimeout(timer); });
   })();
 </script>
 {% endblock %}

@@ -1,0 +1,247 @@
+[
+  {
+    "id": "LW-001",
+    "status": "planned",
+    "implementation_evidence": "Existing employee companion supports conversation independent from tasks.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Durable editable queued turns/files, guidance consumption receipts/conflict decisions and checkpoint execution still required."
+  },
+  {
+    "id": "LW-002",
+    "status": "planned",
+    "implementation_evidence": "Existing typed learning-example operations remain preserved.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Expand shared typed operation catalog to task/clarification/review/schedule/connection/artifact operations and carry freshness across interfaces."
+  },
+  {
+    "id": "LW-003",
+    "status": "planned",
+    "implementation_evidence": "Clarification mode disables attachment selection, explains unsupported file answers and refuses to clear or silently submit a selected batch. Text/files remain intact.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Atomic text+file clarification admission, extraction readiness, version-bound answer and replay receipt still required; mitigation is not full acceptance."
+  },
+  {
+    "id": "LW-004",
+    "status": "planned",
+    "implementation_evidence": "Existing companion private task projection preserved.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Join task/schedule/flow/connection/result sources with coverage and per-owner authorized controls."
+  },
+  {
+    "id": "LW-005",
+    "status": "planned",
+    "implementation_evidence": "Existing Action Center sources preserved.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Add question/failed-work/rejected-review/expiring-dependency adapters, deduplicate and bind private snooze/read preferences."
+  },
+  {
+    "id": "LW-006",
+    "status": "planned",
+    "implementation_evidence": "Failed Copilot request retains editable text; successful matched response clears it; obsolete generation results stay suppressed.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Bind general Copilot drafts/history to freshly verified account/workspace scope even on pages without a learning-example controller."
+  },
+  {
+    "id": "LW-007",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "chat_goal syncComposer keeps Stop for pending/running/blocked; ChatThreads.answer refuses terminal tasks inside the restart transaction.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-008",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "chat_goal renderHalted mounts retry for initial and streamed failed/cancelled states; existing governed resume and budget form retained.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-009",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "chat_goal stream errors expose stale/unknown state and last refresh, switch CONNECTING to bounded polling, offer reconnect and clear denied content.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-010",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "chat_goal question reads have a 12-second deadline, explicit retry, malformed-response handling and stale-question submission fence.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-011",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "chat_goal cancellation immediately reports requested/cleanup-unknown state and polls authoritative state; concurrent completion is explained without rollback promises.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-012",
+    "status": "planned",
+    "implementation_evidence": "Resume preserves safe server detail instead of always blaming spending limit.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Complete structured business error contract and supported remedy links across budget/unfinished/signoff/stale/auth/admission actions."
+  },
+  {
+    "id": "LW-013",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "ChatThreads.history uses owner/tenant-bound keyset pagination relative to the selected goal; thread-history API and progressive retryable history UI.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-014",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "lightwork-file-selection.js provides named type/size chips, individual removal, clear-all, duplicate indicators and batch-count notice for new and follow-up composers.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-015",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "chat_goal attachments panel now retains empty state and Add file, explaining current-task scope and unconfirmed runner consumption.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-016",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "chat_goal attachments retain per-file states and File objects for selective retry; publish_batch/SubmissionStore.admit already deduplicate exact file identities.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-017",
+    "status": "planned",
+    "implementation_evidence": "Existing durable thread identity and task/audit records preserved.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Add user-owned rename/pin/archive/tags metadata, version conflict handling and full-history search without deleting retained evidence."
+  },
+  {
+    "id": "LW-018",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "plan_tree has abort deadline, bounded backoff, auth-denial clearing, hidden-tab pause, freshness time and explicit refresh without overlapping requests.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-123",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "api feedback/edit return separate saved/learning_observation/training_completed fields; optional grounding exceptions are contained; editor/feedback copy no longer claims training.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-124",
+    "status": "planned",
+    "implementation_evidence": "Existing project ownership and packet boundary preserved.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Outcome/acceptance metadata, authorized context bundles, milestones/dependencies/latest accepted deliverable and freshness remain."
+  },
+  {
+    "id": "LW-125",
+    "status": "planned",
+    "implementation_evidence": "Existing version-bound review packets preserved.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Owner revise-and-resubmit task binding, exact prior-packet provenance, change summary and duplicate resubmission receipt remain."
+  },
+  {
+    "id": "LW-126",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "approval decisions return received/required counts; UI renders progress, restores own recorded-vote state after reload and prevents repeated Approve.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-127",
+    "status": "planned",
+    "implementation_evidence": "Existing global audit boundary preserved.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Owner/requester-scoped decision history projection and UI without global audit access remain."
+  },
+  {
+    "id": "LW-128",
+    "status": "planned",
+    "implementation_evidence": "Approval feedback now explicitly distinguishes action authorization from execution.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Cross-surface timeline must join packet review, deliverable signoff, execution and external verification with next owner/action."
+  },
+  {
+    "id": "LW-129",
+    "status": "planned",
+    "implementation_evidence": "User chose explicit recipient acceptance; existing ownership remains unchanged.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Build selected-evidence transfer service with named recipient acceptance, safe in-flight boundary, independent authority/connection rebind and revocation."
+  },
+  {
+    "id": "LW-130",
+    "status": "planned",
+    "implementation_evidence": "Readable private handoff added for139; no recipient ACL widened.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Exact selected-artifact bundle, current ACL/version-bound audience preview, stale acceptance and offline verification manifest still required."
+  },
+  {
+    "id": "LW-131",
+    "status": "planned",
+    "implementation_evidence": "PR2529 head326402bf115a6d6de2adc255e3a1cc9d75fd37a9 implements authoritative completion panel refresh/actions/artifacts; inspected read-only via GitHub connector.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Parent integration decision pending; not in this branch and no duplicate implementation claimed."
+  },
+  {
+    "id": "LW-132",
+    "status": "planned",
+    "implementation_evidence": "Existing current completion/signoff/hashed expiry/revocation checks preserved; PR2529 overlaps audience/prerequisite UI and routing.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Version-bound public-result preview, explicit creation confirmation, policy-bounded lifetime and lifecycle display remain; coordinate2529."
+  },
+  {
+    "id": "LW-133",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "goal_share_previews persists encrypted attempt before dispatch, suppresses resend on unknown outcome, lists prior attempts across reload and reconciles via read-only GitHub lookup.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-134",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "run_share.MissingGitHubToken and ReplayEvidenceError receive distinct remedies; evidence preparation precedes upload; confirmed 4xx rejection differs from uncertainty.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-135",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "cancel_goal no longer submits value 0.0 learning feedback; explicit ratings continue through existing policy.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-136",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "GitHub sharing prepares exact canonical outbound JSON, identifies destination account, previews scope/content and binds confirmation to encrypted context/digest/connection; unknown outcomes retained.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-137",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Downloaded standalone offline archive viewer opens schema-v1 bundles locally without network/actions, displays provenance and explicit legacy-completeness caveat, refuses invalid/newer/oversized files.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  },
+  {
+    "id": "LW-138",
+    "status": "planned",
+    "implementation_evidence": "build_goal_bundle requests cap+1 and visibly refuses10001events/201episodes; manifest has counts/scope/digest and archive copy no longer promises resumable/full universal history.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "True bounded streaming/chunking with one consistent database snapshot and large-history path remain; overflow is safe refusal but full acceptance is not claimed."
+  },
+  {
+    "id": "LW-139",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Authorized handoff.html produces escaped readable objective/outcome/versioned artifacts/source URLs/questions/permissions/completeness, separate from unsanitized technical archive.",
+    "validation": "Static Python AST, extracted JavaScript syntax and whitespace checks; regression tests authored and intentionally unrun. Native/authenticated/browser/PostgreSQL acceptance not claimed.",
+    "remaining": "Runtime acceptance remains deferred by user request; no test suite or live provider call was run."
+  }
+]

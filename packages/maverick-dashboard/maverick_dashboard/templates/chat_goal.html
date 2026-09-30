@@ -235,6 +235,11 @@
       </svg>
 {%- endmacro %}
 <div class="convo">
+  <div id="earlier-history" data-goal="{{ goal.id }}" data-before="{{ thread_turns[0].id if thread_turns else '' }}">
+    <button type="button" class="btn btn--ghost" id="history-load">Load earlier conversation</button>
+    <p id="history-status" role="status" aria-live="polite">Earlier conversation is loaded in pages.</p>
+    <div id="history-turns"></div>
+  </div>
   {% if latest_chat_goal_id and latest_chat_goal_id != goal.id %}
   <p class="muted" id="newer-chat-turn">You are viewing an earlier message.
     <a href="/chat/goal/{{ latest_chat_goal_id }}">Open the latest message in this chat</a>.</p>
@@ -303,6 +308,7 @@
       </svg>
       Lightwork
     </div>
+    <p id="task-authority" role="status" data-goal="{{ goal.id }}" data-operate="{{ '1' if can_operate else '0' }}"></p>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
     <details class="activity" id="work-activity"{% if goal.status == 'draft' %} hidden{% endif %}>
       <summary class="activity__bar" aria-label="Agent activity — expand to show the full work log">
@@ -322,6 +328,9 @@
       </div>
     </details>
     <div id="qa-thread" class="qa" aria-live="polite"></div>
+    <button type="button" id="stream-retry" class="btn btn--ghost" hidden>Reconnect updates</button>
+    <p id="question-status" role="status" aria-live="polite"></p>
+    <button type="button" id="question-retry" class="btn btn--ghost" hidden>Retry loading question</button>
     <p id="stream-error" role="alert" class="muted" style="display: none; margin: 0 0 var(--space-4); color: var(--danger);"></p>
     <div id="result-section" class="answer" style="display: {% if goal.result %}block{% else %}none{% endif %};">
       {% if rendered and rendered.structured %}
@@ -384,7 +393,7 @@
             <button id="edit-save" class="btn btn--primary" type="button">Save my version</button>
             <span id="edit-msg" role="status" aria-live="polite" class="muted"></span>
           </div>
-          <p class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">Your revisions train your workforce — how much you change tells it how close it got.</p>
+          <p class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">Your revision is saved as the current result. Any learning use is separate and governed by your organization's policy; saving does not mean training completed.</p>
         </div>
       {% endif %}
     </div>
@@ -541,6 +550,9 @@
   </div>
 {% endblock %}
 {% block scripts_extra %}
+<script src="/static/lightwork-thread-history.js" defer></script>
+<script src="/static/lightwork-task-authority.js" defer></script>
+<script src="/static/lightwork-file-selection.js" defer></script>
   <style>
     .task-ops { margin-top: var(--space-3); }
     .task-ops__title { font-size: var(--text-base); margin: var(--space-2) 0 var(--space-1); }
@@ -667,7 +679,7 @@
         hidePlaceholder();
         done = true;
         cancelBtn.disabled = true;
-        resultSection.style.display = 'none';
+        // Keep any earlier result visible separately from the stop reason.
         haltReasonEl.textContent = lastResult || 'The run stopped before producing a result.';
         haltCard.style.display = 'block';
       }
@@ -767,11 +779,22 @@
       }
 
       async function pollQuestions() {
+        if (questionLoading) return;
+        questionLoading = true;
+        const status = document.getElementById('question-status');
+        const retry = document.getElementById('question-retry');
+        const control = new AbortController();
+        const timeout = setTimeout(function () { control.abort(); }, 12000);
         try {
-          const r = await fetch('/api/v1/goals/' + goalId + '/open_questions');
-          if (!r.ok) return;
+          const r = await fetch('/api/v1/goals/' + goalId + '/open_questions', {credentials: 'same-origin', cache: 'no-store', signal: control.signal});
+          if (!r.ok || r.redirected) {
+            if (r.status === 401 || r.status === 403 || r.redirected) { currentQuestionId = null; questionText.textContent = ''; questionPanel.style.display = 'none'; }
+            throw new Error(r.status === 401 || r.redirected ? 'Sign in again to load this question.' : r.status === 403 ? 'Access to this question is no longer available.' : 'Could not refresh the question. Last shown question may be out of date.');
+          }
           const j = await r.json();
-          const qs = j.open_questions || [];
+          if (!Array.isArray(j.open_questions)) throw new Error('The question response could not be read. Retry loading it.');
+          const qs = ['cancelled', 'done', 'failed'].includes(currentStatus) ? [] : j.open_questions;
+          questionsFresh = true; status.textContent = ''; retry.hidden = true;
           if (qs.length) {
             currentQuestionId = qs[0].id;
             questionText.textContent = qs[0].question;
@@ -783,14 +806,22 @@
             if (currentStatus === 'blocked') renderHalted();
           }
           syncComposer();
-        } catch (e) { /* swallow */ }
+        } catch (e) {
+          questionsFresh = false;
+          status.textContent = e.name === 'AbortError' ? 'Loading the question timed out. Your draft has been kept.' : (e.message || 'Could not load the question. Your draft has been kept.');
+          retry.hidden = false;
+        } finally { clearTimeout(timeout); questionLoading = false; syncComposer(); }
       }
 
+      document.getElementById('question-retry').addEventListener('click', pollQuestions);
       const sendBtn = document.getElementById('answer-send');
       const composerHint = document.getElementById('composer-hint');
       const replyFiles = document.getElementById('reply-files');
       const replyAttach = document.getElementById('reply-attach');
       let submitting = false;
+      let stopRequested = false;
+      let questionsFresh = false;
+      let questionLoading = false;
 
       function submissionError(detail, fallback) {
         if (typeof detail === 'string') return detail;
@@ -819,12 +850,15 @@
       function syncComposer() {
         const asking = currentQuestionId != null;
         const running = !done && !asking;
+        const stoppable = ['pending', 'running', 'blocked'].includes(currentStatus);
+        if (replyAttach) { replyAttach.disabled = asking; replyAttach.title = asking ? 'File answers are not supported yet. Keep selected files for your next message, or add them to this task separately.' : 'Attach files to your next message'; }
+        if (replyFiles) replyFiles.disabled = asking;
         answerInput.placeholder = asking ? 'Reply to Lightwork…'
           : running ? 'Lightwork is working… you can type while you wait'
           : 'Message Lightwork…';
         if (sendBtn) sendBtn.disabled = running;
-        cancelBtn.hidden = !running;
-        cancelBtn.disabled = !running;
+        cancelBtn.hidden = !stoppable;
+        cancelBtn.disabled = !stoppable || stopRequested;
         answerForm.dataset.mode = asking ? 'answer' : 'reply';
       }
       function resetField() {
@@ -857,6 +891,8 @@
         const text = answerInput.value.trim();
         if (!text) return;
         if (currentQuestionId != null) {
+          if (!questionsFresh) { composerMessage('Refresh the question before answering. Your answer has been kept.', true); return; }
+          if (replyFiles && replyFiles.files.length) { composerMessage('Files cannot be sent with a clarification answer yet. Remove them here or add them to this task before answering. Your text and files have been kept.', true); return; }
           const qid = currentQuestionId;
           const ans = text;
           submitting = true;
@@ -870,6 +906,7 @@
             });
             if (r.ok) {
               resetField();
+              window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: answerForm}}));
               currentQuestionId = null;
               questionPanel.style.display = 'none';
               recordExchange(questionText.textContent, ans);
@@ -902,7 +939,7 @@
         composerMessage('Sending…');
         try {
           const r = await fetch(answerForm.action, { method: 'POST', body: formData });
-          if (r.redirected) { window.location.href = r.url; return; }
+          if (r.redirected) { window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: answerForm}})); window.location.href = r.url; return; }
           const j = await r.json().catch(function () { return {}; });
           composerMessage(replyFailureText(r, j), true);
         } catch (e) {
@@ -917,17 +954,23 @@
       cancelBtn.addEventListener('click', async function() {
         if (!(await mvConfirm('Stop this task? Lightwork will stop after the step it is on.', { okText: 'Stop task' }))) return;
         cancelBtn.disabled = true;
-        actionMsg.textContent = '';
+        actionMsg.textContent = 'Requesting stop…';
         let accepted = false;
         try {
           const r = await fetch('/api/v1/goals/' + goalId + '/cancel', { method: 'POST' });
-          if (r.ok || r.status === 204) { accepted = true; return; }
+          if (r.ok || r.status === 204) {
+            accepted = true; stopRequested = true;
+            actionMsg.textContent = 'Stop requested. The current step may still be cleaning up. Already completed external changes are not undone.';
+            currentQuestionId = null; questionPanel.style.display = 'none';
+            openPollingFallback(true); return;
+          }
           const j = await r.json().catch(function () { return {}; });
           actionMsg.style.color = 'var(--danger)';
           actionMsg.textContent = cgErr(r, 'stop the task');
         } catch (e) {
           actionMsg.style.color = 'var(--danger)';
-          actionMsg.textContent = 'Could not stop the task. Check your connection and try again.';
+          actionMsg.textContent = 'The stop response was lost. Checking task state; the request may have been accepted.';
+          openPollingFallback(true);
         } finally {
           if (!accepted) cancelBtn.disabled = false;
         }
@@ -944,6 +987,9 @@
         // connected: clear the "Waiting…" placeholder and any stale error.
         hidePlaceholder();
         if (streamErrorEl) streamErrorEl.style.display = 'none';
+        lastPayloadAt = Date.now();
+        clearTimeout(reconnectTimer); reconnectTimer = null;
+        document.getElementById('stream-retry').hidden = true;
         const evs = Array.isArray(d.events) ? d.events : [];
         for (const e of evs) {
           // Skip ids we've already rendered, so an SSE reconnect that
@@ -960,7 +1006,7 @@
         eventsEl.scrollTop = eventsEl.scrollHeight;
         if (d.status) {
           setStatus(d.status);
-          if (d.status !== 'blocked' && haltCard) haltCard.style.display = 'none';
+          if (!['blocked', 'failed', 'cancelled'].includes(d.status) && haltCard) haltCard.style.display = 'none';
         }
         if (d.result) {
           const changed = d.result !== lastResult;
@@ -995,11 +1041,16 @@
           done = true;
           cancelBtn.disabled = true;
         }
+        if (['failed', 'cancelled'].includes(currentStatus)) renderHalted();
+        if (stopRequested && currentStatus === 'cancelled') actionMsg.textContent = 'Stop recorded. Cleanup may still be finishing; already completed changes are not undone.';
+        if (stopRequested && currentStatus === 'done') actionMsg.textContent = 'The task completed before the stop took effect. Review its result and any external changes.';
         syncComposer();
       }
 
       let stream = null;
+      let reconnectTimer = null, pollTimer = null, polling = false, lastPayloadAt = null;
       function openStream() {
+        polling = false; clearTimeout(pollTimer); clearTimeout(reconnectTimer);
         if (typeof EventSource === 'undefined') return openPollingFallback();
         if (stream) { try { stream.close(); } catch (_) {} }
         const es = new EventSource('/api/goal/' + goalId + '/events/stream?since=' + sinceId);
@@ -1014,47 +1065,51 @@
         es.onerror = function() {
           // EventSource auto-reconnects; if it permanently fails (network
           // gone, server down), fall back to polling so the UI still works.
-          if (es.readyState === EventSource.CLOSED && stream === es) openPollingFallback();
+          if (stream !== es) return;
+          showStreamError('Updates interrupted. Task state is unknown until reconnected.' + (lastPayloadAt ? ' Last refreshed ' + new Date(lastPayloadAt).toLocaleTimeString() + '.' : ''));
+          document.getElementById('stream-retry').hidden = false;
+          if (es.readyState === EventSource.CLOSED) openPollingFallback();
+          else if (!reconnectTimer) reconnectTimer = setTimeout(function () { if (stream === es) openPollingFallback(); }, 10000);
         };
       }
 
       let pollFailures = 0;
       const MAX_POLL_FAILURES = 5;  // ~25s of dead polling before we surface it
 
-      function openPollingFallback() {
+      function openPollingFallback(force) {
+        if (stream) { stream.close(); stream = null; }
+        clearTimeout(reconnectTimer); reconnectTimer = null;
+        if (polling) return;
+        polling = true;
         async function poll() {
-          if (done) return;
-          if (document.visibilityState === 'hidden') {
-            setTimeout(poll, 5000);
-            return;
-          }
+          if (!polling || (done && !force)) { polling = false; return; }
+          if (document.visibilityState === 'hidden') { pollTimer = setTimeout(poll, 5000); return; }
+          const controller = new AbortController();
+          const timeout = setTimeout(function () { controller.abort(); }, 12000);
           try {
-            const url = '/api/goal/' + goalId + '/events?since=' + sinceId;
-            const resp = await fetch(url);
-            if (resp.status === 404) { done = true; return; }  // goal gone; stop polling
-            if (!resp.ok) {
-              pollFailures++;
-              if (pollFailures >= MAX_POLL_FAILURES) {
-                showStreamError('Lost connection to the agent. Both the live stream and polling failed — reload the page to retry.');
-                return;
-              }
-              setTimeout(poll, 5000);
-              return;
+            const resp = await fetch('/api/goal/' + goalId + '/events?since=' + sinceId,
+              {credentials: 'same-origin', cache: 'no-store', signal: controller.signal});
+            if ([401, 403, 404].includes(resp.status) || resp.redirected) {
+              showStreamError(resp.status === 401 || resp.redirected ? 'Sign in again to reconnect task updates.' : 'Task access is no longer available.');
+              eventsEl.replaceChildren(); resultSection.style.display = 'none';
+              polling = false; document.getElementById('stream-retry').hidden = false; return;
             }
-            pollFailures = 0;
-            applyPayload(await resp.json());
-            if (done) return;
-          } catch (e) {
+            if (!resp.ok) throw new Error('unavailable');
+            applyPayload(await resp.json()); pollFailures = 0; force = false;
+            if (done) { polling = false; return; }
+          } catch (_) {
             pollFailures++;
-            if (pollFailures >= MAX_POLL_FAILURES) {
-              showStreamError('Lost connection to the agent. Both the live stream and polling failed — reload the page to retry.');
-              return;
-            }
-          }
-          setTimeout(poll, pollDelay);
+            showStreamError('Updates are unavailable. The task may still be running. Your draft has been kept.');
+            document.getElementById('stream-retry').hidden = false;
+            if (pollFailures >= MAX_POLL_FAILURES) { polling = false; return; }
+          } finally { clearTimeout(timeout); }
+          pollTimer = setTimeout(poll, Math.min(30000, pollDelay * Math.max(1, pollFailures)));
         }
         poll();
       }
+      document.getElementById('stream-retry').addEventListener('click', function () { pollFailures = 0; openPollingFallback(true); });
+      window.addEventListener('pagehide', function () { polling = false; clearTimeout(pollTimer); clearTimeout(reconnectTimer); if (stream) stream.close(); });
+      if (['failed', 'cancelled'].includes(currentStatus)) renderHalted();
 
       syncComposer();
       // A thread with earlier turns opens on its latest message, like a chat.
@@ -1068,7 +1123,7 @@
       if (currentStatus === 'blocked') pollQuestions();
       // Poll questions on a longer cadence so the form picks up on
       // ask_user that happens between event ticks.
-      setInterval(function() { if (!done) pollQuestions(); }, 5000);
+      setInterval(function() { if (!done && document.visibilityState !== 'hidden') pollQuestions(); }, 5000);
     })();
   </script>
   <script>
@@ -1092,7 +1147,7 @@
           .then(function (r) {
             if (r.ok || r.status === 204) { location.reload(); return null; }
             return r.json().catch(function () { return {}; }).then(function (j) {
-              msg.textContent = cgErr(r, 'continue the task') + ' Check the spending limit too.';
+              msg.textContent = (window.mvPlainDetail && window.mvPlainDetail(j.detail && (j.detail.message || j.detail))) || cgErr(r, 'continue the task');
               btn.disabled = false;
             });
           })
@@ -1179,7 +1234,7 @@
           body: JSON.stringify({rating: rating}),
         }).then(function (r) {
           [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          if (r.ok) { show(rating); msg.textContent = 'Thanks — this trains your workforce.'; return; }
+          if (r.ok) { show(rating); msg.textContent = "Feedback saved. Learning use follows your organization's policy."; return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
             msg.textContent = cgErr(r, 'save your feedback');
@@ -1289,7 +1344,7 @@
           body: JSON.stringify({text: textEl.value}),
         }).then(function (r) {
           saveBtn.disabled = false;
-          if (r.ok) { editMsg.textContent = 'Saved — thanks, this trains your workforce.';
+          if (r.ok) { editMsg.textContent = 'Revision saved. Learning is a separate, policy-governed process.';
                       setTimeout(function () { location.reload(); }, 900); return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
             editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(r, 'save your edit');
@@ -1458,11 +1513,11 @@
       function render(items) {
         list.textContent = '';
         count.textContent = items.length;
-        panel.style.display = items.length ? 'block' : 'none';
+        panel.style.display = 'block';
         if (!items.length) {
           var empty = document.createElement('li');
           empty.className = 'muted';
-          empty.textContent = 'No files attached yet.';
+          empty.textContent = 'No files attached to this task yet. Adding a file does not confirm the runner has read it.';
           list.appendChild(empty);
         }
         items.forEach(function (a) {
@@ -1502,24 +1557,45 @@
       }
       if (addBtn && input) {
         addBtn.addEventListener('click', function () { input.click(); });
+        var pending = [], uploading = false;
+        var progress = document.createElement('ul');
+        progress.setAttribute('aria-label', 'Upload progress'); msg.after(progress);
+        function row(item) {
+          item.row.replaceChildren(document.createTextNode(item.name + ' — ' + item.state + ' '));
+          if (item.state === 'failed') {
+            var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn--ghost';
+            retry.textContent = 'Retry ' + item.name;
+            retry.addEventListener('click', function () { item.state = 'queued'; row(item); drain(); });
+            item.row.append(retry);
+          }
+        }
+        async function drain() {
+          if (uploading) return;
+          uploading = true; addBtn.disabled = true;
+          try {
+            for (var item of pending) {
+              if (item.state !== 'queued') continue;
+              item.state = 'uploading'; row(item);
+              try {
+                var fd = new FormData(); fd.append('file', item.file, item.name);
+                var r = await fetch('/api/v1/goals/' + goalId + '/attachments', {method: 'POST', body: fd});
+                if (!r.ok) throw new Error('upload refused');
+                item.state = 'complete'; item.file = null;
+              } catch (_) { item.state = 'failed'; }
+              row(item);
+            }
+            msg.textContent = pending.some(function (i) { return i.state === 'failed'; })
+              ? 'Some files were not confirmed. Retry only those files. Previously admitted files are preserved.'
+              : 'Files added to this task. Extracted text may still be preparing; this does not confirm the runner has read them.';
+            refresh();
+          } finally { uploading = false; addBtn.disabled = false; }
+        }
         input.addEventListener('change', function () {
-          var files = Array.prototype.slice.call(input.files);
-          input.value = '';
-          if (!files.length) return;
-          msg.textContent = 'Uploading…';
-          var chain = Promise.resolve();
-          files.forEach(function (f) {
-            chain = chain.then(function () {
-              var fd = new FormData();
-              fd.append('file', f, f.name);
-              return fetch('/api/v1/goals/' + goalId + '/attachments', { method: 'POST', body: fd })
-                .then(function (r) {
-                  if (!r.ok) throw new Error(cgErr(r, 'upload ' + f.name));
-                });
-            });
+          Array.from(input.files).forEach(function (file) {
+            var item = {file: file, name: file.name, state: 'queued', row: document.createElement('li')};
+            pending.push(item); progress.append(item.row); row(item);
           });
-          chain.then(function () { msg.textContent = ''; refresh(); })
-               .catch(function (e) { msg.textContent = e && /^Could not/.test(e.message || '') ? e.message : cgErr(e, 'upload the file'); refresh(); });
+          input.value = ''; drain();
         });
       }
       refresh();

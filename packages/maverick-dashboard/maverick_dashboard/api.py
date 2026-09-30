@@ -1703,6 +1703,28 @@ async def goal_events_stream(
                                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@router.get("/goals/{goal_id}/thread-history")
+def goal_thread_history(request: Request, goal_id: int, before_id: int | None = None) -> dict:
+    from dataclasses import asdict
+
+    from maverick.chat_threads import ChatThreads
+
+    require_permission(request, "view")
+    world = _world()
+    goal = world.get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(404, "No such task.")
+    assert_goal_access(request, goal)
+    if before_id is not None and before_id < 1:
+        raise HTTPException(400, "The history position is invalid.")
+    principal = caller_principal(request)
+    if principal and principal != goal.owner:
+        raise HTTPException(403, "Access to one task does not grant access to the employee conversation.")
+    turns, more = ChatThreads(world).history(goal_id, before_id=before_id)
+    return {"turns": [asdict(turn) for turn in turns], "has_more": more,
+            "before_id": turns[0].id if turns else before_id}
+
+
 @router.post("/goals/{goal_id}/answer", status_code=204)
 def answer_question(
     request: Request, goal_id: int, payload: AnswerIn, bg: BackgroundTasks
@@ -1716,6 +1738,8 @@ def answer_question(
     answer = (payload.answer or "").strip()
     if not answer:
         raise HTTPException(status_code=400, detail="answer is required")
+    if g.status in {"cancelled", "done", "failed"}:
+        raise HTTPException(409, "This task is no longer waiting for an answer. Review its current state before restarting.")
     qs = w.open_questions(goal_id=goal_id)
     if not any(q.id == payload.question_id for q in qs):
         raise HTTPException(status_code=404, detail="no such open question for this goal")
@@ -9480,9 +9504,8 @@ def cancel_goal(request: Request, goal_id: int) -> None:
     if g.status in ("done", "cancelled", "failed"):
         return
     w.set_goal_status(goal_id, "cancelled", result="cancelled via dashboard")
-    # A human killing an in-progress run is real negative ground truth (the run
-    # wasn't worth finishing) -- feed it to the learning loop, best-effort.
-    _ground_outcome(w, goal_id, 0.0, kind="cancel")
+    # An operational stop is not a quality rating. Explicit feedback remains
+    # separate and follows the existing consequence/learning policy.
 
 
 @router.get("/goals/{goal_id}/open_questions")
@@ -9606,14 +9629,18 @@ def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
     }
 
 
-def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> None:
+def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> bool:
     """Record a real human/world outcome for the goal's latest episode as
     grounded reward the learning flywheel prefers over its proxy. Delegates to
     the shared core helper (no-op unless ``[consequence]`` is enabled; never
     raises -- grounding is best-effort and must not fail the request)."""
-    from maverick import consequence
+    try:
+        from maverick import consequence
 
-    consequence.record_self_outcome(w, goal_id, value, kind=kind)
+        return consequence.record_self_outcome(w, goal_id, value, kind=kind)
+    except Exception:
+        log.warning("Optional learning observation unavailable for goal %s", goal_id)
+        return False
 
 
 def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
@@ -9657,8 +9684,9 @@ def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
     row = goal_feedback_store.record(
         goal_id, g.owner or "", payload.rating, value=value, note=payload.note or "", by=who
     )
-    _ground_outcome(w, goal_id, value, kind="feedback")
-    return {"feedback": row}
+    observed = _ground_outcome(w, goal_id, value, kind="feedback")
+    return {"feedback": row, "saved": True, "learning_observation": "recorded" if observed else "not_recorded",
+            "training_completed": False}
 
 
 @router.post("/goals/{goal_id}/deliverable/edit")
@@ -9683,10 +9711,11 @@ def edit_deliverable(request: Request, goal_id: int, payload: DeliverableEditIn)
         # Nothing to grade against: the agent produced no draft to keep or
         # rewrite. Grounding this as 0.0 would punish it for text it never wrote,
         # so we save the human's text but ground nothing.
-        return {"similarity": None}
+        return {"similarity": None, "saved": True, "learning_observation": "not_applicable", "training_completed": False}
     similarity = _deliverable_edit_similarity(original, revised)
-    _ground_outcome(w, goal_id, similarity, kind="edit")
-    return {"similarity": round(similarity, 3)}
+    observed = _ground_outcome(w, goal_id, similarity, kind="edit")
+    return {"similarity": round(similarity, 3), "saved": True,
+            "learning_observation": "recorded" if observed else "not_recorded", "training_completed": False}
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:
@@ -13317,6 +13346,8 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
         "X-Lightwork-Decision-Id": event.event_id,
         "X-Lightwork-Approval-Audit": ("delivered" if audit_delivered else "pending"),
         "X-Lightwork-Approval-State": approval_status,
+        "X-Lightwork-Approval-Count": str(state.get("approved_count", 0)),
+        "X-Lightwork-Approval-Required": str(state.get("approvals_required", 1)),
     }
     if audit_delivered:
         return Response(status_code=204, headers=common_headers)
@@ -13498,7 +13529,7 @@ def approval_state(request: Request, approval_id: int) -> dict:
     st = _world().approval_state(approval_id)
     if st is None:
         raise HTTPException(status_code=404, detail="no such approval")
-    return st
+    return {**st, "your_approval_recorded": _supervisor(request) in st.get("approvers", [])}
 
 
 @router.post("/approvals/{approval_id}/claim")

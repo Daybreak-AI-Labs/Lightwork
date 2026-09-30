@@ -231,12 +231,18 @@
               // Keep the shared queue row visible rather than implying that the
               // underlying high-risk action is already effective.
               restoreDisabledStates();
+              btn.disabled = true;
+              const count = r.headers.get('X-Lightwork-Approval-Count') || '?';
+              const required = r.headers.get('X-Lightwork-Approval-Required') || '?';
+              const progress = document.createElement('p'); progress.setAttribute('role', 'status');
+              progress.textContent = 'Your approval is recorded. ' + count + ' of ' + required + ' required approvals received. The action is not authorized yet.';
+              row0.querySelector('.approval-actions').append(progress);
               msg.style.color = 'var(--accent)';
               msg.textContent = 'Your approval of ' + label + ' is recorded. More approvers are needed before it goes ahead.';
               return;
             }
             msg.style.color = 'var(--accent)';
-            msg.textContent = label + (action === 'approve' ? ' approved.' : ' rejected.');
+            msg.textContent = label + (action === 'approve' ? ' authorized. Execution is a separate step; this decision does not confirm it happened.' : ' rejected.');
             // Mutate in place rather than full-reload (keeps scroll
             // position): the decided item leaves the queue.
             const row = document.querySelector('tr[data-id="' + id + '"]');
@@ -268,4 +274,21 @@
       });
     });
   })();
+</script>
+
+<script>
+(function () {
+  document.querySelectorAll('tr[data-id]').forEach(async function (row) {
+    try {
+      var response = await fetch('/api/v1/approvals/' + row.dataset.id + '/state', {credentials: 'same-origin', cache: 'no-store'});
+      if (!response.ok) return;
+      var state = await response.json(), cell = row.querySelector('.approval-actions');
+      if (!cell || state.status !== 'pending') return;
+      var text = document.createElement('p'); text.setAttribute('role', 'status');
+      text.textContent = state.approved_count + ' of ' + state.approvals_required + ' required approvals received.' + (state.your_approval_recorded ? ' Your approval is recorded.' : ' An independent decision is needed.');
+      cell.append(text);
+      if (state.your_approval_recorded) { var approve = row.querySelector('[data-action="approve"]'); if (approve) approve.disabled = true; }
+    } catch (_) { /* Existing decision controls retain their server-side checks. */ }
+  });
+}());
 </script>

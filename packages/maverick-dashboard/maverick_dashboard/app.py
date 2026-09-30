@@ -8847,18 +8847,11 @@ def _thread_turns(w, goal) -> list:
     try:
         from maverick.chat_threads import ChatThreads
 
-        chat = ChatThreads(w)
-        binding = chat.binding(goal.id)
-        if binding is None:
-            return []
-        member_ids = {int(row[0]) for row in chat.members(binding)}
-        turns = w.recent_turns(binding.conversation_id, limit=200)
-    except Exception:  # pragma: no cover -- history is additive, not load-bearing
+        turns, _ = ChatThreads(w).history(goal.id, limit=50)
+        return turns
+    except Exception:  # The history control exposes retry without losing this task.
         return []
-    return [
-        t for t in turns
-        if t.goal_id in member_ids and t.goal_id < goal.id
-    ]
+
 
 
 def _director_run(profile: str, title: str, description: str, base_max_dollars: float | None = None):

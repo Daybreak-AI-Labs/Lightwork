@@ -84,6 +84,31 @@ class ChatThreads:
         members = self.members(binding, limit=1) if binding else []
         return int(members[0][0]) if members else int(goal_id)
 
+    def history(self, goal_id, *, before_id=None, limit=50):
+        """Page authorized earlier turns relative to the selected task."""
+        from .world_model import Turn
+
+        binding = self.binding(goal_id)
+        if binding is None:
+            return [], False
+        gs, gv = self._scope("g")
+        cs, cv = self._scope("c")
+        cursor = " AND t.id < ?" if before_id is not None else ""
+        cursor_values = (int(before_id),) if before_id is not None else ()
+        size = max(1, min(100, int(limit)))
+        rows = self._rows(
+            "SELECT t.id,t.conversation_id,t.goal_id,t.role,t.content,t.ts "
+            "FROM turns t JOIN goals g ON g.id=t.goal_id "
+            "JOIN conversations c ON c.id=t.conversation_id "
+            "WHERE t.conversation_id=? AND g.owner=? AND (g.id=? OR g.parent_id=?) "
+            f"AND g.id < ? AND {gs} AND {cs}{cursor} "
+            "AND t.role IN ('user','assistant') ORDER BY t.id DESC LIMIT ?",
+            (binding.conversation_id, binding.owner, binding.root_id, binding.root_id,
+             goal_id, *gv, *cv, *cursor_values, size + 1),
+        )
+        return list(reversed([Turn(r[0], r[1], r[2], r[3], self.store.open(r[4]), r[5])
+                              for r in rows[:size]])), len(rows) > size
+
     def _lock(self, connection, root_id):
         if not self.store.sqlite:
             key = int.from_bytes(hashlib.sha256(
@@ -187,6 +212,8 @@ class ChatThreads:
         retry the same answer after the newer turn or admission hold clears.
         """
         with self._restart_transaction(goal_id) as (connection, binding, status):
+            if status in {"cancelled", "done", "completed", "failed", "error"}:
+                raise SubmissionConflict("This task is no longer waiting for an answer. Review it before restarting.")
             questions = self._rows("SELECT id FROM questions WHERE goal_id=? AND answer IS NULL",
                                    (goal_id,), connection=connection)
             if question_id not in {int(row[0]) for row in questions}:

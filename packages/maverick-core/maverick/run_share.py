@@ -6,11 +6,39 @@ returning the URL. Nothing is uploaded without an explicit GitHub token.
 """
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
 
 _GIST_API = "https://api.github.com/gists"
+
+
+class MissingGitHubToken(RuntimeError):
+    """Sharing cannot begin until the administrator connects GitHub."""
+
+
+def resolve_token(token: str | None = None) -> str:
+    value = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or _saved_token()
+    if not value:
+        raise MissingGitHubToken("GitHub sharing is not connected on this installation.")
+    return value
+
+
+def upload_payload(payload: dict, token: str) -> str:
+    """Send exactly a reviewed payload. Exceptions after dispatch are uncertain."""
+    import httpx
+
+    response = httpx.post(_GIST_API, content=json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(), headers={
+        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }, timeout=30.0)
+    response.raise_for_status()
+    url = response.json().get("html_url", "")
+    if not isinstance(url, str) or not url.startswith("https://gist.github.com/"):
+        raise ValueError("GitHub did not return a verifiable gist URL")
+    return url
 
 
 def build_gist_payload(goal_id: int) -> dict:
@@ -48,21 +76,4 @@ def share_run(goal_id: int, token: str | None = None) -> str:
     sealed ``[github] share_token`` saved in settings. Raises if none is set
     (we never upload anonymously).
     """
-    token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or _saved_token()
-    if not token:
-        raise RuntimeError(
-            "no GitHub token: set GITHUB_TOKEN to share a run as a gist."
-        )
-    import httpx
-    resp = httpx.post(
-        _GIST_API,
-        json=build_gist_payload(goal_id),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-        timeout=30.0,
-    )
-    resp.raise_for_status()
-    return resp.json().get("html_url", "")
+    return upload_payload(build_gist_payload(goal_id), resolve_token(token))
