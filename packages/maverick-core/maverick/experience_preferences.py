@@ -16,7 +16,7 @@ from .file_lock import atomic_write_bytes, cross_process_lock, ensure_private_di
 from .paths import current_tenant_id_strict, data_dir
 
 DEFAULTS = {
-    "preferred_name": "", "tone": "", "language": "en", "verbosity": "balanced",
+    "preferred_name": "", "tone": "", "language": "en", "interface_language": "", "verbosity": "balanced",
     "output_style": "", "custom_style_name": "", "custom_style": "",
     "theme": "dark", "font": "default", "density": "comfortable", "text_size": "standard",
     "start_page": "/chat", "favorites": [], "today_cards": ["tasks", "decisions", "recent", "schedules", "templates"],
@@ -24,7 +24,7 @@ DEFAULTS = {
     "notification_preferences": {},
 }
 PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "today_days", "template_favorites", "start_page", "notification_preferences"})
-CHOICES = {"verbosity": {"brief", "balanced", "detailed"},
+CHOICES = {"interface_language": {"", "en", "fr", "de", "ja", "zh", "ar"}, "verbosity": {"brief", "balanced", "detailed"},
            "font": {"default", "dyslexic"}, "density": {"comfortable", "compact"},
            "text_size": {"standard", "large", "larger"}, "today_days": {"1", "7", "30"}}
 

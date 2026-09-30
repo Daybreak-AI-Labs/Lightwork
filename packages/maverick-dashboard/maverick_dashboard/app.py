@@ -111,6 +111,8 @@ from .health_routes import (
 from .health_routes import (
     readiness_response as _readiness_response,
 )
+from .i18n_journeys import region as _journey_region
+from .i18n_journeys import text as _journey_text
 from .model_tests_api import router as model_tests_router
 from .my_work_api import router as my_work_router
 from .oidc_login import router as oidc_login_router
@@ -284,6 +286,10 @@ from .themes import custom_themes, theme_css  # noqa: E402
 
 templates.env.globals.setdefault("t", lambda key: _i18n_t(key, "en"))
 
+templates.env.globals.setdefault("ui", _journey_region)
+templates.env.globals.setdefault("ut", _journey_text)
+templates.env.globals.setdefault("ul", lambda source: "en")
+
 _VALID_THEMES = {"dark", "light", "solarized", "hicontrast"}
 _VALID_FONTS = {"default", "dyslexic"}
 _VALID_DENSITIES = {"comfortable", "compact"}
@@ -371,6 +377,7 @@ def _resolve_font(request: Request) -> str:
 def _theme_context(request: Request) -> dict:
     from .i18n import content_lang, dir_for, resolve_lang
     from .i18n import t as _t
+    from .i18n_journeys import context as journey_context
 
     lang = resolve_lang(request)
     custom = custom_themes()
@@ -388,6 +395,7 @@ def _theme_context(request: Request) -> dict:
         "page_lang": content_lang(lang),
         "dir": dir_for(lang),
         "t": lambda key: _t(key, lang),
+        **journey_context(request, lang),
     }
 
 

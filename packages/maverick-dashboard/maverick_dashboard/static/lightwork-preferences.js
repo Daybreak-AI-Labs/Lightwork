@@ -116,7 +116,7 @@
       if (!(await window.mvConfirm(explanation, {okText:'Keep draft for review'}))) return;
       locked.forEach(function (key) { delete draft[key]; });
       model = current; render(); applyDraft(draft);
-      status.textContent = 'Current values loaded. Review and save your remaining draft when ready.';
+      window.LightworkI18n ? window.LightworkI18n.set(status, 'Current values loaded. Review and save your remaining draft when ready.') : status.textContent = 'Current values loaded. Review and save your remaining draft when ready.';
     } catch (failure) { status.textContent = failure.message; }
     finally { busy = false; renderPins(); }
   });
@@ -124,7 +124,7 @@
     event.preventDefault(); if (busy || !Object.keys(changes).length) return;
     var submitted = Object.assign({}, changes);
     if (!(await window.mvConfirm('Apply to ' + (thread ? 'this conversation' : scope.value) + ':\n' + describe(submitted, model), {okText:'Save preferences'}))) return;
-    busy = true; status.textContent = 'Saving preferences.';
+    busy = true; window.LightworkI18n ? window.LightworkI18n.set(status, 'Saving preferences.') : status.textContent = 'Saving preferences.';
     var controls = Array.from(form.querySelectorAll('input,select,textarea,button')).map(function (field) { var old = field.disabled; field.disabled = true; return [field,old]; });
     var confirmed = false;
     try {
@@ -147,7 +147,7 @@
         });
       }
       status.textContent = 'Preferences saved for ' + (thread ? 'this conversation' : scope.value) + '. New work uses this style; running work is unchanged.';
-    } catch (error) { status.textContent = 'Could not confirm this save. Your draft is kept. Check your connection and compare current preferences before retrying.'; if (compare) compare.hidden = false; }
+    } catch (error) { window.LightworkI18n ? window.LightworkI18n.set(status, 'Could not confirm this save. Your draft is kept. Check your connection and compare current preferences before retrying.') : status.textContent = 'Could not confirm this save. Your draft is kept. Check your connection and compare current preferences before retrying.'; if (compare) compare.hidden = false; }
     finally {
       busy = false; controls.forEach(function (item) { item[0].disabled = item[1]; });
       if (confirmed) render();

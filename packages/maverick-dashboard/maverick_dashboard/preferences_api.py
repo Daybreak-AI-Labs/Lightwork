@@ -13,7 +13,7 @@ from . import auth
 from .draft_api import context_for
 
 router = APIRouter()
-PROFILE_FIELDS = frozenset({'tone', 'language', 'verbosity', 'output_style', 'custom_style_name',
+PROFILE_FIELDS = frozenset({'tone', 'language', 'interface_language', 'verbosity', 'output_style', 'custom_style_name',
                             'custom_style', 'theme', 'font', 'density', 'text_size'})
 
 
@@ -95,7 +95,7 @@ def _check_display(key: str, value: str) -> None:
 
     allowed = {"theme": {*_app()._valid_theme_names(), "system"},
                "font": _app()._VALID_FONTS, "density": _app()._VALID_DENSITIES,
-               "language": set(LANGS), "text_size": {"standard", "large", "larger"}}
+               "language": set(LANGS), "interface_language": {"", *LANGS}, "text_size": {"standard", "large", "larger"}}
     if key not in allowed or not isinstance(value, str) or value not in allowed[key]:
         raise HTTPException(422, "Choose an available display preference.")
 
@@ -124,7 +124,7 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
     for key, value in body.changes.items():
         if value is None:
             continue
-        if key in {"theme", "font", "density", "language", "text_size"}:
+        if key in {"theme", "font", "density", "language", "interface_language", "text_size"}:
             _check_display(key, value)
         if key == "start_page" and (not isinstance(value, str) or value not in destinations):
             raise HTTPException(403, "That starting page is not available to your account.")
@@ -146,8 +146,8 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
         raise HTTPException(422, str(exc)) from exc
     response = JSONResponse(_state(request, body.thread), headers={"Cache-Control": "private, no-store"})
     if body.scope == 'personal' and body.thread is None:
-        for key in set(body.changes) & {'theme', 'font', 'density', 'text_size', 'language'}:
-            response.delete_cookie('mvk_lang' if key == 'language' else 'mvk_' + key)
+        for key in set(body.changes) & {'theme', 'font', 'density', 'text_size', 'interface_language'}:
+            response.delete_cookie('mvk_lang' if key == 'interface_language' else 'mvk_' + key)
     return response
 
 
@@ -163,6 +163,9 @@ class DisplayUpdate(BaseModel):
 def display_preference(request: Request, body: DisplayUpdate) -> JSONResponse:
     _app()._require_same_origin(request)
     auth.require_permission(request, "view")
+    # The legacy header key meant interface language, never response language.
+    if body.key == "language":
+        body = body.model_copy(update={"key": "interface_language"})
     _check_display(body.key, body.value)
     context = context_for(request)
     if not hmac.compare_digest(body.context, context):
@@ -182,7 +185,7 @@ def display_preference(request: Request, body: DisplayUpdate) -> JSONResponse:
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
     response = JSONResponse(result, headers={"Cache-Control": "private, no-store"})
-    cookie = "mvk_lang" if body.key == "language" else "mvk_" + body.key
+    cookie = "mvk_lang" if body.key == "interface_language" else "mvk_" + body.key
     if body.device_only or not principal:
         response.set_cookie(cookie, body.value, max_age=365*24*3600, samesite="lax")
         response.set_cookie('mvk_pref_context', context, max_age=365*24*3600, samesite="lax")
@@ -244,7 +247,7 @@ def import_personal_profile(request: Request, body: PersonalProfileImport):
         validate_payload(values)
         changes = {key: preferences._validate(key, value) for key, value in values.items()}
         for key, value in changes.items():
-            if key in {'theme', 'font', 'density', 'language', 'text_size'}:
+            if key in {'theme', 'font', 'density', 'language', 'interface_language', 'text_size'}:
                 _check_display(key, value)
     except ValueError as exc:
         raise HTTPException(422, 'The profile includes an unsupported value or credential-like data. Review the file; nothing was changed.') from exc
@@ -266,12 +269,13 @@ def display_context(request: Request) -> dict:
     return {"display_preference_context": context_for(request),
             "display_preference_revision": state["revision"] if state else "",
             "display_text_size": resolved_display(request, "text_size", "standard"),
+            "display_interface_language": resolved_display(request, "interface_language", ""),
             "display_signed_in": bool(principal and preferences.enabled())}
 
 
 def resolved_display(request: Request, key: str, fallback: str | None = None):
     principal = auth.caller_principal(request)
-    cookie = "mvk_lang" if key == "language" else "mvk_" + key
+    cookie = "mvk_lang" if key == "interface_language" else "mvk_" + key
     cached = None
     if principal and preferences.enabled():
         try:

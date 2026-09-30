@@ -100,12 +100,14 @@
       window.mvConfirm = function (message, opts) {
         opts = opts || {};
         if (!dlg || typeof dlg.showModal !== 'function') {
-          return Promise.resolve(window.confirm(String(message)));
+          return Promise.resolve(window.confirm(opts.productCopy && window.LightworkI18n ? window.LightworkI18n.text(String(message), opts.values) : String(message)));
         }
         if (dlg.open) return Promise.resolve(false);   // not re-entrant (shared dialog)
         var opener = document.activeElement;           // restore focus on close
-        msgEl.textContent = String(message);
-        okBtn.textContent = opts.okText || 'Confirm';
+        if (opts.productCopy && window.LightworkI18n) window.LightworkI18n.set(msgEl, String(message), opts.values);
+        else { msgEl.textContent = String(message); msgEl.lang = 'und'; msgEl.dir = 'auto'; }
+        if (window.LightworkI18n) { window.LightworkI18n.set(okBtn, opts.okText || 'Confirm'); window.LightworkI18n.set(cancelBtn, 'Cancel'); }
+        else okBtn.textContent = opts.okText || 'Confirm';
         return new Promise(function (resolve) {
           function done(val) {
             okBtn.removeEventListener('click', onOk);
@@ -887,13 +889,13 @@
       async function savePreference(key, value, select, isUndo) {
         if (saving) return;
         saving = true;
-        var old = key === 'text_size' ? (document.documentElement.dataset.textSize || 'standard') :
+        var old = key === 'interface_language' ? (select.dataset.savedValue || '') : key === 'text_size' ? (document.documentElement.dataset.textSize || 'standard') :
           key === 'theme' ? (document.body.dataset.themePreference || 'dark') :
           Array.from(document.body.classList).find(function (name) { return name.startsWith(key + '-'); });
         if (old && old.startsWith(key + '-')) old = old.slice(key.length + 1);
         prefs.querySelectorAll('select, button, input').forEach(function (control) { control.disabled = true; });
         window.mvApplyDisplayPreference(key, value);
-        if (status) status.textContent = 'Previewing and saving.';
+        if (status) window.LightworkI18n ? window.LightworkI18n.set(status, 'Saving…') : status.textContent = 'Saving…';
         try {
           var context = document.querySelector('meta[name="lightwork-preference-context"]');
           var revision = document.querySelector('meta[name="lightwork-preference-revision"]');
@@ -907,11 +909,13 @@
           if (revision && data.revision) revision.content = data.revision;
           previous = isUndo ? null : {key:key, value:old, select:select};
           if (undo) undo.hidden = !previous;
-          if (status) status.textContent = 'Saved. Your editor and unsaved work remain open.';
+          if (key === 'interface_language') select.dataset.savedValue = value;
+          var savedMessage = key === 'interface_language' ? 'Language saved. Open another page or reload after saving your draft.' : 'Saved. Your editor and unsaved work remain open.';
+          if (status) window.LightworkI18n ? window.LightworkI18n.set(status, savedMessage) : status.textContent = savedMessage;
         } catch (failure) {
           window.mvApplyDisplayPreference(key, old);
           if (select) select.value = old;
-          if (status) status.textContent = 'Appearance was not saved. The earlier appearance is restored; retry or refresh preferences after saving your work.';
+          if (status) { var failureMessage = 'Appearance was not saved. The earlier appearance is restored; retry or refresh preferences after saving your work.'; if (window.LightworkI18n) window.LightworkI18n.set(status, failureMessage); else status.textContent = failureMessage; }
         } finally {
           saving = false; prefs.querySelectorAll('select, button, input').forEach(function (control) { control.disabled = false; });
         }
@@ -919,7 +923,7 @@
       prefs.querySelectorAll('[data-ui-preference]').forEach(function (select) {
         select.addEventListener('change', function () {
           var key = select.getAttribute('data-ui-preference');
-          if (key && select.value) savePreference(key, select.value, select, false);
+          if (key && (select.value || key === 'interface_language')) savePreference(key, select.value, select, false);
         });
       });
       if (undo) undo.addEventListener('click', function () {

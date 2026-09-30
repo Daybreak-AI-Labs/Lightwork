@@ -1,0 +1,48 @@
+# Employee journey localization
+
+Interface language and response language are independent. The account preference
+`interface_language` supports English, French, German, Japanese, Chinese and the
+existing Arabic community seed. Its empty value follows response language for
+compatibility. It inherits through existing organization/workspace/personal
+layers and respects organization locks. A header choice can be device-only and
+remains bound to the current account/workspace. Changing language saves without
+reloading an editor; the next navigation uses the saved choice. Neither this
+field nor its cookie enters a model prompt.
+
+French, German, Japanese and Chinese journey catalogs are **draft, partial
+translations**. They have not received native-language or consequence-copy
+approval. Arabic's seed has not been machine-completed. `CONTENT_LANGS` remains
+`{"en"}`: the page's English fallback body is declared honestly, and each
+translated control declares its actual language. A visible notice describes
+partial coverage. These changes do not claim a fully localized product.
+
+`ui(source, **values)` renders an escaped product-copy region; `ut(source)` and
+`ul(source)` supply text and actual language for options and attributes. The
+source key is a stable hash of the exact English source. Existing translation
+portal validation checks the same catalog. New copy needs all four draft
+translations with identical placeholders; untranslated text stays English.
+Never call these helpers on an employee's source document, title, result, note,
+draft or model output. Those regions retain their text, use `lang="und"` when
+the content language is unknown, and have independent bidi direction.
+
+The browser helper translates only explicit product bindings. It never scans
+arbitrary text or observes streamed user content. Parameter values use escaped
+`bdi` elements. Its formatters use the matching regional browser locale and
+browser time zone; calendar dates are constructed locally to avoid UTC-day
+drift. Typed product numbers, currency and review pagination use `Intl`.
+Product validation adds a language-labelled error without modifying the draft.
+`mvConfirm(..., {productCopy: true, values})` is the explicit confirmation-copy
+path; ordinary caller messages remain unchanged.
+
+Run `python scripts/journey_i18n_coverage.py --output
+docs/ux-audit-2026-09-30/web-localization-coverage.json` from the repository root
+to regenerate the engineering inventory. It reports literal HTML occurrences,
+with source locations. It deliberately does **not** qualify dynamic labels,
+shared includes, browser/API messages, linguistic quality or screen-reader
+behavior. The audit slice lists the remaining work rather than treating zero
+literal fragments as a complete journey.
+
+Local tests cover locale precedence and inheritance, unchanged response prompts,
+account-bound cookies and locks, Arabic fallback, escaped parameter/source text,
+explicit dialog/table regions, streamed content, date/number/plural formatting
+and required-field error recovery. Provider services are not called.

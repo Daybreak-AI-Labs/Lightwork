@@ -176,8 +176,10 @@
   </style>
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
+{% include "_journey_i18n.html" %}
 </head>
 <body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
+{% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="Translation coverage">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
   <a class="skip-link" href="#content">Skip to content</a>
   <aside class="cs-side" id="cs-side" aria-label="Chats">
     <div style="display:flex; align-items:center;">
@@ -215,7 +217,7 @@
     {% with copilot_chat_shell=true %}{% include "_copilot.html" %}{% endwith %}
     <div class="cs-account">
       <span class="cs-avatar" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg></span>
-      <a href="/settings">Settings</a>
+      <a href="/settings">{{ ui("Settings") }}</a>
       {% include "_display_preferences.html" %}
       <span class="cs-spacer"></span>
       {% if show_logout %}<a href="/auth/logout">Sign out</a>{% endif %}
@@ -249,8 +251,8 @@
     <div class="mv-confirm__body">
       <p class="mv-confirm__msg" id="mv-confirm-msg"></p>
       <div class="mv-confirm__row">
-        <button type="button" class="btn btn--ghost" id="mv-confirm-cancel">Cancel</button>
-        <button type="button" class="btn btn--primary" id="mv-confirm-ok">Confirm</button>
+        <button type="button" class="btn btn--ghost" id="mv-confirm-cancel">{{ ui("Cancel") }}</button>
+        <button type="button" class="btn btn--primary" id="mv-confirm-ok">{{ ui("Confirm") }}</button>
       </div>
     </div>
   </dialog>
@@ -260,7 +262,7 @@
       <div id="mv-form-fields"></div>
       <p class="mv-form__err" id="mv-form-err" aria-live="polite"></p>
       <div class="mv-confirm__row">
-        <button type="button" class="btn btn--ghost" id="mv-form-cancel">Cancel</button>
+        <button type="button" class="btn btn--ghost" id="mv-form-cancel">{{ ui("Cancel") }}</button>
         <button type="submit" class="btn btn--primary" id="mv-form-ok">OK</button>
       </div>
     </form>

@@ -162,7 +162,7 @@
     <div class="panel">
       <div class="wf__field" style="margin-bottom: var(--space-3);">
         <label for="wf-brief">Describe the <span id="wf-noun">workflow</span></label>
-        <textarea id="wf-brief" class="input wf__brief"
+        <textarea lang="und" dir="auto" data-user-content id="wf-brief" class="input wf__brief"
           placeholder="e.g. Gather weekly news about a competitor I choose, summarize the important changes, and draft an email to the team."></textarea>
         <div class="wf__chips" id="wf-examples" aria-label="Starter examples"></div>
       </div>
@@ -177,7 +177,7 @@
         <span class="wf__hint" id="wf-file-name"></span>
         <div id="wf-source-review" hidden>
           <label for="wf-source-text">Review extracted procedure</label>
-          <textarea class="textarea" id="wf-source-text" rows="8" maxlength="8000"></textarea>
+          <textarea lang="und" dir="auto" data-user-content class="textarea" id="wf-source-text" rows="8" maxlength="8000"></textarea>
           <p class="wf__hint">Source material only. Review and remove private or irrelevant text before Draft with AI. Uploading does not start work. PDF and Word documents require the installed document parsers; maximum file size is 512 KB.</p>
           <button class="btn btn--ghost" type="button" id="wf-source-clear">Remove document</button>
         </div>
@@ -204,7 +204,7 @@
       </div>
       <div class="wf__field">
         <label for="wf-steps">Steps</label>
-        <textarea id="wf-steps" class="input wf__steps" aria-label="Workflow steps"></textarea>
+        <textarea lang="und" dir="auto" data-user-content id="wf-steps" class="input wf__steps" aria-label="Workflow steps"></textarea>
       </div>
       <div class="wf-grid">
         <div class="wf__field">
@@ -258,12 +258,12 @@
         </div>
       </div>
       <div class="wf__field">
-        <label for="pb-desc">Description</label>
+        <label for="pb-desc">{{ ui("Description") }}</label>
         <input type="text" id="pb-desc" class="input" aria-label="Agent description" />
       </div>
       <div class="wf__field">
         <label for="pb-persona">Role and working instructions</label>
-        <textarea id="pb-persona" class="input pb-persona" aria-label="Specialist role and instructions"></textarea>
+        <textarea lang="und" dir="auto" data-user-content id="pb-persona" class="input pb-persona" aria-label="Specialist role and instructions"></textarea>
       </div>
       <div class="wf-grid">
         <div class="wf__field">
@@ -1261,7 +1261,7 @@
         + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__rm">Remove</button>'
         + '</span>'
         + '</div>'
-        + '<textarea class="input pb-step__inst" rows="2" placeholder="What the agent does at this step" aria-label="Step instruction"></textarea>'
+        + '<textarea lang="und" dir="auto" data-user-content class="input pb-step__inst" rows="2" placeholder="What the agent does at this step" aria-label="Step instruction"></textarea>'
         + '<div class="pb-step__head" style="margin: 0;">'
         + '<input class="input pb-step__tools" style="flex: 1 1 auto;" placeholder="Actions used here — choose them with the button" aria-label="Actions used in this step" />'
         + '<button type="button" class="btn btn--ghost pb-step__btn pb-step__browse">Choose actions…</button>'

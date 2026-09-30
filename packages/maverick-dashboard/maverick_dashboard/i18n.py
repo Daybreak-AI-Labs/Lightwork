@@ -1,16 +1,13 @@
-"""Dashboard chrome i18n (roadmap 2027-H1 UX — "i18n expansion fr/de/ja/zh").
+"""Explicit dashboard product-copy catalogs, with honest partial-language regions.
 
-Translates the dashboard's *chrome* — navigation, headers, common buttons —
-not user data (goal titles, run output stay verbatim). Deliberately tiny:
-a dict catalog + a ``t(key)`` template helper, no gettext toolchain, because
-the chrome is ~30 strings and a contributor adds a language by editing one
-mapping (and the catalog test keeps every language complete).
-
-Language resolution: ``?lang=`` query param → ``mvk_lang`` cookie →
-``Accept-Language`` header prefix → English. Unknown keys render the English
-string (or the key itself) so a missing translation can never blank the UI.
+The original chrome catalog and draft journey catalogs share the community
+translation validation tooling. User content is never submitted for translation.
+Interface language is independent of response language; regional browser tags
+control date and number formatting. No draft catalog qualifies a full page body.
 """
 from __future__ import annotations
+
+from .i18n_journeys import messages as _journey_messages
 
 LANGS = ("en", "fr", "de", "ja", "zh", "ar")
 DEFAULT_LANG = "en"
@@ -27,7 +24,7 @@ SEED_LANGS = ("ar",)
 RTL_LANGS = frozenset({"ar", "he", "fa", "ur"})
 
 #: Languages the page BODY is actually rendered in. The templates' copy is
-#: English; only the handful of chrome strings routed through :func:`t` follow
+#: English; only explicitly bound chrome and journey product regions follow
 #: the selected language. ``<html lang>`` must describe the body (WCAG 3.1.1),
 #: so it uses :func:`content_lang`, and the translated chrome elements carry
 #: their own ``lang`` attribute. Add a language here once its templates exist.
@@ -78,21 +75,25 @@ MESSAGES: dict[str, dict[str, str]] = {
 }
 
 
+
+MESSAGES.update(_journey_messages())
+
+
 def resolve_lang(request) -> str:
     """``?lang=`` → ``mvk_lang`` cookie → ``Accept-Language`` → en."""
-    q = (request.query_params.get("lang") or "").strip().lower()
+    q = (request.query_params.get("lang") or "").strip().lower().split("-")[0]
     from .auth import caller_principal
 
     if q in LANGS and not caller_principal(request):
         return q
     from .preferences_api import resolved_display
 
-    preferred = resolved_display(request, "language")
+    preferred = resolved_display(request, "interface_language") or resolved_display(request, "language")
     if preferred in LANGS:
         return preferred
-    accept = (request.headers.get("Accept-Language") or "").lower()
-    for part in accept.split(","):
-        code = part.split(";")[0].strip()[:2]
+    from .i18n_journeys import accepted_locales
+    for locale in accepted_locales(request):
+        code = locale.lower().split("-")[0]
         if code in LANGS:
             return code
     return DEFAULT_LANG

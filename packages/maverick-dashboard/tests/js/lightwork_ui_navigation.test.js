@@ -73,7 +73,9 @@ function fixture({ mobile = true, collapsed = false, mainInert = false, headerHe
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ui.js"), "utf8",
   );
   const start = source.indexOf("    // Sidebar toggle.");
-  const end = source.indexOf("    // Preferences popover:", start);
+  // This fixture exercises navigation, not the following appearance controller.
+  const appearance = source.indexOf("      var system = window.matchMedia", start);
+  const end = source.lastIndexOf("    (function () {", appearance);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   vm.runInNewContext(source.slice(start, end), {

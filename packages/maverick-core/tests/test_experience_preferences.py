@@ -99,3 +99,15 @@ def test_inherited_preview_matches_next_lower_layer(isolated):
     value = prefs.state('user:alice')
     assert value['inherited_by_scope']['personal']['values']['tone'] == 'formal'
     assert value['effective_by_scope']['personal']['values']['tone'] == 'friendly'
+
+
+def test_interface_language_never_changes_response_language_or_prompt(isolated):
+    write('user:alice', {'language': 'ja'})
+    original = prefs.prompt('user:alice')
+    write('user:alice', {'interface_language': 'fr'})
+    assert prefs.state('user:alice')['values']['language'] == 'ja'
+    assert prefs.prompt('user:alice') == original
+    with pytest.raises(ValueError, match='Only response style'):
+        write('user:alice', {'interface_language': 'de'}, thread=12)
+    with pytest.raises(ValueError, match='available preference'):
+        write('user:alice', {'interface_language': 'not-a-language'})

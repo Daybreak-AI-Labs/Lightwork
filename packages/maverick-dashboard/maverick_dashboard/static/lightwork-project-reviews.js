@@ -52,8 +52,8 @@
     finally{controls.forEach((item,index)=>item.disabled=previous[index]);busy=false;permissions();}
   }
   function renderInbox(){
-    el("page").textContent=model.total?"Showing "+(model.offset+1)+"–"+Math.min(model.offset+model.limit,model.total)+" of "+model.total:"No matching reviews";
-    el("counts").textContent=model.counts.total+(model.counts.total===1?" review":" reviews")+" · "+model.counts.pending+" waiting · "+model.counts.overdue+" overdue";
+    if(window.LightworkI18n){window.LightworkI18n.set(el("page"),model.total?"Showing {start}–{end} of {total}":"No matching reviews",{start:window.LightworkI18n.number(model.offset+1),end:window.LightworkI18n.number(Math.min(model.offset+model.limit,model.total)),total:window.LightworkI18n.number(model.total)});}else el("page").textContent=model.total?"Showing "+(model.offset+1)+"–"+Math.min(model.offset+model.limit,model.total)+" of "+model.total:"No matching reviews";
+    if(window.LightworkI18n){el("counts").textContent=window.LightworkI18n.plural("{count} review","{count} reviews",model.counts.total)+" · "+window.LightworkI18n.text("{waiting} waiting · {overdue} overdue",{waiting:window.LightworkI18n.number(model.counts.pending),overdue:window.LightworkI18n.number(model.counts.overdue)});el("counts").lang=window.LightworkI18n.languageFor("{count} reviews");}else el("counts").textContent=model.counts.total+(model.counts.total===1?" review":" reviews")+" · "+model.counts.pending+" waiting · "+model.counts.overdue+" overdue";
     el("inbox").replaceChildren();if(!model.items.length)el("inbox").append(node("p","No reviews are shared with you right now. Project owners can pick a result and choose a reviewer below."));
     for(const row of model.items){const item=node("p",""),button=node("button",row.title+" · "+row.status.replace(/_/g," ")+(row.stale?" · source changed":"")+(row.overdue?" · overdue":""));button.type="button";button.className="btn";button.addEventListener("click",()=>action(()=>openPacket(row.id)));item.append(button);el("inbox").append(item);}
   }
@@ -86,10 +86,10 @@
   function renderPacket(){
     packetUnavailable=false;
     el("packet").hidden=false;el("packet-title").textContent=packet.snapshot.title;
-    el("packet-summary").textContent=packet.project_name+" · "+words(packet.status)+" · reviewer "+who(packet.reviewer)+" · due "+new Date(packet.due_at*1000).toLocaleString();
+    el("packet-summary").textContent=packet.project_name+" · "+words(packet.status)+" · reviewer "+who(packet.reviewer)+" · due "+(window.LightworkI18n ? window.LightworkI18n.formatDate(packet.due_at) : new Date(packet.due_at*1000).toLocaleString());
     el("stale").textContent=packet.stale?"The source task changed after this result was captured. Ask the owner to share it again before making a decision.":"You are reviewing the captured result shown below.";
     el("packet-note").textContent=packet.note;el("result").textContent=packet.snapshot.result;el("history").replaceChildren();
-    packet.history.forEach(row=>el("history").append(node("li",who(row.actor)+" · "+words(row.action)+" · "+new Date(row.at*1000).toLocaleString()+" — "+row.note)));
+    packet.history.forEach(row=>el("history").append(node("li",who(row.actor)+" · "+words(row.action)+" · "+(window.LightworkI18n ? window.LightworkI18n.formatDate(row.at) : new Date(row.at*1000).toLocaleString())+" — "+row.note)));
     el("review-provenance").replaceChildren();
     if(packet.previous_packet_id){
       el("review-provenance").append(node("span","Changed since the previous captured result: "+packet.change_summary+" "));

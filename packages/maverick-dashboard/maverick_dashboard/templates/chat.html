@@ -43,7 +43,7 @@
     <summary>Weighing up a decision? Get two viewpoints first</summary>
     <form id="vp-form" class="cs-viewpoints__form" novalidate>
       <label for="vp-question">Question or decision</label>
-      <textarea id="vp-question" name="question" class="textarea" rows="3" minlength="3" maxlength="2000" required
+      <textarea lang="und" dir="auto" data-user-content id="vp-question" name="question" class="textarea" rows="3" minlength="3" maxlength="2000" required
                 placeholder="For example: Should we move our weekly team meeting to Mondays?"></textarea>
       <label for="vp-rounds">How thorough</label>
       <select id="vp-rounds" name="rounds" class="select">
@@ -86,7 +86,7 @@
   />
   <details{% if prefill_description %} open{% endif %}>
     <summary>Add details</summary>
-    <textarea
+    <textarea lang="und" dir="auto" data-user-content
       name="description"
       class="composer__details"
       rows="{{ 6 if prefill_description else 3 }}"
@@ -121,7 +121,7 @@
       <option value="flow">Draft a workflow</option>
       <option value="agent">Draft an agent</option>
     </select>
-    <button type="submit" id="send-btn" class="composer__send" aria-label="Start task">
+    <button type="submit" id="send-btn" class="composer__send" aria-label="{{ ut('Start task') }}" lang="{{ ul('Start task') }}">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
         <path d="M9 14.5V4M9 4l-4.5 4.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>

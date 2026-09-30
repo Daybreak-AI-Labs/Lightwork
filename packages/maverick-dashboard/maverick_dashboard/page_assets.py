@@ -20,6 +20,7 @@ ASSETS = (
     "lightwork-devices.js",
     "lightwork-read-aloud.js",
     "lightwork-theme-preview.js",
+    "lightwork-i18n.js",
     "lightwork-model-guidance.js",
     "lightwork-model-tests.js",
     "lightwork-notification-health.js",
@@ -44,7 +45,7 @@ ASSETS = (
     "lightwork-task-changes.js",
     "lightwork-viewpoints.js",
 )
-STYLES: tuple[str, ...] = ()  # stylesheets served by their own page routers
+STYLES: tuple[str, ...] = ("lightwork-i18n.css",)
 
 
 def _route(name: str):
