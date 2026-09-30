@@ -6,7 +6,8 @@
   var formHost = document.getElementById('mv-product-operation-form');
   if (!panel || !host || !status || !buttons || !formHost) return;
   var root = '/api/v1/copilot/product-operations', generation = 0, busy = false, catalog = null, selected = null;
-  var uncertainty = '', overrideSelection = null;
+  var uncertainty = '', overrideSelection = null, pendingRequests = new Set();
+  function cancelRequests() { pendingRequests.forEach(function (controller) { controller.abort(); }); pendingRequests.clear(); }
   function node(tag, text, parent) { var element = document.createElement(tag); if (text !== undefined) element.textContent = String(text); if (parent) parent.appendChild(element); return element; }
   function clear(element) { element.replaceChildren(); }
   function button(text, parent, handler) { var control = node('button', text, parent); control.type = 'button'; control.className = 'btn btn--ghost'; control.addEventListener('click', handler); return control; }
@@ -14,7 +15,10 @@
     if (overrideSelection) return overrideSelection;
     var goal = window.location.pathname.match(/^\/chat\/goal\/(\d+)(?:\/|$)/);
     if (goal) return {kind: 'goal', id: Number(goal[1]), goal_id: Number(goal[1])};
-    var thread = new URLSearchParams(window.location.search).get('thread');
+    var query = new URLSearchParams(window.location.search);
+    var selectedGoal = query.get('goal_id');
+    if (window.location.pathname === '/budget' && selectedGoal && /^[1-9]\d*$/.test(selectedGoal)) return {goal_id: Number(selectedGoal)};
+    var thread = query.get('thread');
     if (window.location.pathname === '/preferences' && thread && /^\d+$/.test(thread)) return {kind: 'preferences', thread: Number(thread)};
     return {};
   }
@@ -32,12 +36,21 @@
     return fallback;
   }
   async function request(route, body) {
-    var response = await fetch(root + route, {method: 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'}, body: JSON.stringify(body)});
-    var value = null; try { value = await response.json(); } catch (_) { /* No raw server responses. */ }
-    if (!response.ok) { var error = new Error(errorMessage(value, 'The current control is unavailable. Open its native page to check status.')); error.status = response.status; throw error; }
-    if (!value || typeof value !== 'object') throw new Error('The response was unreadable. Check native status before another attempt.');
-    return value;
+    var controller = new AbortController(); pendingRequests.add(controller);
+    var timeout = setTimeout(function () { controller.abort(); }, route === '/propose' ? 45000 : 30000);
+    try {
+      var response = await fetch(root + route, {method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+        headers: {'Content-Type': 'application/json', Accept: 'application/json'}, body: JSON.stringify(body)});
+      var value = null; try { value = await response.json(); } catch (_) { /* No raw server responses. */ }
+      if (!response.ok) { var error = new Error(errorMessage(value, 'The current control is unavailable. Open its native page to check status.')); error.status = response.status; throw error; }
+      if (!value || typeof value !== 'object') throw new Error('The response was unreadable. Check native status before another attempt.');
+      return value;
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(route === '/execute'
+        ? 'The wait ended before the result was confirmed. Check native status before another attempt.'
+        : 'This check timed out or was cancelled. Reopen the control to read current status.');
+      throw error;
+    } finally { clearTimeout(timeout); pendingRequests.delete(controller); }
   }
   function renderData(parent, value) {
     var remaining = 160;
@@ -171,7 +184,7 @@
   }
   window.LightworkProductOperations = {
     open: function () { generation += 1; refresh(); },
-    close: function () { generation += 1; catalog = null; selected = null; clear(formHost); clear(buttons); },
+    close: function () { generation += 1; cancelRequests(); catalog = null; selected = null; clear(formHost); clear(buttons); },
     isBusy: function () { return busy; },
     propose: async function (message) {
       if (busy || !catalog || !catalog.operations.some(function (item) { return item.available; })) return false;
@@ -186,8 +199,9 @@
       finally { lock(false); }
     }
   };
+  window.addEventListener('pagehide', function () { generation += 1; cancelRequests(); });
   document.addEventListener('lightwork:copilot-selection', function (event) {
-    generation += 1; overrideSelection = event.detail && event.detail.selection || null; catalog = null; selected = null; clear(formHost); clear(buttons);
+    generation += 1; cancelRequests(); overrideSelection = event.detail && event.detail.selection || null; catalog = null; selected = null; clear(formHost); clear(buttons);
     document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
     if (!panel.hidden) refresh();
   });
