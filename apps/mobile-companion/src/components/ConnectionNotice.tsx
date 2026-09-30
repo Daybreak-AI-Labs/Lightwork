@@ -1,3 +1,4 @@
+import {msg, messageLanguage, useLanguage} from "../language";
 /* A plain explanation of why the latest information is missing, with the
  * next step as a button. Messages come from src/api.ts and are written for
  * people; no addresses, status codes or code names reach this component. */
@@ -13,6 +14,7 @@ export function ConnectionNotice({ message, accessDenied = false, unsupported = 
   onRetry?: () => void;
   onOpenSettings?: () => void;
 }): React.JSX.Element {
+  useLanguage();
   const theme = useTheme(), styles = stylesFor(theme);
   const headline = unsupported ? "Update needed"
     : accessDenied ? "Access problem"
@@ -21,16 +23,16 @@ export function ConnectionNotice({ message, accessDenied = false, unsupported = 
     <View style={styles.notice} accessibilityRole="alert">
       <Text style={styles.headline}>{headline}</Text>
       <Text style={styles.body}>{message}</Text>
-      {accessDenied ? <Text style={styles.body}>Saved information is hidden until your access is fixed.</Text> : null}
+      {accessDenied ? <Text style={styles.body} accessibilityLanguage="en">Saved information is hidden until your access is fixed.</Text> : null}
       <View style={styles.actions}>
         {onRetry && !unsupported ? (
           <Pressable style={styles.primary} accessibilityRole="button" onPress={onRetry}>
-            <Text style={styles.primaryText}>Try again</Text>
+            <Text style={styles.primaryText} accessibilityLanguage={messageLanguage("Try again")}>{msg("Try again")}</Text>
           </Pressable>
         ) : null}
         {onOpenSettings ? (
           <Pressable style={styles.secondary} accessibilityRole="button" onPress={onOpenSettings}>
-            <Text style={styles.secondaryText}>Check settings</Text>
+            <Text style={styles.secondaryText} accessibilityLanguage={messageLanguage("Check settings")}>{msg("Check settings")}</Text>
           </Pressable>
         ) : null}
       </View>

@@ -1,4 +1,4 @@
-/* Read-only client for the Lightwork dashboard REST API.
+/* Bounded personal companion client for the Lightwork dashboard REST API.
  *
  * Task readers use GET endpoints in
  * packages/maverick-dashboard/maverick_dashboard/api.py:
@@ -12,11 +12,12 @@
  *       served once the integrator adds the maverick.offline_bundle endpoint;
  *       404 from older dashboards is handled by the caller)
  *
- * Task browsing remains read-only. Separately typed POSTs below perform only
- * the expiring device pairing and protected connection-renewal protocol.
+ * Task browsing remains read-only. Typed POSTs handle pairing/renewal and the
+ * explicitly enrolled own-task answer/Stop preview-confirmation service.
  */
 
 import { connectionValidationError } from "./connectionValidation";
+import { nativePlatform, nativeTransportReady, nativeRequest } from './nativeTransport';
 
 export type DeviceInfo = {id: string; generation: number; expires_at: number; enrollment_expires_at: number; principal: string; tenant: string | null; actions: boolean};
 export type Settings = { baseUrl: string; token: string; cacheScope?: string; needsSetup?: boolean; offlineEnabled?: boolean; pairedDevice?: DeviceInfo };
@@ -151,11 +152,11 @@ async function boundedResponseText(res: Response, signal: AbortSignal): Promise<
 async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, body?: object): Promise<T> {
   const error = connectionValidationError(cfg.baseUrl, cfg.token);
   if (error) throw new ApiError(error, undefined, "settings");
-  // Fail before the native bridge fetches/buffers a body when its Fetch API
-  // cannot enforce a streaming byte limit. This scaffold must use a supported
-  // streaming transport in its eventual packaged native build.
-  if (typeof ReadableStream !== "function" || typeof TextDecoder !== "function" ||
-      typeof Response !== "function" || !("body" in Response.prototype)) {
+  // Packaged phones use the native byte-cap/no-redirect bridge. Expo Go and
+  // browsers without a streaming reader fail before sending a credential.
+  if ((nativePlatform && !nativeTransportReady) || (!nativePlatform &&
+      (typeof ReadableStream !== "function" || typeof TextDecoder !== "function" ||
+       typeof Response !== "function" || !("body" in Response.prototype)))) {
     throw new ApiError(UNSUPPORTED_BUILD, undefined, "unsupported");
   }
   const base = cfg.baseUrl.trim().replace(/\/+$/, "");
@@ -177,7 +178,8 @@ async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, 
   try {
     return await Promise.race([cancelled, (async () => {
       if (signal?.aborted) throw new ApiError("Request cancelled.", undefined, "cancelled");
-      const res = await fetch(`${base}${path}`, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined, signal: controller.signal, redirect: "error" });
+      const res = await requestTransport(`${base}${path}`, body ? "POST" : "GET", headers,
+        body ? JSON.stringify(body) : undefined, controller.signal);
       if (!res.ok) {
         const pairing = path.startsWith('/api/v1/devices/');
         const message = pairing && res.status === 401 ? 'This device connection or pairing request expired or was removed. Start device pairing again.'
@@ -186,7 +188,8 @@ async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, 
           : pairing && res.status === 409 ? 'This device connection changed. Review pairing again.' : statusMessage(res.status);
         throw new ApiError(message, res.status, res.status === 401 || res.status === 403 ? "access" : "transient");
       }
-      const raw = await boundedResponseText(res, controller.signal);
+      const raw = await res.read();
+      if (controller.signal.aborted) throw new ApiError("Request cancelled.", undefined, "cancelled");
       try {
         return JSON.parse(raw) as T;
       } catch {
@@ -197,6 +200,16 @@ async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, 
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
   }
+}
+
+async function requestTransport(url: string, method: string, headers: Record<string, string>, body: string | undefined, signal: AbortSignal) {
+  if (nativePlatform) {
+    const response = await nativeRequest(url, method, headers, body, signal);
+    return {status: response.status, ok: response.status >= 200 && response.status < 300,
+      read: async () => response.body};
+  }
+  const response = await fetch(url, {method, headers, body, signal, redirect: 'error', credentials: 'omit'});
+  return {status: response.status, ok: response.ok, read: () => boundedResponseText(response, signal)};
 }
 
 function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Promise<T> {

@@ -1,3 +1,4 @@
+import {msg, messageLanguage, useLanguage, formattedTime} from "../language";
 /* Tasks list — GET /api/v1/goals (newest first), polled every 10s.
  * Falls back to the cached offline bundle when the dashboard is unreachable. */
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -16,6 +17,7 @@ export function RunsListScreen(props: {
   onOpenRun: (id: number, title?: string) => void;
   onOpenSettings?: () => void;
 }): React.JSX.Element {
+  useLanguage();
   const theme = useTheme(), styles = stylesFor(theme);
   const { settings, onOpenRun, onOpenSettings } = props;
   const [query, setQuery] = useState(''), [search, setSearch] = useState(''), [status, setStatus] = useState('');
@@ -61,21 +63,21 @@ export function RunsListScreen(props: {
       <EmptyState
         title={search || status ? "No matching tasks" : "No tasks yet"}
         body={search || status ? "Try another search or status. Matching tasks may be outside the saved offline copy." : "Tasks started from the Lightwork dashboard will appear here. This list refreshes on its own."}
-        actionLabel="Refresh now"
+        actionLabel={msg("Refresh now")}
         onAction={refresh}
       />
     );
   }
 
   const header = <>
-      <Text style={styles.heading} accessibilityRole="header">Tasks</Text>
-      <TextInput style={styles.search} accessibilityLabel="Search tasks" placeholder="Search all task titles and results" value={query} onChangeText={setQuery} onSubmitEditing={() => setSearch(query.trim())} />
+      <Text style={styles.heading} accessibilityRole="header" accessibilityLanguage={messageLanguage("Tasks")}>{msg("Tasks")}</Text>
+      <TextInput style={styles.search} accessibilityLabel={msg("Search tasks")} placeholder="Search all task titles and results" value={query} onChangeText={setQuery} onSubmitEditing={() => setSearch(query.trim())} />
       <View style={styles.filters}>
-        <Button label="Search" onPress={() => setSearch(query.trim())} />
-        <Button label="Clear search" kind="secondary" onPress={() => {setQuery(''); setSearch('');}} />
+        <Button label={msg("Search")} language={messageLanguage("Search")} onPress={() => setSearch(query.trim())} />
+        <Button label={msg("Clear search")} language={messageLanguage("Clear search")} kind="secondary" onPress={() => {setQuery(''); setSearch('');}} />
         {['', 'active', 'blocked', 'done'].map(value => <Button key={value} label={(status === value ? 'Selected: ' : '') + (value ? statusLabel(value) : 'All statuses')} kind="secondary" onPress={() => setStatus(value)} />)}
       </View>
-      {updatedAt ? <Text style={styles.sub}>Updated {new Date(updatedAt).toLocaleTimeString()}</Text> : null}
+      {updatedAt ? <Text style={styles.sub}>Updated {formattedTime(updatedAt)}</Text> : null}
       {search ? <Banner text="Search shows up to 200 matches. Refine your search to find a specific task." /> : null}
       {pageError ? <Banner text={pageError} /> : null}
       {offline && cached ? <Banner text={offlineBanner(cached)} /> : null}

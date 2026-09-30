@@ -1,10 +1,11 @@
+import {msg, messageLanguage, useLanguage, formattedTime} from "./src/language";
 /* Lightwork mobile companion — read-only oversight from a phone.
  *
  * Three tabs (Tasks, Overview, Settings) plus a task-detail drill-down, and
  * a first-run connection setup when nothing is saved yet. Plain
  * state-based navigation: no navigation library, so the dependency surface
  * stays react/react-native/expo only. All data comes from the dashboard's
- * existing read-only REST endpoints (see src/api.ts); the app never mutates.
+ * bounded REST readers and explicitly enrolled action service (see src/api.ts).
  */
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -27,6 +28,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export default function App(): React.JSX.Element {
+  useLanguage();
   const theme = useTheme(), styles = stylesFor(theme);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [corrupt, setCorrupt] = useState(false);
@@ -82,12 +84,12 @@ export default function App(): React.JSX.Element {
     body = settingsError ? (
       <View style={styles.center}>
         <Text style={styles.error} accessibilityRole="alert">{settingsError}</Text>
-        {corrupt ? <Pressable style={styles.retry} accessibilityRole="button" onPress={resetCorrupt}><Text style={styles.retryText}>Reset saved connection</Text></Pressable> : null}
+        {corrupt ? <Pressable style={styles.retry} accessibilityRole="button" onPress={resetCorrupt}><Text style={styles.retryText} accessibilityLanguage="en">Reset saved connection</Text></Pressable> : null}
         <Pressable style={styles.retry} accessibilityRole="button" onPress={reloadSettings}>
-          <Text style={styles.retryText}>Retry loading settings</Text>
+          <Text style={styles.retryText} accessibilityLanguage={messageLanguage("Retry loading settings")}>{msg("Retry loading settings")}</Text>
         </Pressable>
       </View>
-    ) : <Text style={styles.loading} accessibilityLiveRegion="polite">Loading…</Text>;
+    ) : <Text style={styles.loading} accessibilityLiveRegion="polite" accessibilityLanguage="en">Loading…</Text>;
   } else if (firstRun) {
     body = <SettingsScreen firstRun onSaved={reloadSettings} />;
   } else if (tab === "runs" && run !== null) {
@@ -113,7 +115,7 @@ export default function App(): React.JSX.Element {
       <StatusBar style="auto" />
       <View style={styles.fill}>{body}</View>
       {settings && !settings.needsSetup && tab !== 'settings' ? <Text style={styles.cacheStatus}>
-        {settings.offlineEnabled === false ? 'Offline saving is off' : cache.policyMessage || (cache.savedAt ? `Offline copy saved ${new Date(cache.savedAt).toLocaleTimeString()}` : 'Offline copy not ready')}
+        {settings.offlineEnabled === false ? 'Offline saving is off' : cache.policyMessage || (cache.savedAt ? `Offline copy saved ${formattedTime(cache.savedAt)}` : 'Offline copy not ready')}
       </Text> : null}
       {settings && !settingsError && !firstRun ? (
         <View style={styles.tabbar} accessibilityRole="tablist">
@@ -128,7 +130,7 @@ export default function App(): React.JSX.Element {
                 setRun(null);
               }}
             >
-              <Text style={[styles.tabText, tab === t.id && styles.tabActive]}>{t.label}</Text>
+              <Text style={[styles.tabText, tab === t.id && styles.tabActive]} accessibilityLanguage={messageLanguage(t.label)}>{msg(t.label)}</Text>
             </Pressable>
           ))}
         </View>

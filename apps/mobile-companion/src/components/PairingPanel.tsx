@@ -1,3 +1,4 @@
+import {msg, messageLanguage, useLanguage} from "../language";
 import React, {useEffect, useRef, useState} from 'react';
 import {AppState, Linking, Text, View} from 'react-native';
 import {beginPairing, pollPairing, type DeviceInfo, type PairingRequest} from '../api';
@@ -6,6 +7,7 @@ import {useTheme} from '../theme';
 import {Button} from './ui';
 
 export function PairingPanel(props: {address: string; label: string; disabled: boolean; onPaired: (token: string, device: DeviceInfo) => Promise<void>}): React.JSX.Element {
+  useLanguage();
   const theme = useTheme();
   const [pending, setPending] = useState<PairingRequest | null>(null), [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(''), [error, setError] = useState('');
@@ -45,9 +47,9 @@ export function PairingPanel(props: {address: string; label: string; disabled: b
     } else setMessage('Waiting for explicit approval on your signed-in dashboard.');
   });}
   return <View>
-    <Text accessibilityRole="header" style={{color: theme.text, fontSize: 18, marginTop: 16}}>Pair with your account</Text>
-    <Text style={{color: theme.muted}}>Approve a short-lived code in your signed-in dashboard. No access-token copying is needed. The connection is limited to your own work in the chosen workspace.</Text>
-    {!pending ? <Button label="Start device pairing" disabled={props.disabled || busy} onPress={start} /> : <>
+    <Text accessibilityRole="header" style={{color: theme.text, fontSize: 18, marginTop: 16}} accessibilityLanguage="en">Pair with your account</Text>
+    <Text style={{color: theme.muted}} accessibilityLanguage="en">Approve a short-lived code in your signed-in dashboard. No access-token copying is needed. The connection is limited to your own work in the chosen workspace.</Text>
+    {!pending ? <Button label={msg("Start device pairing")} language={messageLanguage("Start device pairing")} disabled={props.disabled || busy} onPress={start} /> : <>
       <Text selectable accessibilityLabel={'Pairing code ' + pending.code.split('').join(' ')} style={{color: theme.text, fontSize: 24}}>{pending.code}</Text>
       <Button label="Open pairing page" disabled={busy} onPress={() => {void Linking.openURL(props.address.replace(/\/+$/, '') + '/devices?code=' + encodeURIComponent(pending.code)).catch(() => setError('Open your dashboard on a computer, choose Your account, then Your paired devices, and enter this code.'));}} />
       <Button label="Check pairing approval" disabled={busy || props.disabled} onPress={check} />

@@ -1,3 +1,4 @@
+import {msg, messageLanguage, useLanguage} from "../language";
 import React, {useEffect, useRef, useState} from 'react';
 import {AppState, Text, TextInput, View} from 'react-native';
 import {deviceActionContext, prepareDeviceAction, executeDeviceAction, isAccessDenied,
@@ -6,6 +7,7 @@ import {Button} from './ui';
 import {useTheme} from '../theme';
 
 export function TaskActions(props: {settings: Settings; goalId: number; online: boolean; onApplied: () => void}): React.JSX.Element {
+  useLanguage();
   const theme = useTheme();
   const [context, setContext] = useState<DeviceActionContext | null>(null);
   const [question, setQuestion] = useState(''), [answer, setAnswer] = useState('');
@@ -62,30 +64,30 @@ export function TaskActions(props: {settings: Settings; goalId: number; online: 
   const disabled = busy || !props.online;
   const text = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value);
   return <View style={{padding: 16, gap: 8}}>
-    <Text accessibilityRole="header" style={{color: theme.text, fontSize: 18}}>Reviewed task actions</Text>
-    <Text style={{color: theme.muted}}>Answer one current question or request Stop. Other decisions and file evidence stay on the full dashboard. Offline copies cannot authorize an action; nothing is queued to send later.</Text>
-    {!props.online ? <Text accessibilityRole="alert" style={{color: theme.warnText}}>Actions are unavailable until the task refreshes online.</Text> : null}
-    <Button label="Load current task actions" disabled={disabled} kind="secondary" onPress={load} />
+    <Text accessibilityRole="header" style={{color: theme.text, fontSize: 18}} accessibilityLanguage={messageLanguage("Reviewed task actions")}>{msg("Reviewed task actions")}</Text>
+    <Text style={{color: theme.muted}} accessibilityLanguage="en">Answer one current question or request Stop. Other decisions and file evidence stay on the full dashboard. Offline copies cannot authorize an action; nothing is queued to send later.</Text>
+    {!props.online ? <Text accessibilityRole="alert" style={{color: theme.warnText}} accessibilityLanguage="en">Actions are unavailable until the task refreshes online.</Text> : null}
+    <Button label={msg("Load current task actions")} language={messageLanguage("Load current task actions")} disabled={disabled} kind="secondary" onPress={load} />
     {context && !review ? <>
       <Text style={{color: theme.text}}>{context.title}</Text>
       {context.answer.blocked ? <Text style={{color: theme.muted}}>{context.answer.blocked}</Text> : <>
         {context.answer.questions.map(row => <Button key={row.id} label={(question === String(row.id) ? 'Selected: ' : 'Answer: ') + row.question}
           kind="secondary" disabled={disabled} onPress={() => setQuestion(String(row.id))} />)}
-        {context.answer.partial ? <Text style={{color: theme.muted}}>Showing the first 20 questions. Open the full task for the rest.</Text> : null}
+        {context.answer.partial ? <Text style={{color: theme.muted}} accessibilityLanguage="en">Showing the first 20 questions. Open the full task for the rest.</Text> : null}
         <TextInput accessibilityLabel="Answer to the selected task question" multiline maxLength={12000} value={answer} editable={!disabled}
           onChangeText={setAnswer} style={{minHeight: 120, padding: 12, color: theme.text, borderColor: theme.border, borderWidth: 1}} />
-        <Button label="Review answer" disabled={disabled || !question || !answer.trim()} onPress={() => prepare('answer')} />
+        <Button label={msg("Review answer")} language={messageLanguage("Review answer")} disabled={disabled || !question || !answer.trim()} onPress={() => prepare('answer')} />
       </>}
       {context.stop.blocked ? <Text style={{color: theme.muted}}>{context.stop.blocked}</Text>
-        : <Button label="Review Stop request" kind="secondary" disabled={disabled} onPress={() => prepare('stop')} />}
+        : <Button label={msg("Review Stop request")} language={messageLanguage("Review Stop request")} kind="secondary" disabled={disabled} onPress={() => prepare('stop')} />}
     </> : null}
     {review ? <>
-      <Text accessibilityRole="header" style={{color: theme.text, fontSize: 18}}>Review before confirming</Text>
+      <Text accessibilityRole="header" style={{color: theme.text, fontSize: 18}} accessibilityLanguage={messageLanguage("Review before confirming")}>{msg("Review before confirming")}</Text>
       <Text selectable style={{color: theme.text}}>{review.summary}</Text>
       {review.changes.map((change, index) => <Text key={index} selectable style={{color: theme.text}}>{change.label || change.field}: {text(change.after)}</Text>)}
-      {uncertain ? <Text accessibilityRole="alert" style={{color: theme.warnText}}>A reply was not confirmed. Checking or retrying uses this same reviewed request and its receipt; accepted work is not repeated.</Text> : null}
+      {uncertain ? <Text accessibilityRole="alert" style={{color: theme.warnText}} accessibilityLanguage="en">A reply was not confirmed. Checking or retrying uses this same reviewed request and its receipt; accepted work is not repeated.</Text> : null}
       <Button label={uncertain ? 'Check or retry reviewed action' : review.action === 'answer' ? 'Confirm answer' : 'Confirm Stop request'} disabled={disabled} onPress={confirm} />
-      <Button label="Return to draft" kind="secondary" disabled={disabled} onPress={() => {setReview(null); setUncertain(false);}} />
+      <Button label={msg("Return to draft")} language={messageLanguage("Return to draft")} kind="secondary" disabled={disabled} onPress={() => {setReview(null); setUncertain(false);}} />
     </> : null}
     {message ? <Text accessibilityLiveRegion="polite" style={{color: theme.muted}}>{message}</Text> : null}
     {error ? <Text accessibilityRole="alert" style={{color: theme.danger}}>{error}</Text> : null}

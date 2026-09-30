@@ -2,7 +2,7 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { statusLabel, statusTone } from "../format";
+import { statusLabel, statusLanguage, statusTone } from "../format";
 import { useTheme, type Palette } from "../theme";
 
 export function Button(props: {
@@ -12,6 +12,7 @@ export function Button(props: {
   disabled?: boolean;
   busy?: boolean;
   hint?: string;
+  language?: string;
 }): React.JSX.Element {
   const theme = useTheme(), styles = stylesFor(theme);
   const primary = (props.kind ?? "primary") === "primary";
@@ -24,7 +25,7 @@ export function Button(props: {
       disabled={props.disabled}
       onPress={props.onPress}
     >
-      <Text style={primary ? styles.primaryText : styles.secondaryText}>{props.label}</Text>
+      <Text style={primary ? styles.primaryText : styles.secondaryText} accessibilityLanguage={props.language}>{props.label}</Text>
     </Pressable>
   );
 }
@@ -53,7 +54,7 @@ export function StatusPill(props: { status: string }): React.JSX.Element {
   const tone = ({"#1a7f37": theme.success, "#9a6700": theme.text, "#cf222e": theme.danger} as Record<string, string>)[baseTone] || theme.muted;
   return (
     <View style={[styles.pill, { borderColor: tone }]}>
-      <Text style={[styles.pillText, { color: tone }]}>{statusLabel(props.status)}</Text>
+      <Text style={[styles.pillText, { color: tone }]} accessibilityLanguage={statusLanguage(props.status)}>{statusLabel(props.status)}</Text>
     </View>
   );
 }

@@ -1,3 +1,4 @@
+import {msg, messageLanguage, useLanguage, formattedTime} from "../language";
 /* Task detail — status header + activity timeline.
  * GET /api/v1/goals/{id}/events?since=0&limit=200, polled every 5s.
  * Paired devices may explicitly review an answer or Stop under current policy. */
@@ -17,7 +18,7 @@ import { useTheme, type Palette } from "../theme";
 const continueReplay = (data: GoalEventsResponse) => !data.terminal;
 
 function clock(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return formattedTime(ts * 1000);
 }
 
 export function RunDetailScreen(props: {
@@ -27,6 +28,7 @@ export function RunDetailScreen(props: {
   onBack: () => void;
   onOpenSettings?: () => void;
 }): React.JSX.Element {
+  useLanguage();
   const theme = useTheme(), styles = stylesFor(theme);
   const { settings, runId, title, onBack, onOpenSettings } = props;
   const replay = useMemo(() => runReplay(settings, runId), [settings, runId]);
@@ -50,7 +52,7 @@ export function RunDetailScreen(props: {
   const header = <>
       <View style={styles.header}>
         <Pressable style={{minHeight: 48, justifyContent: "center"}} onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back to tasks">
-          <Text style={styles.back}>‹ Tasks</Text>
+          <Text style={styles.back} accessibilityLanguage="en">‹ Tasks</Text>
         </Pressable>
       </View>
       <View style={styles.titleBlock}>
@@ -59,7 +61,7 @@ export function RunDetailScreen(props: {
       </View>
       {display?.result ? (
         <View style={styles.result}>
-          <Text style={styles.resultLabel}>Outcome</Text>
+          <Text style={styles.resultLabel} accessibilityLanguage={messageLanguage("Outcome")}>{msg("Outcome")}</Text>
           <Text selectable style={styles.resultText}>{display.result}</Text>
         </View>
       ) : null}
@@ -69,10 +71,10 @@ export function RunDetailScreen(props: {
         <ConnectionNotice message={error} accessDenied={accessDenied} unsupported={unsupported}
           onRetry={refresh} onOpenSettings={accessDenied ? onOpenSettings : undefined} />
       ) : null}
-      <Text style={styles.section} accessibilityRole="header">Activity</Text>
+      <Text style={styles.section} accessibilityRole="header" accessibilityLanguage={messageLanguage("Activity")}>{msg("Activity")}</Text>
       {cached && !data ? <Banner text={offlineBanner(cached)} /> : null}
       {linkError ? <Banner text={linkError} /> : null}
-      <Button label="Open full task on dashboard" kind="secondary" onPress={openDashboard} />
+      <Button label={msg("Open full task on dashboard")} language={messageLanguage("Open full task on dashboard")} kind="secondary" onPress={openDashboard} />
       {settings.pairedDevice?.actions && !accessDenied ? <TaskActions key={settings.pairedDevice.id + ':' + settings.pairedDevice.generation + ':' + runId}
         settings={settings} goalId={runId} online={Boolean(data && !error && !unsupported)} onApplied={refresh} /> : null}
     </>;

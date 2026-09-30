@@ -1,3 +1,4 @@
+import {msg, messageLanguage, useLanguage, formattedNumber, formattedDateTime} from "../language";
 /* Overview (was "Glance") — the at-a-glance summary, polled every 15s.
  *
  * Online path composes two real read-only endpoints:
@@ -30,6 +31,7 @@ import { useTheme, type Palette } from "../theme";
 type GlanceData = { active: ActiveGoal[]; spend: SpendTotal | null };
 
 export function GlanceScreen(props: { settings: Settings; liveBundle?: OfflineBundle | null; onOpenRun?: (id: number, title?: string) => void; onOpenSettings?: () => void }): React.JSX.Element {
+  useLanguage();
   const theme = useTheme(), styles = stylesFor(theme);
   const { settings, onOpenSettings } = props;
 
@@ -48,36 +50,36 @@ export function GlanceScreen(props: { settings: Settings; liveBundle?: OfflineBu
     const g = cached.bundle.glance;
     return (
       <ScrollView style={styles.fill}>
-        <Text style={styles.heading} accessibilityRole="header">Overview</Text>
+        <Text style={styles.heading} accessibilityRole="header" accessibilityLanguage={messageLanguage("Overview")}>{msg("Overview")}</Text>
         <Banner text={offlineBanner(cached)} />
         <View style={styles.stats}>
-          <Stat label="Tasks in progress" value={String(g.counts.active)} />
-          <Stat label="Waiting for approval" value={String(g.counts.pending_approvals)} />
-          <Stat label="Questions for you" value={String(g.counts.open_questions)} />
+          <Stat label="Tasks in progress" value={formattedNumber(g.counts.active)} />
+          <Stat label="Waiting for approval" value={formattedNumber(g.counts.pending_approvals)} />
+          <Stat label="Questions for you" value={formattedNumber(g.counts.open_questions)} />
           <Stat label="Total spend" value={money(g.spend.dollars)} />
         </View>
-        <Text style={styles.section} accessibilityRole="header">In progress (saved)</Text>
-        {g.active.length === 0 ? <Text style={styles.row}>Nothing was running.</Text> : null}
+        <Text style={styles.section} accessibilityRole="header" accessibilityLanguage="en">In progress (saved)</Text>
+        {g.active.length === 0 ? <Text style={styles.row} accessibilityLanguage="en">Nothing was running.</Text> : null}
         {g.active.map((a: Glance["active"][number]) => (
           <Pressable key={a.id} style={styles.row} accessibilityRole="button" onPress={() => props.onOpenRun?.(a.id, a.title)}><Text>{taskTitle(a.title)}</Text></Pressable>
         ))}
-        <Text style={styles.note}>Approvals and questions are answered on the dashboard.</Text>
+        <Text style={styles.note} accessibilityLanguage="en">Approvals and questions are answered on the dashboard.</Text>
       </ScrollView>
     );
   }
 
   return (
     <ScrollView style={styles.fill}>
-      <Text style={styles.heading} accessibilityRole="header">Overview</Text>
+      <Text style={styles.heading} accessibilityRole="header" accessibilityLanguage={messageLanguage("Overview")}>{msg("Overview")}</Text>
       {error ? (
         <ConnectionNotice message={error} accessDenied={accessDenied} unsupported={unsupported}
           onRetry={refresh} onOpenSettings={accessDenied ? onOpenSettings : undefined} />
       ) : null}
       {error && data ? <Banner text="These numbers may be out of date." /> : null}
       <View style={styles.stats}>
-        <Stat label="Tasks in progress" value={data ? String(data.active.length) : "…"} />
-        <Stat label="Waiting for approval" value={props.liveBundle ? String(props.liveBundle.glance.counts.pending_approvals) : "Unavailable"} />
-        <Stat label="Questions for you" value={props.liveBundle ? String(props.liveBundle.glance.counts.open_questions) : "Unavailable"} />
+        <Stat label="Tasks in progress" value={data ? formattedNumber(data.active.length) : "…"} />
+        <Stat label="Waiting for approval" value={props.liveBundle ? formattedNumber(props.liveBundle.glance.counts.pending_approvals) : "Unavailable"} />
+        <Stat label="Questions for you" value={props.liveBundle ? formattedNumber(props.liveBundle.glance.counts.open_questions) : "Unavailable"} />
         <Stat
           label="Total spend"
           value={data?.spend ? money(data.spend.dollars) : "…"}
@@ -85,13 +87,13 @@ export function GlanceScreen(props: { settings: Settings; liveBundle?: OfflineBu
         />
       </View>
       <Button label="Review approvals and questions on dashboard" kind="secondary" onPress={() => { void Linking.openURL(settings.baseUrl.replace(/\/+$/, '') + '/action-center'); }} />
-      {props.liveBundle ? <Text style={styles.note}>Attention counts as of {new Date(props.liveBundle.as_of * 1000).toLocaleString()}. Approvals and questions are answered on the dashboard.</Text> : null}
-      <Text style={styles.section} accessibilityRole="header">In progress now</Text>
+      {props.liveBundle ? <Text style={styles.note}>Attention counts as of {formattedDateTime(props.liveBundle.as_of * 1000)}. Approvals and questions are answered on the dashboard.</Text> : null}
+      <Text style={styles.section} accessibilityRole="header" accessibilityLanguage="en">In progress now</Text>
       {data && data.active.length === 0 ? (
         <EmptyState
           title="Nothing is running"
           body="When a task starts on the dashboard, you'll see it here with its latest step."
-          actionLabel="Refresh now"
+          actionLabel={msg("Refresh now")}
           onAction={refresh}
         />
       ) : null}

@@ -5,11 +5,15 @@ remain unqualified.**
 
 Settings offers **Follow device**, **Light**, and **Dark** appearance, saved on
 this device across connection profiles. Text respects device accessibility size.
-The interface is currently English; task and result text stays verbatim. A failed
-appearance save leaves the previous choice active and offers a visible retry.
+Language and regional formats are a separate device preference. Available
+control translations are a partial preview in French, German, Japanese and
+Chinese; English fallback is identified to assistive technology. Arabic remains
+community-only and uses English product fallback. Dates/numbers/USD costs follow
+the selected format. Task/result text and document output language are unchanged.
+Failed display-preference writes retain the previous saved choice.
 
 Watch your Lightwork swarm from a phone: runs list, run detail with a live
-event timeline, and an at-a-glance fleet summary — with an offline cache so
+event timeline, and an at-a-glance fleet summary â€” with an offline cache so
 losing the network shows "as of 12 min ago" instead of a blank screen.
 
 **Task browsing is read-only by default.** A device explicitly enrolled for actions,
@@ -32,7 +36,7 @@ From `packages/maverick-dashboard/maverick_dashboard/api.py`:
 | Offline     | `GET /api/v1/offline/bundle` with `X-Lightwork-Offline-Policy: 1` (optional; older dashboards still support online views, but snapshots without current retention policy are not saved) |
 | Reviewed actions | `GET /api/v1/devices/actions/context`, `POST /api/v1/devices/actions/prepare`, `POST /api/v1/devices/actions/execute`; exact own-task answer/Stop allowlist only |
 
-Organization controls in **All settings → Data retention** can disable mobile
+Organization controls in **All settings â†’ Data retention** can disable mobile
 offline copies or narrow their retention/size. Workspace policy cannot exceed
 the installation ceiling; people can opt out but cannot relax it. The installer
 offers the same offline-copy enablement choice. No copy exceeds 24 hours or
@@ -48,27 +52,33 @@ device cannot learn a new server policy until it reconnects, so the last accepte
 expiry remains the offline bound. Native timing/storage qualification is still
 pending on native hosts; the local mocked regression suite has been run.
 
-Updates are plain polling (5–15s per screen) — dependency-light and
+Updates are plain polling (5â€“15s per screen) â€” dependency-light and
 battery-predictable; no SSE/websocket client to maintain.
 
-## Running with Expo Go
+## Building a local preview
 
-This is a scaffold: `node_modules/` is not committed and no build artifacts
-ship in the repo.
+The tracked npm lock and local native module generate both phone projects:
 
 ```bash
 cd apps/mobile-companion
-npm install            # or yarn / pnpm
-npx expo start         # scan the QR code with the Expo Go app
+npm ci --ignore-scripts
+npm run build:android:local  # JDK 17 + Android SDK; produces a debug APK
+npm run build:ios:local      # macOS + Xcode + CocoaPods; unsigned simulator app
 ```
+
+Expo Go does not contain the Lightwork transport module. The app fails closed
+before sending a credential there. Use the locally built preview; its native
+bridge caps response bytes before crossing into JavaScript and refuses redirects.
+These commands do not upload or provision signing. See the
+[native release and support matrix](../../docs/native-companion-release.md).
 
 Requirements:
 
 - **Network**: the phone must reach the dashboard (`maverick dashboard`,
-  default port 8765) — same Wi-Fi, VPN, or a tunnel. Set the base URL in the
+  default port 8765) â€” same Wi-Fi, VPN, or a tunnel. Set the base URL in the
   Settings tab (e.g. `https://lightwork.example.com`).
 - **Pairing**: choose **Start device pairing** in Settings, approve the displayed
-  code from **Your account → Your paired devices** on the signed-in dashboard,
+  code from **Your account â†’ Your paired devices** on the signed-in dashboard,
   then return and check approval. The administrator must enable device pairing.
   Named members receive an own-work credential for one workspace. Renew before
   its displayed expiry or pair again. Removing the device denies its next request.
@@ -81,7 +91,7 @@ Requirements:
   Settings preserves the entered values and explains how to correct them.
 - **Offline cache**: the last good `/api/v1/offline/bundle` payload is kept
   in `AsyncStorage` (`@react-native-async-storage/async-storage`) and
-  rendered with an "as of N min ago — offline" banner when fetches fail.
+  rendered with an "as of N min ago â€” offline" banner when fetches fail.
   Each saved connection has an opaque cache scope stored with its URL and
   token in one keychain record. Saving settings starts a new cache scope,
   including when switching tokens on the same dashboard. Reconnect and open
@@ -92,9 +102,10 @@ Requirements:
 
 ## Building store binaries
 
-Producing installable iOS/Android binaries requires Expo's build tooling
-(`eas build`) and platform credentials. That is not run in this repository —
-the repo ships source only.
+Release signing and publication require the release owner's existing platform
+configuration and explicit authorization. The checked-in project provides local
+build inputs; no signed customer download is claimed. Follow the installed-host
+checks in the native release matrix before changing a preview's support status.
 
 ## Type checking
 

@@ -12,6 +12,7 @@ const native = Object.fromEntries(
     .map(name => [name, name]),
 );
 native.useColorScheme = () => 'light';
+native.Platform = {OS: 'web'};
 const lifecycleListeners = new Set();
 native.AppState = {
   currentState: 'active',
@@ -47,9 +48,12 @@ function source(relative, mocks = {}) {
     }
     if (name === 'react') return React;
     if (name === 'react-native') return native;
+    if (name === 'expo-modules-core') return {requireOptionalNativeModule: () => null};
     if (name === '@react-native-async-storage/async-storage') return {getItem: async () => null, setItem: async () => {}};
     if (name === 'expo-status-bar') return { StatusBar: 'StatusBar' };
     if (name.endsWith('/connectionValidation')) return source('src/connectionValidation.ts', mocks);
+    if (name.endsWith('/nativeTransport')) return source('src/nativeTransport.ts', mocks);
+    if (name.endsWith('/language')) return source('src/language.ts', mocks);
     if (name.endsWith('/api')) return source('src/api.ts', mocks);
     if (name.endsWith('/runReplay')) return source('src/runReplay.ts', mocks);
     if (name.endsWith('/poll')) return source('src/poll.ts', mocks);

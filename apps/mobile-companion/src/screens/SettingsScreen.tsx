@@ -9,6 +9,7 @@ import { PairingPanel } from "../components/PairingPanel";
 import { activateProfile, listProfiles, loadSettings, removeProfile, resetSettings, saveProfile, saveSettings, type ConnectionProfile } from "../settings";
 import { connectionValidationError } from "../connectionValidation";
 import { useTheme, useAppearance, saveAppearance, type AppearanceChoice, type Palette } from "../theme";
+import {LANGUAGE_CHOICES, saveLanguage, useLanguage, msg, messageLanguage, formattedDateTime, type LanguageChoice} from '../language';
 
 // People often type "lightwork.example.com"; assume the secure scheme.
 export function withScheme(address: string): string {
@@ -22,6 +23,8 @@ export function SettingsScreen(props: {
 }): React.JSX.Element {
   const theme = useTheme(), styles = stylesFor(theme);
   const appearance = useAppearance();
+  const language = useLanguage();
+  const [languageBusy, setLanguageBusy] = useState(false), [languageNote, setLanguageNote] = useState('');
   const [appearanceBusy, setAppearanceBusy] = useState(false), [appearanceNote, setAppearanceNote] = useState('');
   const { firstRun = false } = props;
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]), [profileId, setProfileId] = useState<string | undefined>();
@@ -193,9 +196,17 @@ export function SettingsScreen(props: {
     }
   }
 
+  async function chooseLanguage(value: LanguageChoice): Promise<void> {
+    if (languageBusy) return;
+    setLanguageBusy(true); setLanguageNote('');
+    try {await saveLanguage(value); if (mounted.current) setLanguageNote('Language and regional formats saved on this device.');}
+    catch {if (mounted.current) setLanguageNote('Language could not be saved. Your previous choice is still active. Try again.');}
+    finally {if (mounted.current) setLanguageBusy(false);}
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.fill} keyboardShouldPersistTaps="handled">
-      <Text style={styles.heading} accessibilityRole="header">{firstRun ? "Connect to Lightwork" : "Settings"}</Text>
+      <Text style={styles.heading} accessibilityRole="header">{firstRun ? msg("Connect to Lightwork") : msg("Settings")}</Text>
       <Text style={styles.help}>
         {firstRun
           ? "Enter your dashboard address, then pair with your signed-in account."
@@ -203,31 +214,43 @@ export function SettingsScreen(props: {
       </Text>
       {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
       {loadFailed ? (
-        <Button label="Retry loading settings" onPress={() => setLoadAttempt(loadAttempt + 1)} />
+        <Button label={msg("Retry loading settings")} language={messageLanguage("Retry loading settings")} onPress={() => setLoadAttempt(loadAttempt + 1)} />
       ) : null}
-      <Text style={styles.label} accessibilityRole="header">Appearance on this device</Text>
+      <Text style={styles.label} accessibilityRole="header" accessibilityLanguage={messageLanguage("Appearance on this device")}>{msg("Appearance on this device")}</Text>
       <View accessibilityRole="radiogroup">
         {(['system', 'light', 'dark'] as AppearanceChoice[]).map(value => (
           <Pressable key={value} accessibilityRole="radio" accessibilityState={{checked: appearance.value === value, disabled: appearanceBusy}}
             disabled={appearanceBusy} style={styles.show} onPress={() => void chooseAppearance(value)}>
-            <Text style={styles.showText}>{appearance.value === value ? 'Selected: ' : ''}{value === 'system' ? 'Follow device' : value === 'light' ? 'Light' : 'Dark'}</Text>
+            <Text style={styles.showText}>{appearance.value === value ? 'Selected: ' : ''}{value === 'system' ? msg('Follow device') : value === 'light' ? msg('Light') : msg('Dark')}</Text>
           </Pressable>
         ))}
       </View>
-      <Text style={styles.fieldHelp}>This device preference applies to every saved connection. Text follows device accessibility size. Interface language is currently English; your task content is kept as written.</Text>
+      <Text style={styles.fieldHelp} accessibilityLanguage="en">Device display preferences apply to every saved connection. Text follows device accessibility size. Task content stays as written.</Text>
       {appearance.error ? <Text style={styles.error} accessibilityRole="alert">{appearance.error}</Text> : null}
       {appearanceNote ? <Text style={styles.help} accessibilityLiveRegion="polite">{appearanceNote}</Text> : null}
-      {profiles.length ? <Text style={styles.label}>Saved connections</Text> : null}
+      <Text style={styles.label} accessibilityRole="header" accessibilityLanguage={messageLanguage('Language and regional formats')}>{msg('Language and regional formats')}</Text>
+      <View accessibilityRole="radiogroup">
+        {LANGUAGE_CHOICES.map(choice => <Pressable key={choice.value} accessibilityRole="radio"
+          accessibilityState={{checked: language.value === choice.value, disabled: languageBusy}}
+          disabled={languageBusy} style={styles.show} onPress={() => void chooseLanguage(choice.value)}>
+          <Text style={styles.showText} accessibilityLanguage={choice.value === 'system' ? messageLanguage('Follow device') : choice.value}>
+            {choice.value === 'system' ? msg(choice.label) : choice.label}
+          </Text>
+        </Pressable>)}
+      </View>
+      <Text style={styles.fieldHelp} accessibilityLanguage="en">Translations are a partial preview. Some controls are translated; other guidance and action consequences are still in English. Arabic awaits community translation. Numbers, dates and USD costs follow your selected regional format. This does not change document output language or workspace policy.</Text>
+      {language.error || languageNote ? <Text style={styles.help} accessibilityLanguage="en" accessibilityLiveRegion="polite">{language.error || languageNote}</Text> : null}
+      {profiles.length ? <Text style={styles.label} accessibilityLanguage={messageLanguage("Saved connections")}>{msg("Saved connections")}</Text> : null}
       {profiles.map(profile => <Button key={profile.id} label={(profileId === profile.id ? 'Current: ' : 'Switch to ') + profile.name} kind="secondary" disabled={disabled || testing || profileId === profile.id} onPress={() => switchProfile(profile.id)} />)}
-      {profileId ? <Button label="Remove this saved connection" kind="secondary" disabled={disabled || testing} onPress={removeSelected} /> : null}
-      <Button label="Add another connection" kind="secondary" disabled={disabled || testing} onPress={() => edited(() => {setProfileId(undefined); setProfileName(''); setBaseUrl(''); setToken(''); setPairedDevice(undefined);})} />
-      <Text style={styles.label}>Connection name (optional for a single connection)</Text>
-      <TextInput style={styles.input} accessibilityLabel="Connection name" maxLength={80} editable={!disabled} value={profileName} onChangeText={setProfileName} />
-      <Text style={styles.fieldHelp}>Choose a name to keep this connection securely alongside your other deployments.</Text>
-      <Text style={styles.label} nativeID="address-label">Dashboard address</Text>
+      {profileId ? <Button label={msg("Remove this saved connection")} language={messageLanguage("Remove this saved connection")} kind="secondary" disabled={disabled || testing} onPress={removeSelected} /> : null}
+      <Button label={msg("Add another connection")} language={messageLanguage("Add another connection")} kind="secondary" disabled={disabled || testing} onPress={() => edited(() => {setProfileId(undefined); setProfileName(''); setBaseUrl(''); setToken(''); setPairedDevice(undefined);})} />
+      <Text style={styles.label} accessibilityLanguage="en">Connection name (optional for a single connection)</Text>
+      <TextInput style={styles.input} accessibilityLabel={msg("Connection name")} maxLength={80} editable={!disabled} value={profileName} onChangeText={setProfileName} />
+      <Text style={styles.fieldHelp} accessibilityLanguage="en">Choose a name to keep this connection securely alongside your other deployments.</Text>
+      <Text style={styles.label} nativeID="address-label" accessibilityLanguage={messageLanguage("Dashboard address")}>{msg("Dashboard address")}</Text>
       <TextInput
         style={styles.input}
-        accessibilityLabel="Dashboard address"
+        accessibilityLabel={msg("Dashboard address")}
         accessibilityHint="The web address you use to open Lightwork on a computer"
         editable={!disabled}
         value={baseUrl}
@@ -237,13 +260,13 @@ export function SettingsScreen(props: {
         keyboardType="url"
         placeholder="https://lightwork.yourcompany.com"
       />
-      <Text style={styles.fieldHelp}>The web address you use to open Lightwork on a computer.</Text>
+      <Text style={styles.fieldHelp} accessibilityLanguage="en">The web address you use to open Lightwork on a computer.</Text>
       <PairingPanel address={withScheme(baseUrl)} label={profileName} disabled={disabled || testing} onPaired={paired} />
       {pairedDevice ? <>
-        <Text style={styles.fieldHelp}>Paired to {pairedDevice.principal} in {pairedDevice.tenant || 'the default workspace'}. Credential expires {new Date(pairedDevice.expires_at * 1000).toLocaleString()}.</Text>
-        <Button label="Renew paired connection" disabled={disabled || testing} onPress={() => void renew()} />
+        <Text style={styles.fieldHelp}>Paired to {pairedDevice.principal} in {pairedDevice.tenant || 'the default workspace'}. Credential expires {formattedDateTime(pairedDevice.expires_at * 1000)}.</Text>
+        <Button label={msg("Renew paired connection")} language={messageLanguage("Renew paired connection")} disabled={disabled || testing} onPress={() => void renew()} />
       </> : null}
-      <Text style={styles.label}>Advanced administrative token connection</Text>
+      <Text style={styles.label} accessibilityLanguage="en">Advanced administrative token connection</Text>
       <View style={styles.tokenRow}>
         <TextInput
           style={[styles.input, styles.tokenInput]}
@@ -263,10 +286,10 @@ export function SettingsScreen(props: {
           <Text style={styles.showText}>{showToken ? "Hide" : "Show"}</Text>
         </Pressable>
       </View>
-      <Text style={styles.fieldHelp}>A private code from your administrator. Leave it empty only if your administrator says sign-in is not needed.</Text>
-      <Text style={styles.label}>Save offline task data on this device</Text>
+      <Text style={styles.fieldHelp} accessibilityLanguage="en">A private code from your administrator. Leave it empty only if your administrator says sign-in is not needed.</Text>
+      <Text style={styles.label} accessibilityLanguage="en">Save offline task data on this device</Text>
       <Switch accessibilityLabel="Save offline task data for up to 24 hours" value={offlineEnabled} disabled={disabled} onValueChange={setOfflineEnabled} />
-      <Text style={styles.fieldHelp}>Saved task content can be sensitive. Your organization can disable offline saving or set a shorter limit. Copies never exceed 2 MB or 24 hours; turn this off and save to remove the previous cache.</Text>
+      <Text style={styles.fieldHelp} accessibilityLanguage="en">Saved task content can be sensitive. Your organization can disable offline saving or set a shorter limit. Copies never exceed 2 MB or 24 hours; turn this off and save to remove the previous cache.</Text>
       {!firstRun ? <Button label="Disconnect and remove saved data" kind="secondary" disabled={disabled || testing} onPress={disconnect} /> : null}
       <Button label={saving ? "Saving…" : loading ? "Loading…" : firstRun ? "Save and connect" : "Save"}
         disabled={disabled || testing} busy={saving} onPress={save} />
@@ -274,12 +297,13 @@ export function SettingsScreen(props: {
         disabled={disabled || testing} busy={testing} onPress={testConnection}
         hint="Checks the address and token without saving them" />
       {note ? <Text style={styles.note} accessibilityLiveRegion="polite">{note}</Text> : null}
-      <Text style={styles.sectionHelp}>Good to know</Text>
-      <Text style={styles.help}>
-        This app only shows information. To start, stop or approve work, use the
-        dashboard on a computer. If you are away from the office, connect to your
-        organization's network or VPN first. Your access token is kept in your
-        device's secure storage.
+      <Text style={styles.sectionHelp} accessibilityLanguage="en">Good to know</Text>
+      <Text style={styles.help} accessibilityLanguage="en">
+        This app reads your work by default. If your administrator allows actions
+        and you explicitly approve them when pairing, you can review an answer or
+        Stop request on your own task. Approvals and other decisions open the full
+        dashboard. Offline copies cannot send actions. If your organization
+        requires a VPN, connect first. Credentials stay in device secure storage.
       </Text>
     </ScrollView>
   );
