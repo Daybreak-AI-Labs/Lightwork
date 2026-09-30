@@ -445,7 +445,7 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     type=click.Choice([
         "status", "repair-capability", "authorize-repair", "inspect", "prepare",
         "execute", "resume", "logs",
-        "save-native-review", "inspect-handoff",
+        "save-native-review", "inspect-handoff", "offline-review", "offline-authorize", "recovery-plan",
     ]),
 )
 def installation_maintenance_cmd(step: str) -> None:
@@ -466,6 +466,15 @@ def installation_maintenance_cmd(step: str) -> None:
         elif step == "inspect-handoff":
             from ..installation_handoff import inspect_handoff
             result = inspect_handoff()
+        elif step == "offline-review":
+            from ..installation_offline import review
+            result = review(request.get("folder"), public_key=request.get("public_key", ""))
+        elif step == "offline-authorize":
+            from ..installation_offline import authorize
+            result = authorize(request.get("review"), confirm=request.get("confirm") is True)
+        elif step == "recovery-plan":
+            from ..installation_planner import plan
+            result = plan(request.get("id"), offset=request.get("offset", 0))
         elif step == "repair-capability":
             result = recovery.repair_capability(
                 expected_runtime_sha256=request.get("runtime_sha256"),

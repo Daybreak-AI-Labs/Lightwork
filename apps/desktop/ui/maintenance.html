@@ -106,6 +106,22 @@
     <p id="maintenance-recovery-result" role="status" aria-live="polite"></p>
   </section>
 
+  <section aria-labelledby="offline-title">
+    <h2 id="offline-title">Repair without a network connection</h2>
+    <p class="muted">Use an administrator-provided folder containing <strong>new.msi</strong> and <strong>downloads.json</strong> for this exact release. Lightwork checks its pinned update signature, Windows publisher, product, package and installed version before offering repair. A working bundled recovery copy can repair a missing primary application.</p>
+    <label for="offline-folder">Offline package folder</label><input id="offline-folder" type="text" autocomplete="off" spellcheck="false" style="width:100%">
+    <div class="actions"><button id="offline-review" type="button">Verify offline package</button><button id="offline-install" type="button" disabled>Repair this exact version and restart</button></div>
+    <p id="offline-details" role="status" aria-live="polite"></p>
+  </section>
+  <section aria-labelledby="planner-title">
+    <h2 id="planner-title">Choose a supported recovery</h2>
+    <label for="planner-point">Saved installation point</label><select id="planner-point"><option value="">Choose a point</option></select>
+    <div class="actions"><button id="planner-load" type="button">Review current blockers</button><button id="planner-next" type="button" disabled>More affected files</button><button id="planner-save" type="button" disabled>Save coordination plan</button></div>
+    <pre id="planner-details" role="status" aria-live="polite"></pre>
+    <div class="actions"><button id="planner-repair" type="button">Review current-version repair</button><button id="planner-workspace" type="button">Open workspace recovery confirmation</button></div>
+    <p class="muted">New spending, reservations, database or action history cannot be erased to enable rollback. Workspace recovery offers export and restore drills for the selected workspace. External services need their owners' coordinated recovery.</p>
+  </section>
+
   <section aria-labelledby="recovery-title">
     <h2 id="recovery-title">If an update fails</h2>
     <p class="muted">If an update stops partway, Windows puts the previous version back automatically. <strong>Repair installation</strong> reinstalls your current version. Neither of these changes or restores your work.</p>

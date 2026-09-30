@@ -501,6 +501,7 @@ def repair_capability(
         ),
         "product_code": registered["product_code"],
         "package_code": registered["package_code"],
+        "publisher_thumbprint": anchor["publisher_thumbprint"],
         "retained_installer_available": anchor["retained_installer_available"],
     }
 

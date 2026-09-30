@@ -8,6 +8,7 @@
   var repairReview = false;
   var identityTransition = null;
   var handoff = null;
+  var offlineReview = null, recoveryPlan = null;
   function protectedApproval(operation) { return handoff && handoff.operation === operation && handoff.expires_at * 1000 > Date.now(); }
   var AUTHORIZATION = /^[0-9a-f]{32}:[0-9a-f]{64}$/;
   var FAILED = "Lightwork could not complete that step.";
@@ -46,6 +47,13 @@
     get("resume-maintenance").disabled = busy || !get("maintenance-incomplete").value;
     get("maintenance-logs").disabled = busy || !get("maintenance-log-point").value;
     get("back").disabled = busy;
+    get("offline-review").disabled = busy || !get("offline-folder").value.trim();
+    get("offline-install").disabled = busy || !offlineReview || offlineReview.expires_at * 1000 <= Date.now();
+    get("planner-load").disabled = busy || !get("planner-point").value;
+    get("planner-next").disabled = busy || !recoveryPlan || !recoveryPlan.has_more;
+    get("planner-save").disabled = busy || !recoveryPlan;
+    get("planner-repair").disabled = busy || !configured;
+    get("planner-workspace").disabled = busy;
     get("save-identity-transition").disabled = busy || !identityTransition;
     if (get("load-handoff")) get("load-handoff").disabled = busy;
     if (get("paste-authorization")) get("paste-authorization").disabled = busy;
@@ -207,6 +215,45 @@
   }
   get("rollback-install").addEventListener("click", function () { return recover(false); });
   get("resume-maintenance").addEventListener("click", function () { return recover(true); });
+  get("offline-folder").addEventListener("input", function () { offlineReview = null; get("offline-details").textContent = "Package selection changed. Verify it again."; controls(); });
+  get("offline-review").addEventListener("click", async function () {
+    if (busy) return;
+    var selected = get("offline-folder").value.trim();
+    offlineReview = null; busy = true; controls();
+    try {
+      var result = await invoke("review_offline_repair", { folder: selected });
+      if (selected !== get("offline-folder").value.trim() || !result || result.verified !== true || !/^[a-f0-9]{32}$/.test(result.review || "")) throw new Error("The offline selection changed or could not be verified.");
+      offlineReview = result;
+      get("offline-details").textContent = "Verified exact version " + result.version + ", " + result.size_bytes + " bytes. Publisher: " + result.publisher_thumbprint + ". Installer SHA-256: " + result.installer_sha256 + ". Review expires " + new Date(result.expires_at * 1000).toLocaleString() + ". Nothing has been installed.";
+    } catch (error) { failure(error); }
+    finally { busy = false; controls(); }
+  });
+  get("offline-install").addEventListener("click", async function () {
+    if (busy || get("offline-install").disabled) return;
+    var selected = offlineReview; offlineReview = null; busy = true; controls();
+    try { await invoke("install_offline_repair", { review: selected.review, confirm: true }); }
+    catch (error) { failure(error); }
+    finally { busy = false; controls(); }
+  });
+  async function loadPlan(offset) {
+    if (busy || !get("planner-point").value) return;
+    busy = true; controls();
+    try {
+      var selected = get("planner-point").value;
+      var result = await invoke("desktop_recovery_plan", { id: selected, offset: offset });
+      if (selected !== get("planner-point").value || result.id !== selected) throw new Error("The selected recovery point changed. Review it again.");
+      recoveryPlan = result;
+      get("planner-details").textContent = (result.blockers.length ? result.blockers.map(function (row) { return row.code + ": " + row.message; }).join("\n") : "No current blocker found. Administrator approval and a fresh check are still required before rollback.") +
+        "\nAffected protected files " + Math.min(offset + 1, result.total_affected) + "-" + Math.min(offset + 50, result.total_affected) + " of " + result.total_affected + ":\n" + result.affected.map(function (row) { return row.change + ": " + row.path; }).join("\n") + "\n" + result.notice;
+    } catch (error) { recoveryPlan = null; failure(error); }
+    finally { busy = false; controls(); }
+  }
+  get("planner-point").addEventListener("change", function () { recoveryPlan = null; get("planner-details").textContent = ""; controls(); });
+  get("planner-load").addEventListener("click", function () { return loadPlan(0); });
+  get("planner-next").addEventListener("click", function () { if (recoveryPlan) return loadPlan(recoveryPlan.offset + 50); });
+  get("planner-save").addEventListener("click", function () { if (recoveryPlan) download(JSON.stringify(recoveryPlan, null, 2), "Lightwork-recovery-coordination.json", "application/json"); });
+  get("planner-repair").addEventListener("click", function () { return check(true); });
+  get("planner-workspace").addEventListener("click", function () { if (!busy) window.location.replace("recovery.html"); });
   describeCode();
   controls();
   invoke("maintenance_status").then(function (result) {
@@ -216,6 +263,7 @@
     var recovery = result.recovery || {};
     recoveryAvailable = recovery.unavailable !== true;
     (recovery.recovery_points || []).forEach(function (point) {
+      var planOption = document.createElement("option"); planOption.value = point.id; planOption.textContent = pointLabel(point, false); get("planner-point").appendChild(planOption);
       var logOption = document.createElement("option"); logOption.value = point.id; logOption.textContent = pointLabel(point, false); get("maintenance-log-point").appendChild(logOption);
       if (point.pending_finalization || ["prepared", "applying", "incomplete"].indexOf(point.status) >= 0) {
         var option = document.createElement("option"); option.value = point.id; option.textContent = pointLabel(point, point.pending_finalization && COMPLETED.indexOf(point.status) >= 0); get("maintenance-incomplete").appendChild(option);

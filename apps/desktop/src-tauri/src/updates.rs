@@ -582,6 +582,93 @@ pub fn desktop_maintenance_logs(
     protocol(&runtime, "logs", &serde_json::json!({"id": id}))
 }
 
+#[tauri::command]
+pub fn desktop_recovery_plan(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Maintenance>,
+    id: String,
+    offset: usize,
+) -> Result<serde_json::Value, String> {
+    local_controls(&window)?;
+    let _busy = acquire(&state)?;
+    let (runtime, _) = selected_maintenance_runtime()?;
+    protocol(
+        &runtime,
+        "recovery-plan",
+        &serde_json::json!({"id": id, "offset": offset}),
+    )
+}
+
+#[tauri::command]
+pub fn review_offline_repair(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Maintenance>,
+    folder: String,
+) -> Result<serde_json::Value, String> {
+    local_controls(&window)?;
+    let _busy = acquire(&state)?;
+    if !cfg!(all(windows, feature = "customer-runtime")) {
+        return Err("Offline customer repair is currently supported on Windows.".into());
+    }
+    let key = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|v| v.get("pubkey"))
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .ok_or("This build has no pinned release verification key.")?;
+    let (runtime, _) = selected_maintenance_runtime()?;
+    protocol(
+        &runtime,
+        "offline-review",
+        &serde_json::json!({"folder": folder, "public_key": key}),
+    )
+}
+
+#[tauri::command]
+pub fn install_offline_repair(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Maintenance>,
+    review: String,
+    confirm: bool,
+) -> Result<(), String> {
+    local_controls(&window)?;
+    let _busy = acquire(&state)?;
+    if !confirm {
+        return Err("Review and explicitly confirm the offline repair first.".into());
+    }
+    #[cfg(windows)]
+    {
+        let (runtime, _) = selected_maintenance_runtime()?;
+        let grant = protocol(
+            &runtime,
+            "offline-authorize",
+            &serde_json::json!({"review": review, "confirm": true}),
+        )?;
+        let authorization = grant
+            .get("authorization")
+            .and_then(|v| v.as_str())
+            .ok_or("The offline repair approval is unavailable.")?;
+        app.state::<lightwork_desktop_runtime::Dashboard>()
+            .pause_for_maintenance()?;
+        let prepared = protocol(
+            &runtime,
+            "prepare",
+            &serde_json::json!({"authorization": authorization}),
+        )?;
+        launch_operation(&app, &prepared, authorization)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, review);
+        Err("Offline customer repair is currently supported on Windows.".into())
+    }
+}
+
 fn recovery_runtime_for(executable: &std::path::Path) -> Result<std::path::PathBuf, String> {
     Ok(executable
         .parent()
@@ -811,7 +898,8 @@ fn protocol_timeout(step: &str) -> std::time::Duration {
     match step {
         // Repair authorization verifies the registered package and retained
         // Authenticode source. Each native inspection has its own shorter cap.
-        "repair-capability" | "authorize-repair" => std::time::Duration::from_secs(6 * 60),
+        "repair-capability" | "authorize-repair" | "offline-review" | "offline-authorize"
+        | "recovery-plan" => std::time::Duration::from_secs(6 * 60),
         // Preparing a protected operation can snapshot up to the documented
         // local recovery limit on a slow customer disk.
         "prepare" => std::time::Duration::from_secs(60 * 60),

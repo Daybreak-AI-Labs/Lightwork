@@ -29,17 +29,17 @@
   },
   {
     "id": "LW-157",
-    "status": "planned",
-    "implementation_evidence": "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice.",
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Build structured blocker/recovery plan and direct supported forward-repair/export/drill actions without rollback bypass or accounting reset."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Native read-only recovery planner authenticates the retained snapshot and compares current protected state under the all-workspaces scope. Structured blocker codes and paged affected-file metadata explain accounting/database/action/resource incompatibility. In-product controls review current-version forward repair, open explicit isolated workspace export/drill confirmation, and save a coordination plan. No force rollback/accounting reset exists.",
+    "validation": "Python AST, JS syntax and Rustfmt syntax/format. Protected-file planner regression authored unrun.",
+    "remaining": "Native qualification and full post-spend/external-resource recovery matrix unrun; workspace export/drill remains scoped to each selected workspace and external owners must coordinate their services."
   },
   {
     "id": "LW-158",
-    "status": "planned",
-    "implementation_evidence": "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice.",
-    "validation": "Static source review only; no tests/installers/providers executed.",
-    "remaining": "Build locally admitted exact signed repair package path with complete product/publisher/version/signature checks and no network dependency."
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Native offline folder review copies exact local MSI into bounded private expiring storage; reuses Minisign, Authenticode, pinned update key, publisher, Windows registered product/package, exact installed version/runtime and existing repair preparation checks. Final explicit repair uses no network and can execute from the separately bundled recovery runtime when primary is damaged. Wrong-version/key and changed-cache regressions authored.",
+    "validation": "Python AST, JS syntax and Rustfmt syntax/format only; no installer or signature/provider execution.",
+    "remaining": "Signed native release offline qualification, damaged-primary recovery, signature/tampering/publisher cases and expiry cleanup tests remain unrun per user."
   },
   {
     "id": "LW-159",
