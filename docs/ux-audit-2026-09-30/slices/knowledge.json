@@ -1,13 +1,19 @@
 [
   {
     "id": "LW-111",
-    "status": "planned",
-    "implementation_evidence": [],
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "assessment_memory.py ties a suggested note and supporting provenance to the winning answer; keeps dissent separate; agreement explicitly differs from certainty. Current approved, stale and unreviewed states use exact pinned questionnaire/current policy digest, review/renewal expiry and named approval.",
+      "Assessment review per-question source panel opens exact saved answer or current comparison; source-date/version/approval/reuse explanation; rejecting one suggestion leaves other questions unchanged; explicit reviewed use rechecks exact source then changes only local draft. Existing assessments.learn gate controls suggestions.",
+      "Native precedent API rechecks current department/context, exact revision and private no-store response; shared typed Copilot read adapter delegates native suggestion service."
+    ],
     "validation": [
-      "Implementation in progress; local test phase newly authorized, no live-provider calls."
+      "28 local Python assessment-memory/discovery tests passed, including dissenting-note regression, policy/expiry staleness, current department and exact fragment checks.",
+      "12 per-answer JS fixtures plus12 assessment mutation-lifecycle fixtures passed (latter fixture updated to evaluate its intended first script after a second script was added to approval queue).",
+      "Focused Ruff and diff whitespace passed; no models or external providers called."
     ],
     "remaining": [
-      "Complete assigned acceptance using current native authorization, source versions and bounded storage."
+      "Integrated suites and real-browser/installed-product accessibility qualification remain."
     ]
   },
   {

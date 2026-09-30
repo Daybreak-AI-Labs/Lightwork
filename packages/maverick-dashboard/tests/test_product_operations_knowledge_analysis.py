@@ -30,3 +30,18 @@ def test_source_analysis_copilot_keeps_exact_source_and_native_operation(monkeyp
     assert calls[0][0]=='d'*32
     assert calls[0][1].knowledge_context.context=='a'*64
     assert outcome.status=='queued' and outcome.details['goal_id']==42
+
+
+def test_precedent_operation_returns_native_sources_without_mutation(monkeypatch):
+    from maverick import assessment_memory
+    from maverick_dashboard import product_operations_knowledge as operations
+    monkeypatch.setattr(operations, "_precedent_authority", lambda request: {"pia"})
+    recorded=[]
+    def suggest(kind, subject, **kwargs):
+        recorded.append((kind, subject, kwargs))
+        return {"q": {"answer":"yes", "state":"stale_precedent", "sources":[{"question":"Is the policy current?"}]}}
+    monkeypatch.setattr(assessment_memory, "suggest_answers", suggest)
+    value = operations.precedent_prepare(None, {}, {"questionnaire":"pia", "subject":"Acme"})
+    assert value.native["suggestions"]["q"]["state"] == "stale_precedent"
+    assert recorded == [("pia", "Acme", {"allowed_types": {"pia"}})]
+    assert next(entry for entry in operations.entries() if entry.id == "knowledge.assessment_precedents").execute is None

@@ -191,7 +191,48 @@ def analysis_execute(request, selection, arguments, native, operation):
                    {"goal_id": goal.id, "state": goal.status, "href": "/knowledge-access#analysis=" + str(goal.id)}, background=background)
 
 
+class PrecedentInput(StrictInput):
+    questionnaire: str = Field(min_length=1, max_length=64)
+    subject: str = Field(min_length=1, max_length=300)
+
+
+def _precedent_authority(request):
+    from maverick.assessment_memory import enabled
+
+    from .api import _permitted_memory_assessment_types
+    from .auth import require_permission
+    require_permission(request, "operate")
+    if not enabled():
+        raise HTTPException(409, "Assessment precedent suggestions are disabled in Memory settings.")
+    return _permitted_memory_assessment_types(request)
+
+
+def precedent_snapshot(request, selection):
+    from maverick.assessment import list_templates, template_state
+
+    from .draft_api import context_for
+    allowed = _precedent_authority(request)
+    choices = [{"value": template.type, "label": template.title} for template in list_templates() if template.type in allowed]
+    revisions = [template_state(choice["value"]) for choice in choices]
+    return Snapshot(digest([context_for(request), revisions]), "Assessment precedents", "Review past answers and exact source provenance. Prior agreement is not factual certainty; no answer is applied automatically.", fields=[
+        {"name": "questionnaire", "label": "Questionnaire", "kind": "select", "required": True, "choices": choices},
+        {"name": "subject", "label": "Subject to compare", "kind": "text", "required": True}])
+
+
+def precedent_prepare(request, selection, arguments):
+    from maverick.assessment_memory import suggest_answers
+    allowed = _precedent_authority(request)
+    if arguments["questionnaire"] not in allowed:
+        raise HTTPException(403, "Current department access is required.")
+    suggestions = suggest_answers(arguments["questionnaire"], arguments["subject"], allowed_types=allowed)
+    return Preview("Each suggested answer keeps its supporting and conflicting exact source versions. Open the questionnaire to compare, reject or use one value in your draft.",
+        changes=[{"label": (value["sources"][0]["question"] if value["sources"] else question),
+                  "before": "No change to your answer", "after": value["answer"] + " / " + value["state"].replace("_", " ")}
+                 for question, value in suggestions.items()], native={"suggestions": suggestions})
+
+
 def entries():
-    return (Adapter("knowledge.source_analysis", "Analyze an approved source", "learning", "/knowledge-access#source-analysis", ("/knowledge-access",), AnalysisInput, analysis_snapshot, analysis_prepare, analysis_execute, analysis_recover),
+    return (Adapter("knowledge.assessment_precedents", "Review precedent answers and sources", "learning", "/privacy", ("/privacy", "/finance", "/security", "/approvals", "/knowledge-access"), PrecedentInput, precedent_snapshot, precedent_prepare),
+            Adapter("knowledge.source_analysis", "Analyze an approved source", "learning", "/knowledge-access#source-analysis", ("/knowledge-access",), AnalysisInput, analysis_snapshot, analysis_prepare, analysis_execute, analysis_recover),
             Adapter("knowledge.rebuild", "Rebuild document search", "learning", "/knowledge-access", ("/knowledge-access",), RebuildInput, rebuild_snapshot, rebuild_prepare, rebuild_execute, rebuild_recover),
             Adapter("knowledge.rebuild_job", "Review or control rebuild progress", "learning", "/knowledge-access", ("/knowledge-access",), JobInput, job_snapshot, job_prepare, job_execute))

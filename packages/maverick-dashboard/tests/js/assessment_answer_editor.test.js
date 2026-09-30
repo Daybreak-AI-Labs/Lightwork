@@ -155,3 +155,42 @@ test("incomplete approval acknowledgment cannot transfer to a different assessme
   vm.runInContext(source.slice(source.indexOf("    async function decide("), source.indexOf("    approveBtn.addEventListener(")), ui.context);
   await ui.context.decide("approved"); assert.equal(ui.calls.length, 0);
 });
+
+function descend(root, text) {
+  if (root.textContent === text) return root;
+  for (const child of root.children || []) { const found = descend(child, text); if (found) return found; }
+  return null;
+}
+function suggestion(question, state = "current_approved") {
+  return {answer: "yes", note: "Reviewed rationale", state, confidence: 1, confidence_meaning: "Agreement, not factual certainty.",
+    why_reused: "Similar subject and questionnaire", sources: [{assessment_id: "source", source_revision: 2, question_id: question,
+      policy_digest: "a".repeat(64), policy_version: 1, current_policy_version: 1, subject: "Prior Acme review", source_date: 1700000000,
+      approval_owner: "user:reviewer", state, reasons: [], answer: "yes", note: "Reviewed rationale"}], conflicts: []};
+}
+test("individual precedent rejection leaves other questions and stored answers unchanged", async () => {
+  const ui = editor({...record(), subject: "Acme", type: "pia"});
+  ui.context.ANSWER_LABEL = {yes: "Yes"}; ui.context.person = value => value.replace(/^user:/, "");
+  const suggestions = {first: suggestion("first", "stale_precedent"), second: suggestion("second")};
+  ui.context.fetch = async (url, options) => { ui.calls.push({url, options}); return response({suggestions}); };
+  await descend(ui.form, "Find precedent answers").listeners.click();
+  assert.ok(descend(ui.form, "Stale precedent - renewed evidence needed"));
+  descend(ui.form, "Reject this suggested value").listeners.click();
+  assert.ok(descend(ui.form, "This suggested value was rejected. Other question suggestions are unchanged."));
+  ui.get("arv-answer-question").value = "q:second"; await ui.get("arv-answer-question").listeners.change();
+  assert.ok(descend(ui.form, "Current approved assessment precedent"));
+  assert.equal(ui.get("arv-answer-value").value, "");
+  assert.equal(ui.calls.some(call => call.options?.method === "PUT"), false);
+});
+test("using a precedent rechecks its exact saved fragment before changing one draft field", async () => {
+  const ui = editor({...record(), subject: "Acme", type: "pia"});
+  ui.context.ANSWER_LABEL = {yes: "Yes"}; ui.context.person = value => value;
+  const value = suggestion("first");
+  ui.context.fetch = async (url, options) => { ui.calls.push({url, options}); return response(url.includes("/fragment/") ? value.sources[0] : {suggestions: {first: value}}); };
+  await descend(ui.form, "Find precedent answers").listeners.click();
+  await descend(ui.form, "Use this value in my draft").listeners.click();
+  assert.match(ui.calls[1].url, /fragment\/source\/first\?revision=2&policy_digest=/);
+  assert.equal(ui.get("arv-answer-value").value, "yes");
+  assert.equal(ui.get("arv-answer-note").value, "Reviewed rationale");
+  assert.equal(ui.context.answerDirty, true);
+  assert.equal(ui.renders.length, 0);
+});

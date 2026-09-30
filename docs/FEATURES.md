@@ -5772,3 +5772,9 @@ Today composes authorized native work, decisions, occurrences and template pins 
   admission share immutable references and current-use checks. Private results
   revalidate source access; ordinary task history and exports contain only a link.
   See [Selected-source analysis](knowledge-source-analysis.md).
+
+- **Assessment precedent provenance**: per-question suggested answers show exact
+  saved fragments, source dates, pinned/current questionnaire versions, named
+  approval and supporting versus dissenting votes. Stale and unreviewed precedent
+  stays visibly distinct from current approved precedent. Each value can be
+  rejected or added to the respondent draft independently under `assessments.learn`.

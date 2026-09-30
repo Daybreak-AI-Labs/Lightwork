@@ -5154,12 +5154,58 @@ async def bulk_import_assessments(
     }
 
 
+def _memory_response_context(request, response):
+    from .draft_api import context_for
+    context = context_for(request)
+    expected = request.headers.get("X-Lightwork-Search-Context")
+    if expected and expected != context:
+        raise HTTPException(409, "Account or workspace changed. Reopen the assessment before using a precedent.")
+    response.headers["Cache-Control"] = "private, no-store"
+    return context
+
+
+def _permitted_memory_assessment_types(request):
+    from maverick.assessment import custom_template_records
+
+    from .app import FINANCE_ASSESSMENT_TYPES, PRIVACY_ASSESSMENT_TYPES, SECURITY_ASSESSMENT_TYPES
+    from .auth import suite_allowed
+    mapping = {kind: suite for suite, kinds in (("finance", FINANCE_ASSESSMENT_TYPES),
+        ("privacy", PRIVACY_ASSESSMENT_TYPES), ("security", SECURITY_ASSESSMENT_TYPES)) for kind in kinds}
+    mapping.update({kind: record.get("department", "privacy") for kind, record in custom_template_records().items()})
+    return {kind for kind, suite in mapping.items() if suite_allowed(request, suite)}
+
+
+@router.get("/assessment-memory/fragment/{assessment_id}/{question_id}")
+async def assessment_memory_fragment(request: Request, response: Response, assessment_id: str, question_id: str,
+                                     revision: int | None = None, policy_digest: str = ""):
+    from maverick.assessment import load_saved
+    from maverick.assessment_memory import source_evidence
+    require_permission(request, "operate")
+    context = _memory_response_context(request, response)
+    record = await run_in_threadpool(load_saved, assessment_id)
+    if not record or record.get("type") not in _permitted_memory_assessment_types(request):
+        raise HTTPException(404, "This source answer is unavailable in your current workspace.")
+    if question_id not in (record.get("answers") or {}):
+        raise HTTPException(404, "This source question has no saved answer.")
+    if ((revision is not None and revision != record.get("revision")) or
+            (policy_digest and policy_digest != record.get("template_digest"))):
+        raise HTTPException(409, "This source changed after the suggestion was prepared. Refresh to compare its current answer.")
+    evidence = source_evidence(record, question_id)
+    require_permission(request, "operate")
+    if (_memory_response_context(request, response) != context or
+            record.get("type") not in _permitted_memory_assessment_types(request)):
+        raise HTTPException(409, "Workspace or department access changed. Reopen the source.")
+    return {"context": context, **evidence}
+
+
 @router.get("/assessment-memory/similar")
 async def assessment_memory_similar(
     request: Request,
+    response: Response,
     subject: str,
     type: str = "",
     k: int = 3,
+    exclude_id: str | None = None,
 ) -> dict:
     """What the org already knows about subjects like this one: similar past
     assessments (with ratings), advisory per-question answer suggestions from
@@ -5170,16 +5216,21 @@ async def assessment_memory_similar(
     require_permission(request, "operate")
     from maverick import assessment_memory
 
+    context = _memory_response_context(request, response)
     subject = subject.strip()[:300]
     k = max(1, min(k, 10))
     if not subject:
         raise HTTPException(status_code=422, detail="subject is required")
+    allowed_types = _permitted_memory_assessment_types(request)
+    if type and type not in allowed_types:
+        raise HTTPException(403, "Current department access is required for these precedents.")
     sim = await run_in_threadpool(
-        assessment_memory.similar, subject, assessment_type=(type or None), k=k
+        assessment_memory.similar, subject, assessment_type=(type or None), k=k,
+        exclude_id=exclude_id, allowed_types=allowed_types
     )
     suggestions = {}
     if type:
-        suggestions = await run_in_threadpool(assessment_memory.suggest_answers, type, subject, k=k)
+        suggestions = await run_in_threadpool(assessment_memory.suggest_answers, type, subject, k=k, exclude_id=exclude_id, allowed_types=allowed_types)
     governed_reader = None
     try:
         from maverick.paths import current_tenant_id_strict
@@ -5215,7 +5266,12 @@ async def assessment_memory_similar(
         k=k,
         reader=governed_reader,
     )
+    require_permission(request, "operate")
+    if (_memory_response_context(request, response) != context or
+            _permitted_memory_assessment_types(request) != allowed_types):
+        raise HTTPException(409, "Workspace or department access changed. Refresh the precedents.")
     return {
+        "context": context,
         "enabled": assessment_memory.enabled(),
         "similar": sim,
         "suggestions": suggestions,
