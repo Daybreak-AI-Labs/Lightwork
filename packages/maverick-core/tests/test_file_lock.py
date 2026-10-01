@@ -739,6 +739,25 @@ def test_strict_cross_process_lock_uses_platform_backend(tmp_path):
     assert p.read_text() == "strict"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_windows_lock_accepts_maximum_tenant_segment_without_splitting_identity(tmp_path):
+    import maverick.file_lock as file_lock
+    from maverick.paths import MAX_TENANT_SEGMENT_LENGTH
+
+    tenant = "t" * MAX_TENANT_SEGMENT_LENGTH
+    target = tmp_path / "tenants" / tenant / "flows" / "runs" / ("." + "a" * 32 + ".checkpoint")
+    lock_path = target.parent / (target.name + ".lock")
+    extended_target = Path(file_lock._windows_extended_path(target))
+    extended_lock = Path(file_lock._windows_extended_path(lock_path))
+    assert len(os.path.abspath(lock_path)) > 260
+    assert file_lock._canonical_lock_path(lock_path) == file_lock._canonical_lock_path(extended_lock)
+
+    with cross_process_lock(target, strict=True):
+        with cross_process_lock(extended_target, strict=True):
+            assert private_path_is_restricted(extended_lock)
+    assert extended_lock.read_bytes() == b"\0"
+
+
 def test_strict_nested_lock_refuses_degraded_outer_scope(tmp_path):
     import maverick.file_lock as file_lock
 

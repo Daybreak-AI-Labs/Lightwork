@@ -2,6 +2,8 @@
 DEK-cache TTL so a revoked key takes effect, and fleet-wide KEK rotation."""
 from __future__ import annotations
 
+import os
+
 import pytest
 
 importorskip = pytest.importorskip
@@ -119,6 +121,34 @@ def test_kms_config_for_raw_tenant_with_escaped_chars_finds_byok_overlay():
 
     assert cfg["provider"] == "aws"
     assert cfg["key_id"] == "alice-cmk"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_maximum_tenant_segment_reads_byok_overlay_and_existing_wrapped_dek(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from maverick.file_lock import (
+        _windows_extended_path,
+        atomic_write_text,
+        ensure_private_directory,
+    )
+    from maverick.paths import MAX_TENANT_SEGMENT_LENGTH, maverick_home
+
+    home = tmp_path / ("h" * max(1, 90 - len(os.path.abspath(tmp_path)) - 1))
+    monkeypatch.setenv("MAVERICK_HOME", str(home))
+    tenant = "t" * MAX_TENANT_SEGMENT_LENGTH
+    plain_overlay = maverick_home() / "tenants" / tenant / "config.toml"
+    assert len(os.path.abspath(plain_overlay)) > 260
+    overlay = Path(_windows_extended_path(plain_overlay))
+    ensure_private_directory(overlay.parent)
+    atomic_write_text(overlay, '[kms]\nprovider = "aws"\nkey_id = "tenant-cmk"\n')
+
+    assert K._kms_config_for(tenant)["provider"] == "aws"
+    assert K._tenant_own_key_id(tenant) == "tenant-cmk"
+    first = K.tenant_dek(tenant, kms=K.LocalKMS())
+    assert K._wrapped_dek_path(tenant).is_file()
+    K._clear_cache()
+    assert K.tenant_dek(tenant, kms=K.LocalKMS()) == first
 
 
 def test_named_tenant_config_error_does_not_leak_ambient(monkeypatch):

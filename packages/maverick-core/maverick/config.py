@@ -42,7 +42,7 @@ from typing import Any
 
 # Initialize encryption before a worker resolves sealed dashboard settings.
 from . import crypto_at_rest
-from .file_lock import atomic_read_bytes
+from .file_lock import _windows_extended_path, atomic_read_bytes
 
 try:
     import tomllib  # Python 3.11+
@@ -496,7 +496,12 @@ def tenant_config_path() -> Path | None:
         tid = _TENANT.get() or os.environ.get("MAVERICK_TENANT", "").strip() or None
         if not tid:
             return None
-        return maverick_home() / "tenants" / _tenant_segment(tid) / "config.toml"
+        path = maverick_home() / "tenants" / _tenant_segment(tid) / "config.toml"
+        # Keep ordinary paths stable in config fingerprints and UI context
+        # tokens; only deep tenant paths need the Win32 extended spelling.
+        if os.name == "nt" and len(os.path.abspath(path)) >= 240:
+            return Path(_windows_extended_path(path))
+        return path
     except Exception:  # pragma: no cover -- config resolution never blocks a run
         return None
 

@@ -12,6 +12,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from hashlib import sha256
+from pathlib import Path
 
 from .ir import Flow
 
@@ -29,8 +30,15 @@ def _history_dir(flow_id: str):
 
 
 def _runs_dir():
+    import os
+
+    from ..file_lock import _windows_extended_path
     from ..paths import data_dir
-    return data_dir("flows", "runs")
+
+    path = data_dir("flows", "runs")
+    # All checkpoint descendants (sidecars, SQLite journals, JSON rows, and
+    # payload artifacts) must retain the extended spelling on Windows.
+    return Path(_windows_extended_path(path)) if os.name == "nt" else path
 
 
 def _objects_dir():

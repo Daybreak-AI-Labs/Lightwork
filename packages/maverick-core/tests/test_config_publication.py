@@ -39,7 +39,7 @@ def test_config_retries_real_published_handle_until_writer_closes(configuration,
         try:
             return original_read(path)
         except PermissionError:
-            if path == configuration:
+            if file_lock._windows_extended_path(path) == file_lock._windows_extended_path(configuration):
                 denials.append(True)
                 release.set()
                 assert finished.wait(5), "private writer did not close"

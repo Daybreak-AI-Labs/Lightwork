@@ -85,6 +85,10 @@ _WINDOWS_LOCK_INITIALIZATION_SECONDS = 2.0
 
 
 def _canonical_lock_path(path: Path) -> str:
+    # Plain and extended Win32 spellings of one sidecar must share the same
+    # process-local lock and recursion state.
+    if os.name == "nt":
+        path = Path(_windows_extended_path(path))
     return os.path.normcase(os.path.realpath(os.path.abspath(path)))
 
 
@@ -1408,6 +1412,10 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
     """
     target = Path(target)
     lock_path = target.parent / (target.name + ".lock")
+    if os.name == "nt":
+        # Use one spelling for creation, descriptor/path identity checks, and
+        # ACL verification when the sidecar exceeds Win32's legacy limit.
+        lock_path = Path(_windows_extended_path(lock_path))
     canonical = _canonical_lock_path(lock_path)
     with _exclusive_local_lock(lock_path):
         held: dict[str, tuple[int, bool]] = getattr(

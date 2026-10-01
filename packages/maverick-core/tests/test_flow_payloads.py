@@ -98,6 +98,39 @@ def test_long_windows_home_reloads_and_reclaims_encrypted_checkpoint(tmp_path, m
     assert not second.exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_maximum_tenant_segment_checkpoint_survives_index_rebuild_and_delete():
+    from maverick.paths import MAX_TENANT_SEGMENT_LENGTH, data_dir, tenant_scope
+
+    with tenant_scope(tenant="t" * MAX_TENANT_SEGMENT_LENGTH):
+        run = row("tenant-limit")
+        plain_lock = data_dir("flows", "runs") / f".{run.run_id}.checkpoint.lock"
+        assert len(os.path.abspath(plain_lock)) > 260
+        assert str(store._runs_dir()).startswith("\\\\?\\")
+
+        store.save_run(run)
+        assert "\\\\?\\" not in json.dumps(raw_row(run.run_id))
+        first = artifact(run.run_id)
+        assert first.is_file()
+        assert store.load_run(run.run_id).data == large_data()
+        assert [item.run_id for item in store.list_run_metadata()] == [run.run_id]
+        assert store.list_runs()[0].data == large_data()
+
+        store.rebuild_run_index()
+        assert store.list_runs()[0].data == large_data()
+        run.data["document"] += " updated"
+        store.save_run(run)
+        second = artifact(run.run_id)
+        assert second != first and second.is_file()
+        assert not first.exists()
+        assert store.load_run(run.run_id).data == run.data
+
+        assert store.delete_run(run.run_id)
+        assert not second.exists()
+        store.rebuild_run_index()
+        assert store.list_run_metadata() == []
+
+
 def test_delay_restart_resume_matches_uninterrupted_business_values():
     flow = Flow(id="resume-complete", name="Complete", start="produce", nodes={
         "produce": FlowNode(id="produce", kind="agent", brief="produce", output="batch", next="wait"),
