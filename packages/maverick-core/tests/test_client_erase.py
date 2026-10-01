@@ -218,6 +218,18 @@ def _symlink_or_skip(path, target):
                        check=True, capture_output=True)
 
 
+def test_nested_directory_alias_is_removed_without_touching_target(tmp_path):
+    root = _seed()
+    outside = tmp_path / "other-client"
+    outside.mkdir()
+    (outside / "must-stay.txt").write_text("other client's data")
+    link = root / "outside-link"
+    _symlink_or_skip(link, outside)
+    client.erase_client()
+    assert not link.exists()
+    assert (outside / "must-stay.txt").read_text() == "other client's data"
+
+
 @pytest.mark.parametrize("alias_area", ["client", "receipt"])
 def test_redirected_folder_refuses_without_removing_outside_data(tmp_path, alias_area):
     from maverick.paths import data_dir
@@ -342,17 +354,139 @@ def test_target_moved_out_of_client_root_after_preparation_is_not_claimed_erased
     assert events[-1]["status"] == "incomplete"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows uses identity-bound deletion handles")
+def test_windows_replaced_child_cannot_produce_completed_receipt(monkeypatch, tmp_path):
+    from maverick import client_erasure
+
+    root = _seed()
+    parked = tmp_path / "still-existing-client-data.db"
+    original = client_erasure.ErasureReceipt.prepare
+
+    def replace_after_signed_inventory(receipt, targets):
+        original(receipt, targets)
+        (root / "world.db").rename(parked)
+        (root / "world.db").write_text("replacement data")
+
+    monkeypatch.setattr(client_erasure.ErasureReceipt, "prepare", replace_after_signed_inventory)
+    with pytest.raises(client.ClientErasureError, match="Erasure is incomplete") as caught:
+        client.erase_client()
+    assert parked.exists()
+    assert (root / "world.db").read_text() == "replacement data"
+    _, events = _receipt(caught.value.receipt_id)
+    assert events[-1]["status"] == "incomplete"
+    assert all(event["kind"] != "client_erased" for event in events)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows records target file IDs during preflight")
+def test_windows_child_changed_during_receipt_creation_refuses_before_deletion(monkeypatch, tmp_path):
+    from maverick import client_erasure
+
+    root = _seed()
+    parked = tmp_path / "still-existing-client-data.db"
+    original = client_erasure.ErasureReceipt.__init__
+
+    def replace_during_receipt(receipt, home, detail):
+        original(receipt, home, detail)
+        (root / "world.db").rename(parked)
+        (root / "world.db").write_text("replacement data")
+
+    monkeypatch.setattr(client_erasure.ErasureReceipt, "__init__", replace_during_receipt)
+    with pytest.raises(client.ClientErasureError, match="Nothing was erased") as caught:
+        client.erase_client()
+    assert parked.exists()
+    assert (root / "world.db").read_text() == "replacement data"
+    _, events = _receipt(caught.value.receipt_id)
+    assert [event["status"] for event in events] == ["requested"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows target handle prevents child rename")
+def test_windows_target_cannot_move_while_deletion_handle_is_open(monkeypatch, tmp_path):
+    import ctypes
+
+    from maverick import client_erasure
+
+    root = _seed()
+    target = root / "world.db"
+    expected_id = target.lstat().st_ino
+    parked = tmp_path / "moved-client-data.db"
+    original_api = client_erasure._windows_erase_api
+    api = original_api()
+    attempts = []
+
+    def set_info_with_race(handle, *args):
+        info = api[4]()
+        assert api[1](handle, ctypes.byref(info))
+        if ((info.index_high << 32) | info.index_low) == expected_id and not attempts:
+            attempts.append(True)
+            with pytest.raises(OSError) as caught:
+                target.rename(parked)
+            assert caught.value.winerror in {5, 32}
+        return api[2](handle, *args)
+
+    monkeypatch.setattr(client_erasure, "_windows_erase_api",
+                        lambda: (api[0], api[1], set_info_with_race, *api[3:]))
+    result = client.erase_client()
+    assert attempts and result["client_id"] == "acme"
+    assert not parked.exists()
+    assert not target.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows exposes link count on the opened target")
+def test_windows_concurrent_hardlink_cannot_produce_completed_receipt(monkeypatch, tmp_path):
+    import ctypes
+
+    from maverick import client_erasure
+
+    root = _seed()
+    target = root / "world.db"
+    expected_id = target.lstat().st_ino
+    outside = tmp_path / "still-existing-client-data.db"
+    original_api = client_erasure._windows_erase_api
+    api = original_api()
+    linked = []
+
+    def set_info_with_hardlink(handle, *args):
+        info = api[4]()
+        assert api[1](handle, ctypes.byref(info))
+        if ((info.index_high << 32) | info.index_low) == expected_id and not linked:
+            outside.hardlink_to(target)
+            linked.append(True)
+        return api[2](handle, *args)
+
+    monkeypatch.setattr(client_erasure, "_windows_erase_api",
+                        lambda: (api[0], api[1], set_info_with_hardlink, *api[3:]))
+    with pytest.raises(client.ClientErasureError, match="Erasure is incomplete") as caught:
+        client.erase_client()
+    assert linked and outside.exists()
+    _, events = _receipt(caught.value.receipt_id)
+    assert events[-1]["status"] == "incomplete"
+
+
+def _deny_world_removal(monkeypatch, root):
+    if os.name == "nt":
+        original = client.delete_windows_erase_target
+
+        def deny_world(path, identity):
+            if path == root / "world.db":
+                raise PermissionError("file is still in use")
+            return original(path, identity)
+
+        monkeypatch.setattr(client, "delete_windows_erase_target", deny_world)
+    else:
+        original = Path.unlink
+
+        def deny_world(path, *args, **kwargs):
+            if path == root / "world.db":
+                raise PermissionError("file is still in use")
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", deny_world)
+
+
 @pytest.mark.parametrize("keep_audit", [False, True])
 def test_partial_deletion_records_incomplete_and_raises(monkeypatch, keep_audit):
     root = _seed()
-    original = Path.unlink
-
-    def deny_world(path, *args, **kwargs):
-        if path == root / "world.db":
-            raise PermissionError("file is still in use")
-        return original(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "unlink", deny_world)
+    _deny_world_removal(monkeypatch, root)
     with pytest.raises(client.ClientErasureError, match="Erasure is incomplete") as caught:
         client.erase_client(keep_audit=keep_audit)
     assert (root / "world.db").exists()
@@ -446,14 +580,7 @@ def test_cli_status_and_erase_confirm():
 
 def test_cli_reports_partial_erasure_as_failure(monkeypatch):
     root = _seed()
-    original = Path.unlink
-
-    def deny_world(path, *args, **kwargs):
-        if path == root / "world.db":
-            raise PermissionError("file is still in use")
-        return original(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "unlink", deny_world)
+    _deny_world_removal(monkeypatch, root)
     result = _run("client", "erase", "--confirm")
     assert result.exit_code != 0 and "Erasure is incomplete" in result.output
     assert "Activity receipt:" in result.output

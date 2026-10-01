@@ -17,6 +17,7 @@ import stat
 import time
 import uuid
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,88 @@ class ClientErasureError(RuntimeError):
         super().__init__(message + suffix)
 
 
+@lru_cache(maxsize=1)
+def _windows_erase_api():
+    import ctypes
+    from ctypes import wintypes
+
+    class FileTime(ctypes.Structure):
+        _fields_ = [("low", wintypes.DWORD), ("high", wintypes.DWORD)]
+
+    class HandleInformation(ctypes.Structure):
+        _fields_ = [
+            ("attributes", wintypes.DWORD), ("created", FileTime),
+            ("accessed", FileTime), ("modified", FileTime),
+            ("volume", wintypes.DWORD), ("size_high", wintypes.DWORD),
+            ("size_low", wintypes.DWORD), ("links", wintypes.DWORD),
+            ("index_high", wintypes.DWORD), ("index_low", wintypes.DWORD),
+        ]
+
+    class Disposition(ctypes.Structure):
+        _fields_ = [("delete_file", wintypes.BOOL)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_path = kernel.CreateFileW
+    open_path.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                          wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    open_path.restype = wintypes.HANDLE
+    inspect = kernel.GetFileInformationByHandle
+    inspect.argtypes = [wintypes.HANDLE, ctypes.POINTER(HandleInformation)]
+    inspect.restype = wintypes.BOOL
+    set_info = kernel.SetFileInformationByHandle
+    set_info.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    set_info.restype = wintypes.BOOL
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+    return open_path, inspect, set_info, close, HandleInformation, Disposition
+
+
+def windows_erase_target_identity(path: Path) -> tuple[int, int, bool, bool]:
+    """Pin a prepared Windows target's file ID and type before its receipt."""
+    info = path.lstat()
+    if not info.st_ino or info.st_nlink < 1:
+        raise ValueError("an erase target has no stable file identity")
+    if stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
+        raise ValueError("an erase target has another hard link outside this path")
+    return (info.st_dev, info.st_ino, stat.S_ISDIR(info.st_mode),
+            bool(getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)))
+
+
+def delete_windows_erase_target(path: Path, expected: tuple[int, int, bool, bool]) -> None:
+    """Delete the inspected object by handle, never a replacement pathname."""
+    import ctypes
+
+    from .file_lock import _windows_extended_path
+
+    open_path, inspect, set_info, close, info_type, disposition_type = _windows_erase_api()
+    # DELETE | FILE_READ_ATTRIBUTES; deny write/delete sharing so a concurrent
+    # writer cannot move this object after it has been opened.
+    handle = open_path(_windows_extended_path(path), 0x00010080, 0x00000001,
+                       None, 3, 0x00200000 | 0x02000000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise OSError(ctypes.get_last_error(), "an erase target could not be held safely")
+    try:
+        info = info_type()
+        if not inspect(handle, ctypes.byref(info)):
+            raise OSError(ctypes.get_last_error(), "an erase target could not be inspected")
+        file_id = (info.index_high << 32) | info.index_low
+        if (file_id != expected[1]
+                or bool(info.attributes & 0x10) != expected[2]
+                or bool(info.attributes & 0x400) != expected[3]
+                or windows_erase_target_identity(path) != expected
+                or (not expected[2] and info.links != 1)):
+            raise ValueError("an erase target changed after the signed inventory")
+        disposition = disposition_type(True)
+        if not set_info(handle, 4, ctypes.byref(disposition), ctypes.sizeof(disposition)):
+            raise OSError(ctypes.get_last_error(), "the inspected erase target could not be removed")
+        final_info = info_type()
+        if not inspect(handle, ctypes.byref(final_info)) or final_info.links != 0:
+            raise ValueError("an erase target still has another filesystem link")
+    finally:
+        close(handle)
+
+
 @contextmanager
 def hold_windows_erase_parents(root: Path, parent: Path, root_identity: tuple[int, int]):
     """Keep each deletion ancestor from becoming a junction while it is used.
@@ -55,7 +138,6 @@ def hold_windows_erase_parents(root: Path, parent: Path, root_identity: tuple[in
         return
 
     import ctypes
-    from ctypes import wintypes
 
     from .file_lock import _windows_extended_path
 
@@ -73,14 +155,7 @@ def hold_windows_erase_parents(root: Path, parent: Path, root_identity: tuple[in
     for part in relative.parts:
         ancestors.append(ancestors[-1] / part)
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    open_dir = kernel.CreateFileW
-    open_dir.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-                         wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-    open_dir.restype = wintypes.HANDLE
-    close = kernel.CloseHandle
-    close.argtypes = [wintypes.HANDLE]
-    close.restype = wintypes.BOOL
+    open_dir, _inspect, _set_info, close, _info_type, _disposition_type = _windows_erase_api()
     handles = []
     try:
         for path in ancestors:
@@ -176,4 +251,5 @@ class ErasureReceipt:
             ) from exc
 
 
-__all__ = ["ClientErasureError", "ErasureReceipt", "hold_windows_erase_parents"]
+__all__ = ["ClientErasureError", "ErasureReceipt", "hold_windows_erase_parents",
+           "windows_erase_target_identity", "delete_windows_erase_target"]

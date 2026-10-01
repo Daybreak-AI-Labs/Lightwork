@@ -31,7 +31,12 @@ import os
 import re
 
 from ._envparse import coerce_bool, is_truthy
-from .client_erasure import ClientErasureError, hold_windows_erase_parents
+from .client_erasure import (
+    ClientErasureError,
+    delete_windows_erase_target,
+    hold_windows_erase_parents,
+    windows_erase_target_identity,
+)
 
 log = logging.getLogger(__name__)
 
@@ -287,6 +292,40 @@ def _require_erase_root_identity(root, canonical_root, expected):
         raise ValueError("the client data folder identity changed")
 
 
+def _remove_client_path(path, windows_identity) -> int:
+    """Return one for removed files/links, zero for ordinary directories."""
+    if os.name == "nt":
+        delete_windows_erase_target(path, windows_identity)
+        return int(not windows_identity[2] or windows_identity[3])
+    junction = getattr(path, "is_junction", None)
+    if callable(junction) and junction():
+        path.rmdir()  # remove the junction itself, never its target
+        return 1
+    if path.is_file() or path.is_symlink():
+        path.unlink()
+        return 1
+    if path.is_dir():
+        path.rmdir()
+        return 0
+    raise FileNotFoundError("a prepared deletion target disappeared")
+
+
+def _windows_target_identities(targets):
+    return {p: windows_erase_target_identity(p) for p in targets} if os.name == "nt" else {}
+
+
+def _require_preflight_targets_unchanged(before, after):
+    for path, identity in before.items():
+        # The audit signer atomically republishes its public key during receipt
+        # creation. Its identity can change without moving customer content;
+        # the second snapshot still pins the object that deletion will open.
+        if (path.parent.name == "keys" and path.parent.parent.name == "audit"
+                and path.suffix == ".pub" and path in after):
+            continue
+        if after.get(path) != identity:
+            raise ValueError("a client data file changed during erase preflight")
+
+
 def _erase_client_locked(root, home, cid, keep_audit, actor, receipt_type, audit,
                          canonical_root, root_identity) -> dict:
     import hashlib
@@ -296,6 +335,7 @@ def _erase_client_locked(root, home, cid, keep_audit, actor, receipt_type, audit
     try:
         _require_erase_root_identity(root, canonical_root, root_identity)
         targets = list(_erase_targets(root, keep_audit=keep_audit)) if root.exists() else []
+        preflight_identities = _windows_target_identities(targets)
         relative = sorted(p.relative_to(root).as_posix() for p in targets)
         areas: dict[str, int] = {}
         for name in relative:
@@ -319,6 +359,8 @@ def _erase_client_locked(root, home, cid, keep_audit, actor, receipt_type, audit
         # audit tree. Include it in deletion rather than leave a fresh key behind.
         _require_erase_root_identity(root, canonical_root, root_identity)
         targets = list(_erase_targets(root, keep_audit=keep_audit)) if root.exists() else []
+        target_identities = _windows_target_identities(targets)
+        _require_preflight_targets_unchanged(preflight_identities, target_identities)
         deletion = {"deletion_target_count": len(targets),
                     "deletion_manifest_sha256": hashlib.sha256(json.dumps(sorted(
                         p.relative_to(root).as_posix() for p in targets
@@ -349,17 +391,7 @@ def _erase_client_locked(root, home, cid, keep_audit, actor, receipt_type, audit
             with hold_windows_erase_parents(root, p.parent, root_identity):
                 # Reject an ancestor redirected outside the inspected client tree.
                 p.parent.resolve().relative_to(canonical_root)
-                junction = getattr(p, "is_junction", None)
-                if callable(junction) and junction():
-                    p.rmdir()  # remove the junction itself, never its target
-                    removed += 1
-                elif p.is_file() or p.is_symlink():
-                    p.unlink()
-                    removed += 1
-                elif p.is_dir():
-                    p.rmdir()
-                else:
-                    raise FileNotFoundError("a prepared deletion target disappeared")
+                removed += _remove_client_path(p, target_identities.get(p))
         except (OSError, ValueError) as exc:
             failed_paths.add(p)
             log.warning("erase: could not remove %s: %s", p, exc)
