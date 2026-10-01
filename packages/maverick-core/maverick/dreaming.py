@@ -552,7 +552,9 @@ def append_insights(
 
     An insight is a duplicate when an existing same-department insight's text
     is lexically contained at/above the threshold. The whole store is
-    rewritten atomically so a crash can't leave a torn NDJSON line.
+    rewritten atomically so a crash can't leave a torn NDJSON line. The return
+    count is new rows retained after the capacity limit, not candidates that
+    were immediately dropped.
     """
     default_store = path is None
     path = Path(path) if path is not None else insights_path()
@@ -566,6 +568,7 @@ def append_insights(
             existing = load_insights(path)
             written = 0
             refreshed = 0
+            new_row_ids: set[int] = set()
             for ins in new or []:
                 safe_text = _sanitize(ins.text)[:1_000]
                 if not safe_text:
@@ -590,18 +593,20 @@ def append_insights(
                     refreshed += 1
                     continue
                 existing.append(ins)
+                new_row_ids.add(id(ins))
                 written += 1
             if not (written or refreshed):
                 return 0
             existing.sort(key=lambda i: i.ts)
             keep = existing[-max(1, max_insights):]
+            retained = sum(id(ins) in new_row_ids for ins in keep)
             if before_write is not None:
                 lines = [json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep]
                 # The existing text writer uses platform-default newline
                 # translation, so hash the bytes that it will actually publish.
                 encoded = "".join(lines).replace("\n", os.linesep).encode("utf-8")
                 digest = hashlib.sha256(encoded).hexdigest()
-                before_write(written, refreshed, digest)
+                before_write(retained, refreshed, digest)
             else:
                 lines = (json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep)
             _atomic_write_lines(
@@ -613,7 +618,7 @@ def append_insights(
             raise
         log.warning("dreaming: insight write failed: %s", e)
         return 0
-    return written
+    return retained
 
 
 def recall_insights(

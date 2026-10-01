@@ -61,6 +61,33 @@ def test_roundtrip_between_trusting_peers(tmp_path, keys):
     assert merged[0].domain is None
 
 
+def test_import_count_excludes_lessons_immediately_removed_by_capacity(tmp_path, keys):
+    bundle = insight_exchange.export_insights(
+        tmp_path / "bundle.json", path=_seed_insights(tmp_path), now=1000.0,
+    )
+    peer_key = _bundle_data(bundle)["peer_key"]
+    dest = tmp_path / "dest.ndjson"
+    texts = [
+        "The shipping route calculation missed remote warehouse closures.",
+        "The approval reminder skipped a pending contract review.",
+        "The inventory forecast double counted returns from the store.",
+    ]
+    existing = [
+        dreaming.DreamInsight(
+            ts=1001.0 + index, kind="failure_pattern", domain=None,
+            text=text,
+            evidence=2, owner="",
+        )
+        for index, text in enumerate(texts)
+    ]
+    assert dreaming.append_insights(existing, path=dest, max_insights=3) == 3
+    imported, reason = insight_exchange.import_insights(
+        bundle, trusted=[peer_key], path=dest, max_insights=3, now=1003.0,
+    )
+    assert (imported, reason) == (0, "ok")
+    assert [row.text for row in dreaming.load_insights(dest)] == [row.text for row in existing]
+
+
 def test_import_halt_before_claim_preserves_the_bundle_for_retry(tmp_path, keys, monkeypatch):
     from maverick import learning_guard
 
