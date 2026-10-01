@@ -783,6 +783,20 @@ def _tools(S, C) -> tuple:
           "finishes.", "number", "Performance", None, "maverick.latency_budget",
           subgroup="Reusing tool results", minimum=100, maximum=600000, integer=True,
           unit="milliseconds", none_text="Off", env=("MAVERICK_TOOL_LATENCY_BUDGET_MS",)),
+        S("tools", "exposure", "Tools described on each request",
+          "How much of the tool list each request to the AI describes up front. The short "
+          "list fits the agent's role, and a specialist pack sees its own tools; agents can "
+          "look up any other tool when they need it.", "select", "Performance", "core",
+          "maverick.config", subgroup="Reusing tool results",
+          choices=(("core", "A short list, and agents look up the rest (recommended)"),
+                   ("full", "Every tool on every request (costs far more per task)")),
+          env=("MAVERICK_TOOL_EXPOSURE",), aliases="tool catalog exposure context tokens"),
+        S("tools", "core_extra", "Tools always described",
+          "Tools to describe on every request as well as the short list, by tool name.",
+          "list", "Performance", [], "maverick.config", subgroup="Reusing tool results",
+          item_label="Tool name", item_hint="scan_finance_anomalies",
+          pattern=r"[a-z0-9_]{1,80}", item_error="a tool name such as read_file",
+          max_items=50),
         S("capabilities", "deferred_tools", "Hide rarely used connectors until needed",
           "Keep the long list of business-system connectors out of each request until an "
           "agent searches for one.", "toggle", "Performance", True, "maverick.agent",

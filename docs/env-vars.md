@@ -258,6 +258,7 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | --- | --- | --- |
 | `MAVERICK_SUPPRESS_SANDBOX_WARNING` | unset | `1` silences the "running without an isolated sandbox" warning. |
 | `MAVERICK_DEFERRED_TOOLS` | unset (on) | `0` disables deferred tool loading, putting every SaaS-connector schema back in the model's per-turn catalog (~600 tools). On by default: the model sees the core toolset + `find_tools` and activates connectors on demand. Also settable via `[capabilities] deferred_tools`. |
+| `MAVERICK_TOOL_EXPOSURE` | unset (`core`) | `core` describes a short, role-aware tool list on each request (about 30-40 tools; a specialist pack sees exactly its `allow_tools`) and the model looks the rest up with `find_tools`; `full` describes every tool except the SaaS long tail (~240 tools, ~47k tokens on every turn). Also settable via `[tools] exposure`; `[tools] core_extra` pins extra tools into the short list. |
 | `MAVERICK_CODE_EXEC` | unset (off) | `1` enables the `code_exec` tool (programmatic tool calling: a sandboxed Python script that orchestrates declared tool calls, keeping raw outputs out of context). Also settable via `[capabilities] code_exec`. |
 | `MAVERICK_FIRECRACKER_STRICT` | `1` (on) | Set `0` to allow Firecracker to fall back to a Docker/hardened sandbox instead of failing. |
 | `MAVERICK_LONG_CMD_TIMEOUT` | `600` | Timeout (seconds) for long-running shell commands. |

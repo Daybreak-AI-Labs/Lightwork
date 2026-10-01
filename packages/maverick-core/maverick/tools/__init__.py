@@ -336,6 +336,12 @@ class ToolRegistry:
         self._core_names: set[str] = set()
         self._core: set[str] = set()
         self._activated: set[str] = set()
+        # Names never exposed NOR discoverable (a pack's deny_tools, or
+        # anything the agent's capability would refuse anyway). run() can
+        # still resolve them -- the capability / ACL check at call time is
+        # the authority; this only keeps them out of the catalog and out of
+        # find_tools' search space.
+        self._hidden: set[str] = set()
         # Listeners receive safe progress before screening, never raw chunks.
         # The agent explicitly releases screened/redacted content at delivery.
         self._chunk_listener = None
@@ -438,10 +444,15 @@ class ToolRegistry:
     # hits. activation only governs what the model SEES -- run() executes
     # any registered tool regardless.
 
-    def enable_deferred(self, core: set[str]) -> None:
-        """Expose only ``core`` (∩ registered) + find_tools to the model."""
+    def enable_deferred(self, core: set[str], *, hidden: set[str] | None = None) -> None:
+        """Expose only ``core`` (∩ registered) + find_tools to the model.
+
+        ``hidden`` names are neither exposed nor discoverable via find_tools
+        (they stay registered, so execution semantics are unchanged).
+        """
         self._deferred = True
-        self._core_names = set(core)
+        self._hidden = set(hidden or ())
+        self._core_names = set(core) - self._hidden
         self._core = {n for n in self._core_names if n in self._tools}
         self._anthropic_cache = None
 
@@ -454,7 +465,8 @@ class ToolRegistry:
     def activate(self, names: list[str]) -> list[str]:
         """Reveal deferred tools to the model. Returns the names that
         resolved to a registered tool (unknown names are ignored)."""
-        resolved = [n for n in names if n in self._tools and self._acl_allows(n) and self._mcp_binding_current(n)]
+        resolved = [n for n in names if n in self._tools and n not in self._hidden
+                    and self._acl_allows(n) and self._mcp_binding_current(n)]
         if resolved:
             self._activated.update(resolved)
             self._anthropic_cache = None
@@ -468,12 +480,12 @@ class ToolRegistry:
         """
         if not self._deferred:
             return [t for n, t in self._tools.items() if self._acl_allows(n) and self._mcp_binding_current(n)]
-        names = self._exposed_names()
+        names = self._exposed_names() - self._hidden
         return [t for n, t in self._tools.items() if n in names and self._acl_allows(n) and self._mcp_binding_current(n)]
 
     def deferred_tools(self) -> list[Tool]:
         """Registered tools not currently exposed -- find_tools' search space."""
-        names = self._exposed_names()
+        names = self._exposed_names() | self._hidden
         return [t for n, t in self._tools.items() if n not in names and self._acl_allows(n) and self._mcp_binding_current(n)]
 
     def to_anthropic(self) -> list[dict[str, Any]]:
@@ -683,7 +695,57 @@ CORE_TOOL_NAMES = frozenset({
     "spend_report", "notify", "compute",
     # multi-agent
     "spawn_subagent", "spawn_swarm",
+    # kernel tools Agent._build_tools registers on top of base_registry
+    # (bus, specialists, governed knowledge, self-learning) -- listed here so
+    # they stay visible under [tools] exposure = "core".
+    "send_to_agent", "recv_from_agent", "delegate_to_agent",
+    "spawn_specialist", "list_specialists", "knowledge_search",
+    "learn_capability", "code_exec",
+    # the read-only data basics 1,700+ specialist packs allow
+    "sql_query_read", "spreadsheet_read",
+    # the discovery meta-tool itself
+    "find_tools",
 })
+
+# Role-specific additions to CORE_TOOL_NAMES under [tools] exposure = "core".
+# Kept small: everything else stays discoverable through find_tools. A role
+# without an entry (worker, writer, summarizer, verifier, a pack's name...)
+# gets exactly CORE_TOOL_NAMES.
+ROLE_TOOL_OVERLAYS: dict[str, frozenset[str]] = {
+    "orchestrator": frozenset({"task_graph", "spend_report"}),
+    "coder": frozenset({
+        "git_advanced", "test_impact", "test_gen", "semantic_code_search",
+        "lsp_bridge", "cross_repo_deps",
+    }),
+    "researcher": frozenset({
+        "arxiv", "wikipedia", "semantic_scholar", "hackernews",
+        "citation_verifier", "web_archive", "spreadsheet",
+    }),
+    "analyst": frozenset({"pandas_query", "spreadsheet", "sql_query", "format_money", "currency"}),
+    "writer": frozenset({"outline_writer", "plain_language", "pandoc", "latex"}),
+}
+ROLE_TOOL_OVERLAYS["coding"] = ROLE_TOOL_OVERLAYS["coder"]
+ROLE_TOOL_OVERLAYS["reviewer"] = ROLE_TOOL_OVERLAYS["coder"]
+ROLE_TOOL_OVERLAYS["revisor"] = ROLE_TOOL_OVERLAYS["coder"]
+# Not every role needs the code-editing tools; the kernel core keeps
+# read_file/write_file/shell for all, and these ride only with code roles.
+_CODE_EDIT_TOOLS = frozenset({"apply_patch", "ast_edit", "preview_diff", "repo_map", "dep_graph"})
+_NON_CODE_ROLES = frozenset({"worker", "researcher", "writer", "analyst", "summarizer",
+                             "verifier", "translator", "vision", "skill_distiller"})
+
+
+def core_tool_names(role: str, *, extra=()) -> frozenset[str]:
+    """The tool names shown up front for ``role`` under exposure = "core".
+
+    ``extra`` is the operator's ``[tools] core_extra`` pin list. Names that
+    are not registered are harmless (enable_deferred intersects).
+    """
+    role = str(role or "").strip().lower()
+    names = set(CORE_TOOL_NAMES) | ROLE_TOOL_OVERLAYS.get(role, frozenset())
+    if role in _NON_CODE_ROLES:
+        names -= _CODE_EDIT_TOOLS
+    names.update(str(t).strip() for t in (extra or ()) if str(t).strip())
+    return frozenset(names)
 
 # Credentialed SaaS/cloud tools that may use ambient host credentials (PR
 # #124): they only register when the operator opts in via
