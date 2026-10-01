@@ -416,10 +416,11 @@ def _decision_from_receipts(
                 matches.append((specificity, item, current))
         if not matches:
             continue
-        most_specific = max(score for score, _item, _current in matches)
-        # An expired newer choice ends its authority; it cannot reveal an older
-        # permanent grant, including one with a less specific scope.
-        if any(not current for score, _item, current in matches if score == most_specific):
+        current_matches = [(score, item) for score, item, current in matches if current]
+        # A receipt's still-current choices retain their usual specificity and
+        # negative-action priority. Only when the newer receipt has no current
+        # match may expiry block fallthrough to an older permanent grant.
+        if not current_matches:
             return EnforcementDecision(
                 False,
                 "no_current_explicit_grant",
@@ -430,9 +431,10 @@ def _decision_from_receipts(
                 profile_revision=profile_revision,
                 evaluated_at=evaluated,
             )
+        most_specific = max(score for score, _item in current_matches)
         actions = {
             str(item.get("action"))
-            for score, item, _current in matches
+            for score, item in current_matches
             if score == most_specific
         }
         if not actions.issubset(_ACTIONS):

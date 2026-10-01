@@ -480,6 +480,40 @@ def test_expired_newer_choice_never_revives_older_grant(
     ).allowed
 
 
+def test_expiry_keeps_current_deny_in_the_same_receipt(
+    store: ConsentPreferenceStore,
+    clock: MutableClock,
+) -> None:
+    _policy(store)
+    _profile(store)
+    receipt = store.record_preferences(
+        "tenant-a",
+        "profile-001",
+        "privacy-notice",
+        1,
+        _context(),
+        [
+            PreferenceChoice("analytics", "deny", channel="web"),
+            PreferenceChoice(
+                "analytics", "grant", vendor_id="vendor-a", expires_at=NOW + 10
+            ),
+        ],
+        expected_revision=0,
+        idempotency_key="mixed-expiry-receipt",
+        actor_sha256=DIGEST_C,
+        retention_until=NOW + 20,
+    )
+    clock.value = NOW + 11
+    decision = store.decide(
+        "tenant-a", "profile-001", "analytics", channel="web",
+        vendor_id="vendor-a", policy_id="privacy-notice",
+    )
+    assert decision.allowed is False
+    assert decision.reason == "explicit_deny"
+    assert decision.action == "deny"
+    assert decision.receipt_id == receipt["receipt_id"]
+
+
 def test_receipt_reactivation_date_is_auditable_and_enforced(
     store: ConsentPreferenceStore,
     clock: MutableClock,
