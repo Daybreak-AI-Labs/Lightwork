@@ -809,6 +809,14 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("AI cost scheduler not started")
         try:
+            from maverick_dashboard.daily_digest_scheduler import (
+                start_daily_digest_scheduler,
+            )
+
+            await run_in_threadpool(start_daily_digest_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("daily summary scheduler not started")
+        try:
             from maverick_dashboard.identity_governance_scheduler import (
                 start_identity_governance_scheduler,
             )
@@ -1467,10 +1475,14 @@ app.include_router(create_ott_ctv_privacy_rights_router())
 # Admin pages (/settings + /users): their own router module -- the first
 # slice of decomposing this file by nav group. See maverick_dashboard.admin_pages.
 from .admin_pages import router as admin_pages_router  # noqa: E402
+from .me_api import api as me_api_router  # noqa: E402
+from .me_api import router as me_router  # noqa: E402
 from .sessions_page import router as sessions_router  # noqa: E402
 
 app.include_router(admin_pages_router)
 app.include_router(sessions_router)
+app.include_router(me_router)
+app.include_router(me_api_router)
 # Settings > All settings (/settings/all + its catalog save/reset API).
 from .privacy_notice_publication_targets_api import (  # noqa: E402
     router as privacy_notice_targets_router,
@@ -8300,6 +8312,9 @@ def channels_page(request: Request, saved: str = "", code: str = "") -> HTMLResp
         "unlinked": "Teams link removed.",
         "link_code": "One-time link code created. Give it to the person; it works once and "
                      "expires in 15 minutes.",
+        "email_sent": "Test email sent. Check that it arrived.",
+        "email_failed": "The test email could not be sent. Check the mail settings "
+                        "(Settings > All settings > Integrations > Email alerts).",
     }.get(saved, "")
     from . import plain_labels, teams_links_api
     for channel in managed:
@@ -8317,11 +8332,22 @@ def channels_page(request: Request, saved: str = "", code: str = "") -> HTMLResp
             "channel_inventory": [row for row in channel_inventory if row["name"] not in managed_names],
             "managed": managed,
             "saved": saved_msg,
-            "saved_failed": saved in {"test_failed", "send_failed"},
+            "saved_failed": saved in {"test_failed", "send_failed", "email_failed"},
             "sendable": ["email", "sms", "slack"],
             **teams_links_api.page_context(code),
+            "mail_configured": _mail_configured(),
         },
     )
+
+
+def _mail_configured() -> bool:
+    """Whether [notifications.email] can send (the Channels page "Test email")."""
+    try:
+        from maverick.notifications import email_configured
+
+        return email_configured()
+    except Exception:  # noqa: BLE001 -- the page must render either way
+        return False
 
 
 @app.post("/channels/save")

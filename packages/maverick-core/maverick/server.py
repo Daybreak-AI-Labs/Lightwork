@@ -578,6 +578,10 @@ def _wire_slack(server, cfg):
         # [channels.slack] thread_replies: answers post under the asking
         # message's thread instead of interleaving into the channel.
         thread_replies=cfg.get("thread_replies"),
+        # Approval buttons and slash commands decide against the server's world;
+        # [channels.slack] approvals_channel is where new cards are posted.
+        world=server.world,
+        approvals_channel=cfg.get("approvals_channel"),
     ))
 
 

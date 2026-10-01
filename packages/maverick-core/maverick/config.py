@@ -2157,6 +2157,40 @@ def get_skill_synthesis() -> dict:
         cfg, "enable", governed_learning_default())}
 
 
+def get_my_work() -> dict:
+    """Return the ``[my_work]`` section with defaults filled in.
+
+    The personal "My work" page (``/me``) is always on. The daily summary it
+    feeds is OFF by default (``digest_enable``): it sends messages to people
+    on a timer, so the operator opts in. ``digest_hour`` is the default local
+    hour (each person can change it on /me), ``digest_poll_seconds`` how often
+    the scheduler looks for people whose summary is due, and
+    ``monthly_spend_limit_dollars`` the per-person monthly spending figure the
+    page compares against (0 = no limit shown). Env override:
+    ``MAVERICK_DAILY_DIGEST``.
+    """
+    cfg = load_config().get("my_work", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    env = env_flag("MAVERICK_DAILY_DIGEST")
+    enable = env if env is not None else _strict_config_bool(cfg, "digest_enable", False)
+
+    def _number(key: str, default: float, *, low: float, high: float) -> float:
+        raw = cfg.get(key, default)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ValueError(f"[my_work] {key} must be a number")
+        return float(min(high, max(low, raw)))
+
+    return {
+        "digest_enable": enable,
+        "digest_hour": int(_number("digest_hour", 8, low=0, high=23)),
+        "digest_poll_seconds": _number("digest_poll_seconds", 300, low=30, high=3600),
+        "monthly_spend_limit_dollars": _number(
+            "monthly_spend_limit_dollars", 0, low=0, high=1_000_000),
+        "send_when_empty": _strict_config_bool(cfg, "send_when_empty", False),
+    }
+
+
 def get_fleet_memory() -> dict:
     """Return the ``[fleet_memory]`` section (agent-agnostic learning plane).
     OFF by default: exposing governed memory to third-party agents is an

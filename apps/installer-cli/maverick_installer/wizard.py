@@ -189,6 +189,7 @@ STEPS: list[tuple[str, str]] = [
     ("persona", "Persona"),
     ("notifications", "Notifications"),
     ("deadline_alerts", "Deadline alerts"),
+    ("daily_summary", "Daily summary and chat approvals"),
     ("webhooks", "Webhooks"),
     ("a2a", "A2A"),
 ]
@@ -6441,6 +6442,71 @@ def _deadline_alerts_step(state: dict[str, Any], notifications: dict[str, Any] |
     return picked
 
 
+def pick_daily_summary(
+    channels: dict[str, dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
+    """Daily summary and chat approvals. Returns ``(my_work, notifications_email,
+    slack_extras, env_vars_needed)``.
+
+    The daily summary ([my_work]) sends each person what is waiting for them
+    (approvals, questions, results, spending) at their own hour through their
+    linked chat apps and email; off unless asked for. Slack approvals need the
+    channel to post cards in and, for the web (non-Socket) receiver, the
+    signing secret.
+    """
+    my_work: dict[str, Any] = {}
+    mail: dict[str, Any] = {}
+    slack: dict[str, Any] = {}
+    envs: list[str] = []
+    if _q_confirm(
+        "Send each person a daily summary of what is waiting for them "
+        "(approvals, questions, results, spending)?",
+        default=False,
+    ):
+        hour = _safe_int(_q_text("  Usual local hour to send it (0-23)", default="8"), default=8)
+        my_work = {"digest_enable": True, "digest_hour": max(0, min(23, hour))}
+        if _q_confirm("  Send summaries by email too? (needs a mail server)", default=False):
+            host = _q_text("  Outgoing mail server (e.g. smtp.example.com)", default="").strip()
+            if host:
+                mail = {
+                    "host": host,
+                    "port": _safe_int(_q_text("  Mail server port", default="587"), default=587),
+                    "user": "${MAVERICK_SMTP_USER}",
+                    "password": "${MAVERICK_SMTP_PASSWORD}",
+                    "from_address": _q_text("  Send as (address)", default="").strip(),
+                    "tls": "starttls",
+                }
+                envs += ["MAVERICK_SMTP_USER", "MAVERICK_SMTP_PASSWORD"]
+    if channels and "slack" in channels and _q_confirm(
+        "Post new approval requests in a Slack channel with Approve / Reject buttons?",
+        default=False,
+    ):
+        room = _q_text("  Slack channel id (starts with C)", default="").strip()
+        if room:
+            slack["approvals_channel"] = room
+        if _q_confirm(
+            "  Will buttons and /lightwork commands reach this server over the web "
+            "(Interactivity URL) rather than Socket Mode?",
+            default=False,
+        ):
+            slack["signing_secret"] = "${SLACK_SIGNING_SECRET}"
+            envs.append("SLACK_SIGNING_SECRET")
+    return my_work, mail, slack, envs
+
+
+def _daily_summary_step(
+    state: dict[str, Any], channels: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Run (or resume) the daily-summary step and fold Slack extras into the
+    Slack channel table. Returns ``(my_work, notifications_email, envs)``."""
+    parts = state.get("_daily_summary") or list(pick_daily_summary(channels))
+    state["_daily_summary"] = parts
+    my_work, mail, slack_extras, envs = parts
+    if slack_extras and isinstance(channels.get("slack"), dict):
+        channels["slack"].update(slack_extras)
+    return my_work, mail, list(envs)
+
+
 def pick_webhooks() -> tuple[dict[str, Any], list[str]]:
     """Outbound run-lifecycle webhooks. Returns (config, env_vars_needed).
 
@@ -9228,6 +9294,8 @@ def write_config(
     deliverables: dict[str, Any] | None = None,
     personas: dict[str, Any] | None = None,
     a2a: dict[str, Any] | None = None,
+    my_work: dict[str, Any] | None = None,
+    notifications_email: dict[str, Any] | None = None,
     web_search_enabled: bool = False,
     skills: dict[str, Any] | None = None,
     self_learning: dict[str, Any] | None = None,
@@ -9419,6 +9487,8 @@ def write_config(
     lines += _cfg_table("persona", persona)
     lines += _cfg_table("notifications", notifications)
     lines += _cfg_deadline_alerts(deadline_alerts)
+    lines += _cfg_table("notifications.email", notifications_email)
+    lines += _cfg_table("my_work", my_work)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)
@@ -10688,6 +10758,10 @@ def run(fast: bool = False, resume: bool = False) -> int:
     deadline_alerts = _deadline_alerts_step(state, notifications)
 
     _announce()
+    my_work_cfg, notifications_email, summary_envs = _daily_summary_step(state, channels)
+    _save_partial(state)
+
+    _announce()
     webhooks, webhook_envs = state.get("_webhooks_pair") or pick_webhooks()
     state["_webhooks_pair"] = [webhooks, webhook_envs]
     _save_partial(state)
@@ -10710,6 +10784,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     extra_envs = (
         set(web_search_envs)
         | set(notify_envs)
+        | set(summary_envs)
         | set(webhook_envs)
         | set(a2a_envs)
         | set(deliverable_envs)
@@ -10767,6 +10842,8 @@ def run(fast: bool = False, resume: bool = False) -> int:
         deliverables=deliverables,
         personas=personas,
         a2a=a2a_cfg,
+        my_work=my_work_cfg,
+        notifications_email=notifications_email,
         web_search_enabled=web_search_enabled,
         skills=signed_skills
         if (

@@ -179,6 +179,24 @@
   </div>
   {% endfor %}
 
+  <div class="section-head"><h2 id="email-alerts">Email alerts and the daily summary</h2></div>
+  <div class="panel">
+    {% if mail_configured %}
+    <p class="muted">Lightwork can send alerts and each person's daily summary by email. Send a test
+      to check the mail settings (Settings &rsaquo; All settings &rsaquo; Integrations &rsaquo; Email alerts).</p>
+    <form method="post" action="/channels/test-email" class="ch-send"
+          data-channels-confirm="Send a test email? It goes to the address you enter.">
+      <label class="ch-field">Send a test email to
+        <input class="input" type="email" name="to" required placeholder="you@company.com" autocomplete="email" />
+      </label>
+      <button type="submit" class="btn">Test email</button>
+    </form>
+    {% else %}
+    <p class="muted">Email sending is not set up. Add the mail server under Settings &rsaquo; All settings &rsaquo;
+      Integrations &rsaquo; Email alerts (host, port, sign-in, from address), then come back to test it.</p>
+    {% endif %}
+  </div>
+
   {% if channel_inventory %}
   <div class="section-head"><h2>Other chat apps set up during installation</h2></div>
   <div class="panel">

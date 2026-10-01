@@ -868,7 +868,7 @@ SETTINGS: tuple[Setting, ...] = (
       "select", "Integrations", "ntfy", "maverick.notifications",
       choices=(("none", "Do not send alerts"), ("ntfy", "ntfy phone alerts"),
                ("slack", "Slack"), ("discord", "Discord"),
-               ("pushover", "Pushover"))),
+               ("pushover", "Pushover"), ("email", "Email"))),
     S("notifications", "ntfy_topic", "ntfy topic",
       "Your private ntfy topic name. Treat it like a password.",
       "secret", "Integrations", "", "maverick.notifications"),

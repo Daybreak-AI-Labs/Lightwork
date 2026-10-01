@@ -182,6 +182,8 @@ CHANNEL_FIELDS = {
     ("discord", "bot_token"): ("Bot token", "From the Discord Developer Portal, under your app's Bot page.", False),
     ("slack", "app_token"): ("App token (starts with xapp-)", "From your Slack app's Basic Information page, under App-Level Tokens.", False),
     ("slack", "bot_token"): ("Bot token (starts with xoxb-)", "From your Slack app's OAuth & Permissions page.", False),
+    ("slack", "signing_secret"): ("Signing secret", "From your Slack app's Basic Information page. Needed only when buttons and slash commands reach this server over the web (Interactivity URL) rather than Socket Mode.", True),
+    ("slack", "approvals_channel"): ("Approvals channel", "The Slack channel id (starts with C) where new approval cards with Approve and Reject buttons are posted. Leave empty to post none.", True),
     ("whatsapp_cloud", "access_token"): ("Access token", "From Meta for Developers, WhatsApp > API Setup.", False),
     ("whatsapp_cloud", "phone_number_id"): ("Phone number ID", "Shown next to your WhatsApp business number on the same API Setup page.", False),
     ("whatsapp_cloud", "verify_token"): ("Verification word", "Any word you choose. Enter the same word in Meta's webhook settings.", False),

@@ -375,6 +375,21 @@ class EventKind:
     # approval_id:int, status:str (approved|denied), decided_by:str,
     # occurred_at:float (when the vote and outbox row committed).
     APPROVAL_DECISION = "approval_decision"
+    # A vote taken from a chat channel (maverick.channel_approvals): the
+    # signed APPROVAL_DECISION above stays the authority; this note says
+    # WHICH channel carried the decision. payload: approval_id:int,
+    # decision:str, channel:str (slack|teams|email), decided_by:str,
+    # effective:bool, approval_event_id:str.
+    CHANNEL_APPROVAL_DECISION = "channel_approval_decision"
+    # Identity linking (maverick.channel_identities): a chat account was tied
+    # to / cut from a Lightwork person. payload: channel:str,
+    # external_id:str, principal:str, actor:str, method:str (admin|code).
+    CHANNEL_IDENTITY_LINKED = "channel_identity_linked"
+    CHANNEL_IDENTITY_UNLINKED = "channel_identity_unlinked"
+    # A daily summary was sent (maverick.daily_digest). No content: only the
+    # recipient, the channel and item counts. payload: recipient:str,
+    # channel:str, approvals:int, results:int, questions:int, ok:bool.
+    DIGEST_SENT = "digest_sent"
     # Earned Autonomy (maverick.earned_autonomy): a consequence card pinned a
     # prediction for a high-stakes action BEFORE it ran, so predicted-vs-actual
     # accuracy is provable from the chain. payload: card:str, principal:str,

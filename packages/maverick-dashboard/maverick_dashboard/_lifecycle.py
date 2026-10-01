@@ -192,6 +192,8 @@ def register_main_components(app, supervisor):
          "_scheduler_thread"),
         ("ai_inventory", "ai_inventory_scheduler", "stop_ai_inventory_scheduler", "_scheduler_thread"),
         ("ai_cost", "ai_cost_scheduler", "stop_ai_cost_scheduler", "_scheduler_thread"),
+        ("daily_digest", "daily_digest_scheduler", "stop_daily_digest_scheduler",
+         "_scheduler_thread"),
         ("identity", "identity_governance_scheduler", "stop_identity_governance_scheduler", "_scheduler_thread"),
         ("data_use_checks", "data_use_scheduler", "stop_data_use_scheduler", "_scheduler_thread"),
         ("deadline_alerts", "deadline_alerts_scheduler", "stop_deadline_alerts_scheduler",

@@ -72,7 +72,9 @@ KNOWN_SECTIONS = frozenset({
     # [mcp]: the tool server's limits and switches (maverick_mcp.settings),
     # [replay]: recording run traces (replay/trace.py); both on All settings.
     "mcp", "replay",
-    "model_cost_tiers", "model_proxy", "models", "notifications", "oauth", "observability",
+    "model_cost_tiers", "model_proxy", "models",
+    # [my_work] the personal "My work" page and daily summary (maverick.daily_digest).
+    "my_work", "notifications", "oauth", "observability",
     "paper_review",
     "obsidian", "operations_scientist",
     "perf", "persona", "planning", "plugins", "privacy",
