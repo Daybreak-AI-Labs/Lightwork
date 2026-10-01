@@ -20,7 +20,7 @@ The initial native group ran at `87c5df110b1884e33a619ad09f2e234ece004b7b`. This
 
 | Local group | Executed evidence |
 | --- | --- |
-| Conversation/native review/export | 538 passed, 12 skipped across answer projection, clarification, inbox, conversation organization, Action Center, My Work, Copilot context/registry/tasks/handoffs, Gist previews, public links, signoff, project reviews, chat threads, selected bundles, handoffs, full archive, offline viewer, quorum and readable handoff suites. |
+| Conversation/native review/export | 538 passed, 12 skipped across answer projection, clarification, inbox, conversation organization, Action Center, My Work, Copilot context/registry/tasks/handoffs, Gist previews, public links, signoff, project reviews, chat threads, selected bundles, handoffs, full task archive, mobile offline snapshot, quorum and readable handoff suites. |
 | Attachment/Stop/stream/error lifecycle | 148 passed, two skipped across native attachment admission/chat/download, restart budget, task-map rendering, product errors, stream state machine, attachment store/companions and Stop boundaries. The initially failing warning assertion was repaired; all 10 tests in its file passed on rerun. |
 | Live handoff/result projection | All five `test_answer_projection.py` cases passed, including the new rendered-template assertion that the closure notice is inside `#answer-panel`. Four of these already occur in the initial count. |
 | Requester history | Four `test_requested_approval_history.py` cases passed using real approval records: requester isolation, current task access, filtered pagination and redacted non-execution projection. |
@@ -41,3 +41,7 @@ Python AST/Ruff, JavaScript syntax, Jinja parsing, ledger JSON/source-ID checks 
 - Full archive preparation visibly refuses above 10,000 events, 200 episodes or 20 MiB; a truncated body is never called complete. Offline viewing does not import execution authority.
 - GitHub fault injection proves local uncertainty/recovery behavior only. Absence from its bounded latest-100 reconciliation window cannot establish zero disclosure.
 - Installed authentication, assistive-technology, mobile/file-picker, reverse-proxy, export rendering and distributed/backend qualification remain explicit in per-ID records. Draft translations still require qualified human language review in the owning localization workstream.
+
+## Receiving-journey coverage correction
+
+The 12 `test_offline_bundle.py` cases above cover the separate `maverick-offline/1` mobile snapshot. They did not execute `lightwork-archive-viewer.html`, its schema/refusal paths, or WebCrypto. The five `test_goal_bundle_completeness.py` cases did verify the native v1 task-archive producer. New native-export/offline-browser receiving and deliverable-manifest tests are authored but remain unrun until the coordinated quiet browser phase; see `../remaining-acceptance-qualification.md`. The historical pass counts remain valid, but are not evidence of archive-viewer behavior.

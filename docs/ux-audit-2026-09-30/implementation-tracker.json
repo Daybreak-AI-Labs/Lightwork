@@ -1439,8 +1439,8 @@
     "implementation_evidence": [
       "027751b: retention form sends explicit null, API distinguishes omitted from null and persists zero no-pruning value, reads effective global config back and refuses masked external overrides."
     ],
-    "validation": "Source review confirms explicit null serializes to no-pruning zero, omitted fields remain unchanged, effective global readback is compared after recorded save, and external overrides produce an explicit refusal. Retention-receipt tests below do not substitute for this settings matrix. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
-    "remaining": "Mixed-field and all-field clearing from an existing 30-day policy, reload/scheduler state and externally enforced override browser acceptance remain; do not describe those as executed.",
+    "validation": "The full compliance controls API module passed18/18 in ordinary and secure postures on native Python3.10.19, source7798b3d plus the recorded acceptance-test patch. Three new regressions prove mixed/all explicit-null resets from30days, omitted-field preservation, fresh effective readback, native pruning preserving old records, recorded policy changes and explicit external-policy override refusal. Exact source/test/artifact hashes and distinct case IDs: remaining-acceptance-qualification.json.",
+    "remaining": "Consolidated immutable-source rerun and rendered browser retention-form interaction remain; native save/readback/enforcement null-reset acceptance passed locally. No live data was deleted.",
     "evidence_slice": "slices/identity-final-qualification.json"
   },
   {
@@ -2019,8 +2019,8 @@
     "implementation_evidence": [
       "Downloaded standalone offline archive viewer opens schema-v1 bundles locally without network/actions, displays provenance and explicit legacy-completeness caveat, refuses invalid/newer/oversized files."
     ],
-    "validation": "Core test_offline_bundle.py (12) passed: independently read archive compatibility, local schema/checksum validation and useful invalid/newer/oversized refusals. Viewer is read-only; current task execution never inherits imported authority. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
-    "remaining": "Installed offline WebCrypto/file-picker/browser qualification remains. Archive viewing is implemented; resumable cross-installation execution is intentionally not implied.",
+    "validation": "Coverage correction: test_offline_bundle.py (12 cases) exercises the separate maverick-offline/1 mobile snapshot, not the v1 task archive viewer. The five test_goal_bundle_completeness.py cases exercise native task export bounds, counts, checksum and SQLite snapshot consistency. Actual offline receiving/browser refusals are now authored in tests/browser/archive_receiving.spec.js and remain unrun pending the coordinated quiet browser phase. See remaining-acceptance-qualification.md.",
+    "remaining": "Actual offline browser/WebCrypto/file-picker receiving and refusal cases are authored but unrun. The supplied viewer is read-only; importing execution authority is not offered.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -2034,7 +2034,7 @@
       "HTTP archive streams the completed private temporary file in 64 KiB chunks, rechecks current content authority and source ownership before release, and closes temporary storage on completion/cancellation.",
       "Compatible v1 goal/events/episodes body retains canonical SHA-256; manifest records exact counts, scope and consistent snapshot. Offline viewer verifies counts and raw canonical payload checksum using local WebCrypto, or explicitly reports inability to verify."
     ],
-    "validation": "Core test_goal_bundle_completeness.py (5) and test_offline_bundle.py (12) passed. Oversized event/episode counts fail before bytes are released; manifest counts, total-byte bound and snapshot-concurrency checks run locally on SQLite. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "validation": "Core test_goal_bundle_completeness.py (5) passed: oversized event/episode counts refuse before download, manifest/count/byte bounds and SQLite snapshot concurrency are checked. Correction: the separately passing test_offline_bundle.py covers mobile snapshots and does not qualify this task archive viewer. New actual task-archive browser cases are authored, unrun. See slices/conversation-acceptance-qualification.md and remaining-acceptance-qualification.md.",
     "remaining": "Dedicated PostgreSQL repeatable-read and installed cancelled-download/large-file memory qualification remain. Current product explicitly refuses beyond 10,000 events, 200 episodes or 20 MiB instead of silently exporting incomplete history.",
     "evidence_slice": "slices/conversation.json"
   },
@@ -2046,7 +2046,7 @@
     "implementation_evidence": [
       "Authorized handoff.html produces escaped readable objective/outcome/versioned artifacts/source URLs/questions/permissions/completeness, separate from unsanitized technical archive."
     ],
-    "validation": "Core test_deliverable_handoff.py (4) and offline archive tests (12) passed. Readable escaped handoff contains provenance/completeness and remains a separate authorized output from the warned technical archive. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
+    "validation": "Core test_deliverable_handoff.py (4) and task-export completeness cases (5) passed. Readable escaped handoff provenance/completeness is a separate authorized output from the warned technical archive. Correction: the 12 test_offline_bundle.py cases cover a different mobile snapshot and do not prove task-archive browser rendering. See slices/conversation-acceptance-qualification.md.",
     "remaining": "Installed assistive-technology/print-layout qualification remains. Technical archive may contain internal/tool details and is never described as universally scrubbed.",
     "evidence_slice": "slices/conversation.json"
   },

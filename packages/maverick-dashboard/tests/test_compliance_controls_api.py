@@ -138,6 +138,85 @@ def test_retention_periods_save_and_apply(monkeypatch):
     assert applied["receipt"]["status"] == "completed"
 
 
+def test_keep_one_retention_period_preserves_omitted_fields_and_records_change(monkeypatch):
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    initial = {"audit_days": 30, "messages_days": 30, "events_days": 30}
+    saved = client.post("/api/v1/compliance/retention", json=initial)
+    assert saved.status_code == 200, saved.text
+    rows = _capture_audit(monkeypatch)
+    response = client.post("/api/v1/compliance/retention", json={"audit_days": None, "messages_days": 90})
+    assert response.status_code == 200, response.text
+    assert response.json()["effective"]["audit_days"] is None
+    assert response.json()["effective"]["messages_days"] == 90
+    # An explicit Keep is persisted; an omitted field is not a request to clear.
+    assert settings_store.load_overlay()["retention"] == {"audit_days": 0, "messages_days": 90, "events_days": 30}
+    config.reset_config_cache()
+    readback = client.get("/api/v1/compliance/retention")
+    assert readback.status_code == 200, readback.text
+    periods = {field["key"]: field["days"] for field in readback.json()["fields"]}
+    assert periods["audit_days"] is None and periods["messages_days"] == 90 and periods["events_days"] == 30
+    changes = [(entry["key"], entry["old"], entry["new"]) for _, entry in rows
+               if entry.get("source") == "compliance"]
+    assert changes == [("audit_days", 30, 0), ("messages_days", 30, 90)]
+    assert all(entry["actor"] for _, entry in rows)
+
+
+def test_keep_all_retention_periods_survives_reload_and_native_enforcement(monkeypatch, tmp_path):
+    from maverick import config
+    from maverick.audit.retention import enforce
+    from maverick_dashboard.compliance_controls_api import RETENTION_FIELDS
+
+    initial = {key: 30 for key, _ in RETENTION_FIELDS}
+    assert client.post("/api/v1/compliance/retention", json=initial).status_code == 200
+    world = app_mod._world()
+    goal = world.create_goal("Old retained task")
+    with world._writing() as connection:
+        connection.execute("INSERT INTO goal_events(goal_id,agent,kind,content,ts) VALUES(?,?,?,?,?)",
+                           (goal, "fixture", "observation", "Keep this original record", 1.0))
+        connection.execute("INSERT INTO episodes(goal_id,started_at,ended_at) VALUES(?,?,?)", (goal, 1.0, 2.0))
+    rows = _capture_audit(monkeypatch)
+    response = client.post("/api/v1/compliance/retention", json=dict.fromkeys(initial))
+    assert response.status_code == 200, response.text
+    assert all(value is None for value in response.json()["effective"].values())
+    config.reset_config_cache()
+    readback = client.get("/api/v1/compliance/retention")
+    assert readback.status_code == 200, readback.text
+    assert all(field["days"] is None for field in readback.json()["fields"])
+    # The actual scheduled enforcement entry point reads the effective config;
+    # it must preserve old records after Keep, not just return a friendly label.
+    report = enforce(db_path=world.path, audit_dir=tmp_path / "audit", now=2_000_000_000.0)
+    assert "events" not in report and "episodes" not in report
+    assert len(world.goal_events(goal, limit=10)) == 1
+    assert world._read_one("SELECT COUNT(*) FROM episodes WHERE goal_id=?", (goal,))[0] == 1
+    changes = {entry["key"]: (entry["old"], entry["new"]) for _, entry in rows
+               if entry.get("source") == "compliance"}
+    assert changes == dict.fromkeys(initial, (30, 0))
+
+
+def test_keep_retention_refuses_effective_installation_override(monkeypatch):
+    from maverick import config
+
+    assert client.post("/api/v1/compliance/retention", json={"messages_days": 30}).status_code == 200
+    # Explicitly model an operator-enforced layer above the UI overlay. Keep the
+    # native save/readback route; only that external policy boundary is supplied.
+    current = config.load_global_config
+
+    def enforced():
+        result = dict(current())
+        result["retention"] = {**result.get("retention", {}), "messages_days": 30}
+        return result
+
+    monkeypatch.setattr(config, "load_global_config", enforced)
+    response = client.post("/api/v1/compliance/retention", json={"messages_days": None})
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["effective"]["messages_days"] == 30
+    assert "overridden by installation policy" in response.json()["detail"]["message"]
+    readback = client.get("/api/v1/compliance/retention")
+    assert next(field for field in readback.json()["fields"] if field["key"] == "messages_days")["days"] == 30
+
+
 def test_people_list_export_and_erase_are_workspace_scoped(monkeypatch):
     _seed_person()
     people = client.get("/api/v1/compliance/people").json()["people"]

@@ -128,8 +128,8 @@
     "implementation_evidence": [
       "027751b: retention form sends explicit null, API distinguishes omitted from null and persists zero no-pruning value, reads effective global config back and refuses masked external overrides."
     ],
-    "validation": "Source review confirms explicit null serializes to no-pruning zero, omitted fields remain unchanged, effective global readback is compared after recorded save, and external overrides produce an explicit refusal. Retention-receipt tests below do not substitute for this settings matrix. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
-    "remaining": "Mixed-field and all-field clearing from an existing 30-day policy, reload/scheduler state and externally enforced override browser acceptance remain; do not describe those as executed."
+    "validation": "The full compliance controls API module passed18/18 in ordinary and secure postures on native Python3.10.19, source7798b3d plus the recorded acceptance-test patch. Three new regressions prove mixed/all explicit-null resets from30days, omitted-field preservation, fresh effective readback, native pruning preserving old records, recorded policy changes and explicit external-policy override refusal. Exact source/test/artifact hashes and distinct case IDs: remaining-acceptance-qualification.json.",
+    "remaining": "Consolidated immutable-source rerun and rendered browser retention-form interaction remain; native save/readback/enforcement null-reset acceptance passed locally. No live data was deleted."
   },
   {
     "id": "LW-103",

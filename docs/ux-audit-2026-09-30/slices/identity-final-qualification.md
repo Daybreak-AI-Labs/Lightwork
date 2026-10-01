@@ -109,7 +109,7 @@ acceptance was never attempted. They do not resolve every per-row browser case.
 | LW-099 | Persistent workspace context, change guard and pinned-deployment refusal. | Actual two-tab draft/approval workspace-switch browser scenario. |
 | LW-100 | Initial server-side task controls plus fresh owner/permission checks, including project submission. | Final authenticated viewer/member/admin and mid-session role-change matrix. |
 | LW-101 | Safe styled failure, local-only return and fresh sign-in without old-code replay. | Controlled IdP failure/expiry/outage/invalid-state plus narrow keyboard interaction. |
-| LW-102 | Explicit null means no pruning, omission means preserve; effective readback detects forced overrides. | All-clear and mixed-clear from 30 days, reload/scheduler/override acceptance; not covered by receipt tests. |
+| LW-102 | Explicit null means no pruning, omission means preserve; effective readback detects forced overrides. | Native all-clear/mixed-clear, reload/enforcement and override acceptance now pass in both postures; see ../remaining-acceptance-qualification.md. Rendered browser interaction remains. |
 | LW-103 | Current policy/scope dry run, holds/dependencies, dirty-form invalidation and fresh fenced authority. | Installed global-admin-with-active-tenant workflow and PostgreSQL; external holds remain attested. |
 | LW-104 | Persistent skipped/failed/unknown store outcomes, partial reporting and unresolved-only retry. | OS-specific interruption/locked-file and PostgreSQL qualification. |
 | LW-107 | Source or explicit legacy/manual provenance, revision-bound correction, durable suppression and private audit. | Installed correction/reconsolidation journey; model recall quality is not established. |
