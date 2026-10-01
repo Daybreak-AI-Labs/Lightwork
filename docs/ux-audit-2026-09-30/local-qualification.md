@@ -1,7 +1,8 @@
 # Local qualification checkpoints
 
-Local testing is authorized. These results replace the earlier testing deferral;
-they do not certify an installed release or live provider integration. All
+Local testing was authorized after the earlier deferral, then explicitly stopped
+by the user. Completed results are preserved below; no further tests are queued.
+These results do not certify an installed release or live provider integration. All
 provider, identity-provider and billing boundaries use synthetic data or mocks.
 No deployment configuration or credentials were changed.
 
@@ -16,7 +17,13 @@ failures/errors, at unchanged `2decc28`. The complete secure-default phase also
 passes **40,099 tests with the same 597 skips and 22 warnings**, zero failures/errors.
 Both serial heavy phases pass all seven selected tests, each with eight repeated
 collection skips and one warning. All four source checks are clean and unchanged.
-Full Python 3.10/3.11 compatibility qualification is now in progress.
+The user subsequently instructed: **"okay stop testing it."** Testing is stopped.
+Both Python 3.10/3.11 full collections passed with the same 40,695 executable
+identities and eight collection skips. The active Python 3.10 ordinary run was
+stopped at its displayed 36% progress; it is incomplete, not a passing full run.
+Python 3.10 heavy and both Python 3.11 runtime phases were cancelled before
+starting. The exact task-owned process tree and controller are confirmed absent;
+source remained unchanged. No further tests or test-driven fixes are scheduled.
 
 The first final08 ordinary attempt stopped after 1,255.54 seconds with ten
 recorded failures and no final JUnit result. Read-only Windows probes established
@@ -33,7 +40,7 @@ posture at frozen `2decc28`. The fresh full ordinary phase on that corrected
 source now passes in ordinary and secure postures, including both serial heavy
 phases. Both Python 3.10/3.11
 environments now pass [exact final09 installation checks](compatibility-final09-installation-2decc28.md),
-with full compatibility runtime still pending.
+with full compatibility runtime interrupted/unrun at the user's instruction.
 
 The complete browser cohort passes **108 distinct cases** across default/setup
 profiles at `1719f2fc0e01216e8daea5f77228da9835409657`, and all **1,711 JavaScript
@@ -72,7 +79,7 @@ or rewrite its failed outcome. Content-free timeout diagnostics remain in place.
 
 | Evidence | Exact execution source | Current result and limit |
 | --- | --- | --- |
-| [Corrected-source integrated Python](python-integrated-final09-2decc28.md) | `2decc28d5a2709ec1d362bdfb8499aaa13aacfce` | Ordinary and secure each pass 40,099 tests with the same 597 skips, zero failures/errors; warnings are 25/22 respectively. Serial heavy passes seven tests in each posture, with eight repeated collection skips and one warning each. All four source checks are clean. Supported-interpreter phases remain pending. |
+| [Corrected-source integrated Python](python-integrated-final09-2decc28.md) | `2decc28d5a2709ec1d362bdfb8499aaa13aacfce` | Ordinary and secure each pass 40,099 tests with the same 597 skips, zero failures/errors; warnings are 25/22 respectively. Serial heavy passes seven tests in each posture, with eight repeated collection skips and one warning each. All four source checks are clean. Supported-interpreter runtime was subsequently stopped/cancelled by the user. |
 | [Complete final08 ordinary run](python-ordinary-final08-57a027a.md) | `57a027adfdd8df955d33aaea88ec7089aafc6c60` | 40,098 passed, one proven corruption-test failure, 597 skipped, 23 warnings and zero errors; source unchanged. Seven added skips are PostgreSQL cursor cases with separate passing evidence in both postures. The deterministic test repair and fresh final09 runtime are tracked separately. |
 | [Corrected-source static gates and package builds](static-build-qualification-2decc28.md) | `2decc28d5a2709ec1d362bdfb8499aaa13aacfce` | All 26 checks pass, including eight wheels and 4,827 exact-source payload files. Both full payload-module probes pass 18 cases. Full runtime phases remain pending. |
 | [Final08 static gates and package builds](static-build-qualification-57a027a.md) | `57a027adfdd8df955d33aaea88ec7089aafc6c60` | All 26 checks pass: Ruff, Vulture, 16 offline contracts and eight wheels. All 4,827 payload files match the exact Git archive. Frozen checkout unchanged. Runtime qualification remains separate. |

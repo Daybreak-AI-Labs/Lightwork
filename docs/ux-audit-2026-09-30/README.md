@@ -15,8 +15,11 @@ focused and full-suite checkpoints.
 - All 195 entries and all 24 source fields were retrieved from ten lossless
   Library parts, each checked for its expected entry count and end marker.
   `source-provenance.json` records the resolved source parts.
-- Local tests and synthetic application journeys are now authorized, superseding
-  the earlier test deferral. Live provider calls remain excluded. Historical
+- Local tests and synthetic application journeys were authorized after the
+  earlier test deferral. The user subsequently said "okay stop testing it";
+  active testing is stopped and all queued phases are cancelled. Completed and
+  interrupted results are preserved in the local qualification record.
+  Live provider calls remain excluded. Historical
   slice validation notes describe their original checkpoints, not a prohibition
   on subsequent local verification.
 - No merge, deployment, credential changes, or production changes are authorized.
