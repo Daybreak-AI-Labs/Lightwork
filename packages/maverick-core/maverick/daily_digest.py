@@ -120,6 +120,36 @@ def _questions(world, principal: str, *, owner_filter: str | None) -> list[dict[
     return out
 
 
+KEY_EXPIRY_DAYS = 7
+
+
+def _expiring_keys(principal: str, *, owner_filter: str | None, now: float) -> list[dict[str, Any]]:
+    """Access keys that stop working within a week (``maverick_dashboard.api_keys``
+    when that module is installed; silently nothing otherwise)."""
+    try:
+        from maverick_dashboard.api_keys import expiring_soon, list_keys
+    except ImportError:
+        return []
+    try:
+        keys = expiring_soon(list_keys(owner=owner_filter), within_days=KEY_EXPIRY_DAYS, now=now)
+    except Exception:  # noqa: BLE001 -- an unreadable key store never breaks the summary
+        log.debug("digest key lookup failed", exc_info=True)
+        return []
+    rows = []
+    for key in sorted(keys, key=lambda k: float(getattr(k, "expires_at", 0) or 0)):
+        expires_at = float(getattr(key, "expires_at", 0) or 0)
+        rows.append({
+            "id": str(getattr(key, "id", "")), "label": str(getattr(key, "label", "") or "")[:200],
+            "prefix": str(getattr(key, "prefix", "") or ""), "owner": str(getattr(key, "owner", "") or ""),
+            "expires_at": expires_at,
+            "days_left": max(0, int((expires_at - now) // 86400)),
+            "href": "/api-keys",
+        })
+        if len(rows) >= MAX_ITEMS:
+            break
+    return rows
+
+
 def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: bool = False,
                    now: float | None = None, time_zone: str = "UTC",
                    spend_limit: float | None = None) -> dict[str, Any]:
@@ -154,6 +184,7 @@ def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: 
         "approvals": _approvals(world, principal, can_decide=can_decide, now=current),
         "results": _results(world, principal, owner_filter=owner_filter, now=current),
         "questions": _questions(world, principal, owner_filter=owner_filter),
+        "expiring_keys": _expiring_keys(principal, owner_filter=owner_filter, now=current),
         "spending": {
             "dollars": round(float(spend.get("dollars") or 0), 4),
             "runs": int(spend.get("runs") or 0),
@@ -166,6 +197,7 @@ def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: 
         "approvals": len(digest["approvals"]),
         "results": len(digest["results"]),
         "questions": len(digest["questions"]),
+        "expiring_keys": len(digest["expiring_keys"]),
     }
     digest["empty"] = not any(digest["counts"].values())
     return digest
@@ -199,6 +231,11 @@ def render_text(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
         lines.append(f"{len(digest['results'])} recent result(s):")
         lines += [f"  - {r['title']} ({r['status_label']})" for r in digest["results"]]
         lines.append("")
+    if digest.get("expiring_keys"):
+        lines.append(f"{len(digest['expiring_keys'])} access key(s) stop working within 7 days:")
+        lines += [f"  - {k['label'] or k['prefix']} (in {k['days_left']} day(s))"
+                  for k in digest["expiring_keys"]]
+        lines.append("")
     if digest["empty"]:
         lines += ["Nothing is waiting for you today.", ""]
     lines.append(_spend_line(digest["spending"]))
@@ -223,6 +260,9 @@ def render_html(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
     body.append(section("Questions an agent is waiting on", [esc(q["question"]) for q in digest["questions"]]))
     body.append(section("Recent results", [
         f"{esc(r['title'])} <em>({esc(r['status_label'])})</em>" for r in digest["results"]]))
+    body.append(section("Access keys that stop working within 7 days", [
+        f"{esc(k['label'] or k['prefix'])} <em>(in {k['days_left']} day(s))</em>"
+        for k in digest.get("expiring_keys", [])]))
     if digest["empty"]:
         body.append("<p>Nothing is waiting for you today.</p>")
     body.append(f"<p>{esc(_spend_line(digest['spending']))}</p>")

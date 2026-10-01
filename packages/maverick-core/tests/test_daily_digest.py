@@ -65,7 +65,7 @@ def test_compose_for_a_person_who_may_decide(tmp_path):
     assert [r["id"] for r in digest["results"]] == [ids["mine"]]
     assert [q["question"] for q in digest["questions"]] == ["Which quarter?"]
     assert digest["spending"]["dollars"] == pytest.approx(1.25)
-    assert digest["counts"] == {"approvals": 2, "results": 1, "questions": 1}
+    assert digest["counts"] == {"approvals": 2, "results": 1, "questions": 1, "expiring_keys": 0}
     assert digest["empty"] is False
 
 
@@ -222,3 +222,43 @@ def test_slack_digest_sends_a_dm_with_blocks(tmp_path, monkeypatch):
     assert ok and dms[0][1] == "U7" and dms[0][2][0]["type"] == "header"
     monkeypatch.delenv("SLACK_BOT_TOKEN")
     assert daily_digest._send_slack("user:a", digest, [{"channel": "slack", "external_id": "U7"}], {}) is False
+
+
+def test_expiring_access_keys_section_is_optional(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    from maverick import daily_digest
+    from maverick.slack_interactive import digest_blocks
+
+    world = _world(tmp_path)
+    now = 1_800_000_000.0
+    assert daily_digest.compose_digest(world, "user:a", can_decide=False, now=now)["expiring_keys"] == []
+
+    class Key:
+        def __init__(self, label, owner, days):
+            self.id, self.label, self.owner, self.prefix = label, label, owner, "lw_" + label[:3]
+            self.expires_at = now + days * 86400
+
+        def usable(self, at):
+            return at < self.expires_at
+
+    keys = [Key("deploy", "user:a", 2), Key("later", "user:a", 20), Key("bobs", "user:b", 1)]
+    fake = types.ModuleType("maverick_dashboard.api_keys")
+    fake.list_keys = lambda owner=None: [k for k in keys if owner is None or k.owner == owner]
+    fake.expiring_soon = lambda rows, within_days=7, now=None: [
+        k for k in rows if k.usable(now) and k.expires_at <= now + within_days * 86400]
+    monkeypatch.setitem(sys.modules, "maverick_dashboard.api_keys", fake)
+    mine = daily_digest.compose_digest(world, "user:a", can_decide=False, now=now)
+    assert [k["label"] for k in mine["expiring_keys"]] == ["deploy"]
+    assert mine["expiring_keys"][0]["days_left"] == 2 and mine["counts"]["expiring_keys"] == 1
+    assert mine["empty"] is False
+    everyone = daily_digest.compose_digest(world, "user:root", can_decide=True,
+                                           sees_everything=True, now=now)
+    assert [k["label"] for k in everyone["expiring_keys"]] == ["bobs", "deploy"]
+    text = daily_digest.render_text(mine)
+    assert "access key(s) stop working within 7 days" in text and "deploy (in 2 day(s))" in text
+    assert "deploy" in daily_digest.render_html(mine)
+    assert "stop working within 7 days" in digest_blocks(mine)[1]["text"]["text"]
+    fake.list_keys = lambda owner=None: (_ for _ in ()).throw(RuntimeError("store down"))
+    assert daily_digest.compose_digest(world, "user:a", can_decide=False, now=now)["expiring_keys"] == []

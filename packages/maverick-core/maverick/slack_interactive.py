@@ -320,7 +320,13 @@ def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[di
         blocks.append({"type": "section", "text": _mrkdwn(
             f"*{len(results)} recent result{'s' if len(results) != 1 else ''}*\n"
             + "\n".join(f"• {r['title']} — {r['status_label']}" for r in results[:10]))})
-    if not (approvals or questions or results):
+    keys = digest.get("expiring_keys") or []
+    if keys:
+        blocks.append({"type": "section", "text": _mrkdwn(
+            f"*{len(keys)} access key{'s' if len(keys) != 1 else ''} stop working within 7 days*\n"
+            + "\n".join(f"• {k.get('label') or k.get('prefix')} — in {k.get('days_left', 0)} day(s)"
+                        for k in keys[:10]))})
+    if not (approvals or questions or results or keys):
         blocks.append({"type": "section", "text": _mrkdwn("Nothing is waiting for you today.")})
     limit = spend.get("limit_dollars") or 0
     spent = f"${float(spend.get('dollars') or 0):.2f}"

@@ -95,7 +95,9 @@ link and unlink is written to the audit log.
   `/lightwork ask` runs through the Socket Mode bot; over the web it points
   the person at the bot.
 * **Daily summary** — at the hour the person chose on My work (default 08:00
-  in their time zone) they get a DM with the same content as the page.
+  in their time zone) they get a DM with the same content as the page:
+  approvals, questions, recent results, access keys that stop working within
+  7 days (when the API-keys feature is installed) and spending this month.
   Turned on with `[my_work] digest_enable = true` (Settings → Integrations →
   Daily summary).
 

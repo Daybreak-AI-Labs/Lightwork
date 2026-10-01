@@ -3,7 +3,7 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% set d = digest %}
-  {% set waiting = d.counts.approvals + d.counts.questions %}
+  {% set waiting = d.counts.approvals + d.counts.questions + d.counts.expiring_keys %}
   {% call hero('Your day', 'My work',
                subtitle='What is waiting for you',
                lede='Requests waiting for your decision, questions an agent needs
@@ -79,6 +79,18 @@
     <p class="muted">No results in the last 7 days.</p>
     {% endif %}
   </div>
+
+  {% if d.expiring_keys %}
+  <div class="section-head"><h2>Access keys that stop working soon</h2></div>
+  <div class="panel">
+    <ul>
+      {% for k in d.expiring_keys %}
+      <li><a href="{{ k.href }}">{{ k.label or k.prefix }}</a> <span class="muted">· stops in {{ k.days_left }} day{{ '' if k.days_left == 1 else 's' }}</span></li>
+      {% endfor %}
+    </ul>
+    <p class="muted">Make a new key before the old one stops, then switch your scripts over.</p>
+  </div>
+  {% endif %}
 
   <div class="section-head"><h2>Spending this month</h2></div>
   <div class="panel">
