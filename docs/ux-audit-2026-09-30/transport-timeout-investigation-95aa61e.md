@@ -8,7 +8,16 @@ The failing test was `packages/maverick-channels/tests/test_transport_supervisio
 
 A read-only inspection of the failed synthetic fixture found all eight durable admissions. The final admission reached `received` about 1.538 seconds after the first receipt was created. Message 0 reached `execution=completed`, `delivery=sending`, revision 5; messages 1 through 7 remained `received/not_ready`, revision 2. The last corresponding audit event was about 1.736 seconds after the first receipt was created. Receipt and audit metadata hashes are preserved in the [machine-readable evidence](transport-timeout-investigation-95aa61e.json); no original fixture files were changed.
 
-This narrows the stall to the first message's sending transition or confirmation, before any later handler began. A persisted `sending` revision does not prove the awaited journal mutation returned: `GovernedRecordStore.update` also flushes its audit outbox before returning. The retained row has a cleared audit outbox and the matching audit event, but no original coroutine or native stack identifies the active operation. A native lock/rename stall and earlier process-global contamination remain hypotheses, not established causes.
+This establishes the last durable transition, before any later handler began;
+it does not identify the worker's active operation or receipt. The worker catches
+processing exceptions and continues, so an exception leaving the first receipt
+in `sending` followed by a later pre-claim stall is also consistent with these
+rows. A persisted `sending` revision does not prove the awaited journal mutation
+returned: `GovernedRecordStore.update` also flushes its audit outbox before
+returning. The retained row has a cleared audit outbox and the matching audit
+event, but no original coroutine or native stack identifies the active operation.
+A native lock/rename stall and earlier process-global contamination remain
+hypotheses, not established causes.
 
 The transport worker, delivery journal, governed records, privacy records, file locking, world model, root test fixtures, and affected test file have identical Git blobs between the previously passing source `500fc87363a492def69722ef19d2cc518d171286` and `2a765aa`. The receipt records each compared blob.
 
