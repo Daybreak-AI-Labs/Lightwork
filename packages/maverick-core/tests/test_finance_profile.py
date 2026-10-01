@@ -307,7 +307,6 @@ def test_flow_dispatch_refuses_a_duty_conflict(tmp_path, monkeypatch):
 
     _config(tmp_path, _ON + '[finance.sod]\nmode = "warn"\n')
     monkeypatch.setattr("maverick.flow.ir.action_tool_policy_error", lambda t: "")
-    monkeypatch.setattr("maverick.shield_policy.scan_block", lambda text: None)
     rows = _audit(monkeypatch)
     denial = tool_authz.authorize("approve_expense", {}, origin="flow")
     assert denial and "separation of duties" in denial

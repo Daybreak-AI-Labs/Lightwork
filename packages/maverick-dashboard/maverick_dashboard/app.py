@@ -448,13 +448,14 @@ def _theme_context(request: Request) -> dict:
         "density": resolve_density(request),
         "custom_theme_css": theme_css(custom),
         "custom_theme_names": sorted(custom),
-        # ``lang`` is the selected UI language (drives ``t()`` and ``dir``);
-        # ``page_lang`` is what the page body is actually written in and is
-        # what ``<html lang>`` declares (W3-73). They differ until the
-        # templates are translated.
+        # ``lang`` is the selected UI language (drives ``t()``); ``page_lang``
+        # is what the page body is actually written in and is what
+        # ``<html lang>`` and ``dir`` declare (W3-73, UX-198). They differ
+        # until the templates are translated, so an English body is never
+        # mirrored because a few chrome strings are Arabic.
         "lang": lang,
         "page_lang": content_lang(lang),
-        "dir": dir_for(lang),
+        "dir": dir_for(content_lang(lang)),
         "t": lambda key: _t(key, lang),
         **journey_context(request, lang),
     }
@@ -1046,8 +1047,13 @@ def enforce_page_visibility(
     """
     if request is None:  # WebSocket connection -- page policy doesn't apply
         return
+    from . import auth as auth_boundary
     from . import ui_visibility
 
+    # A route that carries its own credential (the signed consent webhook) has
+    # no dashboard role to compare against the page policy of its parent page.
+    if auth_boundary._self_authenticated_path(request.url.path):
+        return
     page = ui_visibility.page_for(request.url.path)
     if page is None:
         return
@@ -1920,6 +1926,10 @@ _AUTH_EXEMPT = {
     "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
     "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
     "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
+    # The public share page formats its answer with this renderer, and its
+    # recipient has no dashboard sign-in. The file is a public, dependency-free
+    # script that builds DOM from text and carries no data.
+    "/static/lightwork-markdown.js",
     # The LLM gateway authenticates every call with its OWN bearer inside
     # maverick.llm_gateway (same rationale as /a2a/v1): callers are foreign
     # agents that hold the gateway credential, never the dashboard bearer.
@@ -3757,20 +3767,14 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     (``[personas]`` config) so a logged-in analyst lands on their deliverables;
     ``?role=all`` widens to everything, ``?role=<r>`` picks a single role."""
     from .auth import scope_to_suites
-    from .deliverables import build_inbox, persona_roles_for
+    from .deliverables import build_inbox, persona_roles_for, recent_runs_by_domain
 
     # Job-function scoping: a scoped caller's inbox lists only their
     # departments' deliverable specs (plus generic packs), matching /agents.
     specs = scope_to_suites(request, _deliverable_specs(), suite_of=lambda s: s.get("suite"))
     owner = goal_owner_filter(request)
-    runs_by_domain: dict[str, list] = {}
-    for s in specs:
-        try:
-            runs_by_domain[s["domain"]] = _world().list_goals(
-                domain=s["domain"], owner=owner, limit=5, order="desc"
-            )
-        except Exception:  # pragma: no cover -- a bad domain query never breaks the page
-            runs_by_domain[s["domain"]] = []
+    # One grouped read for every pack's latest runs, not one query per pack.
+    runs_by_domain = recent_runs_by_domain(_world(), [s["domain"] for s in specs], owner=owner)
     ids = [g.id for runs in runs_by_domain.values() for g in runs]
     try:
         signoffs = _world().signoffs_for_goals(ids)
@@ -7702,6 +7706,7 @@ def tools_page(
     """Bounded registered-tool inventory (post-ACL, post-rate-limit)."""
     tools: list[dict] = []
     error = None
+    enterprise_blocked_total = 0
     query = q.strip()
     tool_page = {
         "query": query,
@@ -7716,21 +7721,24 @@ def tools_page(
     }
     try:
         from maverick.sandbox import build_sandbox
-        from maverick.tools import base_registry
+        from maverick.tools import base_registry, enterprise_unavailable_tool_names
 
         from .tool_summary import plain_tool_summary
 
         wm = _world()  # honor the configured backend (SQLite or Postgres)
         sb = build_sandbox()
         reg = base_registry(world=wm, sandbox=sb)
+        enterprise_blocked = enterprise_unavailable_tool_names()
         catalog = [
             {
                 "name": t.name,
                 "description": (t.description or "")[:240],
                 "summary": plain_tool_summary(t.name, t.description),
+                "enterprise_blocked": t.name in enterprise_blocked,
             }
             for t in sorted(reg.all(), key=lambda x: x.name)
         ]
+        enterprise_blocked_total = sum(1 for tool in catalog if tool["enterprise_blocked"])
         folded = query.casefold()
         filtered = [
             tool
@@ -7768,7 +7776,12 @@ def tools_page(
     return templates.TemplateResponse(
         request,
         "tools.html",
-        {"tools": tools, "error": error, "tool_page": tool_page},
+        {
+            "tools": tools,
+            "error": error,
+            "tool_page": tool_page,
+            "enterprise_blocked_total": enterprise_blocked_total,
+        },
     )
 
 
@@ -8186,7 +8199,7 @@ async def permissions_page(
         {
             "perm": perm,
             "permissions_can_manage_sandbox": has_global_permission(request, "admin"),
-            "permissions_can_manage_tools": has_permission(request, "operate"),
+            "permissions_can_manage_tools": has_global_permission(request, "operate"),
         },
     )
 
@@ -12467,10 +12480,23 @@ async def connections_page(request: Request) -> HTMLResponse:
             people = _people(rbac.list_users(), labels, _signed_in_principals())
         except Exception:
             people = []
+    try:
+        from maverick.tools import enterprise_unavailable_tool_names
+        refused = enterprise_unavailable_tool_names()
+    except Exception:  # pragma: no cover -- a missing notice never hides the page
+        refused = frozenset()
+    # Name only the well-known systems that really are refused, so the notice
+    # stays true as individual connectors move onto saved connections.
+    refused_examples = [label for key, label in (
+        ("salesforce", "Salesforce"), ("servicenow", "ServiceNow"),
+        ("workday", "Workday"), ("sap", "SAP"), ("jira", "Jira"),
+    ) if key in refused]
     return templates.TemplateResponse(request, "connections.html", {
         "connections_enabled": enabled,
         "can_manage_keys": has_permission(request, "admin"),
         "people": people,
+        "enterprise_connectors_limited": bool(refused),
+        "enterprise_connector_examples": refused_examples,
     })
 
 

@@ -71,6 +71,49 @@ def test_agent_from_profile_uses_active_handoff_grant_for_parent(tmp_path):
     assert child.capability.permits("shell") is False
 
 
+def test_root_specialist_is_bounded_by_the_run_capability(tmp_path):
+    """The depth-0 specialist root runs under the pack's envelope AND the run's
+    own grant (``ctx.capability``: for a fleet agent, its role + the caller's
+    grant). It used to mint the pack's envelope alone, so a narrower run grant
+    was silently widened back out to everything the pack allows. The run's
+    principal is kept, so the oversight control plane still governs the work
+    as the agent that was dispatched."""
+    ctx = _ctx(tmp_path)
+    ctx.capability = Capability(
+        principal="agent:dept-ops.finance",
+        allow_tools=frozenset({"read_file"}),
+        max_risk="low",
+    )
+    profile = DomainProfile(
+        name="finance", compartment="finance",
+        persona="You are a finance specialist. Cite every figure.",
+        allow_tools=["read_file", "web_search", "write_file"],
+        deny_tools=["shell"], max_risk="high",
+    )
+
+    root = agent_from_profile(profile, ctx, "Analyze Q3 revenue")
+
+    assert root.capability.permits("read_file") is True
+    assert root.capability.permits("web_search") is False  # pack allows it, run grant does not
+    assert root.capability.permits("write_file") is False
+    assert root.capability.max_risk == "low"
+    assert root.capability.principal == "agent:dept-ops.finance"
+
+
+def test_root_specialist_without_a_run_capability_keeps_its_own_envelope(tmp_path):
+    ctx = _ctx(tmp_path)
+    assert ctx.capability is None
+    profile = DomainProfile(
+        name="finance", compartment="finance",
+        allow_tools=["read_file", "web_search"], max_risk="medium",
+    )
+
+    root = agent_from_profile(profile, ctx, "Analyze Q3 revenue")
+
+    assert root.capability.permits("web_search") is True
+    assert root.capability.principal == "agent:finance-0"
+
+
 def test_agent_from_profile_no_autonomy_block_uses_own_suite_default(tmp_path):
     ctx = _ctx(tmp_path)
     parent = agent_from_profile(

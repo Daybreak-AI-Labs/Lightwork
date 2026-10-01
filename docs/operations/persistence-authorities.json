@@ -10672,22 +10672,22 @@
       },
       "source_sites": [
         {
-          "line": 33,
-          "function": "module",
+          "line": 99,
+          "function": "overrides_path",
           "kind": "data_dir",
           "expression": "data_dir('runtime-overrides.toml')"
         },
         {
-          "line": 662,
+          "line": 710,
           "function": "_write_state",
           "kind": "atomic_write_text",
-          "expression": "atomic_write_text(OVERRIDES_PATH, body)"
+          "expression": "atomic_write_text(path, body)"
         },
         {
-          "line": 80,
+          "line": 117,
           "function": "_wrap",
           "kind": "cross_process_lock",
-          "expression": "cross_process_lock(OVERRIDES_PATH)"
+          "expression": "cross_process_lock(overrides_path())"
         }
       ]
     },

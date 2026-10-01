@@ -84,9 +84,14 @@
   {% endif %}
 
   {% if items %}
-    <div class="section-head"><h2>Results</h2></div>
+    {# One page of the deliverables at a time: the whole catalogue is thousands. #}
+    {% set pg = paginate(request.query_params.get('page')) %}
+    <div class="section-head">
+      <h2>Results</h2>
+      {% if pg.pages > 1 %}<span class="muted">Showing {{ pg.first }}–{{ pg.last }} of {{ '{:,}'.format(pg.total) }}</span>{% endif %}
+    </div>
     <div class="card-grid">
-      {% for it in items %}
+      {% for it in pg.page_items %}
         <div class="card">
           <div class="dlv-card__head">
             <span class="dlv-card__label">{{ it.deliverable }}</span>
@@ -111,6 +116,16 @@
           {% endif %}
         </div>
       {% endfor %}
+      {% if pg.pages > 1 %}
+        {# Keep the chosen role (or the explicit "all") on the next page. #}
+        {% set role_q = request.query_params.get('role') %}
+        {% set page_link = '/deliverables?' ~ (('role=' ~ (role_q | urlencode) ~ '&') if role_q else '') ~ 'page=' %}
+        <nav class="dlv-pager" aria-label="Results pages">
+          {% if pg.prev %}<a class="btn" href="{{ page_link ~ pg.prev }}" rel="prev">Previous</a>{% endif %}
+          <span class="muted">Page {{ pg.page }} of {{ pg.pages }}</span>
+          {% if pg.next %}<a class="btn" href="{{ page_link ~ pg.next }}" rel="next">Next</a>{% endif %}
+        </nav>
+      {% endif %}
     </div>
   {% elif has_results or role or showing_mine %}
     <div class="mv-empty">
@@ -159,6 +174,7 @@
     }
     .dlv-run:hover { border-color: var(--brand-border); }
     .dlv-run__title { flex: 1 1 auto; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dlv-pager { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-3); }
   </style>
 {% endblock %}
 {% block scripts_extra %}

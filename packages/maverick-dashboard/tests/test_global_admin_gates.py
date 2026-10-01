@@ -38,13 +38,14 @@ ADMIN_PAGES = (
 #:   settings_store._write  -> config.dashboard_overrides_path(), which is
 #:                             config_path().parent/<basename>
 #:   suite_grants, ui_visibility -> same maverick_home() root
-#:   runtime_overrides      -> OVERRIDES_PATH, a module-level constant bound at
-#:                             IMPORT time. data_dir() is tenant-aware, but
-#:                             freezing it at import captures the tenant active
-#:                             then (none, in practice), so every write lands in
-#:                             the shared file whatever tenant is active later.
-#:                             That freeze is its own latent bug; until it is
-#:                             fixed the sink is global and the gate must match.
+#:   runtime_overrides      -> overrides_path(), resolved per call at the
+#:                             operator floor (MAVERICK_HOME / MAVERICK_TENANT /
+#:                             client binding). A workspace selected for a
+#:                             request deliberately does not move it: the
+#:                             overlay is deployment-wide policy every
+#:                             workspace runs under, so the sink is global and
+#:                             the gate must match. A per-workspace overlay
+#:                             would be a separate, layered design.
 GLOBAL_SINK_MODULES = frozenset({
     "rbac", "invites", "settings_store", "suite_grants", "ui_visibility",
     "runtime_overrides",

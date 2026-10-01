@@ -299,6 +299,141 @@ def test_backup_include_keys_opts_back_in():
     assert "data/audit/keys/signing.key" in members
 
 
+_WORKSPACE_KEY_FILES = (
+    "tenants/acme/audit/keys/signing.key",
+    "tenants/clientco/keys/at_rest.d/old.key",
+    "tenants/clientco/keys/at_rest.key",
+)
+
+
+def _seed_workspace_key_material(home):
+    """Per-workspace key files at their real locations: the audit signing key
+    (audit/signing.py) and a client deployment's at-rest key + keyring
+    (crypto_at_rest.py), all under ``tenants/<id>/``."""
+    for name in _WORKSPACE_KEY_FILES:
+        path = home / Path(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\x05" * 32)
+    # Not secrets: a wrapped DEK and a public key.
+    (home / "tenants" / "clientco" / "keys" / "dek.wrapped").write_bytes(b"\x06" * 64)
+    (home / "tenants" / "acme" / "audit" / "keys" / "signing.pub").write_bytes(b"\x07" * 32)
+
+
+def _whole_home(home):
+    return backup.recovery_scope(home, "installation:test", bytes(range(32)), whole_home=True)
+
+
+def test_backup_excludes_workspace_key_material_by_default(tmp_path):
+    """A whole-home backup must withhold every workspace's audit signing key and
+    a client deployment's at-rest keys too, not only the ones at the archive
+    root: anyone holding the archive could otherwise decrypt that workspace's
+    data and forge its tamper-evident audit trail."""
+    home = tmp_path / "wholehome"
+    _seed(home)
+    _seed_key_material(home)
+    _seed_workspace_key_material(home)
+
+    with _whole_home(home):
+        tar = backup.create_backup(tmp_path / "default.tgz")
+    with tarfile.open(tar, "r:gz") as archive:
+        members = archive.getnames()
+    assert not any(name.endswith(".key") for name in members), members
+    # Ciphertext and public keys still ship: recovery of the payload needs them.
+    assert "data/tenants/clientco/keys/dek.wrapped" in members
+    assert "data/tenants/acme/audit/keys/signing.pub" in members
+    assert "data/world.db" in members
+
+
+def test_backup_include_keys_keeps_workspace_key_material(tmp_path):
+    home = tmp_path / "wholehome"
+    _seed(home)
+    _seed_workspace_key_material(home)
+
+    with _whole_home(home):
+        tar = backup.create_backup(tmp_path / "with-keys.tgz", include_keys=True)
+    with tarfile.open(tar, "r:gz") as archive:
+        members = archive.getnames()
+    for name in _WORKSPACE_KEY_FILES:
+        assert f"data/{name}" in members, members
+
+
+def test_withheld_key_files_lists_what_the_operator_must_escrow(tmp_path):
+    home = tmp_path / "wholehome"
+    _seed(home)
+    _seed_key_material(home)
+    _seed_workspace_key_material(home)
+
+    with _whole_home(home):
+        listed = backup.withheld_key_files()
+    assert listed == sorted([
+        "audit/keys/signing.key",
+        "keys/at_rest.d/k1.key",
+        "keys/at_rest.key",
+        *_WORKSPACE_KEY_FILES,
+    ])
+
+
+def test_replace_existing_restore_preserves_live_workspace_keys(tmp_path):
+    """A keys-excluded archive must not turn a live workspace key into a
+    replacement target: deleting it would leave that workspace's restored data
+    unreadable."""
+    source = tmp_path / "source"
+    _seed(source)
+    _seed_workspace_key_material(source)
+    with _whole_home(source):
+        archive = backup.create_backup(tmp_path / "no-keys.tgz")
+
+    destination = tmp_path / "destination"
+    _seed_workspace_key_material(destination)
+    live = destination / "tenants" / "clientco" / "keys" / "at_rest.key"
+    live.write_bytes(b"\x09" * 32)
+    with _whole_home(destination):
+        backup.restore_backup(archive, replace_existing=True)
+    assert live.read_bytes() == b"\x09" * 32
+    assert (destination / "tenants" / "acme" / "audit" / "keys" / "signing.key").exists()
+
+
+def test_archive_carrying_only_workspace_keys_does_not_make_live_root_keys_disposable(tmp_path):
+    """Archives made before workspace keys were withheld carry them without any
+    root-level key. Restoring one with replace_existing must not read that as
+    'this archive includes keys' and delete the live root keys it lacks."""
+    source = tmp_path / "source"
+    _seed(source)
+    _seed_workspace_key_material(source)
+    with _whole_home(source):
+        legacy_shaped = backup.create_backup(tmp_path / "legacy.tgz", include_keys=True)
+
+    destination = tmp_path / "destination"
+    _seed(destination)
+    _seed_key_material(destination)
+    with _whole_home(destination):
+        backup.restore_backup(legacy_shaped, replace_existing=True)
+    assert (destination / "keys" / "at_rest.key").read_bytes() == b"\x00" * 32
+    assert (destination / "audit" / "keys" / "signing.key").read_bytes() == b"\x02" * 32
+
+
+def test_live_listing_for_an_older_archive_matches_what_the_archive_carries(tmp_path):
+    """The installation upgrade check lists the live home the way the snapshot it
+    took before the upgrade was listed (``include_keys`` taken from the archive)
+    and demands the same files. An archive from before workspace keys were
+    withheld holds them but no root key, so the live listing must keep the
+    workspace keys and still leave out the root keys the archive never had."""
+    source = tmp_path / "source"
+    _seed(source)
+    _seed_workspace_key_material(source)
+    with _whole_home(source):
+        older = backup.create_backup(tmp_path / "older.tgz", include_keys=True)
+        for name in ("keys/at_rest.key", "audit/keys/signing.key"):  # appeared later
+            (source / Path(name)).parent.mkdir(parents=True, exist_ok=True)
+            (source / Path(name)).write_bytes(b"\x08" * 32)
+        expected = backup.read_manifest(older)["files"]
+        stage = tmp_path / "stage"
+        stage.mkdir()
+        observed = backup._stage(
+            source, stage, include_keys=backup._archive_includes_keys(expected))
+    assert set(observed) == set(expected)
+
+
 def test_replace_existing_restore_preserves_live_keys_when_archive_excludes_them(tmp_path):
     """replace_existing unlinks live files absent from the archive. A default
     (keys-excluded) archive must not turn the live at-rest/audit keys into
@@ -567,6 +702,39 @@ def test_cli_backup_create_info_restore():
     r = runner.invoke(main, ["backup", "restore", tarball])
     assert r.exit_code == 0 and "restored into" in r.output
     assert (data_dir() / "world.db").exists()
+
+
+def test_cli_backup_create_names_the_key_files_left_out():
+    from click.testing import CliRunner
+    from maverick.cli import main
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    _seed_key_material(root)
+
+    r = CliRunner().invoke(main, ["backup", "create"])
+
+    assert r.exit_code == 0, r.output
+    before_written = r.output.split("backup written:")[0]
+    for name in ("keys/at_rest.key", "keys/at_rest.d/k1.key", "audit/keys/signing.key"):
+        assert name in before_written, r.output
+    assert "dek.wrapped" not in r.output and "signing.pub" not in r.output
+    # The last line stays the parseable result line.
+    assert r.output.strip().splitlines()[-1].startswith("backup written:")
+
+
+def test_cli_backup_create_with_keys_does_not_claim_any_were_left_out():
+    from click.testing import CliRunner
+    from maverick.cli import main
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    _seed_key_material(root)
+
+    r = CliRunner().invoke(main, ["backup", "create", "--include-keys"])
+
+    assert r.exit_code == 0, r.output
+    assert "left out" not in r.output.lower()
 
 
 def test_create_requires_operator_key_by_default(monkeypatch):

@@ -309,8 +309,10 @@ def _active_cache_context() -> tuple[str, str]:
 
 
 def _to_goal_out(g) -> GoalOut:
+    from .goal_waiting import open_question_ids
     from .plain_labels import risk_label
 
+    open_ids = open_question_ids(_world(), g)
     risk = risk_label(g) or {}
     return GoalOut(
         id=g.id,
@@ -320,6 +322,10 @@ def _to_goal_out(g) -> GoalOut:
         result=g.result,
         risk_tier=risk.get("tier"),
         risk_reasons=risk.get("reasons"),
+        needs_input=bool(open_ids),
+        open_question_ids=open_ids,
+        created_at=g.created_at,
+        updated_at=g.updated_at,
     )
 
 
@@ -630,6 +636,9 @@ def _board_overview(w, owner, days: int) -> dict:
             "done": by_status.get("done", 0),
             "blocked": by_status.get("blocked", 0),
         },
+        # Every status with its own count, so the page can show queued, failed,
+        # cancelled and draft goals separately instead of lumping the rest.
+        "by_status": by_status,
         "window": window,
         "daily": list(daily.values()),
         "domains": sorted(domains.values(), key=lambda r: r["total"], reverse=True)[:8],
@@ -1720,6 +1729,9 @@ def goal_events(
 
     since = replay_cursor(since)
     events, has_more = event_page(w, goal_id, since, limit)
+    from .goal_waiting import open_question_ids
+
+    open_ids = open_question_ids(w, g)
     return GoalEventsResponse(
         status=g.status,
         result=g.result,
@@ -1730,7 +1742,10 @@ def goal_events(
             for e in events
         ],
         has_more=has_more,
-        terminal=g.status in TERMINAL_RUN_STATUSES and not has_more,
+        # A goal waiting for an answer is blocked but not finished.
+        terminal=g.status in TERMINAL_RUN_STATUSES and not has_more and not open_ids,
+        needs_input=bool(open_ids),
+        open_question_ids=open_ids,
     )
 
 
@@ -13383,9 +13398,10 @@ async def disable_tool(request: Request, name: str) -> None:
 
     Writes ~/.maverick/runtime-overrides.toml (NOT config.toml), which
     the kernel unions into the deny-list. Takes effect on the next goal
-    with no restart.
+    with no restart. That file is shared by every workspace, so the global
+    role is required; a role held only inside one workspace is not enough.
     """
-    require_permission(request, "operate")
+    require_global_permission(request, "operate")
     from maverick.runtime_overrides import disable_tool as _disable
 
     try:
@@ -13400,9 +13416,9 @@ async def enable_tool(request: Request, name: str) -> dict:
 
     Only clears overrides set here. The response returns the freshly resolved
     effective state so a config ACL that still denies the tool cannot be
-    optimistically shown as enabled.
+    optimistically shown as enabled. Global role required, as for disable.
     """
-    require_permission(request, "operate")
+    require_global_permission(request, "operate")
     from maverick.runtime_overrides import enable_tool as _enable
 
     try:
@@ -14077,8 +14093,20 @@ def run_fleet_agent(
     # the role + caller grants. domain_capability only narrows (never broadens),
     # and an unknown/disabled pack leaves the grant unchanged.
     if agent.domain:
-        from maverick.domain import available_domains, domain_capability
+        from maverick.domain import available_domains, domain_capability, enabled_domains
 
+        # Same rule as POST /goals: a specialist whose pack is gone, or whose
+        # department is switched off, cannot run. Refuse it rather than quietly
+        # running an unbriefed generic agent under the specialist's name.
+        if agent.domain not in enabled_domains():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "This specialist isn't available right now: its department "
+                    "may be switched off, or it was removed. Switch the "
+                    "department back on or deploy it again, then try again."
+                ),
+            )
         prof = available_domains().get(agent.domain)
         if prof is not None:
             cap = domain_capability(prof, cap, agent_principal)
@@ -14092,6 +14120,11 @@ def run_fleet_agent(
         owner=fleet.owner,
         execution_principal=agent_principal,
     )
+    if agent.domain:
+        # Run AS the specialist: the orchestrator builds the root from the
+        # pack (persona, refusals, workflow, deliverable contract) when the
+        # goal carries its domain, exactly like POST /goals with a domain.
+        w.set_goal_domain(goal_id, agent.domain)
     record_run(fleet_name, agent.name, goal_id)
     # Schedule against the authenticated caller (or the shared anonymous lane
     # when auth is off), not the fleet-agent audit principal.  Agent names are

@@ -171,6 +171,29 @@ def test_shell_renders_search_context_and_serves_new_assets():
             assert "html" not in response.headers["content-type"]
 
 
+def test_chat_shell_emits_search_context_so_record_search_can_run():
+    """The chat pages show the finder's record controls, so they must also carry
+    the context the record-search script needs; without it the script returns
+    early and 'Search records' silently does nothing."""
+    from maverick_dashboard import app as dash_app
+    dash_app._world_cache.clear()
+    world = world_model.WorldModel(world_model.DEFAULT_DB)
+    gid = world.create_goal("find the vendor", "")
+    world.close()
+    marker = 'name="lightwork-search-context" content="'
+    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+        for path in ("/chat", f"/chat/goal/{gid}"):
+            page = client.get(path)
+            assert page.status_code == 200, (path, page.text)
+            assert 'id="navfinder-search"' in page.text, path
+            assert "lightwork-record-search.js" in page.text, path
+            assert marker in page.text, path
+        # Same context value as the product shell, so the API accepts it.
+        shell = client.get("/goals").text
+        chat = client.get("/chat").text
+        assert shell.split(marker)[1].split('"')[0] == chat.split(marker)[1].split('"')[0]
+
+
 def test_review_links_reach_registered_pages_with_bounded_references(monkeypatch):
     monkeypatch.setenv("MAVERICK_TENANT", "workspace-a")
     with TestClient(app, headers={"Origin":"http://testserver"}) as client:

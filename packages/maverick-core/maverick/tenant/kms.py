@@ -193,6 +193,29 @@ def _kms_config_for(tenant_id: str | None) -> dict:
         return dict(base.get("kms") or {})
 
 
+def _tenant_own_key_id(tenant_id: str | None) -> str | None:
+    """The key id ``tenant_id`` pinned in ITS OWN ``tenants/<id>/config.toml``
+    ``[kms]`` (BYOK), or ``None``.
+
+    Only the tenant's own overlay counts: a key inherited from the global
+    config is the operator's and keeps the documented "env wins over config"
+    precedence. An unreadable overlay yields ``None`` (as ``_kms_config_for``
+    falls back to global config), never another tenant's key.
+    """
+    if tenant_id is None:
+        return None
+    try:
+        from ..config import _load_config_file
+        from ..paths import _tenant_segment, maverick_home
+        overlay_path = maverick_home() / "tenants" / _tenant_segment(tenant_id) / "config.toml"
+        if not overlay_path.exists():
+            return None
+        key_id = ((_load_config_file(overlay_path) or {}).get("kms") or {}).get("key_id")
+    except Exception:
+        return None
+    return (str(key_id).strip() or None) if key_id else None
+
+
 def get_kms(tenant_id: str | None = None) -> KMS:
     """The KMS provider for ``tenant_id``. ``[kms] provider`` selects it (per the
     tenant's own config overlay when given); default local.
@@ -210,9 +233,11 @@ def get_kms(tenant_id: str | None = None) -> KMS:
         # HSM-backed provider must never be downgraded to in-process key material
         # (fail-closed, consistent with crypto_at_rest). Callers surface this
         # (doctor's at-rest check, the audit-seal CLI) rather than writing plaintext.
-        # The resolved cfg is passed so the backend uses THIS tenant's key_id.
+        # The resolved cfg is passed so the backend uses THIS tenant's region/
+        # address, and the tenant's OWN key_id is pinned so a server-wide
+        # MAVERICK_KMS_KEY_ID can't wrap its DEK under the operator's key (BYOK).
         from ..kms_backends import build_cloud_kms
-        return build_cloud_kms(provider, cfg)
+        return build_cloud_kms(provider, cfg, key_id=_tenant_own_key_id(tenant_id))
     return LocalKMS()
 
 

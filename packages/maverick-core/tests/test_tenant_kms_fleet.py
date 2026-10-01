@@ -156,6 +156,38 @@ def test_each_tenant_resolves_its_own_provider_and_key(monkeypatch):
     assert isinstance(K.get_kms("globex"), K.LocalKMS)
 
 
+def test_tenants_own_key_beats_the_server_wide_env_key(monkeypatch):
+    # BYOK: the customer pinned THEIR key so they can revoke ours. An operator's
+    # server-wide MAVERICK_KMS_KEY_ID must not silently wrap their DEK instead.
+    monkeypatch.setenv("MAVERICK_KMS_KEY_ID", "operator-global-cmk")
+    _write_tenant_kms("acme", '[kms]\nprovider = "aws"\nkey_id = "acme-byok-cmk"\n')
+
+    assert K.get_kms("acme").key_id == "acme-byok-cmk"
+
+
+def test_server_wide_env_key_is_the_fallback_for_a_tenant_without_its_own(monkeypatch):
+    monkeypatch.setenv("MAVERICK_KMS_KEY_ID", "operator-global-cmk")
+    _write_tenant_kms("globex", '[kms]\nprovider = "aws"\n')
+
+    assert K.get_kms("globex").key_id == "operator-global-cmk"
+
+
+def test_env_key_still_wins_over_the_global_config_key(monkeypatch):
+    # "Env vars win over config" is the documented rule for the operator's OWN
+    # setting; only a tenant's own pinned key is protected from the env key.
+    from maverick.config import config_path
+
+    cfg = config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text('[kms]\nprovider = "aws"\nkey_id = "global-config-cmk"\n',
+                   encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_KMS_KEY_ID", "operator-global-cmk")
+    _write_tenant_kms("globex", '[kms]\nregion = "us-east-1"\n')
+
+    assert K.get_kms("globex").key_id == "operator-global-cmk"
+    assert K.get_kms(None).key_id == "operator-global-cmk"
+
+
 def test_byok_resolution_ignores_ambient_context(monkeypatch):
     # Even with a different tenant active in the context, get_kms(tid) reads tid's
     # config — so a fleet op rotating tenant X never wraps with tenant Y's key.

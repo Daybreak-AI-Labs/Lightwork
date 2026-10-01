@@ -5,6 +5,14 @@ significant (changes behavior across every sandbox backend), so per CLAUDE.md
 ("If a fix is ambiguous or architecturally significant, write it up and ASK")
 it is deliberately left unapplied.
 
+**Interim guard (UX-013).** Until this is decided, every host-side git call in
+that path refuses a workspace whose git settings define a filter (so a planted
+`smudge`/`clean` command cannot run on the host; Git LFS repositories are
+refused too) and runs with repository hooks off, using
+`git_safety.git_metadata_may_execute_filters` / `git_env_without_user_config`.
+That is a static scan of what git reads, not isolation: routing the calls
+through `sandbox.exec()` as proposed below is still the real fix.
+
 ## The problem (launch-audit HIGH)
 
 Coding mode's apply/validate/verify path runs `git` on the **host** via raw

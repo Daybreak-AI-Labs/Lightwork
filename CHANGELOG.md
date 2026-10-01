@@ -56,6 +56,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shows each provider's list status. `[models] discovery` (default on, wizard
   question) and `MAVERICK_MODEL_DISCOVERY=0` switch it off;
   `discovery_ttl_minutes` sets freshness.
+- **Tools and Connections say what Enterprise mode refuses** — while
+  Enterprise mode is on, a signed-in person's task cannot run the
+  hand-written connector tools that read server-wide environment credentials
+  (Salesforce, ServiceNow, Workday, SAP, Jira, Slack and more than sixty
+  others).
+  The Tools page now marks each such tool "Not available in Enterprise mode
+  yet" and counts them, and the Connections page warns that a saved connection
+  does not unlock them, so an administrator learns this before rollout instead
+  of from a refused task. `maverick.tools.enterprise_unavailable_tool_names()`
+  states the same rule the registry applies at call time. Moving those
+  connectors onto saved connections is not part of this change.
 
 ### Changed
 - **Ordinary tasks have optional limits** — omitted dollar, time, token,
@@ -454,6 +465,31 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   auto-applied by `maverick tax prepare` when `[tax] auto_update` +
   `update_url` are configured; the `tax_law_watch` pack monitors IRS/state
   guidance (web access, no client-data access) and alerts the firm.
+- **Coding mode no longer runs a workspace's git commands on the host** — the
+  patch apply, workspace reset and patch check run `git` on the host, and git
+  runs whatever filter, hook or `fsmonitor` command the workspace's own git
+  settings name. Those settings are now read wherever git reads them (a `.git`
+  pointer file or symlink, a linked worktree's main repository,
+  `config.worktree`), repository hooks are switched off, and a workspace whose
+  git settings define a filter is refused rather than run. A repository that
+  really uses a filter, such as Git LFS, therefore gets no host-side patch
+  apply or check in coding mode; running those git steps inside the sandbox is
+  proposed in `docs/proposals/coding-mode-sandbox-routing.md`.
+- **A task started through a specialist pack keeps the requester's limits** —
+  the pack's own tool list used to replace the requester's role, risk ceiling
+  and any compliance restriction (for example the HIPAA / SOC 2 ban on outbound
+  tools), so a read-only person could write files by starting the task through
+  a pack. The pack's tools now only ever narrow what the requester may do.
+- **"Ask a person before starting risky-looking tasks" now applies to every way
+  of starting a task** — it was skipped for tasks started from the dashboard, the
+  API, a schedule, a flow or the job queue. A task that already has a run on
+  record (a retry, or one continued after an answered question) is not asked
+  about again.
+- **The REST API says when a blocked task is only waiting for an answer** —
+  `GET /api/v1/goals/{id}` and the events response carry `needs_input` and
+  `open_question_ids`, the events response reports `terminal: false` while the
+  task waits, and a goal carries `created_at` / `updated_at`. A machine-readable
+  reason for the other kinds of blocked task is not part of this change.
 
 
 ### Changed

@@ -1812,13 +1812,19 @@ here.
   record: goals (with departments, outcomes, spend) + human approvals
   (with deciders) threaded into one queryable spine, exportable as an
   Ed25519-signed portable **capsule** (decision spine + learned state)
-  verifiable offline; tampering fails verification.
+  verifiable offline; tampering fails verification. `maverick record verify`
+  also requires the signing key to be trusted -- this installation's own audit
+  keys by default, or the publisher's key via `--pubkey <hex>` /
+  `--trusted-keys <file>` -- and rejects a capsule signed by any other key as
+  "signed by an untrusted key" (printing that key's fingerprint), because the
+  key embedded in a capsule proves nothing about who made it.
 - **Portable attestation — provable to somebody who trusts nobody**
   (`attestation.py`, `attestation_verify.py`, `maverick attest
   key|export|verify|export-verifier`) — the capsule proves *integrity* but is
-  self-certifying: `verify_capsule` checks the signature with the public key
-  stored inside the capsule, so it establishes that nobody edited the file and
-  nothing about who signed it. An attestation bundle closes that gap. It binds
+  self-certifying on its own: `verify_capsule_integrity` checks the signature
+  with the public key stored inside the capsule, so it establishes that nobody
+  edited the file and nothing about who signed it (`verify_capsule` adds the
+  trusted-key requirement above). An attestation bundle goes further. It binds
   three claims to evidence a third party can re-derive — every recorded action
   stayed inside the declared governance envelope; self-improvement never widened
   its own authority; the decision history is intact and complete (per-day content
@@ -5273,8 +5279,9 @@ tested without spawning py-spy.
   button appears only when `navigator.xr` reports support (untested
   without headset hardware — stated on the page).
 - **RTL language support** (`i18n.py` `RTL_LANGS` + `dir_for()`):
-  `dir="rtl"` driven by the active language (ar/he/fa/ur) through the
-  existing lang resolution, logical-property CSS in the base layout, and an
+  `dir="rtl"` driven by the language the page body is written in (ar/he/fa/ur
+  via `content_lang()`, so an English page is never mirrored by a browser
+  or cookie that selects Arabic chrome strings), logical-property CSS in the base layout, and an
   Arabic community-seed catalog (genuinely translated starter keys, English
   fallback; he/fa/ur activate the moment a catalog lands — they're not
   offered in the picker until one does, to avoid implying support).

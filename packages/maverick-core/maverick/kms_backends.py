@@ -180,13 +180,17 @@ class VaultTransitKMS:
 _PROVIDERS = {"aws": AwsKmsKEK, "gcp": GcpKmsKEK, "vault": VaultTransitKMS}
 
 
-def build_cloud_kms(provider: str, cfg: dict | None = None):
+def build_cloud_kms(provider: str, cfg: dict | None = None, *,
+                    key_id: str | None = None):
     """Construct the cloud KMS backend for ``provider`` (aws/gcp/vault).
 
     ``cfg`` is an explicit ``[kms]`` section (key_id/region/address/mount). Pass
     a tenant's resolved config for deterministic per-tenant BYOK — without it the
     backend reads the ambient ``load_config()`` (which depends on the active
-    tenant context). Raises :class:`EncryptionUnavailable` for an unknown
+    tenant context). ``key_id`` is a key the CALLER has pinned for this backend
+    (a workspace's own BYOK key); it outranks ``MAVERICK_KMS_KEY_ID``, which is
+    the server-wide fallback and must never replace a customer's own key.
+    Raises :class:`EncryptionUnavailable` for an unknown
     provider (fail-closed — never silently fall back to in-process keys).
     Construction is cheap; the SDK client is built lazily on first wrap/unwrap.
     """
@@ -195,7 +199,7 @@ def build_cloud_kms(provider: str, cfg: dict | None = None):
         raise EncryptionUnavailable(
             f"[kms] provider={provider!r} is not a known backend "
             f"(expected one of: local, {', '.join(sorted(_PROVIDERS))})")
-    return cls(cfg=cfg)
+    return cls(key_id=key_id, cfg=cfg)
 
 
 __all__ = ["AwsKmsKEK", "GcpKmsKEK", "VaultTransitKMS", "build_cloud_kms"]

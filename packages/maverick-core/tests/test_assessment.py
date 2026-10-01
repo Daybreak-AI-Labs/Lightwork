@@ -220,6 +220,47 @@ def test_list_saved_tolerates_sibling_register_in_same_data_dir(tmp_path, monkey
     assert heads[0]["subject"] == "Real Subject"
 
 
+def test_metrics_survive_the_capability_review_register(tmp_path, monkeypatch):
+    """Running one capability (agent) assessment writes
+    ``assessments/register.json`` next to the per-subject records. That file
+    used to make ``acceptance_metrics`` and ``question_roi`` raise
+    ``AssessmentStateError`` ("assessment record identity is invalid"), which
+    surfaced as a 500 on the audit binder, the finance board and the question
+    analytics. Drive the register through the real writer, then read the
+    metrics: the real record must still be counted and nothing may raise."""
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    from maverick import assessments
+    from maverick.assessment import (
+        AssessmentSession,
+        acceptance_metrics,
+        decide_assessment,
+        question_roi,
+        save_session,
+    )
+    from maverick.paths import data_dir
+
+    monkeypatch.setattr(
+        assessments,
+        "subject_surface",
+        lambda kind, name: {
+            "kind": "agent", "subject": name, "description": "d",
+            "allow_tools": [], "deny_tools": [], "max_risk": "low",
+            "allow_paths": [], "allow_hosts": [], "mcp_servers": [],
+            "knowledge_sources": [], "has_human_gate": True, "steps": 1,
+        },
+    )
+    session = AssessmentSession(type="pia", subject="Real Subject")
+    save_session(session)
+    decide_assessment(session.id, "approved", decided_by="dpo")
+
+    assert assessments.refresh("agent", "calm_bot", expected_revision=0) is not None
+    assert data_dir("assessments", "register.json").exists()
+
+    assert acceptance_metrics()["decided"] == 1
+    roi = question_roi("pia")
+    assert roi["assessed"] == 1
+
+
 def test_equal_timestamp_history_has_canonical_order_and_limit():
     from maverick.assessment import (
         AssessmentSession,

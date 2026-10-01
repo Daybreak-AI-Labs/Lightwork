@@ -16,7 +16,9 @@ requires the Shield package to be present; it cannot be relaxed by setting the
 separate presence flag to false.
 
 `shield_policy.scan_block` treats a returned `scan_error` as a block, matching its
-existing exception policy. Optional installations still run without Shield.
+existing exception policy; `shield_policy.scan_tool_call_block`, the screen for flow and
+workflow tool steps (the same tool-call rules the agent applies), follows the same policy.
+Optional installations still run without Shield.
 These are control-failure semantics, not a claim that heuristic scanning detects
 every unsafe input or that the unavailable external SDK was tested live.
 

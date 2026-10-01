@@ -814,21 +814,60 @@ def _validate_restore_schemas(stage: Path, manifest: dict[str, Any]) -> None:
 # and the audit signing keys (all ``*.key``). A wrapped DEK (keys/dek.wrapped)
 # is ciphertext under the primary key and public keys are public; both stay in
 # the archive because recovery of the encrypted payload needs them.
+#
+# The same key folders sit inside every workspace folder (``tenants/<id>/``):
+# each workspace's audit signing key, and a client deployment's at-rest key and
+# keyring. A whole-home archive withholds those too -- matching the archive root
+# alone left them bundled next to the data they unlock.
 _KEY_MATERIAL_ROOTS = (("keys",), ("audit", "keys"))
 
 
-def _is_key_material(relative: Path) -> bool:
+def _key_material_scope(relative: Path) -> tuple[str, ...] | None:
+    """The folder a raw key file belongs to: ``()`` for the data root's own keys,
+    ``("tenants", <id>)`` for one workspace's; ``None`` when it is not key material."""
     parts = relative.parts
-    return relative.suffix == ".key" and any(parts[: len(root)] == root for root in _KEY_MATERIAL_ROOTS)
+    scope: tuple[str, ...] = ()
+    if len(parts) > 2 and parts[0] == "tenants":
+        scope, parts = parts[:2], parts[2:]
+    if relative.suffix == ".key" and any(parts[: len(root)] == root for root in _KEY_MATERIAL_ROOTS):
+        return scope
+    return None
 
 
-def _excluded_from_snapshot(relative: Path, *, include_keys: bool) -> bool:
+def _is_key_material(relative: Path) -> bool:
+    return _key_material_scope(relative) is not None
+
+
+def _keys_included(relative: Path, include_keys: bool | frozenset) -> bool:
+    """Is the raw key file at ``relative`` part of the set ``include_keys`` names?
+    ``True`` takes every key; a set of scopes (see :func:`_archive_includes_keys`)
+    only the keys of those folders."""
+    if include_keys is True:
+        return True
+    return bool(include_keys) and _key_material_scope(relative) in include_keys
+
+
+def withheld_key_files() -> list[str]:
+    """Raw key files a default (keys-excluded) backup of the current data root
+    leaves out, relative to that root: the copies the operator must escrow
+    separately. ``maverick backup create`` prints this list."""
+    root = _client_root()
+    if not root.is_dir():
+        return []
+    return sorted(
+        relative.as_posix()
+        for relative in (path.relative_to(root) for path in root.rglob("*.key"))
+        if _is_key_material(relative) and (root / relative).is_file()
+    )
+
+
+def _excluded_from_snapshot(relative: Path, *, include_keys: bool | frozenset) -> bool:
     return (
         not relative.parts
         or relative.parts[0] in {"backups", _RESTORE_TX_ROOT}
         or relative.name == f"{_RESTORE_LOCK_TARGET}.lock"
         or relative.name.endswith(_SKIP_SUFFIXES)
-        or (not include_keys and _is_key_material(relative))
+        or (_is_key_material(relative) and not _keys_included(relative, include_keys))
         or _is_reserved_restore_path(PurePosixPath(relative.as_posix()))
     )
 
@@ -848,7 +887,7 @@ def _is_sqlite_file(path: Path) -> bool:
         raise BackupError("could not inspect a possible SQLite database") from exc
 
 
-def _stage(root: Path, stage: Path, *, include_keys: bool) -> dict[str, dict[str, Any]]:
+def _stage(root: Path, stage: Path, *, include_keys: bool | frozenset) -> dict[str, dict[str, Any]]:
     root, stage = _filesystem_path(root), _filesystem_path(stage)
     files: dict[str, dict[str, Any]] = {}
     total = 0
@@ -927,7 +966,8 @@ def create_backup(
     Existing destination paths are refused rather than overwritten.
 
     ``include_keys`` defaults to ``False``: the at-rest encryption key (and
-    rotation keyring) and the audit signing key are excluded from the
+    rotation keyring) and the audit signing key, those of the data root and of
+    every workspace folder under it, are excluded from the
     archive, matching docs/encryption.md's escrow guidance to keep key
     material off the same copy as the data it decrypts. Pass
     ``include_keys=True`` only when the operator has explicitly chosen to
@@ -1320,8 +1360,16 @@ def _recover_transactions(root: Path, *, allow_unsigned: bool) -> None:
         tx_root.rmdir()
 
 
-def _archive_includes_keys(expected: dict) -> bool:
-    return any(_is_key_material(Path(*PurePosixPath(name).parts)) for name in expected)
+def _archive_includes_keys(expected: dict) -> frozenset:
+    """The key folders (see :func:`_key_material_scope`) this archive carries raw
+    keys for; empty (falsy) when it carries none.
+
+    Per folder, not all-or-nothing: an archive made before workspace keys were
+    withheld holds them but no key of the data root. Reading that as "this
+    archive includes keys" would make the live root keys it lacks replacement
+    targets and delete them."""
+    scopes = (_key_material_scope(Path(*PurePosixPath(name).parts)) for name in expected)
+    return frozenset(scope for scope in scopes if scope is not None)
 
 
 def _replacement_targets(root: Path, expected: dict) -> set[str]:
@@ -1716,4 +1764,5 @@ __all__ = [
     "restore_backup",
     "read_manifest",
     "data_backups_dir",
+    "withheld_key_files",
 ]

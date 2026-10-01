@@ -147,6 +147,109 @@ test("the schedule picker writes the timetable from plain choices", async () => 
   } finally { dom.window.close(); }
 });
 
+// Reachability of the live flow from its first step, over every way out of a step.
+function reachable(w) {
+  const flow = JSON.parse(JSON.stringify(w.__fdLiveFlow()));
+  const byId = Object.fromEntries(flow.nodes.map((n) => [n.id, n]));
+  const seen = new Set(), queue = flow.start ? [flow.start] : [];
+  while (queue.length) {
+    const n = byId[queue.shift()];
+    if (!n || seen.has(n.id)) continue;
+    seen.add(n.id);
+    for (const key of ["next", "if_true", "if_false", "on_error", "on_expire"]) if (n[key]) queue.push(n[key]);
+    for (const c of n.cases || []) if (c.to) queue.push(c.to);
+  }
+  return { flow, byId, seen };
+}
+
+function stepsHelpers(doc) {
+  const add = () => Array.from(doc.querySelectorAll("#fd-simple-body button")).find((b) => b.textContent === "Add step");
+  const where = () => doc.getElementById("fd-steps-add-where");
+  return {
+    where,
+    async addKind(kind, choose) {
+      doc.getElementById("fd-steps-add-kind").value = kind;
+      if (choose) {
+        const sel = where();
+        assert.ok(sel, "the Steps view must ask where the new step goes");
+        const option = Array.from(sel.options).find((o) => o.textContent === choose);
+        assert.ok(option, "missing choice: " + choose + " in " + Array.from(sel.options).map((o) => o.textContent));
+        sel.value = option.value;
+      }
+      add().click();
+      await settle();
+    },
+  };
+}
+
+test("a step added after a Decision goes on the chosen Yes or No path instead of being left unconnected", async () => {
+  const { dom, w, doc } = open();
+  try {
+    await settle();
+    const steps = stepsHelpers(doc);
+    await steps.addKind("agent");
+    // A plain chain needs no question: the new step simply follows the last one.
+    assert.equal(steps.where(), null);
+    await steps.addKind("branch");
+    // After a Decision the person is asked which path the next step belongs to.
+    assert.deepEqual(Array.from(steps.where().options).map((o) => o.textContent),
+      ["If yes, after “Decision”", "If no, after “Decision”"]);
+    await steps.addKind("approval", "If yes, after “Decision”");
+    // The next add starts on the path just worked on, not back at the first open end.
+    assert.equal(steps.where().selectedOptions[0].textContent, "After “Approval”");
+    await steps.addKind("agent", "After “Approval”");
+    await steps.addKind("setvar", "If no, after “Decision”");
+
+    const { flow, byId, seen } = reachable(w);
+    const branch = flow.nodes.find((n) => n.kind === "branch");
+    const approval = flow.nodes.find((n) => n.kind === "approval");
+    assert.equal(branch.if_true, approval.id);
+    assert.equal(byId[approval.id].next, flow.nodes.filter((n) => n.kind === "agent")[1].id);
+    assert.equal(byId[branch.if_false].kind, "setvar");
+    // The point of the fix: every step is reachable from the first step.
+    assert.deepEqual([...seen].sort(), flow.nodes.map((n) => n.id).sort());
+    // Once both paths lead somewhere, only the end of each path is still open.
+    assert.ok(Array.from(steps.where().options).every((o) => !/Decision/.test(o.textContent)));
+  } finally { dom.window.close(); }
+});
+
+test("adding with no explicit place after a Decision still connects the step to a path", async () => {
+  const { dom, w, doc } = open();
+  try {
+    await settle();
+    const steps = stepsHelpers(doc);
+    await steps.addKind("branch");
+    w.__fdEngine.add("approval");
+    await settle();
+    const { flow, seen } = reachable(w);
+    assert.equal(flow.nodes.length, 2);
+    assert.deepEqual([...seen].sort(), flow.nodes.map((n) => n.id).sort());
+  } finally { dom.window.close(); }
+});
+
+test("the Steps list says which steps will never run and where each Decision path leads", async () => {
+  const { dom, w, doc } = open();
+  try {
+    await settle();
+    const steps = stepsHelpers(doc);
+    await steps.addKind("agent");
+    await steps.addKind("branch");
+    await steps.addKind("approval", "If yes, after “Decision”");
+    const cards = () => Array.from(doc.querySelectorAll("#fd-simple-body .fd-scard"));
+    const decision = cards().find((c) => /Decision/.test(c.textContent));
+    assert.match(decision.textContent, /If yes: step 3 “Approval”/);
+    assert.match(decision.textContent, /If no: ends the flow/);
+    assert.doesNotMatch(cards().map((c) => c.textContent).join(" "), /never run/);
+
+    // Disconnect the approval from the Decision from the step settings.
+    const decisionCard = decision; decisionCard.click(); await settle();
+    const yes = Array.from(doc.querySelectorAll("#fd-props select")).find((s) => /If yes, go to/.test(s.closest(".field").textContent));
+    yes.value = ""; yes.dispatchEvent(new w.Event("change")); await settle();
+    const lonely = cards().find((c) => /Approval/.test(c.textContent));
+    assert.match(lonely.textContent, /Not connected, so this step never runs/);
+  } finally { dom.window.close(); }
+});
+
 test("the page offers no code boxes or developer wording", () => {
   const html = read("flow_designer.html"), js = read("flow_designer.js");
   for (const phrase of ["Params (JSON)", "Input data (JSON)", "Schedule expression (cron)", "POST /webhook/run", "_break",

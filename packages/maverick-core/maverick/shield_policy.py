@@ -16,6 +16,8 @@ is required:
 * ``scan_block(text)`` — returns a block reason or ``None`` (allow). A shield
   *scan error* always blocks (fail-toward-gate). A *missing* shield blocks only
   when required (so non-enterprise installs keep the fail-open default).
+* ``scan_tool_call_block(tool, params)`` — the same policy for a TOOL CALL
+  (flow and workflow steps), screened with the tool-call rules the agent applies.
 """
 from __future__ import annotations
 
@@ -88,4 +90,40 @@ def scan_block(text: str) -> str | None:
     return None
 
 
-__all__ = ["shield_required", "shield_available", "scan_block"]
+def scan_tool_call_block(tool: str, params: dict | None = None) -> str | None:
+    """Screen a TOOL CALL with the shield's tool-call rules; a block reason, or
+    ``None`` to allow.
+
+    :func:`scan_block` runs the prompt-injection *text* rules. Feeding it
+    ``f"{tool} {params}"`` (a Python repr) quotes every value, so
+    ``{'cmd': 'rm -rf /'}`` is read as ``'rm -rf /'`` and the destructive-command
+    anchors never match -- while the agent path, which calls
+    ``Shield.scan_tool_call``, blocks it. Every non-agent tool dispatch (flow
+    and workflow steps) must use this function so it is screened by the same
+    rules as an agent's call, under the operator's configured profile.
+
+    Failure policy is the same as :func:`scan_block`: a missing shield blocks
+    only when :func:`shield_required`; a scan error (raised, or absorbed into the
+    verdict) always blocks.
+    """
+    try:
+        from maverick_shield import Shield  # type: ignore
+    except Exception:
+        if shield_required():
+            return ("safety shield is required but not installed "
+                    "([safety] require_shield / enterprise mode)")
+        return None
+    try:
+        verdict = Shield.from_config().scan_tool_call(tool, params or {})
+    except Exception as e:
+        log.warning("shield tool-call scan failed (blocking): %s", e)
+        return "shield scan error"
+    if getattr(verdict, "scan_error", False):
+        return "shield scan error"
+    if not getattr(verdict, "allowed", True):
+        return "; ".join(getattr(verdict, "reasons", []) or ["blocked by shield"])
+    return None
+
+
+__all__ = ["shield_required", "shield_available", "scan_block",
+           "scan_tool_call_block"]

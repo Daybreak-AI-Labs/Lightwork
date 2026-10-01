@@ -86,11 +86,17 @@ _SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | frozenset(
         "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
         "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
         "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
+        # The public share page's markdown renderer (see app._AUTH_EXEMPT).
+        "/static/lightwork-markdown.js",
         # The LLM gateway authenticates every call with its own bearer inside
         # maverick.llm_gateway (same trust-domain rationale as /a2a/v1).
         "/gateway/v1/chat/completions",
         "/gateway/v1/messages",
         "/gateway/v1/otel",
+        # A consent platform pushes consent changes with an HMAC signature
+        # checked inside maverick.consent_registry; it never holds a dashboard
+        # credential. Keep in step with app._AUTH_EXEMPT.
+        "/consent/webhook",
     }
 ) | SELF_AUTH_WEBHOOK_PATHS
 

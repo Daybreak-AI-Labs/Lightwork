@@ -532,6 +532,18 @@ def validate_patch(patch: str, workdir: Path) -> PatchValidation:
             valid=False,
             reason="workdir is not a git repository; cannot validate",
         )
+    # `git apply --check` reads the files it would patch through the repo's
+    # configured `clean` filter, and the agent can write this workdir's git
+    # settings: refuse rather than run a planted command on the host, and keep
+    # the caller's environment out of the child.
+    if git_metadata_may_execute_filters(workdir):
+        return PatchValidation(
+            valid=False,
+            reason="unsafe git filter/fsmonitor metadata in the workdir (a "
+                   "filter such as git-lfs, or another command), so git was "
+                   "not run on the host to check the patch. This is not a "
+                   "problem with the patch itself",
+        )
     # Normalise line endings before sending to git apply. CRLF in the
     # input is the #1 source of "corrupt patch" errors on real LLM
     # output that copy-paste from Windows-origin sources.
@@ -542,6 +554,7 @@ def validate_patch(patch: str, workdir: Path) -> PatchValidation:
             input=normalized.encode("utf-8"),
             capture_output=True,
             timeout=30,
+            env=git_env_without_user_config(),
         )
     except subprocess.TimeoutExpired:
         return PatchValidation(

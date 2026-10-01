@@ -2508,6 +2508,46 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_goal_row(r) for r in rows]
 
+    def recent_goals_by_domain(self, domains: list[str], *, owner: str | None = None,
+                               per_domain: int = 5) -> dict[str, list[PGGoal]]:
+        """The newest ``per_domain`` goals of each listed domain, newest first.
+
+        Mirrors SQLite: the same answer as one ``list_goals(domain=...,
+        limit=per_domain, order="desc")`` per domain, from one grouped query.
+        The Results page asks about every deliverable pack (2,031 on a full
+        catalog) and each separate query is a network round trip here. A domain
+        with no goals is absent from the result.
+        """
+        wanted = sorted({str(d) for d in domains if d})
+        if not wanted:
+            return {}
+        conds = ["domain = ANY(%s)"]
+        params: list = [wanted]
+        if owner is not None:
+            conds.append("owner = %s")
+            params.append(str(owner))
+        frag, fparams = _tenant_scope()
+        if frag:
+            conds.append(frag)
+            params += fparams
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT id, parent_id, title, description, status, "
+                "created_at, updated_at, deadline, result, owner, execution_principal, "
+                "domain, project_id FROM goals WHERE id IN ("
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER "
+                "(PARTITION BY domain ORDER BY id DESC) AS n "
+                f"FROM goals WHERE {' AND '.join(conds)}) ranked WHERE n <= %s) "
+                "ORDER BY id DESC",
+                (*params, max(1, int(per_domain))),
+            )
+            rows = cur.fetchall()
+        found: dict[str, list[PGGoal]] = {}
+        for row in rows:
+            goal = _dec_goal_row(row)
+            found.setdefault(goal.domain, []).append(goal)
+        return found
+
     def list_goals(
         self,
         status: str | None = None,

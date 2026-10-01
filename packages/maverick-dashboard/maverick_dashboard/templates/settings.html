@@ -370,6 +370,8 @@
           {% if p.source_errors %}<div><span class="badge blocked">Settings could not be read</span></div>{% endif %}
           {% if not p.dashboard_can_set_api_key %}<div>This key is {{ p.api_key_source|source_label }}, so it can't be changed here.</div>{% endif %}
           {% if p.base_url_field and not p.dashboard_can_set_base_url %}<div>The server address is {{ p.base_url_source|source_label }}, so it can't be changed here.</div>{% endif %}
+          {% if p.base_url_field and p.base_url %}<div>Server address in use: {{ p.base_url }}{% if p.base_url_source and p.base_url_source.startswith('environment:') %} (set on the computer running Lightwork){% endif %}</div>{% endif %}
+          {% if p.api_key_source and p.api_key_source.startswith('environment:') and p.dashboard_can_set_api_key %}<div>This key comes from the computer running Lightwork. Paste a key below to use a different one instead; removing it again brings the original back.</div>{% endif %}
           {% if p.key_help %}<div><a href="{{ p.key_help }}" target="_blank" rel="noopener noreferrer">Where do I get a key?</a></div>{% endif %}
         </div>
         <div class="provider-row__readiness">{{ provider_status(p) }}</div>
