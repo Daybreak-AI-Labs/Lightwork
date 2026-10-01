@@ -197,7 +197,12 @@ def test_self_harness_apply_audit_uses_the_committed_outbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(si, "enabled", lambda: True)
-    from maverick import audit
+    from maverick import audit, world_model
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    with world_model.WorldModel() as world:
+        source_id = world.create_goal("shared export rehearsal", owner="")
+        world.set_goal_status(source_id, "done", result="bounded export completed")
 
     store = tmp_path / "addenda.json"
     ledger_path = tmp_path / "promotions.json"
@@ -220,6 +225,7 @@ def test_self_harness_apply_audit_uses_the_committed_outbox(
         addendum_line="Bound the export window before starting.",
         rationale="prevents the recurring timeout",
         hypothesis="unbounded exports exhaust the deadline",
+        source_goal_ids=(source_id,),
     )
     validation = sh.ValidationResult(
         accepted=True,

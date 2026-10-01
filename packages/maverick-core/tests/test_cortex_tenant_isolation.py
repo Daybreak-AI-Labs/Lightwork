@@ -44,13 +44,18 @@ def _seed_tenant_a():
     each carrying the secret marker, under acme's per-tenant directories."""
     tok = set_tenant("acme")
     try:
-        # lessons: the addenda file at acme's tenant-scoped default path.
-        store = sh._store_path()
-        store.parent.mkdir(parents=True, exist_ok=True)
-        store.write_text(
-            json.dumps({"MODEL-X": f"- alpha guidance about {_MARKER} turbofoo"}),
-            encoding="utf-8",
-        )
+        # The lesson has a real currently unowned source in the same tenant.
+        # Keep the cached tenant world open for the native recall-time check.
+        from maverick.world_model import close_world_if_owned, open_world
+        world = open_world()
+        try:
+            source_id = world.create_goal(f"{_QUERY} plan", description="acme only", owner="")
+        finally:
+            close_world_if_owned(world)
+        sh._apply_addendum(sh.HarnessProposal(
+            model_id="MODEL-X", signature="tenant recall fixture",
+            addendum_line=f"alpha guidance about {_MARKER} turbofoo",
+            rationale="source-bound tenant lesson", source_goal_ids=(source_id,)))
         # skills: a plain skill file dropped into acme's skills dir.
         sk = skills_mod.skills_dir()
         sk.mkdir(parents=True, exist_ok=True)
@@ -59,15 +64,6 @@ def _seed_tenant_a():
             f"Guidance about {_MARKER} turbofoo widgets.\n",
             encoding="utf-8",
         )
-        # record: a goal in acme's per-tenant world.
-        from maverick.world_model import open_world
-        w = open_world()
-        try:
-            w.create_goal(f"{_MARKER} turbofoo plan", description="acme only")
-        finally:
-            close = getattr(w, "close", None)
-            if callable(close):
-                close()
     finally:
         reset_tenant(tok)
 
@@ -99,6 +95,8 @@ def test_tenant_a_still_recalls_its_own_lessons_and_record():
     hits = " ".join(h.text for h in res.hits)
     assert _MARKER in hits  # positive control: acme sees its own memory
     assert res.tenant == "acme"
+    assert res.per_source["lessons"] > 0
+    assert res.per_source["record"] > 0
 
 
 def test_lessons_source_is_strictly_tenant_scoped():
