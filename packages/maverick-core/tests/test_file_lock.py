@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from maverick.file_lock import (
@@ -187,6 +188,28 @@ def test_windows_atomic_reads_beyond_max_path(tmp_path):
         atomic_read_text(missing_path)
     with pytest.raises(FileNotFoundError):
         atomic_read_bytes(missing_path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_windows_private_directory_helpers_create_and_verify_deep_paths(tmp_path):
+    import maverick.file_lock as file_lock
+
+    parent = tmp_path / ("s0-" + "x" * 35)
+    index = 1
+    while len(os.path.abspath(parent)) < 285:
+        parent /= f"s{index}-" + "x" * 35
+        index += 1
+    assert file_lock.ensure_private_directory(parent) == parent
+    assert file_lock.require_private_directory(parent) == parent
+    assert file_lock.prepare_private_directory(parent) == parent
+    assert private_path_is_restricted(Path(file_lock._windows_extended_path(parent)), 0o700)
+
+    target = parent / ("r" * 64) / ("p" * 64 + ".bin")
+    file_lock.atomic_create_bytes(target, b"deep private payload")
+    assert atomic_read_bytes(target) == b"deep private payload"
+    assert private_path_is_restricted(
+        Path(file_lock._windows_extended_path(target.parent)), 0o700,
+    )
 
 
 def test_atomic_write_bytes_round_trips_privately_without_temp_files(tmp_path):

@@ -833,25 +833,29 @@ def harden_path_permissions(path: str | Path, mode: int = 0o600) -> None:
 def ensure_private_directory(path: str | Path) -> Path:
     """Create/tighten a directory to an owner-only security boundary."""
     path = Path(path)
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # The native private-file writer already uses extended paths on Windows.
+    # Its parent can exceed Win32's shorter CreateDirectory path limit, even
+    # when the configured home and each individual path component are valid.
+    io_path = Path(_windows_extended_path(path) if os.name == "nt" else path)
+    io_path.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
-        before = path.lstat()
+        before = io_path.lstat()
     except OSError as exc:
         raise PermissionError(f"directory could not be inspected: {path}") from exc
-    if _unsafe_lock_alias(path, before) or not stat.S_ISDIR(before.st_mode):
+    if _unsafe_lock_alias(io_path, before) or not stat.S_ISDIR(before.st_mode):
         raise PermissionError(f"private directory path is an alias: {path}")
-    harden_path_permissions(path, 0o700)
+    harden_path_permissions(io_path, 0o700)
     try:
-        after = path.lstat()
+        after = io_path.lstat()
     except OSError as exc:
         raise PermissionError(f"directory could not be verified: {path}") from exc
     if (
-        _unsafe_lock_alias(path, after)
+        _unsafe_lock_alias(io_path, after)
         or not stat.S_ISDIR(after.st_mode)
         or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
     ):
         raise PermissionError(f"private directory identity changed: {path}")
-    if not private_path_is_restricted(path, 0o700):
+    if not private_path_is_restricted(io_path, 0o700):
         raise PermissionError(f"directory could not be made private: {path}")
     return path
 
@@ -866,16 +870,17 @@ def require_private_directory(path: str | Path) -> Path:
     their mode or DACL.
     """
     path = Path(path)
+    io_path = Path(_windows_extended_path(path) if os.name == "nt" else path)
     try:
-        info = path.lstat()
+        info = io_path.lstat()
     except OSError as exc:
         raise PermissionError(
             f"parent directory must already be private: {path}"
         ) from exc
     if (
-        _unsafe_lock_alias(path, info)
+        _unsafe_lock_alias(io_path, info)
         or not stat.S_ISDIR(info.st_mode)
-        or not private_path_is_restricted(path, 0o700)
+        or not private_path_is_restricted(io_path, 0o700)
     ):
         raise PermissionError(f"parent directory must already be private: {path}")
     return path
@@ -891,16 +896,17 @@ def _prepare_parent_directory(path: str | Path) -> Path:
     for a safe directory type.
     """
     path = Path(path)
+    io_path = Path(_windows_extended_path(path) if os.name == "nt" else path)
     try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=False)
+        io_path.mkdir(mode=0o700, parents=True, exist_ok=False)
     except FileExistsError:
         try:
-            info = path.lstat()
+            info = io_path.lstat()
         except OSError as exc:
             raise PermissionError(
                 f"parent directory could not be inspected: {path}"
             ) from exc
-        if _unsafe_lock_alias(path, info) or not stat.S_ISDIR(info.st_mode):
+        if _unsafe_lock_alias(io_path, info) or not stat.S_ISDIR(info.st_mode):
             raise PermissionError(
                 f"parent directory path is an alias: {path}"
             ) from None

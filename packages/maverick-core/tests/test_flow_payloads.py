@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from maverick.flow import execution, payloads, store
@@ -58,6 +59,43 @@ def test_complete_checkpoint_private_artifact_and_bounded_api():
     assert len(output["data"]["rows"]) == 501
     assert len(json.dumps(output["data"]).encode()) < payloads.PREVIEW_BYTES
     assert "data_state" not in output
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_long_windows_home_reloads_and_reclaims_encrypted_checkpoint(tmp_path, monkeypatch):
+    from maverick.file_lock import _windows_extended_path
+
+    # Keep the run row and lock short enough to isolate the deeper encrypted
+    # artifact path, including the per-run SHA-256 directory.
+    padding = max(1, 180 - len(os.path.abspath(tmp_path)) - 1)
+    home = tmp_path / ("h" * padding)
+    monkeypatch.setenv("MAVERICK_HOME", str(home))
+    run = row("long-checkpoint")
+    store.save_run(run)
+
+    def artifact_path():
+        record = store._read_json(store._runs_dir() / f"{run.run_id}.json")
+        assert record["data_state"]["kind"] == "artifact"
+        digest = record["data_state"]["sha256"]
+        run_dir = hashlib.sha256(run.run_id.encode()).hexdigest()
+        return Path(_windows_extended_path(
+            store._runs_dir().parent / "run_payloads" / run_dir / f"{digest}.bin"
+        ))
+
+    first = artifact_path()
+    assert first.is_file()
+    assert store.load_run(run.run_id).data == large_data()
+
+    run.data["document"] += " updated"
+    store.save_run(run)
+    second = artifact_path()
+    assert second != first and second.is_file()
+    assert not first.exists()
+    assert [item.name for item in second.parent.glob("*.bin")] == [second.name]
+    assert store.load_run(run.run_id).data == run.data
+
+    assert store.delete_run(run.run_id)
+    assert not second.exists()
 
 
 def test_delay_restart_resume_matches_uninterrupted_business_values():

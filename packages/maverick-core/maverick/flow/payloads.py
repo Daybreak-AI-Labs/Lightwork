@@ -10,10 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from pathlib import Path
 from typing import Any
 
+from ..file_lock import _windows_extended_path
 from .redact import cap, redact
 
 SCHEMA = "lightwork.flow-data.v1"
@@ -122,12 +124,19 @@ def _directory(root: Path, run_id: str) -> Path:
     return root / hashlib.sha256(run_id.encode("utf-8")).hexdigest()
 
 
+def _io_path(path: Path) -> Path:
+    # Keep stored references portable while Windows filesystem calls reach deep
+    # tenant checkpoint paths beyond the legacy Win32 path limit.
+    return Path(_windows_extended_path(path) if os.name == "nt" else path)
+
+
 def _read_artifact(path: Path) -> bytes:
     from ..file_lock import ensure_private_directory, ensure_private_file
 
-    ensure_private_directory(path.parent)
-    ensure_private_file(path)
-    with path.open("rb") as source:
+    io_path = _io_path(path)
+    ensure_private_directory(io_path.parent)
+    ensure_private_file(io_path)
+    with io_path.open("rb") as source:
         blob = source.read(MAX_BYTES + 8193)
     if len(blob) > MAX_BYTES + 8192:
         raise FlowPayloadError("flow checkpoint artifact exceeds its byte quota")
@@ -214,7 +223,7 @@ def decode(root: Path, row: dict) -> dict:
 
 def reclaim(root: Path, run_id: str, keep: dict | None) -> None:
     """Only under the checkpoint lock; retain the currently committed artifact."""
-    directory = _directory(root, run_id)
+    directory = _io_path(_directory(root, run_id))
     retained = (keep or {}).get("sha256") if (keep or {}).get("kind") == "artifact" else None
     if not directory.exists():
         return
