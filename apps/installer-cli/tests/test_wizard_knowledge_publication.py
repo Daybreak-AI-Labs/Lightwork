@@ -18,6 +18,7 @@ def test_qdrant_choice_explains_limit_and_keeps_selected_url(monkeypatch):
     monkeypatch.setattr(wizard, "_q_text", lambda *_args, **_kwargs: "http://qdrant.internal:6333")
     assert wizard.pick_knowledge() == {
         "enable": True, "embedder": "deterministic", "store": "qdrant", "reindex_jobs": True,
+        "reindex_max_dollars": 5.0,
         "url": "http://qdrant.internal:6333",
     }
     assert any(choice.startswith("qdrant") and "new ingestion unavailable" in choice for choice in choices_seen)

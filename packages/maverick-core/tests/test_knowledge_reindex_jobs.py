@@ -84,7 +84,7 @@ def test_paid_adapter_is_blocked_before_embedding_or_dispatch(setup):
     from maverick_knowledge.embed import HostedEmbedder
     kb, _ = setup
     kb.embedder = HostedEmbedder("test-fixture", "https://example.invalid", "not-a-real-key")
-    with pytest.raises(ValueError, match="verified per-request price"):
+    with pytest.raises(ValueError, match="No reviewed standard embedding price"):
         jobs.preview(kb, "policies")
 
 

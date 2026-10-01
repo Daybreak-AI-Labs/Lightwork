@@ -1598,6 +1598,9 @@ def pick_knowledge() -> dict[str, Any]:
         return {"enable": False}
     out: dict[str, Any] = {"enable": True}
     out["reindex_jobs"] = _q_confirm("Enable bounded search index rebuilds with review, progress and cancellation? Paid embedding requires verified cost admission.", default=False)
+    if out["reindex_jobs"]:
+        out["reindex_max_dollars"] = min(1000.0, max(0.0, _safe_float(
+            _q_text("Maximum provider reservation per rebuild (USD, at reviewed standard rates; 0 permits local only)", default="5.0"), default=5.0)))
     embedder = _q_select(
         "  Embedder:",
         [

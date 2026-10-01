@@ -451,6 +451,11 @@ def _lookup_price_quote(
     estimate_only = _resolve_estimate_only(estimate_only)
     requested = model or MODEL_SONNET
 
+    if requested.startswith("embedding:"):
+        from .embedding_prices import quote_for_budget
+
+        return quote_for_budget(requested)
+
     # Codex CLI is subscription-metered rather than API-token-metered. This is
     # an explicit, verified accounting policy and must win before a bare model
     # id (such as gpt-5.5) resolves to the paid OpenAI API rate.
