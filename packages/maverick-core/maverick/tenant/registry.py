@@ -396,7 +396,19 @@ def _locked(*, strict: bool = False):
         stack.enter_context(authority_effect_fence())
         stack.enter_context(_REGISTRY_LOCK)
         stack.enter_context(cross_process_lock(_registry_path(), strict=strict))
+        # Admission paths that already hold the roster (provider_admission)
+        # must be able to repair the default tenant without re-locking: the
+        # lock is not re-entrant and the flock would block the same process.
+        _LOCK_STATE.held = True
+        stack.callback(setattr, _LOCK_STATE, "held", False)
         return stack.pop_all()
+
+
+_LOCK_STATE = threading.local()
+
+
+def _roster_locked_by_this_thread() -> bool:
+    return bool(getattr(_LOCK_STATE, "held", False))
 
 
 def list_tenants() -> list[TenantRecord]:
@@ -455,8 +467,102 @@ def create_tenant(
             created_at=now, updated_at=now,
         )
         records[tid] = rec
+        # The first roster publication turns admission from "open" to "listed
+        # tenants only". The deployment's implicit default tenant has been
+        # running every task until now; list it too, or the next task is
+        # refused as an unknown tenant.
+        default = _default_record(records) if not _registry_path().exists() else None
+        if default is not None:
+            records[default.id] = default
         _save(records)
+    if default is not None:
+        _audit_default_registered(default.id, trigger="first_workspace")
     return rec
+
+
+#: Roster label for the tenant a deployment ran in before it had workspaces.
+DEFAULT_WORKSPACE_DISPLAY_NAME = "Default workspace"
+
+
+def _default_record(records: dict[str, TenantRecord]) -> TenantRecord | None:
+    """A fresh active row for the implicit default tenant, or ``None`` when the
+    deployment has no binding or the roster already lists it. Caller holds the
+    registry lock."""
+    from ..paths import implicit_tenant_id
+
+    try:
+        tid = _lookup_id(implicit_tenant_id())
+    except Exception:
+        return None
+    if not tid or tid in records:
+        return None
+    namespace_key = _tenant_namespace_key(tid)
+    if any(_tenant_namespace_key(existing) == namespace_key for existing in records):
+        return None
+    try:
+        bind_tenant_namespace(tid)
+        from ..workspace import Workspace
+        ensure_private_directory(Workspace(tid).root)
+    except Exception as exc:
+        log.error("default tenant %r could not be provisioned: %s", tid, exc)
+        return None
+    now = time.time()
+    return TenantRecord(
+        id=tid, status=ACTIVE, plan="free",
+        display_name=DEFAULT_WORKSPACE_DISPLAY_NAME,
+        max_daily_dollars=DEFAULT_TENANT_DAILY_DOLLARS,
+        created_at=now, updated_at=now,
+    )
+
+
+def _audit_default_registered(tenant_id: str, *, trigger: str, actor: str = "system") -> None:
+    from ..audit import EventKind, audit_event
+
+    audit_event(
+        EventKind.TENANT_DEFAULT_REGISTERED, agent="system", _global=True,
+        actor=actor, tenant=tenant_id, trigger=trigger,
+    )
+
+
+def ensure_default_tenant_registered(*, actor: str = "system") -> TenantRecord | None:
+    """Repair an install whose roster predates the default-tenant rule.
+
+    When a roster exists but lacks the deployment's implicit default tenant,
+    add it as active and write an audit event. Returns the new record, or
+    ``None`` when nothing needed doing (no roster, no binding, already
+    listed, or paused on purpose). Safe to call on every startup or admission.
+    """
+    if not _registry_path().exists():
+        return None
+
+    def _register() -> TenantRecord | None:
+        records = _load()
+        default = _default_record(records)
+        if default is not None:
+            records[default.id] = default
+            _save(records)
+        return default
+
+    if _roster_locked_by_this_thread():
+        default = _register()
+    else:
+        with _locked():
+            default = _register()
+    if default is None:
+        return None
+    _audit_default_registered(default.id, trigger="repair", actor=actor)
+    log.warning("tenant registry: registered the default workspace %r so it "
+                "keeps running alongside the named workspaces", default.id)
+    return default
+
+
+def _is_implicit_default(tid: str) -> bool:
+    from ..paths import implicit_tenant_id
+
+    try:
+        return bool(tid) and _lookup_id(implicit_tenant_id()) == tid
+    except Exception:
+        return False
 
 
 def _mutate(tenant_id: str, **changes) -> TenantRecord:
@@ -654,7 +760,15 @@ def is_active(tenant_id: str | None) -> bool:
     except TenantRegistryError:
         return False
     if rec is None:
-        return not _registry_path().exists()
+        if not _registry_path().exists():
+            return True
+        if _is_implicit_default(tid):
+            try:
+                rec = ensure_default_tenant_registered()
+            except Exception:
+                return False
+            return rec is not None and rec.active
+        return False
     return rec.active
 
 
@@ -674,6 +788,10 @@ def assert_tenant_active(tenant_id: str | None) -> None:
     # control-plane state.  Let TenantRegistryError propagate so callers can
     # emit an operator-visible policy outage and, critically, still deny work.
     rec = _load().get(tid)
+    if rec is None and _is_implicit_default(tid):
+        # An install whose roster was written before the default-tenant rule:
+        # the deployment's own tenant is never "unknown", so list it now.
+        rec = ensure_default_tenant_registered()
     if rec is None or not rec.active:
         raise TenantSuspended(f"tenant is suspended or unknown: {tenant_id!r}")
 

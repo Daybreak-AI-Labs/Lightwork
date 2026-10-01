@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 
 from fastapi.responses import StreamingResponse
+from maverick.stop_reasons import stop_payload
 from starlette.concurrency import run_in_threadpool
 
 TERMINAL_RUN_STATUSES = frozenset({"done", "completed", "failed", "cancelled", "blocked", "error"})
@@ -136,6 +137,7 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
                         last = events[-1].id
                     last_result = current.result or ""
                     payload = {"status": current.status, "result": current.result or "",
+                               "stop": stop_payload(current.status, current.result),
                                "next_id": last, "terminal": False,
                                "events": [_event_dict(event) for event in events]}
                     yield f"id: {last}\ndata: {json.dumps(payload)}\n\n"
@@ -156,6 +158,7 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
                     continue
                 if legacy:
                     payload = {"status": current.status, "result": current.result or "",
+                               "stop": stop_payload(current.status, current.result),
                                "next_id": last, "events": [], "terminal": True}
                     yield f"id: {last}\nevent: terminal\ndata: {json.dumps(payload)}\n\n"
                 else:

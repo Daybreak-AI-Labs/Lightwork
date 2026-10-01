@@ -646,6 +646,22 @@ def _warm_goal_runtime() -> None:
 
 
 @asynccontextmanager
+def repair_default_workspace() -> None:
+    """Keep the deployment's default workspace admitted once named ones exist.
+
+    An install that created its first workspace before the default-tenant rule
+    has a roster without its own bound tenant, so every task was refused as an
+    unknown tenant. Registering it (active, audited) is a no-op otherwise and
+    never blocks startup.
+    """
+    try:
+        from maverick.tenant.registry import ensure_default_tenant_registered
+
+        ensure_default_tenant_registered(actor="dashboard-startup")
+    except Exception:  # pragma: no cover -- a repair must never block startup
+        log.exception("default workspace repair skipped")
+
+
 async def _lifespan(app: FastAPI):
     """Application lifespan: run startup tasks, then yield to serve.
 
@@ -716,6 +732,7 @@ async def _lifespan(app: FastAPI):
             warn_if_untrusted_proxy_config()
         except Exception:  # pragma: no cover -- a warning must never block startup
             pass
+        await run_in_threadpool(repair_default_workspace)
         await _reclaim_orphans()
         await _install_queue_dispatcher()
         await _install_automation_scheduler()
@@ -3371,6 +3388,12 @@ async def workflow_readiness_page(request: Request) -> HTMLResponse:
             status_code=403, headers={"Cache-Control": "private, no-store"})
     return templates.TemplateResponse(request, "workflow_readiness.html", {"capabilities": for_request(request)},
                                       headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/workspaces", include_in_schema=False)
+def workspaces_alias() -> RedirectResponse:
+    """The product calls the tenant roster "Workspaces"; links use that name."""
+    return RedirectResponse("/tenants", status_code=303)
 
 
 @app.get("/tenants", response_class=HTMLResponse)
@@ -10180,12 +10203,20 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         spend_ceiling = configured_max_dollars()
     except Exception:  # pragma: no cover -- never 500 the goal page
         spend_ceiling = None
+    # Why the run stopped, in plain words. The raw kernel text is shown only
+    # to administrators, under a disclosure, never in the card itself.
+    from maverick.stop_reasons import stop_payload
+
+    show_technical = has_global_permission(request, "admin")
+    stop = stop_payload(g.status, g.result, include_technical=show_technical)
 
     return templates.TemplateResponse(
         request,
         "chat_goal.html",
         {
             "goal": g,
+            "stop": stop,
+            "show_technical_details": show_technical,
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),
             "spend_ceiling": spend_ceiling,
@@ -10658,11 +10689,14 @@ def api_goal_events_legacy(
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
+    from maverick.stop_reasons import stop_payload
+
     since = replay_cursor(since)
     events, has_more = event_page(w, goal_id, since, limit)
     return {
         "status": g.status,
         "result": g.result or "",
+        "stop": stop_payload(g.status, g.result),
         "next_id": events[-1].id if events else since,
         "has_more": has_more,
         "terminal": g.status in TERMINAL_RUN_STATUSES and not has_more,

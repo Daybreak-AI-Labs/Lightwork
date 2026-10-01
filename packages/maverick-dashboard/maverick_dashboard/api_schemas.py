@@ -349,6 +349,8 @@ class GoalEventOut(BaseModel):
 class GoalEventsResponse(BaseModel):
     status: str
     result: str | None
+    # Plain-language stop reason (message, action, link) for a stopped goal.
+    stop: dict | None = None
     next_id: int
     events: list[GoalEventOut]
     has_more: bool = False
