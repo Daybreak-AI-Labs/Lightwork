@@ -9,7 +9,7 @@ from maverick.chat_threads import ChatThreads
 from maverick.governed_records import GovernedRecordStore, RecordConflict
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import assert_goal_access, caller_principal, require_permission, suite_allowed
+from .auth import assert_goal_access, caller_principal, domain_suites_allowed, require_permission
 from .draft_api import context_for
 
 router = APIRouter(tags=["conversations"])
@@ -48,15 +48,14 @@ def _identity(request, world, goal_id):
     owner = caller_principal(request) or ""
     if (goal.owner or "") != owner:
         raise HTTPException(403, "Conversation organization belongs to its owner.")
-    from maverick.domain import suite_for
-    if not suite_allowed(request, suite_for(goal.domain)):
+    if not domain_suites_allowed(request, goal.domain):
         raise HTTPException(403, "Conversation department access changed.")
     binding = ChatThreads(world).binding(goal.id)
     root = world.get_goal(binding.root_id) if binding else goal
     if root is None or (root.owner or "") != owner:
         raise HTTPException(404, "Conversation ownership changed. Reload before continuing.")
     assert_goal_access(request, root)
-    if not suite_allowed(request, suite_for(root.domain)):
+    if not domain_suites_allowed(request, root.domain):
         raise HTTPException(403, "Conversation department access changed.")
     identity = [root.id, root.created_at, owner]
     key = "CO-" + hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:48]

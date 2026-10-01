@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from maverick import audit, config
@@ -116,6 +117,26 @@ def test_revocation_and_disabled_modes_do_not_create_or_consume_work(setup, monk
     monkeypatch.setattr(module.config, "load_global_config", lambda: {"conversation_inbox": {"enabled": True, "independent": False}})
     with pytest.raises(PermissionError):
         send(inbox, goal, mode="independent")
+
+
+def test_deferred_owner_authority_rechecks_inherited_suite(tmp_path, monkeypatch):
+    from maverick.tenant import registry
+    from maverick_dashboard import auth, rbac, scim_groups
+
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    monkeypatch.setattr(module, "current_tenant_id_strict", lambda: "tenant-a")
+    monkeypatch.setattr(registry, "assert_tenant_active", lambda tenant_id: None)
+    monkeypatch.setattr(scim_groups, "active_for_principal", lambda principal: True)
+    monkeypatch.setattr(rbac, "get_tenant_role", lambda tenant_id, principal: "operator")
+    monkeypatch.setattr(rbac, "permissions_for", lambda role: {"operate"})
+    monkeypatch.setattr(auth, "stored_automation_identity", lambda owner: (owner, "owner", frozenset({"finance"})))
+    goal = SimpleNamespace(owner="user:owner", domain="client_fork")
+
+    with pytest.raises(PermissionError, match="department"):
+        module.current_authority(goal)
 
 
 def test_worker_claim_fences_edits_and_checkpoint_files_are_exact(setup):

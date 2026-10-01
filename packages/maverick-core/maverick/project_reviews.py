@@ -112,6 +112,19 @@ class ProjectReviews:
                 "Current workspace membership or permissions do not allow this review"
             )
 
+    def _can_domain(self, principal, domain, permission="view", *, member=False):
+        from .domain import suites_for_domain
+
+        suites = suites_for_domain(domain)
+        return all(self._can(principal, suite, permission, member=member)
+                   for suite in suites or (None,))
+
+    def _require_domain(self, principal, domain, permission="view", *, member=False):
+        if not self._can_domain(principal, domain, permission, member=member):
+            raise ProjectReviewDenied(
+                "Current workspace membership or permissions do not allow this review"
+            )
+
     @contextmanager
     def _guard(self, team_id):
         self._context()
@@ -156,9 +169,7 @@ class ProjectReviews:
         project, team_id = self._project(project_id)
         if project["owner"] != self.principal:
             raise ProjectReviewDenied("Only the project owner can manage its review team")
-        from .domain import suite_for
-
-        self._require(self.principal, suite_for(project.get("domain", "")), "operate")
+        self._require_domain(self.principal, project.get("domain", ""), "operate")
         record = self._team(team_id)
         return (
             self._public(record)
@@ -186,9 +197,7 @@ class ProjectReviews:
             raise ProjectReviewDenied(
                 "Only the project owner can grant another person's review access"
             )
-        from .domain import suite_for
-
-        suite = suite_for(project.get("domain", ""))
+        domain = project.get("domain", "")
         request_sha = digest(
             {
                 "member": member,
@@ -198,9 +207,9 @@ class ProjectReviews:
             }
         )
         with self._guard(team_id):
-            self._require(self.principal, suite, "operate")
+            self._require_domain(self.principal, domain, "operate")
             if allowed:
-                self._require(member, suite, "operate", member=True)
+                self._require_domain(member, domain, "operate", member=True)
             current = self._team(team_id)
             if current and operation in current["operations"]:
                 if current["operations"][operation] != request_sha:
@@ -294,7 +303,7 @@ class ProjectReviews:
         if project["owner"] != self.principal:
             raise ProjectReviewDenied("Only the project owner can select a task result")
         snapshot = self._snapshot(project_id, goal_id, self.principal)
-        self._require(self.principal, snapshot["suite"], "operate")
+        self._require_domain(self.principal, snapshot["domain"], "operate")
         return {"snapshot": snapshot, "source_version": digest(snapshot)}
 
     def send(
@@ -348,7 +357,7 @@ class ProjectReviews:
             if team["revision"] != expected_team_revision:
                 raise RecordConflict("Project membership changed; review the current team")
             snapshot = self.prepare(project_id, goal_id)["snapshot"]
-            self._require(reviewer, snapshot["suite"], "operate", member=True)
+            self._require_domain(reviewer, snapshot["domain"], "operate", member=True)
             if digest(snapshot) != source_version:
                 raise RecordConflict(
                     "Task result changed; preview its current version before sharing"
@@ -409,7 +418,7 @@ class ProjectReviews:
         packet = self.get(packet_id)
         if packet["owner"] != self.principal:
             raise ProjectReviewDenied("Only the owner may prepare work from a review")
-        self._require(self.principal, packet["snapshot"]["suite"], "operate")
+        self._require_domain(self.principal, packet["snapshot"]["domain"], "operate")
         if packet["revision"] != _version(expected_revision) or packet["source_version"] != source_version:
             raise RecordConflict("The review changed; reopen it before preparing a revision")
         if packet["status"] != "changes_requested" and not packet["stale"]:
@@ -442,8 +451,8 @@ class ProjectReviews:
             raise ProjectReviewDenied("Project review access was revoked")
         if self.principal not in {record["owner"], record["reviewer"]}:
             raise ProjectReviewDenied("This packet is assigned to another reviewer")
-        self._require(
-            self.principal, record["snapshot"]["suite"], member=self.principal != record["owner"]
+        self._require_domain(
+            self.principal, record["snapshot"]["domain"], member=self.principal != record["owner"]
         )
         return team
 
@@ -469,7 +478,7 @@ class ProjectReviews:
             and record["due_at"] < self.packets.authoritative_time(),
             live_goal_changed=False,
             live_goal_signoff=False,
-            can_respond=self._can(self.principal, record["snapshot"]["suite"], "operate", member=self.principal != record["owner"]),
+            can_respond=self._can_domain(self.principal, record["snapshot"]["domain"], "operate", member=self.principal != record["owner"]),
         )
         return result
 
@@ -517,9 +526,9 @@ class ProjectReviews:
         with self._guard(initial["team_id"]) as kind:
             current = self.packets.get(packet_id)
             team = self._authorized(current)
-            self._require(
+            self._require_domain(
                 self.principal,
-                current["snapshot"]["suite"],
+                current["snapshot"]["domain"],
                 "operate",
                 member=self.principal != current["owner"],
             )
@@ -549,7 +558,7 @@ class ProjectReviews:
 
             def mutate(record):
                 self._authorized(record)
-                self._require(self.principal, record["snapshot"]["suite"], "operate", member=self.principal != record["owner"])
+                self._require_domain(self.principal, record["snapshot"]["domain"], "operate", member=self.principal != record["owner"])
                 record["operations"][operation] = request_sha
                 record["history"].append(
                     {

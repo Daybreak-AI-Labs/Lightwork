@@ -712,6 +712,15 @@ def suite_allowed(request: Request, suite: str | None) -> bool:
     return allowed is None or suite in allowed
 
 
+def domain_suites_allowed(request: Request, domain: str | None) -> bool:
+    """Honor the live suite of a custom specialist and its inherited profile."""
+    if not domain:
+        return True
+    from maverick.domain import suites_for_domain
+
+    return all(suite_allowed(request, suite) for suite in suites_for_domain(domain))
+
+
 def scope_to_suites(request: Request, items, *, suite_of, keep_none: bool = True):
     """Filter ``items`` to the caller's granted departments (job-function scope).
 

@@ -23,7 +23,7 @@ def thread(tmp_path, monkeypatch):
     monkeypatch.setattr(audit, "record", lambda *args, **kwargs: True)
     monkeypatch.setattr(organization, "require_permission", lambda *args: None)
     monkeypatch.setattr(organization, "assert_goal_access", lambda *args: None)
-    monkeypatch.setattr(organization, "suite_allowed", lambda *args: True)
+    monkeypatch.setattr(organization, "domain_suites_allowed", lambda *args: True)
     monkeypatch.setattr(organization, "caller_principal", lambda request: "user:alice")
     monkeypatch.setattr(organization, "context_for", lambda request: "a" * 64)
     monkeypatch.setattr(app, "_require_same_origin", lambda request: None)

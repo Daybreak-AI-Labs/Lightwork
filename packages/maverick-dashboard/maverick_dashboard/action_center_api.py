@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from . import action_center
 from .auth import (
     caller_principal,
+    domain_suites_allowed,
     goal_owner_filter,
     require_permission,
     scope_to_suites,
@@ -126,8 +127,6 @@ def _model(request):
     if config.get_features().get("vendor_onboarding") is True:
         def vendor_reconciliations():
             return _vendor_reconciliation_rows(request)
-    from maverick.domain import suite_for
-
     from .auth import can_access_goal
     from .content_access import can_read_approval
     def connection_attention():
@@ -138,7 +137,7 @@ def _model(request):
         project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations,
         connection_attention=connection_attention,
         approval_allowed=lambda row: can_read_approval(request, row, world=_world()),
-        task_allowed=lambda goal: can_access_goal(request, goal) and suite_allowed(request, suite_for(goal.domain)))
+        task_allowed=lambda goal: can_access_goal(request, goal) and domain_suites_allowed(request, goal.domain))
 
 
 async def _snapshot(request):

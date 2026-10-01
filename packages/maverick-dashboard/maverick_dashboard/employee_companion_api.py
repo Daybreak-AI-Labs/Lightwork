@@ -20,7 +20,7 @@ from maverick import config
 from maverick import employee_companion_model as companion_model
 from maverick.authority_effects import authority_effect_fence
 from maverick.conversational_supervisor import DEFAULT_GRAMMAR, parse_utterance
-from maverick.domain import suite_for
+from maverick.domain import suites_for_domain
 from maverick.employee_companion import (
     CompanionConflictError,
     CompanionError,
@@ -178,7 +178,7 @@ def _explanation(policy):
 def _goal_allowed(world, goal, actor, suites):
     if goal is None or goal.owner != actor:
         return False
-    if suites is not None and suite_for(goal.domain) not in suites:
+    if suites is not None and not suites_for_domain(goal.domain) <= suites:
         return False
     if goal.project_id is not None:
         project = world.get_project(goal.project_id)

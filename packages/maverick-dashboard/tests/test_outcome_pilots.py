@@ -759,7 +759,7 @@ def test_goal_acceptance_requires_current_human_signoff_and_suite(monkeypatch):
     decision = {"decision": "approved", "decided_by": "agent:reviewer"}
     world = SimpleNamespace(get_goal=lambda i: goal, list_episodes=lambda **k: [], signoff_for=lambda i: copy.deepcopy(decision))
     monkeypatch.setattr("maverick_dashboard.app._world", lambda: world)
-    monkeypatch.setattr("maverick.domain.suite_for", lambda d: "privacy")
+    monkeypatch.setattr(sources, "domain_suites_allowed", lambda *a: True)
     monkeypatch.setattr(sources, "can_access_goal", lambda *a: True)
     monkeypatch.setattr(sources, "suite_allowed", lambda *a: True)
     monkeypatch.setattr(sources, "caller_principal", lambda *a: "user:alice")
@@ -771,7 +771,7 @@ def test_goal_acceptance_requires_current_human_signoff_and_suite(monkeypatch):
     decision.clear()
     assert not sources.goal_source(None, "1")["accepted"]
     assert sources.goal_source(None, "1")["version"] != old["version"]
-    monkeypatch.setattr(sources, "suite_allowed", lambda *a: False)
+    monkeypatch.setattr(sources, "domain_suites_allowed", lambda *a: False)
     with pytest.raises(LookupError):
         sources.goal_source(None, "1")
 

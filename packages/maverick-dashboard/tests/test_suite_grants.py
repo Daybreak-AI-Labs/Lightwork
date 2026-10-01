@@ -191,6 +191,18 @@ def test_direct_goal_admission_checks_inherited_suite(monkeypatch, tmp_path):
     assert checked == ["aerospace_defense"]
 
 
+def test_domain_read_scope_checks_inherited_suite(monkeypatch, tmp_path):
+    from maverick_dashboard import auth
+
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"finance"}))
+    assert not auth.domain_suites_allowed(None, "client_fork")
+    assert auth.domain_suites_allowed(None, "finance_ap")
+
+
 def test_finance_operations_and_workspace_require_finance_grant(monkeypatch, tmp_path):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[finance_operations]\nenable = true\n", encoding="utf-8")

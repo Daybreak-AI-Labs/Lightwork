@@ -28,13 +28,12 @@ def template_choices(request):
 
 
 def _tasks(request, world, principal, since):
-    from maverick.domain import suite_for
     active, recent, complete = [], [], True
     for status in ("pending", "active", "running", "blocked", "done"):
         rows = world.list_goals(owner=principal, status=status, limit=101, order="desc")
         complete = complete and len(rows) <= 100
         for goal in rows[:100]:
-            if goal.owner != principal or not auth.suite_allowed(request, suite_for(goal.domain)) or not auth.can_access_goal(request, goal):
+            if goal.owner != principal or not auth.domain_suites_allowed(request, goal.domain) or not auth.can_access_goal(request, goal):
                 continue
             row = {"title": goal.title, "href": f"/chat/goal/{goal.id}", "status": goal.status, "updated_at": goal.updated_at}
             if status == "done":

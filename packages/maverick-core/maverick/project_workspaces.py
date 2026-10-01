@@ -12,7 +12,7 @@ import re
 import threading
 from contextlib import contextmanager
 
-from .domain import suite_for
+from .domain import suite_for, suites_for_domain
 from .governed_operations import digest
 from .governed_records import GovernedMutationFence, GovernedRecordStore
 from .paths import current_tenant_id_strict
@@ -105,13 +105,18 @@ class ProjectWorkspaces:
                 self.eligible(principal, suite, permission, member) is not True):
             raise ProjectReviewDenied("Current workspace membership or permissions do not allow this project")
 
+    def _require_domain(self, principal, domain, permission="view", *, member=False):
+        suites = suites_for_domain(domain)
+        for suite in suites or (None,):
+            self._require(principal, suite, permission, member=member)
+
     def _project(self, project_id):
         if type(project_id) is not int or project_id < 1:
             raise ValueError("Choose a project")
         project = self.world.get_project(project_id)
         if not project or not project.get("owner") or project.get("status") != "active":
             raise ProjectReviewDenied("This project is unavailable")
-        self._require(self.principal, suite_for(project.get("domain", "")))
+        self._require_domain(self.principal, project.get("domain", ""))
         identity = {key: project[key] for key in ("id", "owner", "created_at")}
         return project, "PW-" + digest(identity)[:32]
 
@@ -130,7 +135,7 @@ class ProjectWorkspaces:
         owner = self.principal == project["owner"]
         if not owner and self.principal not in record["members"]:
             raise ProjectReviewDenied("The project owner has not shared this workspace with you")
-        self._require(self.principal, suite_for(project.get("domain", "")),
+        self._require_domain(self.principal, project.get("domain", ""),
                       "operate" if write else "view", member=not owner)
         if write and not owner:
             raise ProjectReviewDenied("Only the project owner can change workspace planning or sharing")
@@ -143,7 +148,7 @@ class ProjectWorkspaces:
         # A metadata grant is deliberately insufficient, including for admins.
         if not goal or goal.owner != self.principal or goal.project_id != project_id:
             raise ProjectReviewDenied("The linked task is private or no longer belongs to this project")
-        self._require(self.principal, suite_for(goal.domain))
+        self._require_domain(self.principal, goal.domain)
         return goal
 
     def _packet(self, project_id, packet_id):
@@ -341,7 +346,7 @@ class ProjectWorkspaces:
             raise ValueError("The owner already has workspace access")
         members = set(after["members"])
         if payload["allowed"]:
-            self._require(member, suite_for(project.get("domain", "")), member=True)
+            self._require_domain(member, project.get("domain", ""), member=True)
             members.add(member)
         else:
             members.discard(member)
@@ -521,7 +526,7 @@ class ProjectWorkspaces:
             def update(current):
                 _validate(current, SCHEMA)
                 project, identity = self._project(project_id)
-                self._require(self.principal, suite_for(project.get("domain", "")), "operate")
+                self._require_domain(self.principal, project.get("domain", ""), "operate")
                 if identity != current["id"] or project["owner"] != self.principal or current["owner"] != self.principal:
                     raise ProjectReviewDenied("Project ownership changed; the reviewed update cannot be applied")
                 current.update({key: value for key, value in record.items() if key not in {"revision", "created_at", "updated_at", "_audit_pending"}})

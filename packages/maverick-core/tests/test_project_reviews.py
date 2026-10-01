@@ -66,6 +66,30 @@ def send(setup, **changes):
     return owner.send(project, **payload), payload
 
 
+def test_inherited_specialist_requires_its_suite_for_project_review(setup, tmp_path, monkeypatch):
+    from maverick.project_workspaces import ProjectWorkspaces
+
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    world = setup[0]
+    project = world.create_project("Restricted fork", owner="user:owner", domain="client_fork")
+    goal = world.create_goal("Restricted result", owner="user:owner", project_id=project,
+                             domain="client_fork")
+    world.set_goal_status(goal, "done", result="Private result")
+    def eligible(principal, suite, permission, member):
+        return suite in {None, "finance"}
+    reviews = ProjectReviews(world, principal="user:owner", eligible=eligible)
+    workspace = ProjectWorkspaces(world, principal="user:owner", eligible=eligible)
+    with pytest.raises(ProjectReviewDenied):
+        reviews.team(project)
+    with pytest.raises(ProjectReviewDenied):
+        reviews.prepare(project, goal)
+    with pytest.raises(ProjectReviewDenied):
+        workspace.get(project)
+
+
 def respond(service, packet, **changes):
     payload = {
         "action": "approve",

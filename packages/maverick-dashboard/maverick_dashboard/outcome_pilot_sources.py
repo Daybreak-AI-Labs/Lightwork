@@ -4,7 +4,13 @@ from __future__ import annotations
 import math
 from dataclasses import asdict
 
-from .auth import caller_principal, can_access_goal, goal_owner_filter, suite_allowed
+from .auth import (
+    caller_principal,
+    can_access_goal,
+    domain_suites_allowed,
+    goal_owner_filter,
+    suite_allowed,
+)
 from .outcome_pilots import digest
 
 PREPARED = "Prepared for a workflow pilot. Start this task after the pilot plan is frozen."
@@ -45,13 +51,11 @@ def _can_read_source(request, goal, *, independent_review=False):
 
 
 def goal_source(request, reference, *, independent_review=False):
-    from maverick.domain import suite_for
-
     from .app import _world
 
     world = _world()
     goal = world.get_goal(int(reference))
-    if goal is None or not _can_read_source(request, goal, independent_review=independent_review) or not suite_allowed(request, suite_for(goal.domain)):
+    if goal is None or not _can_read_source(request, goal, independent_review=independent_review) or not domain_suites_allowed(request, goal.domain):
         raise LookupError("Task unavailable.")
     episodes = world.list_episodes(goal_id=goal.id, limit=2001)
     if len(episodes) > 2000:
@@ -157,8 +161,6 @@ def resolve(request, kind, reference, *, independent_review=False):
 
 
 def choices(request):
-    from maverick.domain import suite_for
-
     from .app import _deliverable_specs, _world
     from .vendor_onboarding_api import _binding, _call
 
@@ -167,7 +169,7 @@ def choices(request):
         world = _world()
         goals = world.list_goals(owner=goal_owner_filter(request), limit=201, order="desc")
         for goal in goals[:200]:
-            if can_access_goal(request, goal) and suite_allowed(request, suite_for(goal.domain)):
+            if can_access_goal(request, goal) and domain_suites_allowed(request, goal.domain):
                 if _is_prepared(goal, world.list_episodes(goal_id=goal.id, limit=1)):
                     items.append({"kind": "goal", "reference": str(goal.id), "label": goal.title})
         coverage.append({"kind": "goal", "status": "partial" if len(goals) > 200 else "current"})
@@ -182,7 +184,7 @@ def choices(request):
     except Exception:
         coverage.append({"kind": "vendor", "status": "unavailable"})
     specialists = [{"domain": s["domain"], "label": s.get("name") or s["domain"]}
-                   for s in _deliverable_specs() if s.get("gate") and suite_allowed(request, s.get("suite"))]
+                   for s in _deliverable_specs() if s.get("gate") and domain_suites_allowed(request, s["domain"])]
     return {"items": items, "coverage": coverage, "specialists": specialists}
 
 

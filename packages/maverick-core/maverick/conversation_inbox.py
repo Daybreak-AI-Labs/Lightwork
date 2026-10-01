@@ -312,7 +312,7 @@ def current_authority(goal):
     from maverick_dashboard import rbac, scim_groups
     from maverick_dashboard.auth import stored_automation_identity
 
-    from .domain import suite_for
+    from .domain import suites_for_domain
     from .tenant.registry import assert_tenant_active
     tenant = current_tenant_id_strict()
     assert_tenant_active(tenant)
@@ -321,8 +321,7 @@ def current_authority(goal):
     if tenant and "operate" not in rbac.permissions_for(rbac.get_tenant_role(tenant, goal.owner)):
         raise PermissionError("The task owner no longer has workspace execution permission")
     _, user_id, suites = stored_automation_identity(goal.owner)
-    suite = suite_for(goal.domain)
-    if suite is not None and suites is not None and suite not in suites:
+    if suites is not None and not suites_for_domain(goal.domain) <= suites:
         raise PermissionError("The task department is no longer authorized")
     return user_id, suites
 

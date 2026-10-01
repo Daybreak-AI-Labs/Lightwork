@@ -7,7 +7,6 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from maverick import config
-from maverick.domain import suite_for
 from maverick.paths import current_tenant_id_strict
 from maverick.privacy_ops import RecordConflict
 from maverick.project_reviews import ProjectReviewDenied, ProjectReviews
@@ -136,8 +135,8 @@ def _overview(request):
     service = _service(request)
     projects = []
     for project in service.world.list_projects(owner=service.principal):
-        if project.get("status") == "active" and service._can(
-            service.principal, suite_for(project.get("domain", "")), "operate"
+        if project.get("status") == "active" and service._can_domain(
+            service.principal, project.get("domain", ""), "operate"
         ):
             projects.append({key: project[key] for key in ("id", "name", "description")})
     items = service.inbox()
@@ -201,11 +200,11 @@ async def project_setup(request: Request, response: Response, project_id: int):
         service = _service(request)
         team = service.team(project_id)
         project = service.world.get_project(project_id)
-        suite = suite_for(project.get("domain", ""))
+        domain = project.get("domain", "")
         eligible = [
             actor
             for actor in rbac.list_tenant_roles(service.tenant)
-            if actor != service.principal and service._can(actor, suite, "operate", member=True)
+            if actor != service.principal and service._can_domain(actor, domain, "operate", member=True)
         ]
         goals = []
         for goal in service.world.list_goals(
@@ -214,7 +213,7 @@ async def project_setup(request: Request, response: Response, project_id: int):
             if (
                 goal.result
                 and goal.status not in {"active", "pending"}
-                and service._can(service.principal, suite_for(goal.domain), "operate")
+                and service._can_domain(service.principal, goal.domain, "operate")
             ):
                 goals.append({"id": goal.id, "title": goal.title, "status": goal.status})
         return {"team": team, "eligible_members": sorted(eligible), "goals": goals}
