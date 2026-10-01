@@ -70,6 +70,9 @@ test('recipient verifies exported bundle content offline and gets a refusal for 
   try{
     const {page}=receiver,manifest=JSON.parse(await fs.readFile(path.join(directory,'manifest.json'),'utf8'));
     const files=await Promise.all(manifest.files.map(async item=>({name:item.name,mimeType:'application/octet-stream',buffer:await fs.readFile(path.join(directory,item.name))})));
+    const sameLengthTamper=Buffer.from(files[0].buffer);
+    expect(sameLengthTamper.length).toBeGreaterThan(0);
+    sameLengthTamper[0]^=1;
     await page.goto(pathToFileURL(path.join(directory,'index.html')).href);
     await expect(page.getByRole('heading',{name:'Recipient evidence bundle'})).toBeVisible();
     await expect(page.locator('body')).toContainText('No current human acceptance');
@@ -78,7 +81,8 @@ test('recipient verifies exported bundle content offline and gets a refusal for 
     await expect(page.locator('table')).toContainText('=UNTRUSTED()');
     await page.getByRole('link',{name:'Verify extracted files offline'}).click();
     for(const [selected,valid] of [[files,true],[files.slice(1),false],
-      [[{...files[0],buffer:Buffer.from('changed source')},...files.slice(1)],false],[[...files,files[0]],false]]){
+      [[{...files[0],buffer:Buffer.from('changed source')},...files.slice(1)],false],
+      [[{...files[0],buffer:sameLengthTamper},...files.slice(1)],false],[[...files,files[0]],false]]){
       await page.locator('#files').setInputFiles(selected);
       await page.getByRole('button',{name:'Check selected files'}).click();
       // The handler clears this list synchronously and appends one result per
