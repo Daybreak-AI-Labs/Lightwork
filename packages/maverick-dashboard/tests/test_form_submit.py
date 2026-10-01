@@ -21,7 +21,7 @@ def _isolate(monkeypatch, tmp_path, triggers="1"):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
 
 
-def _register_form(token: str, *, tenant: str = "", name: str = "") -> None:
+def _register_form(token: str, *, tenant: str = "", name: str = "", owner: str = "") -> None:
     from maverick.flow import store as flow_store
     from maverick.flow.ir import Flow, FlowNode
     from maverick.paths import reset_tenant, set_tenant
@@ -45,7 +45,7 @@ def _register_form(token: str, *, tenant: str = "", name: str = "") -> None:
     event_triggers_store.set_trigger(
         name or f"accept-{token}", "", "form", config={"token": token},
         flow=saved.id, flow_owner=saved.owner,
-        flow_revision=release["release_id"], tenant=tenant,
+        flow_revision=release["release_id"], tenant=tenant, owner=owner,
     )
 
 
@@ -168,6 +168,31 @@ def test_invalid_json_is_400(monkeypatch, tmp_path):
     r = _client().post("/form/x", content=b"{not json",
                        headers={"content-type": "application/json"})
     assert r.status_code == 400
+
+
+def test_oversized_json_form_fields_are_rejected_without_truncation(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("sizing")
+    client = _client()
+    responses = [
+        client.post("/form/sizing", json={str(n): "x" for n in range(51)}),
+        client.post("/form/sizing", json={"answer": "x" * 2001}),
+        client.post("/form/sizing", json={"n" * 201: "x"}),
+    ]
+    assert [response.status_code for response in responses] == [400, 400, 400]
+    assert not list(tmp_path.rglob("*.ndjson"))
+
+
+def test_revoked_form_owner_cannot_acknowledge_submission(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("owned", owner="user:departed")
+    from maverick_dashboard import scim_groups
+
+    monkeypatch.setattr(scim_groups, "active_for_principal", lambda _owner: False)
+    response = _client().post("/form/owned", json={"name": "first"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "This form is not accepting submissions."
+    assert not list(tmp_path.rglob("*.ndjson"))
 
 
 def test_unregistered_and_non_form_tokens_create_no_submission(monkeypatch, tmp_path):

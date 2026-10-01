@@ -10432,6 +10432,7 @@ def _append_registered_form(trigger: dict, token: str, fields: dict) -> int:
     from maverick import form_store
     from maverick.flow import store as flow_store
 
+    from .event_poll import _require_stored_event_source_authority, event_source_authority
     from .triggers_store import bound_template
 
     flow_id = str(trigger.get("flow") or "")
@@ -10439,6 +10440,16 @@ def _append_registered_form(trigger: dict, token: str, fields: dict) -> int:
     if bool(flow_id) == bool(template_id):
         raise _FormTargetUnavailable("form trigger has no single target")
     with _stored_trigger_tenant(trigger):
+        owner = str(trigger.get("owner") or "").strip()
+        try:
+            stored_automation_identity(owner)
+            _require_stored_event_source_authority(
+                owner, event_source_authority("form", trigger.get("config") or {}),
+            )
+        except AutomationAuthorizationError as exc:
+            raise HTTPException(
+                status_code=503, detail="This form is not accepting submissions."
+            ) from exc
         if flow_id:
             release_id = str(trigger.get("flow_revision") or "")
             if not release_id:
@@ -10501,6 +10512,13 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
         request._body = body  # noqa: SLF001 - bounded body replay for form parser
         form = await request.form(max_files=0, max_fields=form_store._MAX_FIELDS)
         fields = {k: str(v) for k, v in form.items()}
+    if len(fields) > form_store._MAX_FIELDS:
+        raise HTTPException(status_code=400, detail="This form has too many fields.")
+    if any(len(str(key)) > 200 for key in fields):
+        raise HTTPException(status_code=400, detail="A form field name is too long.")
+    if any(len("" if value is None else str(value)) > form_store._MAX_VALUE
+           for value in fields.values()):
+        raise HTTPException(status_code=400, detail="A form answer is too long.")
     # A trigger may have been deleted while its public caller uploaded a body.
     if trigger is not None:
         current = await run_in_threadpool(_registered_form_trigger, token)
