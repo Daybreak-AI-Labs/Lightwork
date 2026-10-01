@@ -131,10 +131,48 @@ production posture. The harness now sets both. Earlier dashboard-only labels
 without this evidence are ordinary/posture-unspecified checks; corrected
 cohorts and the final full secure run are tracked separately.
 
-Final per-criterion review reopened LW-122: the local-only bounded reindex
-implementation does not complete the existing hosted-embedding path. Supported
-hosted cost admission and ambiguous paid-outcome recovery are active work.
+Final per-criterion review reopened LW-122 at that checkpoint because the
+local-only bounded reindex implementation did not complete the existing hosted
+embedding path. The subsequent implementation in `3dd047f` supports priced
+standard Voyage/OpenAI routes with native cost admission and durable ambiguous
+paid-outcome recovery. Its complete focused group passed 137 tests in each
+posture; unpriced routes fail closed. See
+`hosted-reindex-qualification-2026-10-01.md` for exact boundaries.
 The same review reproduced omitted custom-theme semantic colours and hidden
 mobile Close-button focus after desktop resize; their repairs are in `5bc069b`,
 after the `2c1e8a8` runtime checkpoint. New local and browser regressions qualify
 those changes separately before another consolidated freeze.
+
+## Frozen checkpoint `500fc873`, 2026-10-01
+
+Ruff, Vulture, all 16 offline contracts and all eight wheels passed. All 4,826
+wheel payload files match the exact Git archive. The complete JavaScript run
+passed 1,695 cases across 179 files. The default and setup browser profiles
+executed all 90 unique journeys: 87 passed and three timed out. Two failures
+exhausted the navigation scenario's overall deadline; one accounting-summary
+assertion remained in its loading state. These are unresolved qualification
+failures pending unchanged-deadline quiet-host reruns, not assumed contention.
+
+The ordinary Python run ended incomplete after 12,170 passes, 133 skips and two
+failures: one outdated complete-theme expectation and a lost worker in the
+large-corpus knowledge search case. No fatal traceback or timeout diagnostic
+appeared in that log, so the worker-loss cause is not established. The complete
+417-test theme module passes after its expectation repair in both postures,
+with two POSIX-only skips each. The secure full run is still active. Original
+failed/incomplete results remain retained; focused reruns do not convert them
+into complete-suite passes.
+
+Additional private native-vector qualification passed 41 cases in each posture
+with one explicit live-Qdrant-server skip. Optional SDK and actual synthetic CPU
+training qualification passed 181 cases in each posture, with one intentional
+missing-LangChain fallback skip. These source-pinned supplemental records are
+linked from their individual qualification files and overlap integrated tests.
+
+Native database testing also reproduced an expired SQLite admission escaping
+the public tool's error contract before dispatch. The narrow repair in
+`dd82ce5` preserves budget, halt and cancellation propagation and reports
+`transaction_status=not_started`; deterministic prepatch regressions fail and
+pass after repair. Its seven complete database files passed 210 cases in each
+posture, with real loopback PostgreSQL and MariaDB and no skips. This later
+product change requires renewed integrated qualification; the frozen wheels and
+runtime runs above do not include it.
