@@ -15,7 +15,8 @@ No deployment configuration or credentials were changed.
 | `cfa16bfc6659b59d4e855beb024914409cad44a7` | Incomplete; stopped after worker crash and scheduler stall at99% | Read-only stack inspection showed all workers waiting, not executing tests. No final JUnit or pass/fail total exists; progress dots are not acceptance. The actual assertion failures remain unresolved. |
 | `f036cef90a6d6fd1ddaa3f76bd857b9ca9bd4c3e` | All1,680 dashboard JavaScript tests passed across176 files | Zero failures/skips/cancellations. Exact manifests and source boundaries: dashboard-javascript-qualification.md. |
 | `12ff6b8ad9e42f73a13467c3514f9687ba57465f` | Incomplete: 5,669 passed, 10 skipped, two worker crashes | Run ended after 837.37 seconds with both settings catalog cases losing their workers. Remaining cases were not executed. Streamed reports and JUnit retain the partial result; this is not a full-suite pass. |
-| `29aee7e75b6d31012f087ec725456eec20e206af` | Fresh ordinary Python run in progress | Includes the tested batch-local configuration decryption and monotonic tenant restore repairs. Both former crash cases passed in this run. No complete suite result claimed yet. |
+| `29aee7e75b6d31012f087ec725456eec20e206af` | 39,763 passed, 219 failed, 555 skipped | Complete failed ordinary run; no worker losses or collection errors. Both former crash cases passed unchanged. Later repairs require fresh qualification. |
+| `2c1e8a888eee011a2851836079b57c9929b8d745` | Ordinary and secure Python runs in progress | Fixed source includes all reviewed failure repairs. Both secure switches are explicit. Serial heavy checks follow after parallel phases finish; no final pass claimed yet. |
 
 The initial failures are not dismissed as a single fixture problem. Production
 repairs include exact ownership for local schedules, employee content reads in
