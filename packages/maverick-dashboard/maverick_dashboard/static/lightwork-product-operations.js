@@ -15,6 +15,10 @@
     if (overrideSelection) return overrideSelection;
     var goal = window.location.pathname.match(/^\/(?:chat\/goal|tasks)\/(\d+)(?:\/|$)/);
     if (goal) return {kind: 'goal', id: Number(goal[1]), goal_id: Number(goal[1])};
+    var flow = window.location.pathname.match(/^\/flows\/designer\/([^/]+)$/);
+    if (flow) {
+      try { return {kind: 'flow', id: decodeURIComponent(flow[1])}; } catch (_) { return {}; }
+    }
     var query = new URLSearchParams(window.location.search);
     var selectedGoal = query.get('goal_id');
     if (window.location.pathname === '/budget' && selectedGoal && /^[1-9]\d*$/.test(selectedGoal)) return {goal_id: Number(selectedGoal)};
@@ -122,6 +126,49 @@
     };
     return null;
   }
+  async function openWorkflowRun(item, fresh, started) {
+    var selection = context();
+    var review = await request('/prepare', Object.assign(payload(), {
+      operation: item.id, context: fresh.context, revision: item.revision, arguments: {}
+    }));
+    if (!active(started)) return;
+    var details = review.details || {};
+    if (review.read_only !== true || review.operation !== item.id ||
+        details.flow_id !== selection.id || !/^[0-9a-f]{64}$/.test(details.release_id || '') ||
+        !window.LightworkFlowRun || typeof window.LightworkFlowRun.open !== 'function')
+      throw new Error('The published workflow could not be confirmed. Reopen it before running.');
+    clear(formHost); node('h3', item.label, formHost); node('p', review.summary, formHost);
+    node('p', 'The workflow form will check this published version again. Nothing starts until you enter its values and confirm.', formHost);
+    var launch = button('Enter workflow inputs', formHost, async function () {
+      if (busy || !active(started)) return;
+      if (JSON.stringify(context()) !== JSON.stringify(selection)) {
+        status.textContent = 'The selected workflow changed. Refresh the current controls.'; return;
+      }
+      lock(true);
+      try {
+        var outcome = await window.LightworkFlowRun.open(selection.id, details.release_id);
+        if (!active(started)) return;
+        clear(formHost);
+        if (outcome && outcome.status === 'started' && typeof outcome.run_id === 'string') {
+          node('p', 'The workflow run was accepted. Check its progress and any required approvals.', formHost);
+          var link = node('a', 'Open run progress', formHost);
+          link.href = '/flows/' + encodeURIComponent(selection.id) + '/runs/' + encodeURIComponent(outcome.run_id);
+          link.className = 'btn btn--ghost';
+          status.textContent = 'Run accepted. This is not a completed business outcome.';
+        } else {
+          node('p', outcome && outcome.status === 'cancelled' ? 'Run cancelled. Nothing was submitted.' :
+            'A new run was not confirmed. Check the workflow status before trying again.', formHost);
+          status.textContent = outcome && outcome.status === 'cancelled' ? 'Run cancelled.' :
+            'No new run was confirmed.';
+        }
+        button('Refresh current controls', formHost, function () { clear(formHost); selected = null; refresh(); });
+      } catch (_) {
+        if (active(started)) status.textContent = 'The run result could not be confirmed. Check workflow progress before trying again.';
+      } finally { lock(false); }
+    });
+    launch.className = 'btn btn--primary'; launch.focus();
+    button('Cancel', formHost, function () { clear(formHost); selected = null; status.textContent = 'Run review cancelled.'; });
+  }
   async function openOperation(id) {
     if (busy) return false;
     var started = generation; lock(true);
@@ -130,6 +177,10 @@
       if (!fresh || !active(started)) return false;
       var item = fresh.operations.find(function (entry) { return entry.id === id && entry.available; });
       if (!item) return false;
+      if (item.id === 'learning.workflow_run') {
+        await openWorkflowRun(item, fresh, started);
+        return true;
+      }
       selected = item; clear(formHost); node('h3', item.label, formHost); node('p', item.summary, formHost);
       node('p', 'Source: ' + item.source + '. Checked ' + new Date(fresh.checked_at * 1000).toLocaleString() + '.', formHost);
       nativeLink(item, formHost);
@@ -157,6 +208,9 @@
       });
       var focus = form.querySelector('select,input,textarea,button'); if (focus) focus.focus();
       return true;
+    } catch (error) {
+      if (active(started)) status.textContent = error.message;
+      return false;
     } finally { lock(false); }
   }
   function renderConfirmation(item, review, started) {

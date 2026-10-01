@@ -1646,8 +1646,9 @@
     });
   }
   var learnedInputPending = false;
-  function run(dryRun) {
-    if (runInFlight || learnedInputPending) return;
+  function run(dryRun, expected) {
+    if (runInFlight || learnedInputPending) return Promise.resolve({status: 'busy'});
+    if (expected && rootFlow.id !== expected.flowId) return Promise.resolve({status: 'stale'});
     var data = {};
     var learnedPlan = null;
     var pinnedDraft = JSON.stringify(rootFlow), pinnedSnapshot = draftSnapshot(), selectedFlow = rootFlow, releaseId = '';
@@ -1686,8 +1687,10 @@
         say(dryRun ? 'Test started — nothing is sent to other apps.' : 'Run started.');
         document.getElementById('fd-legend').classList.add('on');
         watchRun(result.run_id);
+        return {status: 'started', run_id: result.run_id};
       } catch (e) {
         say(e.message || unconfirmedMutation('Run'), true);
+        return {status: 'unconfirmed'};
       } finally {
         runInFlight = false;
         buttons.forEach(function (button) { button.disabled = false; button.removeAttribute('aria-busy'); });
@@ -1698,40 +1701,54 @@
     }
     async function prepare() {
       if (!dryRun) {
-        if (!rootFlow.id) { say('Publish the reviewed workflow before running it.', true); return; }
+        if (!rootFlow.id) { say('Publish the reviewed workflow before running it.', true); return {status: 'refused'}; }
         say('Loading the published workflow…');
         var previewResponse = await apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/published');
         var preview = await readMutationResult(previewResponse, 'Published workflow');
         if (!preview.flow || preview.flow.id !== rootFlow.id || !Array.isArray(preview.flow.nodes) ||
             typeof preview.release_id !== 'string' || !/^[0-9a-f]{64}$/.test(preview.release_id))
           throw new Error('The published workflow could not be confirmed. Reload it before trying again.');
+        if (expected && preview.release_id !== expected.releaseId) {
+          say('The published workflow changed. Refresh and review it again.', true);
+          return {status: 'stale'};
+        }
         selectedFlow = preview.flow; releaseId = preview.release_id;
       }
-      if (!unchanged()) { say('The workflow changed. Open the input form again.', true); return; }
+      if (!unchanged()) { say('The workflow changed. Open the input form again.', true); return {status: 'stale'}; }
       var title = (dryRun ? 'Test' : 'Run published') + ' “' + (selectedFlow.name || selectedFlow.id || 'workflow') + '”';
+      if (expected && selectedFlow.learned_recipe == null) return {status: 'stale'};
       if (selectedFlow.learned_recipe != null) {
         learnedPlan = FDRecipeInputs.plan(selectedFlow.learned_recipe);
         data = await FDRecipeInputs.prompt(learnedPlan, {title: title, okText: dryRun ? 'Test workflow' : 'Run published',
           restoreFocus: document.getElementById(dryRun ? 'fd-run' : 'fd-run-real')});
-        if (data === null) { say('Run cancelled.'); return; }
+        if (data === null) { say('Run cancelled.'); return {status: 'cancelled'}; }
       } else {
         data = typeof sampleData === 'function' ? sampleData().data : {};
         var fields = inputFields(dryRun ? flowInputs : (selectedFlow.inputs || []));
         if (fields.length) {
           var values = await window.mvForm(title, fields, {okText: dryRun ? 'Test workflow' : 'Run published'});
-          if (values === null) { say('Run cancelled.'); return; }
+          if (values === null) { say('Run cancelled.'); return {status: 'cancelled'}; }
           Object.keys(values).forEach(function (key) { data[key] = values[key]; });
         } else if (!dryRun && !(await window.mvConfirm('Run the published version? This starts real work and uses connected services.', {okText: 'Run published'}))) {
-          say('Run cancelled.'); return;
+          say('Run cancelled.'); return {status: 'cancelled'};
         }
       }
-      if (!unchanged()) { say('The workflow changed while entering inputs. Open the form again.', true); return; }
-      await proceed();
+      if (!unchanged()) { say('The workflow changed while entering inputs. Open the form again.', true); return {status: 'stale'}; }
+      return await proceed();
     }
     learnedInputPending = true;
-    prepare().catch(function (error) { say(error.message || 'Could not open workflow inputs.', true); })
-      .finally(function () { learnedInputPending = false; });
+    return prepare().catch(function (error) {
+      say(error.message || 'Could not open workflow inputs.', true);
+      return {status: 'unconfirmed'};
+    }).finally(function () { learnedInputPending = false; });
   }
+  window.LightworkFlowRun = Object.freeze({
+    open: function (flowId, releaseId) {
+      if (typeof flowId !== 'string' || !/^[0-9a-f]{64}$/.test(releaseId || ''))
+        return Promise.resolve({status: 'refused'});
+      return run(false, {flowId: flowId, releaseId: releaseId});
+    }
+  });
   function runUrl(runId) {
     return '/flows/' + encodeURIComponent(rootFlow.id) + '/runs/' + encodeURIComponent(runId);
   }

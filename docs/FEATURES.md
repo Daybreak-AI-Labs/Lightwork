@@ -55,6 +55,14 @@ here.
   operation, not all post-install work; see
   [operation coverage](post-install-operation-coverage.md).
 
+- **Run a learned workflow from Copilot** — on a saved workflow's designer page,
+  the closed catalog checks the published release and opens the same labelled
+  input form as Run. The form pins that release; the native run endpoint rechecks
+  access and publication before accepting work. Copilot reports an accepted run
+  as in progress, with a link to its status, rather than claiming the business
+  outcome is complete. This is a local journey, not installed-app acceptance or
+  whole-platform operation coverage.
+
 - **Bounded audit reads and explicit coverage** — live tails seek a bounded
   suffix; newly sealed history uses authenticated 1 MiB frames without changing
   signed bytes. Export supports separate coverage receipts and optional segment

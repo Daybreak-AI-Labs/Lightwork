@@ -155,6 +155,7 @@ def _adapter_modules():
         product_operations_task_views,
         product_operations_tasks,
         product_operations_today,
+        product_operations_workflows,
     )
     return (
         product_operations_preferences,
@@ -178,6 +179,7 @@ def _adapter_modules():
         product_operations_record_history,
         product_operations_conversation,
         product_operations_personal_data,
+        product_operations_workflows,
     )
 
 

@@ -174,6 +174,18 @@ for (const dry of [false, true]) test(`actual ${dry ? "test" : "published"} run 
   else assert.equal(body.expected_release_id, 'a'.repeat(64));
   assert.deepEqual(ui.watched, ["run"]);
 });
+test("Copilot opens the same learned form and binds it to the reviewed release", async () => {
+  const ui = runner(async plan => inputs.read(plan, values(plan, {quantity: 3})));
+  const accepted = await ui.context.LightworkFlowRun.open('case', 'a'.repeat(64));
+  assert.equal(accepted.status, 'started'); assert.equal(accepted.run_id, 'run');
+  assert.equal(JSON.parse(ui.calls.at(-1).options.body).expected_release_id, 'a'.repeat(64));
+  const changed = runner(async () => { throw new Error('stale release must not open inputs'); });
+  const stale = await changed.context.LightworkFlowRun.open('case', 'b'.repeat(64));
+  assert.equal(stale.status, 'stale'); assert.equal(changed.calls.length, 1);
+  assert.deepEqual(changed.watched, []);
+  const wrongFlow = await changed.context.LightworkFlowRun.open('other-case', 'a'.repeat(64));
+  assert.equal(wrongFlow.status, 'stale'); assert.equal(changed.calls.length, 1);
+});
 test("cancel and duplicate clicks dispatch nothing, then allow a fresh input attempt", async () => {
   let finish, count = 0;
   const ui = runner(() => {count++; return new Promise(resolve => {finish = resolve;});});
