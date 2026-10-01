@@ -5,6 +5,13 @@ const {JSDOM}=require('jsdom');
 const template=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/templates/graph_editor.html'),'utf8');
 const script=template.slice(template.indexOf('<script>')+8,template.lastIndexOf('</script>'));
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+async function until(condition){
+  for(let i=0;i<500;i++){
+    if(condition())return;
+    await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.ok(condition(),'the expected task-map state did not arrive');
+}
 const result=(body,status=200)=>({ok:status>=200&&status<300,status,json:async()=>body});
 function page(handler) {
   const dom=new JSDOM(template.slice(template.indexOf('<style>'),template.indexOf('<script>')),
@@ -53,13 +60,14 @@ test('unknown child acknowledgement keeps draft and operation across explicit re
   });
   await tick();ui.select(1);const input=ui.doc.getElementById('ge-child-title');input.value='Smaller task';
   ui.doc.getElementById('ge-add-child').click();
-  for(let i=0;i<6&&attempts===0;i++)await tick();
+  await until(()=>attempts===1);
   assert.equal(attempts,1);ui.expire();await tick();
+  await until(()=>!input.disabled&&/not confirmed/.test(ui.doc.getElementById('ge-error').textContent));
   assert.equal(input.value,'Smaller task');assert.equal(input.disabled,false);
   assert.match(ui.doc.getElementById('ge-error').textContent,/not confirmed/);
   assert.equal(attempts,1);
   ui.doc.getElementById('ge-add-child').click();
-  for(let i=0;i<8&&input.value;i++)await tick();
+  await until(()=>input.value==='');
   const bodies=ui.calls.filter(row=>row.options.method).map(row=>JSON.parse(row.options.body));
   assert.equal(bodies.length,2);assert.equal(bodies[0].operation_id,bodies[1].operation_id);
   assert.equal(input.value,'');assert.match(ui.doc.getElementById('ge-status').textContent,/Smaller task.*not started/);
