@@ -211,7 +211,7 @@ def test_merge_waits_for_the_approval_then_merges(client, monkeypatch, tmp_path)
     # A renewal is refused while the current request is still open.
     assert client.post(f"/api/v1/code/proposals/{pid}/renew").status_code == 409
     row = {a["id"]: a for a in client.get("/api/v1/approvals").json()["approvals"]}[p["approval_id"]]
-    ok = client.post(f"/api/v1/approvals/{row['id']}/approve", headers={
+    ok = client.post(f"/api/v1/approvals/{row['id']}/approve", json={"acknowledged": True, "confirmation": "approve"}, headers={
         "X-Lightwork-Approval-Binding": row["approval_card"]["binding_sha256"]})
     assert ok.status_code in (200, 204), ok.text[:300]
     merged = client.post(f"/api/v1/code/proposals/{pid}/merge")

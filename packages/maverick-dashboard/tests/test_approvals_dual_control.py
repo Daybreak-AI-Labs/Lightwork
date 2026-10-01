@@ -82,13 +82,13 @@ def test_quorum_needs_two_distinct_approvers(monkeypatch, tmp_path):
 
     monkeypatch.setattr(api, "_supervisor", lambda r: "u:alice")
     assert c.post(
-        f"/api/v1/approvals/{aid}/approve", headers=headers,
+        f"/api/v1/approvals/{aid}/approve", json={"acknowledged": True, "confirmation": "approve"}, headers=headers,
     ).status_code == 204
     assert w.get_approval(aid).status == "pending"          # one vote: not yet
 
     monkeypatch.setattr(api, "_supervisor", lambda r: "u:bob")
     assert c.post(
-        f"/api/v1/approvals/{aid}/approve", headers=headers,
+        f"/api/v1/approvals/{aid}/approve", json={"acknowledged": True, "confirmation": "approve"}, headers=headers,
     ).status_code == 204
     assert w.get_approval(aid).status == "approved"         # quorum met
 
@@ -111,7 +111,7 @@ def test_self_approval_barred_returns_403(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "_supervisor", lambda r: "u:alice")
     monkeypatch.setattr("maverick.safety.dual_control.allow_self_approval",
                         lambda: False)
-    r = _client().post(f"/api/v1/approvals/{aid}/approve", headers=headers)
+    r = _client().post(f"/api/v1/approvals/{aid}/approve", json={"acknowledged": True, "confirmation": "approve"}, headers=headers)
     assert r.status_code == 403
     assert "segregation of duties" in r.json()["detail"]
     assert w.get_approval(aid).status == "pending"          # vote not counted
@@ -121,7 +121,7 @@ def test_unknown_approval_still_404(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import api
     monkeypatch.setattr(api, "_supervisor", lambda r: "u:alice")
-    r = _client().post("/api/v1/approvals/4242/approve", headers=_ORIGIN)
+    r = _client().post("/api/v1/approvals/4242/approve", json={"acknowledged": True, "confirmation": "approve"}, headers=_ORIGIN)
     assert r.status_code == 404
 
 

@@ -166,7 +166,8 @@ def test_pending_exact_operation_renders_current_and_actionable_inline(
 
     text = _client().get("/oversight").text
     row = re.search(
-        rf'<tr data-id="{approval_id}".*?</tr>', text, flags=re.DOTALL,
+        rf'<article class="approval-item" data-id="{approval_id}".*?</article>',
+        text, flags=re.DOTALL,
     )
 
     assert row is not None

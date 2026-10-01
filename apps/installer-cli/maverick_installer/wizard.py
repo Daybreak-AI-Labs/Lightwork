@@ -155,6 +155,7 @@ STEPS: list[tuple[str, str]] = [
     ("safety", "Safety"),
     ("signed_skills", "Signed skills"),
     ("budget", "Budget"),
+    ("approvals", "Approvals"),
     ("sandbox", "Sandbox"),
     ("research_execution", "Research lab"),
     ("candidate_promotion", "Candidate promotion"),
@@ -1070,6 +1071,34 @@ def pick_signed_skills() -> dict[str, Any]:
         "trusted_pubkeys": trusted,
         "require_signed": require,
         "require_signed_catalog": require_catalog,
+    }
+
+
+def pick_approvals() -> dict[str, Any]:
+    """``[approval]``: the undo window and the high-risk confirmation.
+
+    The Approvals page is the human-in-command loop: a decision can be undone
+    for ``undo_grace_seconds`` (the agent waits that long before acting) and
+    approving a high or critical risk request needs an explicit confirmation.
+    """
+    console.print()
+    console.print(
+        "[dim]Risky actions wait on the Approvals page for a person. A decision "
+        "can be undone for a short while; the agent only acts once that window "
+        "has passed.[/dim]"
+    )
+    undo_seconds = _safe_int(
+        _q_text("  Seconds a decision can be undone (0 = act at once)", default="30"),
+        default=30,
+    )
+    require_ack = _q_confirm(
+        "  Ask for an explicit confirmation before approving high or critical risk "
+        "requests? (a ticked box for high, typing APPROVE for critical)",
+        default=True,
+    )
+    return {
+        "undo_grace_seconds": max(0, min(undo_seconds, 3600)),
+        "require_acknowledgement": bool(require_ack),
     }
 
 
@@ -6813,6 +6842,16 @@ def _cfg_core(
     return lines
 
 
+def _cfg_approval(approval: dict[str, Any] | None) -> list[str]:
+    if not approval:
+        return []
+    # Approvals page: undo window (the agent waits it out) + high-risk confirmation.
+    lines = ["", "[approval]"]
+    for k, v in approval.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
 def _cfg_skills(skills: dict[str, Any] | None) -> list[str]:
     if not skills:
         return []
@@ -9097,6 +9136,7 @@ def write_config(
     governance_profile: str | None = None,
     per_tenant_keys: bool = False,
     first_outcome: dict[str, Any] | None = None,
+    approval: dict[str, Any] | None = None,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     sandbox = _prepare_wizard_workspace(sandbox)
@@ -9187,6 +9227,7 @@ def write_config(
     )
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)
+    lines += _cfg_approval(approval)
     lines += _cfg_skills(skills)
     lines += _cfg_research_execution(research_execution)
     lines += _cfg_candidate_promotion(candidate_promotion)
@@ -10132,6 +10173,11 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     _save_partial(state)
 
     _announce()
+    approval = state.get("approval") or pick_approvals()
+    state["approval"] = approval
+    _save_partial(state)
+
+    _announce()
     sandbox = state.get("sandbox") or pick_sandbox()
     state["sandbox"] = sandbox
     _save_partial(state)
@@ -10260,6 +10306,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "safety": safety,
         "signed_skills": signed_skills,
         "budget": budget,
+        "approval": approval,
         "sandbox": sandbox,
         "research_execution": research_execution,
         "candidate_promotion": candidate_promotion,
@@ -10472,6 +10519,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     safety = _simple["safety"]
     signed_skills = _simple["signed_skills"]
     budget = _simple["budget"]
+    approval = _simple["approval"]
     sandbox = _simple["sandbox"]
     research_execution = _simple["research_execution"]
     candidate_promotion = _simple["candidate_promotion"]
@@ -10624,6 +10672,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         value=value or None,
         assessments=assessments or None,
         security_suite=security_suite,
+        approval=approval,
         suites=suites,
         license_cfg=license_cfg or None,
         # The advanced flow applies no preset -- the operator hand-picked
