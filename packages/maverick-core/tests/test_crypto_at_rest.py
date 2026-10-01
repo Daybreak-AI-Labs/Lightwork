@@ -178,21 +178,20 @@ def test_existing_key_permissions_are_repaired_before_read(monkeypatch):
     if car.os.name != "nt":
         car._KEY_PATH.parent.chmod(0o755)
         car._KEY_PATH.chmod(0o644)
-    path_type = type(car._KEY_PATH)
-    original_read_text = path_type.read_text
+    original_read_text = file_lock.atomic_read_text
     observed = {}
 
-    def checked_read_text(self, *args, **kwargs):
-        if self == car._KEY_PATH:
+    def checked_read_text(path, *args, **kwargs):
+        if path == car._KEY_PATH:
             observed["key_private_before_read"] = (
-                file_lock.private_path_is_restricted(self)
+                file_lock.private_path_is_restricted(path)
             )
             observed["parent_private_before_read"] = (
-                file_lock.private_path_is_restricted(self.parent, 0o700)
+                file_lock.private_path_is_restricted(path.parent, 0o700)
             )
-        return original_read_text(self, *args, **kwargs)
+        return original_read_text(path, *args, **kwargs)
 
-    monkeypatch.setattr(path_type, "read_text", checked_read_text)
+    monkeypatch.setattr(file_lock, "atomic_read_text", checked_read_text)
 
     assert car._load_or_create_key() == b"k" * 32
     assert observed == {
