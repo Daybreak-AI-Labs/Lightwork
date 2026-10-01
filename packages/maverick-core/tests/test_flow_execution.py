@@ -225,6 +225,24 @@ class TestExecution:
         # the pre-pause node's trace is preserved alongside the post-resume nodes
         assert resumed.nodes["a"]["outcome"] == 1.0 and resumed.nodes["c"]["outcome"] == 1.0
 
+    def test_approval_card_and_run_share_rendered_pause_values(self, tmp_path, monkeypatch):
+        _patch_home(tmp_path, monkeypatch)
+        flow = Flow(id="fPrompt", name="Payments", start="gate", nodes={
+            "gate": FlowNode(
+                id="gate", kind="approval",
+                prompt="Approve paying {{vendor}} {{amount}}?", next="done",
+            ),
+            "done": FlowNode(id="done", kind=NODE_AGENT, brief="Record decision"),
+        })
+        paused = execution.execute(
+            flow, agent_runner=lambda brief, data: ("done", 1.0),
+            action_runner=lambda *args: ("", None),
+            data={"vendor": "Acme Corp", "amount": 5000},
+        )
+        assert paused.status == "paused_approval"
+        assert paused.prompt == "Approve paying Acme Corp 5000?"
+        assert paused.human["approval_card"]["summary"] == paused.prompt
+
     def test_pause_resume_across_persisted_state(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
         f = Flow(id="f2", name="f", start="a", nodes={

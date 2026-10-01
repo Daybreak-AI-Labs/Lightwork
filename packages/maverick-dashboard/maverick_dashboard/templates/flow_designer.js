@@ -986,7 +986,8 @@
       props.appendChild(hint('The repeated steps can change the information this question checks, so the repeat ends on its own.'));
     }
     if (n.kind === 'wait_event') {
-      props.appendChild(field('Waiting for (shown while paused)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: the payment to be confirmed')));
+      var waitPrompt = input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: the payment to be confirmed');
+      props.appendChild(withPills(n.id, field('Waiting for (shown while paused)', waitPrompt), waitPrompt));
       props.appendChild(hint('The flow pauses here until the connected app sends a signal. Anything the app sends is added to the flow’s information.'));
     }
     if (n.kind === 'scope') {
@@ -1030,7 +1031,8 @@
       props.appendChild(hint('Each path runs on its own at the same time; their results are combined afterwards.'));
     }
     if (n.kind === 'approval') {
-      props.appendChild(field('What should the person approve?', input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: Send this reply?')));
+      var approvalPrompt = input(n.prompt, function (v) { n.prompt = v; render(); }, 'For example: Send this reply?');
+      props.appendChild(withPills(n.id, field('What should the person approve?', approvalPrompt), approvalPrompt));
       var who = [{ v: '', t: 'Anyone who can approve' }].concat(people.map(function (pp) { return { v: pp.ref, t: pp.label }; }));
       if (n.assignee && !people.some(function (pp) { return pp.ref === n.assignee; })) who.push({ v: n.assignee, t: human(n.assignee) });
       props.appendChild(field('Who should be asked', select(n.assignee || '', who, function (v) { n.assignee = v; })));

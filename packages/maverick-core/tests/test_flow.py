@@ -231,6 +231,19 @@ class TestRunner:
                            resume={"node_id": "a", "data": paused.data, "decision": "approved"})
         assert resumed.status == STATUS_COMPLETED and resumed.data["done"] == "[proceed]"
 
+    def test_pause_prompts_use_redacted_run_values(self):
+        for kind in ("approval", "wait_event"):
+            flow = _flow([FlowNode(
+                id="a", kind=kind,
+                prompt="Approve paying {{vendor}} {{amount}}? Token: {{api_key}}",
+            )])
+            paused = run_flow(
+                flow, agent_fn=_agent, action_fn=_action,
+                data={"vendor": "Acme Corp", "amount": 5000, "api_key": "private-value"},
+            )
+            assert paused.prompt == "Approve paying Acme Corp 5000? Token: ***redacted***"
+            assert "private-value" not in paused.prompt
+
     def test_approval_rejected_ends_the_flow(self):
         f = _flow([
             FlowNode(id="a", kind="approval", prompt="ok?", next="b"),

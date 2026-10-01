@@ -15,15 +15,15 @@ function pageHtml(options = {}) {
   let html = read("flow_designer.html");
   html = html.slice(html.indexOf("{% block content %}") + 19, html.lastIndexOf("{% endblock %}"));
   html = html.replace(/\{% call hero[\s\S]*?\{% endcall %\}/, "")
-    .replace('{% include "flow_designer_core.js" %}', () => raw(read("flow_designer_core.js")))
-    .replace('{% include "flow_designer_inputs.js" %}', () => raw(read("flow_designer_inputs.js")))
-    .replace('{% include "flow_designer.js" %}', () => raw(read("flow_designer.js")))
     .replace(/\{% for d in range\(1, 29\) %\}[\s\S]*?\{% endfor %\}/, '<option value="1">1st</option><option value="15">15th</option>')
     .replace(/\{% from [^%]*%\}/g, "")
     .replace(/\{\{ \(seed_flow or none\) \| tojson \}\}/, "null")
     .replace("{{ 'true' if flows_enabled else 'false' }}", options.flowOn ? "true" : "false")
     .replace("{{ 'true' if can_manage_flows else 'false' }}", options.canManage ? "true" : "false")
-    .replace(/\{\{[^}]*\}\}/g, "");
+    .replace(/\{\{[^}]*\}\}/g, "")
+    .replace('{% include "flow_designer_core.js" %}', () => raw(read("flow_designer_core.js")))
+    .replace('{% include "flow_designer_inputs.js" %}', () => raw(read("flow_designer_inputs.js")))
+    .replace('{% include "flow_designer.js" %}', () => raw(read("flow_designer.js")));
   return "<!doctype html><html><body><p id=\"fd-state\"></p>" + html + "</body></html>";
 }
 
@@ -107,6 +107,35 @@ test("steps can be added, changed and reordered without the canvas", async () =>
     const order = JSON.parse(JSON.stringify(w.__fdEngine.order().map((s) => s.kind)));
     assert.deepEqual(order, ["approval", "agent"]);
     assert.equal(w.__fdLiveFlow().start, w.__fdEngine.order()[0].id);
+  } finally { dom.window.close(); }
+});
+
+test("approval and waiting questions can insert a run answer from the editor", async () => {
+  const { dom, w, doc } = open();
+  try {
+    await settle();
+    Array.from(doc.querySelectorAll("#fd-props button"))
+      .find((button) => button.textContent === "Add a question").click();
+    const question = doc.querySelector('#fd-props [aria-label="Question 1"]');
+    question.value = "Vendor";
+    question.dispatchEvent(new w.Event("input"));
+
+    const steps = stepsHelpers(doc);
+    for (const [kind, label] of [
+      ["approval", "What should the person approve?"],
+      ["wait_event", "Waiting for (shown while paused)"],
+    ]) {
+      await steps.addKind(kind);
+      const promptField = Array.from(doc.querySelectorAll("#fd-props .field"))
+        .find((field) => field.textContent.includes(label));
+      assert.ok(promptField, kind + " question should be editable");
+      const pill = Array.from(promptField.querySelectorAll(".fd__pill"))
+        .find((button) => button.textContent === "+ Vendor");
+      assert.ok(pill, kind + " should offer the run's Vendor answer");
+      pill.click();
+      assert.match(w.__fdLiveFlow().nodes.find((node) => node.kind === kind).prompt || "",
+        /\{\{vendor\}\}/);
+    }
   } finally { dom.window.close(); }
 });
 

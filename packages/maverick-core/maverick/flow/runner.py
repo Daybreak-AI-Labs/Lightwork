@@ -1822,8 +1822,22 @@ def _execute_chain_result(flow: Flow, data: dict, ctx: _Ctx, start: str | None) 
     except _Pause as p:
         status = {"approval": STATUS_PAUSED_APPROVAL,
                   "event": STATUS_PAUSED_EVENT}.get(p.kind, STATUS_PAUSED_DELAY)
+        prompt = p.node.prompt
+        if p.kind in {"approval", "event"}:
+            from .redact import redact
+
+            try:
+                # This snapshot is what the person sees and approves. Never
+                # interpolate a credential from the unredacted execution data.
+                prompt = redact(render(prompt, redact(p.data, strict=True)),
+                                strict=True)
+            except ValueError:
+                return FlowRunResult(
+                    status=STATUS_FAILED, data=p.data, cursor=p.node.id,
+                    error="Could not safely prepare the review question.",
+                )
         return FlowRunResult(status=status, data=p.data, cursor=p.node.id,
-                             resume_at=p.resume_at, prompt=p.node.prompt)
+                             resume_at=p.resume_at, prompt=prompt)
     except _Reject as r:
         return FlowRunResult(status=STATUS_REJECTED, data=r.data, cursor=r.node.id)
     except _NodeError as e:  # an executor blew up inside a known node -- keep the
