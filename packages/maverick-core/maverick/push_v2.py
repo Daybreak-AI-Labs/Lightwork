@@ -140,7 +140,7 @@ class PushRegistry:
             def send(backend, body, title, priority):  # pragma: no cover -- real path
                 from .notifications import notify
                 return notify(body, title=title, priority=priority,
-                              backends=[backend])
+                              backends=[backend], async_dispatch=False, batch=False)
         if hour is None:
             hour = time.localtime().tm_hour
         ts = float(now if now is not None else time.time())

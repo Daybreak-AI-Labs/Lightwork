@@ -205,13 +205,14 @@ def test_existing_key_permissions_are_repaired_before_read(monkeypatch):
 def test_memory_tool_seals_on_disk(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     monkeypatch.setenv("MAVERICK_MEMORY_DIR", str(tmp_path / "mem"))
-    from maverick.tools.memory import memory
+    from maverick.tools.memory import memory, memory_root_for
 
     tool = memory()
     out = tool.fn({"command": "create", "path": "notes.md",
                    "file_text": "patient SSN 123-45-6789"})
     assert "wrote" in out
-    raw = (tmp_path / "mem" / "notes.md").read_bytes()
+    raw = (memory_root_for("") / "notes.md").read_bytes()
+    assert not (tmp_path / "mem" / "notes.md").exists()  # no shared-root write
     assert car.is_sealed(raw)          # on-disk file is ciphertext
     assert b"123-45-6789" not in raw   # plaintext absent on disk
     view = tool.fn({"command": "view", "path": "notes.md"})
@@ -219,16 +220,20 @@ def test_memory_tool_seals_on_disk(monkeypatch, tmp_path):
 
 
 @requires_crypto
-def test_memory_reads_legacy_plaintext(monkeypatch, tmp_path):
+def test_memory_reads_legacy_plaintext_within_current_owned_scope(monkeypatch, tmp_path):
     memdir = tmp_path / "mem"
-    memdir.mkdir()
-    (memdir / "old.md").write_text("legacy note", encoding="utf-8")  # pre-encryption
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     monkeypatch.setenv("MAVERICK_MEMORY_DIR", str(memdir))
-    from maverick.tools.memory import memory
+    from maverick.tools.memory import memory, memory_root_for
+
+    owned = memory_root_for("")
+    owned.mkdir(parents=True)
+    (owned / "old.md").write_text("legacy note", encoding="utf-8")  # pre-encryption
+    (memdir / "other.md").write_text("unowned shared note", encoding="utf-8")
 
     view = memory().fn({"command": "view", "path": "old.md"})
     assert "legacy note" in view       # transparent plaintext fallback
+    assert "not found" in memory().fn({"command": "view", "path": "other.md"})
 
 
 @requires_crypto

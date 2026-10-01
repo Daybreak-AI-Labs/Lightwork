@@ -387,6 +387,9 @@ async def _execute_claimed(channel, inbound, claimed, *, journal, authorize):
         if not authorize():
             raise PermissionError("Channel sender authorization changed")
         _assert_work_allowed()
+        # Runtime-only provenance from the verified receipt, never from an
+        # inbound body or a restored message field supplied by the sender.
+        inbound._verified_channel_account_sha256 = claimed["account_sha256"]
         reply = as_reply(await channel.handler(inbound))
         if len(reply.text) > MAX_TEXT_CHARS or len(reply.attachments) > MAX_ATTACHMENTS:
             raise ValueError("Channel reply exceeds durable outbox bound")

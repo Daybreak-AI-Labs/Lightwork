@@ -865,7 +865,7 @@ class KnowledgeAccessService:
         )
         items: list[dict] = []
         projections: list[LexicalProjection] = []
-        omitted = unavailable = partial = 0
+        unavailable = partial = 0
         for row in page["items"]:
             try:
                 item = self._item(
@@ -877,7 +877,6 @@ class KnowledgeAccessService:
                 unavailable += 1
                 continue
             except (ResearchRegistryDenied, KnowledgeAccessDenied):
-                omitted += 1
                 continue
             # This projection contains no cached authority. _item has already
             # reread the owning content store and current source/actor rights.
@@ -941,10 +940,43 @@ class KnowledgeAccessService:
             "status": status, "complete": complete, "incomplete_reasons": reasons,
             "next_cursor": next_cursor, "truncated": not complete,
             "matched": len(ranked), "matched_scope": "candidate_page",
-            "omitted_ineligible": omitted, "unavailable_sources": unavailable,
-            "candidates_examined": len(page["items"]),
+            # Keep the transport field for existing clients without disclosing
+            # how many inaccessible records exist in the registry.
+            "omitted_ineligible": 0, "unavailable_sources": unavailable,
+            "candidates_examined": len(items),
             "ranking": "lexical_bm25_v1_within_candidate_page",
         }
+
+    def available_purposes(self, tenant: str, actor: str) -> list[str]:
+        """All current purposes backed by at least one source this actor may read.
+
+        Registry pages are candidate metadata only. Never release a purpose
+        until the same live source, consent, lineage and principal checks used
+        for detail succeed. Storage/projection failures propagate as unavailable.
+        """
+        canonical = canonical_tenant_id(tenant)
+        found: set[str] = set()
+        after = snapshot = None
+        with tenant_scope(tenant=canonical), self.registry.effect_fence():
+            while True:
+                page = self.registry.knowledge_candidate_page(
+                    canonical, source_selectors=None, limit=_MAX_SCAN,
+                    after=after, snapshot=snapshot,
+                )
+                for row in page["items"]:
+                    if row.get("state") != "approved":
+                        continue
+                    for purpose in row.get("manifest", {}).get("allowed_purposes", ()):
+                        try:
+                            self.detail(canonical, actor, ResearchAssetRef(**row["reference"]),
+                                        purpose=purpose)
+                        except (ResearchRegistryDenied, KnowledgeAccessDenied, PermissionError):
+                            continue
+                        found.add(purpose)
+                if not page["has_more"]:
+                    break
+                after, snapshot = page["last"], page["snapshot"]
+        return sorted(found)
 
     def search(
         self,
@@ -1672,6 +1704,46 @@ class KnowledgeAccessService:
                     "knowledge request was created concurrently with different material"
                 ) from exc
             return self._fresh_request_projection(canonical, saved)
+
+    @staticmethod
+    def _feedback_projection(record: dict) -> dict:
+        """Employee receipt: own submission/status, never derivative or hold details."""
+        fields = ("id", "request_type", "status", "reason", "proposed_correction",
+                  "created_at", "updated_at", "source_use_status", "raw_record_status",
+                  "retention_review_status")
+        return {"schema": "lightwork.knowledge-feedback.v1",
+                **{field: record.get(field) for field in fields},
+                "notice": "An independent administrator reviews source changes, dependencies and legal holds. Submitting grants no deletion or training rights."}
+
+    def submit_feedback(self, tenant: str, actor: str, reference: ResearchAssetRef,
+                        *, purpose: str, **kwargs) -> dict:
+        canonical = canonical_tenant_id(tenant)
+        with tenant_scope(tenant=canonical), self.registry.effect_fence():
+            # Exact source/version must still be visible, not merely a guessed
+            # registry identity. The review and apply paths retain admin gates.
+            self.detail(canonical, actor, reference, purpose=purpose)
+            existing_id = self._request_id(canonical, actor, kwargs["request_key"])
+            if self.request_store.get(existing_id) is None:
+                pending = sum(row.get("tenant") == canonical
+                              and row.get("requested_by") == actor
+                              and row.get("status") in {"submitted", "applying"}
+                              for row in self.request_store.list(limit=_MAX_REQUESTS))
+                if pending >= 100:
+                    raise ValueError("Review pending feedback before submitting more requests")
+            result = self.submit_request(canonical, actor, reference, **kwargs)
+            return self._feedback_projection(result)
+
+    def feedback_requests(self, tenant: str, actor: str, *, limit: int = 100,
+                          request_id: str | None = None) -> list[dict]:
+        canonical = canonical_tenant_id(tenant)
+        if not actor.startswith("user:"):
+            raise PermissionError("A named user is required")
+        with tenant_scope(tenant=canonical):
+            rows = [row for row in self.request_store.list(limit=_MAX_REQUESTS)
+                    if row.get("tenant") == canonical and row.get("requested_by") == actor
+                    and (request_id is None or row.get("id") == request_id)]
+        rows.sort(key=lambda row: (row.get("created_at", 0), row.get("id", "")), reverse=True)
+        return [self._feedback_projection(row) for row in rows[:max(1, min(limit, 250))]]
 
     def get_request(self, tenant: str, request_id: str) -> dict:
         canonical = canonical_tenant_id(tenant)

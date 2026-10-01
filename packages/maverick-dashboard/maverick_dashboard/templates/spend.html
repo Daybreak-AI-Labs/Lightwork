@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Spend · Lightwork{% endblock %}
 {% block content %}
+<p><a href="/budget">Review usable budget, reservations and upcoming work</a></p>
 <style>
   /* Spend page — scoped styles for the episode table's cost cells. */
   .cost-cell { display: flex; flex-direction: column; gap: 3px; min-width: 84px; }
@@ -14,15 +15,17 @@
   {% call hero('Value & spend', 'Spend',
                subtitle='What your AI work has cost',
                lede='Costs for every finished task, taken from Lightwork\'s own
-                     records, never estimated. Need the monthly statement?
-                     Open <a href="/billing">Billing</a>.') %}
+                     runtime pricing records. These can be measured, estimated or bounded prices;
+                     they are not verified provider invoices. Need the monthly statement?
+                     Open <a href="/billing">Billing</a>.' | safe) %}
     {{ state('Current state',
-             '$' ~ '{:,.2f}'.format(total.dollars) ~ ' total spent',
+             '$' ~ '{:,.2f}'.format(total.dollars) ~ ' recorded across all time',
              badge=total.runs ~ ' finished task' ~ ('' if total.runs == 1 else 's'),
              badge_class='ok' if total.runs else 'idle',
              copy='The same records power <a href="/savings">Savings</a> and
-                   the monthly statement.') }}
+                   the monthly statement.' | safe) }}
   {% endcall %}
+  <p class="muted">Report scopes: the heading is all time; the charts use the selected period; the task table shows the latest 50 attempts. The download uses its own month selector. Recorded runtime prices exclude subscription fees, taxes, external tools and unreconciled provider adjustments. A missing price is unknown, not free.</p>
 
   <div class="bd-toolbar">
     <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
@@ -45,7 +48,7 @@
     </div>
     <div class="panel viz-card">
       <h2>How tasks ended</h2>
-      <p class="viz-sub">Results of tasks in this period.</p>
+      <p class="viz-sub">All authorized episode attempts started in this period. Running attempts are separate from the finished-attempt cost totals; retries can create several attempts for one task.</p>
       <div id="bd-outcomes"></div>
     </div>
     <div class="panel viz-card viz-card--wide">
@@ -67,8 +70,9 @@
 
   {% include "_spend_insights.html" %}
 
+  <p>Runtime totals exclude platform subscriptions, external-tool fees, taxes, credits and invoice adjustments unless separately evidenced. Provider receipts can be recorded, estimated, ceilings or reconciled; a verified rate card alone is not a verified invoice. <a href="/cost-reconciliation">Compare cost records</a>.</p>
   <div class="toolbar">
-    <h2>Recent tasks</h2>
+    <h2>Latest 50 episode attempts — independent of chart range</h2>
     <form class="spend-download" id="spend-download">
       <label for="spend-month">Download</label>
       <select class="select" id="spend-month">
@@ -79,7 +83,8 @@
     </form>
   </div>
   <div class="panel">
-    {% set _max = (episodes | map(attribute='cost_dollars') | max) if episodes else 0 %}
+    {% set _known = episodes | rejectattr('cost_dollars', 'none') | list %}
+    {% set _max = (_known | map(attribute='cost_dollars') | max) if _known else 0 %}
     {% if episodes %}
     <table>
       <thead>
@@ -101,8 +106,13 @@
             </td>
             <td>
               <div class="cost-cell">
+                {% if e.cost_dollars is not none %}
                 <span title="${{ '%.6f'|format(e.cost_dollars) }}">{{ e.cost_dollars | money }}</span>
                 <span class="cost-cell__bar" style="width: {{ ((e.cost_dollars / _max * 100) if _max else 0) | round(1) }}%;"></span>
+                {% else %}<span>Unknown cost</span>{% endif %}
+                <small>{{ episode_provenance[e.id].runtime_basis }}</small>
+                <small>Linked task receipts: {{ episode_provenance[e.id].basis }}</small>
+                {% if e.goal_id %}<a href="/cost-reconciliation?goal_id={{ e.goal_id }}">Review cost evidence</a>{% endif %}
               </div>
             </td>
             <td>{{ '{:,}'.format(e.input_tokens) }}</td>

@@ -27,8 +27,28 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import uuid
+from contextvars import ContextVar, copy_context
 
 log = logging.getLogger(__name__)
+
+
+_outcome = ContextVar("notification_outcome", default=None)
+
+
+def _response_accepted(status: int) -> bool:
+    if 200 <= status < 300:
+        _outcome.set(("delivered", "Accepted by the notification service. This does not mean the person saw it.", False))
+        return True
+    if 400 <= status < 500 and status != 408:
+        _outcome.set(("failed", "The notification service refused this request. Check the saved destination and credentials.", True))
+    else:
+        _outcome.set(("unknown", "The service did not confirm delivery. Check the destination before sending again.", False))
+    return False
+
+
+def _network_unknown() -> None:
+    _outcome.set(("unknown", "Delivery could not be confirmed. Check the destination before sending again.", False))
 
 
 _executor = None  # type: ignore[var-annotated]
@@ -84,13 +104,14 @@ def _send_ntfy(title: str, body: str, priority: str, server: str, topic: str) ->
         # topic with '/'/'..'/'?'/'#' can't post to a different path on the server.
         import re as _re
         if not _re.fullmatch(r"[A-Za-z0-9_-]+", topic or ""):
-            log.warning("notify ntfy: invalid topic %r (allowed: A-Za-z0-9_-)", topic)
+            log.warning("notify ntfy: invalid topic format")
             return False
         url = f"{server.rstrip('/')}/{topic}"
         resp = httpx.post(url, content=body.encode("utf-8"), headers=headers, timeout=10.0)
-        return resp.status_code < 400
+        return _response_accepted(resp.status_code)
     except Exception as e:
-        log.warning("notify ntfy failed: %s", e)
+        _network_unknown()
+        log.warning("notify ntfy failed: %s", type(e).__name__)
         return False
 
 
@@ -129,9 +150,13 @@ def _send_pushover(title: str, body: str, priority: str, cfg: dict | None = None
             },
             timeout=10.0,
         )
-        return resp.status_code < 400
+        if 200 <= resp.status_code < 300 and resp.json().get("status") != 1:
+            _outcome.set(("failed", "The notification service refused this request. Check the saved destination and credentials.", True))
+            return False
+        return _response_accepted(resp.status_code)
     except Exception as e:
-        log.warning("notify pushover failed: %s", e)
+        _network_unknown()
+        log.warning("notify pushover failed: %s", type(e).__name__)
         return False
 
 
@@ -150,11 +175,12 @@ def _send_discord(title: str, body: str, url: str) -> bool:
             },
             timeout=10.0,
         )
-        return resp.status_code < 400
+        return _response_accepted(resp.status_code)
     except Exception as e:
         # The webhook URL IS the secret here, and httpx embeds the request URL
         # in str(e); log the exception TYPE only so a failed POST can't write the
         # full secret URL to the logs.
+        _network_unknown()
         log.warning("notify discord failed: %s", type(e).__name__)
         return False
 
@@ -169,11 +195,99 @@ def _send_slack(title: str, body: str, url: str) -> bool:
             json={"text": f"*{title}*\n{body}"},
             timeout=10.0,
         )
-        return resp.status_code < 400
+        return _response_accepted(resp.status_code)
     except Exception as e:
         # The webhook URL IS the secret (see _send_discord); log type only.
+        _network_unknown()
         log.warning("notify slack failed: %s", type(e).__name__)
         return False
+
+
+def _legacy_url(section: dict, backend: str):
+    # Older installers wrote ``webhook_url`` next to a single backend.
+    return section.get("webhook_url") if section.get("backend") == backend else None
+
+def _dispatch(backend: str, *, cfg: dict, title: str, body: str, priority: str) -> bool:
+    if backend == "ntfy":
+        # ``topic`` is what older installers wrote; keep honouring it.
+        topic = _resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
+        server = _resolve_env_ref(cfg.get("ntfy_server")) or "https://ntfy.sh"
+        if not topic:
+            topic = os.environ.get("MAVERICK_NTFY_TOPIC")
+        if not topic:
+            log.debug("notify ntfy: no topic configured")
+            return False
+        return _send_ntfy(title, body, priority, server, topic)
+    if backend == "pushover":
+        return _send_pushover(title, body, priority, cfg)
+    if backend == "discord":
+        url = _resolve_env_ref(cfg.get("discord_webhook") or _legacy_url(cfg, "discord")) or \
+              os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
+        return _send_discord(title, body, url or "")
+    if backend == "slack":
+        url = _resolve_env_ref(cfg.get("slack_webhook") or _legacy_url(cfg, "slack")) or \
+              os.environ.get("SLACK_NOTIFY_WEBHOOK_URL")
+        return _send_slack(title, body, url or "")
+    log.warning("notify: unknown backend %r", backend)
+    return False
+
+def _admit(cfg, requested, event, delivery_kind, retry):
+    from .notification_receipts import DeliveryReceipts
+    receipts = DeliveryReceipts() if cfg.get("delivery_receipts", True) is not False else None
+    if len(event) > 200:
+        raise ValueError("Delivery reference is too long")
+    if retry and (receipts is None or delivery_kind != "test"):
+        return receipts, []
+    admitted = []
+    for backend in dict.fromkeys(requested):
+        if receipts is None:
+            admitted.append((backend, None))
+        else:
+            try:
+                ident, acquired = receipts.claim(event, backend, kind=delivery_kind, retry=retry)
+            except Exception as exc:
+                log.warning("notify receipt admission unavailable: %s", type(exc).__name__)
+                if delivery_kind == "test":
+                    raise RuntimeError("Delivery history is unavailable; the test was not sent.") from None
+                continue
+            if acquired:
+                admitted.append((backend, ident))
+
+    return receipts, admitted
+
+
+def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize):
+    from .authority_effects import authority_effect_fence
+    token = _outcome.set(("failed", "Not sent. Check the channel configuration and installed backend dependencies.", True))
+    started = False
+    try:
+        with authority_effect_fence():
+            if authorize is not None:
+                authorize()
+            if cfg != _load_config():
+                raise ValueError("Notification configuration changed")
+            if receipts is not None:
+                receipts.update(ident, "sending", "Contacting the notification service.")
+            started = True
+            result = _dispatch(backend, cfg=cfg, title=title, body=body, priority=priority)
+            outcome = _outcome.get()
+            if result and outcome[0] != "delivered":
+                outcome = ("delivered", "Accepted by the notification service. This does not mean the person saw it.", False)
+            if receipts is not None:
+                receipts.update(ident, outcome[0], outcome[1], safe_to_retry=outcome[2])
+            return result
+    except Exception as exc:
+        log.warning("notify dispatch unavailable: %s", type(exc).__name__)
+        if receipts is not None:
+            try:
+                message = ("Delivery could not be confirmed. Check the destination before sending again." if started
+                           else "Not sent. Current access, configuration or delivery storage could not be verified.")
+                receipts.update(ident, "unknown" if started else "failed", message)
+            except Exception:
+                log.warning("notify receipt could not be saved")
+        return False
+    finally:
+        _outcome.reset(token)
 
 
 def notify(
@@ -185,8 +299,12 @@ def notify(
     backends: list[str] | None = None,
     async_dispatch: bool = True,
     batch: bool = True,
+    delivery_key: str | None = None,
+    delivery_kind: str = "event",
+    retry: bool = False,
+    authorize=None,
 ) -> int:
-    """Send a notification. Returns the number of backends fired.
+    """Queue a notification. Async returns accepted queue count, never proof of delivery.
 
     ``priority`` is one of: low / default / high / max.
     ``backends`` overrides config (e.g. ['ntfy']). None = use config.
@@ -213,50 +331,30 @@ def notify(
     # Opt-in batching: coalesce low/normal-priority pushes into a windowed
     # digest. High/urgent bypass; sync sends (tests, and the batcher's own
     # delivery) bypass so there's no recursion. No-op unless configured.
-    if batch and async_dispatch and priority not in ("high", "max", "urgent"):
+    if batch and async_dispatch and delivery_key is None and priority not in ("high", "max", "urgent"):
         from .notification_batcher import shared as _shared_batcher
         batcher = _shared_batcher()
         if batcher is not None:
             return batcher.submit(body, title=title, priority=priority,
                                   category=category)
 
-    def _legacy_url(section: dict, backend: str):
-        # Older installers wrote ``webhook_url`` next to a single backend.
-        return section.get("webhook_url") if section.get("backend") == backend else None
+    event = delivery_key or uuid.uuid4().hex
+    receipts, admitted = _admit(cfg, requested, event, delivery_kind, retry)
 
-    def _dispatch(backend: str) -> bool:
-        if backend == "ntfy":
-            # ``topic`` is what older installers wrote; keep honouring it.
-            topic = _resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
-            server = _resolve_env_ref(cfg.get("ntfy_server")) or "https://ntfy.sh"
-            if not topic:
-                topic = os.environ.get("MAVERICK_NTFY_TOPIC")
-            if not topic:
-                log.debug("notify ntfy: no topic configured")
-                return False
-            return _send_ntfy(title, body, priority, server, topic)
-        if backend == "pushover":
-            return _send_pushover(title, body, priority, cfg)
-        if backend == "discord":
-            url = _resolve_env_ref(cfg.get("discord_webhook") or _legacy_url(cfg, "discord")) or \
-                  os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
-            return _send_discord(title, body, url or "")
-        if backend == "slack":
-            url = _resolve_env_ref(cfg.get("slack_webhook") or _legacy_url(cfg, "slack")) or \
-                  os.environ.get("SLACK_NOTIFY_WEBHOOK_URL")
-            return _send_slack(title, body, url or "")
-        log.warning("notify: unknown backend %r", backend)
-        return False
+    def tracked(backend, ident):
+        return _tracked(backend, ident, cfg=cfg, title=title, body=body,
+                        priority=priority, receipts=receipts, authorize=authorize)
 
     if async_dispatch:
         exec_ = _get_executor()
-        for backend in requested:
-            exec_.submit(_dispatch, backend)
-        return len(requested)
+        for backend, ident in admitted:
+            context = copy_context()
+            exec_.submit(context.run, tracked, backend, ident)
+        return len(admitted)
     # Sync (for tests).
     fired = 0
-    for backend in requested:
-        if _dispatch(backend):
+    for backend, ident in admitted:
+        if tracked(backend, ident):
             fired += 1
     return fired
 

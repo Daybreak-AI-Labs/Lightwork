@@ -8,11 +8,19 @@ fix are exercised directly: the saved value changes what the kernel does.
 """
 from __future__ import annotations
 
+import os
+import shlex
+import subprocess
+import sys
+
 import pytest
 from fastapi.testclient import TestClient
+from maverick_dashboard import settings_all_page as page
 from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_runtime as runtime
 from maverick_dashboard.app import app
+
+from test_support.settings_pages import save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -60,7 +68,7 @@ def _loaded():
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):
@@ -81,7 +89,6 @@ def _live(source: str) -> list[str]:
 # with the value the kernel then reads.
 _WORDS = {
     "persona.addendum": "Always cite your sources.",
-    "persona.user_name": "Chris",
     "providers.anthropic.base_url": "https://gateway.example.com/anthropic",
     "providers.openai_compatible.base_url": "http://localhost:8000/v1",
     "providers.azure.base_url": "https://acme.openai.azure.com",
@@ -270,7 +277,12 @@ def test_row_saves_reads_back_and_resets(setting, audit_rows):
         assert audit_rows[0]["new"] == "set" and stored not in repr(audit_rows)
     r = _save([{"id": setting.id, "reset": True}], confirm=True)
     assert r.status_code == 200, r.text
-    assert _row(setting.id)["source"] == "default"
+    row = _row(setting.id)
+    if row["source"] == "here":
+        from maverick.config_resets import is_reset
+        assert is_reset(page._sources()["here"], setting), "Only the explicit product-default mask may remain after reset"
+    else:
+        assert row["source"] == "default"
 
 
 @pytest.mark.parametrize("setting", ROWS, ids=lambda s: s.id)
@@ -478,6 +490,11 @@ def test_sandbox_details_survive_the_work_area_type_selector(audit_rows):
     assert "e2b-key-1" not in stored
 
 
+def _proxy_readback_command():
+    args = [sys.executable, "-c", "import os; print(os.environ.get('HTTPS_PROXY') or 'none')"]
+    return subprocess.list2cmdline(args) if os.name == "nt" else shlex.join(args)
+
+
 def test_locked_down_mode_applies_at_every_seam(tmp_path, audit_rows):
     from maverick.budget import resolve_budget_caps
     from maverick.sandbox import LocalBackend, build_sandbox
@@ -502,7 +519,7 @@ def test_locked_down_mode_applies_at_every_seam(tmp_path, audit_rows):
     box = build_sandbox()
     folder = box.workdir
     assert folder != tmp_path / "work" and folder.is_dir()
-    result = box.exec("echo $HTTPS_PROXY")
+    result = box.exec(_proxy_readback_command())
     assert result.stdout.strip() == "http://127.0.0.1:9"
     del box
     import gc
@@ -535,7 +552,7 @@ def test_locked_down_mode_off_changes_nothing(tmp_path):
     box = build_sandbox(workdir=tmp_path)
     assert box.workdir == tmp_path
     expected = scrub_env().get("HTTPS_PROXY") or "none"
-    assert box.exec("echo ${HTTPS_PROXY:-none}").stdout.strip() == expected
+    assert box.exec(_proxy_readback_command()).stdout.strip() == expected
 
 
 def test_request_fit_check_follows_the_setting(monkeypatch, audit_rows):
@@ -665,12 +682,25 @@ def test_env_or_config_prefers_the_environment(monkeypatch):
     assert env_or_config("MAVERICK_PARALLEL_TOOLS", "agent", "parallel_tools", "1") == "0"
 
 
-def test_user_name_reaches_every_agent_prompt(audit_rows):
+def test_preferred_name_is_personal_and_never_reaches_other_agent_prompts(audit_rows):
+    from maverick import config
+    from maverick import experience_preferences as prefs
     from maverick.persona import render_persona_prompt
 
     assert render_persona_prompt() == ""
-    assert _save([{"id": "persona.user_name", "value": "Chris"}]).status_code == 200
-    assert "likes to be called Chris." in render_persona_prompt()
+    assert "persona.user_name" not in catalog.BY_ID
+    assert _save([{"id": "persona.user_name", "value": "Chris"}]).status_code == 400
+    # Existing installation names are not allowed to impersonate every user.
+    config.config_path().parent.mkdir(parents=True, exist_ok=True)
+    config.config_path().write_text('[persona]\nuser_name = "Legacy person"\n', encoding="utf-8")
+    config.reset_config_cache()
+    assert render_persona_prompt() == ""
+    prefs.save("user:chris", scope="personal", changes={"preferred_name": "Chris"},
+               expected_revision=prefs.state("user:chris")["revision"])
+    assert '"preferred_name": "Chris"' in prefs.prompt("user:chris")
+    assert "Chris" not in prefs.prompt("user:someone-else")
+    assert prefs.prompt("service:scheduled") == prefs.prompt("") == ""
+    assert render_persona_prompt() == ""
 
 
 def test_installer_placeholder_name_changes_nothing():

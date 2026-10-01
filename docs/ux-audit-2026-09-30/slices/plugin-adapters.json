@@ -1,0 +1,23 @@
+[
+  {
+    "id": "LW-081",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "plugin_workbench.py and sandbox/plugin_contracts.py execute actual Python tool, channel, skill and persona interfaces, plus source-pinned bundled Node NDJSON and local Python/Node gRPC servers inside the existing immutable research container. Schema, admission-denial, expected-result, timeout/cancel observation and cleanup receipts are version/image/harness specific.",
+      "plugin_execution_pins.py binds task and direct-flow execution to durable owner/revision/version fingerprints before import or construction and at dispatch; cached Python drift, changed source or revoked policy fail closed. Native authorized task/flow pin migration retains history and never resumes or replays work.",
+      "Plugins native controls and product_operations_plugins.py provide the same governed status/check/cancel/publish/migrate operations to explicitly enabled Copilot with fresh review, current authority and durable recovery receipts; installer/settings expose the existing workbench and added Plugins action family.",
+      "grpc_plugin_host.py owns subprocess trees, bounds RPC and process output, propagates cancellation, and emits typed unknown-outcome receipts without retrying a possible Call. Malformed or missing terminal results cannot be reported as successful.",
+      "docs/plugin-qualification-workbench.md documents supported executable contracts, immutable-image prerequisites, honest fast-completion interruption observations, publication scope and affected-work migration."
+    ],
+    "validation": [
+      "Final focused Python regression run: 91 passed (gRPC host, plugin contracts/workbench/loaders/lock, NDJSON host, native/Copilot adapters). Mocked transports and trusted local fixture subprocesses only.",
+      "Existing flow execution/hardening and TS host regression run: 93 passed, 2 SDK-build-dependent tests initially skipped; after building the SDK, both previously skipped actual Node interoperability tests passed. SDK npm test: 24 passed.",
+      "Python 3.10 AST parsing, Ruff on changed Python files, standalone JavaScript syntax and git diff --check passed after correcting fixture import ordering."
+    ],
+    "remaining": [
+      "Controlled immutable-container qualification and installed-service acceptance remain unexecuted locally. Image must already contain the exact plugin/runtime dependencies, JSON Schema extra and (for gRPC) generated stubs; no live provider or external service was contacted.",
+      "Connection-only gRPC servers and arbitrary multi-file/argument-heavy Node or gRPC launchers need an exact reviewed bundled local entry before qualification; they are explicitly blocked rather than represented as a verified version.",
+      "Publication records whether timeout/cancellation interrupted dispatch or the exact result finished first; fast completion is never claimed as observed interruption. Customer acceptance should include a deliberately slow synthetic sample where the plugin supports one."
+    ]
+  }
+]

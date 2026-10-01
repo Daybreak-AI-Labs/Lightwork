@@ -200,8 +200,13 @@ def _validate_item(  # noqa: C901 - operation-specific closed contracts
     required: set[str]
     allowed: set[str]
     if operation == "export_receipts":
+        if "after_sequence" in item:
+            raise ConsentBulkJobValidationError(
+                "Receipt exports from a saved position are not supported. "
+                "Select up to the latest 500 records per person."
+            )
         required = common
-        allowed = common | {"after_sequence", "receipt_limit"}
+        allowed = common | {"receipt_limit"}
     elif operation == "edit_preferences":
         required = common | {
             "expected_revision",
@@ -261,10 +266,8 @@ def _validate_item(  # noqa: C901 - operation-specific closed contracts
     if operation == "reactivate":
         _timestamp(item["reactivation_at"], "reactivation_at")
     if operation == "export_receipts":
-        if "after_sequence" in item:
-            _integer(item["after_sequence"], "after_sequence", 0, 2**63 - 1)
         if "receipt_limit" in item:
-            _integer(item["receipt_limit"], "receipt_limit", 1, 100_000)
+            _integer(item["receipt_limit"], "receipt_limit", 1, 500)
     return item
 
 

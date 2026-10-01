@@ -30,6 +30,10 @@ test('fresh owner can browse every sidebar destination and sign out at phone wid
     await page.locator('input[name="confirm"]').check();
     await page.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(origin+'/start');
+    // The redirect URL can be committed while Chrome is still parsing the
+    // streamed head. Read destinations only once the actual shell is ready.
+    await expect(page.locator('#navfinder-dialog')).toHaveAttribute('data-navfinder-ready','true');
+    await expect(page.locator('#sidebar')).toBeVisible();
     const destinations=await page.locator('#sidebar a[href^="/"]').evaluateAll(links=>[...new Set(links.map(link=>link.getAttribute('href')))]);
     // Get started remains reachable from the home/finder; it is intentionally
     // folded out of the sidebar. The five main customer destinations stay in it.

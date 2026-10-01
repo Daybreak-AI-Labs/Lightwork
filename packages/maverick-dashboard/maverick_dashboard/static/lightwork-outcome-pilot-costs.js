@@ -25,7 +25,7 @@
     if (!costs || !['current','partial'].includes(costs.status)) { panel.append(node('p', costs && costs.reason || 'Provider billing is unavailable.')); host.append(panel); return; }
     if(costs.status==='partial')panel.append(node('p','Cost coverage is partial: changed or unavailable allocations are excluded from current totals. Review the flagged sources below.'));
     panel.append(node('p', 'Provider amounts are separate from your reported total workflow, human and rework costs. Allocation to cases is your reviewed attribution; invoice authenticity is not independently verified.'));
-    const setup=node('a','Open AI cost collection and receipt setup');setup.href='/assurance';panel.append(setup);
+    const setup=node('a','Open AI cost collection and receipt setup');setup.href='/security/assurance';panel.append(setup);
     const totals = Object.entries(costs.current_totals_by_currency || {});
     panel.append(node('p', totals.length ? 'Current allocated provider cost: ' + totals.map(([currency,amount]) => currency + ' ' + amount).join(' · ') : 'No current provider cost allocation. Unknown costs are not zero.'));
     coverageReview(panel,data,costs.coverage,request,reload,mutation);

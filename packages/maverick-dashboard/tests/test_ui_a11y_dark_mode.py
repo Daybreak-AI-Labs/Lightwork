@@ -57,8 +57,15 @@ def test_color_scheme_declared_for_native_controls(monkeypatch, tmp_path):
 
 def test_nav_landmark_is_labelled(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
-    r = _client().get("/")
-    assert '<nav aria-label="Primary">' in r.text
+    # This contract covers base.html; the root may route to the chat shell
+    # or onboarding according to the selected model's readiness.
+    r = _client().get("/overview")
+    assert r.status_code == 200
+    from test_support.element_text import element_texts
+    from test_support.navigation import assert_navigation_link
+
+    assert len(element_texts(r.text, "nav", {"aria-label": "Primary"})) == 1
+    assert_navigation_link(r.text, "/overview", "Overview")
 
 
 def test_skip_link_target_is_focusable(monkeypatch, tmp_path):

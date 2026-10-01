@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PassThrough, Writable } from "node:stream";
-import { defineTool, servePlugin, PROTOCOL, MAX_FRAME_BYTES, type ToolDef } from "../index.js";
+import { defineTool, defineValidatedTool, servePlugin, PROTOCOL, MAX_FRAME_BYTES, type ToolDef } from "../index.js";
 
 function request(extra: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -42,6 +42,20 @@ test("expired and invalid metadata are rejected before invoking handler", async 
   const output = await run(tool, request({ deadline_unix_ms: Date.now() - 1 }) + request({ replay: "idempotent" }) + request({ attempt: 2 }));
   assert.equal(calls, 0);
   assert.ok(output.every(result => result.effect === "not_started" && typeof result.error === "string"));
+});
+
+test("typed parser rejects malformed or missing args before handler and keeps validation errors private", async () => {
+  let calls = 0;
+  const tool = defineValidatedTool({name: "fixture", description: "typed fixture", inputSchema: {type: "object"},
+    parseArgs(value: unknown): {who: string} {
+      if (!value || typeof value !== "object" || typeof (value as {who?: unknown}).who !== "string") throw new Error("secret-value-must-not-be-returned");
+      return {who: (value as {who: string}).who};
+    }, handler: ({who}) => { calls++; return who.toUpperCase(); }});
+  const output = await run(tool, request({args: null}) + request({args: []}) + request({args: {}}) + request({args: {who: "Ada"}}));
+  assert.equal(calls, 1);
+  assert.ok(output.slice(0, 3).every(value => value.effect === "not_started"));
+  assert.equal(output[3].result, "ADA");
+  assert.ok(!JSON.stringify(output).includes("secret-value"));
 });
 
 test("deadline requests cancellation but retains handler ownership until cleanup", async () => {

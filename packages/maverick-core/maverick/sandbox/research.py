@@ -107,7 +107,7 @@ def _local_endpoint(endpoint: str) -> bool:
     )
 
 
-def _capture(args, env, *, timeout, limit, effect_guard=None) -> _Capture:
+def _capture(args, env, *, timeout, limit, effect_guard=None, cancelled=None) -> _Capture:
     """Drain concurrently; retained bytes are bounded before appending."""
     if not math.isfinite(timeout) or timeout <= 0:
         raise ResearchContainerError("process wall budget is exhausted")
@@ -145,7 +145,28 @@ def _capture(args, env, *, timeout, limit, effect_guard=None) -> _Capture:
         thread.start()
     reason = "completed"
     try:
-        process.wait(timeout=timeout)
+        if cancelled is None:
+            process.wait(timeout=timeout)
+        else:
+            deadline = time.monotonic() + timeout
+            while process.poll() is None:
+                try:
+                    cancellation = cancelled()
+                except Exception:
+                    # Failure to determine cancellation authority fails closed.
+                    cancellation = True
+                if cancellation:
+                    reason = "cancelled"
+                    process.kill()
+                    process.wait(timeout=5)
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(args, timeout)
+                try:
+                    process.wait(timeout=min(0.1, remaining))
+                except subprocess.TimeoutExpired:
+                    pass
     except subprocess.TimeoutExpired:
         reason = "timeout"
         process.kill()
@@ -412,7 +433,7 @@ class ResearchContainerRunner:
         return min(15, remaining)
 
     def run(self, files: Mapping[str, bytes], *, budget: Budget,
-            entrypoint: str = "main.py", effect_guard=None) -> ResearchResult:
+            entrypoint: str = "main.py", effect_guard=None, cancelled=None) -> ResearchResult:
         if not isinstance(budget, Budget):
             raise TypeError("an explicit Budget is required")
         copied = _inputs(files, entrypoint)
@@ -446,7 +467,7 @@ class ResearchContainerRunner:
             try:
                 result = _capture([*self._base, "start", "--attach", name], self._env,
                                   timeout=min(timeout, budget.remaining_wall()),
-                                  limit=self.limits.output_bytes, effect_guard=effect_guard)
+                                  limit=self.limits.output_bytes, effect_guard=effect_guard, **({"cancelled": cancelled} if cancelled is not None else {}))
             except (OSError, subprocess.SubprocessError) as exc:
                 raise ResearchContainerError("could not start research container") from exc
             # Always remove the whole container, including background children.

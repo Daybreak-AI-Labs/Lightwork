@@ -109,7 +109,7 @@ def _self_authenticated_path(path: str) -> bool:
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
         ("/share/", "/scim/", "/form/", "/dsar/response/", "/saml/",
          "/auth/invite/", "/api/v1/external/",
-         "/api/v1/public/consent/", "/api/v1/public/policies/")
+         "/api/v1/public/consent/", "/api/v1/public/policies/", "/api/v1/devices/pairing/")
     )
 
 
@@ -543,7 +543,8 @@ def has_permission(request: Request, permission: str) -> bool:
 def require_permission(request: Request, permission: str) -> None:
     """Raise ``HTTPException(403)`` unless the caller's role grants ``permission``."""
     if not has_permission(request, permission):
-        raise HTTPException(status_code=403, detail="insufficient role for this action")
+        from .access_explanations import denial
+        raise HTTPException(status_code=403, detail=denial(request, permission))
 
 
 def has_global_permission(request: Request, permission: str) -> bool:
@@ -563,7 +564,8 @@ def has_global_permission(request: Request, permission: str) -> bool:
 def require_global_permission(request: Request, permission: str) -> None:
     """Raise ``HTTPException(403)`` unless the global role grants permission."""
     if not has_global_permission(request, permission):
-        raise HTTPException(status_code=403, detail="insufficient role for this action")
+        from .access_explanations import denial
+        raise HTTPException(status_code=403, detail=denial(request, permission, installation=True))
 
 
 def caller_suites(request: Request) -> frozenset[str] | None:
@@ -659,40 +661,46 @@ def require_suite(request: Request, suite: str | None) -> None:
 def goal_owner_filter(request: Request) -> str | None:
     """The ``owner`` value to pass to ``WorldModel.list_goals``.
 
-    Returns None (no owner filter -> all goals) when the caller is unauthenticated
-    (auth off) or an admin; otherwise the caller's principal so the listing is
-    scoped to the rows they own. ``owner=None`` is the historical default, so the
-    auth-off path is unchanged.
+    Every named account, including an administrator, lists its own content.
+    A separately reviewed read opens a specific record; it never broadens a
+    list. Unidentified local/installation credentials list only unowned work.
     """
     principal = _authorization_principal(request)
-    if principal is None or is_dashboard_admin(principal):
-        return None
-    return principal
+    return principal or ""
 
 
 def can_access_goal_principal(principal: str | None, goal) -> bool:
     """Whether ``principal`` may read/mutate ``goal``.
 
-    ``None`` means auth is off and preserves the dashboard's historical
-    single-user behavior. Authenticated non-admin callers may access only goals
-    stamped with their exact owner principal.
+    ``None`` identifies no employee and may access only unowned local work.
+    Named callers, including administrators, need exact ownership.
     """
+    if goal is None:
+        return False
     if principal is None:
-        return True
-    if is_dashboard_admin(principal):
-        return True
+        return not getattr(goal, "owner", "")
     return getattr(goal, "owner", "") == principal
 
 
 def can_access_goal(request: Request, goal) -> bool:
     """Whether the caller may read/mutate ``goal``.
 
-    Allowed iff auth is off (no principal), the caller is an admin, or the
-    caller owns the goal. Legacy ``owner == ""`` goals (created before this
-    layer, or by an external/webhook path) are therefore reachable only by the
-    no-auth/admin paths, never by a different authenticated user.
+    Ownership grants normal access. A named administrator needs an independent
+    scoped read approval for another person's content or unowned legacy work.
+    A read approval never grants mutation or publishing authority.
     """
-    return can_access_goal_principal(_authorization_principal(request), goal)
+    principal = _authorization_principal(request)
+    if getattr(request.state, "paired_device_id", None):
+        return bool(principal) and getattr(goal, "owner", "") == principal
+    if can_access_goal_principal(principal, goal):
+        return True
+    # A reviewed content read never confers authority to mutate or publish.
+    if str(getattr(request, "method", "GET")).upper() not in {"GET", "HEAD"}:
+        return False
+    from .content_access import may_read_employee_content
+
+    return may_read_employee_content(request, getattr(goal, "owner", ""),
+                                     resource_kind="goal", resource_id=str(goal.id))
 
 
 def assert_goal_access(request: Request, goal) -> None:
@@ -704,6 +712,14 @@ def assert_goal_access(request: Request, goal) -> None:
     """
     if not can_access_goal(request, goal):
         raise HTTPException(status_code=404, detail="no such goal")
+
+
+def assert_template_access(request: Request, template) -> None:
+    """Private template ownership is separate from policy administration."""
+    from maverick.templates import can_read_template
+    require_permission(request, "view")
+    if not can_read_template(template, caller_principal(request)):
+        raise HTTPException(404, "This template is unavailable to your account.")
 
 
 def _enforce_scim_active(principal: VerifiedPrincipal) -> None:
@@ -828,6 +844,11 @@ def _resolve_principal(
         if _dashboard_token_authenticated(request):
             return None
         explicit_token = _bearer_token(request)
+        if explicit_token.startswith("lwdev1_"):
+            from .device_pairing import authenticate
+            principal = authenticate(explicit_token, request.method, request.url.path)
+            request.state.paired_device_verified = True
+            return principal
         if explicit_token and oidc_enabled():
             return _authenticate_oidc_bearer(request, explicit_token)
         raise HTTPException(
@@ -883,7 +904,9 @@ def _bind_principal(connection, principal):
     """The only phase that mutates request identity or the task's tenant pin."""
     if connection is not None and principal is not None:
         connection.state.principal = principal
-        _pin_tenant_from_principal(connection, principal)
+        from .device_pairing import bind as bind_device
+        if not bind_device(connection, principal):
+            _pin_tenant_from_principal(connection, principal)
     return principal
 
 

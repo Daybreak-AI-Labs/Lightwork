@@ -160,13 +160,16 @@ def test_native_rls_policy_and_flags_survive_key_upgrade(postgres_test_dsn):
 
 
 def test_world_and_standalone_learning_startup_share_migration(postgres_test_dsn, monkeypatch):
-    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from maverick.world_model_backends.postgres import MIGRATIONS, PostgresWorldModel
 
     monkeypatch.setattr(ls, "_postgres", lambda: True)
     with tenant_scope(tenant="alpha"):
         ls.write_addenda_db({"shared": "before world startup"})
         with PostgresWorldModel(postgres_test_dsn) as world:
-            assert world.schema_version == 40
+            assert world.schema_version == MIGRATIONS[-1][0]
+            with world._tx() as cursor:
+                cursor.execute("SELECT version FROM schema_migrations ORDER BY version")
+                assert [row[0] for row in cursor.fetchall()] == [version for version, _ in MIGRATIONS]
         assert ls.load_addenda_db() == {"shared": "before world startup"}
     with tenant_scope(tenant="beta"):
         ls.write_addenda_db({"shared": "after world startup"})

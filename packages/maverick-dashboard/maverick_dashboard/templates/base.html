@@ -8,6 +8,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark light" />
+  <meta name="lightwork-preference-context" content="{{ display_preference_context }}">
+  <meta name="lightwork-preference-revision" content="{{ display_preference_revision }}">
+  <meta name="lightwork-preference-account" content="{{ '1' if display_signed_in else '0' }}">
+  <meta name="lightwork-text-size" content="{{ display_text_size or 'standard' }}">
+  <link rel="stylesheet" href="{{ asset('lightwork-preferences.css') }}">
   <meta name="theme-color" content="#0e1320" />
   {% if draft_recovery_context %}<meta name="lightwork-draft-context" content="{{ draft_recovery_context }}">{% endif %}
   {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
@@ -28,8 +33,11 @@
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
   <link rel="apple-touch-icon" href="{{ asset('daybreak-logo.jpg') }}" />
+{% include "_journey_i18n.html" %}
 </head>
 <body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
+  <p class="muted active-workspace-banner" aria-label="{{ ut('Active workspace') }}" lang="{{ ul('Active workspace') }}">{{ ui('Workspace:') }} <a href="/workspace/tenant">{% if workspace_tenant_name %}<bdi lang="und" dir="auto" data-user-content>{{ workspace_tenant_name }}</bdi>{% else %}{{ ui('Main workspace') }}{% endif %}</a></p>
+  {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut('Translation coverage') }}" lang="{{ ul('Translation coverage') }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
   <a class="skip-link" href="#content"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('chrome.skip_to_content') }}</a>
   <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>
@@ -75,12 +83,12 @@
   </svg>
   <header class="topbar">
     <button type="button" class="topbar__menu" id="nav-toggle"
-            aria-label="Toggle sidebar" aria-expanded="false" aria-controls="sidebar">
+            aria-label="{{ ut('Toggle sidebar') }}" lang="{{ ul('Toggle sidebar') }}" aria-expanded="false" aria-controls="sidebar">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
         <path d="M2 4.5h14M2 9h14M2 13.5h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
       </svg>
     </button>
-    <a class="brand" href="/" aria-label="Lightwork by Daybreak Labs — home">
+    <a class="brand" href="/" aria-label="{{ ut('Lightwork by Daybreak Labs - home') }}" lang="{{ ul('Lightwork by Daybreak Labs - home') }}">
       <span class="brand__plate">
         <img class="brand__logo" src="{{ asset('daybreak-mark.png') }}" alt="Daybreak Labs"
              width="35" height="24" />
@@ -89,57 +97,25 @@
     </a>
     <span class="topbar__controls">
       {% if can_halt %}
-      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="Emergency stop: stop or resume work">
+      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="{{ ut('Emergency stop: stop or resume work') }}" lang="{{ ul('Emergency stop: stop or resume work') }}">
         <span class="dot" aria-hidden="true"></span>
-        <span id="halt-label" aria-live="polite">checking</span>
+        <span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
       </a>
       {% else %}
       <span id="halt-pill" class="halt-pill" data-can-halt="false" aria-disabled="true"
-            aria-label="Emergency stop status. Halt permission is required to change it."
-            title="You do not have permission to stop or resume this work.">
+            aria-label="{{ ut('Emergency stop status. Halt permission is required to change it.') }}" lang="{{ ul('Emergency stop status. Halt permission is required to change it.') }}"
+            title="{{ ut('You do not have permission to stop or resume this work.') }}">
         <span class="dot" aria-hidden="true"></span>
-        <span id="halt-label" aria-live="polite">checking</span>
+        <span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
       </span>
       {% endif %}
       {% if show_settings_link is not defined or show_settings_link %}
-      <a class="iconbtn" href="/settings" aria-label="Settings" title="Settings">
+      <a class="iconbtn" href="/settings" aria-label="{{ ut('Settings') }}" title="{{ ut('Settings') }}" lang="{{ ul('Settings') }}">
         <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-settings"></use></svg>
       </a>
       {% endif %}
-      <a class="iconbtn" href="/help" aria-label="Help and diagnostics" title="Help and diagnostics"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-facts"></use></svg></a>
-      <details class="prefs" id="prefs-menu">
-        <summary class="iconbtn" aria-label="Display preferences" title="Display preferences">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5h3.4M10.4 5h3.1M2.5 11h6.3M13.1 11h.4"/><circle cx="7.7" cy="5" r="1.7"/><circle cx="10.8" cy="11" r="1.7"/></svg>
-        </summary>
-        <div class="prefs__panel" role="group" aria-label="Display preferences">
-          <label class="prefs__row"><span>Theme</span>
-      <select class="ctl" id="theme-select" data-ui-preference="theme" aria-label="Theme">
-        <option value="">Theme</option>
-        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
-        <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
-        <option value="solarized" {% if theme == 'solarized' %}selected{% endif %}>Solarized</option>
-        <option value="hicontrast" {% if theme == 'hicontrast' %}selected{% endif %}>High contrast</option>
-        {% for name in custom_theme_names %}
-        <option value="{{ name }}" {% if theme == name %}selected{% endif %}>{{ name }}</option>
-        {% endfor %}
-      </select>
-          </label>
-          <label class="prefs__row"><span>Density</span>
-      <select class="ctl" id="density-select" data-ui-preference="density" aria-label="Density">
-        <option value="">Density</option>
-        <option value="comfortable" {% if density == 'comfortable' %}selected{% endif %}>Comfortable</option>
-        <option value="compact" {% if density == 'compact' %}selected{% endif %}>Compact</option>
-      </select>
-          </label>
-          <label class="prefs__row"><span{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('label.font') }}</span>
-      <select class="ctl" id="font-select" data-ui-preference="font" aria-label="{{ t('label.font') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
-        <option value="">{{ t('label.font') }}</option>
-        <option value="default" {% if font == 'default' %}selected{% endif %}>{{ t('font.default') }}</option>
-        <option value="dyslexic" {% if font == 'dyslexic' %}selected{% endif %}>{{ t('font.dyslexic') }}</option>
-      </select>
-          </label>
-        </div>
-      </details>
+      <a class="iconbtn" href="/help" aria-label="{{ ut('Help and diagnostics') }}" title="{{ ut('Help and diagnostics') }}" lang="{{ ul('Help and diagnostics') }}"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-facts"></use></svg></a>
+      {% include "_display_preferences.html" %}
       <a class="iconbtn" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5.5" r="2.75"/><path d="M2.75 14a5.25 5.25 0 0 1 10.5 0"/></svg>
       </a>
@@ -152,17 +128,17 @@
   </header>
   <div class="nav-backdrop" id="nav-backdrop"></div>
   <aside class="sidebar" id="sidebar">
-    <nav aria-label="Primary">
+    <nav aria-label="{{ ut('Primary') }}" lang="{{ ul('Primary') }}">
       {% if can_create_goal %}
       <a class="btn btn--primary navquick" href="/chat">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-        <span class="nav-label">New task</span>
+        <span class="nav-label">{{ ui("New task") }}</span>
       </a>
       {% endif %}
       <button type="button" class="navfinder__open" id="navfinder-open"
               aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.25" stroke="currentColor" stroke-width="1.4"/><path d="m10.25 10.25 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-        <span class="nav-label">Find a page</span>
+        <span class="nav-label">{{ ui('Find a page') }}</span>
         <kbd aria-hidden="true">Ctrl K</kbd>
       </button>
       {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
@@ -186,13 +162,13 @@
         <div class="navgrp">
           <button type="button" class="navgrp__toggle" data-grp="{{ _group.label }}"
                   aria-expanded="true" aria-controls="navgrp-{{ loop.index0 }}">
-            <span class="navgrp__label">{{ _group_labels.get(_group.label, _group.label) }}</span>
+            <span class="navgrp__label">{{ ui(_group_labels.get(_group.label, _group.label)) }}</span>
             <svg class="navgrp__caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <ul class="navgrp__items" id="navgrp-{{ loop.index0 }}">
             {% for _link in _group.links %}
               {% set _active = (_active_nav.href == _link.href) %}
-              <li><a href="{{ _link.href }}"{% if _active %} class="active" aria-current="page"{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ _link.label }}</span></a></li>
+              <li><a href="{{ _link.href }}"{% if _active %} class="active" aria-current="page"{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ ui(_link.label) }}</span></a></li>
             {% endfor %}
           </ul>
         </div>
@@ -210,7 +186,7 @@
     {% block content %}{% endblock %}
   </main>
   <footer>
-    <span class="muted">Lightwork by Daybreak Labs · <span{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('footer.local') }}</span> · proprietary software</span>
+    <span class="muted">Lightwork by Daybreak Labs · <span{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('footer.local') }}</span> · {{ ui('proprietary software') }}</span>
   </footer>
 
   <!-- Reusable toast regions + confirm dialog (window.mvToast / window.mvConfirm).
@@ -223,8 +199,8 @@
     <div class="mv-confirm__body">
       <p class="mv-confirm__msg" id="mv-confirm-msg"></p>
       <div class="mv-confirm__row">
-        <button type="button" class="btn btn--ghost" id="mv-confirm-cancel">Cancel</button>
-        <button type="button" class="btn btn--primary" id="mv-confirm-ok">Confirm</button>
+        <button type="button" class="btn btn--ghost" id="mv-confirm-cancel">{{ ui("Cancel") }}</button>
+        <button type="button" class="btn btn--primary" id="mv-confirm-ok">{{ ui("Confirm") }}</button>
       </div>
     </div>
   </dialog>
@@ -234,12 +210,13 @@
       <div id="mv-form-fields"></div>
       <p class="mv-form__err" id="mv-form-err" aria-live="polite"></p>
       <div class="mv-confirm__row">
-        <button type="button" class="btn btn--ghost" id="mv-form-cancel">Cancel</button>
-        <button type="submit" class="btn btn--primary" id="mv-form-ok">OK</button>
+        <button type="button" class="btn btn--ghost" id="mv-form-cancel">{{ ui("Cancel") }}</button>
+        <button type="submit" class="btn btn--primary" id="mv-form-ok">{{ ui('OK') }}</button>
       </div>
     </form>
   </dialog>
   {% include "_copilot.html" %}
+  <script src="{{ asset('lightwork-product-operations.js') }}"></script>
   <script src="{{ asset('lightwork-copilot.js') }}"></script>
   <script src="{{ asset('lightwork-ui.js') }}"></script>
   <link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">
@@ -247,6 +224,7 @@
   <link rel="stylesheet" href="{{ asset('lightwork-guided-actions.css') }}">
   <script src="{{ asset('lightwork-guided-actions.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
+  <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   {% block scripts_extra %}{% endblock %}

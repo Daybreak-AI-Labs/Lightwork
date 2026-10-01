@@ -30,6 +30,11 @@ class RetentionCursor(RecordingCursor):
         return (2,)
 
 
+class FactWriteCursor(RecordingCursor):
+    def fetchone(self):
+        return (7,) if "RETURNING write_seq" in self.calls[-1][0] else None
+
+
 class TemporalDeleteCursor(RecordingCursor):
     rowcount = 1
 
@@ -159,7 +164,7 @@ def test_fact_upsert_advances_write_order_sequence(monkeypatch):
         "maverick.world_model._temporal_memory_enabled", lambda: False
     )
     world = PostgresWorldModel.__new__(PostgresWorldModel)
-    cur = RecordingCursor()
+    cur = FactWriteCursor()
 
     @contextmanager
     def tx():
@@ -176,6 +181,50 @@ def test_fact_upsert_advances_write_order_sequence(monkeypatch):
     assert "fact-write-order:" not in source
     recall_source = inspect.getsource(PostgresWorldModel.get_facts)
     assert "ORDER BY write_seq DESC" in recall_source
+
+
+def test_fact_revision_conflict_does_not_write_or_touch_history(monkeypatch):
+    from maverick.fact_revision import FactConflict
+
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr("maverick.world_model._temporal_memory_enabled", lambda: True)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+
+    class CurrentCursor(RecordingCursor):
+        def fetchone(self):
+            return (9,)
+
+    cur = CurrentCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    with pytest.raises(FactConflict):
+        world.upsert_fact("hours", "stale", expected_revision=8)
+    assert len(cur.calls) == 2
+    assert "pg_advisory_xact_lock" in cur.calls[0][0]
+    assert cur.calls[0][1] == ("fact:acme:hours",)
+    assert "tenant_id = %s" in cur.calls[1][0]
+    assert cur.calls[1][1] == ("hours", "acme")
+
+
+def test_shared_fact_history_uses_exact_ownership_even_in_compatibility_mode(monkeypatch):
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = EmptyFactCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    assert world.fact_history("hours", owned_only=True) == []
+    [(sql, params)] = cur.calls
+    assert "tenant_id = %s" in sql and "tenant_id IS NULL" not in sql
+    assert params == ("hours", "acme", 50)
 
 
 def test_fact_value_and_trust_share_one_snapshot(monkeypatch):

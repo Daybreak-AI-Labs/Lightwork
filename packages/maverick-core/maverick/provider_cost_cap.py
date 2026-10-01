@@ -648,6 +648,7 @@ class ReservationSnapshot:
     outcome_claim_state: str | None
     outcome_claim_event: str | None
     operation: dict[str, object] | None
+    reconciliation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -864,6 +865,7 @@ def _snapshot(
         ),
         outcome_claim_event=row.get("outcome_claim_event"),
         operation=_validate_operation_metadata(row.get("operation")),
+        reconciliation=row.get("reconciliation"),
     )
 
 

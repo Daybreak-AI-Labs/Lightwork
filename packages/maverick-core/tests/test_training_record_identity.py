@@ -11,12 +11,20 @@ from maverick.training.schema import to_klear_jsonl
 def test_same_second_family_keeps_every_run_and_candidate(monkeypatch, tmp_path):
     monkeypatch.setattr(donation, "_donations_enabled", lambda: True)
     monkeypatch.setattr(donation, "_text_donations_enabled", lambda: True)
+    from maverick import world_model
+    db = tmp_path / "source-world.db"
+    monkeypatch.setattr(world_model, "DEFAULT_DB", db)
+    world = world_model.WorldModel(db)
+    try:
+        goal_ids = [world.create_goal("synthetic shared training", owner="") for _ in range(4)]
+    finally:
+        world.close()
     records = [donation.TrajectoryRecord(
         ts=1700000000.0, task_brief_hash="same-family", goal_id=i,
         outcome="success", verifier_confidence=0.9, disagreement_entropy=0.9,
         rejected_attempts=[{"text": f"draft-{i}", "confidence": 0.1}],
         scored_candidates=[{"text": f"candidate-{i}", "score": 0.4}],
-    ) for i in range(4)]
+    ) for i in goal_ids]
     with ThreadPoolExecutor(max_workers=4) as pool:
         paths = list(pool.map(lambda record: donation.write_record(record, outbox=tmp_path), records))
     assert None not in paths and len(set(paths)) == 4

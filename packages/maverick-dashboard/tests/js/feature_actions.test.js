@@ -20,6 +20,9 @@ function response(value, status = 200, headers = {}) {
   return new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json', ...headers}});
 }
 const ME = {name: 'Ada', role: 'Administrator', departments: [], all_departments: true, tools: 'Every tool',
+  role_source: 'Current workspace role', access_owner: 'Installation administrator', department_source: 'Current workspace policy',
+  allowed_tool_names: [], allowed_tool_summary: 'Every tool', blocked_tool_names: [], tool_policy_source: 'Installation policy',
+  profile: 'Enterprise', enterprise_boundary: true, privacy_scope: 'Private task content requires owner access.',
   blocked_tools: 0, risk: 'No limit', limits_enforced: true, installation_admin: true,
   abilities: [{label: 'See work and results', allowed: true}, {label: 'Change settings and manage people', allowed: false}],
   can: {view: true, operate: true, audit: false, admin: true, installation_admin: true}};

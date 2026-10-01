@@ -794,7 +794,7 @@ def test_scorecard_page_renders_and_404s_unknown():
     assert client.get("/external-agents/ghost").status_code == 404
 
 
-def test_boards_carry_platform_segments():
+def test_boards_keep_external_agent_platform_segments_out_of_local_scope():
     _enroll()
     token = _mint()
     bare = TestClient(app)
@@ -803,11 +803,18 @@ def test_boards_carry_platform_segments():
               json={"title": "Quote", "outcome": "success", "summary": "s",
                     "cost_dollars": 2.0})
     spend = client.get("/api/v1/dashboards/spend").json()
-    assert any(r["label"] == "Salesforce Agentforce"
-               for r in spend["by_platform"])
+    # Ingested work belongs to the service principal, not the local operator.
+    assert spend["by_platform"] == []
     wf = client.get("/api/v1/dashboards/workforce").json()
-    (row,) = [r for r in wf["platforms"]
-              if r["label"] == "Salesforce Agentforce"]
+    assert wf["platforms"] == []
+    # Explicitly unscoped internal calculations retain platform attribution;
+    # HTTP owner filters must never silently opt into this scope.
+    from maverick.world_model import open_world
+    from maverick_dashboard.api import _external_platform_spend, _external_platform_workforce
+    world = open_world()
+    assert _external_platform_spend(world, None, 0) == [
+        {"label": "Salesforce Agentforce", "cost": 2.0, "runs": 1}]
+    (row,) = _external_platform_workforce(world, None)
     assert row["completed"] == 1 and row["spend"] == pytest.approx(2.0)
 
 

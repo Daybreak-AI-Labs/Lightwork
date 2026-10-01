@@ -54,12 +54,47 @@ def test_people_see_only_their_own_stopped_tasks_and_get_a_scrubbed_link(client,
     tasks = client.get("/api/v1/support/issue-report/tasks").json()["tasks"]
     assert [t["id"] for t in tasks] == [mine]
     made = client.post("/api/v1/support/issue-report", json={"task": mine}).json()
-    url = unquote(made["url"])
-    assert url.startswith("https://github.com/") and "Quarterly summary" in url
-    assert "sk-ant-api03-" + "z" * 40 not in url and "Nothing is sent" in made["summary"]
+    assert "url" not in made  # preparation cannot navigate outside Lightwork
+    assert "Quarterly summary" in made["title"]
+    assert "sk-ant-api03-" + "z" * 40 not in made["body"]
+    assert "Opening GitHub sends" in made["summary"]
+    reviewed = client.post("/api/v1/support/issue-report/review", json={
+        "task": mine, "title": "Reviewed title", "body": "Business details removed",
+    }).json()
+    assert "Business details removed" in unquote(reviewed["url"])
+    assert "Quarterly summary" not in unquote(reviewed["url"])
     assert client.post("/api/v1/support/issue-report", json={"task": theirs}).status_code == 404
     assert client.post("/api/v1/support/issue-report", json={"task": 999999}).status_code == 404
     assert client.post("/api/v1/support/issue-report", json={"task": 0}).status_code == 422
+
+
+def test_support_search_finds_old_tasks_and_deep_link_rechecks_access(client, monkeypatch):
+    oldest = _stopped_task("user:vic@example.com", "Oldest quarterly task")
+    for index in range(59):
+        _stopped_task("user:vic@example.com", f"Later task {index}")
+    other = _stopped_task("user:other@example.com", "Oldest private task")
+    _as(monkeypatch, "viewer", "user:vic@example.com")
+    found = client.get("/api/v1/support/issue-report/tasks", params={"query": "Oldest"}).json()
+    assert [row["id"] for row in found["tasks"]] == [oldest]
+    page = client.get("/api/v1/support/issue-report/tasks", params={"selected": oldest}).json()
+    assert page["selected"]["id"] == oldest and page["next_offset"] is not None
+    second = client.get("/api/v1/support/issue-report/tasks", params={"offset": page["next_offset"]}).json()
+    assert set(row["id"] for row in page["tasks"]).isdisjoint(row["id"] for row in second["tasks"])
+    assert client.get("/api/v1/support/issue-report/tasks", params={"selected": other}).status_code == 404
+    assert client.get("/api/v1/support/issue-report/tasks", params={"after": "2026-02-30"}).status_code == 422
+    assert client.get("/api/v1/support/issue-report/tasks", params={"after": "2026-10-01", "before": "2026-09-01"}).status_code == 422
+
+
+def test_review_scrubs_edits_and_rechecks_task_authority(client, monkeypatch):
+    mine = _stopped_task("user:vic@example.com", "Private account")
+    _as(monkeypatch, "viewer", "user:vic@example.com")
+    secret = "sk-ant-api03-" + "z" * 40
+    payload = {"task": mine, "title": "Share selected details", "body": "New key " + secret}
+    response = client.post("/api/v1/support/issue-report/review", json=payload)
+    assert response.status_code == 200 and secret not in str(response.json())
+    assert response.headers["cache-control"] == "private, no-store"
+    _as(monkeypatch, "viewer", "user:other@example.com")
+    assert client.post("/api/v1/support/issue-report/review", json=payload).status_code == 404
 
 
 def test_help_page_offers_the_bug_report(client):

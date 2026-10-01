@@ -23,7 +23,12 @@ def test_base_loads_module_and_chat_fallback_uses_it():
     base = (_TPL / "templates" / "base.html").read_text(encoding="utf-8")
     assert "asset('lightwork-voice.js')" in base      # versioned /static/lightwork-voice.js link
     chat = (_TPL / "templates" / "chat_goal.html").read_text(encoding="utf-8")
-    assert "window.lwVoice" in chat
-    # The bare utterance survives only as the last-resort fallback branch.
-    assert chat.index("window.lwVoice") < chat.index(
-        "new SpeechSynthesisUtterance")
+    assert "asset('lightwork-read-aloud.js')" in chat
+    controller = client.get("/static/lightwork-read-aloud.js")
+    assert controller.status_code == 200
+    # Only the result's own declared language may influence playback. Unknown
+    # user content is never rewritten with the interface language's prose.
+    assert "window.lwVoice.humanize(text, contentLanguage)" in controller.text
+    assert "window.lwVoice.best(contentLanguage)" in controller.text
+    assert "source.getAttribute('lang') || 'und'" in controller.text
+    assert "utterance.voice = voice" in controller.text

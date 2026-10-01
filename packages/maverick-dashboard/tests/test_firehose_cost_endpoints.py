@@ -1,6 +1,8 @@
 """Run-events firehose (WS), inline cost preview, cost breakdown, anomalies."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import maverick_dashboard.auth as auth
 import pytest
 from fastapi.testclient import TestClient
@@ -158,9 +160,14 @@ def test_cost_breakdown(monkeypatch):
 
 def test_cost_anomalies(monkeypatch):
     class _W:
+        def list_goals(self, *, owner, limit, order):
+            assert owner == "" and limit == 10_000 and order == "desc"
+            return [SimpleNamespace(id=i, owner="") for i in (*range(1, 9), 99)]
+
         def list_episodes(self, limit=500):
             eps = [_Ep(i, 0.10) for i in range(1, 9)]
             eps.append(_Ep(99, 25.0))  # the outlier
+            eps.append(_Ep(100, 900.0))  # another employee's private task
             return eps
 
     monkeypatch.setattr(app_mod, "_world", lambda: _W())
@@ -173,6 +180,10 @@ def test_cost_anomalies(monkeypatch):
 
 def test_cost_anomalies_needs_baseline(monkeypatch):
     class _W:
+        def list_goals(self, *, owner, limit, order):
+            assert owner == "" and limit == 10_000 and order == "desc"
+            return [SimpleNamespace(id=1, owner="")]
+
         def list_episodes(self, limit=500):
             return [_Ep(1, 1.0)]
 

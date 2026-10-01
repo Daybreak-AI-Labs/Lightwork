@@ -1,0 +1,104 @@
+[
+  {
+    "id": "LW-111",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "assessment_memory.py ties a suggested note and supporting provenance to the winning answer; keeps dissent separate; agreement explicitly differs from certainty. Current approved, stale and unreviewed states use exact pinned questionnaire/current policy digest, review/renewal expiry and named approval.",
+      "Assessment review per-question source panel opens exact saved answer or current comparison; source-date/version/approval/reuse explanation; rejecting one suggestion leaves other questions unchanged; explicit reviewed use rechecks exact source then changes only local draft. Existing assessments.learn gate controls suggestions.",
+      "Native precedent API rechecks current department/context, exact revision and private no-store response; shared typed Copilot read adapter delegates native suggestion service."
+    ],
+    "validation": [
+      "28 local Python assessment-memory/discovery tests passed, including dissenting-note regression, policy/expiry staleness, current department and exact fragment checks.",
+      "12 per-answer JS fixtures plus12 assessment mutation-lifecycle fixtures passed (latter fixture updated to evaluate its intended first script after a second script was added to approval queue).",
+      "Focused Ruff and diff whitespace passed; no models or external providers called."
+    ],
+    "remaining": [
+      "Integrated suites and real-browser/installed-product accessibility qualification remain."
+    ]
+  },
+  {
+    "id": "LW-113",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "Shared keyboard finder explicit business-metadata vs approved-knowledge modes; current-purpose picker; record_search_api delegates native knowledge ACL service and independently rechecks account/workspace before returning.",
+      "Exact-version deep link reopens through native governed detail; no source text in URL and no model called by either mode.",
+      "LW115 exact selected-source task admission rechecks current ACL/purpose/source at queue start, provider dispatch and private output read; no metadata search sends content to a model."
+    ],
+    "validation": [
+      "12 local record-search Python tests and 7 shared-finder JS fixtures passed; native denied sources never supply snippets/counts; metadata mode never calls knowledge service."
+    ],
+    "remaining": [
+      "Integrated real-browser and installed PostgreSQL qualification; historical metadata scale is tracked independently in LW114."
+    ]
+  },
+  {
+    "id": "LW-114",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "record_history.py shared current-authority metadata service; native SQLite/PostgreSQL owner/date task/project/fact pages, governed vault/report windows, bounded questionnaire metadata windows, sealed tenant/context/filter cursors, honest current/partial/unavailable coverage and source-recovery links.",
+      "Shared finder historical source, UTC dates, oldest/newest and20/50 page controls reach beyond former1000/500-head caps. Added workflows/templates, automations, projects, exact-owner connections and shared fact-key adapters, native detail links and typed Copilot knowledge.history with same service.",
+      "Formal additive migration45 owner/date indexes on both backends; release1–44 hashes preserved.50k metadata/250 returned-head/cooperative3s scan bounds; no persistent content index, model, connector call or private notes/results/fact values projected. Existing record-search Settings+installer gate retained.",
+      "Canonical template publication/ownership and exact flow-owner metadata filtering preserved; native source details reauthorize. docs/record-search.md includes customer controls, scope, budgets, rollback and qualification limits."
+    ],
+    "validation": [
+      "20 focused history Python checks passed after final bounded questionnaire/cursor repair;10,050-task fixture returned250 metadata heads in0.172–0.235s. Actual1005-questionnaire,501-vault and501-report beyond-cap fixtures pass; native SQLite owner/date index query plan verified.",
+      "Prior integration run passed12 existing record-search checks and31 migration-governance checks; no released migration altered. 43 finder/connection JS tests pass (including nine finder tests), including empty-window continuation, source recovery links, current context, stale paging and new exact native destinations.",
+      "Focused Ruff and changed JS syntax/whitespace pass. Existing integrated app.py import-order/E402 findings are reported to root for its shared cleanup.",
+      "Real VerifiedPrincipal exact-owner fixture passes without patching native auth; cursor confidentiality and cross-tenant rejection pass. No provider/native application execution or production calls."
+    ],
+    "remaining": [
+      "Installed PostgreSQL concurrency/performance and real-browser rendering/accessibility remain qualification work; local fixtures do not certify those environments.",
+      "Current metadata only; no optional full-text ingestion enabled. Very large or slow source inventories visibly require narrower dates under scan budgets. Native governed catalog capacity and retention boundaries remain authoritative."
+    ]
+  },
+  {
+    "id": "LW-115",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "knowledge_task_context.py immutable owner/tenant/brief/exact-version binding, atomic source-analysis admission marker, existing Budget/provider authority, one tool-free physical model attempt, current source revalidation at dispatch/publication/read, no automatic paid retry.",
+      "Native Knowledge source picker (up to five), purpose/freshness review, private analysis with exact source links, unknown-submission reconciliation and explicit saved-draft cancellation; ordinary task history/export stores only status and link, so task copies cannot inherit content access.",
+      "knowledge_access.task_context Settings/installer gate default false; product_operations_knowledge.py typed native source-analysis operation; docs/knowledge-source-analysis.md."
+    ],
+    "validation": [
+      "21 focused local Python tests passed for source runtime/admission, installer and original receipt reconciliation; fake models only.",
+      "24 Knowledge/source-analysis JS fixtures passed after source-analysis fixture repair; additional 7 shared-finder JS tests passed.",
+      "Typed operation dependency loaded from committed settings foundation for local verification only; focused Ruff and JS syntax passed."
+    ],
+    "remaining": [
+      "Integrated suites, live browser rendering and PostgreSQL concurrency qualification remain; no actual provider or production calls made.",
+      "General action agents do not accept selected-source bindings: this implemented workflow is explicitly a tool-free source analysis. Already-transmitted provider content cannot be recalled."
+    ]
+  },
+  {
+    "id": "LW-119",
+    "status": "planned",
+    "implementation_evidence": [
+      "facts_api.py shared-only server-filtered query/source/date/tag pages with context+revision-bound snapshot; 409 on changed sequence.",
+      "world_model.py and postgres.py additive43 tags_json metadata, CAS writes advance existing fact revision; values remain encrypted, private namespaces excluded.",
+      "Facts page tag editing/current detail/history/bulk review; memory.fact_tags config, Settings toggle, installer question."
+    ],
+    "validation": [
+      "14 focused local tests passed (Python3.12, unique workspace basetemp), including10000-record late match/tag filter, stale writes, private namespace exclusion, stale snapshots, installer parity.",
+      "Migration governance43/43 and JS syntax passed."
+    ],
+    "remaining": "Native Facts search, detail, tags and CAS/restore UI are implemented. Final acceptance review confirmed the promised typed Copilot fact-operation callback was not yet registered. A native-authority adapter and actual page selection handoff are now in progress; no stub completion is claimed."
+  },
+  {
+    "id": "LW-122",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "knowledge_reindex_jobs.py durable per-account/workspace operation journal, private shadow vectors, exact collection/model/limit review, Budget+durable deadline, 64-passage cancellation boundaries, atomic live-index source compare-and-replace, checkpoint resume and publish reconciliation.",
+      "knowledge_library_api.py and lightwork-knowledge-library.js native admin review/start/status/cancel/continue/archive; retained idempotency receipts; actual model/cost/size warning.",
+      "knowledge.reindex_jobs and bounded limits settings/installer; product_operations_knowledge.py shared native Copilot adapter; docs/knowledge-reindex-jobs.md."
+    ],
+    "validation": [
+      "9 focused local reindex/API/installer tests passed;13 prior focused reindex/catalog tests passed; full catalogue run found19 unrelated integrated configuration registry issues reported to root.",
+      "Deterministic temporary SQLite used only; no live providers. JS syntax and focused Ruff passed.",
+      "Final six core rebuild regression tests passed, including source mutation between preview and source reread; no suites required live providers."
+    ],
+    "remaining": [
+      "Integrated registry tests pending; PostgreSQL, browser, installed local-model qualification pending.",
+      "Paid/custom embedding intentionally fails admission closed until adapter supplies verified per-request price and usage projection; no configured provider or credentials changed."
+    ]
+  }
+]

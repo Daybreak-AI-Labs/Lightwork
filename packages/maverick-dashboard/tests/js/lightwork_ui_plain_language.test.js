@@ -12,6 +12,7 @@ const source = fs.readFileSync(
 function load() {
   const dom = new JSDOM('<div id="mv-toasts"></div><div id="mv-toasts-alert"></div>',
     { url: "https://lightwork.test/", runScripts: "outside-only" });
+  dom.window.matchMedia = () => ({matches:false, addEventListener() {}, removeEventListener() {}});
   dom.window.eval(source);
   return dom.window;
 }
@@ -75,6 +76,7 @@ function goalForm(reply) {
     '<p id="goal-error" style="display:none"></p>',
     { url: "https://lightwork.test/", runScripts: "outside-only" });
   dom.window.fetch = async (url) => (String(url).includes("/chat/send") ? reply() : { ok: false, status: 404, json: async () => ({}) });
+  dom.window.matchMedia = () => ({matches:false, addEventListener() {}, removeEventListener() {}});
   dom.window.eval(source);
   return dom.window;
 }

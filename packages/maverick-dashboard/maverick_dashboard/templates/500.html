@@ -24,14 +24,16 @@
     {% else %}
       <h1 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">Something went wrong</h1>
       <p class="muted" style="max-width: 480px; margin: 0 auto 1.5rem;">
-        This page could not be loaded. Try again, and if this keeps happening,
-        contact your administrator with the support details below.
+        {% if uncertain_mutation %}The change could not be confirmed. Check its current state before repeating it.
+        {% else %}This page could not be loaded. You can retry loading it.{% endif %}
+        If this keeps happening, contact your administrator with the support details below.
       </p>
       <details style="max-width: 480px; margin: 0 auto 1.5rem;">
         <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">Support details</summary>
-        <p class="muted">Page: {{ path or request.url.path }}</p>
-        <p class="muted" style="margin: 0.5rem 0 0;">An administrator can find the full details in Lightwork’s activity log, or prepare a support report on the <a href="/help">Help</a> page.</p>
-        <button type="button" class="btn btn--ghost" id="support-copy" data-copy="Page {{ path or request.url.path }}">Copy support details</button>
+        <p class="muted">Support reference: {{ failure_reference or 'Unavailable' }}</p>
+        {% if failure_time %}<p class="muted">Time: {{ failure_time }}</p>{% endif %}
+        <p class="muted" style="margin: 0.5rem 0 0;">An administrator can locate this reference in restricted server logs, or prepare a support report on the <a href="/help{% if failure_reference %}?failure={{ failure_reference }}{% endif %}">Help</a> page.</p>
+        <button type="button" class="btn btn--ghost" id="support-copy" data-copy="Support reference: {{ failure_reference or 'Unavailable' }}{% if failure_time %} | Time: {{ failure_time }}{% endif %}">Copy support details</button>
       </details>
     {% endif %}
     <p style="margin-top: 1.5rem;">

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from html import unescape
+from html.parser import HTMLParser
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,7 +39,24 @@ def test_goal_page_folds_the_kernels_withheld_markers_and_renders_prose(page_env
     assert json.dumps(Blackboard._WITHHELD_CONTENT) in text
     assert json.dumps(Blackboard._REDACTION_UNAVAILABLE_CONTENT) in text
     # The result is prose the renderer upgrades in place, not a <pre> dump.
-    assert 'id="result" tabindex="0" aria-label="Goal result" class="prose" data-markdown' in text
+    class Elements(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.by_id = {}
+
+        def handle_starttag(self, tag, attrs):
+            attributes = dict(attrs)
+            if attributes.get("id"):
+                self.by_id[attributes["id"]] = (tag, attributes)
+
+    elements = Elements()
+    elements.feed(text)
+    tag, result = elements.by_id["result"]
+    assert tag == "div" and result["tabindex"] == "0"
+    assert result["class"] == "prose" and "data-markdown" in result
+    assert result["aria-labelledby"] in elements.by_id
+    assert result["lang"] == "und" and result["dir"] == "auto"
+    assert "data-user-content" in result
     assert 'src="/static/lightwork-markdown.js' in text
     # The work log is a step list; the raw "[agent] kind" trace line is gone.
     assert 'id="events" role="log" aria-live="polite" aria-label="Goal progress" tabindex="0"' in text
@@ -67,7 +85,7 @@ def test_blocked_goal_reads_as_paused_and_keeps_the_question_in_the_conversation
     # Answering re-opens the live stream instead of leaving the page on a
     # finished stream with a Resume button.
     assert "resumeFollowing()" in text
-    assert "recordExchange(questionText.textContent, ans)" in text
+    assert "recordExchange(attempt.question, attempt.answer)" in text
 
 
 def test_markdown_renderer_is_served_as_javascript(page_env):
@@ -226,3 +244,24 @@ def test_chat_export_uses_real_owner_authority(page_env, monkeypatch):
         response = client.get(f"/chat/goal/{gid}/download.md{suffix}")
         assert response.status_code == 404
         assert "owner-only content" not in response.text
+
+
+@pytest.mark.parametrize("language, label", [
+    ("fr", "Envoyer des consignes pour cette tâche"),
+    ("de", "Hinweise an diese Aufgabe senden"),
+    ("ja", "このタスクに指示を送る"),
+    ("zh", "向此任务发送指导"),
+])
+def test_conversation_localizes_governed_controls_without_translating_source(page_env, language, label):
+    client, world = page_env
+    goal_id = world.create_goal("Save مرحبا", "Save <img src=x>")
+    world.set_goal_status(goal_id, "done", result="Save مرحبا")
+    response = client.get(f"/chat/goal/{goal_id}", params={"lang": language})
+    assert response.status_code == 200
+    assert f'lang="{language}">{label}</option>' in response.text
+    assert '<html lang="en" dir="ltr">' in response.text
+    assert '<div class="bubble__title" lang="und" dir="auto" data-user-content>Save مرحبا</div>' in response.text
+    assert 'data-user-content>Save &lt;img src=x&gt;</div>' in response.text
+    assert 'data-product-copy>Messages and task receipts</span>' not in response.text
+    assert 'id="conversation-inbox"' in response.text
+    assert '"review_status": "draft_partial"' in response.text

@@ -12,20 +12,15 @@ from maverick_dashboard import ai_cloud_agent_governance_workbench as workbench
 
 @pytest.fixture()
 def environment(monkeypatch: pytest.MonkeyPatch):
+    from maverick_dashboard.app import _theme_context
+
     template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    templates = Jinja2Templates(directory=str(template_dir))
+    templates = Jinja2Templates(
+        directory=str(template_dir),
+        context_processors=[_theme_context],
+    )
     templates.env.globals.update(
-        {
-            "theme": "dark",
-            "font": "default",
-            "lang": "en",
-            "density": "comfortable",
-            "custom_theme_css": "",
-            "custom_theme_names": [],
-            "dir": "ltr",
-            "nav_groups": [],
-            "t": lambda key: key,
-        }
+        nav_groups=[],
     )
     state = {"enabled": True}
     monkeypatch.setattr(workbench, "_tenant_id", lambda: "tenant-cloud-agents")

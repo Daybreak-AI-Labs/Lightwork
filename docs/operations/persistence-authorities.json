@@ -2603,13 +2603,15 @@
       "owner": "packages/maverick-core/maverick/backup.py",
       "purpose": "Authenticated, bounded backup / transactional restore for one client.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Tenant lifecycle recovery review: installation-wide immutable claims and deletion tombstones are protected anti-reuse authority, outside purged tenant directories. Exact snapshot comparison, atomic no-replace restore publication and monotonic rollback preserve current barriers; bootstrap retains bytes under startup hold. No restored absence grants current admission.",
       "governed_namespaces": [],
       "literal_path_hints": [
         ".db",
         ".json",
         ".key",
         ".sqlite3",
+        ".tenant-deletions",
+        ".tenant-namespaces",
         "backup has no manifest.json",
         "backup has no readable manifest.json",
         "control-plane-holder.json",
@@ -2625,76 +2627,94 @@
       },
       "source_sites": [
         {
-          "line": 133,
-          "function": "data_backups_dir",
-          "kind": "data_dir",
-          "expression": "data_dir('backups')"
-        },
-        {
-          "line": 1097,
-          "function": "_write_journal",
-          "kind": "atomic_write_text",
-          "expression": "file_lock.atomic_write_text(tx / _JOURNAL, json.dumps(document, sort_keys=True, separators=(',', ':')))"
-        },
-        {
-          "line": 118,
+          "line": 120,
           "function": "_client_root",
           "kind": "data_dir",
           "expression": "data_dir()"
         },
         {
-          "line": 551,
+          "line": 135,
+          "function": "data_backups_dir",
+          "kind": "data_dir",
+          "expression": "data_dir('backups')"
+        },
+        {
+          "line": 553,
           "function": "_new_private_empty",
           "kind": "atomic_create_bytes",
           "expression": "file_lock.atomic_create_bytes(path, b'')"
         },
         {
-          "line": 689,
+          "line": 691,
           "function": "_consistent_db_copy",
           "kind": "connect",
           "expression": "sqlite3.connect(str(source))"
         },
         {
-          "line": 734,
-          "function": "_world_schema_version",
-          "kind": "connect",
-          "expression": "sqlite3.connect(uri + '?mode=ro&immutable=1', uri=True)"
-        },
-        {
-          "line": 976,
-          "function": "create_backup",
-          "kind": "atomic_create_text",
-          "expression": "file_lock.atomic_create_text(manifest_path, json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False))"
-        },
-        {
-          "line": 691,
+          "line": 693,
           "function": "_consistent_db_copy",
           "kind": "connect",
           "expression": "sqlite3.connect(str(destination))"
         },
         {
-          "line": 893,
+          "line": 736,
+          "function": "_world_schema_version",
+          "kind": "connect",
+          "expression": "sqlite3.connect(uri + '?mode=ro&immutable=1', uri=True)"
+        },
+        {
+          "line": 895,
           "function": "_unique_private_empty",
           "kind": "atomic_create_bytes",
           "expression": "file_lock.atomic_create_bytes(candidate, b'')"
         },
         {
-          "line": 1298,
+          "line": 978,
+          "function": "create_backup",
+          "kind": "atomic_create_text",
+          "expression": "file_lock.atomic_create_text(manifest_path, json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False))"
+        },
+        {
+          "line": 1099,
+          "function": "_write_journal",
+          "kind": "atomic_write_text",
+          "expression": "file_lock.atomic_write_text(tx / _JOURNAL, json.dumps(document, sort_keys=True, separators=(',', ':')))"
+        },
+        {
+          "line": 1248,
+          "function": "_publish_lifecycle_barrier",
+          "kind": "atomic_create_bytes_chunks",
+          "expression": "file_lock.atomic_create_bytes_chunks(destination, iter(lambda: reader.read(_COPY_CHUNK), b''))"
+        },
+        {
+          "line": 1355,
           "function": "_verify_restored",
           "kind": "connect",
           "expression": "sqlite3.connect(uri + '?mode=ro', uri=True)"
         },
         {
-          "line": 1505,
-          "function": "restore_backup",
-          "kind": "cross_process_lock",
-          "expression": "file_lock.cross_process_lock(lock_target, strict=True)"
-        },
-        {
-          "line": 1366,
+          "line": 1429,
           "function": "_apply_transaction",
           "kind": "atomic_write_bytes",
           "expression": "file_lock.atomic_write_bytes(destination, _DERIVED_REBUILD_MARKER_BYTES)"
+        },
+        {
+          "line": 1568,
+          "function": "restore_backup",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(lock_target, strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": ".tenant-namespaces/82/822b33ad87c148a0a20a5ba7cd5ebcaa68d36a18e7aad165554903f52ca82757.json",
+          "recovery_policy": "tenant_namespace_reservation",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
+        },
+        {
+          "sample_path": ".tenant-deletions/822b33ad87c148a0a20a5ba7cd5ebcaa68d36a18e7aad165554903f52ca82757.json",
+          "recovery_policy": "tenant_deletion_tombstone",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
         }
       ]
     },
@@ -8038,39 +8058,53 @@
     {
       "path": "packages/maverick-core/maverick/paths.py",
       "contract": "storage_primitive",
-      "owner": "delegated; inspect source callsites below",
+      "owner": "packages/maverick-core/maverick/paths.py",
       "purpose": "Tenant-aware data paths — the P1 multi-tenancy primitive.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Tenant lifecycle recovery review: installation-wide immutable claims and deletion tombstones are protected anti-reuse authority, outside purged tenant directories. Exact snapshot comparison, atomic no-replace restore publication and monotonic rollback preserve current barriers; bootstrap retains bytes under startup hold. No restored absence grants current admission.",
       "governed_namespaces": [],
       "literal_path_hints": [
-        ".json"
+        ".json",
+        ".tenant-namespaces"
       ],
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 200,
+          "line": 192,
+          "function": "tenant_namespace_reserved",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 219,
           "function": "bind_tenant_namespace",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 377,
+          "line": 279,
+          "function": "bind_tenant_namespace",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(claim_path, payload)"
+        },
+        {
+          "line": 402,
           "function": "data_dir",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 394,
+          "line": 419,
           "function": "diagnostic_data_dir",
           "kind": "maverick_home",
           "expression": "maverick_home()"
-        },
+        }
+      ],
+      "persisted_authorities": [
         {
-          "line": 256,
-          "function": "bind_tenant_namespace",
-          "kind": "atomic_create_text",
-          "expression": "atomic_create_text(claim_path, payload)"
+          "sample_path": ".tenant-namespaces/82/822b33ad87c148a0a20a5ba7cd5ebcaa68d36a18e7aad165554903f52ca82757.json",
+          "recovery_policy": "tenant_namespace_reservation",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
         }
       ]
     },
@@ -13291,9 +13325,10 @@
       "owner": "packages/maverick-core/maverick/ux_store.py",
       "purpose": "Dashboard UX store: pins, saved views, trace annotations (roadmap 2027-H1 UX).",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Follow-up reviewed against source b6d19b46e831ce373dd97d8ec9e9c5186a366855: default/shared stores read and write tenant-resolved dashboard/ux_store-v2.json. Legacy ux_store.json is deliberately retained unread because the former singleton did not establish reliable workspace lineage; no automatic adoption or migration by principal/goal match.",
       "governed_namespaces": [],
       "literal_path_hints": [
+        "ux_store-v2.json",
         "ux_store.json"
       ],
       "observed_mechanism_markers": {
@@ -13301,16 +13336,22 @@
       },
       "source_sites": [
         {
-          "line": 63,
+          "line": 44,
+          "function": "__init__",
+          "kind": "data_dir",
+          "expression": "data_dir('dashboard')"
+        },
+        {
+          "line": 70,
           "function": "_save",
           "kind": "write_text",
           "expression": "tmp.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')"
         },
         {
-          "line": 43,
-          "function": "__init__",
+          "line": 305,
+          "function": "shared",
           "kind": "data_dir",
-          "expression": "data_dir('dashboard')"
+          "expression": "data_dir('dashboard', 'ux_store-v2.json')"
         }
       ]
     },
@@ -16480,9 +16521,10 @@
       "referenced_store_owners": [
         "..quotas"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Tenant lifecycle recovery review: installation-wide immutable claims and deletion tombstones are protected anti-reuse authority, outside purged tenant directories. Exact snapshot comparison, atomic no-replace restore publication and monotonic rollback preserve current barriers; bootstrap retains bytes under startup hold. No restored absence grants current admission.",
       "governed_namespaces": [],
       "literal_path_hints": [
+        ".tenant-deletions",
         "ledger.json",
         "reservations.json",
         "tenant_registry.json"
@@ -16493,88 +16535,118 @@
       },
       "source_sites": [
         {
-          "line": 376,
-          "function": "_save",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(_registry_path(), json.dumps(payload, indent=2, sort_keys=True))"
-        },
-        {
-          "line": 818,
-          "function": "_reservations_path",
-          "kind": "data_dir",
-          "expression": "data_dir('usage', 'reservations.json', tenant=tenant_id)"
-        },
-        {
-          "line": 114,
+          "line": 117,
           "function": "_registry_path",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 313,
+          "line": 122,
+          "function": "_retirement_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 149,
+          "function": "_retire",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(path, json.dumps({'version': 1, 'id': tenant_id, 'deleted_at': time.time()}, sort_keys=True))"
+        },
+        {
+          "line": 161,
+          "function": "_legacy_role_names",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 370,
           "function": "_load",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 393,
+          "line": 433,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(_registry_path(), json.dumps(payload, indent=2, sort_keys=True))"
+        },
+        {
+          "line": 450,
           "function": "_locked",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 824,
-          "function": "_load_reservations",
-          "kind": "maverick_home",
-          "expression": "maverick_home()"
-        },
-        {
-          "line": 915,
-          "function": "reserve_tenant_dollars",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(path, strict=True)"
-        },
-        {
-          "line": 922,
-          "function": "reserve_tenant_dollars",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))"
-        },
-        {
-          "line": 1005,
-          "function": "release_tenant_reservation",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(path, strict=True)"
-        },
-        {
-          "line": 1009,
-          "function": "release_tenant_reservation",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(path, json.dumps(_live_reservations(data, now), indent=2, sort_keys=True))"
-        },
-        {
-          "line": 398,
+          "line": 455,
           "function": "_locked",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(_registry_path(), strict=strict)"
         },
         {
-          "line": 696,
+          "line": 777,
           "function": "tenant_spend_today",
           "kind": "data_dir",
           "expression": "data_dir('usage', 'ledger.json', tenant=tid)"
         },
         {
-          "line": 974,
+          "line": 898,
+          "function": "_reservations_path",
+          "kind": "data_dir",
+          "expression": "data_dir('usage', 'reservations.json', tenant=tenant_id)"
+        },
+        {
+          "line": 904,
+          "function": "_load_reservations",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 1003,
+          "function": "reserve_tenant_dollars",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 1010,
+          "function": "reserve_tenant_dollars",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))"
+        },
+        {
+          "line": 1062,
           "function": "reserve_tenant_budget",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(path, strict=True)"
         },
         {
-          "line": 991,
+          "line": 1081,
           "function": "reserve_tenant_budget",
           "kind": "atomic_write_text",
           "expression": "atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))"
+        },
+        {
+          "line": 1095,
+          "function": "release_tenant_reservation",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 1099,
+          "function": "release_tenant_reservation",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(_live_reservations(data, now), indent=2, sort_keys=True))"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": ".tenant-deletions/822b33ad87c148a0a20a5ba7cd5ebcaa68d36a18e7aad165554903f52ca82757.json",
+          "recovery_policy": "tenant_deletion_tombstone",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
+        },
+        {
+          "sample_path": "tenant_registry.json",
+          "recovery_policy": "tenant_registry",
+          "disposition": "Preserve current identity history across purge, full/additive restore and failed-transaction rollback. Refuse erasure or rewrite of a current barrier; hold restored authority for current reconciliation, never automatic tenant readmission."
         }
       ]
     },
@@ -24319,6 +24391,1785 @@
           "expression": "data_dir('data_use_governance', 'data-use-governance.sqlite3', tenant=tenant)"
         }
       ]
+    },
+    {
+      "path": "apps/jetbrains-plugin/build.py",
+      "contract": "artifact",
+      "owner": "apps/jetbrains-plugin/build.py",
+      "purpose": "Build an unsigned installable preview with the pinned Gradle wrapper.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 46,
+          "function": "main",
+          "kind": "write_text",
+          "expression": "artifact.with_suffix('.manifest.json').write_text(json.dumps(manifest, indent=2) + '\\n', encoding='utf-8')"
+        },
+        {
+          "line": 47,
+          "function": "main",
+          "kind": "write_text",
+          "expression": "artifact.with_suffix('.zip.sha256').write_text(checksum + '  ' + artifact.name + '\\n', encoding='utf-8')"
+        }
+      ]
+    },
+    {
+      "path": "apps/zed-extension/build.py",
+      "contract": "artifact",
+      "owner": "apps/zed-extension/build.py",
+      "purpose": "Build and bundle an unsigned, locked-source Zed preview; never install or publish.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 60,
+          "function": "main",
+          "kind": "write_text",
+          "expression": "(directory / (bundle.name + '.sha256')).write_text(checksum + '  ' + bundle.name + '\\n', encoding='utf-8')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-channels/maverick_channels/recovery_lookup.py",
+      "contract": "read_projection",
+      "owner": "packages/maverick-channels/maverick_channels/recovery_lookup.py",
+      "purpose": "Bounded read-only checkpoint metadata from configured channel adapters.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 59,
+          "function": "imessage_page",
+          "kind": "connect",
+          "expression": "sqlite3.connect(CHAT_DB.resolve().as_uri() + '?mode=ro', uri=True, timeout=2)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/audit/preservation.py",
+      "contract": "read_projection",
+      "owner": "packages/maverick-core/maverick/audit/preservation.py",
+      "purpose": "Read-only preservation gates for broad retention, including disabled ledgers.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 19,
+          "function": "preservation_snapshot",
+          "kind": "data_dir",
+          "expression": "data_dir('privacy_automation', 'privacy-rights-orchestration.sqlite3')"
+        },
+        {
+          "line": 26,
+          "function": "preservation_snapshot",
+          "kind": "connect",
+          "expression": "sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=5)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/budget_guidance.py",
+      "contract": "preferences",
+      "owner": "packages/maverick-core/maverick/budget_guidance.py",
+      "purpose": "Read-only task ceilings and explicitly scoped, non-additive ledger headroom.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "personal_budget_warnings",
+          "line": 196,
+          "recovery_policy": null
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 196,
+          "function": "_warnings_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('personal_budget_warnings', 'PBW', 'budget_warning')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/conversation_inbox.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/conversation_inbox.py",
+      "purpose": "Durable conversation intent, distinct from a task's execution ownership.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "conversation_inbox",
+          "line": 24,
+          "recovery_policy": "conversation_intent_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 24,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('conversation_inbox', 'CI', 'conversation_inbox')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "conversation_inbox/record.json",
+          "recovery_policy": "conversation_intent_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/deliverable_bundles.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/deliverable_bundles.py",
+      "purpose": "Selected immutable deliverable copies with exact recipient and review authority.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "deliverable_bundles",
+          "line": 15,
+          "recovery_policy": "deliverable_release_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 15,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('deliverable_bundles', 'DLB', 'deliverable_bundle')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "deliverable_bundles/record.json",
+          "recovery_policy": "deliverable_release_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/employee_companion.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-core/maverick/employee_companion.py",
+      "purpose": "Bounded, private employee companion policy and conversation storage.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 266,
+          "function": "__init__",
+          "kind": "data_dir",
+          "expression": "data_dir('employee_companions')"
+        },
+        {
+          "line": 273,
+          "function": "_check_context",
+          "kind": "data_dir",
+          "expression": "data_dir('employee_companions')"
+        },
+        {
+          "line": 287,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(self.root / 'authority', strict=True)"
+        },
+        {
+          "line": 397,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "file_lock.atomic_write_text(path, raw)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "employee_companions/record.enc",
+          "recovery_policy": "employee_companion_policy_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/experience_preferences.py",
+      "contract": "preferences",
+      "owner": "packages/maverick-core/maverick/experience_preferences.py",
+      "purpose": "Allowlisted personal/workspace/organization experience preferences.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 55,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('experience-preferences', 'workspace.enc')"
+        },
+        {
+          "line": 59,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('experience-preferences', name + '.enc')"
+        },
+        {
+          "line": 169,
+          "function": "save",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(config.dashboard_overrides_path(), strict=True)"
+        },
+        {
+          "line": 169,
+          "function": "save",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(lock, strict=True)"
+        },
+        {
+          "line": 199,
+          "function": "save",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(path, seal(json.dumps({'revision': record['revision'] + 1, 'values': values, 'last_operation': {'id': operation_id, 'digest': operation_digest} if operation_id else None}).encode()), mode=384)"
+        },
+        {
+          "line": 215,
+          "function": "erase_personal",
+          "kind": "data_dir",
+          "expression": "data_dir('experience-preferences')"
+        },
+        {
+          "line": 220,
+          "function": "erase_personal",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(config.dashboard_overrides_path(), strict=True)"
+        },
+        {
+          "line": 220,
+          "function": "erase_personal",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(lock, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/goal_archive.py",
+      "contract": "transient",
+      "owner": "packages/maverick-core/maverick/goal_archive.py",
+      "purpose": "Bounded version-one archives from one native database read snapshot.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 161,
+          "function": "prepare_goal_archive",
+          "kind": "data_dir",
+          "expression": "data_dir('archive-staging')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/installation_offline.py",
+      "contract": "recovery",
+      "owner": "packages/maverick-core/maverick/installation_offline.py",
+      "purpose": "Explicitly selected, exact-release offline repair using the online trust checks.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 109,
+          "function": "authorize",
+          "kind": "atomic_write_text",
+          "expression": "file_lock.atomic_write_text(target / 'downloads.json', json.dumps({'public_key': row['public_key'], 'identity_transition': None, 'new': release}, allow_nan=False))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/knowledge_reindex_jobs.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/knowledge_reindex_jobs.py",
+      "purpose": "Durable, bounded knowledge-index rebuilds with no partial live publication.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 42,
+          "function": "_root",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        },
+        {
+          "line": 58,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(value, sort_keys=True))"
+        },
+        {
+          "line": 94,
+          "function": "start",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 122,
+          "function": "archive",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 136,
+          "function": "cancel",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 149,
+          "function": "_update",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 174,
+          "function": "run",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path.with_suffix('.run'), strict=True)"
+        },
+        {
+          "line": 228,
+          "function": "_execute",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(shadow_path, _enc_field(json.dumps(vectors)))"
+        },
+        {
+          "line": 237,
+          "function": "_execute",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "knowledge-reindex/context/job.json",
+          "recovery_policy": "knowledge_reindex_execution_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/knowledge_task_context.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/knowledge_task_context.py",
+      "purpose": "Exact owner-bound source analysis; selection never copies or grants source ACLs.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 32,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('knowledge-task-context', str(goal_id) + '.json')"
+        },
+        {
+          "line": 54,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, _enc_field(json.dumps(record, sort_keys=True)))"
+        },
+        {
+          "line": 105,
+          "function": "bind",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(goal_id), strict=True)"
+        },
+        {
+          "line": 161,
+          "function": "run_analysis",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 208,
+          "function": "run_analysis",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "knowledge-task-context/1.json",
+          "recovery_policy": "knowledge_task_binding_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/learning_content.py",
+      "contract": "learning",
+      "owner": "packages/maverick-core/maverick/learning_content.py",
+      "purpose": "Server-derived ownership for learned content and generated executable source.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 48,
+          "function": "publish",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(metadata_path(source), json.dumps({**record, 'sha256': hashlib.sha256(content.encode('utf-8')).hexdigest()}, sort_keys=True), mode=384)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "custom/example.ownership.json",
+          "recovery_policy": "generated_content_owner_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/model_tests.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/model_tests.py",
+      "purpose": "One reviewed synthetic model call, with durable no-replay receipts.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 65,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        },
+        {
+          "line": 81,
+          "function": "_edit",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path.with_suffix('.lock'), strict=True)"
+        },
+        {
+          "line": 84,
+          "function": "_edit",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(value, allow_nan=False), encoding='utf-8')"
+        },
+        {
+          "line": 92,
+          "function": "history",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path.with_suffix('.lock'), strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "model-tests/record.json",
+          "recovery_policy": "model_test_dispatch_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/notification_receipts.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/notification_receipts.py",
+      "purpose": "Bounded, tenant-scoped delivery receipts containing no notification content.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 22,
+          "function": "__init__",
+          "kind": "data_dir",
+          "expression": "data_dir('notification-deliveries.json')"
+        },
+        {
+          "line": 37,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(self.path, json.dumps(rows[-1000:], separators=(',', ':')))"
+        },
+        {
+          "line": 51,
+          "function": "claim",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(self.path)"
+        },
+        {
+          "line": 73,
+          "function": "update",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(self.path)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "notification-deliveries.json",
+          "recovery_policy": "notification_dispatch_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/personal_identity.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-core/maverick/personal_identity.py",
+      "purpose": "Explicit tenant-local links proven from a channel and a named dashboard.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 48,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('personal-data', 'identity-links.enc')"
+        },
+        {
+          "line": 69,
+          "function": "_write",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(_path(), seal(json.dumps(record, sort_keys=True).encode()), mode=384)"
+        },
+        {
+          "line": 79,
+          "function": "_lock",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(), strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "personal-data/identity-links.enc",
+          "recovery_policy": "personal_identity_link_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/personal_learning.py",
+      "contract": "learning",
+      "owner": "packages/maverick-core/maverick/personal_learning.py",
+      "purpose": "Current owned learning inventory with opaque independently reviewed targets.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 24,
+          "function": "owned_tools",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/personal_memory.py",
+      "contract": "learning",
+      "owner": "packages/maverick-core/maverick/personal_memory.py",
+      "purpose": "Owned preference corrections and durable suppression, separate from training.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 25,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('personal-memory', key + '.enc')"
+        },
+        {
+          "line": 56,
+          "function": "_write",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(_path(record['key']), seal(json.dumps(record).encode()), mode=384)"
+        },
+        {
+          "line": 127,
+          "function": "update",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(key), strict=True)"
+        },
+        {
+          "line": 164,
+          "function": "share",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(record['key']), strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "personal-memory/record.enc",
+          "recovery_policy": "personal_memory_consent_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/personal_notification_delivery.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/personal_notification_delivery.py",
+      "purpose": "Private channel delivery uses verified recipients, never organization webhooks.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 30,
+          "function": "_folder",
+          "kind": "data_dir",
+          "expression": "data_dir('personal-notifications', 'deliveries', hashlib.sha256(principal.encode()).hexdigest()[:32])"
+        },
+        {
+          "line": 185,
+          "function": "_write",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(self.path, seal(json.dumps(state).encode()), mode=384)"
+        },
+        {
+          "line": 189,
+          "function": "claim",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(self.path)"
+        },
+        {
+          "line": 209,
+          "function": "finish",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(self.path)"
+        },
+        {
+          "line": 307,
+          "function": "remove_link_history",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 317,
+          "function": "remove_personal_history",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 344,
+          "function": "prune_expired",
+          "kind": "data_dir",
+          "expression": "data_dir('personal-notifications', 'deliveries')"
+        },
+        {
+          "line": 355,
+          "function": "prune_expired",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "personal-notifications/deliveries/owner/record.enc",
+          "recovery_policy": "personal_notification_delivery_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/personal_notification_recipients.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/personal_notification_recipients.py",
+      "purpose": "Explicit recipient enrollment, scoped to the current tenant and encrypted.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 14,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('personal-notifications', 'recipients.enc')"
+        },
+        {
+          "line": 33,
+          "function": "enroll",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 40,
+          "function": "enroll",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(path, seal(json.dumps(state).encode()), mode=384)"
+        },
+        {
+          "line": 49,
+          "function": "observed",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 54,
+          "function": "observed",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(path, seal(json.dumps(state).encode()), mode=384)"
+        },
+        {
+          "line": 65,
+          "function": "withdraw",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 69,
+          "function": "withdraw",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(path, seal(json.dumps(state).encode()), mode=384)"
+        },
+        {
+          "line": 71,
+          "function": "withdraw",
+          "kind": "data_dir",
+          "expression": "data_dir('personal-notifications', hashlib.sha256(principal.encode()).hexdigest() + '.enc')"
+        },
+        {
+          "line": 72,
+          "function": "withdraw",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(inbox)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "personal-notifications/recipients.enc",
+          "recovery_policy": "personal_notification_delivery_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/personal_notifications.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/personal_notifications.py",
+      "purpose": "Recipient-specific in-product alert policy and encrypted delivery state.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 100,
+          "function": "__init__",
+          "kind": "data_dir",
+          "expression": "data_dir('personal-notifications', hashlib.sha256(principal.encode()).hexdigest() + '.enc')"
+        },
+        {
+          "line": 121,
+          "function": "refresh",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(self.path)"
+        },
+        {
+          "line": 172,
+          "function": "refresh",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(self.path, seal(json.dumps(next_state, separators=(',', ':')).encode()), mode=384)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "personal-notifications/record.enc",
+          "recovery_policy": "personal_notification_delivery_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/plugin_execution_pins.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/plugin_execution_pins.py",
+      "purpose": "Durable per-task and per-flow-run plugin bytes; no automatic migration.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 33,
+          "function": "flow_path",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        },
+        {
+          "line": 50,
+          "function": "check_pin",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        },
+        {
+          "line": 55,
+          "function": "check_pin",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 64,
+          "function": "check_pin",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(pins, sort_keys=True))"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "plugin-flow-pins/run.json",
+          "recovery_policy": "plugin_execution_pin_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        },
+        {
+          "sample_path": "plugin-task-pins/1.json",
+          "recovery_policy": "plugin_execution_pin_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/plugin_workbench.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/plugin_workbench.py",
+      "purpose": "Version-bound plugin checks; no imports or external effects on the host.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 103,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        },
+        {
+          "line": 118,
+          "function": "_edit",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 121,
+          "function": "_edit",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(state, sort_keys=True))"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "plugin-workbench/context.json",
+          "recovery_policy": "plugin_qualification_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/project_workspaces.py",
+      "contract": "mixed_api",
+      "owner": "packages/maverick-core/maverick/project_workspaces.py",
+      "purpose": "Project outcome planning without extending live task or review authority.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "project_workspaces",
+          "line": 22,
+          "recovery_policy": "project_workspace_membership_authority"
+        },
+        {
+          "namespace": "project_workspace_defaults",
+          "line": 23,
+          "recovery_policy": null
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 22,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('project_workspaces', 'PW', 'project_workspace')"
+        },
+        {
+          "line": 23,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('project_workspace_defaults', 'PWD', 'project_workspace_defaults')"
+        },
+        {
+          "line": 487,
+          "function": "_guard",
+          "kind": "data_dir",
+          "expression": "data_dir('project_workspace_authority')"
+        },
+        {
+          "line": 488,
+          "function": "_guard",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "project_workspaces/record.json",
+          "recovery_policy": "project_workspace_membership_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/runtime_configuration.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-core/maverick/runtime_configuration.py",
+      "purpose": "Startup configuration receipts for observed long-lived processes.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 92,
+          "function": "renew",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(self.path, seal(json.dumps(record).encode()), mode=384)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/task_execution_guard.py",
+      "contract": "composition",
+      "owner": "packages/maverick-core/maverick/task_execution_guard.py",
+      "purpose": "A non-reentrant lease held through execution and finalization.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 45,
+          "function": "lease",
+          "kind": "connect",
+          "expression": "BoundedConnection.connect(world._dsn, **options, io_timeout_seconds=postgres_io_timeout_seconds())"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/task_handoffs.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/task_handoffs.py",
+      "purpose": "Explicit accepted continuations, without transferring private chat history.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "task_handoffs",
+          "line": 25,
+          "recovery_policy": "task_handoff_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 25,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('task_handoffs', 'HOF', 'task_handoff')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "task_handoffs/record.json",
+          "recovery_policy": "task_handoff_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/workflow_versions.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-core/maverick/workflow_versions.py",
+      "purpose": "Immutable workflow snapshots, reviewed publication and local input fixtures.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 45,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(value, ensure_ascii=True, sort_keys=True))"
+        },
+        {
+          "line": 90,
+          "function": "history",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(user_templates_dir() / (name + '.md'), strict=True)"
+        },
+        {
+          "line": 109,
+          "function": "record_fixture",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(user_templates_dir() / (name + '.md'), strict=True)"
+        },
+        {
+          "line": 132,
+          "function": "publish",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(user_templates_dir() / (name + '.md'), strict=True)"
+        },
+        {
+          "line": 155,
+          "function": "restore",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(user_templates_dir() / (name + '.md'), strict=True)"
+        },
+        {
+          "line": 181,
+          "function": "execution_template",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(user_templates_dir() / (name + '.md'), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/billing_sync_reviews.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/billing_sync_reviews.py",
+      "purpose": "Reviewed Stripe dispatch with retained stage receipts and conservative recovery.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "billing_sync_reviews",
+          "line": 22,
+          "recovery_policy": "billing_sync_review_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 22,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('billing_sync_reviews', 'BSR', 'billing_sync_review', authority_scope='deployment_global')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "billing_sync_reviews/record.json",
+          "recovery_policy": "billing_sync_review_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/budget_guidance_api.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/budget_guidance_api.py",
+      "purpose": "Owned budget previews and a minimal, audited accounting escalation journey.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "budget_accounting_cases",
+          "line": 22,
+          "recovery_policy": "budget_reconciliation_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 22,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('budget_accounting_cases', 'BAC', 'budget_accounting_case')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "budget_accounting_cases/record.json",
+          "recovery_policy": "budget_reconciliation_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/clarification_submission.py",
+      "contract": "composition",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/clarification_submission.py",
+      "purpose": "Atomic clarification evidence admission, without a second task or provider retry.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 69,
+          "function": "_prepare",
+          "kind": "write_bytes",
+          "expression": "path.write_bytes(data)"
+        },
+        {
+          "line": 175,
+          "function": "submit",
+          "kind": "data_dir",
+          "expression": "data_dir('attachment-staging')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/content_access.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/content_access.py",
+      "purpose": "Employee content authority is distinct from administrator policy authority.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "employee_content_access",
+          "line": 16,
+          "recovery_policy": "private_content_grant_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 16,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('employee_content_access', 'ECA', 'employee_content_access', authority_scope='deployment_global')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "employee_content_access/record.json",
+          "recovery_policy": "private_content_grant_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/conversation_organization.py",
+      "contract": "preferences",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/conversation_organization.py",
+      "purpose": "Private organization over immutable conversation/task identities.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed. The bounded conversation-organization-<authenticated-context> namespace contains private labels/pin/archive data only; restoring it grants no source access or execution.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 30,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('conversation-organization-' + context_for(request), 'CO', 'conversation_organization')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/deliverable_sharing.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/deliverable_sharing.py",
+      "purpose": "Fresh result previews and version-bound public release metadata.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "deliverable-share-releases",
+          "line": 20,
+          "recovery_policy": "public_release_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 20,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('deliverable-share-releases', 'shr', 'deliverable_share_release')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "deliverable-share-releases/record.json",
+          "recovery_policy": "public_release_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/device_pairing.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/device_pairing.py",
+      "purpose": "Short-lived device codes and revocable own-work companion credentials.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 52,
+          "function": "_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 58,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(), strict=True)"
+        },
+        {
+          "line": 84,
+          "function": "_save",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(_path(), seal(json.dumps(value, separators=(',', ':')).encode()), mode=384)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "device-pairing/registry.enc",
+          "recovery_policy": "device_credential_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/employee_activation.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/employee_activation.py",
+      "purpose": "Owned job activation drafts, native task admission and current human acceptance.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "employee_activation",
+          "line": 27,
+          "recovery_policy": "employee_activation_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 27,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('employee_activation', 'EAP', 'employee_activation')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "employee_activation/record.json",
+          "recovery_policy": "employee_activation_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/employee_departures.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/employee_departures.py",
+      "purpose": "Employee departure inventory, deactivation and explicitly retained handoff.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "employee_departures",
+          "line": 16,
+          "recovery_policy": "employee_departure_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 16,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('employee_departures', 'EDP', 'employee_departure', authority_scope='deployment_global')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "employee_departures/record.json",
+          "recovery_policy": "employee_departure_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/goal_share_previews.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/goal_share_previews.py",
+      "purpose": "Exact-payload gist review and durable disclosure-attempt receipts.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 25,
+          "function": "_directory",
+          "kind": "data_dir",
+          "expression": "data_dir('goal-share-previews', context)"
+        },
+        {
+          "line": 29,
+          "function": "_write",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(path, seal(json.dumps(value).encode()))"
+        },
+        {
+          "line": 65,
+          "function": "prepare",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(directory / 'index', strict=True)"
+        },
+        {
+          "line": 99,
+          "function": "send",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 152,
+          "function": "reconcile",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "goal-share-previews/context/review.enc",
+          "recovery_policy": "external_share_dispatch_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/permission_requests.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/permission_requests.py",
+      "purpose": "Current permission explanations and reviewed requests, never automatic grants.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "permission_access_requests",
+          "line": 14,
+          "recovery_policy": "permission_request_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 14,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('permission_access_requests', 'PAR', 'permission_access_request')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "permission_access_requests/record.json",
+          "recovery_policy": "permission_request_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/personal_data_requests.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/personal_data_requests.py",
+      "purpose": "Owner-requested, separately reviewed deletion with per-store receipts.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "personal_data_requests",
+          "line": 22,
+          "recovery_policy": "personal_erasure_request_authority"
+        },
+        {
+          "namespace": "owned_task_diagnostics",
+          "line": 25,
+          "recovery_policy": "private_diagnostic_release_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 22,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('personal_data_requests', 'PDR', 'personal_data_request')"
+        },
+        {
+          "line": 25,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('owned_task_diagnostics', 'OTD', 'owned_task_diagnostics')"
+        },
+        {
+          "line": 136,
+          "function": "preview",
+          "kind": "data_dir",
+          "expression": "experience_preferences.data_dir('experience-preferences')"
+        },
+        {
+          "line": 247,
+          "function": "_erase_target",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(personal_memory._path(record['key']), strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "personal_data_requests/record.json",
+          "recovery_policy": "personal_erasure_request_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        },
+        {
+          "sample_path": "owned_task_diagnostics/record.json",
+          "recovery_policy": "private_diagnostic_release_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/plugin_workbench_api.py",
+      "contract": "composition",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/plugin_workbench_api.py",
+      "purpose": "Administrator workbench for scoped plugin qualification; no install effects.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 43,
+          "function": "_dependencies",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        },
+        {
+          "line": 69,
+          "function": "_dependencies",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        },
+        {
+          "line": 188,
+          "function": "migrate_plugin_pin",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        },
+        {
+          "line": 189,
+          "function": "migrate_plugin_pin",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 208,
+          "function": "migrate_plugin_pin",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(pins, sort_keys=True))"
+        },
+        {
+          "line": 249,
+          "function": "migrate_flow_plugin_pin",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 265,
+          "function": "migrate_flow_plugin_pin",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(pins, sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/retention_runs.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/retention_runs.py",
+      "purpose": "Durable, policy-bound reviews and receipts for dashboard retention runs.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 31,
+          "function": "_directory",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 45,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(_path(receipt['id']), json.dumps(receipt, sort_keys=True))"
+        },
+        {
+          "line": 152,
+          "function": "apply",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(run_id), strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "retention-runs/run.json",
+          "recovery_policy": "retention_dispatch_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/settings_experience.py",
+      "contract": "read_projection",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/settings_experience.py",
+      "purpose": "Reviewed configuration portability and history over the existing catalog writer.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 200,
+          "function": "history",
+          "kind": "data_dir",
+          "expression": "data_dir('audit', tenant=None)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/setup_guide.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/setup_guide.py",
+      "purpose": "The full setup guide (``maverick init``) inside the app.",
+      "referenced_store_owners": [],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 185,
+          "function": "_write_receipt",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(receipt, sort_keys=True), mode=384)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/task_diagnostics.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/task_diagnostics.py",
+      "purpose": "Exact, expiring, owner-only diagnostic documents with acknowledged audit reads.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "governed_namespaces": [
+        {
+          "namespace": "owned_task_diagnostics",
+          "line": 22,
+          "recovery_policy": "private_diagnostic_release_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 22,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('owned_task_diagnostics', 'OTD', 'owned_task_diagnostics')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "owned_task_diagnostics/record.json",
+          "recovery_policy": "private_diagnostic_release_authority",
+          "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/product_operations_facts.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/product_operations_facts.py",
+      "purpose": "Durable admission and completion receipts prevent replay of an exact reviewed Facts mutation, including after a fact is subsequently removed.",
+      "referenced_store_owners": [
+        "maverick.governed_records",
+        "maverick.world_model"
+      ],
+      "review": "Reviewed Facts adapter admission-before-effect, context/actor/operation digest binding, native revision CAS and historical receipt recovery (source fa3cd13019fea8ba44bc434d778e32e6f62bdd1a). Receipt metadata contains no fact name/value. Restored receipt absence or stale completion cannot authorize another effect; hold startup until current authority and consumed-operation state are reconciled. Retained minimal replay evidence is disclosed in My Data.",
+      "governed_namespaces": [
+        {
+          "namespace": "fact_operation_receipts",
+          "line": 18,
+          "recovery_policy": "fact_operation_receipt_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 18,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('fact_operation_receipts', 'FOP', 'fact_operation_receipt')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "fact_operation_receipts/FOP-example.json",
+          "recovery_policy": "fact_operation_receipt_authority",
+          "disposition": "Retain authenticated receipt bytes under global startup hold. Reconcile current source/revision, consent and consumed-operation evidence before admission; no automatic replay, grant restoration or inference of completion from matching fact values."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/goal_feedback_store.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/goal_feedback_store.py",
+      "purpose": "Tenant-resolved, owner-stamped human feedback on goal results; bounded-tail display and accumulated-signal counts, separate from governed signoff and execution approval.",
+      "referenced_store_owners": [
+        "maverick.ndjson_log",
+        "maverick.paths"
+      ],
+      "review": "Reviewed source b6d19b46e831ce373dd97d8ec9e9c5186a366855: _path delegates to data_dir(\"dashboard\", \"goal-feedback-v2.ndjson\"); append_row and tail_rows retain private NDJSON semantics. This feedback projection is customer data, not an independent execution grant. The former file beside dashboard_overrides_path(), goal-feedback.ndjson, is retained unread: matching an owner string or colliding goal number cannot prove workspace lineage. Other learning stores and signoff authority retain their own controls.",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "dashboard/goal-feedback-v2.ndjson",
+        "goal-feedback.ndjson"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 29,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('dashboard', 'goal-feedback-v2.ndjson')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "dashboard/goal-feedback-v2.ndjson",
+          "recovery_policy": null,
+          "disposition": "Ordinary tenant customer data, without independent execution authority. Retain old deployment-global feedback unread; restoring or matching identifiers does not authorize adopting its lineage."
+        }
+      ]
     }
-  ]
+  ],
+  "customer_audit_additions": {
+    "base_sha": "d822db99ee48aab4fdded47fc799486e8e5ea44f",
+    "module_count": 48,
+    "review": "September 30 customer-audit additions: source purpose, path construction and persistence call sites. Restore holds cover grants, identity links, dispatch receipts and pending work; warning/project-default records are explicitly non-authorizing data. No distributed or live-provider qualification. The Facts adapter follow-up adds metadata-only consumed-operation receipts under the same startup hold; it cannot reauthorize a restored mutation."
+  }
 }

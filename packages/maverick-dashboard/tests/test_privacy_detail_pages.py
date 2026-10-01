@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from markupsafe import escape
 from maverick_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
@@ -92,6 +93,49 @@ def test_vendor_detail_404_and_403(tmp_path):
     (tmp_path / "config.toml").write_text("", encoding="utf-8")
     config.reset_config_cache()
     assert client.get("/privacy/vendors/vend-nope").status_code == 403
+
+
+@pytest.mark.parametrize("field", ["name", "category", "registered_by"])
+@pytest.mark.parametrize("value", [
+    '<xprobe title="quotes">Café & 東京</xprobe>',
+    '</h1><svg data-probe="alternate">Résumé</svg>',
+])
+def test_vendor_detail_escapes_stored_hero_fields(field, value, monkeypatch):
+    from maverick_dashboard import api
+    from maverick_dashboard.identity_format import humanize, humanize_principal
+
+    payload = {
+        "name": "Synthetic vendor", "category": "analytics",
+        "criticality": "high", "owner": "procurement",
+    }
+    if field == "registered_by":
+        monkeypatch.setattr(api, "_request_actor", lambda request: value)
+    else:
+        payload[field] = value
+    created = client.post("/api/v1/vendors", json=payload)
+    assert created.status_code == 201, created.text
+    record = created.json()
+    assert record[field] == value
+
+    page = client.get(f"/privacy/vendors/{record['id']}")
+    assert page.status_code == 200
+    displayed = humanize(value) if field == "category" else (
+        str(humanize_principal(value)) if field == "registered_by" else value
+    )
+    assert str(escape(displayed)) in page.text
+    assert "<xprobe" not in page.text.lower()
+    assert '<svg data-probe="alternate">' not in page.text.lower()
+
+
+def test_vendor_detail_preserves_unicode_and_literal_punctuation():
+    value = 'Café & 東京 <Research> "Partners"'
+    created = client.post("/api/v1/vendors", json={
+        "name": value, "category": "analytics", "criticality": "low", "owner": "ops",
+    })
+    assert created.status_code == 201, created.text
+    page = client.get(f"/privacy/vendors/{created.json()['id']}")
+    assert page.status_code == 200
+    assert f'id="page-hero-title">{escape(value)}</h1>' in page.text
 
 
 def test_dsar_detail_shows_fulfillment_trail_without_tokens():

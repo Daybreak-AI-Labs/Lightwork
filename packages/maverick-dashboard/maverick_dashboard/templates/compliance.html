@@ -52,7 +52,7 @@
                subtitle='What is covered and what still needs doing',
                lede='How your workspace measures up against privacy and AI rules: the EU
                      General Data Protection Regulation (GDPR), the EU AI Act, the US NIST AI
-                     Risk Management Framework, the Colorado AI Act, New York City&rsquo;s
+                     Risk Management Framework, the Colorado AI Act, New York City’s
                      hiring-tools law and the California privacy laws. This shows which
                      protections are switched on. It is not legal advice.') %}
     {% if summary %}
@@ -205,7 +205,7 @@
 
   <div class="section-head"><h2 id="cmp-retention">How long data is kept</h2></div>
   <div class="panel">
-    <p class="muted" style="margin-top: 0;">Older records are deleted automatically. Choose a period for each kind of record.</p>
+    <p class="muted" style="margin-top: 0;">Choose installation default periods. Keep until I choose turns off automatic pruning for that record type. Workspace policies may override these defaults; review the effective periods and workspace scope before deleting.</p>
     <form id="cmp-retention-form" class="cmp-grid">
       {% for key, label in retention_fields %}
       <label for="cmp-ret-{{ key }}">{{ label }}
@@ -218,12 +218,21 @@
     <div class="cmp-links">
       {% if can_global_admin %}
       <button type="button" class="btn btn--primary" id="cmp-retention-save">Save periods</button>
-      <button type="button" class="btn btn--ghost" id="cmp-retention-apply">Delete old records now</button>
+      <button type="button" class="btn btn--ghost" id="cmp-retention-apply">Preview old records</button>
       {% else %}
       <span class="muted">Only an administrator can change these periods.</span>
       {% endif %}
     </div>
     <p id="cmp-retention-result" class="muted" role="status" aria-live="polite"></p>
+    {% if can_global_admin %}
+    <section id="cmp-retention-review" hidden aria-labelledby="cmp-retention-review-title">
+      <h3 id="cmp-retention-review-title">Review effective retention</h3>
+      <div id="cmp-retention-summary"></div>
+      <p>Recorded privacy-rights holds block deletion for the whole workspace because broad retention cannot identify every subject record. Check external holds separately with your records owner. Deleting task history also removes its provenance links from retained facts.</p>
+      <label><input type="checkbox" id="cmp-retention-holds"> I confirmed with the records owner that no preservation hold applies to these records.</label>
+      <p><button type="button" class="btn btn--danger" id="cmp-retention-confirm">Delete reviewed old records</button></p>
+    </section>
+    {% endif %}
   </div>
 
   <div class="section-head"><h2>Reports for auditors</h2></div>

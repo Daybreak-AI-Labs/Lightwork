@@ -32,7 +32,7 @@ def _isolated(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
-def _forked_run(owner="ada@corp.test"):
+def _forked_run(owner=""):
     """A parent run with a trail, plus one branch off its second event."""
     from maverick import session_tree
     from maverick.world_model import open_world

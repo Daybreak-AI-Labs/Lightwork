@@ -17,6 +17,8 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
+from test_support.settings_pages import save_catalog
+
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
 _ENV = (
@@ -62,7 +64,7 @@ def audit_rows(monkeypatch):
 
 
 def _save(changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm})
 
 
 def _loaded():
@@ -220,7 +222,7 @@ def _vote(approval_id, who, verb="approve"):
 
 
 def _save_as(who, changes, confirm=False):
-    return client.post(API, json={"changes": changes, "confirm": confirm},
+    return save_catalog(client, API, json={"changes": changes, "confirm": confirm},
                        headers={"X-Test-User": who})
 
 
@@ -618,3 +620,52 @@ def test_explains_its_reasoning_style_reaches_the_prompt(audit_rows):
 
     assert _save([{"id": "persona.style", "value": "verbose"}]).status_code == 200
     assert STYLES["verbose"] in render_persona_prompt()
+
+
+def test_settings_labels_cannot_grant_admin_read_of_an_unbound_or_task_card(monkeypatch, audit_rows):
+    from maverick_dashboard import settings_quorum
+    from maverick_dashboard._shared import _world
+
+    _as(monkeypatch)
+    assert _save_as("user:a", [{"id": "safety.quorum_required", "value": "2"}]).status_code == 200
+    held = _save_as("user:a", [{"id": "safety.cascade", "value": True}]).json()
+    world = _world()
+    original = world.get_approval(held["quorum"]["approval_id"])
+    assert settings_quorum.has_bound_admin_review(original)
+    forged = world.create_approval("settings_change", risk="high", scope="settings", detail=original.detail,
+                                  provenance="settings_quorum", approvals_required=2, requested_by="user:a")
+    assert not settings_quorum.has_bound_admin_review(world.get_approval(forged))
+    assert _vote(forged, "user:b").status_code == 403
+    from dataclasses import replace
+    assert not settings_quorum.has_bound_admin_review(replace(original, goal_id=123))
+    from maverick.approval_cards import decode_approval_detail, digest, encode_approval_detail
+    card = decode_approval_detail(original.detail)
+    card["summary"] = "Unrelated private employee content"
+    card.pop("binding_sha256")
+    card["binding_sha256"] = digest(card)
+    assert not settings_quorum.has_bound_admin_review(replace(original, detail=encode_approval_detail(card)))
+    assert _vote(original.id, "user:b").status_code in (202, 204)
+
+
+def test_legacy_settings_proposal_requires_a_fresh_bound_review_before_apply(monkeypatch, audit_rows):
+    from dataclasses import replace
+
+    from maverick import quorum
+    from maverick_dashboard import settings_quorum
+    from maverick_dashboard._shared import _world
+
+    _as(monkeypatch)
+    assert _save_as("user:a", [{"id": "safety.quorum_required", "value": "2"}]).status_code == 200
+    change = [{"id": "safety.cascade", "value": True}]
+    held = _save_as("user:a", change).json()
+    world, store = _world(), quorum.ProposalStore()
+    proposal = store.all()[0]
+    original_id = held["quorum"]["approval_id"]
+    store.put(replace(proposal, new={"approval": original_id}))
+    assert world.decide_approval(original_id, "approved", decided_by="user:b")
+    assert world.decide_approval(original_id, "approved", decided_by="user:c")
+    assert not settings_quorum.has_bound_admin_review(world.get_approval(original_id))
+    fresh = _save_as("user:a", change)
+    assert fresh.status_code == 202
+    assert fresh.json()["quorum"]["approval_id"] != original_id
+    assert "cascade" not in (_loaded().get("safety") or {})

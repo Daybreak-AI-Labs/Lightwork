@@ -6,7 +6,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark light" />
+  <meta name="lightwork-preference-context" content="{{ display_preference_context }}">
+  <meta name="lightwork-preference-revision" content="{{ display_preference_revision }}">
+  <meta name="lightwork-preference-account" content="{{ '1' if display_signed_in else '0' }}">
+  <meta name="lightwork-text-size" content="{{ display_text_size or 'standard' }}">
+  <link rel="stylesheet" href="{{ asset('lightwork-preferences.css') }}">
   <meta name="theme-color" content="#0e1320" />
+  {% if draft_recovery_context %}<meta name="lightwork-draft-context" content="{{ draft_recovery_context }}">{% endif %}
   {% if workspace_tenant_selection %}
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
   {% endif %}
@@ -181,25 +187,27 @@
   </style>
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
+{% include "_journey_i18n.html" %}
 </head>
 <body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
-  <a class="skip-link" href="#content">Skip to content</a>
-  <aside class="cs-side" id="cs-side" aria-label="Chats">
+{% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut("Translation coverage") }}" lang="{{ ul("Translation coverage") }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
+  <a class="skip-link" href="#content">{{ ui("Skip to content") }}</a>
+  <aside class="cs-side" id="cs-side" aria-label="{{ ut("Chats") }}" lang="{{ ul("Chats") }}">
     <div style="display:flex; align-items:center;">
-      <a class="cs-brand" href="/overview" title="Open the Lightwork dashboard">
+      <a class="cs-brand" href="/overview" title="{{ ut("Open the Lightwork dashboard") }}" lang="{{ ul("Open the Lightwork dashboard") }}">
         <img src="{{ asset('daybreak-mark.png') }}" alt="" width="32" height="22" />
         <span>Lightwork</span>
       </a>
-      <button type="button" class="btn btn--ghost cs-side__close" id="cs-menu-close">Close menu</button>
+      <button type="button" class="btn btn--ghost cs-side__close" id="cs-menu-close">{{ ui("Close menu") }}</button>
     </div>
     {% if can_create_goal %}<a class="cs-item" href="/chat">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.5 2.5l2 2L6 12H4v-2z"/><path d="M2.5 13.5h11"/></svg>
-      New chat
+      {{ ui("New chat") }}
     </a>{% endif %}
     <button type="button" class="cs-item cs-item--button" id="navfinder-open"
             aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg>
-      Find a page
+      {{ ui("Find a page") }}
       <kbd aria-hidden="true" id="cs-find-kbd">Ctrl K</kbd>
     </button>
     {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
@@ -221,27 +229,31 @@
     </nav>
     <label class="cs-search">
       <svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></svg>
-      <input type="search" id="cs-filter" placeholder="Search chats" aria-label="Search chats" autocomplete="off" />
+      <input type="search" id="cs-filter" placeholder="{{ ut('Filter recent chats') }}" aria-label="{{ ut('Filter recent chat titles') }}" lang="{{ ul('Filter recent chat titles') }}" aria-describedby="cs-filter-scope" autocomplete="off" />
     </label>
+    <p id="cs-filter-scope" class="muted">{{ ui('Filters the 25 recent chat titles below.') }} <a href="/goals">{{ ui('Find older chats and task contents') }}</a>.</p>
+    <p id="cs-filter-status" role="status" aria-live="polite" class="muted"></p>
     <div class="cs-recents">
-      <div class="cs-label">Recent chats</div>
-      {% from "_chat_threads.html" import chat_threads %}
+      <div class="cs-label">{{ ui("Recents") }}</div>
+      {% from "_chat_threads.html" import chat_threads with context %}
       {{ chat_threads(threads or []) }}
     </div>
+    {% with copilot_chat_shell=true %}{% include "_copilot.html" %}{% endwith %}
     <div class="cs-account">
       <span class="cs-avatar" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg></span>
-      {% if show_settings_link %}<a href="/settings">Settings</a>{% endif %}
+      {% if show_settings_link %}<a href="/settings">{{ ui("Settings") }}</a>{% endif %}
+      {% include "_display_preferences.html" %}
       <span class="cs-spacer"></span>
-      {% if show_logout %}<a href="/auth/logout">Sign out</a>{% endif %}
+      {% if show_logout %}<a href="/auth/logout">{{ ui("Sign out") }}</a>{% endif %}
     </div>
   </aside>
   <div class="cs-backdrop" id="cs-backdrop" aria-hidden="true"></div>
   {% include "_navfinder.html" %}
   <main id="content" tabindex="-1">
     <div class="cs-topbar">
-      <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">Menu</button>
+      <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">{{ ui("Menu") }}</button>
       <span class="cs-topbar__title">Lightwork</span>
-      {% if can_create_goal %}<a class="btn btn--ghost" href="/chat">New chat</a>{% endif %}
+      {% if can_create_goal %}<a class="btn btn--ghost" href="/chat">{{ ui("New chat") }}</a>{% endif %}
     </div>
     <div class="cs-scroll" id="cs-scroll">
       <div class="cs-column">
@@ -263,8 +275,8 @@
     <div class="mv-confirm__body">
       <p class="mv-confirm__msg" id="mv-confirm-msg"></p>
       <div class="mv-confirm__row">
-        <button type="button" class="btn btn--ghost" id="mv-confirm-cancel">Cancel</button>
-        <button type="button" class="btn btn--primary" id="mv-confirm-ok">Confirm</button>
+        <button type="button" class="btn btn--ghost" id="mv-confirm-cancel">{{ ui("Cancel") }}</button>
+        <button type="button" class="btn btn--primary" id="mv-confirm-ok">{{ ui("Confirm") }}</button>
       </div>
     </div>
   </dialog>
@@ -274,8 +286,8 @@
       <div id="mv-form-fields"></div>
       <p class="mv-form__err" id="mv-form-err" aria-live="polite"></p>
       <div class="mv-confirm__row">
-        <button type="button" class="btn btn--ghost" id="mv-form-cancel">Cancel</button>
-        <button type="submit" class="btn btn--primary" id="mv-form-ok">OK</button>
+        <button type="button" class="btn btn--ghost" id="mv-form-cancel">{{ ui("Cancel") }}</button>
+        <button type="submit" class="btn btn--primary" id="mv-form-ok">{{ ui("OK") }}</button>
       </div>
     </form>
   </dialog>
@@ -283,6 +295,7 @@
   <script src="{{ asset('lightwork-markdown.js') }}"></script>
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
+  <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script>
     // Small screens: the Menu button opens the sidebar as a drawer. Esc, the
@@ -296,6 +309,8 @@
       var covered = Array.prototype.map.call(document.querySelectorAll('body > main'), function (element) {
         return {element: element, wasInert: element.hasAttribute('inert')};
       });
+      var lastDrawerFocus = null;
+      side.addEventListener('focusin', function (event) { lastDrawerFocus = event.target; });
       function isOpen() { return body.classList.contains('cs-drawer-open'); }
       function syncAccess() {
         var modal = mq.matches && isOpen();
@@ -324,6 +339,8 @@
         });
       }
       function open() {
+        if (window.matchMedia && !window.matchMedia('(max-width: 860px)').matches) return;
+        lastDrawerFocus = null;
         body.classList.add('cs-drawer-open'); openBtn.setAttribute('aria-expanded', 'true');
         syncAccess();
         var first = focusable()[0]; if (first) first.focus();
@@ -352,7 +369,24 @@
       if (finder) finder.addEventListener('click', function () { close(false); });
       // Leaving the small-screen layout never leaves the page locked behind the drawer.
       if (window.matchMedia) {
-        var onChange = function () { if (!mq.matches) close(false); syncAccess(); };
+        var onChange = function () {
+          if (mq.matches) { syncAccess(); return; }
+          var wasOpen = isOpen(), active = document.activeElement;
+          close(false);
+          syncAccess();
+          // The mobile Close/Menu controls disappear on desktop. Preserve a
+          // visible navigation/dialog target, but never strand focus on Close.
+          // Chromium can blur a now-display:none Close control to body before
+          // the media-query callback runs. Keep its last actual focus target.
+          var focusWasLost = (active === body || active === document.documentElement) && lastDrawerFocus === closeBtn;
+          if (wasOpen && (active === closeBtn || focusWasLost)) {
+            var target = Array.prototype.find.call(side.querySelectorAll('a[href], button, input, [tabindex="0"]'), function (node) {
+              return node !== closeBtn && !node.disabled && !node.hidden && node.getClientRects().length;
+            });
+            if (!target) { side.setAttribute('tabindex', '-1'); target = side; }
+            target.focus();
+          }
+        };
         if (mq.addEventListener) mq.addEventListener('change', onChange); else if (mq.addListener) mq.addListener(onChange);
       }
       syncAccess();
@@ -366,12 +400,32 @@
       if (!input || !list) return;
       input.addEventListener('input', function () {
         var q = input.value.trim().toLowerCase();
+        var count = 0;
         Array.prototype.forEach.call(list.children, function (li) {
-          li.hidden = !!q && li.textContent.toLowerCase().indexOf(q) === -1;
+          var link = li.querySelector('[data-conversation-root]');
+          if (!link) { li.hidden = !!q; return; }
+          var title = link.querySelector('[data-user-content]');
+          var original = title ? title.textContent : link.getAttribute('title') || '';
+          li.hidden = !!q && original.toLowerCase().indexOf(q) === -1;
+          if (!li.hidden) count += 1;
         });
+        var status = document.getElementById('cs-filter-status');
+        if (status) {
+          var i18n = window.LightworkI18n;
+          if (!q) status.replaceChildren();
+          else if (i18n) {
+            var source = count ? i18n.plural('{count} matching recent title.', '{count} matching recent titles.', count) : 'No recent titles match. Open task search for older chats or a match in task contents.';
+            i18n.set(status, source);
+          } else status.textContent = count ? count + ' matching recent titles.' : 'No recent titles match. Open task search for older chats or a match in task contents.';
+        }
       });
     })();
   </script>
+  <link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">
+  <script src="{{ asset('lightwork-draft-recovery.js') }}" defer></script>
+  <script src="{{ asset('lightwork-chat-drafts.js') }}" defer></script>
+  <script src="{{ asset('lightwork-product-operations.js') }}"></script>
+  <script src="{{ asset('lightwork-copilot.js') }}"></script>
   {% block scripts_extra %}{% endblock %}
 </body>
 </html>

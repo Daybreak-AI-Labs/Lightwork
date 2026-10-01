@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}My background work · Lightwork{% endblock %}
+{% block content %}
+<main id="my-work" data-context="{{ work_context }}" style="max-width:72rem">
+  <h1>My background work</h1>
+  <p>Your tasks, schedules, workflow runs and connections. Open a row for its current controls and evidence.</p>
+  <p><a href="/chat">Continue a conversation</a> · <a href="/action-center">Review actions needing attention</a></p>
+  <label for="my-work-filter">Show</label>
+  <select id="my-work-filter" class="input"><option value="all">All my work</option><option value="task">Tasks and results</option><option value="schedule">Schedules</option><option value="workflow">Workflow runs</option><option value="connection">Connections</option></select>
+  <button id="my-work-refresh" class="btn" type="button">Refresh status</button>
+  <p id="my-work-status" role="status" aria-live="polite"></p>
+  <section aria-labelledby="my-work-coverage-title"><h2 id="my-work-coverage-title">What was checked</h2><ul id="my-work-coverage"></ul></section>
+  <section aria-label="Your background work" id="my-work-rows"></section>
+</main>
+<style>#my-work .input{max-width:24rem}#my-work article{padding-block:1rem;border-bottom:1px solid var(--border)}#my-work h2,#my-work p{overflow-wrap:anywhere}</style>
+<script src="/static/lightwork-my-work.js" defer></script>
+{% endblock %}

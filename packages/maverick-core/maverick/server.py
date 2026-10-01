@@ -101,6 +101,8 @@ class Server:
         self._owns_sandbox = (
             created_sandbox if owns_sandbox is None else bool(owns_sandbox)
         )
+        self._runtime_receipt = None
+        self._runtime_configuration_native = False
         self._resources_closed = False
         self._stopping = False
         self._stopped = False
@@ -261,6 +263,26 @@ class Server:
         if refusal:
             return refusal
 
+        # The adapter has authenticated the sender and tenant. A linking
+        # command is control-plane proof, never a prompt or remembered turn.
+        from .personal_identity import CHANNELS, account_identity, prove_channel_command
+        account_sha256 = getattr(msg, "_verified_channel_account_sha256", None)
+        memory_user_id = (account_identity(principal_id, account_sha256)
+                          if msg.channel in CHANNELS and account_sha256 else principal_id)
+        identity_refusal = _linked_channel_refusal(msg.channel, memory_user_id, account_sha256)
+        if identity_refusal:
+            return identity_refusal
+        try:
+            proof_reply = prove_channel_command(msg.text, channel=msg.channel or "unknown", user_id=memory_user_id,
+                                                sender_id=getattr(msg, "principal_id", None), account_sha256=account_sha256)
+        except Exception:
+            log.warning("Personal identity proof unavailable")
+            if msg.text.startswith("LIGHTWORK LINK"):
+                return "Identity linking could not be confirmed. Check My Data before retrying."
+            proof_reply = None
+        if proof_reply is not None:
+            return proof_reply
+
         # Per-tenant concurrency ceiling (noisy-neighbor protection). Derived
         # from the tenant's plan entitlement; no-op when tenant is None or the
         # plan is unlimited. Held across the whole goal run and released in the
@@ -289,14 +311,13 @@ class Server:
             disclosure = first_turn_disclosure(
                 world,
                 channel=msg.channel or "unknown",
-                user_id=principal_id,
+                user_id=memory_user_id,
             )
 
             conversation = world.get_or_create_conversation(
                 channel=msg.channel or "unknown",
-                user_id=principal_id,
+                user_id=memory_user_id,
             )
-            world.append_turn(conversation.id, "user", msg.text)
 
             from .deployment import require_enterprise_or_die
             require_enterprise_or_die()
@@ -313,10 +334,11 @@ class Server:
             goal_id = world.create_goal(
                 title,
                 msg.text,
-                owner=f"user:{execution_user_id}",
+                owner=f"user:{msg.channel or 'unknown'}:{memory_user_id}",
                 execution_principal=f"user:{execution_user_id}",
                 **({"domain": specialist} if specialist else {}),
             )
+            world.append_turn(conversation.id, "user", msg.text, goal_id=goal_id)
             if specialist:
                 log.info("goal #%s routed to specialist %s", goal_id, specialist)
 
@@ -491,6 +513,8 @@ class Server:
                         channel.start(), name=f"channel-{channel.name}",
                     )
                 )
+            from .runtime_configuration import start as start_runtime_receipt
+            self._runtime_receipt = start_runtime_receipt("channels") if self._runtime_configuration_native else None
             results = await asyncio.gather(*self._tasks, return_exceptions=True)
             for c, result in zip(self._channels, results, strict=False):
                 if isinstance(result, Exception):
@@ -529,6 +553,8 @@ class Server:
         if self._resources_closed:
             return
         self._resources_closed = True
+        if self._runtime_receipt is not None:
+            self._runtime_receipt.close()
         if self._owns_sandbox:
             close = getattr(self.sandbox, "close", None)
             if callable(close):
@@ -920,6 +946,7 @@ def build_from_config() -> Server:
             owns_world=True,
             owns_sandbox=True,
         )
+        server._runtime_configuration_native = True
 
         channels_cfg = cfg.get("channels", {})
         for name, wire in _WIRES.items():
@@ -1024,3 +1051,16 @@ def _extract_oidc_token(msg) -> str:
             return authorization[len(prefix):].strip()
         return authorization.strip()
     return ""
+
+
+def _linked_channel_refusal(channel, user_id, account_sha256):
+    from .personal_identity import CHANNELS, channel_membership_current
+    if channel not in CHANNELS or not account_sha256:
+        return None
+    try:
+        if not channel_membership_current(channel, user_id):
+            return "Your linked workspace membership is no longer active. Ask your administrator to review access."
+    except Exception:
+        log.warning("Linked channel membership could not be verified")
+        return "Workspace identity policy is unavailable. No task was started; try again later."
+    return None

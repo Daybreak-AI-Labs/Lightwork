@@ -6,6 +6,7 @@ refresh those lists, and still accept a typed id for anything else.
 """
 from __future__ import annotations
 
+import re
 import time
 
 from fastapi.testclient import TestClient
@@ -53,7 +54,7 @@ def test_pickers_group_reachable_models_by_configured_provider(monkeypatch, tmp_
     _prep(monkeypatch, tmp_path)
     text = _client().get("/settings").text
     # Real selects, grouped by provider; only configured providers are offered.
-    assert '<select class="select" name="model"' in text
+    assert re.search(r'<select\b[^>]*\bname="model"', text)
     assert '<optgroup label="OpenAI">' in text
     assert '<optgroup label="Anthropic (Claude)">' not in text
     # A model the key reaches but the shipped catalog does not know is offered.
@@ -192,3 +193,14 @@ def test_discovery_switched_off_is_explained_not_silent(monkeypatch, tmp_path):
     assert "controlled by your installation" in text  # env override: no button
     # The catalog still offers the configured providers' shipped models.
     assert '<optgroup label="OpenAI">' in text and 'value="openai:gpt-5.4"' in text
+
+
+def test_model_guidance_does_not_override_disabled_discovery(monkeypatch):
+    from maverick import model_discovery, model_guidance
+    from maverick_dashboard import model_pickers
+    monkeypatch.setattr(model_discovery, "snapshot", dict)
+    monkeypatch.setattr(model_discovery, "discovery_enabled", lambda: False)
+    monkeypatch.setattr(model_guidance, "enabled", lambda: True)
+    value = model_pickers.build([], set())
+    assert value["discovery_enabled"] is False
+    assert value["model_guidance_enabled"] is True

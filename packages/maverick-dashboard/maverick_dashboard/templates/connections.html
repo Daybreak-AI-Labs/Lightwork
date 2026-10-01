@@ -47,14 +47,18 @@
 {% endcall %}
 
 <div class="cx">
+  {% set activation_draft = request.query_params.get('activation_draft', '') %}
+  {% if activation_draft.startswith('EAP-') and activation_draft|length == 52 %}<p class="panel"><a href="/get-started/employee?draft={{ activation_draft|urlencode }}">Return to your saved activation draft</a>. Connection setup does not restart a task; review the same draft after repair.</p>{% endif %}
   {% if not connections_enabled %}
   {% from "_module_gate.html" import module_gate %}
   {{ module_gate('connections', 'Connections', detail='Save sign-ins and keys for the services your workflows use.') }}
   {% endif %}
   {% include "_connection_setup.html" %}
-  <div class="section-head"><h2>Add a connection with a key</h2></div>
-  <form class="cx__form" id="cx-form" autocomplete="off" data-draft-recovery="off">
+  {% include "_account_inventory.html" %}
+  <div class="section-head"><h2>{{ 'Add a connection with a key' if can_manage_keys else 'Your saved connections' }}</h2></div>
+  <form class="cx__form" id="cx-form" data-can-manage="{{ 'true' if can_manage_keys else 'false' }}"{% if not can_manage_keys %} hidden{% endif %} autocomplete="off" data-draft-recovery="off">
     <div class="cx__fld">
+      <label for="cx-catalog-search">Find a service</label><input class="input" id="cx-catalog-search" type="search" placeholder="Search supported service names">
       <label for="cx-preset">What are you connecting?</label>
       <select class="select" id="cx-preset">
         <option value="">Choose a service…</option>
@@ -76,12 +80,14 @@
       <label for="cx-aws-access">Access key ID</label><input class="input" id="cx-aws-access" autocomplete="off" maxlength="128">
       <label for="cx-aws-secret">Secret access key</label><input class="input" id="cx-aws-secret" type="password" autocomplete="off" maxlength="256">
       <label for="cx-aws-region">Region</label>
-      <select class="select" id="cx-aws-region">
+      <input class="input" id="cx-aws-region" list="cx-aws-regions" placeholder="e.g. us-east-1" pattern="[a-z]{2}(-[a-z]+)+-[0-9]+" maxlength="64">
+      <datalist id="cx-aws-regions">
         <option value="">Choose the region your storage is in…</option>
         {% for code, name in [('us-east-1','US East (N. Virginia)'),('us-east-2','US East (Ohio)'),('us-west-1','US West (N. California)'),('us-west-2','US West (Oregon)'),('ca-central-1','Canada (Central)'),('eu-west-1','Europe (Ireland)'),('eu-west-2','Europe (London)'),('eu-west-3','Europe (Paris)'),('eu-central-1','Europe (Frankfurt)'),('eu-north-1','Europe (Stockholm)'),('ap-south-1','Asia Pacific (Mumbai)'),('ap-southeast-1','Asia Pacific (Singapore)'),('ap-southeast-2','Asia Pacific (Sydney)'),('ap-northeast-1','Asia Pacific (Tokyo)'),('sa-east-1','South America (São Paulo)')] %}
         <option value="{{ code }}">{{ name }}</option>
         {% endfor %}
-      </select>
+      </datalist>
+      <p class="cx__sub">Choose a suggestion or enter your storage region. The storage adapter supports approved amazonaws.com addresses; other partitions require a separately supported service address. Changing sharing alone preserves the saved credential and region.</p>
       <label for="cx-aws-session">Session token (only if your IT team gave you one)</label><input class="input" id="cx-aws-session" type="password" autocomplete="off" maxlength="16384">
       <p class="cx__sub">Use a sign-in that can read the storage you want to scan. The values are encrypted and cleared after saving.</p>
     </fieldset>
@@ -125,6 +131,15 @@
   </form>
 
   <div class="section-head"><h2>Saved connections</h2></div>
+  <p class="cx__msg" id="cx-inventory-status" role="status" aria-live="polite">Loading saved connections.</p>
+  <button class="btn" type="button" id="cx-retry">Refresh connections</button>
+  <section id="cx-conflict" class="panel" hidden aria-labelledby="cx-conflict-title">
+    <h3 id="cx-conflict-title">Review the changed connection</h3>
+    <p>Your unsaved draft is preserved below without its key. Saving stays blocked until you load the current record and review your changes again.</p>
+    <pre id="cx-conflict-draft"></pre>
+    <pre id="cx-conflict-current"></pre>
+    <button class="btn" type="button" id="cx-reload-edit">Load current record for review</button>
+  </section>
   <ul class="cx__list" id="cx-list"></ul>
   <p class="cx__sub" id="cx-empty" hidden>None yet — save your first connection above and it appears here, ready to test.</p>
 
@@ -168,234 +183,8 @@
   </section>
 </div>
 
-<script>
-(function () {
-  'use strict';
-  var msg = document.getElementById('cx-msg');
-  var list = document.getElementById('cx-list');
-  var currentByName = {};
-  var editingName = '';
-  var accessLost = document.getElementById('connection-setup')?.dataset.accessDenied === 'true';
-  function clearAccess() {
-    accessLost = true; currentByName = {}; editingName = ''; list.replaceChildren();
-    document.getElementById('cx-empty').hidden = true;
-    document.getElementById('cx-form').querySelectorAll('input,textarea,select,button').forEach(function (control) { if (control.type === 'checkbox') control.checked = false; else if (control.tagName !== 'BUTTON') control.value = ''; control.disabled = true; });
-    say('Your connection access changed. Sign in again and reload Connections.', true);
-  }
-  document.addEventListener('lightwork:connection-access-lost', clearAccess);
-  document.addEventListener('lightwork:connection-saved', function () { if (!accessLost) load(); });
-  function say(t, err) { msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
-  {% include "_dash_helpers.js" %}
-
-  // ---- guided presets: pick a service, we prefill connector + base URL. The
-  // Advanced fold still lets a power user override either. Org-specific hosts
-  // are offered as a hint/placeholder rather than a wrong hard-coded value. ----
-  var PRESETS = [
-    { id: 'slack',      label: 'Slack',       connector: 'slack',      base: 'https://slack.com/api', keyHelp: 'https://api.slack.com/apps' },
-    { id: 'github',     label: 'GitHub',      connector: 'github',     base: 'https://api.github.com', keyHelp: 'https://github.com/settings/tokens' },
-    { id: 'notion',     label: 'Notion',      connector: 'notion',     base: 'https://api.notion.com', keyHelp: 'https://www.notion.so/my-integrations' },
-    { id: 'hubspot',    label: 'HubSpot',     connector: 'hubspot',    base: 'https://api.hubapi.com', keyHelp: 'https://knowledge.hubspot.com/integrations/how-do-i-get-my-hubspot-api-key' },
-    { id: 'stripe',     label: 'Stripe',      connector: 'stripe',     base: 'https://api.stripe.com', keyHelp: 'https://dashboard.stripe.com/apikeys' },
-    { id: 'salesforce', label: 'Salesforce',  connector: 'salesforce', base: '', hint: 'https://your-company.my.salesforce.com', baseLabel: 'Your Salesforce address' },
-    { id: 'zendesk',    label: 'Zendesk',     connector: 'zendesk',    base: '', hint: 'https://your-company.zendesk.com', baseLabel: 'Your Zendesk address' },
-    { id: 'jira',       label: 'Jira',        connector: 'jira',       base: '', hint: 'https://your-team.atlassian.net', baseLabel: 'Your Jira address', keyHelp: 'https://id.atlassian.com/manage-profile/security/api-tokens' },
-    { id: 'aws_s3', label: 'Privacy scanning: Amazon S3 storage', connector: 'aws_s3', base: '', hint: 'https://your-bucket.s3.your-region.amazonaws.com', baseLabel: 'Your storage address', discovery: true, help: 'Fill in the Amazon Web Services sign-in below.' },
-    { id: 'azure_blob', label: 'Privacy scanning: Azure storage', connector: 'azure_blob', base: '', hint: 'https://your-account.blob.core.windows.net', baseLabel: 'Your Azure storage address', discovery: true, help: 'Paste an access token from Azure that can read this storage. Shared access links and account keys are not supported.' },
-    { id: 'google_cloud_storage', label: 'Privacy scanning: Google Cloud Storage', connector: 'google_cloud_storage', base: 'https://storage.googleapis.com', discovery: true, help: 'Paste an access token from Google Cloud that can read this storage.' },
-    { id: 'snowflake_metadata', label: 'Privacy scanning: Snowflake', connector: 'snowflake_metadata', base: '', hint: 'https://your-account.snowflakecomputing.com', baseLabel: 'Your Snowflake address', discovery: true, help: 'Paste an access token from Snowflake. Scanning only reads the names and types of your data, not the data itself.' },
-    { id: 'servicenow_cmdb', label: 'Privacy scanning: ServiceNow', connector: 'servicenow_cmdb', base: '', hint: 'https://your-company.service-now.com', baseLabel: 'Your ServiceNow address', discovery: true, help: 'Paste an access token from ServiceNow that can read your list of systems.' },
-    { id: 'entra_assets', label: 'Privacy scanning: Microsoft Entra', connector: 'entra_assets', base: 'https://graph.microsoft.com', discovery: true, help: 'Paste a Microsoft access token that can read your devices and apps.' },
-  ];
-  var preset = document.getElementById('cx-preset');
-  var nameEl = document.getElementById('cx-name');
-  var connEl = document.getElementById('cx-connector');
-  var baseEl = document.getElementById('cx-base');
-  var hintEl = document.getElementById('cx-hint');
-  var advanced = document.getElementById('cx-advanced');
-  var nameAs = document.getElementById('cx-name-as');
-  var keyHelp = document.getElementById('cx-key-help');
-  var baseLabel = document.getElementById('cx-base-label');
-  // People type a name; the saved name is tidied into small letters and dashes.
-  function slugName(value) {
-    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '').slice(0, 64);
-  }
-  function showNameAs() {
-    var slug = slugName(nameEl.value);
-    nameAs.textContent = slug && slug !== nameEl.value.trim() ? 'Workflows use it as: ' + slug : '';
-  }
-  nameEl.addEventListener('input', showNameAs);
-  var connectorNames = {};
-  PRESETS.forEach(function (p) { connectorNames[p.connector] = p.label; });
-  PRESETS.forEach(function (p) {
-    var o = document.createElement('option'); o.value = p.connector; o.textContent = p.label; connEl.appendChild(o);
-  });
-  function peopleBoxes() { return Array.prototype.slice.call(document.querySelectorAll('#cx-principals input[type="checkbox"]')); }
-  function discoveryPreset(connector) { return PRESETS.find(function (p) { return p.connector === connector && p.discovery; }); }
-  function credentialFields(connector) {
-    var selected = discoveryPreset(connector);
-    document.getElementById('cx-aws').hidden = connector !== 'aws_s3';
-    document.getElementById('cx-save-test').hidden = Boolean(selected);
-    document.getElementById('cx-credential-help').textContent = selected ? selected.help + ' Test exact source access from Privacy Data Discovery after saving the source.' : '';
-    ['access','secret','region','session'].forEach(function (name) { document.getElementById('cx-aws-' + name).value=''; });
-  }
-  // Insert preset options before the trailing "Custom" entry.
-  PRESETS.forEach(function (p) {
-    var o = document.createElement('option'); o.value = p.id; o.textContent = p.label;
-    preset.insertBefore(o, preset.querySelector('option[value="custom"]'));
-  });
-  var nameEdited = false;
-  nameEl.addEventListener('input', function () { nameEdited = true; });
-  preset.addEventListener('change', function () {
-    var p = PRESETS.filter(function (x) { return x.id === preset.value; })[0];
-    hintEl.textContent = '';
-    keyHelp.hidden = true;
-    document.getElementById('cx-connector-field').hidden = preset.value !== 'custom';
-    baseLabel.textContent = 'Web address of the service';
-    if (!p) {                                   // Custom / none: reveal Advanced
-      if (preset.value === 'custom') { advanced.open = true; credentialFields(''); }
-      return;
-    }
-    connEl.value = p.connector;
-    credentialFields(p.connector);
-    baseEl.value = p.base || '';
-    if (p.keyHelp) { keyHelp.href = p.keyHelp; keyHelp.hidden = false; }
-    if (p.baseLabel) baseLabel.textContent = p.baseLabel;
-    if (p.hint) { baseEl.placeholder = p.hint; hintEl.textContent = 'For example ' + p.hint; advanced.open = true; }
-    if (!nameEdited && !nameEl.value.trim()) { nameEl.value = p.label.replace(/^Privacy scanning: /, ''); showNameAs(); }
-  });
-
-  function load() {
-    if (accessLost) { clearAccess(); return; }
-    api('/api/v1/connections').then(function (r) {
-      if (r.status === 403) { say('Connections are turned off. Use the Turn on button above, or ask an administrator.', true); return { connections: [] }; }
-      return r.ok ? r.json() : { connections: [] };
-    }).then(function (j) {
-      if (accessLost) return;
-      var conns = j.connections || [];
-      currentByName = {};
-      conns.forEach(function (c) { currentByName[c.name] = c; });
-      list.textContent = '';
-      document.getElementById('cx-empty').hidden = conns.length > 0;
-      conns.forEach(function (c) {
-        var li = el('li', 'cx__row');
-        li.appendChild(el('span', 'name', c.name));
-        var scope = c.access === 'tenant' ? 'Everyone in the workspace' : 'Only you and people you chose';
-        var meta = el('div', 'meta', (c.connector ? (connectorNames[c.connector] || c.connector) + ' · ' : '') + scope);
-        li.appendChild(meta);
-        li.appendChild(el('span', 'badge ' + (c.has_token ? 'active' : 'blocked'), c.has_token ? 'Key saved' : 'No key saved'));
-        var discovery = discoveryPreset(c.connector);
-        var readinessText = discovery ? 'Test it from Privacy scanning' : c.last_test ? (c.last_test.authenticated ? 'Working' : 'Not working') : 'Not tested yet';
-        li.appendChild(el('span', 'badge ' + (!discovery && c.last_test ? (c.last_test.authenticated ? 'active' : 'blocked') : ''), readinessText));
-        var edit = el('button', 'btn btn--ghost', 'Change');
-        edit.setAttribute('aria-label', 'Change connection ' + c.name);
-        edit.type = 'button';
-        edit.addEventListener('click', function () {
-          if (accessLost) return;
-          editingName = c.name;
-          nameEl.value = c.name;
-          connEl.value = c.connector || '';
-          credentialFields(c.connector);
-          baseEl.value = c.base_url || '';
-          document.getElementById('cx-tenant-access').checked = c.access === 'tenant';
-          peopleBoxes().forEach(function (box) { box.checked = (c.allowed_principals || []).indexOf(box.value) !== -1; });
-          document.getElementById('cx-token').value = '';
-          showNameAs();
-          advanced.open = true;
-          say('Changing ' + c.name + '. Leave the key blank to keep it, or paste a new one.');
-        });
-        var test = el('button', 'btn btn--ghost', discoveryPreset(c.connector) ? 'Open Privacy scanning' : 'Test');
-        test.setAttribute('aria-label', 'Test connection ' + c.name);
-        test.type = 'button';
-        test.addEventListener('click', function () {
-          if (accessLost) return;
-          if (discoveryPreset(c.connector)) { window.location.href = '/privacy/data-discovery'; return; }
-          test.textContent = 'Testing…';
-          api('/api/v1/connections/' + encodeURIComponent(c.name) + '/test', { method: 'POST' })
-            .then(function (r) { return r.json(); })
-            .then(function (res) { test.textContent = 'Test'; say(res.ok ? c.name + ' is working.' : c.name + ' did not work. Check the key and address, then test again.', !res.ok); load(); })
-            .catch(function (e) { test.textContent = 'Test'; say(mvErrorText(e, 'test the connection'), true); });
-        });
-        var del = el('button', 'btn btn--danger', 'Remove');
-        del.type = 'button';
-        del.setAttribute('aria-label', 'Remove connection ' + c.name);
-        del.addEventListener('click', async function () {
-          if (accessLost) return;
-          if (!(await mvConfirm('Remove the connection “' + c.name + '”? Workflows that use it will stop until you connect again.', { okText: 'Remove' }))) return;
-          if (accessLost) return;
-          api('/api/v1/connections/' + encodeURIComponent(c.name) + '?' + new URLSearchParams({expected_revision:c.revision}), { method: 'DELETE' })
-            .then(function (r) { if (!r.ok) { say(r.status === 409 ? 'This connection changed. Refresh and check it before removing it.' : mvErrorText(r, 'remove the connection'), true); } else { say('Connection removed. Existing tasks are kept and will ask for access again before they run.'); } load(); })
-            .catch(function (e) { say(mvErrorText(e, 'remove the connection'), true); });
-        });
-        li.appendChild(edit); li.appendChild(test); li.appendChild(del);
-        list.appendChild(li);
-      });
-    }).catch(function () { say('Could not load connections.', true); });
-  }
-
-  function readBody() {
-    var name = slugName(document.getElementById('cx-name').value);
-    var existing = currentByName[name];
-    var body = { name: name };
-    var token = document.getElementById('cx-token').value;
-    if (connEl.value === 'aws_s3') {
-      var access=document.getElementById('cx-aws-access').value.trim(), secret=document.getElementById('cx-aws-secret').value;
-      var region=document.getElementById('cx-aws-region').value.trim(), session=document.getElementById('cx-aws-session').value;
-      if (access || secret || region || session) {
-        if (!access || !secret || !region) throw new Error('AWS access key, secret key and region are required together.');
-        var aws={access_key_id:access,secret_access_key:secret,region:region};
-        if (session) aws.session_token=session;
-        token=JSON.stringify(aws);
-      }
-    }
-    if (token || !existing) body.token = token;
-    if (!existing || editingName === name) {
-      body.connector = document.getElementById('cx-connector').value.trim();
-      body.base_url = document.getElementById('cx-base').value.trim();
-      body.access = document.getElementById('cx-tenant-access').checked ? 'tenant' : 'owner';
-      body.allowed_principals = peopleBoxes().filter(function (box) { return box.checked; }).map(function (box) { return box.value; });
-    }
-    if (existing) body.expected_revision = existing.revision;
-    return body;
-  }
-
-  // Save, then (optionally) fire the reachability test for the just-saved one.
-  function save(thenTest) {
-    if (accessLost) return;
-    var body;
-    try { body = readBody(); } catch (error) { say(error.message, true); return; }
-    if (discoveryPreset(body.connector || connEl.value)) thenTest=false;
-    if (!body.name) { say('Give the connection a name.', true); return; }
-    say(thenTest ? 'Saving & testing…' : 'Saving…');
-    return api('/api/v1/connections', { method: 'POST', body: JSON.stringify(body) })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
-      .then(function (res) {
-        if (accessLost) return;
-        if (!res.ok) {
-          if (res.status === 409) {
-            say('This connection changed in another tab. The current record was reloaded; review it before saving again.', true);
-            load();
-            return;
-          }
-          say(res.status === 422 ? 'Some details need fixing. Check the name, key and address.' : mvErrorText({status: res.status}, 'save the connection'), true);
-          return;
-        }
-        document.getElementById('cx-token').value = '';
-        credentialFields(body.connector || connEl.value);
-        editingName = '';
-        if (!thenTest) { say('Saved.'); load(); return; }
-        return api('/api/v1/connections/' + encodeURIComponent(body.name) + '/test', { method: 'POST' })
-          .then(function (r) { return r.json(); })
-          .then(function (t) { say(t.ok ? 'Saved, and the test worked.' : 'Saved, but the test did not work. Check the key and address.', !t.ok); load(); })
-          .catch(function () { say('Saved, but the test could not run. Try Test again.', true); load(); });
-      }).catch(function (e) { say(mvErrorText(e, 'save the connection'), true); });
-  }
-
-  document.getElementById('cx-form').addEventListener('submit', function (e) { e.preventDefault(); save(false); });
-  document.getElementById('cx-save-test').addEventListener('click', function () { save(true); });
-
-  load();
-})();
-</script>
+<script src="/static/lightwork-connection-impact.js" defer></script>
+<script src="/static/lightwork-connections.js" defer></script>
 <style>
   .to-change { display: flex; flex-direction: column; gap: var(--space-2); max-width: 40rem; margin-top: var(--space-4); }
   .to-change__fields { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }

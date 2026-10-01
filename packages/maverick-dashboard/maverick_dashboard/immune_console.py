@@ -17,7 +17,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from .auth import has_global_permission, has_permission, require_permission
+from .auth import (
+    caller_principal,
+    can_access_goal_principal,
+    has_global_permission,
+    has_permission,
+    require_permission,
+)
 from .evolution_ledger_page import _HEADERS
 
 IMMUNE_PATH = "/immune"
@@ -34,7 +40,7 @@ def _world_or_none() -> Any:
         return None
 
 
-def _immune_summary() -> dict:
+def _immune_summary(principal=None) -> dict:
     from maverick.immune import report
 
     from .identity_format import humanize_principal
@@ -56,7 +62,7 @@ def _immune_summary() -> dict:
                 goal = world.get_goal(gid)
             except Exception:  # noqa: BLE001 -- a missing title falls back to a number
                 goal = None
-            if goal is not None and goal.title:
+            if goal is not None and goal.title and can_access_goal_principal(principal, goal):
                 titles[str(gid)] = goal.title[:200]
     data["goal_titles"] = titles
     for kind in ("canary", "drill"):
@@ -97,7 +103,7 @@ def create_immune_console_router() -> APIRouter:
         require_permission(request, "audit")
         if request.query_params:
             raise HTTPException(status_code=404, detail="immune summary unavailable")
-        return await run_in_threadpool(_immune_summary)
+        return await run_in_threadpool(_immune_summary, caller_principal(request))
 
     @router.get("/code/summary")
     async def code_summary(request: Request) -> dict:

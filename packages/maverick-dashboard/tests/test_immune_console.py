@@ -177,9 +177,15 @@ def test_a_codebase_merge_approval_can_be_approved_in_the_dashboard(client):
     p = {"id": "0123456789abcdef", "repo": "r", "title": "t", "branch": "lightwork/t-012345",
          "head": "a" * 40, "base": "b" * 40, "files": ["x.py"], "tests": None, "review": None,
          "diff_truncated": False, "diff_chars": 1}
-    aid = dash_app._world().create_approval(
-        "codebase_merge", risk="high", scope="r", provenance="codebase",
-        requested_by="agent:codebase", detail=_approval_detail(p))
+    goal_id = dash_app._world().create_goal("Review this code change")
+    from maverick.logging_config import reset_goal_context, set_goal_context
+    context = set_goal_context(goal_id)
+    try:
+        aid = dash_app._world().create_approval(
+            "codebase_merge", risk="high", scope="r", provenance="codebase",
+            requested_by="agent:codebase", detail=_approval_detail(p))
+    finally:
+        reset_goal_context(context)
     row = {r["id"]: r for r in client.get("/api/v1/approvals").json()["approvals"]}[aid]
     assert row["approval_card_status"] == "current"
     response = client.post(f"/api/v1/approvals/{aid}/approve", headers={

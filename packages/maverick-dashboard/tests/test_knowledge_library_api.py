@@ -53,12 +53,16 @@ def test_overview_lists_collections_and_starter_content_for_viewers(client) -> N
     assert state["permissions"] == ["view"] and state["closed"] == 1
 
 
-def test_reindex_needs_admin_and_a_known_collection(client) -> None:
+def test_reindex_requires_a_current_review_and_explicit_confirmation(client, monkeypatch) -> None:
     test_client, state = client
-    done = test_client.post("/api/v1/knowledge/library/collections/gdpr/reindex")
-    assert done.status_code == 200 and done.json() == {"collection": "gdpr", "chunks": 12}
-    assert state["permissions"] == ["admin"] and state["reindexed"] == ["gdpr"]
-    assert test_client.post("/api/v1/knowledge/library/collections/other/reindex").status_code == 404
+    assert test_client.post("/api/v1/knowledge/library/collections/gdpr/reindex").status_code == 422
+    from maverick_dashboard import draft_api
+    monkeypatch.setattr(draft_api, "context_for", lambda request: "a" * 64)
+    result = test_client.post("/api/v1/knowledge/library/collections/gdpr/reindex", json={
+        "context": "a" * 64, "job_id": "b" * 32, "review": "c" * 64, "confirmed": False,
+    })
+    assert result.status_code == 400
+    assert state["permissions"] == ["admin"] and state["reindexed"] == []
 
 
 def test_seed_refuses_unknown_starter_content_and_reports_when_off(client) -> None:

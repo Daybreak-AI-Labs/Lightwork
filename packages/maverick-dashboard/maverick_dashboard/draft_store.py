@@ -87,7 +87,7 @@ class DraftStore:
     def _floor(self) -> int:
         path = self.directory / "retention.index"
         if not path.exists():
-            return 0
+            return self._erasure_floor()
         if path.stat().st_size > 4096:
             raise ValueError("Recovery retention history could not be verified.")
         raw = atomic_read_bytes(path)
@@ -99,6 +99,19 @@ class DraftStore:
                 or type(record.get("revision_floor")) is not int
                 or not 1 <= record["revision_floor"] <= MAX_REVISION):
             raise ValueError("Recovery retention history could not be verified.")
+        return max(record["revision_floor"], self._erasure_floor())
+
+    def _erasure_floor(self) -> int:
+        path = self.directory / "erasure.index"
+        if not path.exists():
+            return 0
+        raw = atomic_read_bytes(path)
+        if len(raw) > 4096 or not is_sealed(raw):
+            raise ValueError("Recovery erasure history could not be verified.")
+        record = json.loads(unseal(raw))
+        if (record.get("context") != self.context or type(record.get("revision_floor")) is not int
+                or not 1 <= record["revision_floor"] <= MAX_REVISION):
+            raise ValueError("Recovery erasure history could not be verified.")
         return record["revision_floor"]
 
     def _read(self, path: Path, slot: str, *, floor: int | None = None) -> dict:
@@ -117,6 +130,8 @@ class DraftStore:
                 or type(result.get("revision")) is not int or not 1 <= result["revision"] <= MAX_REVISION
                 or "payload" not in result):
             raise ValueError("Recovery copy binding could not be verified.")
+        if result["revision"] < self._erasure_floor():
+            return empty
         # An interrupted retirement may leave old tombstones on disk. The
         # durable floor takes effect before deletion, so stale tabs remain
         # unable to resurrect them even if cleanup has not completed.
@@ -159,6 +174,22 @@ class DraftStore:
         ensure_private_directory(self.directory)
         with _LOCK, cross_process_lock(self.directory / "index", strict=True):
             return self._inventory()[0]
+
+    def erase_all(self, *, expected_version: str) -> dict:
+        """Retire this exact owner's copies and fence old autosave revisions."""
+        ensure_private_directory(self.directory)
+        with _LOCK, cross_process_lock(self.directory / "index", strict=True):
+            inventory, records = self._inventory()
+            if not hmac.compare_digest(expected_version, inventory["version"]):
+                raise DraftConflict("Recovery copies changed. Review a fresh deletion scope.")
+            floor = max([self._floor(), *(row["revision"] for _, row in records)]) + 1
+            if floor >= MAX_REVISION:
+                raise ValueError("Recovery revision capacity is exhausted; no copies were removed.")
+            atomic_write_bytes(self.directory / "erasure.index", seal(json.dumps(
+                {"context": self.context, "revision_floor": floor}).encode()))
+            for path, _ in records:
+                path.unlink()
+            return {"state": "purged", "removed": len(records), "retained": "Content-free revision barrier prevents stale tabs from restoring deleted drafts."}
 
     def retire_discarded(self, *, expected_version: str) -> dict:
         """Reclaim only discarded copies while durably fencing every old tab."""

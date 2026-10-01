@@ -17,8 +17,10 @@ Restore scans tar streams without ``getmembers``/``extractall``, enforces hard
 member/path/type/per-file/expanded-size limits, writes only into a private
 staging tree, and authenticates/verifies the complete payload before touching
 live state. Application is journaled: originals plus SQLite sidecars are saved
-first, and any failure rolls the entire file set back. An interrupted restore
-is recovered from its private journal before the next restore begins.
+first, and a failure rolls ordinary payloads back. Tenant namespace claims and
+deletion tombstones remain append-only even after a failed publication: releasing
+that history could reauthorize old identities. An interrupted restore is recovered
+from its private journal before the next restore begins.
 """
 from __future__ import annotations
 
@@ -1207,11 +1209,66 @@ def _validate_journal_entries(document: dict[str, Any]) -> list[dict[str, Any]]:
     return validated
 
 
+def _tenant_lifecycle_barrier(relative: str) -> bool:
+    from .recovery_authorities import TENANT_LIFECYCLE_AUTHORITY_POLICIES, authority_policy
+
+    return authority_policy(relative, is_sqlite=False) in TENANT_LIFECYCLE_AUTHORITY_POLICIES.values()
+
+
+def _lifecycle_conflict() -> BackupError:
+    return BackupError(
+        "Restore would erase or rewrite tenant lifecycle history. Current namespace "
+        "reservations and workspace deletions must be retained; reconcile this "
+        "snapshot in a separate isolated installation. Force cannot bypass this guard."
+    )
+
+
+def _guard_lifecycle_replacement(root: Path, stage: Path, targets: set[str]) -> None:
+    """Refuse an older barrier set before publishing any ordinary payload."""
+    for relative in targets:
+        if not _tenant_lifecycle_barrier(relative):
+            continue
+        destination = _live_path(root, relative)
+        if not os.path.lexists(destination):
+            continue
+        _validate_optional_live_file(destination)
+        source = stage.joinpath(*PurePosixPath(relative).parts)
+        if not source.is_file() or _sha256(destination) != _sha256(source):
+            raise _lifecycle_conflict()
+
+
+def _publish_lifecycle_barrier(source: Path, destination: Path) -> None:
+    """Publish once; a concurrently created claim or retirement always wins."""
+    if not os.path.lexists(destination):
+        # Unlike ordinary restore files, identity history must never use replace.
+        # Publish fully written private bytes atomically without replacing a
+        # concurrent claimant; readers cannot observe a partial JSON record.
+        try:
+            with os.fdopen(file_lock.open_private_read(source), "rb") as reader:
+                file_lock.atomic_create_bytes_chunks(
+                    destination, iter(lambda: reader.read(_COPY_CHUNK), b""),
+                )
+            return
+        except FileExistsError:
+            pass
+    _validate_optional_live_file(destination)
+    if not source.is_file() or _sha256(destination) != _sha256(source):
+        raise _lifecycle_conflict()
+
+
 def _rollback(root: Path, tx: Path, document: dict[str, Any]) -> None:
     entries = _validate_journal_entries(document)
     for entry in reversed(entries):
         rel = entry["rel"]
         destination = _live_path(root, rel)
+        if _tenant_lifecycle_barrier(rel):
+            # This applies to journals written by older versions as well. A
+            # failed restore cannot release a name or undo a later retirement.
+            if os.path.lexists(destination):
+                _validate_optional_live_file(destination)
+            elif entry["existed"]:
+                _publish_lifecycle_barrier(tx / "originals" / Path(*PurePosixPath(rel).parts), destination)
+            continue
         if _is_sqlite_file(destination) or entry["sidecars"]:
             for suffix in _DB_SIDECARS:
                 sidecar = Path(str(destination) + suffix)
@@ -1340,6 +1397,7 @@ def _apply_transaction(
     committed = False
     try:
         targets = _replacement_targets(root, expected) if replace_existing else set(expected)
+        _guard_lifecycle_replacement(root, stage, targets)
         flow_markers = _flow_index_restore_markers(targets)
         targets.update(flow_markers)
         entries = [_capture_original(root, tx, rel) for rel in sorted(targets)]
@@ -1352,6 +1410,11 @@ def _apply_transaction(
             rel = entry["rel"]
             source = stage / Path(*PurePosixPath(rel).parts)
             destination = _live_path(root, rel)
+            if _tenant_lifecycle_barrier(rel):
+                # Recheck at publication: a new claim/deletion can appear after
+                # the initial inventory. No replace or unlink is allowed here.
+                _publish_lifecycle_barrier(source, destination)
+                continue
             if _is_sqlite_file(destination) or _is_sqlite_file(source):
                 for suffix in _DB_SIDECARS:
                     sidecar = Path(str(destination) + suffix)

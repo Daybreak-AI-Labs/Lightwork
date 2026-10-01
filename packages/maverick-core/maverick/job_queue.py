@@ -146,6 +146,13 @@ CREATE TABLE IF NOT EXISTS job_admissions (
   job_id INTEGER NOT NULL,
   created_at REAL NOT NULL
 );
+-- Reviewed recurrence repair receipts outlive routine completed-job retention.
+CREATE TABLE IF NOT EXISTS recurrence_recovery_receipts (
+  job_id INTEGER NOT NULL, actor TEXT NOT NULL, operation_id TEXT NOT NULL,
+  request_hash TEXT NOT NULL, successor_id INTEGER NOT NULL, created_at REAL NOT NULL,
+  PRIMARY KEY(job_id, actor, operation_id)
+);
+
 """
 
 
@@ -179,7 +186,10 @@ class JobQueue:
 
     def _ensure_schema(self) -> None:
         with self._conn() as c:
-            c.executescript(_SCHEMA)
+            from .schedule_definitions import SCHEMA as schedule_schema
+            from .schedule_definitions import adopt_existing
+
+            c.executescript(_SCHEMA + schedule_schema)
             c.execute("BEGIN IMMEDIATE")
             columns = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}
             for name, definition in _RECURRENCE_COLUMNS.items():
@@ -217,6 +227,7 @@ class JobQueue:
                                                 default=str), int(uncertain), uncertain,
                      uncertain, _RECONCILE_REASON, job.id),
                 )
+            adopt_existing(c)
             c.commit()
 
     @contextmanager
@@ -237,6 +248,11 @@ class JobQueue:
         if recurrence_id is None and payload.get("__cron__"):
             recurrence_id, occurrence = uuid.uuid4().hex, 0
             recurrence_payload = json.dumps(_recurrence_template(kind, payload), default=str)
+        if recurrence_id:
+            from .schedule_definitions import register
+
+            register(c, recurrence_id, kind, json.loads(recurrence_payload), now)
+            c.execute("UPDATE schedule_definitions SET occurrence_cursor=MAX(occurrence_cursor,?) WHERE id=?", (occurrence + 1, recurrence_id))
         cur = c.execute(
             "INSERT INTO jobs (kind, payload, run_at, created_at, updated_at, "
             "recurrence_id, occurrence, scheduled_at, recurrence_payload) "
@@ -372,6 +388,8 @@ class JobQueue:
             # Pick a candidate.
             row = c.execute(
                 "SELECT id FROM jobs WHERE status='pending' AND run_at <= ? "
+                "AND (recurrence_id IS NULL OR attempts>0 OR EXISTS "
+                "(SELECT 1 FROM schedule_definitions WHERE id=jobs.recurrence_id AND state='active')) "
                 "ORDER BY run_at ASC, id ASC LIMIT 1",
                 (cutoff,),
             ).fetchone()
@@ -489,13 +507,19 @@ class JobQueue:
     def _advance_recurrence(self, c, row, *, now: float) -> int:
         from .scheduler import next_run
 
-        template = json.loads(row["recurrence_payload"])
+        definition = c.execute("SELECT * FROM schedule_definitions WHERE id=?", (row["recurrence_id"],)).fetchone()
+        if definition is not None and definition["state"] != "active":
+            payload = json.loads(row["payload"])
+            payload["__rearmed__"] = True
+            c.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(payload), row["id"]))
+            return 0
+        template = json.loads(definition["payload"] if definition is not None else row["recurrence_payload"])
         run_at = next_run(template["__cron__"], after=now,
                           tz=str(template.get("__tz__") or ""))
         successor = self._insert_job(
             c, row["kind"], template, run_at, now,
-            recurrence_id=row["recurrence_id"], occurrence=row["occurrence"] + 1,
-            recurrence_payload=row["recurrence_payload"],
+            recurrence_id=row["recurrence_id"], occurrence=max(row["occurrence"] + 1, definition["occurrence_cursor"] if definition is not None else 0),
+            recurrence_payload=json.dumps(template),
         )
         payload = json.loads(row["payload"])
         payload["__rearmed__"] = True
@@ -528,10 +552,29 @@ class JobQueue:
                 self._advance_recurrence(c, row, now=n)
             return self._row_to_job(c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
 
+    @staticmethod
+    def _recovery_fingerprint(expected_attempts, successor_id, rearm, expected_evidence, rationale):
+        return hashlib.sha256(json.dumps({"attempts": expected_attempts, "successor": successor_id,
+            "rearm": rearm, "evidence": expected_evidence, "rationale": rationale}, sort_keys=True).encode()).hexdigest()
+
+    def recovery_receipt(self, job_id, *, actor, operation_id, expected_attempts, successor_id,
+                         rearm, expected_evidence, rationale):
+        digest = self._recovery_fingerprint(expected_attempts, successor_id, rearm, expected_evidence, rationale)
+        with self._conn() as connection:
+            row = connection.execute("SELECT request_hash,successor_id FROM recurrence_recovery_receipts "
+                "WHERE job_id=? AND actor=? AND operation_id=?", (job_id, actor, operation_id)).fetchone()
+        if row is None:
+            return None
+        if row["request_hash"] != digest:
+            raise ValueError("This recovery reference belongs to a different reviewed decision.")
+        return int(row["successor_id"])
+
     def reconcile_recurrence(self, job_id: int, *, expected_attempts: int,
                              successor_id: int | None = None,
-                             rearm: bool = False, confirm: bool = False) -> int:
-        """Local operator recovery; never called by a worker or exposed as a tool.
+                             rearm: bool = False, confirm: bool = False,
+                             expected_evidence: str | None = None, actor: str = "local operator",
+                             rationale: str = "Reviewed future recurrence recovery", operation_id: str | None = None) -> int:
+        """Explicit operator recovery; never automatically called by a worker.
 
         Requires filesystem/operator authority over this queue, explicit
         confirmation and the inspected attempt. Link a reviewed compatible
@@ -542,10 +585,30 @@ class JobQueue:
             raise ValueError("confirm exactly one recovery: successor_id or rearm=True")
         from .task_file_recovery import mutation_gate
 
+        digest = self._recovery_fingerprint(expected_attempts, successor_id, rearm, expected_evidence, rationale)
         with mutation_gate(), self._transaction() as c:
+            if operation_id:
+                prior = c.execute("SELECT request_hash,successor_id FROM recurrence_recovery_receipts "
+                    "WHERE job_id=? AND actor=? AND operation_id=?", (job_id, actor, operation_id)).fetchone()
+                if prior is not None:
+                    if prior["request_hash"] != digest:
+                        raise ValueError("This recovery reference belongs to a different reviewed decision.")
+                    return int(prior["successor_id"])
             row = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if row is None or row["attempts"] != expected_attempts or row["status"] != "failed":
                 raise ValueError("reconciliation state changed; inspect the job again")
+            if expected_evidence is not None:
+                from .schedule_definitions import recovery_evidence
+
+                current_evidence = recovery_evidence(c, row)
+                if current_evidence != expected_evidence:
+                    raise ValueError("Recovery evidence changed. Review the occurrence again.")
+            from .schedule_definitions import _record_version
+
+            definition = c.execute("SELECT * FROM schedule_definitions WHERE id=?", (row["recurrence_id"],)).fetchone()
+            if definition is not None and row["recurrence_reconcile_required"]:
+                _record_version(c, definition, payload=json.loads(definition["payload"]),
+                                state="active", actor=actor, rationale=rationale, now=time.time())
             if not row["recurrence_reconcile_required"]:
                 if row["successor_id"] and (rearm or row["successor_id"] == successor_id):
                     return int(row["successor_id"])
@@ -557,6 +620,12 @@ class JobQueue:
                 if (json.loads(child["recurrence_payload"] or "null")
                         != json.loads(row["recurrence_payload"])):
                     raise ValueError("successor schedule/authority template differs")
+                # A separately identified successor owns its future chain.
+                # Retire the source definition to prevent a second chain.
+                if definition is not None and child["recurrence_id"] != row["recurrence_id"]:
+                    current_definition = c.execute("SELECT * FROM schedule_definitions WHERE id=?", (row["recurrence_id"],)).fetchone()
+                    _record_version(c, current_definition, payload=json.loads(current_definition["payload"]),
+                                    state="retired", actor=actor, rationale=f"Linked to schedule {child['recurrence_id']}: {rationale}", now=time.time())
                 payload = json.loads(row["payload"])
                 payload["__rearmed__"] = True
                 c.execute("UPDATE jobs SET successor_id=?, payload=? WHERE id=?",
@@ -565,9 +634,13 @@ class JobQueue:
                 successor_id = self._advance_recurrence(c, row, now=time.time())
             c.execute(
                 "UPDATE jobs SET recurrence_reconcile_required=0, last_error=?, updated_at=? WHERE id=?",
-                (f"recurrence reconciled by local operator; successor job {successor_id}; "
+                (f"recurrence reconciled; successor job {successor_id}; "
                  "historical execution not replayed", time.time(), job_id),
             )
+            if operation_id:
+                c.execute("INSERT INTO recurrence_recovery_receipts "
+                    "(job_id,actor,operation_id,request_hash,successor_id,created_at) VALUES(?,?,?,?,?,?)",
+                    (job_id, actor, operation_id, digest, successor_id, time.time()))
             return int(successor_id)
 
     def fail(
@@ -690,9 +763,9 @@ class JobQueue:
                 ).fetchall()
         return [self._row_to_job(r) for r in rows]
 
-    def iter_pending(self, kind: str, *, page_size: int = 256,
+    def iter_pending(self, kind: str | None = None, *, page_size: int = 256,
                      include_running: bool = False) -> Iterator[Job]:
-        """Inspect every pending job of one kind, without a dashboard page cutoff.
+        """Inspect pending jobs of one kind, or all kinds, without a page cutoff.
 
         Keyset pages tolerate cancellation during reconciliation. A fixed high
         water mark bounds the pass if producers keep appending new jobs.
@@ -704,13 +777,15 @@ class JobQueue:
         status = "status IN ('pending','running')" if include_running else "status='pending'"
         with self._conn() as c:
             upper = c.execute("SELECT COALESCE(MAX(id), 0) FROM jobs").fetchone()[0]
+        kind_sql = "kind=? AND " if kind is not None else ""
+        kind_args = (kind,) if kind is not None else ()
         after = 0
         while after < upper:
             with self._conn() as c:
                 rows = c.execute(
-                    f"SELECT * FROM jobs WHERE kind=? AND {status} "
+                    f"SELECT * FROM jobs WHERE {kind_sql}{status} "
                     "AND id>? AND id<=? ORDER BY id LIMIT ?",
-                    (kind, after, upper, page_size),
+                    (*kind_args, after, upper, page_size),
                 ).fetchall()
             if not rows:
                 return
@@ -743,7 +818,7 @@ class JobQueue:
         cutoff = time.time() - older_than_days * 86400
         with self._lock, self._conn() as c:
             cur = c.execute(
-                "DELETE FROM jobs WHERE status IN ('done','failed') AND updated_at < ? "
+                "DELETE FROM jobs WHERE status IN ('done','failed','cancelled') AND updated_at < ? "
                 "AND recurrence_reconcile_required=0",
                 (cutoff,),
             )

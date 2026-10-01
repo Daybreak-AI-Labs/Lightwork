@@ -36,12 +36,15 @@ test('malformed flow recovery cannot partially replace an editor',async()=>{
 });
 
 function workflowFixture(){
-  const dom=new JSDOM('<div class="wf"><textarea id="wf-brief">brief</textarea><input id="wf-name" value="workflow"><textarea id="wf-steps">  unfinished steps  </textarea><input id="pb-name" value="agent"><input id="pb-risk" value="medium"><input id="wf-file" type="file"><div id="pb-steps"></div></div>'),d=dom.window.document;
-  const context={document:d,mode:'playbook',templateWorkspaceStarted:true,playbookWorkspaceStarted:true,wfEditingName:'workflow',wfEditGeneration:3,wfEditWall:90,pbEditingName:'agent',pbEditGeneration:'a'.repeat(64),pbEditPreserve:{compartment:'trusted'},pbSteps:d.getElementById('pb-steps'),pbName:d.getElementById('pb-name'),
+  const dom=new JSDOM('<div class="wf"><textarea id="wf-brief">brief</textarea><input id="wf-name" value="workflow"><textarea id="wf-steps">  unfinished steps  </textarea><input id="pb-name" value="agent"><input id="pb-risk" value="medium"><input id="wf-file" type="file"><div id="pb-steps"></div><div id="wf-input-fields"></div><button id="wf-add-input"></button></div>'),d=dom.window.document;
+  const context={document:d,Option:dom.window.Option,productText(node,source){node.textContent=source;},mode:'playbook',templateWorkspaceStarted:true,playbookWorkspaceStarted:true,wfEditingName:'workflow',wfEditGeneration:3,wfEditWall:90,pbEditingName:'agent',pbEditGeneration:'a'.repeat(64),pbEditPreserve:{compartment:'trusted'},pbSteps:d.getElementById('pb-steps'),pbName:d.getElementById('pb-name'),
     addStep(){const row=d.createElement('div');row.className='pb-step';for(const key of ['name','inst','tools','gate']){const input=d.createElement('input');input.className='pb-step__'+key;row.append(input);}context.pbSteps.append(row);},
     paintGate(){},renumber(){},renderToolSelections(){},schedulePbLint(){},setStatus(){},setForm(mode){context.mode=mode;},collectPlaybook(){return {workflow:[]};}};
   context.addStep();context.pbSteps.querySelector('.pb-step__inst').value='  Work without a step name yet  ';
   const source=fs.readFileSync(path.join(templates,'workflow_builder.html'),'utf8');
+  context.window=dom.window;
+  vm.runInNewContext(source.slice(source.indexOf('    function productText('),source.indexOf('    function appendSource(')),context);
+  vm.runInNewContext(source.slice(source.indexOf('    var inputFields ='),source.indexOf('    function renderDraft(')),context);
   vm.runInNewContext(source.slice(source.indexOf('    function recoveryFields('),source.indexOf('    var existingNames',source.indexOf('    function recoveryFields('))),context);
   vm.runInNewContext(source.slice(source.indexOf('    function playbookPayload('),source.indexOf('    // --- live governance feedback',source.indexOf('    function playbookPayload('))),context);
   return {dom,d,context};
@@ -58,4 +61,18 @@ test('workflow restoration keeps incomplete steps, raw whitespace and original o
 test('workflow restoration refuses missing version bindings before replacing user work',()=>{
   const ui=workflowFixture(),saved=JSON.parse(JSON.stringify(ui.context.recoveryPayload()));saved.agent_generation=null;ui.d.getElementById('wf-steps').value='newer work';
   assert.throws(()=>ui.context.restoreRecovery(saved),/incomplete fields or saved-version/);assert.equal(ui.d.getElementById('wf-steps').value,'newer work');ui.dom.window.close();
+});
+
+
+test('workflow recovery preserves unfinished typed fields and raw choices without save-time validation',()=>{
+  const ui=workflowFixture();ui.context.addInputField('',{});
+  const row=ui.d.querySelector('#wf-input-fields fieldset');
+  row.querySelector('[data-input-key="name"]').value='  unfinished name  ';
+  row.querySelector('[data-input-key="choices"]').value=' Alpha, , Beta  ';
+  const saved=JSON.parse(JSON.stringify(ui.context.recoveryPayload()));
+  assert.throws(()=>ui.context.collectInputFields(),/unique name/);
+  ui.d.getElementById('wf-input-fields').replaceChildren();ui.context.restoreRecovery(saved);
+  assert.equal(ui.d.querySelector('[data-input-key="name"]').value,'  unfinished name  ');
+  assert.equal(ui.d.querySelector('[data-input-key="choices"]').value,' Alpha, , Beta  ');
+  assert.throws(()=>ui.context.collectInputFields(),/unique name/);ui.dom.window.close();
 });

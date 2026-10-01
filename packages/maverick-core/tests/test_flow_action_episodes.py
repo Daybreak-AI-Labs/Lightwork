@@ -255,16 +255,17 @@ def test_native_authorization_denial_produces_no_observation_or_effect(native, m
     assert native[0] == [] and collector.status == "unusable"
 
 
-def test_resolved_secret_expressions_never_enter_capture(native, monkeypatch):
+def test_legacy_secret_expressions_refuse_before_capture_or_effect(native, monkeypatch):
     from maverick import secret_provider
 
-    monkeypatch.setattr(secret_provider, "get_secret", lambda name: "local-fixture-value")
+    monkeypatch.setattr(secret_provider, "get_secret", lambda name: pytest.fail("Flow must not read deployment secrets"))
     source = flow(one_step=True)
     source.nodes["lookup"].params["query"] = "{{secret('CAPTURE_TEST')}}"
     store.save_flow(source)
     collector = capture()
-    assert run(source, collector).status == "completed"
-    assert native[0][0][1]["query"] == "local-fixture-value"
+    result = run(source, collector)
+    assert result.status == "failed" and "Connections" in result.error
+    assert native[0] == []
     assert collector.status == "unusable"
 
 

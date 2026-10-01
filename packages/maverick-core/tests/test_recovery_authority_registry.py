@@ -17,6 +17,7 @@ from maverick.recovery_authorities import (
     DYNAMIC_JSON_AUTHORITY_POLICIES,
     GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES,
     GLOBAL_START_JSON_AUTHORITY_POLICIES,
+    NON_AUTHORIZING_GOVERNED_NAMESPACES,
     authority_policy,
 )
 
@@ -45,6 +46,25 @@ def test_canonical_authority_registry_covers_every_declared_store() -> None:
     assert authority_policy("future-authority.lock", is_sqlite=True) == "unknown_sqlite"
 
 
+def test_non_authorizing_preferences_and_warnings_restore_as_data(tmp_path: Path) -> None:
+    stage = file_lock.ensure_private_directory(tmp_path / "stage")
+    originals = {}
+    for namespace in NON_AUTHORIZING_GOVERNED_NAMESPACES:
+        relative = f"tenants/acme/{namespace}/record.json"
+        path = _write(stage, relative, {"revision": 1, "owner": "user:alice"})
+        originals[relative] = path.read_bytes()
+        assert authority_policy(relative.swapcase(), is_sqlite=False) is None
+        # A file's SQLite identity still wins over a data-only directory name.
+        assert authority_policy(relative, is_sqlite=True) == "unknown_sqlite"
+
+    removed, report = recovery._reconcile_bootstrap_stage(stage)
+
+    assert removed == set()
+    assert report["items"] == []
+    assert report["protected_authority"]["classification_complete"] is True
+    assert all((stage / relative).read_bytes() == payload for relative, payload in originals.items())
+
+
 def test_shared_a2a_binding_is_retained_and_blocks_restored_admission(tmp_path: Path) -> None:
     """An opaque anti-downgrade receipt cannot be discarded as an ordinary cache."""
     stage = file_lock.ensure_private_directory(tmp_path / "stage")
@@ -70,7 +90,8 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
     """Make adding a default governed store without recovery policy fail CI."""
     packages = Path(__file__).parents[2]
     source_roots = (packages / "maverick-core" / "maverick",
-                    packages / "maverick-channels" / "maverick_channels")
+                    packages / "maverick-channels" / "maverick_channels",
+                    packages / "maverick-dashboard" / "maverick_dashboard")
     declarations: dict[str, str] = {}
     dynamic_declarations: set[str] = set()
     for source in (path for root in source_roots for path in root.rglob("*.py")):
@@ -115,9 +136,13 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
     missing = {
         relative: location
         for relative, location in declarations.items()
-        if authority_policy(relative, is_sqlite=False) is None
+        if relative.split("/")[0] not in NON_AUTHORIZING_GOVERNED_NAMESPACES
+        and authority_policy(relative, is_sqlite=False) is None
     }
     assert missing == {}
+    for namespace in NON_AUTHORIZING_GOVERNED_NAMESPACES:
+        assert f"{namespace}/recovered.json" in declarations
+        assert authority_policy(f"{namespace}/recovered.json", is_sqlite=False) is None
     for namespace, policy in GLOBAL_START_JSON_AUTHORITY_POLICIES.items():
         relative = f"{namespace}/recovered.json"
         assert relative in declarations
@@ -130,6 +155,7 @@ def test_every_literal_local_governed_json_store_has_recovery_policy() -> None:
     assert dynamic_declarations == {
         "f'identity_governance_{sink}_outcomes'",
         "f'identity_governance_{sink}_requests'",
+        "'conversation-organization-' + context_for(request)",
     }
     for namespace, policy in DYNAMIC_JSON_AUTHORITY_POLICIES.items():
         relative = f"{namespace}/recovered.json"

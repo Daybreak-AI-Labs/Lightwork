@@ -46,8 +46,9 @@ def test_safety_page_aggregates_blocks(monkeypatch, tmp_path):
     r = _client().get("/safety")
     assert r.status_code == 200
     body = r.text
-    assert "prompt injection" in body
-    assert "secret exfiltration" in body
+    assert "prompt injection" not in body
+    assert "secret exfiltration" not in body
+    assert "Details are private; audit metadata only" in body
     assert "95%" in body                        # score shown as a percentage
     assert "What agents read" in body and "What agents said" in body  # stage breakdown
     from test_support.plain_language import developer_terms
@@ -62,7 +63,8 @@ def test_safety_page_ignores_non_shield_events(monkeypatch, tmp_path):
     _block(log, stage="input", reason="jailbreak", score=0.7)
 
     body = _client().get("/safety").text
-    assert "jailbreak" in body
+    assert "jailbreak" not in body
+    assert "Details are private; audit metadata only" in body
     assert "input_summary" not in body  # unrelated event content must not leak
 
 

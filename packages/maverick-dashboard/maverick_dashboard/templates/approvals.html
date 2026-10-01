@@ -13,6 +13,7 @@
              badge_class='warn' if approvals else 'ok',
              copy='Approve, reject, or send a request back with a note saying what should change.') }}
   {% endcall %}
+  {% if private_count %}<p class="panel">{{ private_count }} pending request{{ '' if private_count == 1 else 's' }} contain private employee content. <a href="/content-access">Request the exact approval-card read</a> before reviewing. Content access does not grant a vote: your current review role, claim and separation-of-duties checks still apply.</p>{% endif %}
 
   <div class="panel">
     {% include "_approvals_queue.html" %}

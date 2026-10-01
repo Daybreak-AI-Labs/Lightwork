@@ -621,6 +621,8 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
             for score, meta in sem:
                 gid = meta.get("goal_id")
                 g = world.get_goal(gid) if gid is not None else None
+                if g is None or g.owner != (goal.owner or ""):
+                    continue
                 rows.append((
                     score, gid,
                     (getattr(g, "title", None) or "") if g else "",
@@ -628,7 +630,7 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
                 ))
         else:
             from .tools.recall import recall_past_goals
-            for score, g in recall_past_goals(query, num_results=k + 2, world=world):
+            for score, g in recall_past_goals(query, num_results=k + 2, world=world, owner=goal.owner or ""):
                 rows.append((score, g.id, g.title or "", g.result or ""))
         lines: list[str] = []
         for score, gid, title, raw_result in rows:
@@ -821,6 +823,7 @@ def _maybe_record_reflexion(
             # mining scopes the resulting guidance so an orchestrator lesson
             # doesn't tax worker prompts of the same model.
             role="orchestrator",
+            owner=getattr(goal, "owner", "") or "", goal_id=goal.id,
         )
 
 
@@ -901,6 +904,8 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
             )
         else:
             facts = world.get_facts()
+        from .fact_revision import is_private_fact_key
+        facts = {key: value for key, value in facts.items() if not is_private_fact_key(key)}
     # Bound the block: facts are a standing brief section on EVERY goal, and
     # the store grows forever (kv_memory, dashboard, MCP all write it). Keep
     # the newest N (get_facts orders newest-first) and cap each value, the
@@ -1039,6 +1044,7 @@ async def _apply_brief_enrichments(
                 channel=channel,
                 user_id=user_id,
                 domain=domain,
+                owner=goal.owner or "",
             )
             ctx_block = reflexion.format_context(recalled, shield=shield)
             if ctx_block:
@@ -1056,6 +1062,7 @@ async def _apply_brief_enrichments(
             _dreamed = dreaming.recall_insights(
                 f"{goal.title}\n{goal.description or ''}", domain=domain,
                 channel=channel, user_id=user_id,
+                owner=goal.owner or "",
             )
             _dream_block = dreaming.format_context(_dreamed, shield=shield)
             if _dream_block:
@@ -1065,7 +1072,9 @@ async def _apply_brief_enrichments(
             # learned from; framed as untrusted self-reported data.
             from . import user_notes as _un
             _notes_block = _un.format_context(
-                _un.notes_for(channel, user_id), shield=shield,
+                _un.notes_for(channel, (goal.owner or "").removeprefix("user:" + str(channel) + ":")
+                              if (goal.owner or "").startswith("user:" + str(channel) + ":account:") else user_id,
+                              execution_identity=not (goal.owner or "").startswith("user:" + str(channel) + ":account:")), shield=shield,
             )
             if _notes_block:
                 brief = brief + "\n" + _notes_block
@@ -1872,6 +1881,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         log.warning("goal #%s blocked by UserPromptSubmit hook", goal_id)
         return "BLOCKED: goal input rejected by a UserPromptSubmit hook"
 
+    from .knowledge_task_context import has_binding, run_analysis
+    if has_binding(goal_id, world):
+        return await run_analysis(world, goal_id, budget, _lifecycle, shield=shield)
+
     _fire_webhook("goal_created", {"goal_id": goal_id, "title": goal.title})
 
     mcp_specs = load_mcp_specs_from_config()
@@ -2544,7 +2557,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 trajectories = [
                     {"goal_id": g.id, "goal": g.title, "success": True, "tools": [],
                      "t": getattr(g, "updated_at", 0.0)}
-                    for g in world.list_goals(status="done", limit=10, order="desc")
+                    for g in world.list_goals(status="done", limit=10, order="desc", owner="")
                 ]
                 # v2: gate on evidence + dedup against the learned-skills store
                 # so the loop doesn't accumulate near-duplicate skills each run.
@@ -2684,6 +2697,12 @@ async def run_goal(
     allowed_suites: frozenset[str] | None = None,
 ) -> str:
     """Hold task execution authority until all finalization work has stopped."""
+    from .goal_mutations import GoalMutationConflict
+    from .task_handoffs import apply_ceiling, require_open
+    try:
+        require_open(world, goal_id)
+    except GoalMutationConflict as exc:
+        return f"BLOCKED: {exc}"
     from .federation_admission import FederationAdmissionRequired, require_execution
     try:
         require_execution(world, goal_id, capability=capability, budget=budget, consume=True)
@@ -2717,17 +2736,30 @@ async def run_goal(
                 except Exception:  # pragma: no cover - status write must not mask the block
                     log.exception("failed to mark goal #%s blocked after admission gate", goal_id)
             return f"BLOCKED: {reason}"
+    from .task_execution_guard import TaskBusy
+    from .task_execution_guard import lease as execution_lease
     from .task_file_recovery import run_scope
+    from .template_connections import SelectionUnavailable, bind_goal
     from .tenant.provider_admission import run_scope as organization_run_scope
     sandbox = sandbox or LocalBackend()
-    with run_scope(world, goal_id, sandbox), organization_run_scope(
-        budget, _execution_principal(user_id=user_id, capability=capability),
-    ):
-        return await _run_goal_accounted(
-            llm, world, budget, goal_id, sandbox, max_depth, conversation_id,
-            channel, user_id, capability, orchestrator_model_override, resume,
-            resume_episode_id, domain, allowed_suites,
-        )
+    try:
+        with execution_lease(world, goal_id):
+            require_open(world, goal_id)
+            apply_ceiling(world, goal_id, budget)
+            with bind_goal(world, goal_id, _execution_principal(user_id=user_id, capability=capability)), run_scope(world, goal_id, sandbox), organization_run_scope(
+                budget, _execution_principal(user_id=user_id, capability=capability),
+            ):
+                return await _run_goal_accounted(
+                    llm, world, budget, goal_id, sandbox, max_depth, conversation_id,
+                    channel, user_id, capability, orchestrator_model_override, resume,
+                    resume_episode_id, domain, allowed_suites,
+                )
+    except SelectionUnavailable as exc:
+        if goal is not None and goal.owner == _execution_principal(user_id=user_id, capability=capability):
+            world.set_goal_status(goal_id, "blocked", result=str(exc))
+        return f"BLOCKED: {exc}"
+    except (TaskBusy, GoalMutationConflict) as exc:
+        return f"BLOCKED: {exc}"
 
 
 def run_goal_sync(*args, **kwargs) -> str:

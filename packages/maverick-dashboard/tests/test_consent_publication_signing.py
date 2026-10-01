@@ -333,7 +333,9 @@ def test_the_server_key_wins_and_cannot_be_replaced_here(monkeypatch, audit_rows
 
 # ------------------------------------------------- the setting takes effect
 def _save(value, confirm=False):
-    return client.post(SETTINGS_API, json={"changes": [{"id": SWITCH, "value": value}],
+    from test_support.settings_pages import save_catalog
+
+    return save_catalog(client, SETTINGS_API, json={"changes": [{"id": SWITCH, "value": value}],
                                            "confirm": confirm})
 
 

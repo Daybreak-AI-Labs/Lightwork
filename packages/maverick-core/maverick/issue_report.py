@@ -28,10 +28,10 @@ def build_issue_url(
     )
 
 
-def build_report(
+def build_report_fields(
     goal, error_events, *, repo: str = DEFAULT_REPO, version: str | None = None,
-) -> str:
-    """Build a prefilled bug-report URL from a goal's failed turns.
+) -> dict[str, str]:
+    """Build the exact, bounded local draft before any external navigation.
 
     ``goal`` exposes ``.id`` / ``.title`` / ``.status``; ``error_events`` is a
     list of objects with ``.agent`` / ``.content``. All free text is scrubbed
@@ -60,4 +60,16 @@ def build_report(
     else:
         lines.append("_(no error events recorded)_")
     lines += ["", "### What I expected", "", "<!-- describe the expected behaviour -->"]
-    return build_issue_url(repo, title, "\n".join(lines))
+    body = "\n".join(lines)
+    if len(body) > _MAX_BODY_CHARS:
+        suffix = "\n\n[Earlier report content exceeds this draft's size; review task history for more.]"
+        body = body[:_MAX_BODY_CHARS - len(suffix)] + suffix
+    return {"title": title, "body": body}
+
+
+def build_report(
+    goal, error_events, *, repo: str = DEFAULT_REPO, version: str | None = None,
+) -> str:
+    """Compatibility entry point for the explicitly requested CLI URL."""
+    draft = build_report_fields(goal, error_events, repo=repo, version=version)
+    return build_issue_url(repo, draft["title"], draft["body"])

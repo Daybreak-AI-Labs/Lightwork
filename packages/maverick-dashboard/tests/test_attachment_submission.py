@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
+from html import unescape
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -76,7 +78,11 @@ def test_missing_companion_is_explicit_before_runner_and_in_model_context(enviro
     assert "has not been read" in receipt["detail"]["message"]
     assert any("Do not imply that its contents were read" in block.get("text", "") for block in blocks)
     page = client.get(f"/chat/goal/{goal_id}")
-    assert "could not be read (unavailable)" in page.text
+    status_panel = re.search(r'<section[^>]*id="submission-status"[^>]*>(.*?)</section>', page.text, re.DOTALL)
+    assert status_panel is not None
+    # Translation spans and bidi-isolated parameters preserve the readable text.
+    visible = unescape(re.sub(r"<[^>]+>", "", status_panel.group(1))).lower()
+    assert "recording.wav" in visible and "could not be read (unavailable)" in visible
     assert world.get_goal(goal_id).status == "pending"
 
 

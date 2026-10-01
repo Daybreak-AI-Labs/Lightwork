@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from test_support.element_text import element_attributes, element_texts
+
 
 def _client():
     from maverick_dashboard.app import app
@@ -25,7 +27,10 @@ def test_goal_log_and_result_are_keyboard_scrollable(monkeypatch, tmp_path):
     assert r.status_code == 200
     assert ('id="events" role="log" aria-live="polite" '
             'aria-label="Goal progress" tabindex="0"') in r.text
-    assert 'id="result" tabindex="0" aria-label="Goal result"' in r.text
+    result, = element_attributes(r.text, "div", {"id": "result"})
+    assert result["tabindex"] == "0"
+    assert result["aria-labelledby"] == "answer-result-label"
+    assert element_texts(r.text, "span", {"id": result["aria-labelledby"]}) == ["Goal result"]
 
 
 def test_audit_results_region_is_focusable_and_named(monkeypatch, tmp_path):

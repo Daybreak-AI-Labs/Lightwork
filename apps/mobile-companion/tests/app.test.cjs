@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { React, act, create, source, deferred, connection, newer, text, tab, button } = require('./helpers.cjs');
+const address = app => app.root.findAllByType('TextInput').find(input => input.props.accessibilityLabel === 'Dashboard address');
 const mocks = settings => ({ './src/settings': settings, '../settings': settings });
 
 test('connection problems read plainly and offer Try again and Check settings', async () => {
@@ -42,7 +43,7 @@ test('every dashboard status becomes a plain sentence without codes', () => {
 });
 
 test('fresh installs open the connection setup without tabs until saved', async () => {
-  let current = { baseUrl: 'http://127.0.0.1:8400', token: '', needsSetup: true }, saved = null, app;
+  let current = { baseUrl: 'http://127.0.0.1:8765', token: '', needsSetup: true }, saved = null, app;
   const App = source('App.tsx', mocks({
     loadSettings: async () => current,
     saveSettings: async value => { saved = value; current = { ...value }; },
@@ -50,8 +51,8 @@ test('fresh installs open the connection setup without tabs until saved', async 
   await act(async () => { app = create(React.createElement(App)); });
   assert.match(text(app), /Connect to Lightwork/);
   assert.equal(tab(app, 'Tasks'), undefined);
-  assert.equal(app.root.findAllByType('TextInput')[0].props.value, '');
-  await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText('lightwork.example.test'); });
+  assert.equal(address(app).props.value, '');
+  await act(async () => { address(app).props.onChangeText('lightwork.example.test'); });
   await act(async () => { await button(app, 'Save and connect').props.onPress(); });
   assert.equal(saved.baseUrl, 'https://lightwork.example.test');
   assert.ok(tab(app, 'Tasks'));
@@ -90,11 +91,11 @@ test('settings load failure prevents overwriting unread values and permits retry
   let app;
   await act(async () => { app = create(React.createElement(SettingsScreen, { onSaved() {} })); });
   assert.match(text(app), /Could not open your saved settings/);
-  assert.equal(app.root.findAllByType('TextInput')[0].props.editable, false);
+  assert.equal(address(app).props.editable, false);
   assert.equal(button(app, 'Save').props.disabled, true);
   await act(async () => { button(app, 'Retry loading settings').props.onPress(); });
-  assert.equal(app.root.findAllByType('TextInput')[0].props.value, connection.baseUrl);
-  assert.equal(app.root.findAllByType('TextInput')[0].props.editable, true);
+  assert.equal(address(app).props.value, connection.baseUrl);
+  assert.equal(address(app).props.editable, true);
   app.unmount();
 });
 
@@ -106,10 +107,10 @@ test('save failure retains entered values and retry success confirms the save', 
   }));
   let app;
   await act(async () => { app = create(React.createElement(SettingsScreen, { onSaved() { callbacks++; } })); });
-  await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText(newer.baseUrl); });
+  await act(async () => { address(app).props.onChangeText(newer.baseUrl); });
   await act(async () => { await button(app, 'Save').props.onPress(); });
   assert.match(text(app), /Could not save your settings/);
-  assert.equal(app.root.findAllByType('TextInput')[0].props.value, newer.baseUrl);
+  assert.equal(address(app).props.value, newer.baseUrl);
   assert.equal(callbacks, 0);
   await act(async () => { await button(app, 'Save').props.onPress(); });
   assert.match(text(app), /Saved\./);
@@ -140,14 +141,14 @@ test('invalid address stays editable with actionable guidance and no false save'
     loadSettings: async () => connection, saveSettings: async () => { saves++; },
   }));
   await act(async () => { app = create(React.createElement(SettingsScreen, { onSaved() { callbacks++; } })); });
-  await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText('http://remote.example.test'); });
+  await act(async () => { address(app).props.onChangeText('http://remote.example.test'); });
   await act(async () => { await button(app, 'Save').props.onPress(); });
   assert.equal(saves, 0);
   assert.equal(callbacks, 0);
   assert.match(text(app), /starts with https:\/\//);
   assert.doesNotMatch(text(app), /Saved\./);
-  assert.equal(app.root.findAllByType('TextInput')[0].props.value, 'http://remote.example.test');
-  await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText(newer.baseUrl); });
+  assert.equal(address(app).props.value, 'http://remote.example.test');
+  await act(async () => { address(app).props.onChangeText(newer.baseUrl); });
   await act(async () => { await button(app, 'Save').props.onPress(); });
   assert.equal(saves, 1);
   assert.equal(callbacks, 1);
@@ -166,7 +167,8 @@ test('confirmation stays mounted during the post-save connection refresh', async
   await act(async () => { tab(app, 'Settings').props.onPress(); });
   await act(async () => { await button(app, 'Save').props.onPress(); });
   assert.match(text(app), /Saved\./);
-  assert.equal(app.root.findAllByType('TextInput').length, 2);
+  assert.ok(address(app));
+  assert.ok(app.root.findAllByType('TextInput').find(input => input.props.accessibilityLabel === 'Access token'));
   await act(async () => { refresh.resolve(newer); });
   assert.match(text(app), /Saved\./);
   app.unmount();
@@ -183,7 +185,7 @@ for (const failure of [false, true]) {
     await act(async () => { app = create(React.createElement(App)); });
     await act(async () => { tab(app, 'Settings').props.onPress(); });
     await act(async () => { await button(app, 'Save').props.onPress(); });
-    await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText(newer.baseUrl); });
+    await act(async () => { address(app).props.onChangeText(newer.baseUrl); });
     await act(async () => { await button(app, 'Save').props.onPress(); });
     await act(async () => { tab(app, 'Tasks').props.onPress(); });
     assert.equal(app.root.findByType('RunsListScreen').props.settings, newer);

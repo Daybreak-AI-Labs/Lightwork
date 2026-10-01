@@ -422,3 +422,10 @@ time.sleep(60)
     result = _execute(real_runner, source)
     assert result.reason == "timeout"
     _assert_no_container(real_runner, result)
+
+
+def test_controller_cancellation_kills_owned_client_without_retry():
+    result = _capture([sys.executable, "-c", "import time;time.sleep(5)"],
+                      _host_environment(), timeout=3, limit=1024, cancelled=lambda: True)
+    assert result.reason == "cancelled"
+    assert result.code != 0

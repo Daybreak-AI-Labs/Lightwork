@@ -60,3 +60,17 @@ def test_keys_match_what_kernel_reads(tmp_path, monkeypatch):
     parsed = tomllib.loads(cfg)["plugins"]
     assert parsed["grant"] == ["subprocess"]
     assert parsed["enforce_permissions"] is True
+
+
+def test_workbench_uses_the_existing_plugins_table():
+    from maverick_installer.wizard import _cfg_plugins
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+    rendered = "\n".join(_cfg_plugins(["example"], ["network"], True, None, workbench=True))
+    assert rendered.count("[plugins]") == 1
+    value = tomllib.loads(rendered)["plugins"]
+    assert value["enabled"] == ["example"]
+    assert value["workbench"] is True
+    assert value["enforce_permissions"] is True

@@ -109,6 +109,17 @@ def build(providers: list[dict], allow: set[str]) -> dict:
                rows.get(name), discovered.get(name) or {}, enabled, now)
         for name in order
     ]
+    from maverick.model_guidance import describe
+    from maverick.model_guidance import enabled as model_guidance_enabled
+    guidance_enabled = model_guidance_enabled()
+    metadata = {}
+    if guidance_enabled:
+        for group in groups:
+            entry = discovered.get(group["name"]) or {}
+            for model in group["models"]:
+                metadata[model["spec"]] = describe(model["spec"], provider=group["name"],
+                    capability=(entry.get("capabilities") or {}).get(model["id"]),
+                    fetched_at=entry.get("fetched_at"), stale=bool(entry.get("stale", True)))
     known = {m["spec"] for g in groups for m in g["models"]}
     custom = [s for s in config_catalog() if s not in known]
     if custom:
@@ -139,6 +150,8 @@ def build(providers: list[dict], allow: set[str]) -> dict:
                if isinstance(e.get("fetched_at"), (int, float))]
     return {
         "model_groups": groups,
+        "model_guidance": metadata,
+        "model_guidance_enabled": guidance_enabled,
         "picker_groups": picker_groups,
         "offered_specs": sorted(offered),
         "discovery_enabled": enabled,

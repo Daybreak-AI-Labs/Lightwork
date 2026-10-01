@@ -179,25 +179,63 @@ def test_export_downloads_the_same_bundle_the_command_writes(env):
     response = env.client.get(f"/api/v1/goals/{env.goal}/export.json")
     assert response.status_code == 200
     assert 'filename="task-' in response.headers["content-disposition"]
-    assert json.loads(response.text) == json.loads(json.dumps(build_goal_bundle(env.world, env.goal), default=str))
+    downloaded = response.json()
+    command = json.loads(json.dumps(build_goal_bundle(env.world, env.goal), default=str))
+    # Separate exports have distinct preparation times, but the same immutable contents.
+    assert downloaded["manifest"].pop("snapshot_prepared_at") > 0
+    assert command["manifest"].pop("snapshot_prepared_at") > 0
+    assert downloaded == command
+    import hashlib
+    assert downloaded["manifest"]["sha256"] == hashlib.sha256(
+        response.content.split(b',"manifest":', 1)[0] + b"}").hexdigest()
     assert env.client.get(f"/api/v1/goals/{env.goal}/export.json", headers=_as("other")).status_code == 404
 
 
 def test_gist_share_needs_confirmation_operate_and_audits_first(env, monkeypatch):
-    import maverick.run_share as run_share
+    import httpx
+    from maverick.run_share import MissingGitHubToken
+    from maverick_dashboard import goal_share_previews as sharing
 
     calls = []
-    monkeypatch.setattr(run_share, "share_run", lambda gid: calls.append(gid) or "https://gist.github.com/x/1")
+    monkeypatch.setattr(sharing, "resolve_token", lambda: "test-gist-token")
+
+    def account(url, **kwargs):
+        assert url == "https://api.github.com/user"
+        return httpx.Response(200, json={"login": "test-account"}, request=httpx.Request("GET", url))
+
+    def upload(payload, token):
+        assert token == "test-gist-token"
+        assert payload["public"] is False
+        assert any(row["kind"] == "goal_shared_gist" and row["phase"] == "dispatch"
+                   for row in env.audit)
+        calls.append(payload)
+        return "https://gist.github.com/x/1"
+
+    monkeypatch.setattr(httpx, "get", account)
+    monkeypatch.setattr(sharing, "upload_payload", upload)
     url = f"/api/v1/goals/{env.goal}/share/gist"
-    assert env.client.post(url, json={"confirm": False}).status_code == 409
-    assert env.client.post(url, json={"confirm": True}, headers=_as("viewer")).status_code == 403
-    assert env.client.post(url, json={"confirm": True}, headers=_as("other")).status_code == 404
+    review = env.client.post(url + "/preview")
+    assert review.status_code == 200, review.text
+    preview = review.json()
+    body = {"preview_id": preview["preview_id"], "sha256": preview["sha256"], "confirm": True}
+    assert env.client.post(url, json={**body, "confirm": False}).status_code == 409
+    assert env.client.post(url, json=body, headers=_as("viewer")).status_code == 403
+    assert env.client.post(url, json=body, headers=_as("other")).status_code == 404
     assert calls == []
-    data = env.client.post(url, json={"confirm": True}).json()
-    assert data == {"shared": True, "url": "https://gist.github.com/x/1"} and calls == [env.goal]
-    assert [r["phase"] for r in env.audit if r["kind"] == "goal_shared_gist"] == ["start", "done"]
-    monkeypatch.setattr(run_share, "share_run", lambda gid: (_ for _ in ()).throw(RuntimeError("no GitHub token")))
-    assert "isn't connected" in env.client.post(url, json={"confirm": True}).json()["message"]
+    data = env.client.post(url, json=body).json()
+    assert data == {"shared": True, "url": "https://gist.github.com/x/1", "attempt": preview["preview_id"]}
+    assert calls == [preview["payload"]]
+    # Lost-response recovery returns the durable receipt and does not upload again.
+    assert env.client.post(url, json=body).json() == data
+    assert len(calls) == 1
+    assert [row["phase"] for row in env.audit if row["kind"] == "goal_shared_gist"] == ["dispatch"]
+
+    def disconnected():
+        raise MissingGitHubToken("no GitHub token")
+
+    monkeypatch.setattr(sharing, "resolve_token", disconnected)
+    missing = env.client.post(url + "/preview")
+    assert missing.status_code == 409 and "not connected" in missing.json()["detail"]
 
 
 # ---- schedule add ------------------------------------------------------------

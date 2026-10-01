@@ -1,0 +1,38 @@
+{
+  "source_head": "6d656645153462af2b83394e359256de70dceab8",
+  "test_file_sha256": "06c605b88d942e104a6128bec87b0890c1fec6ffdc1c08e832266295ef150ab6",
+  "runs": [
+    {
+      "mode": "ordinary",
+      "passed": 9,
+      "result": {
+        "checkout": "Lightwork-staging",
+        "targets": 2,
+        "exit_code": 0,
+        "elapsed_seconds": 19.73,
+        "basetemp": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-ljltl7vy\\t"
+      },
+      "junit_sha256": "ecc6ec1ebe2d3259f3db7acf5aa89370a5fd876dd12897511907a0aeba5cee6f",
+      "log_sha256": "8f5b9b7bab05181255f63cff185c20790628427754e3fccaa93ead42e2ac7dfe"
+    },
+    {
+      "mode": "secure",
+      "passed": 9,
+      "result": {
+        "checkout": "Lightwork-staging",
+        "targets": 2,
+        "exit_code": 0,
+        "elapsed_seconds": 18.19,
+        "basetemp": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-t4m302cn\\t"
+      },
+      "junit_sha256": "b2b841cd6e6e7d2c31281d858252cb89a4197394abeca704865c5db71a70cf4e",
+      "log_sha256": "2a989fb8cdacc975e99a003d230808cd1024ee09ff44f8ca9619cfc9eee99f66"
+    }
+  ],
+  "secure_flags": [
+    "MAVERICK_SECURE_DEFAULT=1",
+    "MAVERICK_TEST_SECURE_DEFAULT=1"
+  ],
+  "syntax": "Parsed by native Python3.10.19",
+  "product_change": false
+}

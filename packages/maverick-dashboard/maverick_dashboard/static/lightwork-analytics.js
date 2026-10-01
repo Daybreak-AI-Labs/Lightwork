@@ -16,8 +16,8 @@
  *     page on another origin are blocked by the browser. Embed on a page the
  *     dashboard serves (see /embed-demo) or behind the same reverse proxy.
  *   - Token exposure: anyone who can read the embedding page's HTML can read
- *     the token and gains full dashboard API access with it. Only embed on
- *     pages whose audience you would trust with the dashboard itself.
+ *     the token and gains its granted API access. Do not put broad credentials
+ *     in shared HTML. Prefer each viewer's own same-origin signed-in session.
  *   - No-token loopback mode needs no token attribute at all.
  *
  * The legacy <maverick-analytics> tag from before the Lightwork rebrand stays
@@ -72,8 +72,11 @@
   }
 
   class LightworkAnalytics extends HTMLElement {
+    static get observedAttributes() { return ['endpoint', 'token']; }
+    attributeChangedCallback() { if (this.isConnected && this.shadowRoot) this.connectedCallback(); }
+    disconnectedCallback() { this._generation = (this._generation || 0) + 1; if (this._controller) this._controller.abort(); }
     connectedCallback() {
-      const root = this.attachShadow({ mode: "open" });
+      const root = this.shadowRoot || this.attachShadow({ mode: "open" });
       root.innerHTML =
         "<style>" +
         ":host { display: block; font: 13px/1.5 -apple-system, 'Segoe UI', Roboto, sans-serif; " +
@@ -86,18 +89,24 @@
         "section { margin-bottom: 0.9rem; }" +
         ".err { color: #f85149; }" +
         "</style>" +
-        '<section><h2>Total spend</h2><div id="spend" class="muted">loading…</div></section>' +
-        '<section><h2>Cost per task, over time</h2><div id="trend" class="muted">loading…</div></section>' +
-        '<section style="margin-bottom:0"><h2>Tasks by status</h2><div id="goals" class="muted">loading…</div></section>';
+        '<section><h2>Recorded runtime spend - all time</h2><div id="spend" class="muted">loading…</div></section>' +
+        '<section><h2>Cost of recent episode attempts</h2><div id="trend" class="muted">loading…</div></section>' +
+        '<section style="margin-bottom:0"><h2>Latest 100 accessible tasks - sample by status</h2><div id="goals" class="muted">loading…</div></section>';
+      const scope = document.createElement('p');
+      scope.textContent = 'Snapshot scope: recorded runtime spend across all time, recent episode costs, and a sample of at most 100 accessible tasks. Older tasks can be omitted; status bars are not workspace-wide totals.';
+      root.appendChild(scope);
+      const freshness = document.createElement('p'); freshness.id = 'freshness'; freshness.setAttribute('role', 'status'); root.appendChild(freshness);
+      const refresh = document.createElement('button'); refresh.id = 'refresh'; refresh.type = 'button'; refresh.textContent = 'Refresh snapshot';
+      refresh.addEventListener('click', () => this._load(root)); root.appendChild(refresh);
       this._load(root);
     }
 
-    _fetch(path) {
+    _fetch(path, signal) {
       const base = (this.getAttribute("endpoint") || "").replace(/\/+$/, "");
       const headers = { Accept: "application/json" };
       const token = this.getAttribute("token");
       if (token) headers.Authorization = "Bearer " + token;
-      return fetch(base + path, { headers }).then((r) => {
+      return fetch(base + path, { headers, signal, cache: 'no-store' }).then((r) => {
         if (!r.ok) {
           const e = new Error(r.status === 401 || r.status === 403
             ? "Sign-in needed — ask your administrator for an access key."
@@ -109,12 +118,20 @@
     }
 
     _load(root) {
+      if (this._controller) this._controller.abort();
+      const controller = this._controller = new AbortController();
+      const generation = this._generation = (this._generation || 0) + 1;
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      const refresh = root.getElementById('refresh'); refresh.disabled = true;
+      root.getElementById('freshness').textContent = 'Refreshing the selected connection snapshot.';
+      let failed = false;
       const put = (id, html, isErr) => {
+        if (generation !== this._generation || !this.isConnected) return;
         const el = root.getElementById(id);
         el.innerHTML = html;
         el.className = isErr ? "err" : "";
       };
-      this._fetch("/api/v1/spend").then((data) => {
+      const spending = this._fetch("/api/v1/spend", controller.signal).then((data) => {
         const total = data.total || {};
         put("spend", "$" + Number(total.dollars || 0).toFixed(4) +
           ' <span class="muted">(' + (Number(total.runs) || 0) + " tasks)</span>");
@@ -123,11 +140,12 @@
           .reverse(); // API returns newest first; plot oldest -> newest
         put("trend", sparklineSVG(costs, 360, 42, "#3fb950"));
       }).catch((e) => {
+        failed = true;
         const msg = plain(e);
         put("spend", esc(msg), true);
         put("trend", esc(msg), true);
       });
-      this._fetch("/api/v1/goals?limit=100").then((goals) => {
+      const tasks = this._fetch("/api/v1/goals?limit=100", controller.signal).then((goals) => {
         const counts = {};
         (goals || []).forEach((g) => {
           const s = g.status || "unknown";
@@ -135,7 +153,14 @@
         });
         put("goals", barsSVG(counts, 360, "#3fb950", "#9aa3ad"));
       }).catch((e) => {
+        failed = true;
         put("goals", esc(plain(e)), true);
+      });
+      Promise.allSettled([spending, tasks]).then(() => {
+        clearTimeout(timeout);
+        if (generation !== this._generation || !this.isConnected) return;
+        refresh.disabled = false;
+        root.getElementById('freshness').textContent = (failed ? 'Snapshot incomplete. Attempted ' : 'Snapshot loaded ') + new Date().toLocaleString() + '. Refresh to check current state.';
       });
     }
   }

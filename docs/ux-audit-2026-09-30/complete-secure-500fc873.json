@@ -1,0 +1,51 @@
+{
+  "source": {
+    "source_head": "500fc87363a492def69722ef19d2cc518d171286",
+    "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-04",
+    "phase": "secure",
+    "faulthandler_timeout": 0,
+    "fatal_tracebacks": true,
+    "started_at": 1790818906.6345577
+  },
+  "process": {
+    "source_head": "500fc87363a492def69722ef19d2cc518d171286",
+    "checkout": "qualification-final-04",
+    "phase": "secure",
+    "exit_code": 1,
+    "basetemp": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-_n33kgz0\\t",
+    "elapsed_seconds": 3940.97,
+    "log": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-04-secure.log"
+  },
+  "counts": {
+    "failure": 3,
+    "error": 0,
+    "skipped": 558,
+    "passed": 40054
+  },
+  "case_count": 40615,
+  "failures": [
+    {
+      "classname": "packages.maverick-dashboard.tests.test_settings_catalog_access",
+      "name": "test_colour_themes_are_made_on_the_page_and_offered_to_everyone"
+    },
+    {
+      "classname": "packages.maverick-dashboard.tests.test_control_plane",
+      "name": "test_build_replay_timeline_and_chain"
+    },
+    {
+      "classname": "packages.maverick-dashboard.tests.test_goal_attachments_download",
+      "name": "test_download_streams_file_without_reading_all_bytes"
+    }
+  ],
+  "both_secure_flags": true,
+  "evidence_hashes": {
+    ".source.json": "929a4161de6093ccaa8f9771fab0abcf1a7a1a0349e68486f40f979a070c03d5",
+    ".result.json": "8886b45a93998af29b4d3babdd0cc25cb8782f3650138b99982979bac21686c0",
+    ".xml": "19573031b18f694be56cacb4e8cb980202f4ba4d11e2e906e64c292556b894e8",
+    ".log": "06105a4e1e3f3234386a6ac4ecd539b793b1603b8996f26f7d0b02340c89e44f"
+  },
+  "complete": true,
+  "successful": false,
+  "worker_losses": 0,
+  "note": "Original failed run retained; later corrected module passes are separate evidence."
+}

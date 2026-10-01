@@ -8,8 +8,12 @@ This local helper does not contact an AI provider or start ordinary work.
 For messages, record whether the requested action happened, whether the message
 was delivered, and the findings for each reply part. Previously confirmed
 deliveries and their receipts must be retained. For collection, the form shows
-the position or time required by that connection. Check the original service,
-enter when it was checked, and supply a reference to the evidence. Unknown
+the position or time required by that connection. For iMessage and Mastodon,
+select **Look up source checkpoints** to read dates and evidence from the exact
+configured source, then select a checkpoint. Lookup fills the observation time
+and evidence reference for your review; it does not confirm the review. Other
+connections already use human dates or retained delivery receipts. You can still
+review the original service and record an explicit manual attestation. Unknown
 outcomes remain unresolved; no choice is silently treated as “did not happen.”
 
 Review the details and explicitly confirm to record them. These are your
@@ -31,13 +35,28 @@ browser-storage copy of these entries.
 
 ## Current product boundary
 
-The structured forms replace the old requirement to edit a data object or
-enter numeric timestamps. Manual source-position numbers are still required
-for some collection sources, including iMessage. Finding those numbers can
-still require technical knowledge; an in-product source lookup or selection
-journey is outstanding. Other recovery controls are not yet operated by the
-local helper. The full recovery page still needs language and visual review.
+The structured forms include read-only checkpoint lookup for the two built-in
+sources that use numeric collection positions: iMessage and Mastodon. Their
+existing adapter identity must match the restored record exactly; disabled,
+changed or unavailable sources are never substituted. iMessage reads only row
+identity/date metadata from the configured local Messages database in SQLite
+read-only mode. Mastodon reads a bounded page of notification metadata using the
+configured account. The result exposes dates and evidence digests, not message
+bodies, sender identities or credentials. Older pages remain explicit.
 
+Selecting a checkpoint means collection resumes after that item; it can skip
+older uncollected work and therefore requires the administrator's separate
+confirmation. Lookup does not start a channel, run its polling loop, change a
+checkpoint, confirm delivery or rewrite prior receipts. Empty, unavailable and
+unknown states are distinct. If lookup fails, keep the item unresolved, check
+source access and retry; a manual advanced source-position review remains
+available. Normal work still requires the separate final recovery decision.
+
+The existing workspace-recovery setting, global administrator permission,
+current recovery context, configured channel enablement and exact account
+binding govern lookup. No new provider credentials or broader source access are
+introduced. Installed-source qualification remains separate from mocked local
+tests.
 Native file and archive tests, API admission tests and synthetic browser checks
 are separate from authenticated installed-application acceptance. These changes
 do not establish that every post-install operation is complete.

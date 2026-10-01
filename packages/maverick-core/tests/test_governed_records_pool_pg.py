@@ -119,6 +119,18 @@ def test_shutdown_stays_pending_until_real_pool_reset_worker_exits(authority, mo
 def test_pool_wait_is_bounded_without_retrying_the_operation(authority):
     factory, _, _ = authority
     backend = factory(timeout=.1)
+    # This checks an exhausted warm pool, not Windows process/socket startup.
+    # Establish the same real pool before measuring its unchanged 100ms lease.
+    transactions = backend._transactions
+    options = transactions._connection_options()
+    pool = pt._shared_pool(transactions._dsn, options, transactions._size,
+                           transactions._timeout, transactions._io_timeout).pool
+    with pool.connection(timeout=5) as connection:
+        connection.execute("SELECT 1")
+    deadline = time.monotonic() + 5
+    while pool.get_stats().get("pool_available", 0) != 1 and time.monotonic() < deadline:
+        time.sleep(.005)
+    assert pool.get_stats().get("pool_available", 0) == 1
     save(backend, "alpha", "kept")
     with tenant_scope(tenant="alpha"), backend._raw_transaction():
         started = time.monotonic()

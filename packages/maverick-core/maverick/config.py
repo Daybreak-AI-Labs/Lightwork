@@ -294,19 +294,30 @@ def _unseal_config_tree(value: object) -> object:
     Dashboard-managed credentials are deployment-global configuration, so they
     must use the process/deployment key even when a request currently carries a
     tenant context.  Legacy plaintext remains readable; a genuine ciphertext
-    that cannot be authenticated fails closed through ``unseal_from_str``.
+    that cannot be authenticated fails closed through ``unseal_many_from_str``.
+    Each key is resolved once within this read, never cached across config
+    reads, so rotations and key-file permission changes remain observable.
     Re-entrant loads (see ``_UNSEALING``) receive the tokens unopened.
     """
     if not _tree_contains_sealed_value(value) or _UNSEALING.get():
         return value
     token = _UNSEALING.set(True)
     try:
+        sealed: dict[str, None] = {}
+
+        def collect(item: object) -> None:
+            if isinstance(item, str) and crypto_at_rest.is_sealed_str(item):
+                sealed[item] = None
+            elif isinstance(item, dict):
+                for child in item.values():
+                    collect(child)
+            elif isinstance(item, (list, tuple)):
+                for child in item:
+                    collect(child)
+
         def walk(item: object) -> object:
             if isinstance(item, str):
-                return (
-                    crypto_at_rest.unseal_from_str(item)
-                    if crypto_at_rest.is_sealed_str(item) else item
-                )
+                return opened.get(item, item)
             if isinstance(item, dict):
                 return {key: walk(child) for key, child in item.items()}
             if isinstance(item, list):
@@ -316,6 +327,8 @@ def _unseal_config_tree(value: object) -> object:
             return item
 
         with crypto_at_rest.deployment_key_scope():
+            collect(value)
+            opened = dict(zip(sealed, crypto_at_rest.unseal_many_from_str(list(sealed)), strict=True))
             return walk(value)
     finally:
         _UNSEALING.reset(token)
@@ -540,10 +553,13 @@ def load_global_config() -> dict:
     # keys / capability+feature toggles merge over config.toml without touching it.
     dash = dashboard_overrides_path()
     if dash.exists():
-        cfg = _deep_merge_config(cfg, _load_config_file(dash))
+        from .config_resets import merge_dashboard
+        cfg = merge_dashboard(cfg, _load_config_file(dash), _deep_merge_config)
     overlay = os.environ.get(CONFIG_OVERLAY_ENV)
     if overlay:
         cfg = _deep_merge_config(cfg, _load_config_file(Path(overlay).expanduser()))
+    from .runtime_configuration import remember
+    remember(cfg, valid=not bool(config_source_errors(include_tenant=False)))
     return cfg
 
 
@@ -1025,7 +1041,12 @@ def get_features() -> dict:
 
     Draft recovery, record search, Action Center, guided onboarding and workflow
     readiness default on. Workspace recovery, project reviews and outcome
-    measurement require explicit opt-in. The older switches default on.
+    measurement and employee companions require explicit opt-in. The older
+    switches default on. Employee companions expose the enrolled person's task
+    status, private companion history controls and optional administrator-permitted
+    AI drafts through the existing writer role. Drafts may use eligible retained
+    history and currently permitted own-task titles/status; they do not enable
+    model tools, task actions, connected sources or learned memory.
     """
     cfg = load_config().get("features", {}) or {}
     return {
@@ -1035,6 +1056,10 @@ def get_features() -> dict:
         "pack_editing": bool(cfg.get("pack_editing", True)),
         "role_editing": bool(cfg.get("role_editing", True)),
         "draft_recovery": cfg.get("draft_recovery", True) is True,
+        "personal_preferences": cfg.get("personal_preferences", True) is True,
+        "configuration_profiles": cfg.get("configuration_profiles", True) is True,
+        "employee_task_diagnostics": cfg.get("employee_task_diagnostics", True) is True,
+        "employee_activation": cfg.get("employee_activation", True) is True,
         "support_center": cfg.get("support_center", True) is True,
         "record_search": cfg.get("record_search", True) is True,
         "workspace_recovery": cfg.get("workspace_recovery", False) is True,
@@ -1043,7 +1068,25 @@ def get_features() -> dict:
         "guided_onboarding": cfg.get("guided_onboarding", True) is True,
         "workflow_readiness": cfg.get("workflow_readiness", True) is True,
         "project_reviews": cfg.get("project_reviews", False) is True,
+        "deliverable_bundles": cfg.get("deliverable_bundles", False) is True,
+        "project_workspaces": cfg.get("project_workspaces", False) is True,
+        "task_handoffs": cfg.get("task_handoffs", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
+        "employee_companions": (
+            not config_source_errors() and cfg.get("employee_companions", False) is True
+        ),
+        "employee_content_access_requests": (
+            not config_source_errors() and cfg.get("employee_content_access_requests", False) is True
+        ),
+        "permission_access_requests": (
+            not config_source_errors() and cfg.get("permission_access_requests", False) is True
+        ),
+        "employee_departures": (
+            not config_source_errors() and cfg.get("employee_departures", False) is True
+        ),
+        "personal_data_controls": (
+            not config_source_errors() and cfg.get("personal_data_controls", False) is True
+        ),
         "copilot_operations": (not config_source_errors() and cfg.get("copilot_operations", False) is True),
         "scheduling": bool(cfg.get("scheduling", True)),
         "triggers": bool(cfg.get("triggers", True)),
@@ -3354,3 +3397,22 @@ def get_value(*, config: dict | None = None) -> dict:
         "currency": str(cfg.get("currency", "USD") or "USD").upper()[:8],
         "departments": departments,
     }
+
+
+EMPLOYEE_ACTIVATION_JOBS = {
+    "weekly_update": "Write a useful weekly update", "project_plan": "Turn notes into a project plan",
+    "privacy_evidence": "Prepare a privacy evidence summary", "security_review": "Prepare a security review brief",
+    "finance_variance": "Explain a simple budget variance",
+}
+
+
+def get_employee_activation_jobs() -> set[str]:
+    """Organization-approved first-job guides; a workspace may only narrow."""
+    key = "employee_activation_jobs"
+    ceiling = load_global_config().get("dashboard", {}).get(key, list(EMPLOYEE_ACTIVATION_JOBS))
+    selected = load_config().get("dashboard", {}).get(key, ceiling)
+    if not isinstance(ceiling, list) or not isinstance(selected, list):
+        return set()
+    if not all(isinstance(item, str) for item in [*ceiling, *selected]):
+        return set()
+    return set(ceiling) & set(selected) & EMPLOYEE_ACTIVATION_JOBS.keys()

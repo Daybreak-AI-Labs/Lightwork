@@ -10,18 +10,20 @@ const readTemplate = name => fs.readFileSync(path.join(templates, name), "utf8")
 
 async function receiveTemplateFixture(draft, existing = {}, serverContext = "ctx") {
   const details = { open: false }, title = { value: existing.title || "" };
+  const references = {value:"[]"};
   const description = { value: existing.description || "", closest: () => details };
   const notice = { hidden: true }, storage = new Map([["lightwork:template-draft:v1", JSON.stringify(draft)]]);
   let submits = 0;
-  const form = { querySelector: selector => selector.startsWith("input") ? title : description, submit() { submits++; } };
+  const form = { querySelector: selector => selector.includes("connection_references") ? references : selector.startsWith("input") ? title : description, submit() { submits++; } };
   for (const input of [title, description]) { input.listeners = {}; input.addEventListener = (type, callback) => { input.listeners[type] = callback; }; input.removeEventListener = type => { delete input.listeners[type]; }; }
-  const context = { Date, fetch: async () => typeof serverContext === "function" ? serverContext(title, description) : ({ ok: true, json: async () => ({ context: serverContext }) }),
+  const context = { window: {}, Date, fetch: async () => typeof serverContext === "function" ? serverContext(title, description) : ({ ok: true, json: async () => ({ context: serverContext }) }),
     sessionStorage: { getItem: key => storage.get(key), removeItem: key => storage.delete(key) },
     document: { querySelector: () => form, getElementById: () => notice } };
   const source = readTemplate("chat.html");
+  vm.runInNewContext(source.slice(source.indexOf("  function chatCopy("), source.indexOf("  // A prepared template")), context);
   const start = source.indexOf("  (async function receiveTemplateDraft()");
   await vm.runInNewContext(source.slice(start, source.indexOf("  })();", start) + 7), context);
-  return { title, description, details, notice, storage, submits };
+  return { title, description, references, details, notice, storage, submits };
 }
 
 test("prepared template becomes a visible ordinary Chat draft once, without submitting", async () => {
@@ -243,10 +245,12 @@ test("readable permission chips retain exact identifiers and remove only the sel
   const allow = new Element(), deny = new Element();
   allow.value = "web_search, send_email"; deny.value = "delete_file";
   const allowed = new Element(), blocked = new Element(), browse = new Element();
-  const context = { pbAllow: allow, pbDeny: deny, Event,
+  const context = { pbAllow: allow, pbDeny: deny, Event, window: {},
     document: { createElement: () => new Element(), querySelector: () => browse,
       getElementById: id => id === "pb-allow-summary" ? allowed : blocked } };
   const source = readTemplate("workflow_builder.html");
+  vm.runInNewContext(source.slice(source.indexOf("    function productText("),
+    source.indexOf("    function setStatus(")), context);
   const splitStart = source.indexOf("    function splitList(");
   const splitEnd = source.indexOf("\n    }", splitStart) + 6;
   vm.runInNewContext(source.slice(splitStart, splitEnd), context);
@@ -282,7 +286,9 @@ test("collapsed chat progress does not repeat raw work-log content and retains e
   const source = readTemplate("chat_goal.html");
   const start = source.indexOf("    (function () {", source.indexOf('// "Show work" strip'));
   const end = source.indexOf("    })();", start) + "    })();".length;
-  vm.runInNewContext(source.slice(start, end), { MutationObserver, document: { getElementById: id => fields[id] } });
+  const context = { MutationObserver, window: {}, document: { getElementById: id => fields[id] } };
+  vm.runInNewContext(source.slice(source.indexOf('    function cgText('), source.indexOf('    // Plain-language failure text')), context);
+  vm.runInNewContext(source.slice(start, end), context);
   observers.get(events)();
   assert.equal(now.textContent.includes("internal_connector"), false);
   assert.equal(events.children[0].textContent, raw, "the complete work log remains available");
@@ -311,4 +317,11 @@ test("a refused chat follow-up shows the server's plain sentence and never raw v
   assert.equal(context.replyFailureText({ status: 422 }, { detail: [{ loc: ["body", "message"], msg: "Please review this message." }] }), "Please review this message.");
   assert.equal(context.replyFailureText({ status: 422 }, { detail: [{ loc: ["body", "message"], msg: "field_required" }] }), "Could not send your message. Generic 422.");
   assert.equal(context.replyFailureText({ status: 500 }, {}), "Could not send your message. Generic 500.");
+});
+
+
+test("prepared account references remain separate from the editable brief",async()=>{
+ const refs=[{name:"chosen",owner:"user:owner",tenant:"one",connector:"slack_api",revision:"fixed"}];
+ const ui=await receiveTemplateFixture({title:"Review",description:"Brief",connection_references:refs,created_at:Date.now(),context:"ctx"});
+ assert.deepEqual(JSON.parse(ui.references.value),refs);assert.equal(ui.description.value,"Brief");assert.equal(ui.submits,0);
 });

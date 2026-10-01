@@ -1,0 +1,4 @@
+{% if journey_i18n %}<script type="application/json" id="lightwork-i18n-data">{{ (journey_i18n_bootstrap if journey_i18n_bootstrap is defined else journey_i18n)|tojson }}</script>{% endif %}
+{% if journey_i18n_asset %}<script src="{{ journey_i18n_asset }}"></script>{% endif %}
+<script src="/static/lightwork-i18n.js"></script>
+<link rel="stylesheet" href="/static/lightwork-i18n.css">

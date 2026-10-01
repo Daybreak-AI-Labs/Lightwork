@@ -162,7 +162,10 @@ def test_unconfigured_root_enters_setup_and_chat_action_is_disabled(
     assert direct_chat.status_code == 200
     assert 'id="model-route-setup"' in direct_chat.text
     assert '<fieldset class="composer__controls" disabled>' in direct_chat.text
-    assert 'href="/start">Continue setup</a>' in direct_chat.text
+    from test_support.element_text import element_texts
+
+    setup_links = element_texts(direct_chat.text, "a", {"href": "/start"})
+    assert setup_links.count("Continue setup") == 1
 
 
 def test_unrelated_codex_login_does_not_complete_anthropic_route(

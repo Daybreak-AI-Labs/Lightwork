@@ -36,7 +36,7 @@ from pydantic import BaseModel, ConfigDict
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from .auth import require_permission
+from .auth import caller_principal, execution_user_id_from_request, require_permission
 from .tools_ops_api import record, same_origin
 
 log = logging.getLogger(__name__)
@@ -282,9 +282,13 @@ async def watch_note_start(name: str, note_id: str, body: ConfirmIn, request: Re
     if await run_in_threadpool(_provider_missing):
         raise HTTPException(503, "Set up an AI provider in Settings before asking Lightwork to "
                                  "work on a note.")
+    owner = caller_principal(request) or ""
+    user_id = execution_user_id_from_request(request)
+    if owner and owner != f"user:{user_id}":
+        raise HTTPException(403, "A current named execution identity is required.")
     record(request, "code_watch_note_start", installation=False, repo=name, note=note_id,
            protect=repo.protect)
-    bg.add_task(_run_feature, name, note["title"], note["task"], None)
+    bg.add_task(_run_feature, name, note["title"], note["task"], None, owner, user_id)
     return {"started": True, "repo": name, "protect": repo.protect}
 
 

@@ -37,10 +37,10 @@
                      That covers company rules that hold work for approval, the safety filter, tools or
                      data transfers that are not allowed, refused consent and emergency stops.') %}
     {{ state('Current state',
-             'Stopped: all work is paused' if halted else (active ~ ' assistant' ~ ('' if active == 1 else 's') ~ ' working now'),
-             badge=(pending ~ ' waiting for approval') if pending else 'Nothing waiting',
-             badge_class='warn' if (halted or pending) else 'ok',
-             copy=total ~ ' intervention' ~ ('' if total == 1 else 's') ~ ' in
+             'Current state unavailable' if halted is none or active is none else ('Stopped: all work is paused' if halted else (active ~ ' assistant' ~ ('' if active == 1 else 's') ~ ' working now')),
+             badge='Approval state unknown' if pending is none else ((pending ~ ' waiting for approval') if pending else 'Nothing waiting'),
+             badge_class='warn' if (source_errors or halted or pending) else 'ok',
+             copy=('Activity state unavailable' if total is none else total) ~ ' intervention' ~ ('' if total == 1 else 's') ~ ' in
                    this window. Each one is kept in the activity log.') }}
     <div class="ov-links">
       <a class="btn btn--ghost" href="/approvals">Approvals</a>
@@ -50,12 +50,14 @@
     </div>
   {% endcall %}
 
+  {% for error in source_errors %}<p role="alert">{{ error }} <a href="/audit">Review activity</a> or <a href="/help">get help</a>.</p>{% endfor %}
   <section class="panel ov-stop" aria-labelledby="ov-stop-title" data-halted="{{ 'true' if halted else 'false' }}">
     <h2 id="ov-stop-title">Emergency stop</h2>
-    {% if halted %}
+    {% if halted is none %}<p role="alert">Emergency-stop state is unknown. Refresh this page before attempting to resume work.</p>
+    {% elif halted %}
     <p><strong>All work is stopped.</strong> No assistant starts or continues work until someone resumes it.</p>
     {% else %}
-    <p>Everything is running normally. Use the emergency stop if assistants are doing something they should not.</p>
+    <p>The emergency stop is not active. Use the emergency stop if assistants are doing something they should not.</p>
     {% endif %}
     {% if can_halt %}
       {% if halted %}
@@ -130,14 +132,14 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="muted">No interventions in this window.</p>
+    <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions in this window.' }}</p>
     {% endif %}
   </div>
 
   <div class="section-head ov-section"><h2>Recent interventions</h2></div>
   <div class="grid">
     <div class="stat" data-halted="{{ 'true' if halted else 'false' }}">
-      <div class="num">{% if halted %}<strong class="danger-text">Stopped</strong>{% else %}Running{% endif %}</div>
+      <div class="num">{% if halted is none %}Unknown{% elif halted %}<strong class="danger-text">Stopped</strong>{% else %}Stop not active{% endif %}</div>
       <div class="label">Emergency stop</div>
     </div>
     <div class="stat">
@@ -186,7 +188,7 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted">No interventions on this day. Nothing was blocked or held.</p>
+      <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions on this day.' }}</p>
       <p><button type="button" class="btn btn--ghost" id="ov-pick-day">Pick another day</button></p>
     {% endif %}
   </div>
@@ -417,18 +419,34 @@
 
     // Charts.
     var B = window.LWBoard;
+    var lastKnown = {};
     function renderBoard(D) {
       var k = document.getElementById('bd-kpis');
       k.textContent = '';
+      var sourceState = D.sources || {};
+      ['audit', 'approvals', 'halt'].forEach(function (name) {
+        var source = sourceState[name] || {state: 'unavailable'};
+        if (source.state === 'available') {
+          lastKnown[name] = {at: source.checked_at, value: name === 'audit' ? D.interventions : (name === 'approvals' ? D.pending_approvals : D.halted)};
+        } else {
+          var notice = document.createElement('p'); notice.setAttribute('role', 'status');
+          notice.textContent = name + ': ' + source.state + '. Current state is not known. ';
+          if (lastKnown[name]) notice.textContent += 'Last known: ' + lastKnown[name].value + ' at ' + new Date(lastKnown[name].at * 1000).toLocaleString() + '. ';
+          var repair = document.createElement('a'); repair.href = source.repair_href || '/help'; repair.textContent = 'Review this source'; notice.appendChild(repair); k.appendChild(notice);
+        }
+      });
       k.appendChild(B.kpi({ label: 'Interventions', value: D.interventions,
+        format: function (v) { return v === null ? 'Unknown' : B.fmt(v); },
         spark: D.daily.map(function (r) { return r.n; }),
         sub: 'times a safety rule stepped in, last ' + D.days + ' days' }));
       k.appendChild(B.kpi({ label: 'Waiting for approval', value: D.pending_approvals,
-        sub: D.pending_approvals ? 'waiting for a person' : 'nothing waiting' }));
+        format: function (v) { return v === null ? 'Unknown' : B.fmt(v); },
+        sub: D.pending_approvals === null ? 'approval records unavailable' : (D.pending_approvals ? 'waiting for a person' : 'nothing waiting') }));
       k.appendChild(B.kpi({ label: 'Emergency stop', value: D.halted ? 1 : 0,
-        format: function () { return D.halted ? 'Stopped' : 'Off'; },
-        sub: D.halted ? 'all work is stopped' : 'work is running normally' }));
+        format: function () { return D.halted === null ? 'Unknown' : (D.halted ? 'Stopped' : 'Off'); },
+        sub: D.halted === null ? 'stop state unavailable — check before relying on it' : (D.halted ? 'all work is stopped' : 'stop is not currently active') }));
       k.appendChild(B.kpi({ label: 'Kinds of safety rule', value: D.by_kind.length,
+        format: function (v) { return sourceState.audit && sourceState.audit.state === 'available' ? B.fmt(v) : 'Unknown'; },
         sub: 'different rules that stepped in' }));
       if (D.interventions) {
         var weekly = D.days > 60;
@@ -440,7 +458,7 @@
           tipHead: function (r) { return (weekly ? 'Week of ' : '') + r.d; },
           xTick: function (r, i, n) { return i % Math.ceil(n / 8) === 0 ? r.d.slice(5) : ''; } });
       } else {
-        B.empty(document.getElementById('bd-interventions'), 'No interventions in this window. Nothing needed stopping.');
+        B.empty(document.getElementById('bd-interventions'), D.degraded ? 'This view is incomplete. Review the source warnings above.' : 'No recorded interventions in this window.');
       }
       if (D.by_kind.length) {
         var kmax = 1;
@@ -452,7 +470,7 @@
                      title: label + ': ' + B.fmt(r.n) };
           }), 'Interventions by safety rule in this window.');
       } else {
-        B.empty(document.getElementById('bd-fired'), 'No interventions in this window. Nothing needed stopping.');
+        B.empty(document.getElementById('bd-fired'), D.degraded ? 'This view is incomplete. Review the source warnings above.' : 'No recorded interventions in this window.');
       }
     }
     if (B) B.attach({ board: 'oversight', render: renderBoard });

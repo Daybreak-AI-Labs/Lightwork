@@ -152,3 +152,61 @@ Engineering outputs per platform:
 
 Lightwork already needs Rust in the toolchain for the agent-shield
 performance core, so adding Tauri is essentially free.
+
+## Interrupted setup and dependency recovery
+
+The app keeps a bounded local `bootstrap-recovery.json` journal in its OS app-data
+directory. It records the pinned commit, last known phase, terminal outcome and
+non-secret local dependency inventory. It does not store bootstrap log payloads,
+GitHub credentials or AI keys. Launch or **Recheck dependencies** checks Git,
+Python 3.10+, pipx and the installed Lightwork package report with owned processes,
+eight-second deadlines and bounded output. A successful version response is
+labelled **responded**, not proof of a complete dependency installation.
+
+Before each start, a five-minute native review binds the inventory to this exact
+bootstrap commit. After interruption, acknowledge that independent OS package or
+elevation operations have finished. **Open OS application management** hands off
+to the platform's existing controls; after repair, return and recheck. Linux uses
+GNOME Software when present and gives manual OS-settings guidance otherwise.
+macOS opens System Settings; dependencies installed by an external package manager
+may still require that manager's administrator. The app never stops unowned OS
+operations or claims a dependency rollback. Successful launch requires the native
+Lightwork dashboard identity handshake, including legitimate onboarding.
+
+## macOS/Linux engineering artifact verification
+
+The supported customer candidate remains Windows. macOS/Linux are explicitly
+engineering source setup: private repository authorization, network, dependency
+installation and readable Python sources remain part of that journey. The GUI
+above provides inventory, interruption recovery and in-app dashboard setup.
+Unsigned workflow artifacts remain unsigned; do not relabel them as customer
+installers or remove platform trust protections to suppress warnings.
+
+Release operators can verify separately approved signed engineering packages with
+`scripts/verify_desktop_artifact.py`. Supply a release-owner public key obtained
+independently of the download and an expected commit/version/target. The tool
+requires Python 3.10+ and [Minisign](https://jedisct1.github.io/minisign/) on the
+operator's machine, verifies a bounded immutable signed manifest, and streams the
+artifact SHA-256. It neither extracts nor executes the selected artifact, and it
+never generates signing keys or changes credentials.
+
+The signed manifest schema is `lightwork.signed-engineering-artifact.v1`, with
+`repository: Daybreak-AI-Labs/Lightwork`, full lowercase `commit`, exact `version`,
+`target`, `support_channel: engineering`, `artifact_filename`, `artifact_sha256`
+and integer `size_bytes`. Sign that manifest through the release owner's existing
+approved process; no signing automation or release credentials are introduced here.
+
+```bash
+python3 scripts/verify_desktop_artifact.py --manifest release.json \
+  --signature release.json.minisig --artifact Lightwork-engineering.tar.gz \
+  --public-key "$REVIEWED_PUBLIC_KEY" --expected-commit "$REVIEWED_COMMIT" \
+  --expected-version "$REVIEWED_VERSION" --target aarch64-apple-darwin
+```
+
+For Linux use the exact approved Linux target. The JSON receipt always labels
+`customer_qualified: false` and `platform_signing_verified: false`. It proves the
+selected signed bytes and release identity, not notarization or native install
+acceptance. [Tauri's macOS signing guidance](https://v2.tauri.app/distribute/sign/macos/)
+describes the separate platform-signing/notarization prerequisites. Production
+certificates, notarization, supported customer target expansion, dependency
+advisory resolution and exact native acceptance remain release prerequisites.

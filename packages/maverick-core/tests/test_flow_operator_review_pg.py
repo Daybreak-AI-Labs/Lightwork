@@ -38,6 +38,8 @@ def reviews(authority, monkeypatch):
     monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "postgres")
     monkeypatch.setenv("MAVERICK_PG_DSN", dsn)
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    # Strict verification requires signed receipts in the ordinary posture too.
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
     monkeypatch.setattr(config, "get_flows", lambda: {"learned_operator_questions": True})
 
     def service():

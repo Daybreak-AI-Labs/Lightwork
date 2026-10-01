@@ -31,3 +31,11 @@ end, { desc = "Arm the Lightwork killswitch" })
 vim.api.nvim_create_user_command("MaverickUnhalt", function()
   mv().unhalt()
 end, { desc = "Clear the Lightwork killswitch" })
+
+vim.api.nvim_create_user_command("MaverickCancelControl", function()
+  mv().cancel_control()
+end, { desc = "Stop waiting for a local command; outcome remains unconfirmed" })
+
+vim.api.nvim_create_autocmd("VimLeavePre", {
+  callback = function() mv().cancel_control(true) end,
+})

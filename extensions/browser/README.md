@@ -14,16 +14,12 @@ progress back into the popup.
 
 1. Start the dashboard locally: `maverick dashboard` (default
    `http://127.0.0.1:8765`).
-2. Set `MAVERICK_DASHBOARD_TOKEN` when starting the dashboard, then opt the
-   server in to extension calls (fail-closed default — see "Security model"):
-   add to `~/.maverick/config.toml`
-
-   ```toml
-   [dashboard]
-   allow_extension = true
-   ```
-
-   or start the dashboard with `MAVERICK_DASHBOARD_ALLOW_EXTENSION=1`.
+2. Open **Settings → Access** in the local dashboard and search for
+   **Allow the browser extension**. An administrator enables this setting and
+   provides the required dashboard access token. If you cannot edit it, ask your
+   workspace administrator. Settings shows deployment overrides; a locked
+   effective value needs the installation administrator. Return to the popup
+   after setup. No token means the extension cannot connect.
 3. Chrome / Edge / Brave: open `chrome://extensions`, enable **Developer
    mode**, click **Load unpacked**, and pick this directory
    (`extensions/browser/`).
@@ -36,9 +32,12 @@ progress back into the popup.
 
 - **Chat**: type a goal, press **Send** (or Ctrl/Cmd-Enter). The popup polls
   the goal's event feed and renders progress + the final result.
-- **Send this page**: ships the active tab's title, URL, any selected text,
-  and a bounded structured snapshot of the page (see below) as goal context,
-  together with whatever you typed in the chat box.
+- **Send this page** opens a preview first. Independently include or remove
+  title/URL, selection, page structure and visible form values. Form values need
+  administrator permission and a fresh choice on each page. Cancel sends no goal.
+  Category preferences contain booleans only; private captured values stay in the
+  open popup until the reviewed context is sent or discarded. The current policy
+  is checked again before starting work. Existing task/tool governance still applies.
 
 ## Structured page context
 
@@ -69,7 +68,7 @@ types, focuses, submits, or otherwise mutates the page.
 
 - **Local only.** `host_permissions` is `http://127.0.0.1/*` — the extension
   *cannot* talk to any other host, and the popup refuses non-loopback
-  dashboard URLs. Nothing ever leaves your machine.
+  dashboard URLs. This describes extension transport only. The dashboard may send reviewed content to its configured AI provider and permitted tools under workspace policy; the popup shows the configured model before submission.
 - **Opt-in CORS, fail-closed.** The dashboard answers extension origins
   (`chrome-extension://…`, `moz-extension://…`) only when the operator sets
   `[dashboard] allow_extension = true` (or

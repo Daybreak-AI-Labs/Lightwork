@@ -8,14 +8,25 @@ const ts = require('typescript');
 
 const root = path.resolve(__dirname, '..');
 const native = Object.fromEntries(
-  ['Pressable', 'SafeAreaView', 'Text', 'TextInput', 'View', 'ScrollView', 'FlatList']
+  ['Pressable', 'SafeAreaView', 'Text', 'TextInput', 'View', 'ScrollView', 'FlatList', 'Switch']
     .map(name => [name, name]),
 );
+native.useColorScheme = () => 'light';
+native.Platform = {OS: 'web'};
+const lifecycleListeners = new Set();
+native.AppState = {
+  currentState: 'active',
+  addEventListener(_name, fn) { lifecycleListeners.add(fn); return {remove() { lifecycleListeners.delete(fn); }}; },
+  emit(state) { this.currentState = state; lifecycleListeners.forEach(fn => fn(state)); },
+};
+native.BackHandler = {addEventListener() { return {remove() {}}; }};
+native.Alert = {alert() {}};
+native.Linking = {openURL: async () => {}};
 native.StyleSheet = { create: value => value, hairlineWidth: 1 };
-native.FlatList = function FlatList({ data, renderItem, ListEmptyComponent }) {
-  return React.createElement('FlatList', null, data.length
+native.FlatList = function FlatList({ data, renderItem, ListEmptyComponent, ListHeaderComponent, ListFooterComponent }) {
+  return React.createElement('FlatList', null, ListHeaderComponent, data.length
     ? data.map((item, index) => React.createElement(React.Fragment, { key: item.id ?? index }, renderItem({ item, index })))
-    : ListEmptyComponent);
+    : ListEmptyComponent, ListFooterComponent);
 };
 
 // Execute real TS/TSX with React's renderer. Device APIs and timers are explicit
@@ -31,19 +42,33 @@ function source(relative, mocks = {}) {
   });
   const module = { exports: {} };
   function requireMock(name) {
-    if (Object.hasOwn(mocks, name)) return mocks[name];
+    if (Object.hasOwn(mocks, name)) {
+      if (name.endsWith('/settings')) return {listProfiles: async () => ({active: '', profiles: []}), InvalidSavedConnection: class extends Error {}, ...mocks[name]};
+      return mocks[name];
+    }
     if (name === 'react') return React;
     if (name === 'react-native') return native;
+    if (name === 'expo-modules-core') return {requireOptionalNativeModule: () => null};
+    if (name === '@react-native-async-storage/async-storage') return {getItem: async () => null, setItem: async () => {}};
     if (name === 'expo-status-bar') return { StatusBar: 'StatusBar' };
     if (name.endsWith('/connectionValidation')) return source('src/connectionValidation.ts', mocks);
+    if (name.endsWith('/nativeTransport')) return source('src/nativeTransport.ts', mocks);
+    if (name.endsWith('/language')) return source('src/language.ts', mocks);
     if (name.endsWith('/api')) return source('src/api.ts', mocks);
     if (name.endsWith('/runReplay')) return source('src/runReplay.ts', mocks);
     if (name.endsWith('/poll')) return source('src/poll.ts', mocks);
     if (name.endsWith('/format')) return source('src/format.ts', mocks);
     if (name.endsWith('/theme')) return source('src/theme.ts', mocks);
     if (name.endsWith('/offlineCache') && Object.hasOwn(mocks, '@react-native-async-storage/async-storage')) return source('src/offlineCache.ts', mocks);
+    if (name.endsWith('/offlineCache')) return {
+      purgeBundle: async () => {}, purgeAppBundles: async () => {}, useCachedBundle: () => null,
+      useConnectionCache: () => ({data: null, savedAt: null}),
+    };
     if (name.endsWith('/components/ConnectionNotice')) return source('src/components/ConnectionNotice.tsx', mocks);
     if (name.endsWith('/components/ui')) return source('src/components/ui.tsx', mocks);
+    if (name === './ui') return source('src/components/ui.tsx', mocks);
+    if (name.endsWith('/components/PairingPanel')) return source('src/components/PairingPanel.tsx', mocks);
+    if (name.endsWith('/components/TaskActions')) return source('src/components/TaskActions.tsx', mocks);
     if (name.includes('/screens/')) {
       const screen = name.split('/').at(-1);
       if (screen === 'SettingsScreen') return source('src/screens/SettingsScreen.tsx', mocks);
@@ -84,4 +109,4 @@ function button(app, label) {
   return app.root.findAllByType('Pressable').find(node =>
     node.findAllByType('Text').some(child => child.props.children === label));
 }
-module.exports = { React, ...renderer, source, deferred, connection, newer, text, tab, button };
+module.exports = { native, React, ...renderer, source, deferred, connection, newer, text, tab, button };

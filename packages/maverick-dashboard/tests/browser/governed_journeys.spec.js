@@ -151,16 +151,20 @@ test('a rejected website address is explained plainly and keeps the other fields
 });
 
 test('workspace recovery creates a real local snapshot and retains signed temporary restore evidence after reload',async({page},info)=>{
+  test.setTimeout(150000); // Real archive verification and fresh-process restore, including Windows filesystem latency.
   await page.setViewportSize({width:375,height:812});await page.goto('/workspace/recovery');
   await expect(page.locator('#wrec-key-create')).toBeEnabled();
   const key=page.waitForEvent('download');await page.locator('#wrec-key-create').click();
   expect((await key).suggestedFilename()).toBe('Lightwork-recovery-key.txt');
-  await expect(page.locator('#wrec-create')).toBeEnabled();await page.locator('#wrec-create').click();
+  await expect(page.locator('#wrec-create')).toBeEnabled();
+  const created=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/api/v1/recovery/snapshots'),{timeout:60000});
+  await page.locator('#wrec-create').click();await ok(await created);
   await expect(page.locator('#wrec-status')).toContainText('Snapshot created and verified');
   await page.locator('#wrec-inspect').click();await expect(page.locator('#wrec-result')).toContainText('files verified');
   const archive=page.waitForEvent('download');await page.locator('#wrec-download').click();
   expect((await archive).suggestedFilename()).toMatch(/^Lightwork-snapshot-.+\.tgz$/);
-  await page.locator('#wrec-drill').click();await expect(page.locator('#wrec-status')).toContainText('Local restore test passed');
+  const restored=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/drill'),{timeout:60000});
+  await page.locator('#wrec-drill').click();await ok(await restored);await expect(page.locator('#wrec-status')).toContainText('Local restore test passed');
   await expect(page.locator('#wrec-result')).toContainText('Your live workspace was not changed');
   const snapshot=await page.locator('#wrec-snapshot').inputValue();
   let reportLoads=0;page.on('request',r=>{if(r.url().endsWith('/drill/report'))reportLoads++;});
@@ -271,7 +275,9 @@ test('recovery comparison pages real protected differences, downloads captured e
   if(await page.locator('#wrec-key-create').isEnabled()){
     const key=page.waitForEvent('download');await page.locator('#wrec-key-create').click();await key;
   }
-  await expect(page.locator('#wrec-create')).toBeEnabled();await page.locator('#wrec-create').click();
+  await expect(page.locator('#wrec-create')).toBeEnabled();
+  const created=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/api/v1/recovery/snapshots'),{timeout:60000});
+  await page.locator('#wrec-create').click();await ok(await created);
   await expect(page.locator('#wrec-status')).toContainText('Snapshot created and verified');
   const snapshot=await page.locator('#wrec-snapshot').inputValue();
   for(let index=0;index<55;index++){

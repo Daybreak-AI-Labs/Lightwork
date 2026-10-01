@@ -105,10 +105,10 @@
 {%- if value is number -%}{{ value }} of 25 ({{ 'Critical' if value >= 20 else 'High' if value >= 12 else 'Medium' if value >= 6 else 'Low' }}){%- else -%}—{%- endif -%}
 {%- endmacro %}
 
-{% call hero('Governed workspaces', 'Security &amp; GRC',
+{% call hero('Governed workspaces', 'Security & GRC',
              subtitle='Your security program',
              lede='One place for security assessments, controls and their evidence, risks and exceptions, fix plans
-                   (POA&amp;M), vendors, policies, incidents and audits. Lightwork prepares the records; people decide
+                   (POA&M), vendors, policies, incidents and audits. Lightwork prepares the records; people decide
                    what applies, accept evidence and approve exceptions.') %}
   {{ state('Current state', 'Lightwork prepares, people decide',
            badge='Every decision is recorded', badge_class='ok',

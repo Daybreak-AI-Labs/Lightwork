@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import contextvars
 import dataclasses
+import hashlib
 import itertools
+import json
 import os
 import threading
 import time
@@ -86,6 +88,23 @@ def _sources() -> dict[str, Any]:
     }
 
 
+def _revision(layers: dict[str, Any] | None = None) -> str:
+    """Opaque review binding, including deployment overrides and environment."""
+    from . import settings_store
+
+    sources = _sources() if layers is None else layers
+    names = {name for setting in catalog.SETTINGS for name in setting.env}
+    names.update(name for provider in settings_store.PROVIDERS for name in provider.get("env", ()))
+    names.update(name for name in os.environ if name.startswith("MAVERICK_"))
+    # Variable references may be chosen by the installer rather than named in
+    # the catalog. Bind their values without ever sending those values out.
+    from maverick.config import _ENV_PATTERN
+    names.update(_ENV_PATTERN.findall(json.dumps(sources, default=str)))
+    environment = {name: os.environ.get(name, "") for name in names}
+    return hashlib.sha256(json.dumps([sources, environment], sort_keys=True,
+                                     default=str).encode()).hexdigest()
+
+
 def _env_locked(setting: catalog.Setting) -> bool:
     return any(os.environ.get(name, "").strip() for name in setting.env)
 
@@ -110,8 +129,11 @@ def _layer_value(setting: catalog.Setting, layer: object) -> tuple[bool, object]
 
 def _resolve_table(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
     """Tables merge like the kernel's config loader: later layers add rows."""
+    from maverick.config_resets import apply_to_base, is_reset
+    masked = is_reset(layers["here"], setting)
+    layers = {**layers, "base": apply_to_base(layers["base"], layers["here"])}
     merged: dict[str, object] = {}
-    source = "default"
+    source = "here" if masked else "default"
     for name, label in (("base", "installer"), ("here", "here")):
         present, value = _layer_value(setting, layers[name])
         if present and isinstance(value, dict):
@@ -121,7 +143,7 @@ def _resolve_table(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str
     if present:
         merged.update(value if isinstance(value, dict) else {})
         return {"source": "deployment", "locked": True, "value": merged, "known": True}
-    return {"source": source, "locked": False, "value": merged, "known": True}
+    return {"source": "here" if masked else source, "locked": False, "value": merged, "known": True}
 
 
 def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
@@ -136,6 +158,9 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
     present, value = catalog.lookup(layers["here"], setting.path)
     if present:
         return {"source": "here", "locked": False, "value": value, "known": True}
+    from maverick.config_resets import is_reset
+    if is_reset(layers["here"], setting):
+        return {"source": "here", "locked": False, "value": _default_in(setting, layers), "known": True}
     present, value = catalog.lookup(layers["base"], setting.path)
     if present:
         return {"source": "installer", "locked": False, "value": value, "known": True}
@@ -423,6 +448,7 @@ def _structured_sources() -> dict[str, Any]:
 
 _ACCESS_SOURCES = {
     "themes": _theme_choices,
+    "preference_themes": lambda: [("system", "Follow system"), *_theme_choices()],
     "capability_roles": _capability_role_choices,
     "workspaces": _workspace_choices,
     "model_roles": _model_role_choices,
@@ -715,7 +741,7 @@ def _working_values(layers: dict[str, Any]) -> dict[str, object]:
 
 def _search_text(setting: catalog.Setting) -> str:
     """What a search matches (the page filters its loaded rows on the same words)."""
-    return " ".join((setting.label, setting.help, setting.aliases, setting.group,
+    return " ".join((setting.id, setting.id.replace(".", " "), setting.label, setting.help, setting.aliases, setting.group,
                      setting.subgroup)).lower()
 
 
@@ -734,6 +760,7 @@ def catalog_state(
     the settings matching every search word, or only those changed here."""
     layers = _sources()
     groups = []
+    revision = _revision(layers)
     filtered = bool(group or words or changed)
     order = itertools.count()
     token = _CHOICE_MEMO.set({})
@@ -755,10 +782,11 @@ def catalog_state(
             for index, setting in settings:
                 rows.append(_row(setting, layers))
                 rows[-1]["order"] = index
+                rows[-1]["revision"] = revision
             groups.append(_group_state(name, rows, parts))
     finally:
         _CHOICE_MEMO.reset(token)
-    return {"groups": groups}
+    return {"groups": groups, "revision": revision}
 
 
 def _parts(settings: list[catalog.Setting]) -> dict[str, int]:
@@ -936,9 +964,11 @@ class SettingChange(BaseModel):
     id: str = Field(min_length=3, max_length=120)
     value: Any = None
     reset: bool = False
+    inherit: bool = False
 
 
 class CatalogUpdate(BaseModel):
+    expected_revision: str = Field(..., pattern=r"^[0-9a-f]{64}$")
     changes: list[SettingChange] = Field(min_length=1, max_length=len(catalog.SETTINGS))
     confirm: bool = False
 
@@ -1071,9 +1101,28 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 "so it can't be changed here.",
             )
         old = state["value"]
+        from maverick.config_resets import METADATA, is_reset, reset_spec
+        marker = (METADATA, setting.id)
+        was_reset = is_reset(layers["here"], setting)
+        if item.reset and item.inherit:
+            raise _Refused(400, "Choose either product default or inherited value.")
+        if item.inherit and setting.control != "table":
+            if not catalog.lookup(layers["here"], setting.path)[0] and not was_reset:
+                continue
+            if was_reset:
+                writes[marker] = None
+            inherited = {**layers, "here": {}}
+            new = _resolve(setting, inherited)["value"]
+            writes[setting.path] = None
+            prospective[setting.id] = new
+            changes.append({"setting": setting, "old": old, "new": new})
+            if catalog.weakens(setting, old, new):
+                weakening.append({"id": setting.id, "label": setting.label,
+                                  "warning": setting.warning})
+            continue
         if setting.control == "table":
             new, table_writes = _plan_table(setting, item, old, layers)
-            if old == new and not (item.reset and table_writes):
+            if old == new and not ((item.reset or item.inherit) and table_writes):
                 continue
             writes.update(table_writes)
             prospective[setting.id] = new
@@ -1085,13 +1134,16 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         if item.reset:
             default = _default_of(setting)
             base_present, base_value = catalog.lookup(layers["base"], setting.path)
-            if _has_partial_default(setting):
+            if default is None and base_present:
+                writes[marker] = reset_spec(setting)
+                writes[setting.path] = None
+                new = None
+            elif _has_partial_default(setting):
                 # Removing the value could let an older default apply: write
                 # the default itself.
                 writes[setting.path] = default
                 new = default
-            elif (not setting.secret and base_present and default is not None
-                    and base_value != default):
+            elif (base_present and default is not None and base_value != default):
                 # The installer chose something else: write the default so the
                 # setting really returns to it.
                 writes[setting.path] = default
@@ -1100,6 +1152,8 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 writes[setting.path] = None  # drop the value set here
                 new = base_value if base_present else default
         else:
+            if was_reset:
+                writes[marker] = None
             try:
                 new = catalog.coerce(_resolved(setting, old), item.value)
                 if setting.control == "document":
@@ -1116,7 +1170,7 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
             else:
                 writes[setting.path] = _sealed_rows(setting, new)
         unchanged = old == new and (not item.reset or state["source"] != "here")
-        if unchanged and (item.reset or not setting.secret):
+        if unchanged and marker not in writes and (item.reset or not setting.secret):
             writes.pop(setting.path, None)
             continue
         prospective[setting.id] = new
@@ -1151,9 +1205,21 @@ def _plan_table(
     base_rows = dict(base_rows) if isinstance(base_rows, dict) else {}
     _present, here_rows = _layer_value(setting, layers["here"])
     here_rows = dict(here_rows) if isinstance(here_rows, dict) else {}
-    if item.reset:
+    from maverick.config_resets import METADATA, is_reset, reset_spec
+    marker = (METADATA, setting.id)
+    was_reset = is_reset(layers["here"], setting)
+    metadata_writes = {}
+    if item.inherit:
+        if was_reset:
+            metadata_writes[marker] = None
         wanted = dict(base_rows)
+    elif item.reset:
+        wanted = dict(_default_of(setting))
+        metadata_writes[marker] = reset_spec(setting)
+        base_rows = {}
     else:
+        if was_reset:
+            base_rows = {}
         try:
             wanted = catalog.coerce(_resolved(setting, before), item.value)
         except catalog.SettingError as exc:
@@ -1173,7 +1239,14 @@ def _plan_table(
                 for name, spec in wanted.items()
             }
         wanted = _keep_named_secrets(setting, before, wanted)
-    writes: dict[tuple[str, ...], object] = {}
+        if setting.id == "dashboard.themes":
+            from .themes import contrast_issues
+
+            for name, palette in wanted.items():
+                issues = contrast_issues(palette)
+                if issues:
+                    raise _Refused(400, f"Theme {name}: " + " ".join(issues))
+    writes: dict[tuple[str, ...], object] = dict(metadata_writes)
     if setting.key_kind == "entries":
         for name in here_rows:
             if name not in wanted or wanted[name] == base_rows.get(name):
@@ -1231,7 +1304,7 @@ def _sealed_named(setting: catalog.Setting, rows: dict) -> dict:
 
 
 def _record(changes: list[dict], actor: str, confirmed: bool,
-            asked: frozenset[str] = frozenset()) -> None:
+            asked: frozenset[str] = frozenset(), before_revision: str = "", after_revision: str = "") -> None:
     from maverick.audit import EventKind, audit_event
 
     for change in changes:
@@ -1243,6 +1316,7 @@ def _record(changes: list[dict], actor: str, confirmed: bool,
             actor=actor,
             section=setting.section,
             key=setting.key,
+            before_revision=before_revision, after_revision=after_revision,
             old=_audit_value(setting, change["old"]),
             new=_audit_value(setting, change["new"]),
             confirmed=bool(confirmed and (setting.id in asked or catalog.weakens(
@@ -1270,120 +1344,97 @@ def _saved_state(before: dict[str, Any] | None, asked: set[str]) -> dict[str, An
     old = {r["id"]: r for g in before["groups"] for r in g["settings"]}
     groups = []
     for group in after["groups"]:
-        rows = [r for r in group["settings"] if r["id"] in asked or old.get(r["id"]) != r]
+        rows = [r for r in group["settings"] if r["id"] in asked or
+                {k: v for k, v in old.get(r["id"], {}).items() if k != "revision"} !=
+                {k: v for k, v in r.items() if k != "revision"}]
         if rows:
             parts = {r["subgroup"] for r in rows}
             groups.append({**group, "settings": rows,
                            "subgroups": [s for s in group["subgroups"] if s["name"] in parts]})
-    return {"groups": groups}
+    return {"groups": groups, "revision": after["revision"]}
 
 
 @router.post(API_PATH)
-async def catalog_update(
-    request: Request, body: CatalogUpdate, full: bool = False,
-) -> JSONResponse:
+async def catalog_update(request: Request, body: CatalogUpdate, full: bool = False) -> JSONResponse:
+    """Validate, commit and record one reviewed revision under the writer lock."""
+    def save() -> JSONResponse:
+        from . import settings_store
+
+        with settings_store._locked(strict=True):
+            return _catalog_update_locked(request, body, full)
+
+    return await run_in_threadpool(save)
+
+
+def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=False) -> JSONResponse:
     """Save or reset settings. The reply carries the rows the save touched
     (``?full=1``: every row, as ``GET`` lists them)."""
     _app()._require_same_origin(request)
-    auth.require_global_permission(request, "admin")
+    auth.require_global_permission(request, 'admin')
     from maverick.audit import AuditRefused
 
     from . import settings_governance_level, settings_store
-
-    try:
-        # Choosing a governance level also applies the settings it stands for.
-        body, learning = await run_in_threadpool(
-            settings_governance_level.expand, body, SettingChange)
-        writes, changes, weakening, _layers = await run_in_threadpool(_plan, body)
-    except settings_governance_level.Unavailable as exc:
-        return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=409,
+    current = _revision()
+    if body.expected_revision != current:
+        state = catalog_state()
+        asked = {item.id for item in body.changes}
+        conflicts = [{"id": row["id"], "label": row["label"],
+                      "current": row["value_text"], "source": row["source_text"]}
+                     for group in state["groups"] for row in group["settings"]
+                     if row["id"] in asked]
+        return JSONResponse({"message": "Settings changed since you reviewed them. Your draft is kept.",
+                             "conflicts": conflicts, "revision": current}, status_code=409,
                             headers={"Cache-Control": "no-store"})
-    except _Refused as exc:
-        # ``message`` is written for people (the page shows it as is).
-        return JSONResponse({"detail": exc.message, "message": exc.message},
-                            status_code=exc.status, headers={"Cache-Control": "no-store"})
     try:
-        access = await run_in_threadpool(_guard, request, writes, changes, _layers) \
-            if changes else []
+        body, learning = settings_governance_level.expand(body, SettingChange)
+        writes, changes, weakening, _layers = _plan(body)
+    except settings_governance_level.Unavailable as exc:
+        return JSONResponse({'detail': str(exc), 'message': str(exc)}, status_code=409, headers={'Cache-Control': 'no-store'})
+    except _Refused as exc:
+        return JSONResponse({'detail': exc.message, 'message': exc.message}, status_code=exc.status, headers={'Cache-Control': 'no-store'})
+    try:
+        access = _guard(request, writes, changes, _layers) if changes else []
     except settings_access_guard.Refused as exc:
-        return JSONResponse({"detail": exc.message, "message": exc.message, "lockout": True},
-                            status_code=409, headers={"Cache-Control": "no-store"})
+        return JSONResponse({'detail': exc.message, 'message': exc.message, 'lockout': True}, status_code=409, headers={'Cache-Control': 'no-store'})
     weakening = weakening + access + settings_governance_level.confirm_items(learning)
-    if weakening and not body.confirm:
-        return JSONResponse(
-            {"detail": "confirmation required", "confirm": weakening},
-            status_code=409,
-            headers={"Cache-Control": "no-store"},
-        )
+    if weakening and (not body.confirm):
+        return JSONResponse({'detail': 'confirmation required', 'confirm': weakening}, status_code=409, headers={'Cache-Control': 'no-store'})
     asked = {item.id for item in body.changes}
-    before = None if full else await run_in_threadpool(catalog_state)
+    before = None if full else catalog_state()
     if not writes:
         if learning:
-            await run_in_threadpool(settings_governance_level.turn_on, learning,
-                                    auth.caller_principal(request) or "local administrator")
-        state = await run_in_threadpool(_saved_state, before, asked)
-        return JSONResponse({"changed": [], "restart": False, **state},
-                            headers={"Cache-Control": "no-store"})
-    actor = auth.caller_principal(request) or "local administrator"
-    # [safety] quorum_required: a protected change waits for other
-    # administrators' approval (settings_quorum); unset, this is a no-op.
+            settings_governance_level.turn_on(learning, auth.caller_principal(request) or 'local administrator')
+        state = _saved_state(before, asked)
+        return JSONResponse({'changed': [], 'restart': False, **state}, headers={'Cache-Control': 'no-store'})
+    actor = auth.caller_principal(request) or 'local administrator'
     from . import settings_quorum
-
-    hold, approved = await run_in_threadpool(settings_quorum.review, changes, actor,
-                                             _audit_value)
+    hold, approved = settings_quorum.review(changes, actor, _audit_value)
     if hold is not None:
-        state = await run_in_threadpool(_saved_state, before, asked)
-        return JSONResponse({"changed": [], "restart": False, "quorum": hold,
-                             "message": hold["message"], **state},
-                            status_code=202, headers={"Cache-Control": "no-store"})
-    payload = {path: (settings_store.REMOVE if value is None else value)
-               for path, value in writes.items()}
+        state = _saved_state(before, asked)
+        return JSONResponse({'changed': [], 'restart': False, 'quorum': hold, 'message': hold['message'], **state}, status_code=202, headers={'Cache-Control': 'no-store'})
+    payload = {path: settings_store.REMOVE if value is None else value for path, value in writes.items()}
     try:
-        previous = await run_in_threadpool(settings_store.set_catalog_values, payload)
+        previous = settings_store.set_catalog_values(payload)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="That setting is not available here.") from exc
+        raise HTTPException(status_code=400, detail='That setting is not available here.') from exc
     except (OSError, TypeError, settings_store.SecuritySuiteConfigUnavailable) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Settings could not be saved right now. Nothing was changed.",
-        ) from exc
+        raise HTTPException(status_code=503, detail='Settings could not be saved right now. Nothing was changed.') from exc
     try:
-        await run_in_threadpool(_record, changes, actor, body.confirm,
-                                frozenset(item["id"] for item in access))
+        _record(changes, actor, body.confirm, frozenset(item['id'] for item in access), current, _revision())
     except AuditRefused as exc:
-        # The activity record refused the change: put the previous values back
-        # so nothing changes without a record of it.
         try:
-            await run_in_threadpool(settings_store.set_catalog_values, previous)
+            settings_store.set_catalog_values(previous)
         except Exception as rollback_exc:
-            raise HTTPException(
-                status_code=500,
-                detail="The change could not be recorded and could not be undone.",
-            ) from rollback_exc
-        raise HTTPException(
-            status_code=503,
-            detail="The change could not be recorded, so it was undone.",
-        ) from exc
-    await run_in_threadpool(settings_quorum.settle, approved)
+            raise HTTPException(status_code=500, detail='The change could not be recorded and could not be undone.') from rollback_exc
+        raise HTTPException(status_code=503, detail='The change could not be recorded, so it was undone.') from exc
+    settings_quorum.settle(approved)
     if learning:
         try:
-            await run_in_threadpool(settings_governance_level.turn_on, learning, actor)
+            settings_governance_level.turn_on(learning, actor)
         except (RuntimeError, OSError) as exc:
-            raise HTTPException(
-                status_code=503,
-                detail="The settings were saved, but the learning systems for this level "
-                       "could not be turned on. Turn them on from the Learning page.",
-            ) from exc
-    state = await run_in_threadpool(_saved_state, before, asked)
-    return JSONResponse(
-        {
-            "changed": [c["setting"].id for c in changes],
-            "restart": any(c["setting"].restart for c in changes),
-            **state,
-        },
-        headers={"Cache-Control": "no-store"},
-    )
-
+            raise HTTPException(status_code=503, detail='The settings were saved, but the learning systems for this level could not be turned on. Turn them on from the Learning page.') from exc
+    state = _saved_state(before, asked)
+    return JSONResponse({'changed': [c['setting'].id for c in changes], 'restart': any(c['setting'].restart for c in changes), **state}, headers={'Cache-Control': 'no-store'})
 
 # ---------------------------------------------------------------- checks
 class SettingCheck(BaseModel):

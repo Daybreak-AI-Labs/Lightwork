@@ -74,6 +74,7 @@ from .auth import (
     SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
     assert_goal_access,
+    assert_template_access,
     auth_genuinely_off,
     caller_principal,
     caller_role,
@@ -93,8 +94,16 @@ from .auth import (
     stored_automation_identity,
     websocket_caller_principal,
 )
+from .budget_guidance_api import router as budget_guidance_router
+from .conversation_inbox_api import router as conversation_inbox_router
+from .conversation_organization import present_title as _conversation_title
+from .conversation_organization import router as conversation_organization_router
+from .cost_reconciliation_api import router as cost_reconciliation_router
+from .deliverable_bundles_api import router as deliverable_bundles_router
+from .draft_api import context_for as _conversation_context
 from .draft_api import page_context as _draft_page_context
 from .draft_api import router as draft_router
+from .employee_activation import router as employee_activation_router
 from .health_routes import (
     health_response as _health_response,
 )
@@ -104,16 +113,28 @@ from .health_routes import (
 from .health_routes import (
     readiness_response as _readiness_response,
 )
+from .i18n_journeys import region as _journey_region
+from .i18n_journeys import text as _journey_text
+from .model_tests_api import router as model_tests_router
+from .my_work_api import router as my_work_router
 from .oidc_login import router as oidc_login_router
 from .outcome_accounting_api import router as outcome_accounting_router
 from .outcome_pilot_costs_api import router as outcome_pilot_costs_router
 from .outcome_pilots_api import router as outcome_pilots_router
+from .preferences_api import display_context as _display_preference_context
+from .preferences_api import router as preferences_router
+from .product_operations import router as product_operations_router
 from .project_reviews_api import router as project_reviews_router
+from .project_workspaces_api import router as project_workspaces_router
 from .record_search_api import page_context as _record_search_page_context
 from .record_search_api import router as record_search_router
 from .route_identity import (
     stabilize_effective_route_names as _stabilize_effective_route_names,
 )
+from .settings_experience import router as settings_experience_router
+from .settings_runtime_status import router as settings_runtime_router
+from .task_diagnostics import router as task_diagnostics_router
+from .task_handoffs_api import router as task_handoffs_router
 
 _MAX_USER_SPEND_METRIC_SERIES = _health_routes.MAX_USER_SPEND_METRIC_SERIES
 _USER_SPEND_OVERFLOW_LABEL = _health_routes.USER_SPEND_OVERFLOW_LABEL
@@ -267,6 +288,10 @@ from .themes import custom_themes, theme_css  # noqa: E402
 
 templates.env.globals.setdefault("t", lambda key: _i18n_t(key, "en"))
 
+templates.env.globals.setdefault("ui", _journey_region)
+templates.env.globals.setdefault("ut", _journey_text)
+templates.env.globals.setdefault("ul", lambda source: "en")
+
 _VALID_THEMES = {"dark", "light", "solarized", "hicontrast"}
 _VALID_FONTS = {"default", "dyslexic"}
 _VALID_DENSITIES = {"comfortable", "compact"}
@@ -290,11 +315,13 @@ def _resolve_pref(
     [dashboard] config → default ladder, accepting only values in ``valid``.
     ``config_key=None`` skips the config step (cookie-only prefs)."""
     q = (request.query_params.get(param) or "").strip().lower()
-    if q in valid:
+    if q in valid and not caller_principal(request):
         return q
-    c = (request.cookies.get(cookie) or "").strip().lower()
-    if c in valid:
-        return c
+    from .preferences_api import resolved_display
+
+    preferred = resolved_display(request, param)
+    if preferred in valid or (param == "theme" and preferred == "system"):
+        return preferred
     if config_key is not None:
         try:
             from maverick.config import load_config
@@ -352,6 +379,7 @@ def _resolve_font(request: Request) -> str:
 def _theme_context(request: Request) -> dict:
     from .i18n import content_lang, dir_for, resolve_lang
     from .i18n import t as _t
+    from .i18n_journeys import context as journey_context
 
     lang = resolve_lang(request)
     custom = custom_themes()
@@ -369,6 +397,7 @@ def _theme_context(request: Request) -> dict:
         "page_lang": content_lang(lang),
         "dir": dir_for(lang),
         "t": lambda key: _t(key, lang),
+        **journey_context(request, lang),
     }
 
 
@@ -416,6 +445,14 @@ def _nav_context(request: Request) -> dict:
     # The Ctrl+K page finder: same role resolution, but it also indexes pages
     # folded out of the rail (in_nav: False) -- reachable must mean searchable.
     finder = ui_visibility.finder_pages(role, scope_roles=scope_roles)
+    from .employee_companion_api import navigation_available
+
+    unavailable = {path for path, admin in (("/companion", False), ("/companion/admin", True))
+                   if not navigation_available(request, admin=admin)}
+    for collection in (groups, finder):
+        for group in collection:
+            group["links"] = [link for link in group["links"] if link["href"] not in unavailable]
+        collection[:] = [group for group in collection if group["links"]]
     # The topbar's Settings gear follows the same policy as the sidebar entry.
     show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
     # A deployment-wide halt backend is a global control even when the caller
@@ -472,7 +509,13 @@ def _workspace_context(request: Request) -> dict:
     except Exception:  # pragma: no cover -- shell rendering stays fail-soft
         tenant_id = ""
     source = str(getattr(request.state, "workspace_tenant_source", "") or "")
+    workspace_name = "Main workspace"
+    if tenant_id:
+        from maverick.tenant.registry import get_tenant
+        record = get_tenant(tenant_id)
+        workspace_name = (record.display_name or record.id) if record else "Selected workspace"
     return {
+        "workspace_tenant_name": workspace_name,
         "workspace_tenant_id": tenant_id,
         "workspace_tenant_selection": tenant_id
         if source in {"local_selection", "principal_selection"}
@@ -696,6 +739,7 @@ async def _lifespan(app: FastAPI):
 
     from ._lifecycle import ShutdownSupervisor, register_main_components, shutdown_seconds
 
+    runtime_receipt = None
     previous = getattr(app.state, "lifecycle_supervisor", None)
     if previous is not None:
         previous.assert_restart_allowed()
@@ -720,6 +764,13 @@ async def _lifespan(app: FastAPI):
         await _reclaim_orphans()
         await _install_queue_dispatcher()
         await _install_automation_scheduler()
+        try:
+            from .personal_notification_scheduler import start_personal_notification_scheduler
+            await run_in_threadpool(start_personal_notification_scheduler)
+        except Exception as exc:
+            log.warning("Personal notification observer did not start (%s)", type(exc).__name__)
+        from .conversation_inbox_scheduler import start_conversation_inbox_scheduler
+        await run_in_threadpool(start_conversation_inbox_scheduler)
         _warm_goal_runtime()
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
@@ -806,8 +857,12 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("voice STT warm-up not started")
         supervisor.phase = "running"
+        from maverick.runtime_configuration import start as start_runtime_receipt
+        runtime_receipt = start_runtime_receipt("dashboard")
         yield
     finally:
+        if runtime_receipt is not None:
+            runtime_receipt.close()
         await supervisor.stop()
 
 
@@ -1067,12 +1122,31 @@ install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
 app.include_router(draft_router)
+
+app.include_router(preferences_router)
+app.include_router(budget_guidance_router)
+app.include_router(model_tests_router)
+app.include_router(cost_reconciliation_router)
+app.include_router(task_diagnostics_router)
+app.include_router(employee_activation_router)
+app.include_router(product_operations_router)
+
+app.include_router(settings_experience_router)
+app.include_router(settings_runtime_router)
+templates.context_processors.append(_display_preference_context)
 app.include_router(record_search_router)
+app.include_router(conversation_inbox_router)
 app.include_router(action_center_router)
 app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)
 app.include_router(outcome_pilot_costs_router)
 app.include_router(project_reviews_router)
+app.include_router(deliverable_bundles_router)
+app.include_router(project_workspaces_router)
+app.include_router(task_handoffs_router)
+
+app.include_router(my_work_router)
+app.include_router(conversation_organization_router)
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
@@ -1404,6 +1478,19 @@ from .privacy_notice_publication_targets_api import (  # noqa: E402
 from .settings_all_page import router as settings_all_router  # noqa: E402
 
 app.include_router(settings_all_router)
+from .employee_companion_api import router as employee_companion_router  # noqa: E402
+
+app.include_router(employee_companion_router)
+from .content_access_api import router as content_access_router  # noqa: E402
+from .employee_departures_api import router as employee_departures_router  # noqa: E402
+from .personal_data_api import router as personal_data_router  # noqa: E402
+
+app.include_router(content_access_router)
+app.include_router(employee_departures_router)
+from .permission_requests_api import router as permission_requests_router  # noqa: E402
+
+app.include_router(permission_requests_router)
+app.include_router(personal_data_router)
 # Settings > License (/settings/license + its install, sign and key-pair API).
 from .license_ops_api import router as license_ops_router  # noqa: E402
 
@@ -2135,6 +2222,9 @@ async def bearer_auth(request: Request, call_next):
         # a private bearer. The admin policy-publication prefix remains
         # under normal dashboard authentication.
         or request.url.path.startswith("/api/v1/public/policies/")
+        # Pairing bootstrap authenticates its own opaque, expiring device proof.
+        # Browser approval and device administration remain under normal auth.
+        or request.url.path.startswith("/api/v1/devices/pairing/")
     ):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
@@ -2266,7 +2356,7 @@ async def bearer_auth(request: Request, call_next):
         # A non-static bearer may be an OIDC token in a mixed deployment. Let
         # the global dependency verify it; malformed/invalid credentials never
         # fall back to proxy or cookie identity there.
-        if _configured_oidc_bearer_present(request):
+        if header_token.startswith("lwdev1_") or _configured_oidc_bearer_present(request):
             return await call_next(request)
         _auth_metrics.record_auth_failure("bad_token")
         return JSONResponse({"detail": "unauthorized"}, status_code=401)
@@ -2565,15 +2655,34 @@ async def flow_payload_exception_handler(request: Request, exc: FlowPayloadError
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Catch-all so we never serve the default white "Internal Server Error"."""
-    log.exception("unhandled dashboard exception on %s", request.url.path)
+    from datetime import datetime, timezone
+    from secrets import token_hex
+
+    reference = "lw-failure-" + token_hex(16)
+    occurred_at = datetime.now(timezone.utc).isoformat()
+    route = getattr(request.scope.get("route"), "path", "unmatched route")
+    log.error("dashboard failure reference=%s time=%s action=%s route=%s",
+              reference, occurred_at, request.method, route,
+              exc_info=(type(exc), exc, exc.__traceback__))
+    headers = {"Cache-Control": "private, no-store", "X-Lightwork-Failure-Reference": reference}
     if _wants_html(request):
-        return templates.TemplateResponse(
-            request,
-            "500.html",
-            {"path": request.url.path},
-            status_code=500,
-        )
-    return JSONResponse({"detail": "internal server error"}, status_code=500)
+        try:
+            return templates.TemplateResponse(
+                request, "500.html", {"failure_reference": reference, "failure_time": occurred_at,
+                                      "uncertain_mutation": request.method not in {"GET", "HEAD"}},
+                status_code=500, headers=headers,
+            )
+        except Exception:
+            # Deliberately independent of the normal layout and its data reads.
+            return HTMLResponse(
+                '<!doctype html><html lang="en"><meta charset="utf-8"><title>Lightwork needs attention</title>'
+                '<h1>Something went wrong</h1><p>Check the current state before repeating a change.</p>'
+                f'<p>Support reference: {reference}</p><p>Time: {occurred_at}</p>'
+                f'<a href="/help?failure={reference}">Open Help</a></html>',
+                status_code=500, headers=headers,
+            )
+    return JSONResponse({"detail": "The request could not be completed. Check its current state before retrying a change.",
+                         "failure_reference": reference, "occurred_at": occurred_at}, status_code=500, headers=headers)
 
 
 @app.middleware("http")
@@ -3062,7 +3171,9 @@ def overview(request: Request) -> HTMLResponse:
     }
     # The executive board (charts, KPI deltas, recent list) renders client-side
     # from GET /api/v1/dashboards/overview; the page only needs the hero counts.
-    facts = w.get_facts()
+    # Reserved task/user memory is private; the overview is shared business context.
+    facts = {key: value for key, value in w.get_facts().items()
+             if not str(key).startswith(("goal:", "user:"))}
     skills = _load_skills()
     return templates.TemplateResponse(
         request,
@@ -3170,10 +3281,21 @@ async def perf_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "perf.html", {})
 
 
+@app.get("/static/lightwork-task-views.js")
+def task_views_script():
+    return FileResponse(Path(__file__).parent / "static" / "lightwork-task-views.js", media_type="application/javascript")
+
+
 @app.get("/goals", response_class=HTMLResponse)
 def goals_page(request: Request) -> HTMLResponse:
     goals = _world().list_goals(owner=goal_owner_filter(request), limit=200, order="desc")
-    return templates.TemplateResponse(request, "goals.html", {"goals": goals})
+    from .preferences_api import _principal
+    try:
+        _principal(request)
+        task_views_available = True
+    except HTTPException:
+        task_views_available = False
+    return templates.TemplateResponse(request, "goals.html", {"goals": goals, "task_views_available": task_views_available})
 
 
 @app.get("/projects", response_class=HTMLResponse)
@@ -3584,7 +3706,7 @@ async def learned_page(request: Request) -> HTMLResponse:
         request,
         "learned.html",
         {
-            **_learned_snapshot(include_pending_items=can_manage),
+            **_learned_snapshot(include_pending_items=can_manage, request=request),
             "can_manage": can_manage,
             "can_remove_tools": has_permission(request, "admin"),
         },
@@ -3593,7 +3715,10 @@ async def learned_page(request: Request) -> HTMLResponse:
 
 @app.get("/facts", response_class=HTMLResponse)
 def facts_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "facts.html", {"facts": _world().get_facts()})
+    from .draft_api import context_for
+    return templates.TemplateResponse(request, "facts.html", {
+        "fact_records": _world().fact_records(limit=51, shared_only=True), "fact_context": context_for(request),
+    })
 
 
 @app.get("/spend", response_class=HTMLResponse)
@@ -3606,6 +3731,8 @@ def spend_page(request: Request) -> HTMLResponse:
     owner = goal_owner_filter(request)
     w = _world()
     episodes = w.list_episodes(limit=50, owner=owner)
+    from maverick.cost_provenance import for_goal, runtime_basis
+    episode_provenance = {e.id: {"runtime_basis": runtime_basis(e.cost_dollars), **for_goal(e.goal_id)} for e in episodes}
     # Task titles for the table (the episodes are already scoped to the caller).
     goal_titles: dict[int, str] = {}
     for gid in {e.goal_id for e in episodes if e.goal_id}:
@@ -3626,7 +3753,7 @@ def spend_page(request: Request) -> HTMLResponse:
         request,
         "spend.html",
         {"episodes": episodes, "total": w.total_spend(owner=owner),
-         "goal_titles": goal_titles, "csv_months": months},
+         "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance},
     )
 
 
@@ -5546,7 +5673,7 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     days = max(1, min(days, 730))
     resolution = _value_assumptions_resolution()
     cfg = resolution["effective_assumptions"]
-    report = savings_mod.compute(_world(), window_days=days, cfg=cfg)
+    report = savings_mod.compute(_world(), window_days=days, cfg=cfg, owner=goal_owner_filter(request))
     return templates.TemplateResponse(
         request,
         "savings.html",
@@ -5575,16 +5702,22 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     # Keep both the statement and its itemized export within the same
     # principal boundary as the spend APIs. Tenant scoping alone is not enough:
     # a tenant can contain many mutually untrusted dashboard users.
-    episodes = w.list_episodes(limit=10_000, owner=goal_owner_filter(request))
+    from maverick.episode_reporting import iter_episodes
+
+    owner = goal_owner_filter(request)
+    episodes = iter_episodes(w, owner=owner, finished_only=True)
     months: dict[str, dict] = {}
     for e in episodes:
         if not e.ended_at:
             continue
         m = datetime.fromtimestamp(e.started_at, timezone.utc).strftime("%Y-%m")
         b = months.setdefault(
-            m, {"period": m, "cost": 0.0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
+            m, {"period": m, "cost": 0.0, "unknown_cost_runs": 0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
         )
-        b["cost"] += e.cost_dollars
+        if e.cost_dollars is None:
+            b["unknown_cost_runs"] += 1
+        else:
+            b["cost"] += e.cost_dollars
         b["input_tokens"] += e.input_tokens
         b["output_tokens"] += e.output_tokens
         b["runs"] += 1
@@ -5612,36 +5745,50 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
 
     if format == "csv":
         sel = period or datetime.now(timezone.utc).strftime("%Y-%m")
-        rows = [
-            "Run,Task,Started,Finished,Result,"
-            "Cost (USD),Input tokens,Output tokens,Tool uses"
-        ]
-        for e in episodes:
-            if not e.ended_at:
-                continue
-            started = datetime.fromtimestamp(e.started_at, timezone.utc)
-            if started.strftime("%Y-%m") != sel:
-                continue
-            ended = datetime.fromtimestamp(e.ended_at, timezone.utc).isoformat()
-            rows.append(
-                f"{e.id},{e.goal_id},{started.isoformat()},{ended},"
-                f"{e.outcome or ''},{e.cost_dollars:.6f},"
-                f"{e.input_tokens},{e.output_tokens},{e.tool_calls}"
-            )
-        return PlainTextResponse(
-            "\n".join(rows) + "\n",
-            media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="invoice-{tenant}-{sel}.csv"'},
-        )
+        try:
+            start = datetime.strptime(sel, "%Y-%m").replace(tzinfo=timezone.utc)
+            if start.strftime("%Y-%m") != sel:
+                raise ValueError("invalid month")
+            end = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
+        except ValueError:
+            raise HTTPException(422, "Choose a billing month in year-month order.") from None
+
+        def rows():
+            import csv
+            import io
+
+            from maverick.cost_provenance import EXPORT_HEADERS, export_fields
+
+            from .audit_actions_api import csv_safe
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(["Run", "Task", "Started", "Finished", "Result", "Cost (USD)",
+                             "Input tokens", "Output tokens", "Tool uses", *EXPORT_HEADERS])
+            yield buf.getvalue()
+            for episode in iter_episodes(w, owner=owner, since=start.timestamp(), until=end.timestamp(), finished_only=True):
+                buf.seek(0)
+                buf.truncate(0)
+                writer.writerow([episode.id, episode.goal_id,
+                                 datetime.fromtimestamp(episode.started_at, timezone.utc).isoformat(),
+                                 datetime.fromtimestamp(episode.ended_at, timezone.utc).isoformat(),
+                                 csv_safe(episode.outcome or ""),
+                                 "unknown" if episode.cost_dollars is None else f"{episode.cost_dollars:.6f}",
+                                 episode.input_tokens, episode.output_tokens, episode.tool_calls,
+                                 *export_fields(episode)])
+                yield buf.getvalue()
+        safe_tenant = "".join(c for c in tenant if c.isalnum() or c in "-_")[:64] or "workspace"
+        return StreamingResponse(rows(), media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="statement-{safe_tenant}-{sel}.csv"',
+                     "Cache-Control": "private, no-store"})
 
     cur = datetime.now(timezone.utc).strftime("%Y-%m")
     current = months.get(
-        cur, {"period": cur, "cost": 0.0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
+        cur, {"period": cur, "cost": 0.0, "unknown_cost_runs": 0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
     )
     prev_keys = sorted([m for m in months if m < cur], reverse=True)
     previous = months.get(prev_keys[0]) if prev_keys else None
     delta_pct = None
-    if previous and previous["cost"] > 0:
+    if previous and previous["cost"] > 0 and not previous["unknown_cost_runs"] and not current["unknown_cost_runs"]:
         delta_pct = round((current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
     series = [months[k] for k in sorted(months, reverse=True)][:12]
     from maverick.quotas import UsageLedger, UsageLedgerError
@@ -5758,8 +5905,6 @@ async def audit_page(request: Request) -> HTMLResponse:
     # view-only caller reads the full audit log via the HTML page despite the
     # API denying them.
     require_permission(request, "audit")
-    from collections import deque
-
     from maverick.audit import default_audit_log
 
     from . import audit_actions_api as _audit_plain
@@ -5775,8 +5920,16 @@ async def audit_page(request: Request) -> HTMLResponse:
             status_code=400,
             detail="Invalid audit day. Enter a real date in YYYY-MM-DD format.",
         )
-    since = safe_audit_day(request.query_params.get("since"))
-    until = safe_audit_day(request.query_params.get("until"))
+    raw_since, raw_until = request.query_params.get("since"), request.query_params.get("until")
+    since, until = safe_audit_day(raw_since), safe_audit_day(raw_until)
+    filter_error = ""
+    if (raw_since and since is None) or (raw_until and until is None):
+        filter_error = "Enter a real From and To date in year-month-day order. No search was performed."
+    elif since and until and since > until:
+        filter_error = "From must be on or before To. No search was performed."
+    before_event = request.query_params.get("before_event", "")
+    if before_event and (len(before_event) != 64 or any(c not in "0123456789abcdef" for c in before_event)):
+        filter_error = "This continuation is invalid. Start a new activity search."
     audit_log = default_audit_log()
     from maverick.audit.segments import ReadReport
 
@@ -5794,42 +5947,38 @@ async def audit_page(request: Request) -> HTMLResponse:
         return not needle or (needle in json.dumps(e, default=str).lower()
                               or needle in _audit_plain.kind_label(e.get("kind")).lower())
 
-    window_note = ""
-    if since or until:
-        from maverick.audit.export import iter_audit_events
+    from datetime import datetime, timezone
+    from urllib.parse import urlencode
 
-        def _window() -> tuple[list[dict], set[str], set[str], int, bool]:
-            # Filters apply while scanning, and the newest matches are kept,
-            # so a busy range never hides recent events behind old ones.
-            kept: deque = deque(maxlen=n)
-            seen_kinds: set[str] = set()
-            seen_people: set[str] = set()
-            matched = 0
-            for scanned, e in enumerate(iter_audit_events(since=since, until=until,
-                                                          report=read_report)):
-                if scanned >= _AUDIT_RANGE_SCAN_LIMIT:
-                    return list(kept), seen_kinds, seen_people, matched, True
-                if e.get("kind"):
-                    seen_kinds.add(str(e.get("kind")))
-                if len(seen_people) < 1000:
-                    seen_people.add(_audit_plain.event_person(e))
-                if _matches(e):
-                    matched += 1
-                    kept.append(e)
-            return list(kept), seen_kinds, seen_people, matched, False
+    from maverick.audit.export import iter_audit_events
 
-        events, kind_set, people_set, matched, cut = await run_in_threadpool(_window)
-        if cut:
-            window_note = ("These dates hold more activity than the page can search at once, "
-                           "so later events may be missing. Choose fewer days to see everything.")
-        elif matched > n:
-            window_note = (f"Showing the latest {n} of {matched} matching events. "
-                           "Choose fewer days or add a filter to see earlier ones.")
-    else:
-        events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
-        kind_set = {str(e.get("kind")) for e in events if e.get("kind")}
-        people_set = {_audit_plain.event_person(e) for e in events}
-        events = [e for e in events if _matches(e)]
+    from .audit_search import search_events
+
+    window_note, next_href = "", None
+    events, kind_set, people_set = [], set(), set()
+    if not filter_error:
+        scan_since, scan_until = since, until
+        if not (since or until):
+            scan_since = scan_until = day or datetime.now(timezone.utc).date().isoformat()
+        result = await run_in_threadpool(
+            search_events, iter_audit_events(since=scan_since, until=scan_until, report=read_report),
+            matches=_matches, person_for=_audit_plain.event_person, limit=n,
+            before=before_event, scan_limit=_AUDIT_RANGE_SCAN_LIMIT,
+        )
+        events, kind_set, people_set = result["events"], result["kinds"], result["people"]
+        if not result["cursor_found"]:
+            filter_error = "The saved activity position is no longer available. Start a new search."
+            events = []
+        elif result["cut"]:
+            window_note = "The activity scan reached its limit. This is a partial view; narrow the dates before relying on its totals."
+        else:
+            window_note = f"Showing {len(events)} of {result['matched']} matching events before this page boundary."
+        if result["next_cursor"] and not filter_error:
+            params = dict(request.query_params)
+            if not (since or until):
+                params["day"] = scan_since
+            params["before_event"] = result["next_cursor"]
+            next_href = "/audit?" + urlencode(params)
     # Distinct kinds and people in the window (for the filter dropdowns),
     # gathered before filtering so every choice stays selectable.
     kinds = sorted(kind_set, key=_audit_plain.kind_label)
@@ -5853,6 +6002,8 @@ async def audit_page(request: Request) -> HTMLResponse:
             "audit_signing_enabled": bool(audit_log.signing_enabled),
             "audit_read_report": read_report.as_dict(),
             "audit_window_note": window_note,
+            "audit_filter_error": filter_error,
+            "audit_next_href": next_href,
             **_audit_plain.page_helpers(),
         },
     )
@@ -6400,21 +6551,21 @@ def _audit_event_visible_to_caller(
     world,
     goal_owner_cache: dict[int, str | None],
 ) -> bool:
-    """Return whether an oversight audit row is visible to this dashboard user.
+    """Match exact task ownership before projecting intervention metadata.
 
-    ``owner_filter is None`` is the dashboard's established bypass for auth-off
-    single-user mode and admins.  Authenticated non-admins only see events tied
-    to one of their goals, or ownerless events whose explicit user principal is
-    theirs.  Unknown/malformed ownership markers fail closed so the global audit
-    log cannot leak cross-tenant guardrail metadata.
+    Local installation authority covers unowned local work only. Named task
+    owners and explicit named actors never become local through a missing login.
+    Unknown task references fail closed. Global audit review uses /audit.
     """
-    if owner_filter is None:
-        return True
-    if principal is None:
+    scope = owner_filter or ""
+    if principal and principal != scope:
         return False
-
     raw_goal_id = e.get("goal_id")
-    if raw_goal_id not in (None, ""):
+    if isinstance(raw_goal_id, bool):
+        return False
+    if raw_goal_id not in (None, "", 0):
+        if not isinstance(raw_goal_id, (str, int)):
+            return False
         try:
             goal_id = int(raw_goal_id)
         except (TypeError, ValueError):
@@ -6425,9 +6576,14 @@ def _audit_event_visible_to_caller(
                 goal_owner_cache[goal_id] = getattr(goal, "owner", None) if goal else None
             except Exception:
                 goal_owner_cache[goal_id] = None
-        return goal_owner_cache[goal_id] == owner_filter
+        return goal_owner_cache[goal_id] == scope
+    actor = e.get("principal") or e.get("actor") or ""
+    if scope:
+        return actor == scope
+    # Agent-only system events without a task carry no named employee content;
+    # only their metadata will be shown. Malformed actor markers are withheld.
+    return isinstance(actor, str) and (not actor or actor.startswith(("agent:", "local:")))
 
-    return str(e.get("principal") or "") == principal
 
 
 @app.get("/oversight", response_class=HTMLResponse)
@@ -6449,8 +6605,6 @@ def oversight_page(request: Request) -> HTMLResponse:
 
     from collections import Counter, deque
 
-    from maverick.audit import default_audit_log
-
     try:
         n = max(1, min(int(request.query_params.get("n") or 1000), 5000))
     except (TypeError, ValueError):
@@ -6469,46 +6623,36 @@ def oversight_page(request: Request) -> HTMLResponse:
     by_kind: Counter = Counter()
     recent: deque = deque(maxlen=150)
     total = 0
-    if ranged:
-        # Incident review: an inclusive [since, until] window across day-files,
-        # reusing the export reader's lexical date filter (open-ended if one
-        # bound is unset). Bound the file scan on a very wide window.
-        from maverick.audit.export import iter_audit_events
+    source_errors = []
+    from datetime import datetime, timezone
 
-        scanned = 0
-        try:
-            for e in iter_audit_events(since=since, until=until):
-                scanned += 1
-                if scanned > 200_000:
-                    break
-                if _is_intervention(e) and _audit_event_visible_to_caller(
-                    e,
-                    principal=principal,
-                    owner_filter=owner_filter,
-                    world=w,
-                    goal_owner_cache=goal_owner_cache,
-                ):
-                    by_kind[str(e.get("kind"))] += 1
-                    total += 1
-                    recent.append(e)
-        except Exception:  # pragma: no cover - never 500 the console on a log error
-            pass
-    else:
-        try:
-            raw = default_audit_log().tail(n, day=day)
-        except Exception:  # pragma: no cover - never 500 the console on a log error
-            raw = []
-        for e in raw:
-            if _is_intervention(e) and _audit_event_visible_to_caller(
-                e,
-                principal=principal,
-                owner_filter=owner_filter,
-                world=w,
+    from maverick.audit.export import iter_audit_events
+    from maverick.audit.segments import ReadReport
+
+    from .content_access import audit_metadata
+
+    report = ReadReport()
+    scan_since, scan_until = since, until
+    if not ranged:
+        scan_since = scan_until = day or datetime.now(timezone.utc).date().isoformat()
+    try:
+        for scanned, event in enumerate(iter_audit_events(since=scan_since, until=scan_until, report=report)):
+            if scanned >= 200_000:
+                source_errors.append("Activity is partial: narrow the date range to inspect the rest.")
+                break
+            if _is_intervention(event) and _audit_event_visible_to_caller(
+                event, principal=principal, owner_filter=owner_filter, world=w,
                 goal_owner_cache=goal_owner_cache,
             ):
-                by_kind[str(e.get("kind"))] += 1
+                safe = audit_metadata(event)
+                by_kind[str(safe.get("kind"))] += 1
                 total += 1
-                recent.append(e)
+                recent.append(safe)
+        if report.as_dict().get("failures"):
+            source_errors.append("Some activity segments could not be read. Counts are partial; review the activity log.")
+    except Exception:
+        total = None
+        source_errors.append("Activity is unavailable. An empty list does not mean that no intervention occurred.")
 
     titles: dict[int, str] = {}
 
@@ -6518,7 +6662,8 @@ def oversight_page(request: Request) -> HTMLResponse:
         if goal_id not in titles:
             try:
                 goal = w.get_goal(goal_id)
-            except Exception:  # pragma: no cover - a missing title shows a number
+                assert_goal_access(request, goal)
+            except Exception:  # pragma: no cover - a missing or private title shows a number
                 goal = None
             titles[goal_id] = (goal.title if goal is not None else "") or ""
         return titles[goal_id]
@@ -6537,20 +6682,24 @@ def oversight_page(request: Request) -> HTMLResponse:
 
     try:
         from maverick.killswitch import is_active
-
         halted = bool(is_active())
     except Exception:
-        halted = False
+        halted = None
+        source_errors.append("Emergency-stop state is unavailable. Check its controls before relying on this view.")
 
     try:
-        approvals = list(w.pending_approvals())
+        from .content_access import can_read_approval
+        approvals = [a for a in w.pending_approvals() if can_read_approval(request, a, world=w)]
+        pending = len(approvals)
     except Exception:
-        approvals = []
+        approvals, pending = [], None
+        source_errors.append("Your approval queue is unavailable. Its current size is unknown.")
     approval_context = _approval_queue_context(approvals)
     try:
         active = len(w.list_goals(status="active", owner=owner_filter))
     except Exception:
-        active = 0
+        active = None
+        source_errors.append("Active task state is unavailable.")
 
     return templates.TemplateResponse(
         request,
@@ -6566,7 +6715,8 @@ def oversight_page(request: Request) -> HTMLResponse:
             "can_halt": has_global_permission(request, "operate"),
             "approvals": approvals,
             **approval_context,
-            "pending": len(approvals),
+            "pending": pending,
+            "source_errors": source_errors,
             "active": active,
             "n": n,
             "day": day,
@@ -6632,14 +6782,18 @@ async def safety_page(request: Request) -> HTMLResponse:
 
     from maverick.audit import default_audit_log
 
+    from .content_access import audit_metadata
+
+    require_permission(request, "audit")
+
     try:
         n = max(1, min(int(request.query_params.get("n") or 1000), 5000))
     except (TypeError, ValueError):
         n = 1000
     day = safe_audit_day(request.query_params.get("day"))
-    blocks = [e for e in default_audit_log().tail(n, day=day) if e.get("kind") == "shield_block"]
+    blocks = [audit_metadata(e) for e in default_audit_log().tail(n, day=day) if e.get("kind") == "shield_block"]
     by_stage = Counter((e.get("stage") or "unknown") for e in blocks)
-    top_reasons = Counter((e.get("reason") or "unknown") for e in blocks).most_common(10)
+    top_reasons = [("Details are private; audit metadata only", len(blocks))] if blocks else []
     recent = list(reversed(blocks))[:100]
     return templates.TemplateResponse(
         request,
@@ -7758,12 +7912,16 @@ def approvals_page(request: Request) -> HTMLResponse:
     so a view-only caller must not read it via the HTML page either.
     """
     require_permission(request, "operate")
-    approvals = list(_world().pending_approvals())
+    from .content_access import can_read_approval
+    world = _world()
+    pending = list(world.pending_approvals())
+    approvals = [row for row in pending if can_read_approval(request, row, world)]
     return templates.TemplateResponse(
         request,
         "approvals.html",
         {
             "approvals": approvals,
+            "private_count": len(pending) - len(approvals),
             **_approval_queue_context(approvals),
         },
     )
@@ -7784,7 +7942,8 @@ def _recent_governance_holds(limit: int = 10) -> list[dict]:
         events = [e for e in default_audit_log().tail(500) if e.get("kind") == kind]
     except Exception:  # pragma: no cover - never 500 the console on a log error
         return []
-    return list(reversed(events))[:limit]
+    from .content_access import audit_metadata
+    return [audit_metadata(event) for event in reversed(events)][:limit]
 
 
 def _fleet_recent_runs(fleet_name: str, *, owner: str | None = None, limit: int = 12) -> list[dict]:
@@ -7908,7 +8067,7 @@ async def store_page(request: Request, saved: str = "") -> HTMLResponse:
     )
 
 
-def template_market_entries() -> list[dict]:
+def template_market_entries(principal: str | None = None) -> list[dict]:
     """The goal-template catalog (user-installed + bundled), annotated with the
     operator's own star ratings from the marketplace ratings ledger.
 
@@ -7917,7 +8076,7 @@ def template_market_entries() -> list[dict]:
     means everything shows unrated.
     """
     from maverick.marketplace.ratings import RatingsLedger, stars_bar
-    from maverick.templates import list_templates, load_template
+    from maverick.templates import can_read_template, list_templates, load_template
 
     try:
         ratings = RatingsLedger().all_ratings("templates")
@@ -7927,6 +8086,8 @@ def template_market_entries() -> list[dict]:
     for name in list_templates():
         try:
             tpl = load_template(name)
+            if not can_read_template(tpl, principal):
+                continue
         except (OSError, ValueError, FileNotFoundError):
             continue
         mine = ratings.get(name) or {}
@@ -7936,6 +8097,7 @@ def template_market_entries() -> list[dict]:
                 "name": name,
                 "title": tpl.title,
                 "params": list(tpl.params),
+                "parameter_schema": tpl.parameter_schema,
                 "body": tpl.body[:2000],
                 "stars": stars,
                 "rating_bar": stars_bar(float(stars), 0) if stars else "unrated",
@@ -7960,7 +8122,7 @@ async def templates_market_page(request: Request) -> HTMLResponse:
         request,
         "templates_market.html",
         {
-            "entries": template_market_entries(),
+            "entries": template_market_entries(caller_principal(request)),
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
         },
@@ -8408,15 +8570,18 @@ async def pins_remove(request: Request, goal_id: int) -> JSONResponse:
 
 
 @app.get("/api/v1/views")
-async def views_list(request: Request) -> JSONResponse:
+async def views_list(request: Request, task_filters: bool = False) -> JSONResponse:
     """Saved dashboard views (named filter/query-param sets) for the caller."""
     from maverick.ux_store import shared as _ux
 
+    if task_filters:
+        from .task_saved_views import current
+        return JSONResponse(current(request), headers={"Cache-Control": "private, no-store"})
     return JSONResponse({"views": _ux().views(caller_principal(request))})
 
 
 @app.post("/api/v1/views/{name}")
-async def views_save(request: Request, name: str) -> JSONResponse:
+async def views_save(request: Request, name: str, task_filters: bool = False) -> JSONResponse:
     from maverick.ux_store import shared as _ux
 
     try:
@@ -8432,6 +8597,16 @@ async def views_save(request: Request, name: str) -> JSONResponse:
         ) from None
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object of params")
+    if task_filters:
+        from pydantic import ValidationError
+
+        from .task_saved_views import Change, change
+        try:
+            reviewed = Change.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(422, "Refresh saved views and review a valid task search and status.") from exc
+        return JSONResponse(change(request, name, reviewed), status_code=201,
+                            headers={"Cache-Control": "private, no-store"})
     try:
         _ux().save_view(caller_principal(request), name, body)
     except ValueError as e:
@@ -8440,9 +8615,21 @@ async def views_save(request: Request, name: str) -> JSONResponse:
 
 
 @app.delete("/api/v1/views/{name}")
-async def views_delete(request: Request, name: str) -> JSONResponse:
+async def views_delete(request: Request, name: str, task_filters: bool = False) -> JSONResponse:
     from maverick.ux_store import shared as _ux
 
+    if task_filters:
+        from pydantic import ValidationError
+
+        from .task_saved_views import Change, change
+        try:
+            raw = await _read_limited_request_body(request, max_bytes=_MAX_SAVED_VIEW_BODY_BYTES,
+                                                 too_large_detail="saved view body too large")
+            reviewed = Change.model_validate(json.loads(raw or b"{}"))
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(422, "Refresh saved views before reviewing removal.") from exc
+        return JSONResponse(change(request, name, reviewed, delete=True),
+                            headers={"Cache-Control": "private, no-store"})
     if not _ux().delete_view(caller_principal(request), name):
         raise HTTPException(status_code=404, detail="no such view")
     return JSONResponse({"deleted": name})
@@ -8783,6 +8970,12 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         goals = w.conversation_summaries(owner=goal_owner_filter(request), limit=_THREAD_LIST_LIMIT)
     except Exception:  # pragma: no cover -- the sidebar must never 500 a page
         return []
+    from .conversation_organization import organization, pinned_roots
+    try:
+        known = {goal.id for goal in goals}
+        goals.extend(goal for goal in pinned_roots(request, w) if goal.id not in known)
+    except Exception:
+        pass  # Current authorized tasks remain readable if organization storage is unavailable.
     threads: list[dict] = []
     for g in goals:
         target_id = ChatThreads(w).latest(g.id)
@@ -8790,11 +8983,18 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         if target is None:
             continue
         assert_goal_access(request, target)
+        try:
+            metadata = organization(request, w, g.id)
+        except Exception:
+            metadata = {"title": "", "pinned": False, "archived": False}
+        if metadata["archived"] and g.id != active_root:
+            continue
         threads.append({
-            "id": g.id, "target_id": target_id, "title": g.title, "status": target.status,
+            "id": g.id, "target_id": target_id, "title": metadata["title"] or g.title, "status": target.status,
+            "pinned": metadata["pinned"], "archived": metadata["archived"],
             "active": g.id == active_root, "updated_at": g.updated_at,
         })
-    return threads
+    return sorted(threads, key=lambda row: (not row["pinned"], -row["updated_at"]))
 
 
 def _thread_turns(w, goal) -> list:
@@ -8803,18 +9003,11 @@ def _thread_turns(w, goal) -> list:
     try:
         from maverick.chat_threads import ChatThreads
 
-        chat = ChatThreads(w)
-        binding = chat.binding(goal.id)
-        if binding is None:
-            return []
-        member_ids = {int(row[0]) for row in chat.members(binding)}
-        turns = w.recent_turns(binding.conversation_id, limit=200)
-    except Exception:  # pragma: no cover -- history is additive, not load-bearing
+        turns, _ = ChatThreads(w).history(goal.id, limit=50)
+        return turns
+    except Exception:  # The history control exposes retry without losing this task.
         return []
-    return [
-        t for t in turns
-        if t.goal_id in member_ids and t.goal_id < goal.id
-    ]
+
 
 
 def _director_run(profile: str, title: str, description: str, base_max_dollars: float | None = None):
@@ -8879,6 +9072,15 @@ async def home(request: Request) -> HTMLResponse | RedirectResponse:
 
     if not await run_in_threadpool(selected_model_routes_ready):
         return RedirectResponse("/start", status_code=303)
+    if caller_principal(request):
+        from .preferences_api import _state
+
+        try:
+            start = (await run_in_threadpool(_state, request))["values"]["start_page"]
+            if start != "/chat" and start != "/":
+                return RedirectResponse(start, status_code=303)
+        except (HTTPException, ValueError, OSError):
+            pass
     return await run_in_threadpool(chat_page, request)
 
 
@@ -8891,11 +9093,19 @@ async def chat_send(
     files: list[UploadFile] = File(default=[]),
     submission_key: str = Form(""),
     director_profile: str = Form(""),
+    connection_references: str = Form(""),
 ) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "operate")
     require_provider_or_400()
     check_goal_rate_limit(request)
+    from maverick.template_connections import validate as validate_connections
+    try:
+        if len(connection_references) > 200000:
+            raise ValueError("The account selection is too large.")
+        refs = validate_connections(caller_principal(request) or "", json.loads(connection_references or "[]"))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     title = (title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="goal text is required")
@@ -8929,7 +9139,7 @@ async def chat_send(
 
     receipt = await submit(w, files, token=request.headers.get("Idempotency-Key") or submission_key or secrets.token_urlsafe(24),
                            owner=owner, title=title, description=description,
-                           chat_text=chat_text)
+                           chat_text=chat_text, connection_references=refs)
     goal_id = receipt["goal_id"]
     if director is not None and receipt.get("created"):
         from maverick.director_mode import record
@@ -9249,7 +9459,7 @@ def _fire_stored_trigger(
             raise HTTPException(
                 status_code=409, detail="trigger template binding is unavailable"
             ) from exc
-        declared = set(tpl.params)
+        declared = set(tpl.params) - {key for key, spec in tpl.parameter_schema.get("fields", {}).items() if spec["type"] == "connection"}
         params = dict(trigger.get("params") or {})
         inbound = payload.get("data")
         if isinstance(inbound, dict):
@@ -9257,7 +9467,9 @@ def _fire_stored_trigger(
                 if key in declared:
                     params[str(key)] = str(value)[:2000]
         try:
-            title, description = tpl.render(**params)
+            from maverick.template_connections import parameters as connection_parameters
+            _, refs = connection_parameters(tpl, owner, params)
+            title, description = tpl.render_for(owner, **params)
         except ValueError as exc:
             from maverick.secrets import scrub
 
@@ -9266,7 +9478,8 @@ def _fire_stored_trigger(
 
         check_goal_rate_limit(request, source="webhook")
         world = _world()
-        goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
+        goal_id = world.create_goal(title[:200], description[:8000], owner=owner,
+            **({"connection_references": refs} if refs else {}))
         world.record_goal_origin(goal_id, "trigger", name)
         from maverick.runner import (
             clamp_task_limit,
@@ -10110,7 +10323,7 @@ async def _handle_issue_webhook(
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
 
-def _goal_deliverable(g):
+def _goal_deliverable(g, *, strict: bool = False):
     """A goal's result rendered as the deliverable its pack declares.
 
     Returns ``(contract, rendered)`` -- the pack's output contract (label /
@@ -10125,6 +10338,8 @@ def _goal_deliverable(g):
 
         prof = available_domains().get(g.domain) if g.domain else None
         if prof is None:
+            if strict and g.domain:
+                raise LookupError("The task's result policy is unavailable")
             return None, None
         rendered = render_deliverable(prof.output.shape, g.result)
         gate = enforced_gate(prof)
@@ -10139,7 +10354,9 @@ def _goal_deliverable(g):
             "gate": gate,
         }
         return contract, rendered
-    except Exception:  # never 500 the goal page if the factory layer is unavailable
+    except Exception:  # never 500 the full page if the factory layer is unavailable
+        if strict:
+            raise
         return None, None
 
 
@@ -10226,6 +10443,15 @@ def _chat_history_download_states(request: Request, w, turns) -> dict:
             allowed = False
         out[turn.id] = {"allowed": allowed, "note": note}
     return out
+@app.get("/chat/goal/{goal_id}/answer-panel", response_class=HTMLResponse)
+def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
+    """Current authorized saved result, actions, release gate and artifact versions."""
+    from .answer_projection import projection
+
+    context = projection(request, _world(), goal_id)
+    return templates.TemplateResponse(request, "_chat_answer_panel.html", context,
+                                      headers={"Cache-Control": "no-store, private",
+                                               "X-Lightwork-Context": context["conversation_context"]})
 
 
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
@@ -10262,13 +10488,14 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     from maverick.runner import configured_max_dollars
 
     from ._event_stream import TERMINAL_RUN_STATUSES
+    from .answer_projection import version_for
 
     try:
         spend_ceiling = configured_max_dollars()
     except Exception:  # pragma: no cover -- never 500 the goal page
         spend_ceiling = None
 
-    thread_turns = _thread_turns(w, g)
+    thread_turns = _thread_turns(w, g) if can_access_goal_principal(caller_principal(request), g) else []
     thread_questions = {}
     for earlier_id in {turn.goal_id for turn in thread_turns}:
         earlier = w.get_goal(earlier_id)
@@ -10276,6 +10503,13 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             thread_questions[earlier_id] = [
                 q for q in w.all_questions(earlier_id) if q.answer is not None
             ]
+    from types import SimpleNamespace
+
+    from maverick.task_handoffs import apply_ceiling, closure
+    handed_off = closure(w, goal_id)
+    handoff_budget = SimpleNamespace(max_dollars=spend_ceiling)
+    apply_ceiling(w, goal_id, handoff_budget)
+    spend_ceiling = handoff_budget.max_dollars
 
     return templates.TemplateResponse(
         request,
@@ -10286,13 +10520,16 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "chat_answer_download_note": download_note,
             "chat_answer_text": _chat_answer_text(g),
             "answered_questions": [q for q in w.all_questions(goal_id) if q.answer is not None],
+            "can_operate": not handed_off and has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
+            "handoff_closed": handed_off,
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),
             "spend_ceiling": spend_ceiling,
             "spend_ceiling_text": (
                 f"{spend_ceiling:,.2f}" if spend_ceiling is not None else ""
             ),
-            "thread_title": root.title,
+            "thread_title": _conversation_title(request, w, root),
+            "conversation_context": _conversation_context(request),
             "latest_chat_goal_id": ChatThreads(w).latest(g.id),
             "thread_turns": thread_turns,
             "thread_downloads": _chat_history_download_states(request, w, thread_turns),
@@ -10304,6 +10541,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "rendered": rendered,
             "signoff": signoff,
             "artifacts": artifacts,
+            "answer_version": version_for(g, contract, signoff, artifacts),
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),
@@ -10356,6 +10594,21 @@ def download_chat_answer(request: Request, goal_id: int, turn_id: int | None = N
             "X-Content-Type-Options": "nosniff",
         },
     )
+@app.get("/api/v1/chat/goal/{goal_id}/permissions")
+def chat_goal_permissions(request: Request, goal_id: int) -> dict:
+    """Fresh task authority for a long-lived page; ownership is not a role."""
+    require_permission(request, "view")
+    goal = _world().get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(404, "no such goal")
+    assert_goal_access(request, goal)
+    from maverick.task_handoffs import CLOSED, closure
+    if closure(_world(), goal_id):
+        return {"can_operate": False, "reason": CLOSED}
+    allowed = has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), goal)
+    return {"can_operate": allowed, "reason": "" if allowed else (
+        "Your current access allows viewing this task only. A reviewed content read does not grant changes. "
+        "Ask a workspace administrator about your role. Your draft has not been submitted.")}
 
 
 def _voice_only_mode() -> bool:
@@ -10381,7 +10634,7 @@ def _withheld_event_markers() -> list[str]:
         return []
 
 
-def _goal_artifacts(w, goal_id: int) -> list[dict]:
+def _goal_artifacts(w, goal_id: int, *, strict: bool = False) -> list[dict]:
     """A goal's latest artifacts, each pre-rendered by kind: a ``table`` artifact
     parses to a grid (reusing the deliverable renderer), everything else falls
     back to text. ``[]`` if the goal has none (the panel then doesn't render)."""
@@ -10394,7 +10647,9 @@ def _goal_artifacts(w, goal_id: int) -> list[dict]:
             r = render_deliverable(shape, a.get("content"))
             out.append({**a, "table": r.table, "prose": r.prose})
         return out
-    except Exception:  # pragma: no cover -- never 500 the goal page
+    except Exception:  # the live projection reports unavailable rather than empty
+        if strict:
+            raise
         return []
 
 
@@ -10420,6 +10675,27 @@ def shared_goal(request: Request, token: str) -> HTMLResponse:
     finally:
         if scope_token is not None:
             reset_tenant(scope_token)
+
+
+def _require_shared_goal_release(world, goal, goal_id: int):
+    """Fail closed when a removed policy or revoked sign-off blocks sharing."""
+    try:
+        from maverick.domain import available_domains, deliverable_release_allowed
+
+        profile = available_domains().get(goal.domain) if goal.domain else None
+        if goal.domain and profile is None:
+            raise HTTPException(status_code=404, detail="not found")
+        if profile is not None and not deliverable_release_allowed(
+            profile, world.signoff_for(goal_id)
+        ):
+            raise HTTPException(status_code=404, detail="not found")
+        return profile
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if goal.domain:
+            raise HTTPException(status_code=404, detail="not found") from exc
+        return None
 
 
 def _shared_goal_in_scope(request: Request, token: str) -> HTMLResponse:
@@ -10465,43 +10741,26 @@ def _shared_goal_in_scope(request: Request, token: str) -> HTMLResponse:
     # already copied. Fail closed without revealing whether a gate exists.
     if g.status != "done" or not g.result:
         raise HTTPException(status_code=404, detail="not found")
+    prof = _require_shared_goal_release(w, g, goal_id)
+    from .deliverable_sharing import release_matches
     try:
-        from maverick.domain import (
-            available_domains,
-            deliverable_release_allowed,
-        )
-
-        prof = available_domains().get(g.domain) if g.domain else None
-        if g.domain and prof is None:
-            # A removed/renamed pack is unavailable policy, not an ungated
-            # pack. Existing copied tokens must fail closed.
-            raise HTTPException(status_code=404, detail="not found")
-        if prof is not None and not deliverable_release_allowed(
-            prof,
-            w.signoff_for(goal_id),
-        ):
-            raise HTTPException(status_code=404, detail="not found")
-    except HTTPException:
-        raise
+        if not release_matches(w, g, token):
+            raise HTTPException(404, "not found")
     except Exception as exc:
-        # A gate lookup failure must not turn a token into an ungoverned public
-        # export. Unknown/no-domain goals remain shareable through the normal
-        # path; known factory failures fail closed here.
-        if g.domain:
-            raise HTTPException(status_code=404, detail="not found") from exc
+        raise HTTPException(404, "not found") from exc
     contract, rendered = _goal_deliverable(g)
     artifacts = _goal_artifacts(w, goal_id)
     # Re-check after materializing the composite payload. If an artifact or
     # result changed between the first authorization read and these reads, its
     # transaction revoked sign-off; never render that mixed-version snapshot.
     if prof is not None:
-        try:
-            if not deliverable_release_allowed(prof, w.signoff_for(goal_id)):
-                raise HTTPException(status_code=404, detail="not found")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=404, detail="not found") from exc
+        _require_shared_goal_release(w, g, goal_id)
+    try:
+        fresh_goal = w.get_goal(goal_id)
+        if fresh_goal is None or w.resolve_share_link(token) != goal_id or not release_matches(w, fresh_goal, token):
+            raise HTTPException(404, "not found")
+    except Exception as exc:
+        raise HTTPException(404, "not found") from exc
     return templates.TemplateResponse(
         request,
         "shared_goal.html",
@@ -10702,7 +10961,7 @@ def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
         request,
         "trajectory.html",
         {"goal": g, "events": events, "fork_enabled": fork_enabled,
-         "can_operate": has_permission(request, "operate")},
+         "can_operate": has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), g)},
     )
 
 
@@ -10771,6 +11030,7 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
     def generate():
         buf = _io.StringIO()
         writer = csv.writer(buf)
+        from maverick.cost_provenance import EXPORT_HEADERS, export_fields
         writer.writerow(
             [
                 "episode_id",
@@ -10782,50 +11042,22 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
                 "input_tokens",
                 "output_tokens",
                 "tool_calls",
+                *EXPORT_HEADERS,
             ]
         )
         yield buf.getvalue()
         buf.seek(0)
         buf.truncate(0)
 
-        sql = (
-            "SELECT id, goal_id, started_at, ended_at, outcome, "
-            "cost_dollars, input_tokens, output_tokens, tool_calls "
-            "FROM episodes"
-        )
-        conds: list[str] = []
-        plist: list = []
-        if start_ts is not None:
-            conds.append("started_at >= ? AND started_at < ?")
-            plist += [start_ts, end_ts]
-        if owner is not None:
-            # Subquery (not a 10k-element IN list) avoids SQLite's bound-variable
-            # limit and scopes the stream to the caller's goals.
-            conds.append("goal_id IN (SELECT id FROM goals WHERE owner = ?)")
-            plist.append(owner)
-        if conds:
-            sql += " WHERE " + " AND ".join(conds)
-        sql += " ORDER BY id"
-        params = tuple(plist)
+        from maverick.episode_reporting import iter_episodes
 
-        # outcome is a sealed column when at-rest encryption is on; this CSV reads
-        # it via raw SQL, so decrypt it like the WorldModel accessors do.
-        from maverick.world_model import _dec_field
+        from .audit_actions_api import csv_safe
 
-        for row in w.query(sql, params):
-            writer.writerow(
-                [
-                    row["id"],
-                    row["goal_id"],
-                    row["started_at"],
-                    row["ended_at"] or "",
-                    _dec_field(row["outcome"]) or "",
-                    f"{(row['cost_dollars'] or 0):.6f}",
-                    row["input_tokens"],
-                    row["output_tokens"],
-                    row["tool_calls"],
-                ]
-            )
+        for episode in iter_episodes(w, owner=owner, since=start_ts, until=end_ts, finished_only=True):
+            writer.writerow([episode.id, episode.goal_id, episode.started_at, episode.ended_at,
+                             csv_safe(episode.outcome or ""),
+                             "unknown" if episode.cost_dollars is None else f"{episode.cost_dollars:.6f}",
+                             episode.input_tokens, episode.output_tokens, episode.tool_calls, *export_fields(episode)])
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)
@@ -10834,7 +11066,7 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
     return StreamingResponse(
         generate(),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        headers={"Content-Disposition": f'attachment; filename="{fname}"', "Cache-Control": "private, no-store"},
     )
 
 
@@ -10991,6 +11223,30 @@ async def shell_copilot_js() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-answer-panel.js")
+@app.get("/static/lightwork-approval-history.js")
+@app.get("/static/lightwork-chat-drafts.js")
+@app.get("/static/lightwork-conversation-inbox.js")
+@app.get("/static/lightwork-conversation-organization.js")
+@app.get("/static/lightwork-deliverable-bundles.js")
+@app.get("/static/lightwork-deliverable-sharing.js")
+@app.get("/static/lightwork-employee-companion.js")
+@app.get("/static/lightwork-file-selection.js")
+@app.get("/static/lightwork-my-work.js")
+@app.get("/static/lightwork-permission-requests.js")
+@app.get("/static/lightwork-personal-data.js")
+@app.get("/static/lightwork-preferences.js")
+@app.get("/static/lightwork-project-workspaces.js")
+@app.get("/static/lightwork-settings-review.js")
+@app.get("/static/lightwork-settings-runtime.js")
+@app.get("/static/lightwork-task-authority.js")
+@app.get("/static/lightwork-task-handoffs.js")
+@app.get("/static/lightwork-thread-history.js")
+@app.get("/static/lightwork-employee-companion.css")
+@app.get("/static/lightwork-preferences.css")
+@app.get("/static/lightwork-product-operations.js")
+@app.get("/static/lightwork-settings-search.js")
+@app.get("/static/lightwork-task-resume.js")
 @app.get("/static/lightwork-facts.js")
 @app.get("/static/lightwork-access-state.js")
 @app.get("/static/lightwork-consent-policy-editor.js")
@@ -10999,9 +11255,13 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-vendor-setup.js")
 @app.get("/static/lightwork-portal-routing-key.js")
 @app.get("/static/lightwork-task-file-recovery.js")
+@app.get("/static/lightwork-connections.js")
+@app.get("/static/lightwork-account-inventory.js")
+@app.get("/static/lightwork-schedule-management.js")
 @app.get("/static/lightwork-connection-setup.js")
 @app.get("/static/lightwork-native-account-return.js")
 @app.get("/static/lightwork-template-library.js")
+@app.get("/static/lightwork-template-connections.js")
 @app.get("/static/lightwork-guided-actions.js")
 @app.get("/static/lightwork-ai-business-intake.js")
 @app.get("/static/lightwork-guided-actions.css")
@@ -11547,11 +11807,13 @@ async def workflow_builder_page(
 
         try:
             t = load_template(edit)
+            assert_template_access(request, t)
             edit_prefill = {
                 "name": t.name,
                 "title": t.title,
                 "body": t.body,
                 "params": list(t.params),
+                "parameter_schema": t.parameter_schema,
                 "budget_dollars": t.budget_dollars,
                 # Carry the wall-seconds cap so a save round-trip can't
                 # silently reset it to the schema default (3600).
@@ -11565,7 +11827,9 @@ async def workflow_builder_page(
 
         try:
             tpl = load_template(template)
-            prefill = {"name": tpl.name, "params": list(tpl.params), "title": tpl.title}
+            assert_template_access(request, tpl)
+            prefill = {"name": tpl.name, "params": list(tpl.params),
+                "parameter_schema": tpl.parameter_schema, "title": tpl.title}
         except (ValueError, FileNotFoundError):
             prefill = None
     return templates.TemplateResponse(
@@ -11603,6 +11867,7 @@ def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLRes
         reviewed_outcome=guided["outcome"] if guided else None,
     )
     state["guided"] = guided
+    state["employee_activation_enabled"] = get_features().get("employee_activation") is True
     from .local_owner import available as local_owner_available
     state["local_owner_setup_available"] = local_owner_available(request)
     return templates.TemplateResponse(
@@ -11618,7 +11883,7 @@ def workflows_index_page(request: Request) -> HTMLResponse:
     with quick edit / automate actions. The builder is reached via 'New'. (This
     is the management index; /templates remains the browse-the-catalog page.)"""
     from maverick.config import get_features
-    from maverick.templates import load_template, user_templates_dir
+    from maverick.templates import can_read_template, load_template, user_templates_dir
 
     feats = get_features()
     tpls: list[dict] = []
@@ -11629,6 +11894,8 @@ def workflows_index_page(request: Request) -> HTMLResponse:
     for name in names:
         try:
             t = load_template(name)
+            if not can_read_template(t, caller_principal(request)):
+                continue
             tpls.append({"name": t.name, "title": t.title, "params": list(t.params)})
         except (ValueError, FileNotFoundError):
             continue
@@ -11648,7 +11915,7 @@ def workflows_index_page(request: Request) -> HTMLResponse:
         if flows_enabled:
             from maverick.flow import store as _flow_store
 
-            flows = _flow_store.list_flow_summaries()
+            flows = _flow_store.list_flow_summaries(owner=caller_principal(request) or "")
     except Exception:  # pragma: no cover -- never block the page on the flow engine
         flows = []
     return templates.TemplateResponse(
@@ -11695,6 +11962,7 @@ async def connections_page(request: Request) -> HTMLResponse:
             people = []
     return templates.TemplateResponse(request, "connections.html", {
         "connections_enabled": enabled,
+        "can_manage_keys": has_permission(request, "admin"),
         "people": people,
     })
 
@@ -11727,6 +11995,8 @@ async def flow_designer_page(
             from maverick.templates import load_template
 
             tpl = load_template(from_template)
+
+            assert_template_access(request, tpl)
             from maverick.flow.ir import single_agent_flow
 
             body = getattr(tpl, "body", "") or getattr(tpl, "title", "") or from_template
@@ -12136,10 +12406,15 @@ def _health_should_redact() -> bool:
 @app.get("/healthz")
 async def healthz() -> JSONResponse:
     """Deep health: DB writable, LLM provider key present, runner alive."""
-    return await _health_response(
+    response = await _health_response(
         world_provider=_world,
         provider_key_set=_any_provider_key_set,
     )
+    # Fixed, non-secret identity for the native bounded loopback handshake.
+    # A provider-missing 503 still identifies a genuine onboarding dashboard.
+    response.headers["X-Lightwork-Service"] = "dashboard-v1"
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/readyz")

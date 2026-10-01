@@ -79,9 +79,9 @@ test('owner shares an exact captured result and assigned colleague reviews it wi
     await review.locator('#pr-refresh').click();await expect(review.locator('#pr-status')).toContainText('Your unfinished comment is kept');await expect(review.locator('#pr-response-note')).toHaveValue('Synthetic colleague reviewed the captured result and limitations.');await expect(review.locator('#pr-action')).toHaveValue('comment');
     await review.locator('#pr-action').selectOption('approve');
     await review.locator('#pr-response-button').click();
-    await review.getByRole('dialog',{name:/Save this approve decision/}).getByRole('button',{name:'Save decision',exact:true}).click();
+    await review.getByRole('dialog',{name:'Save this Approve decision for the captured result? The live task will remain unchanged.'}).getByRole('button',{name:'Save decision',exact:true}).click();
     await expect(review.locator('#pr-status')).toContainText('Review response saved');
-    await expect(review.locator('#pr-packet-summary')).toContainText('approved');await fits(review);
+    await expect(review.locator('#pr-packet-summary')).toContainText('Approved');await fits(review);
     const reviewImage=info.outputPath('assigned-colleague-review-320.png');await review.screenshot({path:reviewImage});await info.attach('assigned-colleague-review',{path:reviewImage,contentType:'image/png'});
     await review.route('**/api/v1/project-reviews**',route=>route.fulfill({status:401,contentType:'text/html',body:'<h1>Synthetic session expired</h1>'}));
     await review.locator('#pr-refresh').click();await expect(review.locator('#pr-status')).toContainText('sign-in or access changed');

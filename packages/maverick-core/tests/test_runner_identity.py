@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 
-
-def test_run_goal_in_thread_propagates_execution_identity(monkeypatch):
+def test_run_goal_in_thread_propagates_execution_identity(monkeypatch, tmp_path):
     """HTTP adapters can pass an authenticated user through the runner."""
     from maverick import budget as budget_mod
     from maverick import llm as llm_mod
@@ -12,29 +10,25 @@ def test_run_goal_in_thread_propagates_execution_identity(monkeypatch):
 
     captured: dict = {}
 
-    class FakeWorld:
-        def get_goal(self, goal_id):
-            return SimpleNamespace(
-                id=goal_id,
-                status="done" if captured else "pending",
-                execution_principal="user:alice",
-            )
-
-        def close(self):
-            pass
+    db = tmp_path / "world.db"
+    world = world_model.WorldModel(db)
+    goal_id = world.create_goal("fixture task", owner="user:alice",
+                                    execution_principal="user:alice")
 
     def fake_run_goal_sync(*args, **kwargs):
+        args[1].set_goal_status(args[3], "done")
         captured.update(kwargs)
         return "DONE."
 
-    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
+    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: world_model.WorldModel(db))
+    world.close()
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: object())
     monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", fake_run_goal_sync)
 
     assert runner.run_goal_in_thread(
-        42, max_depth=2, channel="api", user_id="alice", conversation_id=9,
+        goal_id, max_depth=2, channel="api", user_id="alice", conversation_id=9,
         allowed_suites=frozenset({"finance"}),
     ) == "done"
     assert captured["channel"] == "api"
@@ -44,7 +38,7 @@ def test_run_goal_in_thread_propagates_execution_identity(monkeypatch):
     assert captured["resume"] is True
 
 
-def test_run_goal_in_thread_can_schedule_by_caller_principal(monkeypatch):
+def test_run_goal_in_thread_can_schedule_by_caller_principal(monkeypatch, tmp_path):
     """Fleet runs keep agent audit identity but share the caller's fair lane."""
     from maverick import budget as budget_mod
     from maverick import llm as llm_mod
@@ -54,16 +48,10 @@ def test_run_goal_in_thread_can_schedule_by_caller_principal(monkeypatch):
     captured: dict = {}
     lanes: list[str | None] = []
 
-    class FakeWorld:
-        def get_goal(self, goal_id):
-            return SimpleNamespace(
-                id=goal_id,
-                status="done" if captured else "pending",
-                execution_principal="user:agent:acme.coder",
-            )
-
-        def close(self):
-            pass
+    db = tmp_path / "world.db"
+    world = world_model.WorldModel(db)
+    goal_id = world.create_goal("fixture task", owner="user:alice",
+                                    execution_principal="user:agent:acme.coder")
 
     class FakeSemaphore:
         def acquire(self, timeout=None):
@@ -73,6 +61,7 @@ def test_run_goal_in_thread_can_schedule_by_caller_principal(monkeypatch):
             pass
 
     def fake_run_goal_sync(*args, **kwargs):
+        args[1].set_goal_status(args[3], "done")
         captured.update(kwargs)
         return "DONE."
 
@@ -81,14 +70,15 @@ def test_run_goal_in_thread_can_schedule_by_caller_principal(monkeypatch):
         return FakeSemaphore()
 
     monkeypatch.setattr(runner, "_principal_semaphore", fake_principal_semaphore)
-    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: FakeWorld())
+    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: world_model.WorldModel(db))
+    world.close()
     monkeypatch.setattr(llm_mod, "LLM", lambda: object())
     monkeypatch.setattr(sandbox_mod, "build_sandbox", lambda: object())
     monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: budget_mod.Budget())
     monkeypatch.setattr(orchestrator, "run_goal_sync", fake_run_goal_sync)
 
     assert runner.run_goal_in_thread(
-        42,
+        goal_id,
         max_depth=2,
         channel="fleet",
         user_id="agent:acme.coder",

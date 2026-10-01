@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Activity log · Lightwork{% endblock %}
 {% block content %}
+  <p class="panel">This is the audit metadata view. Private prompts, task text and tool inputs are withheld from display, search and downloads. Projected downloads are not the original signed audit bytes. <a href="/content-access">Review specific content access</a>.</p>
   <style>
     .aud-detail { display: flex; flex-direction: column; gap: 2px; max-width: 46rem; }
     .aud-kv { display: grid; grid-template-columns: 9rem 1fr; gap: var(--space-2); align-items: baseline; }
@@ -39,6 +40,8 @@
   {% if audit_window_note %}
   <p class="muted" role="status">{{ audit_window_note }}</p>
   {% endif %}
+  {% if audit_filter_error %}<p role="alert">{{ audit_filter_error }}</p>{% endif %}
+  {% if audit_next_href %}<p><a class="btn" href="{{ audit_next_href }}">Older matching activity</a></p>{% endif %}
   {% if audit_read_report and audit_read_report.failures %}
   <p role="alert">Some entries could not be read. This view is incomplete. Run “Check the log has not been changed” below before using it as evidence.</p>
   {% endif %}
@@ -88,7 +91,8 @@
   </section>
 
   <div class="panel">
-    {% if events %}
+    {% if audit_filter_error %}<p>Correct the filters above to search activity.</p>
+    {% elif events %}
       <table id="audit-table">
         <caption class="sr-only">Activity, newest last</caption>
         <thead>

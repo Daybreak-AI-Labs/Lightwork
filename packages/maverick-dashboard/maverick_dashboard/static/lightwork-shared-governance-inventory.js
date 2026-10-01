@@ -259,7 +259,7 @@
       button.addEventListener("click", function () {
         current.focus = item.entity_ref_sha256;
         loadLinks(false).then(function () {
-          document.getElementById("sgi-links-title").scrollIntoView({ behavior: "smooth", block: "start" });
+          window.mvReveal(document.getElementById("sgi-links-title"));
         }).catch(showError("load the links"));
       });
       tr.appendChild(cell(button));

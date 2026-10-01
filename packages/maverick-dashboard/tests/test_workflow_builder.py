@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from test_support.navigation import assert_navigation_link
+
 
 def _client():
     # Mutating /api/v1 requests in no-token mode must pass the same-origin CSRF check.
@@ -816,7 +818,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     r = _client().get("/workflow-builder")
     assert r.status_code == 200
     assert "<title>Workflow builder · Lightwork</title>" in r.text
-    assert '<h1 class="page-title">Workflow builder</h1>' in r.text
+    assert '<h1 class="page-title"><span lang="en" dir="ltr" data-product-copy>Workflow builder</span></h1>' in r.text
     assert 'id="wf-draft-btn"' in r.text
     assert "/api/v1/workflows/draft" in r.text
     # Both forms are offered, and the playbook saves via the agent-override path.
@@ -843,7 +845,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     assert '<summary class="wf__sched-title">' in r.text
     # Reachable from the primary nav (Operate group): the redesigned Flows
     # builder is the sidebar entry; the workflow builder is linked in-page from it.
-    assert '<span class="nav-label">Flows</span>' in r.text
+    assert_navigation_link(r.text, "/flows/designer", "Flows")
     # A Chat handoff is verified before filling the ordinary brief for review.
     assert "lightwork.authoring-handoff" in r.text
     assert "/api/v1/templates/draft-context" in r.text
@@ -912,7 +914,7 @@ def test_non_admin_edit_agent_deeplink_withholds_existing_pack(monkeypatch, tmp_
     ).text
     assert "PB_EDIT = null" in html
     assert 'PB_EDIT_DENIED = "invoice-clerk"' in html
-    assert "draft a new unsaved first pass" in html
+    assert "You can still draft an unsaved first pass." in html
 
 
 def test_builder_edit_deeplink_rehydrates_editor(monkeypatch, tmp_path):
@@ -922,7 +924,7 @@ def test_builder_edit_deeplink_rehydrates_editor(monkeypatch, tmp_path):
     tdir = tmp_path / ".maverick" / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
-        "---\ntitle: Weekly report\nparams:\n  - topic\n---\nResearch {{topic}}.\n", encoding="utf-8")
+        "---\nowner: local\ntitle: Weekly report\nparams:\n  - topic\n---\nResearch {{topic}}.\n", encoding="utf-8")
     t = _client().get("/workflow-builder?edit=weekly-report").text
     assert "WF_EDIT = null" not in t and "weekly-report" in t
     assert "renderDraft(WF_EDIT)" in t and "Editing" in t
@@ -938,7 +940,7 @@ def test_builder_prefill_deeplink_jumps_to_automate(monkeypatch, tmp_path):
     tdir = tmp_path / ".maverick" / "templates"
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
-        "---\ntitle: Weekly report\nparams:\n  - topic\n---\nbody\n", encoding="utf-8")
+        "---\nowner: local\ntitle: Weekly report\nparams:\n  - topic\n---\nbody\n", encoding="utf-8")
     r = _client().get("/workflow-builder?template=weekly-report")
     assert r.status_code == 200
     assert "weekly-report" in r.text and "WF_PREFILL = null" not in r.text
@@ -956,3 +958,19 @@ def test_workflow_builder_reads_plainly(monkeypatch, tmp_path):
     for phrase in ("a name (id)", "no gate", "Trigger from a webhook", "POSTing", "Failed: '", "Save failed: '"):
         assert phrase not in t
     assert "Someone must approve" in t and "Start it from another app" in t
+
+
+def test_extract_document_requires_review_and_never_calls_drafter(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr("maverick_dashboard.api._extract_binary_doc_text", lambda raw, name: "Procedure text")
+    monkeypatch.setattr("maverick_dashboard.api._drafter_for", lambda form: pytest.fail("Extraction must not call a paid drafter"))
+    response = _client().post("/api/v1/workflows/extract-source", files={"file": ("procedure.pdf", b"%PDF synthetic", "application/pdf")})
+    assert response.status_code == 200
+    assert response.json() == {"text": "Procedure text", "truncated": False, "review_required": True, "started": False}
+
+
+def test_extract_document_refuses_unsupported_empty_and_oversize(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    for name, body in [("procedure.exe", b"data"), ("empty.txt", b""), ("large.txt", b"x" * 512001)]:
+        response = _client().post("/api/v1/workflows/extract-source", files={"file": (name, body)})
+        assert response.status_code == 422

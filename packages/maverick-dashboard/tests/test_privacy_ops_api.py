@@ -602,14 +602,26 @@ def test_static_dashboard_token_document_access_uses_only_its_saved_connection(
         "dashboard-scoped-token",
     )]
     current = client.get("/api/v1/connections", headers=headers).json()
-    deleted = client.delete(
+    unreviewed = client.delete(
         "/api/v1/connections/dashboard-token-graph",
         headers=headers,
         params={"expected_revision": current["connections"][0]["revision"]},
     )
+    assert unreviewed.status_code == 409
+    review = client.get("/api/v1/connections/dashboard-token-graph/impact", headers=headers)
+    assert review.status_code == 200, review.text
+    impact = review.json()
+    assert impact["revision"] == current["connections"][0]["revision"]
+    deleted = client.delete(
+        "/api/v1/connections/dashboard-token-graph",
+        headers=headers,
+        params={"expected_revision": impact["revision"],
+                "impact_version": impact["impact_version"], "context": impact["context"]},
+    )
     assert deleted.status_code == 200, deleted.text
     assert client.get("/api/v1/connections", headers=headers).json() == {
         "connections": [],
+        "context": impact["context"],
     }
 
 

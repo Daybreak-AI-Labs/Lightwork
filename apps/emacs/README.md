@@ -25,5 +25,18 @@ Add to `load-path` and require:
 | `M-x maverick-logs` | recent run logs |
 | `M-x maverick-halt` | arm the killswitch (confirms first) |
 | `M-x maverick-unhalt` | clear the killswitch |
+| `M-x maverick-cancel-control` | stop local status/halt supervision; outcome remains unconfirmed |
+
+Status and halt controls use asynchronous owned processes. Editing remains
+available while they wait. `maverick-control-timeout` defaults to 30 seconds
+(bounded to 0.1–120 seconds), and responses are limited to 64 KiB. Timeout,
+cancellation and nonzero exit never claim that external effects stopped; inspect
+local state before another action. Late callbacks cannot replace a newer result.
+The halt acknowledgement still requires exact local scope and checkpoint semantics.
+
+The two regression tests in `tests/maverick-control-tests.el` passed in native
+Emacs 30.2 using mocked processes and timers. This does not qualify interactive
+editing or real CLI cancellation; see the [native editor qualification
+receipt](../../docs/ux-audit-2026-09-30/native-editor-qualification.md).
 
 See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

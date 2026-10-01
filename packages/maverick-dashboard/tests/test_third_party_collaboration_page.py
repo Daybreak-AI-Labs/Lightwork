@@ -8,26 +8,13 @@ from fastapi.testclient import TestClient
 
 
 def _client(*, enabled: bool) -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     templates = Jinja2Templates(
-        directory=str(
-            Path(__file__).parents[1]
-            / "maverick_dashboard"
-            / "templates"
-        )
+        directory=str(Path(__file__).parents[1] / "maverick_dashboard" / "templates"),
+        context_processors=[_theme_context],
     )
-    templates.env.globals.update(
-        {
-            "theme": "dark",
-            "font": "default",
-            "lang": "en",
-            "density": "comfortable",
-            "custom_theme_css": "",
-            "custom_theme_names": [],
-            "dir": "ltr",
-            "nav_groups": [],
-            "t": lambda key: key,
-        }
-    )
+    templates.env.globals.update(nav_groups=[])
     app = FastAPI()
 
     @app.get("/third-party/collaboration")

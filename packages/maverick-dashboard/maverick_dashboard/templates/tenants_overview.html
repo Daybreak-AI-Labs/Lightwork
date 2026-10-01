@@ -7,7 +7,7 @@
                subtitle='Summary for each workspace',
                lede='Tasks by status, today\'s spending, and how close each
                      workspace is to its daily limit. Create and change
-                     workspaces on <a href="/tenants">Workspaces</a>.') %}
+                     workspaces on <a href="/tenants">Workspaces</a>.' | safe) %}
     {{ state('Current state',
              rows | length ~ ' workspace' ~ ('' if rows | length == 1 else 's'),
              badge=(suspended_count ~ ' paused') if suspended_count

@@ -14,7 +14,7 @@ from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 
 def test_schema_version_is_current(tmp_path):
-    assert SCHEMA_VERSION == 41  # bump when adding a migration
+    assert SCHEMA_VERSION == 46  # bump when adding a migration
     assert WorldModel(tmp_path / "w.db").schema_version == SCHEMA_VERSION
 
 
@@ -118,7 +118,7 @@ def test_explicit_goal_selectors_preserve_both_principal_fields(tmp_path):
 
     selected = [
         world.search_goals("needle")[0],
-        next(goal for goal in world.candidate_goals(False) if goal.id == child),
+        next(goal for goal in world.candidate_goals(False, owner="user:human-owner") if goal.id == child),
         world.subgoals(root)[0],
     ]
 

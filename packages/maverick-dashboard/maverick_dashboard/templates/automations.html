@@ -37,7 +37,7 @@
              lede='Every way your workflows run without you — on a recurring
                    schedule, when another service sends an update, or when something new
                    appears in a connected source. Create them in the
-                   <a href="/workflow-builder">Workflow Builder</a>.') %}
+                   <a href="/workflow-builder">Workflow Builder</a>.' | safe) %}
   {{ state('Current state',
            automation_total ~ ' automation' ~ ('' if automation_total == 1 else 's') ~ ' configured',
            badge=(channels_on ~ ' of 3 ways to start are on') if channels_on else 'All turned off',
@@ -49,6 +49,7 @@
 {% endcall %}
 
 <div class="auto">
+  {% include "_account_inventory.html" %}
   {% if scheduling_enabled %}
   <section class="auto__section panel" id="auto-sched-section" aria-labelledby="auto-sched-h">
     <div class="section-head">
@@ -56,6 +57,9 @@
       <span class="muted" id="auto-sched-count"></span>
     </div>
     <p class="auto__hint">Run daily reports, weekly digests, and other recurring work while Lightwork’s background service is running.</p>
+    <p id="auto-sched-status" class="auto__hint" role="status" aria-live="polite">Loading schedules.</p>
+    <button class="btn btn--ghost" id="auto-sched-retry" type="button">Refresh schedules</button>
+    <a href="/login" id="auto-sched-signin" hidden>Sign in again</a>
     <ul class="auto__list" id="auto-sched-list" aria-label="Schedules"></ul>
     <div class="mv-empty" id="auto-sched-empty" hidden>
       <p class="mv-empty__title">No schedules yet</p>
@@ -374,24 +378,58 @@
   var schedList = document.getElementById('auto-sched-list');
   var schedEmpty = document.getElementById('auto-sched-empty');
   var schedCount = document.getElementById('auto-sched-count');
+  var schedSerial=0, schedContext=null, schedLoadedAt=null, schedReady=false;
+  var schedStatus=document.getElementById('auto-sched-status');
+  function forgetSchedules() {
+    schedSerial++; schedReady=false; schedLoadedAt=null; schedContext=null;
+    if (schedList) schedList.replaceChildren(); if (schedEmpty) schedEmpty.hidden=true;
+    if (schedCount) schedCount.textContent='';
+  }
+  document.addEventListener('lightwork:workspace-changed',forgetSchedules);
+  document.addEventListener('lightwork:connection-access-lost',forgetSchedules);
+  document.getElementById('auto-sched-retry')?.addEventListener('click',loadSchedules);
   async function loadSchedules() {
     if (!schedList) return;
-    var data = {};
-    try { data = await (await fetch('/api/v1/schedules')).json(); } catch (e) { return; }
-    var items = data.schedules || [];
-    schedList.textContent = '';
-    if (schedCount) schedCount.textContent = items.length ? (items.length + (items.length === 1 ? ' schedule' : ' schedules')) : '';
-    if (schedEmpty) schedEmpty.hidden = items.length > 0;
+    var serial=++schedSerial, controller=new AbortController();
+    var timer=setTimeout(function () { controller.abort(); },15000);
+    schedReady=false; schedEmpty.hidden=true; schedStatus.textContent='Checking schedules.';
+    schedList.querySelectorAll('button').forEach(function (b) { b.disabled=true; });
+    var data;
+    try {
+      var response=await fetch('/api/v1/schedules',{cache:'no-store',signal:controller.signal});
+      if (serial!==schedSerial) return;
+      if (response.status===401 || response.status===403) {
+        forgetSchedules(); schedStatus.textContent=response.status===401 ? 'Sign in again to view your schedules.' : 'Schedules are not accessible. Check workspace access and scheduling settings with an administrator.';
+        document.getElementById('auto-sched-signin').hidden=response.status!==401; return;
+      }
+      if (!response.ok) throw new Error('Schedules unavailable.');
+      data=await response.json();
+      if (serial!==schedSerial) return;
+      if (!Array.isArray(data.schedules) || typeof data.context!=='string' || data.schedules.some(function (item) { return !item || typeof item.id!=='number'; })) throw new Error('Unreadable schedules.');
+      if (schedContext && schedContext!==data.context) { forgetSchedules(); schedStatus.textContent='Workspace changed. Refresh this page to review current schedules.'; return; }
+      schedContext=data.context; schedReady=true; schedLoadedAt=new Date();
+      schedStatus.textContent='Schedules checked at '+schedLoadedAt.toLocaleTimeString()+'.';
+      document.getElementById('auto-sched-signin').hidden=true;
+    } catch (error) {
+      if (serial!==schedSerial) return;
+      schedStatus.textContent='Schedules are unavailable. '+(schedLoadedAt ? 'Rows below were last checked at '+schedLoadedAt.toLocaleString()+'. ' : '')+'Refresh to try again. No changes can be made until the current list is known.'; return;
+    } finally { clearTimeout(timer); }
+    var items=data.schedules;
+    schedList.textContent='';
+    if (schedCount) schedCount.textContent=items.length+(items.length===1 ? ' schedule' : ' schedules');
+    if (schedEmpty) schedEmpty.hidden=items.length>0;
     items.forEach(function (s) {
-      var li = el('li', 'mv-row');
+      var li = el('li', 'mv-row'); li.dataset.schedule=JSON.stringify(s);
       var main = el('div', 'mv-row__main');
       main.appendChild(el('div', 'mv-row__title', s.title || 'Untitled task'));
       main.appendChild(el('div', 'mv-row__sub', cronText(s.cron) + (s.zone ? ' (' + String(s.zone).replace(/_/g, ' ') + ' time)' : '') + (fmtWhen(s.next_run) ? ' · next run ' + fmtWhen(s.next_run) : '')));
       if (s.schedule_id) { var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('schedule', s.schedule_id, runs); }
       li.appendChild(main);
-      li.appendChild(delBtn('Delete schedule ' + (s.title || s.id), function () { delSchedule(s.id); }));
+      main.appendChild(el('div','mv-row__sub',(s.state || 'active') + (s.running ? ' · a run is in progress' : '')));
+      if (!s.definition_id) li.appendChild(delBtn('Delete schedule ' + (s.title || s.id), function () { delSchedule(s.id); }));
       schedList.appendChild(li);
     });
+    document.dispatchEvent(new CustomEvent('lightwork:schedules-rendered'));
   }
   document.addEventListener('lightwork:schedules-changed', function () { loadSchedules(); });
   function refocus(id) {   // re-home focus after a row is removed (it held focus)
@@ -399,6 +437,7 @@
     if (h) h.focus();
   }
   async function delSchedule(id) {
+    if (!schedReady) return;
     if (!(await mvConfirm('Delete this schedule? It will stop running.'))) return;
     try {
       var r = await fetch('/api/v1/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
@@ -1370,4 +1409,5 @@
 })();
 </script>
 <script src="/static/lightwork-schedule-picker.js" defer></script>
+<script src="/static/lightwork-schedule-management.js" defer></script>
 {% endblock %}

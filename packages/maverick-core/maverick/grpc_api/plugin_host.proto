@@ -11,7 +11,7 @@
 //   - issues one Call per tool invocation. The host sets a gRPC deadline on
 //     the RPC and mirrors it in ToolCall.deadline_ms. Report a tool failure
 //     via ToolResult.error rather than failing the RPC — a failed RPC reads
-//     as a transport fault to the host (which reconnects and retries once).
+//     as an unknown outcome to the host. A possible Call is never replayed.
 //
 // Generate Python stubs with:
 //   python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. plugin_host.proto

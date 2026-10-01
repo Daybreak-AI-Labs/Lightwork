@@ -199,9 +199,11 @@ def test_no_session_token_is_written_to_logs(tmp_path, caplog):
 
 # ------------------------------------------------ the setting takes effect
 def _save(value, confirm=False):
+    from test_support.settings_pages import save_catalog
+
     client = TestClient(app, headers={"Origin": "http://testserver"})
     change = {"id": TTL_ID, "reset": True} if value is None else {"id": TTL_ID, "value": value}
-    return client.post("/api/v1/settings/catalog", json={"changes": [change],
+    return save_catalog(client, "/api/v1/settings/catalog", json={"changes": [change],
                                                           "confirm": confirm})
 
 

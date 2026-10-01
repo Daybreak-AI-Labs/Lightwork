@@ -39,7 +39,7 @@
     var payload = {};
     try { payload = await response.json(); } catch (_error) { payload = null; }
     if (!response.ok || !payload || typeof payload !== "object") {
-      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : plain(response.status, action));
+      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : (payload && typeof payload.detail === "string" ? payload.detail : plain(response.status, action)));
     }
     return payload;
   }
@@ -59,13 +59,50 @@
     });
     return b;
   }
+  var jobsPanel = el("section"), jobsContext = "", pendingRebuild = null;
+  jobsPanel.setAttribute("aria-label", "Search index rebuild jobs"); panel.appendChild(jobsPanel);
+  async function refreshJobs() {
+    if (!canAdmin) return;
+    var payload = await call("GET", "/reindex-jobs", undefined, "refresh rebuild jobs");
+    if (jobsContext && jobsContext !== payload.context) { jobsPanel.replaceChildren(); pendingRebuild = null; throw new Error("Your workspace changed. Reload to review rebuilds."); }
+    jobsContext = payload.context; jobsPanel.replaceChildren(el("h3", "Search index rebuild jobs"));
+    if (!payload.jobs.length) jobsPanel.appendChild(el("p", "No rebuild jobs to show. Archived operation receipts remain recorded."));
+    payload.jobs.forEach(function(job) {
+      var section = el("section"), progress = el("progress"); progress.max = Math.max(1,job.count); progress.value = job.done; progress.setAttribute("aria-label", "Rebuild progress");
+      section.append(el("h4",human(job.collection)), el("p", human(job.state) + ": " + job.done + " of " + job.count + " passages. " + job.message),progress);
+      section.appendChild(el("p", "Observed provider usage at reviewed rates: $" + Number(job.observed_dollars || 0).toFixed(6) + ". Unresolved reservation: $" + Number(job.unresolved_dollars || 0).toFixed(6) + "."));
+      if (["queued","running","publishing"].indexOf(job.state) >= 0) {
+        ["cancel","resume"].forEach(function(action) {
+          section.appendChild(button(action === "cancel" ? "Cancel at next safe boundary" : "Continue after an interruption", async function() {
+            if (!(await confirmed(action === "cancel" ? "Stop after the current batch? The live index stays unchanged unless its complete replacement already published." : "Continue this recorded job? Saved progress and current permissions will be checked. An active job will keep its single run.", "Confirm"))) return;
+            await call("POST","/reindex-jobs/"+job.job_id+"/"+action,{context:jobsContext,confirmed:true},action + " rebuild"); await refreshJobs();
+          },"btn btn--ghost"));
+        });
+      }
+      if (["completed","cancelled","failed","changed","unconfirmed"].indexOf(job.state) >= 0) {
+        section.appendChild(button("Archive finished rebuild", async function(){
+          if (!(await confirmed("Archive this finished rebuild? Its operation receipt remains recorded; saved temporary vectors are removed.", "Archive"))) return;
+          await call("POST","/reindex-jobs/"+job.job_id+"/archive",{context:jobsContext,confirmed:true},"archive rebuild"); await refreshJobs();
+        },"btn btn--ghost"));
+      }
+      jobsPanel.appendChild(section);
+    });
+    jobsPanel.appendChild(button("Refresh rebuild progress",refreshJobs,"btn btn--ghost"));
+  }
   async function reindex(name) {
-    var ok = await confirmed("Rebuild the search index for " + human(name) + "? This can take a while and may use your AI provider, which can cost money.", "Rebuild");
+    var result = await call("GET", "/collections/" + encodeURIComponent(name) + "/reindex-review", undefined, "review rebuild limits"), review = result.review;
+    jobsContext = result.context;
+    var ok = await confirmed("Rebuild " + human(name) + "? " + review.count + " passages, using " + review.model + ". Provider admission ceiling: $" + review.cost_ceiling.toFixed(6) + ". " + review.price_basis + " Time limit: " + review.limits.max_wall_seconds + " seconds, checked between batches. A complete replacement is published only after validation. AI indexing can cost money with a paid provider; paid requests are blocked without verified cost admission.", "Start rebuild");
     if (!ok) return;
-    statusEl.textContent = "Rebuilding the search index…";
-    var result = await call("POST", "/collections/" + encodeURIComponent(name) + "/reindex", undefined, "rebuild the search index");
-    statusEl.textContent = "Rebuilt the search index for " + human(name) + " (" + result.chunks + " pieces of text).";
-    await load();
+    pendingRebuild = {name:name,body:{context:result.context,job_id:crypto.randomUUID().replace(/-/g,""),review:review.review,confirmed:true}};
+    statusEl.textContent = "Starting the rebuild. You may leave this page and return to its recorded status.";
+    try {
+      await call("POST", "/collections/" + encodeURIComponent(name) + "/reindex", pendingRebuild.body, "start rebuild");
+      pendingRebuild = null; await refreshJobs();
+    } catch(error) {
+      statusEl.textContent = "The start could not be confirmed. Refresh rebuild progress to locate the recorded job before starting again. " + error.message;
+      await refreshJobs();
+    }
   }
   async function seed(collection, title) {
     var ok = await confirmed("Load the starter content “" + title + "”? Loading again replaces the earlier copy.", "Load");
@@ -114,6 +151,7 @@
       starters.appendChild(li);
     });
   }
-  document.getElementById("ka-library-refresh").addEventListener("click", load);
+  document.getElementById("ka-library-refresh").addEventListener("click", function(){ load(); refreshJobs().catch(function(error){ statusEl.textContent=error.message; }); });
+  refreshJobs().catch(function(error){statusEl.textContent=error.message;});
   load();
 })();

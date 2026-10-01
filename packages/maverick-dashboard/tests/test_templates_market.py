@@ -31,12 +31,12 @@ def _isolated(tmp_path, monkeypatch):
 @pytest.fixture
 def catalog(_isolated):
     (_isolated / "trip-plan.md").write_text(
-        "---\ntitle: Plan a trip to {{ city }}\nparams:\n  - city\n---\n"
+        "---\nowner: local\ntitle: Plan a trip to {{ city }}\nparams:\n  - city\n---\n"
         "Plan a trip to {{ city }} under budget.",
         encoding="utf-8",
     )
     (_isolated / "research-report.md").write_text(
-        "---\ntitle: Research a topic\n---\nResearch it deeply.",
+        "---\nowner: local\ntitle: Research a topic\n---\nResearch it deeply.",
         encoding="utf-8",
     )
     return _isolated

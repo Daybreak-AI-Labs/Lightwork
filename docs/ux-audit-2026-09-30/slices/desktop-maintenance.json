@@ -1,0 +1,51 @@
+[
+  {
+    "id": "LW-153",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Native desktop-runtime fixed-loopback HTTP handshake requires exact X-Lightwork-Service dashboard-v1 with HTTP200 or genuine setup503; 2-second socket/8-KiB header bounds. Desktop startup/recovery use bundled-only IPC instead of opaque CORS probes; conflicting listeners never launch/stop/adopt arbitrary processes. Rust and JS fixtures authored.",
+    "validation": "Python3.10 AST, JS syntax and Rustfmt passed. Rust runtime compilation reached linker but could not execute: Microsoft C++ link.exe/toolchain is absent (vswhere confirms no installed VC tools).",
+    "remaining": "Native occupied-port/stuck-socket/independent-dashboard/onboarding qualification requires the supported Windows C++ build toolchain and installed release environment."
+  },
+  {
+    "id": "LW-154",
+    "status": "test-needed",
+    "implementation_evidence": "Existing Windows desktop/installer source and the integrated exact-release maintenance handoff, coordinated recovery and verified offline repair paths were reviewed. LW-153 and LW-156 through LW-159 record their implementation and local synthetic evidence. This row requires qualification of an exact signed Windows release on clean supported hosts; source review and mocked maintenance fixtures do not establish publisher trust, clean-machine installation or upgrade acceptance.",
+    "validation": "Source and implementation reviewed. Local mocked maintenance/recovery fixtures pass; real signed installation qualification has not run.",
+    "remaining": "Exact signed release hashes, recognized publisher trust, clean Windows standard/admin/elevation/offline/interruption/repair/rollback matrix and actual adjacent release migration require release artifacts and dedicated qualification hosts; no release acceptance is claimed."
+  },
+  {
+    "id": "LW-155",
+    "status": "test-needed",
+    "implementation_evidence": "Owner confirmed existing Windows customer-candidate boundary; macOS/Linux remain explicitly engineering source setup. Their GUI now labels that scope and includes durable dependency/retry/OS-repair flow. scripts/verify_desktop_artifact.py authenticates a separately signed exact engineering manifest against an independently trusted Minisign key plus expected repository/commit/version/target/channel and streamed artifact hash/size, refusing wrong/stale/changed bytes. It never executes artifacts or claims platform signing/customer qualification.",
+    "validation": "Signature-process-mocked artifact identity fixtures passed in the 9-test new maintenance/artifact run. Python3.10 AST passed; official Minisign/Tauri guidance linked. No credentials/signing/publishing performed.",
+    "remaining": "Approved signed artifacts/key custody, macOS signing/notarization, Linux dependency advisory resolution and exact native acceptance remain release prerequisites. Self-contained non-Windows customer distribution is outside the owner-confirmed current supported target policy; no customer-ready claim."
+  },
+  {
+    "id": "LW-156",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Private authenticated local review/handoff records bind the exact release version, runtime/MSI hash/signature or retained rollback point to the authenticated recovery administrator and 15-minute grant. The native helper revalidates the private grant; raw authorization remains in native state/pipe and private OS storage, never either webview. UI reviews administrator/action/scope/expiry with explicit final native action and manual fallback. Pending release metadata survives bundled-page navigation; expired approval is checked before consuming the reviewed update. Remote dashboard content has no new native capability.",
+    "validation": "9 new local mocked maintenance/artifact tests passed; 104 existing installation recovery/accounting/retirement/identity-transition tests passed after adapting fixtures to mandatory exact-release review, including a new changed-reviewed-bytes denial. Python3.10 AST, JS syntax and Rustfmt passed. No MSI/provider/live service executed.",
+    "remaining": "Run Windows/Tauri browser navigation, expiry, tampering, clipboard-disabled, concurrent administrators and exact-release/rollback qualification."
+  },
+  {
+    "id": "LW-157",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Native read-only recovery planner authenticates the retained snapshot and compares current protected state under the all-workspaces scope. Structured blocker codes and paged affected-file metadata explain accounting/database/action/resource incompatibility. In-product controls review current-version forward repair, open explicit isolated workspace export/drill confirmation, and save a coordination plan. No force rollback/accounting reset exists.",
+    "validation": "9 new local mocked maintenance/artifact tests passed; 104 existing installation recovery/accounting/retirement/identity-transition tests passed after adapting fixtures to mandatory exact-release review, including a new changed-reviewed-bytes denial. Python3.10 AST, JS syntax and Rustfmt passed. No MSI/provider/live service executed.",
+    "remaining": "Native qualification and full post-spend/external-resource recovery matrix unrun; workspace export/drill remains scoped to each selected workspace and external owners must coordinate their services."
+  },
+  {
+    "id": "LW-158",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Native offline folder review copies exact local MSI into bounded private expiring storage; reuses Minisign, Authenticode, pinned update key, publisher, Windows registered product/package, exact installed version/runtime and existing repair preparation checks. Final explicit repair uses no network and can execute from the separately bundled recovery runtime when primary is damaged. Wrong-version/key and changed-cache regressions authored.",
+    "validation": "9 new local mocked maintenance/artifact tests passed; 104 existing installation recovery/accounting/retirement/identity-transition tests passed after adapting fixtures to mandatory exact-release review, including a new changed-reviewed-bytes denial. Python3.10 AST, JS syntax and Rustfmt passed. No MSI/provider/live service executed.",
+    "remaining": "Signed native release offline qualification, damaged-primary recovery, signature/tampering/publisher cases and expiry cleanup tests require a controlled signed-release qualification environment."
+  },
+  {
+    "id": "LW-159",
+    "status": "implemented-test-needed",
+    "implementation_evidence": "Source bootstrap persists exact/current previous refs, phase/outcome and bounded dependency inventory atomically in local OS app data. Before install, native review binds a five-minute current inventory; interruptions require explicit dependency/elevation review. Owned bounded local probes never infer complete cleanup. OS application-management handoff clears review and requires return/recheck before retry; partial and unconfirmed states stay visible. Final installer dashboard navigation uses exact native readiness handshake. Svelte interruption/repair fixtures and Rust journal regression authored.",
+    "validation": "Installer pnpm check: 0 errors and 0 warnings. All 15 local Svelte tests passed. Rustfmt syntax/format passed; Rust execution cannot link because Microsoft C++ link.exe/toolchain is absent.",
+    "remaining": "Real package-manager/elevation/cancellation/restart and all-platform native acceptance require platform qualification; no full-machine rollback claim."
+  }
+]

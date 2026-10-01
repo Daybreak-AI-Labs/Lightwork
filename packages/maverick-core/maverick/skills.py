@@ -115,6 +115,8 @@ class Skill:
     # PBAC: purposes this skill may be recalled FOR (empty = any purpose).
     # Enforced default-open by relevant_skills via maverick.access_policy.
     purposes: tuple[str, ...] = ()
+    source: str = ""
+    source_goal_ids: tuple[int, ...] = ()
 
     @classmethod
     def parse(cls, text: str, path: Path) -> Skill:
@@ -178,6 +180,9 @@ class Skill:
             sig=sig if isinstance(sig, str) else None,
             pubkey=pubkey if isinstance(pubkey, str) else None,
             purposes=tuple(meta["purposes"]) if isinstance(meta.get("purposes"), list) else (),
+            source=str(meta.get("source", "")),
+            source_goal_ids=tuple(int(v) for v in str(meta.get("source_goal_ids", "")).split()
+                                  if v.isdecimal() and int(v) > 0),
         )
 
 
@@ -270,10 +275,31 @@ def load_skills(skills_dir: Path | None = None) -> list[Skill]:
     out = []
     for p in target_dir.glob("*.md"):
         try:
-            out.append(Skill.parse(p.read_text(encoding="utf-8"), p))
+            skill = Skill.parse(p.read_text(encoding="utf-8"), p)
+            if _source_readable(skill):
+                out.append(skill)
         except Exception:
             continue
     return out
+
+
+def _source_readable(skill: Skill) -> bool:
+    """Generated text retains source authority, including after exclusion.
+
+    Installed human-authored and packaged skills are explicit shared resources.
+    Automatically distilled skills without verifiable lineage stay unavailable.
+    """
+    if not skill.source.startswith("auto-distilled"):
+        return True
+    if not skill.source_goal_ids:
+        return False
+    try:
+        from .memory_ownership import current_owner, source_allowed
+        owner = current_owner()
+        return all(source_allowed(gid, owner) or source_allowed(gid, "")
+                   for gid in skill.source_goal_ids)
+    except Exception:
+        return False
 
 
 def builtin_skills_dir() -> Path:
@@ -398,7 +424,7 @@ def relevant_skills(goal: str, all_skills: list[Skill], max_n: int = 3) -> list[
     ``[skills].embed_threshold`` (default 0.35) and the lexical fallback only
     at/above ``[skills].lexical_min_relevance`` (default a real two-word/phrase
     match). This gives the "warm is never worse than cold" property."""
-    all_skills = _purpose_allowed(all_skills)  # PBAC: purpose-scope before relevance
+    all_skills = _purpose_allowed([s for s in all_skills if _source_readable(s)])
     try:
         from . import config as _config
         cfg = _config.get_skills()
@@ -428,6 +454,7 @@ def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
     the relevance-ranked tail once spent (the first skill always renders).
     0 disables either cap.
     """
+    skills = [s for s in skills if _source_readable(s)]
     if not skills:
         return ""
     from .env_setting import env_or_config_int
@@ -440,6 +467,8 @@ def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
     parts = ["# Relevant skills from past runs", ""]
     total = 0
     for s in skills:
+        from .plugin_execution_pins import check_skill
+        check_skill(s)
         body = s.body or ""
         if max_body_chars > 0 and len(body) > max_body_chars:
             body = (body[:max_body_chars].rstrip()
@@ -973,6 +1002,16 @@ def distill(
         text = text.removeprefix("markdown")
         text = text.strip()
     try:
+        # The model cannot choose provenance. Retain the server's exact source
+        # before storing generated text in the shared installed-skill directory.
+        from .logging_config import current_goal_id
+        source_id = current_goal_id()
+        match = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
+        if match:
+            front = "\n".join(line for line in match[1].splitlines()
+                              if not line.startswith(("source:", "source_goal_ids:")))
+            lineage = f"\nsource_goal_ids: {source_id}" if source_id else ""
+            text = f"---\n{front}\nsource: auto-distilled-provider-v1{lineage}\n---\n{match[2]}"
         # Route distilled skills through the SAME validation + shield scan
         # as install_skill (#396 quality gate). A skill distilled from a
         # trajectory can inherit injected content from tool output, and its

@@ -79,7 +79,7 @@ def test_suggest_reads_local_template_catalog(tmp_path, monkeypatch):
     user_dir = tmp_path / "templates"
     user_dir.mkdir()
     (user_dir / "trip-plan.md").write_text(
-        "---\ntitle: Plan a trip to {{ city }}\nparams:\n  - city\n---\nGo.",
+        "---\nowner: local\ntitle: Plan a trip to {{ city }}\nparams:\n  - city\n---\nGo.",
         encoding="utf-8",
     )
     monkeypatch.setattr(tpl_mod, "USER_TEMPLATES", user_dir)

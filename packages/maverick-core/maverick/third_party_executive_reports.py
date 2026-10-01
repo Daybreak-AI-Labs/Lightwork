@@ -2178,6 +2178,29 @@ class ThirdPartyExecutiveReportStore:
             if self._access_allowed(report.role_view, role)
         )[:bounded]
 
+    def history_window(self, *, caller_role, offset=0, after=None, before=None, oldest=False):
+        """Current role-scoped metadata windows without the recent-list cap."""
+        from .metadata_history import sql_window
+        self._principal()
+        role = _role(caller_role)
+        allowed = sorted(value for value in ROLE_VIEWS if self._access_allowed(value, role))
+        where = ["json_extract(r.content_json,'$.role_view') IN (" + ",".join("?" for _ in allowed) + ")"]
+        params = list(allowed)
+        for value, operator in ((after, ">="), (before, "<")):
+            if value is not None:
+                where.append("r.created_at" + operator + "?")
+                params.append(value)
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            result = sql_window(connection.execute,
+                table="executive_reports r LEFT JOIN executive_report_controls c USING(report_id)",
+                columns="r.report_id", stamp="r.report_id,r.content_sha256,c.control_sha256",
+                where=" AND ".join(where), params=tuple(params),
+                order="r.created_at " + ("ASC" if oldest else "DESC") + ",r.report_id", offset=offset)
+            reports = [self._row_record(connection, str(row[0])) for row in result.rows]
+            result.rows = [row for row in reports if self._access_allowed(row.role_view, role)]
+            return result
+
     def issue_download_grant(
         self,
         report_id: str,

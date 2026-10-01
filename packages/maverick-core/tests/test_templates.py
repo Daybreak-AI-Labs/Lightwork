@@ -54,7 +54,7 @@ def test_render_substitutes_variables():
 
 def test_render_missing_required_param():
     t = Template.parse(TEMPLATE_BODY, "research")
-    with pytest.raises(ValueError, match="missing required params"):
+    with pytest.raises(ValueError, match=r"depth: enter a value\."):
         t.render(topic="x")  # forgot 'depth'
 
 

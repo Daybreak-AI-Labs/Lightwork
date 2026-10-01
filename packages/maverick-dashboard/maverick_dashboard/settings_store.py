@@ -28,7 +28,7 @@ from maverick import config
 # Serializes the overlay load-modify-save in-process; cross_process_lock in
 # _locked() extends it across processes (multiple dashboard workers edit
 # provider keys / toggles).
-_SETTINGS_LOCK = threading.Lock()
+_SETTINGS_LOCK = threading.RLock()
 
 
 class SecuritySuiteRevisionConflict(RuntimeError):
@@ -114,13 +114,25 @@ CAPABILITY_DEFAULTS = {
     "mobile_tools": False, "ros": False, "code_exec": False,
 }
 FEATURE_DEFAULTS = {
+    "employee_content_access_requests": False,
+    "personal_data_controls": False,
+    "permission_access_requests": False,
+    "employee_departures": False,
+    "employee_companions": False,
     "workflow_readiness": True,
     "project_reviews": False,
+    "deliverable_bundles": False,
+    "project_workspaces": False,
+    "task_handoffs": False,
     "outcome_measurement": False,
     "copilot_operations": False,
     "guided_onboarding": True,
     "action_center": True,
     "draft_recovery": True,
+    "personal_preferences": True,
+    "configuration_profiles": True,
+    "employee_task_diagnostics": True,
+    "employee_activation": True,
     "support_center": True,
     "record_search": True,
     "workspace_recovery": False,
@@ -153,10 +165,31 @@ CAPABILITY_INFO = {
                  "before shell commands run.",
 }
 FEATURE_INFO = {
-    "copilot_operations": "Let Copilot show the current learning example and open its reviewed stop-use control. You confirm the decision in a protected form. Other product actions are not included; the page's own controls remain available when this is off.",
+    "personal_preferences": "Let people choose their own display, response and workflow defaults within organization policy. Locked settings and permission limits still take precedence.",
+    "configuration_profiles": "Review and apply portable preference or settings profiles with a preview of each change. Profiles never transfer credentials or grant permissions.",
+    "employee_content_access_requests": "Allow named administrators to request an employee task or subject export, and named operators to request an exact approval-card read. Another administrator or the content owner must approve; reads expire within one hour and are recorded. Reading a card grants no voting authority. Turning this off revokes use of existing grants. Private content remains owner-only by default.",
+    "personal_data_controls": "Allow named workspace members to inspect and correct their personal memory, narrow local learning, review My Data and verify channel identity links. Linking alone shares nothing; optional cross-channel preferences never grant roles or tools. Disabling stops linked recall; previously saved channel recall restrictions remain enforced.",
+    "permission_access_requests": "Let named employees request review of a blocked permission or tool by its actual policy owner. Requests share the employee-provided business reason with reviewers and never grant permissions automatically; completion rechecks the effective policy.",
+    "employee_departures": "Allow named installation administrators to preview employee work, revoke Lightwork access, remove reviewed local connection credentials, retire recurring definitions, cancel pending owned jobs and record retained-data handoff owners. Closure needs a fresh inventory and current named responsibility for every item and external obligation. Provider outcomes remain human-attested retained obligations; private-content access never transfers.",
+    "employee_companions": (
+        "Let workspace administrators enroll employees for a personal companion "
+        "with own-task status and optional AI draft conversations. AI drafts "
+        "require a separate grant for each employee and send messages, eligible "
+        "retained history and permitted own-task titles and status to the "
+        "installation's configured AI service. Administrators control access "
+        "and retention, and see policy and audit metadata without private "
+        "companion history. Companions cannot take actions, use connected "
+        "sources or create learned memory."
+    ),
+    "employee_task_diagnostics": "Show bounded diagnostics and support guidance for the signed-in person's own tasks. No diagnostic control grants access to another person's work.",
+    "employee_activation": "Guide each signed-in person through their allowed first task and readiness checks. Existing policy, cost limits and provider configuration stay in force.",
+    "copilot_operations": "Let Copilot open registered product controls in the action families enabled by your organization. Every change requires a fresh review and explicit confirmation; native controls remain available when this is off.",
     "support_center": "Allow installation administrators to prepare, review and download redacted diagnostics in Help. Reports are never sent automatically.",
     "workflow_readiness": "Show available workflows, their supported boundaries, and the live or platform validation still required. Enablement never establishes customer acceptance.",
     "project_reviews": "Share selected, fixed task results with assigned workspace reviewers. Review does not execute or sign off the live task.",
+    "deliverable_bundles": "Share only selected result versions and evidence files with one named workspace recipient, with separate human acceptance and offline export.",
+    "project_workspaces": "Plan project outcomes, reviewed context and live milestones. Explicit planning membership never grants private task, review, or execution access.",
+    "task_handoffs": "Offer a named colleague an unstarted continuation with selected evidence and a spending ceiling; acceptance closes the original conversation to new execution.",
     "outcome_measurement": "Plan a paired workflow pilot, record observed baseline and review effort, and compare current accepted outcomes. Unmeasured costs and unreviewed work remain explicit.",
     "guided_onboarding": "Offer a guided path to a reviewed deliverable, privacy assessment, or accepted vendor case. Task creation alone never establishes success.",
     "action_center": "Collect approvals, deliverable sign-offs, assessment reviews, and uncertain external actions in one personal list, with private read and snooze preferences. Overdue items remain visible.",
@@ -631,7 +664,7 @@ def _dump(data: dict) -> str:
     for section in dict.fromkeys((
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
-                    "security_suite_control", "oauth", "workspace",
+                    "security_suite_control", "oauth", "workspace", "_dashboard_resets",
                     # Portal link keyring (portal_routing_key_api); sealed values.
                     "third_party_portal",
                     # Consent publication signing keyring
@@ -1094,6 +1127,17 @@ def assert_effective_copilot_operations(enabled: bool) -> None:
         )
 
 
+def assert_effective_employee_companions(enabled: bool) -> None:
+    """Report when a saved opt-in differs from the effective deployment policy."""
+    from maverick import config
+
+    if config.get_features().get("employee_companions") is not bool(enabled):
+        raise FeatureSettingNotEffective(
+            "Employee companions are controlled by another setting. "
+            "The requested change is not active."
+        )
+
+
 def set_toggles(section: str, updates: dict[str, bool]) -> None:
     """Commit a complete group of flag changes in one atomic overlay write."""
     defaults = {"capabilities": CAPABILITY_DEFAULTS, "features": FEATURE_DEFAULTS}.get(section)
@@ -1286,7 +1330,7 @@ def set_compliance_settings(updates: dict[tuple[str, str], object]) -> None:
             value = list(dict.fromkeys(value))
         elif kind is int:
             low, high = _RETENTION_DAY_BOUNDS
-            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            if isinstance(value, bool) or not isinstance(value, int) or not (value == 0 or low <= value <= high):
                 raise ValueError("retention days are out of range")
         elif not isinstance(value, str) or not value.strip() or len(value) > 1000:
             raise ValueError("text setting is empty or too long")
@@ -1463,6 +1507,8 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
     value of each path (``REMOVE`` when absent) so a caller can undo the save
     if the change cannot be recorded in the audit trail.
     """
+    from maverick.config_resets import METADATA, reset_spec
+
     from .settings_catalog import SETTINGS
 
     by_path = {s.path: s for s in SETTINGS if s.key_kind != "entries"}
@@ -1471,7 +1517,15 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
     entries = {s.path: s for s in SETTINGS if s.key_kind == "entries"}
     if not isinstance(changes, dict) or not changes:
         raise ValueError("no settings given")
+    reset_tables = {s.id: s for s in SETTINGS}
     for path in changes:
+        if len(path) == 2 and path[0] == METADATA:
+            table = reset_tables.get(path[1])
+            value = changes[path]
+            if table is None or (value is not None and value is not REMOVE and value != reset_spec(table)):
+                raise ValueError("unknown product-default reset")
+            by_path[path] = table
+            continue
         table = entries.get(tuple(path[:-1]))
         if path in by_path:
             continue

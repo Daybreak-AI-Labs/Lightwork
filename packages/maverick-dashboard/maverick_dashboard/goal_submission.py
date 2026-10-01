@@ -16,7 +16,7 @@ def api_token(key):
     return "api-goal:" + hashlib.sha256(key.encode()).hexdigest()
 
 
-def reserve_api(world, *, key, owner, payload, title, description, domain, caps):
+def reserve_api(world, *, key, owner, payload, title, description, domain, caps, connection_references=None):
     token = api_token(key)
     # Historical processed-message rows did not bind full request payloads.
     # They remain readable for reconciliation, but cannot authorize new work.
@@ -26,14 +26,19 @@ def reserve_api(world, *, key, owner, payload, title, description, domain, caps)
             "A legacy goal receipt exists for this key. Read /api/v1/goal-submissions/receipt "
             "with the same Idempotency-Key to reconcile it; no new work was dispatched."
         ))
+    payload_data = payload.model_dump(mode="json")
+    if not payload_data.get("connection_references"):
+        payload_data.pop("connection_references", None)
     fingerprint = hashlib.sha256(json.dumps({
-        "schema": "api-goal-request.v1", "payload": payload.model_dump(mode="json"),
+        "schema": "api-goal-request.v1", "payload": payload_data,
         "title": title, "description": description, "domain": domain, "caps": caps,
+        **({"connection_references": connection_references} if connection_references else {}),
     }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
     try:
         return SubmissionStore(world).create(token=token, fingerprint=fingerprint, owner=owner,
             title=title[:200], description=description, domain=domain or "", manifest=[],
-            kind="api")
+            kind="source_analysis" if payload.knowledge_context is not None else "api",
+            connection_references=connection_references)
     except SubmissionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

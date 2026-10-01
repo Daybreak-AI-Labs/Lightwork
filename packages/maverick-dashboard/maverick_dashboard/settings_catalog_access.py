@@ -240,7 +240,7 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
                   "one can do everything an administrator can.",
           aliases="bearer token api access remote"),
         S("dashboard", "default_role", "Role for people without one",
-          "The role anyone who signs in gets until they are given a role of their own.",
+          "The fallback for accounts without an explicit role or verified group mapping. Existing unassigned accounts also inherit changes. Users offers a reviewed viewer/no-department migration.",
           "select", grp, "operator", "maverick_dashboard.rbac", subgroup=access,
           choices_from="roles", weaker="change",
           warning="Everyone without a role of their own will get this role's permissions.",
@@ -258,6 +258,35 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "before any sign-in method is set up.",
           "toggle", grp, True, "maverick_dashboard.local_owner", subgroup=access,
           env=("MAVERICK_LOCAL_OWNER_SETUP",), aliases="owner setup first"),
+        S("plugins", "workbench", "Plugin qualification workbench",
+          "Enable administrator-only version checks in a restricted local container, and pin used plugin bytes for ongoing tasks. No service credentials or network are available during checks.",
+          "toggle", grp, False, "maverick.plugin_workbench", subgroup=access),
+        S("plugins", "workbench_image", "Reviewed local plugin-check image",
+          "Fixed image reference for an already installed Linux check environment containing the exact approved plugin and its validation tools. Lightwork never downloads an image or runs these checks directly on the host.",
+          "text", grp, "", "maverick.plugin_workbench", subgroup=access, max_length=71,
+          pattern=r"^(sha256:[a-f0-9]{64})?$"),
+        S("workflows", "versioning", "Workflow draft and publication history",
+          "Keep immutable snapshots, check reviewed input samples, and require administrator publication for new scheduled workflows. Existing schedule contents stay pinned.",
+          "toggle", grp, True, "maverick.workflow_versions", subgroup=access),
+        S("workflows", "typed_inputs", "Author typed workflow inputs",
+          "Let workflow authors add dates, choices, defaults, optional inputs and own connected accounts. Account selections need this setting on and are checked again before execution; other saved inputs still validate when it is off.",
+          "toggle", grp, True, "maverick_dashboard.api", subgroup=access),
+        S("connections", "allow_self_connect", "Let employees connect their own approved accounts",
+          "Employees with permission to operate can sign in to administrator-approved account profiles. Accounts stay private; app registration and sharing remain administrator tasks.",
+          "toggle", grp, False, "maverick.connection_oauth", subgroup=access, weaker=True,
+          warning="Employees can authorize their own accounts for the approved profiles."),
+        S("connections", "self_connect_profiles", "Approved employee account profiles",
+          "Comma-separated profiles: google-drive, google-cloud-storage, jira-cloud. Jira includes reviewed write access; approve it only when needed.",
+          "text", grp, "google-drive", "maverick.connection_oauth", subgroup=access, max_length=128,
+          pattern=r"^(google-drive|google-cloud-storage|jira-cloud)(,(google-drive|google-cloud-storage|jira-cloud))*$"),
+        S("dashboard", "extension_form_values", "Allow reviewed browser form values",
+          "Allow a person to explicitly share visible form values after reviewing them. Values remain off by default for each page; password values are never read.",
+          "toggle", grp, False, "maverick_dashboard.api", subgroup=access, weaker=True,
+          warning="Reviewed browser context may include private values entered in forms."),
+        S("dashboard", "extension_page_structure", "Allow reviewed browser page structure",
+          "Allow a person to review and share page headings and interactive controls with the configured AI service.",
+          "toggle", grp, True, "maverick_dashboard.api", subgroup=access, weaker=True,
+          warning="Reviewed browser context may include headings and control labels from private pages."),
         S("dashboard", "allow_extension", "Allow the browser extension",
           "Let Lightwork's browser extension work with this installation. It needs the "
           "server's access token.",
@@ -1131,6 +1160,8 @@ def entries(S, C, Column) -> tuple:  # noqa: N803,ARG001 -- the catalog's row an
 
     rows = list(_sign_in(S) + _people(S) + _security(S) + _other_agents(S) + _server(S)
                 + _plumbing(S) + _journal(S))
+    from .settings_catalog_conversation import entries as conversation_entries
+    rows.extend(conversation_entries(S))
     for index, row in enumerate(rows):
         if row.id == "tenancy.egress":
             rows[index] = dataclasses.replace(row, columns=(

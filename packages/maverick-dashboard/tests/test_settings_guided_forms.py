@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard.app import app
 
-from test_support.settings_pages import every_group
+from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 API = "/api/v1/settings/catalog"
@@ -82,7 +82,7 @@ def _loaded():
 
 
 def _save(changes, confirm=False, http=client):
-    return http.post(API, json={"changes": changes, "confirm": confirm})
+    return save_catalog(http, API, json={"changes": changes, "confirm": confirm})
 
 
 def _row(setting_id):

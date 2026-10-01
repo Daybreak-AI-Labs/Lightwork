@@ -15,11 +15,11 @@ const pythonExecutable=require('./python-runtime');
 const pythonCommand=JSON.stringify(pythonExecutable);
 // Capture this test-only opt-in before the server clears LIGHTWORK_* variables.
 const showVendorSetup=process.env.LIGHTWORK_BROWSER_SHOW_VENDOR_SETUP==='1'?' --show-vendor-setup':'';
-// The 36 journeys take about four minutes on one worker in CI (237-239 s on
-// main), so the suite budget sits well above that; the workflow's 20-minute
-// job limit is the backstop. Per-test time stays at 45 s.
+// The expanded suite includes fresh owner, recovery and enterprise lifecycle
+// journeys. Allow the complete one-worker qualification run to finish; keep
+// each test and assertion deadline unchanged so hangs remain failures.
 module.exports=defineConfig({
-  testDir:'.',testMatch:'*.spec.js',fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:600000,
+  testDir:'.',testMatch:'*.spec.js',fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:1800000,
   outputDir:process.env.LIGHTWORK_BROWSER_OUTPUT||path.join(os.tmpdir(),'lightwork-browser-results'),
   timeout:45000,expect:{timeout:10000},
   reporter:[['list'],['html',{outputFolder:'browser-report',open:'never'}],['json',{outputFile:'test-results/results.json'}]],

@@ -223,7 +223,7 @@
     actions.appendChild(R.button("Show history", "", function () { history(r, host); }));
     if (canAudit && r.status === "archived") { actions.appendChild(R.button("Show the deletion note", "", function () { tombstone(r, host); })); }
     host.appendChild(actions);
-    host.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(host);
   }
   function history(r, host) {
     request("/" + encodeURIComponent(r.record_id) + "/history").then(function (d) {
@@ -356,7 +356,7 @@
     }
     switchKind();
     editor.hidden = false;
-    editor.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(editor);
     F("title").focus();
   }
   F("record_kind").addEventListener("change", switchKind);

@@ -213,7 +213,7 @@ class TestLifecycle:
         listed = client.get("/scim/v2/Users", headers=_auth()).json()
         assert listed["totalResults"] == 0
 
-    def test_partial_tenant_create_is_compensated_before_scim_failure(
+    def test_uncertain_tenant_create_is_not_adopted_or_deleted_after_failure(
         self, client, monkeypatch
     ):
         from maverick.tenant import registry
@@ -226,6 +226,43 @@ class TestLifecycle:
 
         monkeypatch.setattr(registry, "create_tenant", fail_after_registry_commit)
         response = _make_user(client, username="partial-tenant@example.com")
+        assert response.status_code == 500
+        # A raised create did not hand back an owned incarnation. It might be
+        # a competing provisioner's record, so SCIM cannot safely delete it.
+        retained = registry.list_tenants()
+        assert len(retained) == 1
+        assert client.get("/scim/v2/Users", headers=_auth()).json()["totalResults"] == 0
+        monkeypatch.setattr(registry, "create_tenant", original_create)
+        with pytest.raises(ValueError):
+            registry.create_tenant(retained[0].id)
+        retry = _make_user(client, username="partial-tenant@example.com")
+        assert retry.status_code == 201
+        assert retry.json()["id"] != retained[0].id
+
+    def test_create_uuid_race_never_deletes_another_provisioners_tenant(self, monkeypatch):
+        from maverick.tenant import registry
+        from maverick_dashboard import scim
+
+        original = registry.create_tenant
+
+        def competitor_wins(uid, **kwargs):
+            original(uid, display_name="Other provisioner")
+            return original(uid, **kwargs)
+
+        monkeypatch.setattr(registry, "create_tenant", competitor_wins)
+        with pytest.raises(ValueError, match="already exists"):
+            scim._provision_tenant("race", "SCIM candidate")
+        assert registry.get_tenant("race").display_name == "Other provisioner"
+
+    def test_known_provision_is_compensated_if_scim_publication_fails(self, client, monkeypatch):
+        from maverick.tenant import registry
+        from maverick_dashboard import scim
+
+        def failed_save(_users):
+            raise OSError("synthetic storage failure")
+
+        monkeypatch.setattr(scim, "_save", failed_save)
+        response = _make_user(client, username="failed-save@example.com")
         assert response.status_code == 500
         assert registry.list_tenants() == []
         assert client.get("/scim/v2/Users", headers=_auth()).json()["totalResults"] == 0

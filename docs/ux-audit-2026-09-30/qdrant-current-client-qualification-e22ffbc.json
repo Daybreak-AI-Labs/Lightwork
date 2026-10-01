@@ -1,0 +1,2164 @@
+{
+  "source_head": "e22ffbcca2af43887ed4c142b2633fd86a51471c",
+  "docs_base": "6232e994072aec02ab8e5e244b4989aa39526e78",
+  "verified_clean_source": true,
+  "source_commits": [
+    "ec8e9e62f1dafe152f8b53088f1385bc18569d00",
+    "4a72a912441a0378968794fce5fd9f58f0afab22",
+    "2f38d026fe595cdd6d30e446e39c236beeb7c6e3",
+    "4f287dc1c8e4c22137e846ab78cdbb2ec1434f70",
+    "759e7bbbf3d983be4b0797085982bae9ffb66a79",
+    "3e5442456d15f8efa293bc89257630f565dc228f",
+    "e22ffbcca2af43887ed4c142b2633fd86a51471c"
+  ],
+  "source_files": [
+    {
+      "path": "packages/maverick-core/maverick/vector_store/qdrant_store.py",
+      "git_blob": "63bb1628e10ee999927a9e22aa9204c9aa78d04f",
+      "git_content_sha256": "404545e3640126a9e33e305be95fb079eafcd6e8ace684ebeb5a049fc3477d86"
+    },
+    {
+      "path": "packages/maverick-core/maverick/vector_store/qdrant_text.py",
+      "git_blob": "dfa54611535dee015aacbc9ed5df1aef6f58da74",
+      "git_content_sha256": "4835598421703c041d9079b17195c928eea7d1f95fb1899d1f4d9707ebf7b4d3"
+    },
+    {
+      "path": "packages/maverick-core/tests/test_qdrant_store.py",
+      "git_blob": "51820bffb484e660cde4dacbedd26af0eec313e8",
+      "git_content_sha256": "e6e3fbd364a9b884b931937f057a141b6395ecfd68b063ec70e9887e33cb492f"
+    },
+    {
+      "path": "packages/maverick-core/tests/test_qdrant_text_compat.py",
+      "git_blob": "31aff2832d1d08bef97d5582ebedc4926d68baf4",
+      "git_content_sha256": "cd99337046911e0ec19ad88566fe2eb0d97dfd862b44d76d68bc76ed7eb317c8"
+    }
+  ],
+  "unchanged_real_server_test": {
+    "path": "packages/maverick-core/tests/test_qdrant_isolation_live.py",
+    "git_blob": "f67f126d3b22f5413da00db9edeeae75edf93a22"
+  },
+  "python": "3.12.12",
+  "installed_versions_from_verified_environment": {
+    "chromadb": "1.5.9",
+    "qdrant-client": "1.19.1",
+    "onnxruntime": "1.30.0",
+    "fastembed": "0.8.1"
+  },
+  "metadata_readback": {
+    "fastembed": "0.8.1",
+    "numpy": "2.2.6",
+    "qdrant-client": "1.19.1",
+    "onnxruntime": "1.30.0",
+    "method": "importlib.metadata read-only under private environment owner; sandbox account cannot read installer-owned metadata"
+  },
+  "additional_official_wheels": [
+    {
+      "name": "fastembed",
+      "version": "0.8.1",
+      "url": "https://files.pythonhosted.org/packages/c4/76/209f9f4c421853f729176c5a6ca99a9cd92b3b593390a20f9414fd333ad7/fastembed-0.8.1-py3-none-any.whl",
+      "sha256": "b4f4043080af36ee820d22d2d3034df635c1a8b9764e5d2a642bc7aeb1d0e749"
+    },
+    {
+      "name": "loguru",
+      "version": "0.7.3",
+      "url": "https://files.pythonhosted.org/packages/0c/29/0348de65b8cc732daa3e33e67806420b2ae89bdce2b04af740289c5c6c8c/loguru-0.7.3-py3-none-any.whl",
+      "sha256": "31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c"
+    },
+    {
+      "name": "py_rust_stemmers",
+      "version": "0.1.8",
+      "url": "https://files.pythonhosted.org/packages/92/ca/ebb707ab280636b8f46d040ccb051d1a9ddbc1f1ca2d90cdba626872f405/py_rust_stemmers-0.1.8-cp312-cp312-win_amd64.whl",
+      "sha256": "dd967eea2f808a1e73aa71ecccef0f4925a4cca4eb02ced94057afe3303153ef"
+    },
+    {
+      "name": "win32_setctime",
+      "version": "1.2.0",
+      "url": "https://files.pythonhosted.org/packages/e1/07/c6fe3ad3e685340704d314d765b7912993bcb8dc198f0e7a89382d37974b/win32_setctime-1.2.0-py3-none-any.whl",
+      "sha256": "95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390"
+    }
+  ],
+  "totals": {
+    "distinct_passed_ids": 75,
+    "distinct_intentional_skips": 1,
+    "final_passing_case_executions": 152
+  },
+  "static_checks": {
+    "ruff_four_changed_python_files": "passed",
+    "python_3_10_ast_four_changed_python_files": "passed",
+    "git_diff_check_c906e07_to_e22ffbc": "passed",
+    "runtime_repeated_by_receipt_reviewer": false
+  },
+  "runs": [
+    {
+      "label": "qdrant-server-500fc87-ordinary",
+      "source": {
+        "source_head": "500fc87363a492def69722ef19d2cc518d171286",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-04",
+        "mode": "ordinary",
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+        "archive_sha256": "9b6f69bd85f6abed4bc13f943099f55c6ffd55f5dd90388635320d8fbb569eb0",
+        "binary_sha256": "b5354e3c8f9d13d92294f38d4988d4ddedc04acaa2ce51f0a2d65b30e2d4cd69",
+        "config": {
+          "log_level": "INFO",
+          "telemetry_disabled": true,
+          "cluster": {
+            "enabled": false
+          },
+          "service": {
+            "host": "127.0.0.1",
+            "http_port": 58012,
+            "grpc_port": null,
+            "max_workers": 1,
+            "enable_cors": false,
+            "api_key": "synthetic-local-qdrant-qualification",
+            "enable_snapshot_url_recovery": false
+          },
+          "storage": {
+            "storage_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-ka3mkegz\\storage",
+            "snapshots_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-ka3mkegz\\snapshots",
+            "temp_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-ka3mkegz\\server-temp",
+            "update_concurrency": 1,
+            "wal": {
+              "wal_capacity_mb": 1
+            },
+            "performance": {
+              "max_search_threads": 1,
+              "optimizer_cpu_budget": 1
+            },
+            "optimizers": {
+              "default_segment_number": 1,
+              "max_optimization_threads": 1
+            },
+            "hnsw_index": {
+              "max_indexing_threads": 1
+            }
+          }
+        },
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "optional_test_guard",
+          "-p",
+          "no:cacheprovider",
+          "packages/maverick-core/tests/test_qdrant_isolation_live.py",
+          "-q",
+          "-rs",
+          "-o",
+          "faulthandler_timeout=0",
+          "--basetemp=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-ka3mkegz\\cases",
+          "--junitxml=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qdrant-server-500fc87-ordinary.xml"
+        ],
+        "started_at": 1790821810.8457172,
+        "server_pid": 45552,
+        "server_identity": {
+          "title": "qdrant - vector search engine",
+          "version": "1.19.1",
+          "commit": "6ab21cac18ebb6f4ae29102c7f8f5cc11affd5de"
+        },
+        "returncode": 1,
+        "server_exit_code": 1,
+        "server_stopped": true,
+        "finished_at": 1790821816.4288895
+      },
+      "counts": {
+        "failed": 1
+      },
+      "suite_seconds": 3.329,
+      "cases": [
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_isolation_live::test_tenant_scoped_add_query_delete",
+          "status": "failed",
+          "seconds": 2.563
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/qdrant-server-500fc87-ordinary.source.json",
+          "bytes": 2560,
+          "sha256": "8db5ac27c1f321a4c13a9140c0f0c1a0bd82b7f2d041f22ba1bd7d4cb3a78a9b"
+        },
+        {
+          "path": "audit/qdrant-server-500fc87-ordinary.xml",
+          "bytes": 2380,
+          "sha256": "ed539fd0cd7713f0d486f509d1c73078c4ef1e3f2bf1892e6b7f6176f3a3807d"
+        },
+        {
+          "path": "audit/qdrant-server-500fc87-ordinary.log",
+          "bytes": 2659,
+          "sha256": "fcdd15f5b2482633d6fd952f7f69c63ddd7f9d85277516c609855fdcfdbaa528"
+        },
+        {
+          "path": "audit/qdrant-server-500fc87-ordinary-server.log",
+          "bytes": 2226,
+          "sha256": "327c68401e49cd80ea92dc520afb1ad14519a9754870cc24319ed5c37f869485"
+        }
+      ]
+    },
+    {
+      "label": "optional-vectors-ec8e9e6-ordinary",
+      "source": {
+        "source_head": "ec8e9e62f1dafe152f8b53088f1385bc18569d00",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-optional-vectors",
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+        "phase": "ordinary",
+        "tests": [
+          "packages/maverick-core/tests/test_recall_native_adapters.py",
+          "packages/maverick-core/tests/test_q2_2026_batch3.py",
+          "packages/maverick-core/tests/test_qdrant_store.py",
+          "packages/maverick-core/tests/test_qdrant_text_compat.py"
+        ],
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "optional_test_guard",
+          "-p",
+          "no:cacheprovider",
+          "packages/maverick-core/tests/test_recall_native_adapters.py",
+          "packages/maverick-core/tests/test_q2_2026_batch3.py",
+          "packages/maverick-core/tests/test_qdrant_store.py",
+          "packages/maverick-core/tests/test_qdrant_text_compat.py",
+          "-q",
+          "-rs",
+          "-o",
+          "faulthandler_timeout=0",
+          "--basetemp=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\vec-ordinary-gauvwhf7\\cases",
+          "--junitxml=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\optional-vectors-ec8e9e6-ordinary.xml"
+        ],
+        "state": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\vec-ordinary-gauvwhf7",
+        "external_network_guard": "optional_test_guard",
+        "started_at": 1790822184.296939,
+        "secure_default": "0",
+        "test_secure_default": "0",
+        "finished_at": 1790822195.5019732,
+        "returncode": 1,
+        "log_sha256": "e2a523a056966accbfa71744fada32d75895723dbd8cf144d93d1e26280878cb"
+      },
+      "counts": {
+        "passed": 54,
+        "skipped": 1,
+        "failed": 3
+      },
+      "suite_seconds": 9.467,
+      "cases": [
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_replace_dimension_failure_preserves_prior_and_recovers[chroma]",
+          "status": "passed",
+          "seconds": 2.783
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_replace_dimension_failure_preserves_prior_and_recovers[qdrant]",
+          "status": "passed",
+          "seconds": 1.259
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_failed_preparation_and_delete_do_not_resurrect[chroma]",
+          "status": "passed",
+          "seconds": 0.102
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_failed_preparation_and_delete_do_not_resurrect[qdrant]",
+          "status": "passed",
+          "seconds": 0.05
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_qdrant_exact_tenant_filter_and_uuid_collision[chroma]",
+          "status": "skipped",
+          "seconds": 0.042,
+          "reason": "Qdrant exact payload filter contract"
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_qdrant_exact_tenant_filter_and_uuid_collision[qdrant]",
+          "status": "passed",
+          "seconds": 0.047
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_default_url",
+          "status": "passed",
+          "seconds": 0.049
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_env_overrides",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_v1_suffix_idempotent",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_in_registry",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_dispatches",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_chroma_store_round_trip",
+          "status": "passed",
+          "seconds": 0.074
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_chroma_store_delete_and_reset",
+          "status": "passed",
+          "seconds": 0.103
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_chroma_store_missing_dep_raises_importable_error",
+          "status": "passed",
+          "seconds": 0.006
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_bluesky_start_requires_credentials",
+          "status": "passed",
+          "seconds": 0.068
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_bluesky_session_created_and_cached",
+          "status": "passed",
+          "seconds": 0.023
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_requires_token",
+          "status": "passed",
+          "seconds": 0.049
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_strip_html",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_poll_uses_since_id",
+          "status": "passed",
+          "seconds": 0.437
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_wizard_catalog_includes_tgi",
+          "status": "passed",
+          "seconds": 0.029
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_bluesky_requires_allowlist",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_requires_allowlist",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_missing_import_raises",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_local_path_init",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_url_init_skips_path",
+          "status": "passed",
+          "seconds": 0.136
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_add_autogenerates_ids",
+          "status": "passed",
+          "seconds": 0.007
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_add_passes_metadata",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_add_empty_noop",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_query_shape",
+          "status": "passed",
+          "seconds": 0.007
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_query_empty_text",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_query_is_tenant_scoped",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_delete",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_count",
+          "status": "passed",
+          "seconds": 0.006
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_count_swallows_errors",
+          "status": "passed",
+          "seconds": 0.006
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_remote_operations_publish_unknown_cost_receipts",
+          "status": "passed",
+          "seconds": 0.851
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_remote_count_failure_is_retained",
+          "status": "passed",
+          "seconds": 0.144
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_remote_reset_failure_is_retained_after_recreate_attempt",
+          "status": "passed",
+          "seconds": 0.144
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_best_effort_count_does_not_hide_accounting_failure",
+          "status": "passed",
+          "seconds": 0.006
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_unknown_price_cap_blocks_before_remote_dispatch",
+          "status": "passed",
+          "seconds": 0.102
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_unknown_price_cap_blocks_before_remote_connect",
+          "status": "passed",
+          "seconds": 0.105
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_local_operations_are_never_metered",
+          "status": "passed",
+          "seconds": 0.014
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_vector_transport_accounting_bridge_preserves_core_only_install",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_existing_named_legacy_collection_infers_model_and_preserves_payload",
+          "status": "passed",
+          "seconds": 0.036
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_new_collection_delegates_default_or_honors_explicit_model[None-synthetic/current]",
+          "status": "passed",
+          "seconds": 0.028
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_new_collection_delegates_default_or_honors_explicit_model[synthetic/other-synthetic/other]",
+          "status": "passed",
+          "seconds": 0.028
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_recorded_model_survives_reopen_sdk_default_change_and_reset",
+          "status": "failed",
+          "seconds": 0.047
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_recorded_model_rejects_same_basename_same_dimension_different_model",
+          "status": "passed",
+          "seconds": 0.032
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[model]",
+          "status": "passed",
+          "seconds": 0.024
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[dimension]",
+          "status": "passed",
+          "seconds": 0.035
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[distance]",
+          "status": "passed",
+          "seconds": 0.037
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[unnamed]",
+          "status": "passed",
+          "seconds": 0.039
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_unresolvable_legacy_model_refuses_before_encoder_or_write[False]",
+          "status": "passed",
+          "seconds": 0.038
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_unresolvable_legacy_model_refuses_before_encoder_or_write[True]",
+          "status": "passed",
+          "seconds": 0.042
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_reset_preserves_named_or_unnamed_schema_without_encoder_initialization[False]",
+          "status": "failed",
+          "seconds": 0.043
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_reset_preserves_named_or_unnamed_schema_without_encoder_initialization[True]",
+          "status": "failed",
+          "seconds": 0.04
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_legacy_rows_without_scope_field_are_filtered_by_exact_tenant_prefix",
+          "status": "passed",
+          "seconds": 0.078
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_new_rows_keep_tenant_ids_distinct_and_override_reserved_metadata",
+          "status": "passed",
+          "seconds": 0.076
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_encoder_initialization_failure_never_creates_or_overwrites_collection",
+          "status": "passed",
+          "seconds": 0.051
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/optional-vectors-ec8e9e6-ordinary.source.json",
+          "bytes": 1752,
+          "sha256": "5ae683087b38bd05db687b7f54d39e7f90d9a8f8034415352ea222e33af563e6"
+        },
+        {
+          "path": "audit/optional-vectors-ec8e9e6-ordinary.xml",
+          "bytes": 13806,
+          "sha256": "4f31599f23e3b73cbaecb06d36b732d8daba30768c839a357364213cd5084a9a"
+        },
+        {
+          "path": "audit/optional-vectors-ec8e9e6-ordinary.log",
+          "bytes": 4869,
+          "sha256": "e2a523a056966accbfa71744fada32d75895723dbd8cf144d93d1e26280878cb"
+        }
+      ]
+    },
+    {
+      "label": "qdrant-server-ec8e9e6-ordinary",
+      "source": {
+        "source_head": "ec8e9e62f1dafe152f8b53088f1385bc18569d00",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-optional-vectors",
+        "mode": "ordinary",
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+        "archive_sha256": "9b6f69bd85f6abed4bc13f943099f55c6ffd55f5dd90388635320d8fbb569eb0",
+        "binary_sha256": "b5354e3c8f9d13d92294f38d4988d4ddedc04acaa2ce51f0a2d65b30e2d4cd69",
+        "config": {
+          "log_level": "INFO",
+          "telemetry_disabled": true,
+          "cluster": {
+            "enabled": false
+          },
+          "service": {
+            "host": "127.0.0.1",
+            "http_port": 51923,
+            "grpc_port": null,
+            "max_workers": 1,
+            "enable_cors": false,
+            "api_key": "synthetic-local-qdrant-qualification",
+            "enable_snapshot_url_recovery": false
+          },
+          "storage": {
+            "storage_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-gg48_ko_\\storage",
+            "snapshots_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-gg48_ko_\\snapshots",
+            "temp_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-gg48_ko_\\server-temp",
+            "update_concurrency": 1,
+            "wal": {
+              "wal_capacity_mb": 1
+            },
+            "performance": {
+              "max_search_threads": 1,
+              "optimizer_cpu_budget": 1
+            },
+            "optimizers": {
+              "default_segment_number": 1,
+              "max_optimization_threads": 1
+            },
+            "hnsw_index": {
+              "max_indexing_threads": 1
+            }
+          }
+        },
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "optional_test_guard",
+          "-p",
+          "no:cacheprovider",
+          "packages/maverick-core/tests/test_qdrant_isolation_live.py",
+          "-p",
+          "qdrant_synthetic_embeddings",
+          "-q",
+          "-rs",
+          "-o",
+          "faulthandler_timeout=0",
+          "--basetemp=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-gg48_ko_\\cases",
+          "--junitxml=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qdrant-server-ec8e9e6-ordinary.xml"
+        ],
+        "started_at": 1790822197.133217,
+        "server_pid": 57276,
+        "server_identity": {
+          "title": "qdrant - vector search engine",
+          "version": "1.19.1",
+          "commit": "6ab21cac18ebb6f4ae29102c7f8f5cc11affd5de"
+        },
+        "returncode": 0,
+        "server_exit_code": 1,
+        "server_stopped": true,
+        "finished_at": 1790822204.9247499
+      },
+      "counts": {
+        "passed": 1
+      },
+      "suite_seconds": 5.861,
+      "cases": [
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_isolation_live::test_tenant_scoped_add_query_delete",
+          "status": "passed",
+          "seconds": 5.438,
+          "properties": {
+            "inference_boundary": "synthetic vectors; real fastembed metadata; real Qdrant HTTP server",
+            "synthetic_embedding_calls": "{'initializations': 2, 'passages': 2, 'queries': 4}"
+          }
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/qdrant-server-ec8e9e6-ordinary.source.json",
+          "bytes": 2606,
+          "sha256": "420afb959c8ea0c9c9dc8ec40b0147cc892c1a13d4121b50cf52abeca607c0f8"
+        },
+        {
+          "path": "audit/qdrant-server-ec8e9e6-ordinary.xml",
+          "bytes": 633,
+          "sha256": "a7285342a399eec117df634ca34bf93abe84e38f5cbd88fc01cdc20fb2cf29c6"
+        },
+        {
+          "path": "audit/qdrant-server-ec8e9e6-ordinary.log",
+          "bytes": 937,
+          "sha256": "78fb07eaf87b4d83b5a7f2aae19303782289c97e7d43fa0e8e5762106fb33ab3"
+        },
+        {
+          "path": "audit/qdrant-server-ec8e9e6-ordinary-server.log",
+          "bytes": 6151,
+          "sha256": "83facf022e81543b6cbfc9980012956642b8ca0e3fb105994c2dc78c6aa39033"
+        }
+      ]
+    },
+    {
+      "label": "optional-vectors-e22ffbc-ordinary",
+      "source": {
+        "source_head": "e22ffbcca2af43887ed4c142b2633fd86a51471c",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-optional-vectors",
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+        "phase": "ordinary",
+        "tests": [
+          "packages/maverick-core/tests/test_recall_native_adapters.py",
+          "packages/maverick-core/tests/test_q2_2026_batch3.py",
+          "packages/maverick-core/tests/test_qdrant_store.py",
+          "packages/maverick-core/tests/test_qdrant_text_compat.py"
+        ],
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "optional_test_guard",
+          "-p",
+          "no:cacheprovider",
+          "packages/maverick-core/tests/test_recall_native_adapters.py",
+          "packages/maverick-core/tests/test_q2_2026_batch3.py",
+          "packages/maverick-core/tests/test_qdrant_store.py",
+          "packages/maverick-core/tests/test_qdrant_text_compat.py",
+          "-q",
+          "-rs",
+          "-o",
+          "faulthandler_timeout=0",
+          "--basetemp=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\vec-ordinary-bbyr9re9\\cases",
+          "--junitxml=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\optional-vectors-e22ffbc-ordinary.xml"
+        ],
+        "state": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\vec-ordinary-bbyr9re9",
+        "external_network_guard": "optional_test_guard",
+        "started_at": 1790825433.7654123,
+        "secure_default": "0",
+        "test_secure_default": "0",
+        "finished_at": 1790825443.9818053,
+        "returncode": 0,
+        "log_sha256": "775e6c18e161b0e66e175ba25facab89ba485c1e42380b610cb019df0af3a42e"
+      },
+      "counts": {
+        "passed": 74,
+        "skipped": 1
+      },
+      "suite_seconds": 8.649,
+      "cases": [
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_replace_dimension_failure_preserves_prior_and_recovers[chroma]",
+          "status": "passed",
+          "seconds": 2.387
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_replace_dimension_failure_preserves_prior_and_recovers[qdrant]",
+          "status": "passed",
+          "seconds": 1.231
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_failed_preparation_and_delete_do_not_resurrect[chroma]",
+          "status": "passed",
+          "seconds": 0.1
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_failed_preparation_and_delete_do_not_resurrect[qdrant]",
+          "status": "passed",
+          "seconds": 0.045
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_qdrant_exact_tenant_filter_and_uuid_collision[chroma]",
+          "status": "skipped",
+          "seconds": 0.037,
+          "reason": "Qdrant exact payload filter contract"
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_qdrant_exact_tenant_filter_and_uuid_collision[qdrant]",
+          "status": "passed",
+          "seconds": 0.039
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_default_url",
+          "status": "passed",
+          "seconds": 0.05
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_env_overrides",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_v1_suffix_idempotent",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_in_registry",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_dispatches",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_chroma_store_round_trip",
+          "status": "passed",
+          "seconds": 0.065
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_chroma_store_delete_and_reset",
+          "status": "passed",
+          "seconds": 0.092
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_chroma_store_missing_dep_raises_importable_error",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_bluesky_start_requires_credentials",
+          "status": "passed",
+          "seconds": 0.115
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_bluesky_session_created_and_cached",
+          "status": "passed",
+          "seconds": 0.014
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_requires_token",
+          "status": "passed",
+          "seconds": 0.038
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_strip_html",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_poll_uses_since_id",
+          "status": "passed",
+          "seconds": 0.373
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_wizard_catalog_includes_tgi",
+          "status": "passed",
+          "seconds": 0.008
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_bluesky_requires_allowlist",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_requires_allowlist",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_missing_import_raises",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_local_path_init",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_explicit_legacy_model_failure_does_not_fall_back",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_url_init_skips_path",
+          "status": "passed",
+          "seconds": 0.098
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_add_autogenerates_ids",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_add_passes_metadata",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_add_empty_noop",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_query_shape",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_query_empty_text",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_query_is_tenant_scoped",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_delete",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_count",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_count_swallows_errors",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_remote_operations_publish_unknown_cost_receipts",
+          "status": "passed",
+          "seconds": 0.798
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_remote_count_failure_is_retained",
+          "status": "passed",
+          "seconds": 0.132
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_remote_reset_failure_is_retained_after_recreate_attempt",
+          "status": "passed",
+          "seconds": 0.128
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_best_effort_count_does_not_hide_accounting_failure",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_unknown_price_cap_blocks_before_remote_dispatch",
+          "status": "passed",
+          "seconds": 0.113
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_unknown_price_cap_blocks_before_remote_connect",
+          "status": "passed",
+          "seconds": 0.078
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_local_operations_are_never_metered",
+          "status": "passed",
+          "seconds": 0.013
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_vector_transport_accounting_bridge_preserves_core_only_install",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_existing_named_legacy_collection_infers_model_and_preserves_payload",
+          "status": "passed",
+          "seconds": 0.036
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_new_collection_delegates_default_or_honors_explicit_model[None-synthetic/current]",
+          "status": "passed",
+          "seconds": 0.025
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_new_collection_delegates_default_or_honors_explicit_model[synthetic/other-synthetic/other]",
+          "status": "passed",
+          "seconds": 0.028
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_recorded_model_survives_reopen_sdk_default_change_and_reset",
+          "status": "passed",
+          "seconds": 0.045
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_recorded_model_rejects_same_basename_same_dimension_different_model",
+          "status": "passed",
+          "seconds": 0.031
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[model]",
+          "status": "passed",
+          "seconds": 0.025
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[dimension]",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[distance]",
+          "status": "passed",
+          "seconds": 0.024
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[unnamed]",
+          "status": "passed",
+          "seconds": 0.023
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_unresolvable_legacy_model_refuses_before_encoder_or_write[False]",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_unresolvable_legacy_model_refuses_before_encoder_or_write[True]",
+          "status": "passed",
+          "seconds": 0.024
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_reset_preserves_named_or_unnamed_schema_without_encoder_initialization[False]",
+          "status": "passed",
+          "seconds": 0.034
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_reset_preserves_named_or_unnamed_schema_without_encoder_initialization[True]",
+          "status": "passed",
+          "seconds": 0.033
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_legacy_rows_without_scope_field_are_filtered_by_exact_tenant_prefix",
+          "status": "passed",
+          "seconds": 0.042
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_new_rows_keep_tenant_ids_distinct_and_override_reserved_metadata",
+          "status": "passed",
+          "seconds": 0.045
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_encoder_initialization_failure_never_creates_or_overwrites_collection",
+          "status": "passed",
+          "seconds": 0.032
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_invalid_embedding_batch_preserves_existing_points[vectors0]",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_invalid_embedding_batch_preserves_existing_points[vectors1]",
+          "status": "passed",
+          "seconds": 0.132
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_invalid_embedding_batch_preserves_existing_points[vectors2]",
+          "status": "passed",
+          "seconds": 0.02
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_uncertain_native_upsert_is_not_retried_or_followed_by_deletion",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_display_document_metadata_preserves_legacy_precedence_and_typed_values",
+          "status": "passed",
+          "seconds": 0.019
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_failed_legacy_model_initialization_releases_native_path_lock",
+          "status": "passed",
+          "seconds": 0.021
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_exhausted_budget_stops_text_before_encoder_or_native_rpc[add]",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_exhausted_budget_stops_text_before_encoder_or_native_rpc[query]",
+          "status": "passed",
+          "seconds": 0.023
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancellation_during_encoder_init_stops_embedding_and_native_effects[add]",
+          "status": "passed",
+          "seconds": 0.035
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancellation_during_encoder_init_stops_embedding_and_native_effects[query]",
+          "status": "passed",
+          "seconds": 0.033
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancelled_passage_batch_stops_remaining_vectors_batches_and_upsert[1]",
+          "status": "passed",
+          "seconds": 0.039
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancelled_passage_batch_stops_remaining_vectors_batches_and_upsert[16]",
+          "status": "passed",
+          "seconds": 0.04
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_wall_budget_expiring_during_query_embedding_prevents_native_search",
+          "status": "passed",
+          "seconds": 0.04
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancelled_encoder_is_not_reused_for_a_different_later_identity[False]",
+          "status": "passed",
+          "seconds": 0.04
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancelled_encoder_is_not_reused_for_a_different_later_identity[True]",
+          "status": "passed",
+          "seconds": 0.039
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_unsupported_sdk_default_does_not_publish_an_unvalidated_encoder",
+          "status": "passed",
+          "seconds": 0.037
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/optional-vectors-e22ffbc-ordinary.source.json",
+          "bytes": 1753,
+          "sha256": "f8f1ac24efd5788c821d934ef43351d23bd99b611d683263a5100326c2954420"
+        },
+        {
+          "path": "audit/optional-vectors-e22ffbc-ordinary.xml",
+          "bytes": 11785,
+          "sha256": "78407d7430a8c9ae6bce382c509cee37826efa08f7b8f074656183dacb55671f"
+        },
+        {
+          "path": "audit/optional-vectors-e22ffbc-ordinary.log",
+          "bytes": 388,
+          "sha256": "775e6c18e161b0e66e175ba25facab89ba485c1e42380b610cb019df0af3a42e"
+        }
+      ]
+    },
+    {
+      "label": "optional-vectors-e22ffbc-secure",
+      "source": {
+        "source_head": "e22ffbcca2af43887ed4c142b2633fd86a51471c",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-optional-vectors",
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+        "phase": "secure",
+        "tests": [
+          "packages/maverick-core/tests/test_recall_native_adapters.py",
+          "packages/maverick-core/tests/test_q2_2026_batch3.py",
+          "packages/maverick-core/tests/test_qdrant_store.py",
+          "packages/maverick-core/tests/test_qdrant_text_compat.py"
+        ],
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "optional_test_guard",
+          "-p",
+          "no:cacheprovider",
+          "packages/maverick-core/tests/test_recall_native_adapters.py",
+          "packages/maverick-core/tests/test_q2_2026_batch3.py",
+          "packages/maverick-core/tests/test_qdrant_store.py",
+          "packages/maverick-core/tests/test_qdrant_text_compat.py",
+          "-q",
+          "-rs",
+          "-o",
+          "faulthandler_timeout=0",
+          "--basetemp=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\vec-secure-era7_2y5\\cases",
+          "--junitxml=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\optional-vectors-e22ffbc-secure.xml"
+        ],
+        "state": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\vec-secure-era7_2y5",
+        "external_network_guard": "optional_test_guard",
+        "started_at": 1790825461.410269,
+        "secure_default": "1",
+        "test_secure_default": "1",
+        "finished_at": 1790825468.5463433,
+        "returncode": 0,
+        "log_sha256": "fdcfc2cd72406788cfe7b92d0f78b023f6f011958317f3ccb4dae3ea0549824a"
+      },
+      "counts": {
+        "passed": 74,
+        "skipped": 1
+      },
+      "suite_seconds": 6.164,
+      "cases": [
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_replace_dimension_failure_preserves_prior_and_recovers[chroma]",
+          "status": "passed",
+          "seconds": 1.01
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_replace_dimension_failure_preserves_prior_and_recovers[qdrant]",
+          "status": "passed",
+          "seconds": 0.86
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_failed_preparation_and_delete_do_not_resurrect[chroma]",
+          "status": "passed",
+          "seconds": 0.114
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_failed_preparation_and_delete_do_not_resurrect[qdrant]",
+          "status": "passed",
+          "seconds": 0.049
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_qdrant_exact_tenant_filter_and_uuid_collision[chroma]",
+          "status": "skipped",
+          "seconds": 0.036,
+          "reason": "Qdrant exact payload filter contract"
+        },
+        {
+          "id": "packages.maverick-core.tests.test_recall_native_adapters::test_native_qdrant_exact_tenant_filter_and_uuid_collision[qdrant]",
+          "status": "passed",
+          "seconds": 0.041
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_default_url",
+          "status": "passed",
+          "seconds": 0.013
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_env_overrides",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_v1_suffix_idempotent",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_in_registry",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_tgi_provider_dispatches",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_chroma_store_round_trip",
+          "status": "passed",
+          "seconds": 0.063
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_chroma_store_delete_and_reset",
+          "status": "passed",
+          "seconds": 0.079
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_chroma_store_missing_dep_raises_importable_error",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_bluesky_start_requires_credentials",
+          "status": "passed",
+          "seconds": 0.017
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_bluesky_session_created_and_cached",
+          "status": "passed",
+          "seconds": 0.007
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_requires_token",
+          "status": "passed",
+          "seconds": 0.023
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_strip_html",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_poll_uses_since_id",
+          "status": "passed",
+          "seconds": 0.39
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_wizard_catalog_includes_tgi",
+          "status": "passed",
+          "seconds": 0.007
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_bluesky_requires_allowlist",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_q2_2026_batch3::test_mastodon_requires_allowlist",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_missing_import_raises",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_local_path_init",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_explicit_legacy_model_failure_does_not_fall_back",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_url_init_skips_path",
+          "status": "passed",
+          "seconds": 0.039
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_add_autogenerates_ids",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_add_passes_metadata",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_add_empty_noop",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_query_shape",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_query_empty_text",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_query_is_tenant_scoped",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_delete",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_count",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_count_swallows_errors",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_remote_operations_publish_unknown_cost_receipts",
+          "status": "passed",
+          "seconds": 0.682
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_remote_count_failure_is_retained",
+          "status": "passed",
+          "seconds": 0.117
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_remote_reset_failure_is_retained_after_recreate_attempt",
+          "status": "passed",
+          "seconds": 0.122
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_best_effort_count_does_not_hide_accounting_failure",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_unknown_price_cap_blocks_before_remote_dispatch",
+          "status": "passed",
+          "seconds": 0.076
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_unknown_price_cap_blocks_before_remote_connect",
+          "status": "passed",
+          "seconds": 0.076
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_qdrant_local_operations_are_never_metered",
+          "status": "passed",
+          "seconds": 0.011
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_store::test_vector_transport_accounting_bridge_preserves_core_only_install",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_existing_named_legacy_collection_infers_model_and_preserves_payload",
+          "status": "passed",
+          "seconds": 0.033
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_new_collection_delegates_default_or_honors_explicit_model[None-synthetic/current]",
+          "status": "passed",
+          "seconds": 0.024
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_new_collection_delegates_default_or_honors_explicit_model[synthetic/other-synthetic/other]",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_recorded_model_survives_reopen_sdk_default_change_and_reset",
+          "status": "passed",
+          "seconds": 0.035
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_recorded_model_rejects_same_basename_same_dimension_different_model",
+          "status": "passed",
+          "seconds": 0.029
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[model]",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[dimension]",
+          "status": "passed",
+          "seconds": 0.02
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[distance]",
+          "status": "passed",
+          "seconds": 0.021
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_incompatible_existing_collection_is_never_overwritten[unnamed]",
+          "status": "passed",
+          "seconds": 0.021
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_unresolvable_legacy_model_refuses_before_encoder_or_write[False]",
+          "status": "passed",
+          "seconds": 0.019
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_unresolvable_legacy_model_refuses_before_encoder_or_write[True]",
+          "status": "passed",
+          "seconds": 0.02
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_reset_preserves_named_or_unnamed_schema_without_encoder_initialization[False]",
+          "status": "passed",
+          "seconds": 0.033
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_reset_preserves_named_or_unnamed_schema_without_encoder_initialization[True]",
+          "status": "passed",
+          "seconds": 0.027
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_legacy_rows_without_scope_field_are_filtered_by_exact_tenant_prefix",
+          "status": "passed",
+          "seconds": 0.04
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_new_rows_keep_tenant_ids_distinct_and_override_reserved_metadata",
+          "status": "passed",
+          "seconds": 0.041
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_encoder_initialization_failure_never_creates_or_overwrites_collection",
+          "status": "passed",
+          "seconds": 0.128
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_invalid_embedding_batch_preserves_existing_points[vectors0]",
+          "status": "passed",
+          "seconds": 0.02
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_invalid_embedding_batch_preserves_existing_points[vectors1]",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_invalid_embedding_batch_preserves_existing_points[vectors2]",
+          "status": "passed",
+          "seconds": 0.02
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_uncertain_native_upsert_is_not_retried_or_followed_by_deletion",
+          "status": "passed",
+          "seconds": 0.019
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_display_document_metadata_preserves_legacy_precedence_and_typed_values",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_failed_legacy_model_initialization_releases_native_path_lock",
+          "status": "passed",
+          "seconds": 0.017
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_exhausted_budget_stops_text_before_encoder_or_native_rpc[add]",
+          "status": "passed",
+          "seconds": 0.021
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_exhausted_budget_stops_text_before_encoder_or_native_rpc[query]",
+          "status": "passed",
+          "seconds": 0.02
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancellation_during_encoder_init_stops_embedding_and_native_effects[add]",
+          "status": "passed",
+          "seconds": 0.019
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancellation_during_encoder_init_stops_embedding_and_native_effects[query]",
+          "status": "passed",
+          "seconds": 0.019
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancelled_passage_batch_stops_remaining_vectors_batches_and_upsert[1]",
+          "status": "passed",
+          "seconds": 0.021
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancelled_passage_batch_stops_remaining_vectors_batches_and_upsert[16]",
+          "status": "passed",
+          "seconds": 0.022
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_wall_budget_expiring_during_query_embedding_prevents_native_search",
+          "status": "passed",
+          "seconds": 0.02
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancelled_encoder_is_not_reused_for_a_different_later_identity[False]",
+          "status": "passed",
+          "seconds": 0.021
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_cancelled_encoder_is_not_reused_for_a_different_later_identity[True]",
+          "status": "passed",
+          "seconds": 0.021
+        },
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_text_compat::test_unsupported_sdk_default_does_not_publish_an_unvalidated_encoder",
+          "status": "passed",
+          "seconds": 0.021
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/optional-vectors-e22ffbc-secure.source.json",
+          "bytes": 1744,
+          "sha256": "22b1b94e84e3a1264edddcd7885eb5b2fd47b900a8a2bfab0ada4e1a100e3e80"
+        },
+        {
+          "path": "audit/optional-vectors-e22ffbc-secure.xml",
+          "bytes": 11785,
+          "sha256": "2ff9c488b751f3426e4fab6aaf6be703295b98758c2d59ca7985bd1f80cf68d9"
+        },
+        {
+          "path": "audit/optional-vectors-e22ffbc-secure.log",
+          "bytes": 388,
+          "sha256": "fdcfc2cd72406788cfe7b92d0f78b023f6f011958317f3ccb4dae3ea0549824a"
+        }
+      ]
+    },
+    {
+      "label": "qdrant-server-e22ffbc-synthetic-ordinary",
+      "source": {
+        "source_head": "e22ffbcca2af43887ed4c142b2633fd86a51471c",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-optional-vectors",
+        "mode": "ordinary",
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+        "archive_sha256": "9b6f69bd85f6abed4bc13f943099f55c6ffd55f5dd90388635320d8fbb569eb0",
+        "binary_sha256": "b5354e3c8f9d13d92294f38d4988d4ddedc04acaa2ce51f0a2d65b30e2d4cd69",
+        "binary_archive_member": "qdrant.exe",
+        "config": {
+          "log_level": "INFO",
+          "telemetry_disabled": true,
+          "cluster": {
+            "enabled": false
+          },
+          "service": {
+            "host": "127.0.0.1",
+            "http_port": 62557,
+            "grpc_port": null,
+            "max_workers": 1,
+            "enable_cors": false,
+            "api_key": "synthetic-local-qdrant-qualification",
+            "enable_snapshot_url_recovery": false
+          },
+          "storage": {
+            "storage_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-bmv1unpk\\storage",
+            "snapshots_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-bmv1unpk\\snapshots",
+            "temp_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-bmv1unpk\\server-temp",
+            "update_concurrency": 1,
+            "wal": {
+              "wal_capacity_mb": 1
+            },
+            "performance": {
+              "max_search_threads": 1,
+              "optimizer_cpu_budget": 1
+            },
+            "optimizers": {
+              "default_segment_number": 1,
+              "max_optimization_threads": 1
+            },
+            "hnsw_index": {
+              "max_indexing_threads": 1
+            }
+          }
+        },
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "optional_test_guard",
+          "-p",
+          "no:cacheprovider",
+          "packages/maverick-core/tests/test_qdrant_isolation_live.py",
+          "-p",
+          "qdrant_synthetic_embeddings",
+          "-q",
+          "-rs",
+          "-o",
+          "faulthandler_timeout=0",
+          "--basetemp=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-bmv1unpk\\cases",
+          "--junitxml=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qdrant-server-e22ffbc-synthetic-ordinary.xml"
+        ],
+        "started_at": 1790825491.6504438,
+        "server_pid": 40300,
+        "server_identity": {
+          "title": "qdrant - vector search engine",
+          "version": "1.19.1",
+          "commit": "6ab21cac18ebb6f4ae29102c7f8f5cc11affd5de"
+        },
+        "returncode": 0,
+        "server_exit_code": 1,
+        "server_stopped": true,
+        "finished_at": 1790825499.4184568
+      },
+      "counts": {
+        "passed": 1
+      },
+      "suite_seconds": 5.838,
+      "cases": [
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_isolation_live::test_tenant_scoped_add_query_delete",
+          "status": "passed",
+          "seconds": 5.448,
+          "properties": {
+            "inference_boundary": "synthetic vectors; real fastembed metadata; real Qdrant HTTP server",
+            "synthetic_embedding_calls": "{'initializations': 2, 'passages': 2, 'queries': 4}"
+          }
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/qdrant-server-e22ffbc-synthetic-ordinary.source.json",
+          "bytes": 2659,
+          "sha256": "80946bfaf71de098316c1cc992f03f48bf997b17adfa8a43c295a663dbdfb1d0"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-synthetic-ordinary.xml",
+          "bytes": 633,
+          "sha256": "1b13ed9778b78af48d400848242ce76aff047357dd2e7d69dddf7d36533d4e4a"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-synthetic-ordinary.log",
+          "bytes": 937,
+          "sha256": "4180c8392d8feb938bab6077abe10a446bbbfad0b3f2fe7d59b2521d5cf80e90"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-synthetic-ordinary-server.log",
+          "bytes": 6151,
+          "sha256": "61465f3ec9ba8ce94d2f64e37feb883b22a5795d8d7141acdb7dc86534ee1c8b"
+        }
+      ]
+    },
+    {
+      "label": "qdrant-server-e22ffbc-synthetic-secure",
+      "source": {
+        "source_head": "e22ffbcca2af43887ed4c142b2633fd86a51471c",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-optional-vectors",
+        "mode": "secure",
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+        "archive_sha256": "9b6f69bd85f6abed4bc13f943099f55c6ffd55f5dd90388635320d8fbb569eb0",
+        "binary_sha256": "b5354e3c8f9d13d92294f38d4988d4ddedc04acaa2ce51f0a2d65b30e2d4cd69",
+        "binary_archive_member": "qdrant.exe",
+        "config": {
+          "log_level": "INFO",
+          "telemetry_disabled": true,
+          "cluster": {
+            "enabled": false
+          },
+          "service": {
+            "host": "127.0.0.1",
+            "http_port": 62856,
+            "grpc_port": null,
+            "max_workers": 1,
+            "enable_cors": false,
+            "api_key": "synthetic-local-qdrant-qualification",
+            "enable_snapshot_url_recovery": false
+          },
+          "storage": {
+            "storage_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-secure-m7w0wgo4\\storage",
+            "snapshots_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-secure-m7w0wgo4\\snapshots",
+            "temp_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-secure-m7w0wgo4\\server-temp",
+            "update_concurrency": 1,
+            "wal": {
+              "wal_capacity_mb": 1
+            },
+            "performance": {
+              "max_search_threads": 1,
+              "optimizer_cpu_budget": 1
+            },
+            "optimizers": {
+              "default_segment_number": 1,
+              "max_optimization_threads": 1
+            },
+            "hnsw_index": {
+              "max_indexing_threads": 1
+            }
+          }
+        },
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "optional_test_guard",
+          "-p",
+          "no:cacheprovider",
+          "packages/maverick-core/tests/test_qdrant_isolation_live.py",
+          "-p",
+          "qdrant_synthetic_embeddings",
+          "-q",
+          "-rs",
+          "-o",
+          "faulthandler_timeout=0",
+          "--basetemp=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-secure-m7w0wgo4\\cases",
+          "--junitxml=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qdrant-server-e22ffbc-synthetic-secure.xml"
+        ],
+        "started_at": 1790825512.9674819,
+        "server_pid": 41044,
+        "server_identity": {
+          "title": "qdrant - vector search engine",
+          "version": "1.19.1",
+          "commit": "6ab21cac18ebb6f4ae29102c7f8f5cc11affd5de"
+        },
+        "returncode": 0,
+        "server_exit_code": 1,
+        "server_stopped": true,
+        "finished_at": 1790825520.2764077
+      },
+      "counts": {
+        "passed": 1
+      },
+      "suite_seconds": 5.891,
+      "cases": [
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_isolation_live::test_tenant_scoped_add_query_delete",
+          "status": "passed",
+          "seconds": 5.518,
+          "properties": {
+            "inference_boundary": "synthetic vectors; real fastembed metadata; real Qdrant HTTP server",
+            "synthetic_embedding_calls": "{'initializations': 2, 'passages': 2, 'queries': 4}"
+          }
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/qdrant-server-e22ffbc-synthetic-secure.source.json",
+          "bytes": 2647,
+          "sha256": "243da25157da9281b6c0ca9e9f088e0a711656abba5be6dfaff2f910cb1ff2ee"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-synthetic-secure.xml",
+          "bytes": 633,
+          "sha256": "2a35ce0202b14a1b7b82cd6085553cd43a1f186c25b0fa9f60d1f8028b163aa0"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-synthetic-secure.log",
+          "bytes": 937,
+          "sha256": "d89256399292d24e5050e28854716221a07ccdb5dc1a6213c76afabb1fdb7722"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-synthetic-secure-server.log",
+          "bytes": 6147,
+          "sha256": "c8e9ade5e44d81954137f9600a0720fff0775f485e66d1687eafc72fd87630bf"
+        }
+      ]
+    },
+    {
+      "label": "qdrant-server-e22ffbc-offline-ordinary",
+      "source": {
+        "source_head": "e22ffbcca2af43887ed4c142b2633fd86a51471c",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-optional-vectors",
+        "mode": "ordinary",
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+        "archive_sha256": "9b6f69bd85f6abed4bc13f943099f55c6ffd55f5dd90388635320d8fbb569eb0",
+        "binary_sha256": "b5354e3c8f9d13d92294f38d4988d4ddedc04acaa2ce51f0a2d65b30e2d4cd69",
+        "binary_archive_member": "qdrant.exe",
+        "config": {
+          "log_level": "INFO",
+          "telemetry_disabled": true,
+          "cluster": {
+            "enabled": false
+          },
+          "service": {
+            "host": "127.0.0.1",
+            "http_port": 50089,
+            "grpc_port": null,
+            "max_workers": 1,
+            "enable_cors": false,
+            "api_key": "synthetic-local-qdrant-qualification",
+            "enable_snapshot_url_recovery": false
+          },
+          "storage": {
+            "storage_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-d04s80y0\\storage",
+            "snapshots_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-d04s80y0\\snapshots",
+            "temp_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-d04s80y0\\server-temp",
+            "update_concurrency": 1,
+            "wal": {
+              "wal_capacity_mb": 1
+            },
+            "performance": {
+              "max_search_threads": 1,
+              "optimizer_cpu_budget": 1
+            },
+            "optimizers": {
+              "default_segment_number": 1,
+              "max_optimization_threads": 1
+            },
+            "hnsw_index": {
+              "max_indexing_threads": 1
+            }
+          }
+        },
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "optional_test_guard",
+          "-p",
+          "no:cacheprovider",
+          "packages/maverick-core/tests/test_qdrant_isolation_live.py",
+          "-p",
+          "qdrant_offline_embeddings",
+          "-q",
+          "-rs",
+          "-o",
+          "faulthandler_timeout=0",
+          "--basetemp=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-ordinary-d04s80y0\\cases",
+          "--junitxml=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qdrant-server-e22ffbc-offline-ordinary.xml"
+        ],
+        "started_at": 1790825573.6485038,
+        "server_pid": 32784,
+        "server_identity": {
+          "title": "qdrant - vector search engine",
+          "version": "1.19.1",
+          "commit": "6ab21cac18ebb6f4ae29102c7f8f5cc11affd5de"
+        },
+        "returncode": 0,
+        "server_exit_code": 1,
+        "server_stopped": true,
+        "finished_at": 1790825580.9449632
+      },
+      "counts": {
+        "passed": 1
+      },
+      "suite_seconds": 5.908,
+      "cases": [
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_isolation_live::test_tenant_scoped_add_query_delete",
+          "status": "passed",
+          "seconds": 5.535,
+          "properties": {
+            "inference_boundary": "real offline ONNX CPU; verified immutable assets; real Qdrant HTTP",
+            "model_asset_revision": "aa8f8b060edb00e03bfdd08813a2949946c8ba55",
+            "real_embedding_calls": "{'passages': 2, 'queries': 4}"
+          }
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/qdrant-server-e22ffbc-offline-ordinary.source.json",
+          "bytes": 2655,
+          "sha256": "ba62b70b6397d3adf4cacc7a0d9c25e5f0109e7c43134849d72e217ac4c9dcdd"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-offline-ordinary.xml",
+          "bytes": 694,
+          "sha256": "f3ae3e0a28e43b888a26c6f930286ed00687494e45ffa0aaf81d2f6f0988a1fa"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-offline-ordinary.log",
+          "bytes": 937,
+          "sha256": "5c0fbb89fee16bedba294ca5b89483274e5e58fcf413db26d919fd618bb77b27"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-offline-ordinary-server.log",
+          "bytes": 6151,
+          "sha256": "b35a3cf50b76d34d380fa82133cd1e588e39d89755c75fdeecb5c68adfa4cce1"
+        }
+      ]
+    },
+    {
+      "label": "qdrant-server-e22ffbc-offline-secure",
+      "source": {
+        "source_head": "e22ffbcca2af43887ed4c142b2633fd86a51471c",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-optional-vectors",
+        "mode": "secure",
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+        "archive_sha256": "9b6f69bd85f6abed4bc13f943099f55c6ffd55f5dd90388635320d8fbb569eb0",
+        "binary_sha256": "b5354e3c8f9d13d92294f38d4988d4ddedc04acaa2ce51f0a2d65b30e2d4cd69",
+        "binary_archive_member": "qdrant.exe",
+        "config": {
+          "log_level": "INFO",
+          "telemetry_disabled": true,
+          "cluster": {
+            "enabled": false
+          },
+          "service": {
+            "host": "127.0.0.1",
+            "http_port": 64333,
+            "grpc_port": null,
+            "max_workers": 1,
+            "enable_cors": false,
+            "api_key": "synthetic-local-qdrant-qualification",
+            "enable_snapshot_url_recovery": false
+          },
+          "storage": {
+            "storage_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-secure-0vvwe555\\storage",
+            "snapshots_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-secure-0vvwe555\\snapshots",
+            "temp_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-secure-0vvwe555\\server-temp",
+            "update_concurrency": 1,
+            "wal": {
+              "wal_capacity_mb": 1
+            },
+            "performance": {
+              "max_search_threads": 1,
+              "optimizer_cpu_budget": 1
+            },
+            "optimizers": {
+              "default_segment_number": 1,
+              "max_optimization_threads": 1
+            },
+            "hnsw_index": {
+              "max_indexing_threads": 1
+            }
+          }
+        },
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-optional-vectors-500fc87\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "optional_test_guard",
+          "-p",
+          "no:cacheprovider",
+          "packages/maverick-core/tests/test_qdrant_isolation_live.py",
+          "-p",
+          "qdrant_offline_embeddings",
+          "-q",
+          "-rs",
+          "-o",
+          "faulthandler_timeout=0",
+          "--basetemp=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\qd-secure-0vvwe555\\cases",
+          "--junitxml=C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qdrant-server-e22ffbc-offline-secure.xml"
+        ],
+        "started_at": 1790825595.8409383,
+        "server_pid": 10508,
+        "server_identity": {
+          "title": "qdrant - vector search engine",
+          "version": "1.19.1",
+          "commit": "6ab21cac18ebb6f4ae29102c7f8f5cc11affd5de"
+        },
+        "returncode": 0,
+        "server_exit_code": 1,
+        "server_stopped": true,
+        "finished_at": 1790825603.3061867
+      },
+      "counts": {
+        "passed": 1
+      },
+      "suite_seconds": 6.035,
+      "cases": [
+        {
+          "id": "packages.maverick-core.tests.test_qdrant_isolation_live::test_tenant_scoped_add_query_delete",
+          "status": "passed",
+          "seconds": 5.673,
+          "properties": {
+            "inference_boundary": "real offline ONNX CPU; verified immutable assets; real Qdrant HTTP",
+            "model_asset_revision": "aa8f8b060edb00e03bfdd08813a2949946c8ba55",
+            "real_embedding_calls": "{'passages': 2, 'queries': 4}"
+          }
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/qdrant-server-e22ffbc-offline-secure.source.json",
+          "bytes": 2643,
+          "sha256": "127371ca839f2d908faaecd5cc9281cc64f16795f8c431acd887cc400745e966"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-offline-secure.xml",
+          "bytes": 694,
+          "sha256": "d188f4cbd6736a25f8f14e38881ac5a3f43d2ea7b2de941bfb117a6d694ab47b"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-offline-secure.log",
+          "bytes": 937,
+          "sha256": "2fccd4d438f02e43905f937622918cf24e56e5505c9ba68187da4b2a5daea221"
+        },
+        {
+          "path": "audit/qdrant-server-e22ffbc-offline-secure-server.log",
+          "bytes": 6147,
+          "sha256": "daeb6a91042a3f435d3da81b9ae9befb8bd7dbc2ebe0a34205ada35364858377"
+        }
+      ]
+    }
+  ],
+  "server_archive": {
+    "path": ".qdrant-portable-1.19.1/qdrant-x86_64-pc-windows-msvc.zip",
+    "bytes": 29671153,
+    "sha256": "9b6f69bd85f6abed4bc13f943099f55c6ffd55f5dd90388635320d8fbb569eb0"
+  },
+  "server_executable": {
+    "path": ".qdrant-portable-1.19.1/bin/qdrant.exe",
+    "bytes": 85063168,
+    "sha256": "b5354e3c8f9d13d92294f38d4988d4ddedc04acaa2ce51f0a2d65b30e2d4cd69"
+  },
+  "published_release": {
+    "tag": "v1.19.1",
+    "url": "https://github.com/qdrant/qdrant/releases/tag/v1.19.1",
+    "asset_url": "https://github.com/qdrant/qdrant/releases/download/v1.19.1/qdrant-x86_64-pc-windows-msvc.zip",
+    "asset_digest": "sha256:9b6f69bd85f6abed4bc13f943099f55c6ffd55f5dd90388635320d8fbb569eb0"
+  },
+  "model_assets": {
+    "repository": "Qdrant/bge-small-en-v1.5-onnx-Q",
+    "revision": "aa8f8b060edb00e03bfdd08813a2949946c8ba55",
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "license": "MIT",
+    "path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.qdrant-model-assets\\aa8f8b060edb00e03bfdd08813a2949946c8ba55",
+    "total_bytes": 67180063,
+    "files": [
+      {
+        "file": "model_optimized.onnx",
+        "bytes": 66465124,
+        "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/model_optimized.onnx",
+        "published_hash_algorithm": "sha256",
+        "published_hash": "51f1bd0addd6e859e42c2c8021a5e5461385bb676a649f4b269aa445449f2431",
+        "sha256": "51f1bd0addd6e859e42c2c8021a5e5461385bb676a649f4b269aa445449f2431"
+      },
+      {
+        "file": "config.json",
+        "bytes": 706,
+        "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/config.json",
+        "published_hash_algorithm": "git_blob_sha1",
+        "published_hash": "0d7726d0cdccb62ee17c03bd1595cff07199b8f8",
+        "sha256": "13582bcf2effc85b7bf3d3f5532e686bc1c9ce86bb009d10f0ec33cbe92299dd"
+      },
+      {
+        "file": "special_tokens_map.json",
+        "bytes": 695,
+        "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/special_tokens_map.json",
+        "published_hash_algorithm": "git_blob_sha1",
+        "published_hash": "9bbecc17cabbcbd3112c14d6982b51403b264bfa",
+        "sha256": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a"
+      },
+      {
+        "file": "tokenizer.json",
+        "bytes": 711396,
+        "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/tokenizer.json",
+        "published_hash_algorithm": "git_blob_sha1",
+        "published_hash": "688882a79f44442ddc1f60d70334a7ff5df0fb47",
+        "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+      },
+      {
+        "file": "tokenizer_config.json",
+        "bytes": 1242,
+        "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/tokenizer_config.json",
+        "published_hash_algorithm": "git_blob_sha1",
+        "published_hash": "75305659f7795d4549f0e23688b52fa20a32f925",
+        "sha256": "0b29c7bfc889e53b36d9dd3e686dd4300f6525110eaa98c76a5dafceb2029f53"
+      },
+      {
+        "file": "README.md",
+        "bytes": 900,
+        "source": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/aa8f8b060edb00e03bfdd08813a2949946c8ba55/README.md",
+        "published_hash_algorithm": "git_blob_sha1",
+        "published_hash": "7cb06d09a9326eb4f63654b255d4889895b90db9",
+        "sha256": "01e220eed6921254f7e086bb3506d1c03f019f5f747bb9ac2f6ec5ce541edc12"
+      }
+    ]
+  },
+  "helper_artifacts": [
+    {
+      "path": "run_optional_vectors.py",
+      "bytes": 3723,
+      "sha256": "8163f2c6255ec0d2289f7b4e0603880a0faa717eae37cf62953b726cfe9927eb"
+    },
+    {
+      "path": "run_qdrant_server_qualification.py",
+      "bytes": 7660,
+      "sha256": "4f3102f369c3e80afaefaa09c7a41a16ed31a24808b0b9d6a4b4d979c7625552"
+    },
+    {
+      "path": "optional_test_guard.py",
+      "bytes": 901,
+      "sha256": "968477afc9094d87d269a044b56cddf9a3bfb9c4325a8d578ee9e317db9b1f08"
+    },
+    {
+      "path": "qdrant_synthetic_embeddings.py",
+      "bytes": 1659,
+      "sha256": "dc9a57264d1ee2bc71e10323f6a4aa815a75da38f03442a824f23db25332fb51"
+    },
+    {
+      "path": "qdrant_offline_embeddings.py",
+      "bytes": 4585,
+      "sha256": "4b52e42e7fd91a8468e57fa86c0af22decd564520417671ecd5bbd6b90cae433"
+    },
+    {
+      "path": "prefetch_qdrant_model.py",
+      "bytes": 3454,
+      "sha256": "041463d6f6283bb27525a586afff13613875ee50f2ae28ba7b59eb40b7a3cb6a"
+    }
+  ],
+  "provenance_artifacts": [
+    {
+      "path": "audit/qdrant-offline-model-assets.json",
+      "bytes": 2897,
+      "sha256": "783dd6f071bbca8c3291f22b82b45b41e5f412047f147f5c0ff740a2e7ff3653"
+    },
+    {
+      "path": "audit/optional-vectors-environment.json",
+      "bytes": 21412,
+      "sha256": "3d66f6d8877a2b3448c37fd01d2c456fd9ffa981eb03f060cd160db94592c18d"
+    },
+    {
+      "path": "audit/qdrant-portable-v1.19.1-release.json",
+      "bytes": 19605,
+      "sha256": "b09f9b08134240e56a156168426fdd8adf5bd62c396e4ec28555c6503c1f21b6"
+    },
+    {
+      "path": "audit/optional-qdrant-fastembed-installed.json",
+      "bytes": 45216,
+      "sha256": "3f2fb61c31565de6c97e056a5f5d22cc5206fae70950b26e5cddb67b8f8c38bb"
+    },
+    {
+      "path": "audit/optional-qdrant-fastembed-resolve.json",
+      "bytes": 45053,
+      "sha256": "5c870fcf21a556ce4f61b29d029ccc8114f0342331562e66f71b9de51aa0a1d3"
+    },
+    {
+      "path": "audit/optional-qdrant-fastembed-wheels.lock",
+      "bytes": 397,
+      "sha256": "ac173fe708467a4553b803e72027ae60cb7664d54a230219c2eff8086baa994e"
+    },
+    {
+      "path": "audit/optional-qdrant-fastembed-install.log",
+      "bytes": 805,
+      "sha256": "3f228b0c3cd0e6bda416011ea082c6c30d25fca21566d711c4da07e0e7e6e307"
+    }
+  ],
+  "limits": [
+    "Python socket audit hook is not an OS firewall or native-process network sandbox.",
+    "Real service qualification is loopback single-node Windows Qdrant 1.19.1, not production TLS, authentication integration, clustering, or every historical SDK.",
+    "The four-file native run uses synthetic embeddings; the two offline server runs use verified ONNX CPU inference through real FastEmbed.",
+    "Both secure-default flags are set by the runners; existing native recall fixture explicitly disables encrypted-at-rest storage, so this is not encrypted vector-file qualification.",
+    "The real-server test is one distinct case repeated with two encoders and two postures; the 152 passing executions represent 75 distinct test IDs.",
+    "Raw receipts and private helpers are retained under the task workspace; committed hashes identify them but do not embed every raw log."
+  ]
+}

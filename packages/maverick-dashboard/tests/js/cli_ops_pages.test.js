@@ -10,7 +10,8 @@ const { JSDOM } = require('jsdom');
 
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const read = name => fs.readFileSync(path.join(folder, name), 'utf8').replace(/\r\n?/g, '\n');
-const strip = html => html.replace(/\{%[\s\S]*?%\}/g, '').replace(/\{\{[\s\S]*?\}\}/g, '1').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+// These controller fixtures represent an authorized operator render.
+const strip = html => html.replace(/\{% if not can_operate %\}[\s\S]*?\{% endif %\}/g, '').replace(/\{%[\s\S]*?%\}/g, '').replace(/\{\{[\s\S]*?\}\}/g, '1').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 function slice(template, start, end) {
   const text = read('templates/' + template);
   const from = text.indexOf(start);
@@ -69,24 +70,26 @@ test('task journal lists, previews and undoes only after a confirmation', async 
   assert.match(ui.$('tj-status').textContent, /Put back 1 file/);
 });
 
-test('sharing a task on GitHub confirms first and shows only a safe link', async t => {
+test('sharing a task on GitHub reviews exact content before uploading and shows only a safe link', async t => {
   const markup = '<div id="goal-export" data-goal="7"><button id="goal-gist"></button><p id="goal-export-msg"></p></div>';
-  const declined = await page(markup, 'lightwork-goal-export.js', () => ({ shared: true, url: 'https://gist.github.com/a' }), { confirm: false });
-  t.after(() => declined.w.close());
-  declined.$('goal-gist').click();
-  await declined.settle();
-  assert.equal(declined.calls.length, 0);
-  const ui = await page(markup, 'lightwork-goal-export.js', () => ({ shared: true, url: 'https://gist.github.com/a' }));
-  t.after(() => ui.w.close());
-  ui.$('goal-gist').click();
-  await ui.settle();
-  assert.deepEqual(JSON.parse(ui.calls[0].options.body), { confirm: true });
-  assert.equal(ui.d.querySelector('#goal-export-msg a').href, 'https://gist.github.com/a');
-  const bad = await page(markup, 'lightwork-goal-export.js', () => ({ shared: true, url: 'javascript:alert(1)' }));
-  t.after(() => bad.w.close());
-  bad.$('goal-gist').click();
-  await bad.settle();
-  assert.equal(bad.d.querySelector('#goal-export-msg a'), null);
+  const fixture = async url => page(markup, 'lightwork-goal-export.js', endpoint => {
+    if (endpoint.endsWith('/attempts')) return {attempts:[]};
+    if (endpoint.endsWith('/preview')) return {account:'Synthetic account',scope:'Selected task',payload:{description:'Reviewed synthetic content'},preview_id:'review-1',sha256:'a'.repeat(64)};
+    return {shared:true,url};
+  });
+  const ui = await fixture('https://gist.github.com/a');t.after(()=>ui.w.close());
+  assert.equal(ui.calls.filter(c=>c.options.method==='POST').length,0);
+  ui.$('goal-gist').click();await ui.settle();
+  assert.equal(ui.calls.filter(c=>c.url==='/api/v1/goals/7/share/gist').length,0,'preview does not upload');
+  assert.match(ui.d.querySelector('#goal-export pre').textContent,/Reviewed synthetic content/);
+  Array.from(ui.d.querySelectorAll('#goal-export button')).find(b=>b.textContent==='Upload this reviewed copy').click();await ui.settle();
+  const write=ui.calls.find(c=>c.url==='/api/v1/goals/7/share/gist');
+  assert.deepEqual(JSON.parse(write.options.body),{confirm:true,preview_id:'review-1',sha256:'a'.repeat(64)});
+  assert.equal(ui.d.querySelector('#goal-export-msg a').href,'https://gist.github.com/a');
+  const bad=await fixture('javascript:alert(1)');t.after(()=>bad.w.close());
+  bad.$('goal-gist').click();await bad.settle();
+  Array.from(bad.d.querySelectorAll('#goal-export button')).find(b=>b.textContent==='Upload this reviewed copy').click();await bad.settle();
+  assert.equal(bad.d.querySelector('#goal-export-msg a'),null);
 });
 
 test('the schedule picker sends plain choices and a chosen time zone, never a typed timetable', async t => {

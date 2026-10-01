@@ -24,11 +24,25 @@ administrators must separately select the job in branch protection if required.
 The fixture binds only `127.0.0.1`, uses a new temporary home/configuration,
 clears inherited Lightwork configuration and provider-key environment aliases,
 and blocks outbound sockets before importing the product. Browser requests are
-restricted to that local origin. Two explicitly synthetic identities exercise
-real current permission checks; this is not an IdP login acceptance test.
+restricted to that local origin. Explicitly synthetic named identities exercise
+real current permission checks. The enterprise lifecycle fixture instead uses
+real single-use invitations and signed local-session cookies for an administrator,
+employee and manager; neither fixture establishes IdP login acceptance.
 Drive evidence, ticket execution and privacy reads are local test adapters.
 Billing receipts are explicitly synthetic admissions. No model is run, no
 provider is contacted, and no customer data is used.
+
+The Python interpreter and all eight installed source packages must belong to
+this exact checkout. Recovery deliberately removes `PYTHONPATH` from its child
+process; mixing one checkout's server with another checkout's editable packages
+correctly fails the application-identity check. On managed Windows hosts, use a
+workspace-owned temporary/cache directory before starting Node. Tests which pin
+native directory handles need an execution environment that permits those
+handles; do not disable recovery's alias/race checks to accommodate a sandbox.
+The full single-worker run has a bounded 30-minute budget, and CI reserves 45
+minutes for dependency setup, qualification and artifact preservation. Snapshot
+and restore tests await their exact successful native operation responses before
+asserting the rendered receipt.
 
 Coverage includes:
 

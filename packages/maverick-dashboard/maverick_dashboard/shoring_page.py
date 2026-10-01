@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from ._shared import _world
-from .auth import has_global_permission, require_permission
+from .auth import goal_owner_filter, has_global_permission, require_permission
 
 PAGE_PATH = "/shoring"
 API_BASE = "/api/v1/shoring"
@@ -73,8 +73,8 @@ def create_shoring_page_router(templates: Jinja2Templates) -> APIRouter:
 
         world = _world()
         try:
-            report = await run_in_threadpool(savings_mod.compute, world)
-            functions = await run_in_threadpool(shoring.book_status, world)
+            report = await run_in_threadpool(savings_mod.compute, world, owner=goal_owner_filter(request))
+            functions = await run_in_threadpool(shoring.book_status, world, owner=goal_owner_filter(request))
         except (OSError, RuntimeError, ValueError) as exc:
             raise HTTPException(
                 status_code=503,

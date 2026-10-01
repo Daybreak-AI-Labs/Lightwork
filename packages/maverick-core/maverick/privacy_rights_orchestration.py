@@ -1560,7 +1560,9 @@ class PrivacyRightsOrchestrationStore:
             "expected_revision": expected_revision,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        from .authority_effects import authority_effect_fence
+
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant_id, idempotency_key, request

@@ -8,7 +8,12 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
-from .auth import caller_principal, require_global_permission, require_permission
+from .auth import (
+    assert_template_access,
+    caller_principal,
+    require_global_permission,
+    require_permission,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
 
@@ -99,6 +104,16 @@ def template_draft_context(request: Request) -> dict:
     return {"context": _draft_context(request)}
 
 
+@router.get("/templates/connection-choices")
+def template_connection_choices(request: Request) -> dict:
+    require_permission(request, "operate")
+    from maverick.template_connections import SelectionUnavailable, choices
+    try:
+        return {"choices": choices(caller_principal(request) or ""), "context": _draft_context(request)}
+    except SelectionUnavailable as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
 @router.post("/templates/{name}/prepare")
 def prepare_template(request: Request, name: str, payload: TemplatePrepareIn) -> dict:
     require_permission(request, "operate")
@@ -108,18 +123,21 @@ def prepare_template(request: Request, name: str, payload: TemplatePrepareIn) ->
         raise HTTPException(404, "This template is no longer available.")
     try:
         template = load_template(name)
-        if set(payload.params) != set(template.params):
+        assert_template_access(request, template)
+        if set(payload.params) - set(template.params):
             raise ValueError("Complete the template's listed inputs.")
-        if any(not value.strip() or len(value) > 10000 for value in payload.params.values()):
+        if any(len(value) > 10000 or (not value.strip() and name not in template.parameter_schema.get("fields", {})) for name, value in payload.params.items()):
             raise ValueError("Each input needs a value of at most 10,000 characters.")
-        title, description = template.render(**payload.params)
+        from maverick.template_connections import parameters
+        _, references = parameters(template, caller_principal(request) or "", payload.params)
+        title, description = template.render_for(caller_principal(request) or "", **payload.params)
         if not title.strip() or len(title) > GOAL_TITLE_MAX_LENGTH or len(description) > GOAL_DESCRIPTION_MAX_LENGTH:
             raise ValueError("Chat accepts a title up to 200 characters and details up to 16,000 characters. Shorten this template in the workflow builder.")
     except (OSError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     return {
         "title": title, "description": description, "started": False,
-        "context": _draft_context(request),
+        "context": _draft_context(request), "connection_references": references,
     }
 
 

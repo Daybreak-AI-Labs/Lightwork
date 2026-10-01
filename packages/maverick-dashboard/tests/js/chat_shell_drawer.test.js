@@ -30,6 +30,7 @@ function open(options = {}) {
     query.matches = mobile;
     onChange();
   };
+  dom.resizeDesktop = () => dom.resizeDrawer(false);
   return dom;
 }
 
@@ -107,5 +108,40 @@ test("resizing to a closed mobile drawer moves focus out of hidden navigation", 
   dom.resizeDrawer(true);
   assert.equal(doc.activeElement.id, 'cs-menu');
   assert.equal(doc.getElementById('cs-side').getAttribute('aria-hidden'), 'true');
+  dom.window.close();
+});
+
+test("desktop resize transfers focus from the hidden close control to visible navigation", () => {
+  const dom = open(), doc = dom.window.document;
+  doc.querySelector('#cs-side a').getClientRects = () => [{}];
+  doc.getElementById('cs-menu').click();
+  assert.equal(doc.activeElement.id, 'cs-menu-close');
+  dom.resizeDesktop();
+  assert.equal(doc.body.classList.contains('cs-drawer-open'), false);
+  assert.equal(doc.activeElement, doc.querySelector('#cs-side a'));
+  assert.equal(doc.querySelector('main').hasAttribute('inert'), false);
+  assert.equal(Boolean(doc.querySelector('main').inert), false);
+  dom.window.close();
+});
+
+test("desktop resize preserves a navigation or handed-off dialog focus target", () => {
+  const dom = open(), doc = dom.window.document;
+  const link = doc.querySelector('#cs-side a');
+  link.getClientRects = () => [{}];
+  doc.getElementById('cs-menu').click(); link.focus(); dom.resizeDesktop();
+  assert.equal(doc.activeElement, link);
+  dom.window.close();
+});
+
+test("desktop resize restores visible focus when layout blurs Close before the media event", () => {
+  const dom = open(), doc = dom.window.document;
+  const link = doc.querySelector('#cs-side a');
+  link.getClientRects = () => [{}];
+  doc.getElementById('cs-menu').click();
+  doc.getElementById('cs-menu-close').blur();
+  assert.equal(doc.activeElement, doc.body);
+  dom.resizeDesktop();
+  assert.equal(doc.activeElement, link);
+  assert.equal(doc.body.classList.contains('cs-drawer-open'), false);
   dom.window.close();
 });

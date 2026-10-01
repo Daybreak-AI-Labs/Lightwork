@@ -151,6 +151,7 @@ class Worker:
         retry_after: float = 60.0,
         reclaim_lease: float = 3600.0,
     ) -> None:
+        self._runtime_configuration_native = queue is None and db_path is None
         self.queue = queue or JobQueue(db_path=db_path)
         self.idle_sleep = float(idle_sleep)
         self.max_attempts = int(max_attempts)
@@ -253,7 +254,10 @@ class Worker:
                 world = open_world()  # client/tenant-floored canonical world
                 try:
                     owner = str(job.payload.get("owner") or "")
-                    goal_id = world.create_goal(title, text, owner=owner)
+                    from .template_connections import validate
+                    refs = validate(owner, job.payload.get("connection_references", []))
+                    goal_id = world.create_goal(title, text, owner=owner,
+                        **({"connection_references": refs} if refs else {}))
                     # Provenance: link this run to its schedule so the dashboard
                     # Automations page can show the schedule's run history. Only
                     # on first creation (not retries, which reuse goal_id).
@@ -481,22 +485,28 @@ class Worker:
         # peer's orphan is recovered within ~one lease without a restart.
         reclaim_interval = max(self.reclaim_lease / 2.0, 1.0)
         last_reclaim = time.monotonic()
-        while not self._stop.is_set():
-            now = time.monotonic()
-            if now - last_reclaim >= reclaim_interval:
+        from .runtime_configuration import start as start_runtime_receipt
+        runtime_receipt = start_runtime_receipt("worker") if self._runtime_configuration_native else None
+        try:
+            while not self._stop.is_set():
+                now = time.monotonic()
+                if now - last_reclaim >= reclaim_interval:
+                    try:
+                        self._reclaim_stale()
+                    except Exception:
+                        log.exception("worker: periodic reclaim failed")
+                    last_reclaim = now
+                ran = False
                 try:
-                    self._reclaim_stale()
+                    ran = self.run_once()
                 except Exception:
-                    log.exception("worker: periodic reclaim failed")
-                last_reclaim = now
-            ran = False
-            try:
-                ran = self.run_once()
-            except Exception:
-                log.exception("worker: unexpected error in loop")
-            if not ran:
-                # Idle: wait, but wake up cleanly on stop().
-                self._stop.wait(self.idle_sleep)
+                    log.exception("worker: unexpected error in loop")
+                if not ran:
+                    # Idle: wait, but wake up cleanly on stop().
+                    self._stop.wait(self.idle_sleep)
+        finally:
+            if runtime_receipt is not None:
+                runtime_receipt.close()
         log.info("worker: stopped")
 
     def drain(self) -> int:

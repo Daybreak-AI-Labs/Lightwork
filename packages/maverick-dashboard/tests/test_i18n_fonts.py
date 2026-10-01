@@ -55,10 +55,10 @@ def test_lang_param_translates_chrome_and_sets_cookie():
     r2 = client.get("/overview", params={"lang": "ja"})
     assert '<html lang="en" dir="ltr">' in r2.text
     assert 'lang="ja">コンテンツへスキップ</a>' in r2.text
-    # English selection: no per-element lang attributes at all.
+    # English selection: chrome and explicit journey regions declare English.
     r3 = client.get("/overview", params={"lang": "en"})
     assert '<html lang="en" dir="ltr">' in r3.text
-    assert 'lang="en">' not in r3.text
+    assert 'lang="en" dir="ltr" data-product-copy>Interface language</span>' in r3.text
 
 
 def test_rtl_selection_keeps_direction_but_declares_the_english_body():

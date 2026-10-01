@@ -30,7 +30,9 @@ from collections.abc import Iterator, Sequence
 from .paths import data_dir
 from .tenant.kms import seal_text_for_tenant, unseal_text_for_tenant
 
-_lock = threading.Lock()
+# A reviewed mutation can compose an impact check and a store helper under
+# the same transaction. The OS sidecar lock is reentrant as well.
+_lock = threading.RLock()
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ACCESS = frozenset({"owner", "tenant"})
 _MAX_PRINCIPAL_LENGTH = 256
@@ -276,8 +278,25 @@ def set_connection(name: str, *, connector: str | None = None,
             # A new generation invalidates every prior readiness assertion.
             "revision": uuid.uuid4().hex,
         }
+        if rec["connector"] == "aws_s3" and token is not None:
+            try:
+                credential = json.loads(token)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Enter the AWS access key, secret key and storage region together.") from exc
+            if (not isinstance(credential, dict) or not isinstance(credential.get("region"), str)
+                    or re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-[0-9]+", credential["region"]) is None):
+                raise ValueError("Enter a valid AWS storage region, such as us-east-1.")
         if existing_oauth and token is None:
             rec["oauth"] = dict(existing_oauth)
+        if existing:
+            # Preserve the evidence of the old generation. Its revision stays
+            # unchanged so no consumer can mistake it for current readiness.
+            if existing.get("last_test"):
+                rec["last_test"] = dict(existing["last_test"])
+            if existing.get("test_history"):
+                rec["test_history"] = list(existing["test_history"])
+            if existing.get("capability_receipts"):
+                rec["capability_receipts"] = list(existing["capability_receipts"])
         data[slug] = rec
         _save(data)
     return _public(rec)
@@ -326,6 +345,8 @@ def _public(rec: dict) -> dict:
         "allowed_principals": list(rec.get("allowed_principals") or []),
         "revision": str(rec.get("revision") or ""),
         "last_test": dict(last_test) if last_test is not None else None,
+        "test_history": [dict(item) for item in rec.get("test_history", []) if isinstance(item, dict)],
+        "capability_receipts": [dict(item) for item in rec.get("capability_receipts", []) if isinstance(item, dict)],
     }
     status = public_status(rec)
     if status is not None:
@@ -394,6 +415,10 @@ def resolve_named(name: str, *, expected_revision: str, connector: str, origin: 
     principal = current_principal()
     if not principal:
         raise PermissionError("saved connection requires a named authenticated principal")
+    from .template_connections import selected
+    pin = selected(connector, principal)
+    if pin is not None and (pin["name"] != name or pin["revision"] != expected_revision):
+        raise PermissionError("This task selected a different account or saved revision.")
     record = get_connection(name)
     if not record or not _may_use(record, principal) or not record.get("token"):
         raise PermissionError("named connection access is unavailable or denied")
@@ -421,9 +446,13 @@ def resolve(connector: str, *, principal: str | None = None) -> tuple[str, str] 
     # a connection named exactly after the connector wins; else the first one
     # whose "connector" field points at it AND whose use grant admits the
     # authenticated caller.  Sort the fallback so selection is deterministic.
+    from .template_connections import selected
+    pin = selected(slug, caller)
     data = _load()
-    rec = data.get(slug)
-    if not isinstance(rec, dict) or not _may_use(rec, caller):
+    rec = data.get(pin["name"] if pin else slug)
+    if pin is not None and (not rec or rec.get("revision") != pin["revision"] or not _may_use(rec, caller)):
+        raise PermissionError("Selected account changed before credential resolution.")
+    if pin is None and (not isinstance(rec, dict) or not _may_use(rec, caller)):
         rec = next((r for _, r in sorted(data.items())
                     if isinstance(r, dict) and r.get("connector") == slug
                     and _may_use(r, caller)), None)
@@ -446,6 +475,7 @@ def record_test_result(
     status: int | None = None,
     expected_owner: str | None = None,
     expected_revision: str | None = None,
+    outcome: str | None = None,
 ) -> dict:
     """Persist a bounded, non-secret readiness receipt for a connection.
 
@@ -468,15 +498,63 @@ def record_test_result(
                 "connection changed while its readiness probe was running"
             )
         updated = dict(rec)
+        if isinstance(rec.get("last_test"), dict):
+            updated["test_history"] = (list(rec.get("test_history", [])) + [dict(rec["last_test"])])[-100:]
         updated["last_test"] = {
             "tested_at": time.time(),
             "reachable": bool(reachable),
             "authenticated": bool(authenticated),
             "status": int(status) if status is not None else None,
+            "revision": str(rec.get("revision") or ""),
+            "capability": "service-address authentication check; task access is not checked",
+            "outcome": outcome if outcome in {
+                "authenticated", "access_unverified", "sign_in_refused",
+                "blocked_by_policy", "unreachable", "address_missing",
+            } else ("authenticated" if authenticated else "access_unverified" if reachable else "unreachable"),
         }
         data[slug] = updated
         _save(data)
     return _public(updated)
+
+
+def replace_from_staged(name: str, replacement: str, *, owner: str | None,
+                        expected_revision: str, replacement_revision: str) -> dict:
+    """Copy reviewed API-key bytes without exposing them to a client.
+
+    Both records and the fresh authentication receipt are checked under one
+    credential-store lock. Existing sharing remains explicit and unchanged.
+    OAuth accounts use their own consent flow, never this key-copy operation.
+    """
+    with _mutation_lock():
+        records = _load()
+        target, staged = records.get(normalize_name(name)), records.get(normalize_name(replacement))
+        expected_owner = owner or ""
+        if (not target or not staged or target["name"] == staged["name"]
+                or (target.get("owner") or "") != expected_owner
+                or (staged.get("owner") or "") != expected_owner):
+            raise PermissionError("Choose two different connections owned by your account.")
+        if target.get("revision") != expected_revision or staged.get("revision") != replacement_revision:
+            raise ConnectionVersionConflict("A connection changed. Review the replacement again.")
+        if target.get("oauth") or staged.get("oauth"):
+            raise ValueError("Reconnect renewable accounts through their provider consent flow.")
+        if target.get("connector") != staged.get("connector") or target.get("base_url") != staged.get("base_url"):
+            raise ValueError("A staged key replacement must use the same adapter and service address.")
+        receipt = staged.get("last_test") or {}
+        if (receipt.get("revision") != staged["revision"] or receipt.get("authenticated") is not True
+                or not 0 <= time.time() - float(receipt.get("tested_at") or 0) <= 86400):
+            raise ValueError("Verify the staged credential's authentication within the last day before switching it.")
+        updated = dict(target)
+        updated["token"] = staged["token"]
+        updated["revision"] = uuid.uuid4().hex
+        history = list(target.get("test_history", []))
+        if target.get("last_test"):
+            history.append(dict(target["last_test"]))
+        updated["test_history"] = history[-100:]
+        updated["last_test"] = {**receipt, "revision": updated["revision"],
+                                "staged_name": staged["name"], "staged_revision": staged["revision"]}
+        records[updated["name"]] = updated
+        _save(records)
+        return _public(updated)
 
 
 __all__ = [

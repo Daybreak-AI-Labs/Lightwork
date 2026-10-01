@@ -97,8 +97,8 @@ def test_missing_goal_renders_fail_soft(monkeypatch, tmp_path):
     r = _client().get("/fleets")
     assert r.status_code == 200
     text = r.text
-    assert 'href="/chat/goal/999999"' in text
-    assert "missing" in text
+    assert 'href="/chat/goal/999999"' not in text
+    assert "No tasks yet" in text
 
 
 def test_authenticated_run_history_hides_other_owner_stale_index(monkeypatch, tmp_path):

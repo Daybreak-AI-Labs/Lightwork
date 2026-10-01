@@ -29,11 +29,16 @@ class _FakeWorld:
             _Ep(3, 0.10),  # untagged
         ]
 
-    def list_episodes(self, limit=500):
-        return self._eps[:limit]
+    def list_goals(self, *, owner, limit, order):
+        assert owner == "" and limit == 10_000 and order == "desc"
+        return [self.get_goal(gid) for gid in (1, 2, 3)]
+
+    def list_episodes(self, limit=500, goal_id=None):
+        assert goal_id in (1, 2, 3)  # never read another employee's episodes
+        return [ep for ep in self._eps if ep.goal_id == goal_id][:limit]
 
     def get_goal(self, gid):
-        return types.SimpleNamespace(metadata=None, tags=None)
+        return types.SimpleNamespace(id=gid, owner="", metadata=None, tags=None)
 
 
 def test_cost_by_tag_buckets(monkeypatch):
@@ -54,7 +59,7 @@ def test_cost_by_tag_limit_clamped(monkeypatch):
     seen = {}
 
     class _W(_FakeWorld):
-        def list_episodes(self, limit=500):
+        def list_episodes(self, limit=500, goal_id=None):
             seen["limit"] = limit
             return []
 
@@ -83,7 +88,7 @@ def test_cost_by_tag_scopes_authenticated_owner(monkeypatch):
             return self._eps.get(goal_id, [])[:limit]
 
         def get_goal(self, gid):
-            return types.SimpleNamespace(metadata=None, tags=None)
+            return types.SimpleNamespace(id=gid, owner="user:alice" if gid == 1 else "user:bob", metadata=None, tags=None)
 
     world = _OwnedWorld()
     monkeypatch.setattr(app_mod, "_world", lambda: world)

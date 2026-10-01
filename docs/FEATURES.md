@@ -1,4 +1,10 @@
-# Lightwork — Shipped Features
+# Lightwork - Shipped Features
+
+- **Personal device pairing preview** — default-off `[device_pairing] enabled`
+  lets named members approve an expiring device code. Scoped credentials read
+  only their own work in one workspace, with protected renewal and explicit
+  removal in Your paired devices. Mobile/watch/vision settings store the
+  connection securely. See [scope, retention and qualification](device-pairing.md).
 
 What Lightwork **does today**, grounded in the code on `main`. This is the
 catalogue of built features and tools; the forward backlog (what's *not* done
@@ -18,6 +24,18 @@ here.
   `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
 
 ## Agent kernel & orchestration
+
+- **Employee companion preview** - default-off `[features] employee_companions`
+  adds an explicitly enrolled employee's private conversation and workspace-admin
+  policy/metadata page. A separate policy grant enables draft replies through the
+  configured writer model, with optional permitted own-task context and bounded
+  retained history. Deterministic task status stays available alongside work.
+  No agent tools execute; request receipts prevent automatic paid replay, and
+  authority is rechecked before dispatch/publication. History retention is optional
+  and encrypted; connector retrieval,
+  learned memory, actions and voice are unavailable. This increment is untested
+  and does not change legacy administrator access to ordinary task/chat content.
+  See [scope and qualification gaps](employee-companions.md).
 
 - **Guided restored-connection review** — recovery uses ordinary outcome,
   evidence and date controls instead of editing a data object. Recovery Copilot
@@ -408,7 +426,10 @@ here.
   preference statements ("I prefer tables", "call me Sam") distilled from
   recent conversations into briefing notes injected ONLY for their exact
   (channel, user) scope; the store rewrites every cycle, so deleted
-  conversations stop feeding notes.
+  conversations stop feeding notes. Each person's own recent-conversation window
+  is bounded independently; coworkers cannot evict it. Newest matching source
+  turns take precedence over opposite preferences, source turn/version metadata
+  is retained, and an unavailable rebuild preserves the last complete store.
 - **Learned behavior selection** — `[planning] mode = "auto"` picks
   tree-of-thought per task class from a learned outcome record
   (`planning_stats.py`, bandit-lite + deterministic); budget task classes
@@ -1738,7 +1759,11 @@ here.
   Raw deletion is never described as erasing learned-weight influence. The
   production projector currently supports exact approved evidence-graph nodes
   and immutable fleet-memory inbox records; unsupported or mismatched stores
-  fail closed. See [Governed Knowledge](knowledge-access.md).
+  fail closed. The purpose picker walks every authorized registry page and
+  distinguishes unavailable from empty with retry. Operators can submit an
+  exact visible source/version for independent administrator review and inspect
+  their own limited status receipts; this grants no approval, deletion, hold or
+  training authority. See [Governed Knowledge](knowledge-access.md).
 - **Cortex — the company brain** (`cortex.py`, default-on `[cortex] enable`
   / `MAVERICK_CORTEX`; CLI `maverick cortex status|recall|deposit`; dashboard
   compatibility page `/cortex`; audit kinds `cortex_recall` / `cortex_deposit`) — ONE
@@ -2209,9 +2234,9 @@ here.
   tenant-scoped indexed metadata history and cursor-paged due-run recovery,
   with data threading, safe expression rendering (`{{fn(...)}}` incl. arithmetic,
   list ops, `and`/`or` conditions with numeric-or-lexical ordering so date/string
-  comparisons work; action params may additionally use `{{secret('NAME')}}` to
-  pull a connector credential from the governed vault at run time so the raw
-  value never enters the flow definition or persisted run data), a whole-flow wall-clock deadline
+  comparisons work; legacy `secret(...)` action expressions are refused before
+  effects, while authorized native connectors resolve their scoped accounts
+  internally; see [credential migration](./flow-credential-migration.md)), a whole-flow wall-clock deadline
   (`Flow.max_seconds`), a per-run **aggregate agent-spend ceiling**
   (`Flow.max_dollars`, enforced in `execution.py` so a wide parallel / long
   foreach can't fan out unbounded cost), a per-flow **concurrency cap**
@@ -2671,11 +2696,18 @@ here.
   `{id,result|error}`); the host (`ts_plugin_host.py`, `[plugins] ts =
   [["node", "/path/plugin.js"]]`, wizard step included) loads the manifest
   into regular Tools with a persistent scrubbed-env child, per-call timeout,
-  one crash-restart, and the no-shadowing rule built-ins enjoy. A **gRPC
+  no automatic call replay, owned process cleanup, and the no-shadowing rule built-ins enjoy. A **gRPC
   plugin host** (`grpc_plugin_host.py`, proto `grpc_api/plugin_host.proto`,
   `[plugins] grpc = [{target, command}]`) carries the same contract over gRPC
   for any language: Describe → Tools, Call with a deadline, scrubbed-env spawn,
-  reconnect/respawn-once.
+  owned process cleanup and typed unknown outcomes without call replay.
+  **Governed qualification workbench** (`plugin_workbench.py`, `/plugins`) runs
+  actual Python tool/channel/skill/persona, bundled Node and local gRPC contracts
+  in a reviewed immutable no-network container. It records observed completion or
+  interruption, rejects unknown/malformed versions, retains task/workflow pins,
+  and offers explicit stopped-work migration. Settings and the installer control
+  it and its shared native/Copilot review operations; no live-service acceptance
+  is inferred from process startup.
   **Retrospective generators (time-gated runs)** — the 2-/36-month
   retrospectives ship as period generators the operator runs at the mark:
   `safety_report` (safety), `benchmark_retrospective` (perf), and
@@ -5741,3 +5773,32 @@ Provider adapters declare supported settings and refuse unsupported nonempty fie
 WorldModel and governed-record connections bound established-socket waits, including commit, rollback and pool reset, while preserving unknown outcomes without replaying writes. See [PostgreSQL client I/O deadlines](operations/postgres-io-deadlines.md) for the independent client, connection and server timeout settings and reconciliation contract.
 
 PostgreSQL learning stores use tenant-scoped keys for addenda, line metadata, transfer memory and corpus rows. [Migration 39](operations/learning-store-tenant-keys.md) preserves existing data and refuses unrecognized constraint layouts.
+
+### Personal daily work and first-job activation
+
+Today composes authorized native work, decisions, occurrences and template pins with personal card order, period and starting-page preferences. Employee activation keeps sample/real source drafts private, returns from scoped connection repair, starts through native submission receipts, requires current human acceptance and hands off reusable private workflow instructions. Both expose reviewed native Copilot operations; see [employee activation](employee-activation.md). These audit changes remain draft implementation awaiting final integrated qualification.
+- **Selected-source analysis tasks** (`knowledge_task_context.py`, opt-in
+  `[knowledge_access] task_context`): named members select exact approved sources
+  in Knowledge for one budgeted, tool-free AI attempt. Native and typed Copilot
+  admission share immutable references and current-use checks. Private results
+  revalidate source access; ordinary task history and exports contain only a link.
+  See [Selected-source analysis](knowledge-source-analysis.md).
+
+- **Assessment precedent provenance**: per-question suggested answers show exact
+  saved fragments, source dates, pinned/current questionnaire versions, named
+  approval and supporting versus dissenting votes. Stale and unreviewed precedent
+  stays visibly distinct from current approved precedent. Each value can be
+  rejected or added to the respondent draft independently under `assessments.learn`.
+### Bounded model samples
+
+Settings > Models combines reported capability/pricing evidence with separately enabled,
+explicitly reviewed synthetic text/image generation tests. Each uses one admitted physical
+request, narrow existing Budget limits, no failover/retry, and a durable account/workspace
+receipt with native Stop and recovery. Copilot's Models family uses the same service.
+Tool support remains provider-reported and untested. See [model choice tests](model-choice-tests.md).
+
+- Historical metadata discovery: finder source/date/oldest filters, bounded
+  current-authority continuation beyond recent-list caps, exact record and
+  recovery links, and the shared typed Copilot operation. See
+  [record search](record-search.md); governed by existing record-search Settings
+  and installer controls. Migration 45 adds owner/date indexes; no content index.

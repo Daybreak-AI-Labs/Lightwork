@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 import pytest
 from maverick_dashboard import api, auth
 from maverick_dashboard import app as dashboard
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import Request
 
 
 @pytest.fixture
@@ -34,8 +34,10 @@ async def _unexpected_sleep(delay):
 
 
 def _request(last_id=None):
-    return SimpleNamespace(headers={"last-event-id": str(last_id)} if last_id else {},
-                           is_disconnected=_connected)
+    headers = [(b"last-event-id", str(last_id).encode())] if last_id else []
+    request = Request({"type": "http", "method": "GET", "scheme": "http", "path": "/events", "headers": headers})
+    request.is_disconnected = _connected
+    return request
 
 
 def _goal(world, n=3, status="done"):

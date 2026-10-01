@@ -586,7 +586,7 @@
   <h2 id="grc-title">Sending records to your GRC system</h2>
   {% if not grc_sync_enabled %}
   <p class="muted">Sending to an outside governance, risk and compliance system (such as ServiceNow) is not set up. When it is, findings, accepted risks and incidents are copied there with a link back to Lightwork.</p>
-  <p><a class="btn" href="/get-started">Set up a connection</a></p>
+  <p><a class="btn" href="/start">Set up a connection</a></p>
   {% else %}
   {% if grc_error %}<p class="muted">{{ grc_error }}</p>{% endif %}
   {% if grc_status and grc_status.outbound %}

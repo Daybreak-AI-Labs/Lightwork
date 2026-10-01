@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -63,7 +64,13 @@ def test_recents_reopens_latest_actual_turn_and_keeps_old_work_link(chat):
     assert "Budget BUDGET-ALPHA-731" in reopened.text
     assert "Original assistant answer" in reopened.text
     assert "Revise that report." in reopened.text and "Latest assistant answer" in reopened.text
-    assert f'href="/chat/goal/{root}">Open answer' in reopened.text
+    earlier_answer = re.search(
+        rf'<a\b[^>]*href="/chat/goal/{root}"[^>]*>(.*?)</a>',
+        reopened.text,
+        re.DOTALL,
+    )
+    assert earlier_answer is not None
+    assert "Open answer" in re.sub(r"<[^>]+>", "", earlier_answer.group(1))
     old = client.get(f"/chat/goal/{root}")
     assert "Original assistant answer" in old.text
     assert "Latest assistant answer" not in old.text

@@ -201,6 +201,15 @@ def test_flows_gated_off_by_default(monkeypatch, tmp_path):
     assert _client().get("/api/v1/flows").status_code == 403
 
 
+def test_flow_designer_explains_credential_migration_and_links_native_accounts(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    response = _client().get("/flows/designer")
+    assert response.status_code == 200, response.text
+    assert "Connector credentials belong in Connections." in response.text
+    assert "saved definitions and grants are not changed automatically" in response.text
+    assert 'href="/connections"' in response.text
+
+
 _INPUT_FLOW = {
     "id": "typed", "name": "Typed", "start": "a",
     "nodes": [{"id": "a", "kind": "agent", "brief": "process {{amount}}"}],
@@ -1314,6 +1323,9 @@ def test_run_drains_through_queue_and_pauses_on_approval(monkeypatch, tmp_path):
     started = c.post("/api/v1/flows/demo/run", json={"data": {"order": "X-9"}}).json()
     run_id = started["run_id"]
     assert started["status"] == "queued"
+    from maverick.flow import store
+    assert store.load_run(run_id).owner == ""
+    assert run_id in {item["run_id"] for item in c.get("/api/v1/flows/runs").json()["runs"]}
     # drain the queued flow_run job
     _drain(aq)
     run = c.get(f"/api/v1/flows/runs/{run_id}").json()
@@ -2946,7 +2958,7 @@ def test_designer_opens_a_template_as_a_flow(monkeypatch, tmp_path):
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tdir)
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-digest.md").write_text(
-        "---\ntitle: Weekly digest\nparams: []\n---\nWrite the weekly digest.\n",
+        "---\nowner: local\ntitle: Weekly digest\nparams: []\n---\nWrite the weekly digest.\n",
         encoding="utf-8")
     r = _client().get("/flows/designer?from_template=weekly-digest")
     assert r.status_code == 200
@@ -2995,7 +3007,7 @@ def test_flow_crud_is_owner_scoped_for_authenticated_non_admin(monkeypatch, tmp_
     assert saved["owner"] == "user:alice"
 
 
-def test_flow_crud_admin_keeps_unscoped_access(monkeypatch, tmp_path):
+def test_flow_crud_admin_cannot_read_or_edit_employee_content(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import api as api_mod
 
@@ -3008,11 +3020,13 @@ def test_flow_crud_admin_keeps_unscoped_access(monkeypatch, tmp_path):
     assert c.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
 
     current.update(principal="user:admin", admin=True)
-    current_flow = c.get("/api/v1/flows/demo").json()
-    updated = {**current_flow, "name": "Admin edit", "schedule": "* * * * *"}
-    assert c.post("/api/v1/flows", json={"flow": updated}).status_code == 201
+    assert c.get("/api/v1/flows/demo").status_code == 404
+    updated = {**_FLOW, "name": "Admin edit", "schedule": "* * * * *"}
+    assert c.post("/api/v1/flows", json={"flow": updated}).status_code == 404
+    assert c.delete("/api/v1/flows/demo").status_code == 404
+    current.update(principal="user:alice", admin=False)
     saved = c.get("/api/v1/flows/demo").json()
-    assert saved["name"] == "Admin edit"
+    assert saved["name"] == _FLOW["name"]
     assert saved["owner"] == "user:alice"
 
 

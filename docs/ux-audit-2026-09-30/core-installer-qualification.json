@@ -1,0 +1,171 @@
+{
+  "schema": "lightwork.customer-audit.core-qualification.v1",
+  "recorded_at": "2026-09-30T22:20:28.630437+00:00",
+  "base_sha": "d822db99ee48aab4fdded47fc799486e8e5ea44f",
+  "implementation_sha": "e29f3f31a78337c8715da1ba50674be1d99de5cd",
+  "scope": "Remaining core and installer ordinary-failure files; identity/privacy/memory learning and conversation projection files were assigned separately.",
+  "files": [
+    "apps/installer-cli/tests/test_wizard_parity.py",
+    "packages/maverick-core/tests/test_postgres_tenant_migrations.py",
+    "packages/maverick-core/tests/test_client_reliability.py",
+    "packages/maverick-core/tests/test_q3_2026_batch9.py",
+    "packages/maverick-core/tests/test_q3_2026_batch4.py",
+    "packages/maverick-core/tests/test_world_owner.py",
+    "packages/maverick-core/tests/test_q2_2026_batch4.py",
+    "packages/maverick-core/tests/test_query_execution.py",
+    "packages/maverick-core/tests/test_recovery_rehearsal.py",
+    "packages/maverick-core/tests/test_tenancy.py",
+    "packages/maverick-core/tests/test_q3_2026_batch3.py",
+    "packages/maverick-core/tests/test_q2_2026_batch2.py",
+    "packages/maverick-core/tests/test_cli_ops_kernel_work.py",
+    "packages/maverick-core/tests/test_document_processing.py",
+    "packages/maverick-core/tests/test_workspace_bootstrap_recovery.py",
+    "apps/installer-cli/tests/test_wizard_consumer_mode.py",
+    "packages/maverick-core/tests/test_ai_regulated_verticals.py",
+    "packages/maverick-core/tests/test_fleet_supervisor.py",
+    "packages/maverick-core/tests/test_async_route_audit.py",
+    "packages/maverick-core/tests/test_reachability.py",
+    "packages/maverick-core/tests/test_templates.py",
+    "packages/maverick-core/tests/test_ai_evidence_local_parsers.py",
+    "packages/maverick-core/tests/test_failure_policy.py",
+    "packages/maverick-core/tests/test_recovery_authority_registry.py",
+    "packages/maverick-core/tests/test_features_wiring.py",
+    "packages/maverick-core/tests/test_skill_render_caps.py",
+    "packages/maverick-core/tests/test_channel_bootstrap_recovery.py",
+    "packages/maverick-core/tests/test_persistence_authority_inventory.py",
+    "packages/maverick-core/tests/test_runner_identity.py",
+    "apps/installer-cli/tests/test_wizard_pricing.py",
+    "packages/maverick-core/tests/test_runner_fair_concurrency.py",
+    "packages/maverick-core/tests/test_workspace_recovery_drill_acceptance.py",
+    "apps/installer-cli/tests/test_wizard_knowledge_publication.py"
+  ],
+  "runs": [
+    {
+      "mode": "ordinary",
+      "tests": 695,
+      "passed": 686,
+      "skipped": 9,
+      "failed": 0,
+      "errors": 0,
+      "seconds": 602.967,
+      "junit": "audit/core-qualification-08.xml",
+      "junit_sha256": "898ce27184bfe33340ff514de94b0f307e464be972315e55e158c52798241a8d",
+      "skips": [
+        {
+          "test": "packages.maverick-core.tests.test_q2_2026_batch4::test_postgres_without_dep_raises_actionable",
+          "reason": "psycopg IS installed; can't test the missing-dep path"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_native_postgres_statement_deadline_and_fresh_next_query",
+          "reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+          "reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_native_postgres_read_uses_bounded_server_cursor",
+          "reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_psycopg2_statement_deadline_and_fresh_next_query",
+          "reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_mysql_statement_deadline_and_fresh_next_query",
+          "reason": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_mysql_kill_query_alone_stops_a_read",
+          "reason": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_mysql_server_limit_alone_stops_a_read",
+          "reason": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_ai_evidence_local_parsers::test_workers_launch_through_a_linked_interpreter_and_refuse_a_repointed_link",
+          "reason": "Windows symlink creation privilege is unavailable"
+        }
+      ]
+    },
+    {
+      "mode": "secure-default",
+      "tests": 695,
+      "passed": 686,
+      "skipped": 9,
+      "failed": 0,
+      "errors": 0,
+      "seconds": 609.041,
+      "junit": "audit/core-qualification-09.xml",
+      "junit_sha256": "60bf64e1d58107ddfe1d16c39c5b3800307c08925c20f4026c48bbd4a92fab38",
+      "skips": [
+        {
+          "test": "packages.maverick-core.tests.test_q2_2026_batch4::test_postgres_without_dep_raises_actionable",
+          "reason": "psycopg IS installed; can't test the missing-dep path"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_native_postgres_statement_deadline_and_fresh_next_query",
+          "reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+          "reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_native_postgres_read_uses_bounded_server_cursor",
+          "reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_psycopg2_statement_deadline_and_fresh_next_query",
+          "reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_mysql_statement_deadline_and_fresh_next_query",
+          "reason": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_mysql_kill_query_alone_stops_a_read",
+          "reason": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_query_execution::test_mysql_server_limit_alone_stops_a_read",
+          "reason": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+        },
+        {
+          "test": "packages.maverick-core.tests.test_ai_evidence_local_parsers::test_workers_launch_through_a_linked_interpreter_and_refuse_a_repointed_link",
+          "reason": "Windows symlink creation privilege is unavailable"
+        }
+      ]
+    }
+  ],
+  "environment": {
+    "os": "Windows",
+    "python": "3.12.12",
+    "source": "A dedicated venv loads this checkout through a plain .pth and shared dependency site; other-checkout editable hooks are not executed.",
+    "filesystem": "Actual Windows handles, short unique pytest basetemp under Local/Temp/lw-core-08 or lw-core-09, and workspace task-5/.t TEMP/TMP set before launching Python. Short Local/Temp scratch alone did not resolve native lxml reopening failures; this short workspace scratch passed both complete focused cohorts without product guard changes.",
+    "live_provider_calls": false,
+    "production_changes": false
+  },
+  "changes": [
+    "Restore admission now holds customer workflow, private-content grant, identity/link, pairing, plugin-pin and dispatch authority until current reconciliation; stale backups never silently restore approvals or replay work.",
+    "The closed governed-store completeness check includes dashboard declarations. Warning and project-default records are explicitly non-authorizing data; actual SQLite content remains protected.",
+    "Persistence inventory classifies 46 newly introduced source modules, their observed write/read seams and exact authority restore dispositions.",
+    "Postgres schema expectations cover migrations 42-45; mutation tests verify advisory locking and exact tenant-scoped DELETE.",
+    "Runner/fleet/fair-lane tests exercise temporary real WorldModel transactions and ownership, with synthetic LLM/sandbox dependencies and joined threads.",
+    "Installer budgets, notification opt-ins and knowledge reindex settings match the implemented explicit defaults.",
+    "Owned memory, source-scoped recall, goal-bound conversation turns, theme class tokens, snapshot timestamps and queued notification semantics have current assertions.",
+    "Only Windows error 1314 skips the linked-interpreter test; unexpected symlink errors still fail."
+  ],
+  "static_validation": [
+    "Ruff on every changed Python file",
+    "Python AST parsing",
+    "git diff --check"
+  ],
+  "limitations": [
+    "No dedicated PostgreSQL or MySQL test services were available; their native driver cases remain skipped.",
+    "This Windows account cannot create symlinks; linked-interpreter qualification remains host-bound.",
+    "Restored new authority stores remain held pending current reconciliation; the registry is not an automatic migration/replay mechanism.",
+    "This focused group does not certify the full repository suite, live providers, signed native releases or multi-host recovery."
+  ]
+}

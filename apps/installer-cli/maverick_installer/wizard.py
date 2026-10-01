@@ -282,6 +282,12 @@ def _q_secret(message: str) -> str:
     return _ask(questionary.password(message)) or ""
 
 
+def _employee_activation_job_choices() -> list[str]:
+    from maverick.config import EMPLOYEE_ACTIVATION_JOBS
+    chosen = _q_checkbox("Which first-job guides may employees use within their existing access?", list(EMPLOYEE_ACTIVATION_JOBS.values()), default=list(EMPLOYEE_ACTIVATION_JOBS.values()))
+    return [key for key, label in EMPLOYEE_ACTIVATION_JOBS.items() if label in chosen]
+
+
 def _q_checkbox(message: str, choices: list[str], default: list[str] | None = None) -> list[str]:
     if questionary is None:
         print(f"{message} (comma-separated numbers, blank = none)")
@@ -1097,6 +1103,23 @@ def pick_budget() -> dict[str, Any]:
         "(recommended; choose No only for estimate-only custom gateways)",
         default=True,
     )
+    budget["guidance"] = _q_confirm(
+        "  Show known budget headroom before work? This never changes execution limits.", default=True)
+    budget["warnings"] = _q_confirm(
+        "  Show in-product warnings as tasks approach their limits?", default=True)
+    if budget["warnings"]:
+        import math
+        while True:
+            raw_thresholds = _q_text("  Warning thresholds, as fractions of the limit", default="0.8, 0.95, 1.0")
+            try:
+                values = [float(part.strip()) for part in raw_thresholds.split(",")]
+                if not 1 <= len(values) <= 10 or any(not math.isfinite(value) or not 0 < value <= 1 for value in values):
+                    raise ValueError
+            except (TypeError, ValueError):
+                console.print("[yellow]Enter one to ten finite numbers above 0 and at most 1, separated by commas.[/yellow]")
+                continue
+            budget["warning_thresholds"] = sorted(set(values))
+            break
     return budget
 
 
@@ -1574,6 +1597,10 @@ def pick_knowledge() -> dict[str, Any]:
     if not _q_confirm("Enable per-domain knowledge RAG?", default=False):
         return {"enable": False}
     out: dict[str, Any] = {"enable": True}
+    out["reindex_jobs"] = _q_confirm("Enable bounded search index rebuilds with review, progress and cancellation? Paid embedding requires verified cost admission.", default=False)
+    if out["reindex_jobs"]:
+        out["reindex_max_dollars"] = min(1000.0, max(0.0, _safe_float(
+            _q_text("Maximum provider reservation per rebuild (USD, at reviewed standard rates; 0 permits local only)", default="5.0"), default=5.0)))
     embedder = _q_select(
         "  Embedder:",
         [
@@ -4435,6 +4462,7 @@ def pick_advanced() -> dict[str, Any]:
             "retrieval). Every decision is audited. OFF by default.",
             default=False,
         ),
+        "fact_tags": _q_confirm("Organize shared business facts with tags? Tags do not change access.", default=False),
         "temporal_memory": _q_confirm(
             "Temporal memory? Keep a bitemporal history of every fact (validity "
             "windows) instead of overwriting -- answer 'what did we believe on "
@@ -4601,6 +4629,30 @@ def pick_advanced() -> dict[str, Any]:
             "weaken the safety envelope. Turn off to lock the agent roster.",
             default=True,
         ),
+        "allow_runtime_configuration_status": _q_confirm(
+            "Show saved versus startup-acknowledged configuration for running services? Missing or stale service evidence remains unconfirmed.", default=True,
+        ),
+        "allow_employee_task_diagnostics": _q_confirm(
+            "Show employees bounded diagnostics and support guidance for their own tasks? No additional record access is granted.", default=True,
+        ),
+        "employee_activation_jobs": _employee_activation_job_choices(),
+        "allow_employee_activation": _q_confirm(
+            "Guide signed-in employees through readiness checks and their first allowed task? Existing policy and budget limits still apply.", default=True,
+        ),
+        "allow_configuration_profiles": _q_confirm(
+            "Allow reviewed, secret-free configuration profiles and outcome presets? "
+            "Import previews every change and keeps current policy checks.", default=True,
+        ),
+        "allow_conversation_inbox": _q_confirm(
+            "Enable durable conversation guidance, queued messages and explicitly separate tasks while work is running? "
+            "Guidance requires review and a safe checkpoint; existing task ownership, permissions and spending limits remain enforced.",
+            default=False,
+        ),
+        "allow_personal_preferences": _q_confirm(
+            "Allow account-scoped writing style, display preferences, pinned pages, saved task filters and daily work layout? "
+            "Personal choices never grant tools or change security or retention policy.",
+            default=True,
+        ),
         "allow_draft_recovery": _q_confirm(
             "Keep encrypted recovery copies of unfinished dashboard work? "
             "Copies are private to each account and workspace. Credentials and "
@@ -4641,6 +4693,47 @@ def pick_advanced() -> dict[str, Any]:
             "Enable project team reviews of selected, fixed task results? "
             "Assigned workspace reviewers cannot execute or sign off the live task.",
             default=False,
+        ),
+        "allow_task_handoffs": _q_confirm(
+            "Enable named task handoffs with explicit recipient acceptance, selected evidence and a new-work ceiling? Requires selected deliverable bundles.",
+            default=False,
+        ),
+        "allow_deliverable_bundles": _q_confirm(
+            "Enable selected deliverable bundles with named recipient access, separate human acceptance and offline verification?",
+            default=False,
+        ),
+        "allow_project_workspaces": _q_confirm(
+            "Enable project workspaces with explicit outcomes, milestones and reviewed source context? "
+            "Only explicitly chosen colleagues see planning metadata; private tasks and review packets keep separate access rules.",
+            default=False,
+        ),
+        "allow_employee_companions": _q_confirm(
+            "Enable personal companions for employees enrolled by a workspace "
+            "administrator, with own-task status and optional AI drafts? An "
+            "administrator must permit drafts for each employee. The configured "
+            "AI service receives messages, eligible retained history and permitted "
+            "own-task titles and status. Administrators manage policy and audit "
+            "metadata, without access to private companion history. Companions "
+            "cannot take task actions or use connected sources.",
+            default=False,
+        ),
+        "allow_personal_data_controls": _q_confirm(
+            "Enable My Data, owned-memory controls and verified channel linking? Sharing stays off until the employee chooses it.",
+            default=False,
+        ),
+        "allow_employee_content_access_requests": _q_confirm(
+            "Employee tasks and chats are private to their owner. Enable exceptional "
+            "task/export reads and exact approval-card reads with a separate reviewer, a stated purpose, "
+            "expiry within one hour and a recorded receipt for each read?", default=False,
+        ),
+        "allow_permission_access_requests": _q_confirm(
+            "Enable named employees to request permission reviews from the responsible administrator? Requests never grant access automatically.", default=False,
+        ),
+        "allow_employee_departures": _q_confirm(
+            "Enable reviewed employee-departure controls? Named installation administrators "
+            "can deactivate accounts, remove reviewed local credentials, retire recurring schedules "
+            "and record handoff owners. Closure retains data, holds and explicit named responsibility "
+            "for running work and unverified external outcomes.", default=False,
         ),
         "allow_outcome_measurement": _q_confirm(
             "Enable measured workflow pilots with paired baseline observations "
@@ -4908,6 +5001,18 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "plugin_workbench": _q_confirm(
+            "Enable the governed plugin qualification workbench? Sandbox checks require a reviewed local Linux image configured later in Settings; no image is downloaded. Ongoing tasks retain pins to plugin bytes already used.", default=False),
+        "workflow_versioning": _q_confirm(
+            "Keep workflow version history, safe input fixtures and administrator-reviewed publication before new schedules?", default=True),
+        "workflow_typed_inputs": _q_confirm(
+            "Allow workflow authors to add dates, choices, optional inputs, defaults and own connected-account selections? Account selections are checked again before execution.", default=True),
+        "connections_self_connect": _q_confirm(
+            "Allow employees to connect their own read-only Google Drive account after an administrator registers the workspace provider app? Other profiles require explicit approval in Settings.", default=False),
+        "extension_form_values": _q_confirm(
+            "Allow people to review and share browser form values with the configured AI service? Values remain off by default for every page.", default=False),
+        "extension_page_structure": _q_confirm(
+            "Allow people to review and share browser page headings and controls with the configured AI service?", default=True),
         "emergent_protocol": _q_confirm(
             "Emergent coordination shorthand? Swarms evolve short codes for the boilerplate "
             "they repeat (cheaper coordination), while every code decodes EXACTLY back to "
@@ -5023,11 +5128,15 @@ def pick_advanced() -> dict[str, Any]:
             "Off by default; leave off for SQLite or single-tenant installs.",
             default=False,
         ),
+        "copilot_operation_families": _q_checkbox(
+            "Which action families may Copilot open when enabled? Native permissions still apply.",
+            ["learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
+             "connections", "artifacts", "notifications", "models", "budget", "plugins"], default=["learning"],
+        ),
         "allow_copilot_operations": _q_confirm(
-            "Let Copilot show a learning example's current status and open its "
-            "stop-use review? You confirm each decision in a protected form. "
-            "Other product actions are not included. Page controls remain available "
-            "when this is off.", default=False,
+            "Let Copilot open the native controls in your selected action families? "
+            "Changes require a fresh review and explicit confirmation. Native page "
+            "controls remain available when this is off.", default=False,
         ),
         "governed_pg_pool": _q_confirm(
             "Reuse one bounded Postgres connection for governed records? "
@@ -5469,6 +5578,17 @@ def pick_advanced() -> dict[str, Any]:
     )
     # Settings > Models lists the models each saved key can reach by asking the
     # provider's own model-list endpoint ([models] discovery, default on).
+    advanced["mobile_offline"] = {"enabled": _q_confirm(
+        "Allow mobile companions to save task copies for up to 24 hours and 2 MB? Shorter limits are available in All settings.", default=True,
+    ), "max_age_seconds": 86400, "max_bytes": 2097152}
+    advanced["device_pairing"] = _pick_device_pairing()
+    advanced["model_guidance"] = _q_confirm(
+        "Show dated model pricing evidence and provider-reported capabilities in Settings?",
+        default=True,
+    )
+    advanced["model_capability_tests"] = _q_confirm(
+        "Allow administrators to explicitly confirm bounded, potentially paid synthetic model tests (at most USD 0.05 and 64 output tokens, no retry)?", default=False,
+    )
     advanced["model_discovery"] = _q_confirm(
         "Let Settings discover the models each provider key can reach (one "
         "bounded model-list request per provider, cached)? Say no to offer "
@@ -5476,6 +5596,18 @@ def pick_advanced() -> dict[str, Any]:
         default=True,
     )
     return advanced
+
+
+def _pick_device_pairing() -> dict[str, Any]:
+    """Keep pairing and optional task-control consent in one ordered group."""
+    pairing = {"enabled": _q_confirm(
+        "Let named members pair personal companions with an expiring code and explicit browser approval? Devices can read only their own work in the chosen workspace.", default=False,
+    ), "credential_hours": 24, "allow_actions": False}
+    if pairing["enabled"]:
+        pairing["allow_actions"] = _q_confirm(
+            "Also allow separately opted-in companions to review and submit answers or Stop on their own tasks? Approvals remain on the dashboard.", default=False,
+        )
+    return pairing
 
 
 def _regulatory_profile_choices() -> list[str]:
@@ -5621,12 +5753,14 @@ def pick_department_access(sso_enabled: bool) -> dict[str, Any]:
     console.print(
         "[dim]Department scoping limits which specialist teams each signed-in "
         "user can see and run — a finance analyst gets the Finance department, "
-        "not Legal. OFF by default (everyone sees every department); you can "
+        "not Legal. The recommended first-login baseline is viewer with no departments; you can "
         "always assign per-user access later on the dashboard Users page.[/dim]"
     )
-    if not _q_confirm("Restrict users to specific departments by default?", default=False):
-        return {}
+    if not _q_confirm("Start new signed-in users as viewers with no departments until granted access?", default=True):
+        console.print("[yellow]New users will be operators with access to every department. Existing deployments keep their chosen settings until you save this choice.[/yellow]")
+        return {"default_role": "operator"}
     result: dict[str, Any] = {
+        "default_role": "viewer",
         "default_suites": _split_csv(
             _q_text(
                 "  Departments a new user may use until granted more (comma-separated "
@@ -5863,7 +5997,11 @@ def pick_knowledge_access() -> dict[str, bool]:
         "enable": _q_confirm(
             "Enable governed Knowledge in the app (recommended)?",
             default=True,
-        )
+        ),
+        "task_context": _q_confirm(
+            "Allow tool-free AI tasks using employee-selected approved source versions?",
+            default=False,
+        ),
     }
 
 
@@ -6156,11 +6294,31 @@ def pick_persona() -> dict[str, str]:
 
 def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     """Run-end notification webhook. Returns (config, env_vars_needed)."""
+    personal_alerts = _q_confirm(
+        "Allow signed-in people to use a personal in-product alert inbox with quiet hours and daily digests? Requires personal preferences; external personal delivery is not connected.",
+        default=False,
+    )
+    personal_critical_bypass = personal_alerts and _q_confirm(
+        "Allow people to opt approval/deadline alerts out of their quiet hours and digest timing?", default=False,
+    )
+    personal_background = personal_alerts and _q_confirm(
+        "Refresh enrolled people's alert inboxes and release digests while their pages are closed? The dashboard must remain running.", default=False,
+    )
+    personal_config = {"personal_alerts": personal_alerts, "personal_critical_bypass": personal_critical_bypass,
+                       "personal_background": personal_background}
+    if personal_background and _q_confirm(
+        "Allow people to opt into alerts in their verified Slack/Telegram private conversations? Requires My Data identity verification and configured bot channel allowlists.", default=False,
+    ):
+        personal_config["personal_external"] = True
+        personal_config["personal_dashboard_url"] = _q_text("HTTPS dashboard origin for authenticated notification links (no path):", default="")
     if not _q_confirm(
         "Get pinged when long runs finish? (ntfy / Pushover / Slack / Discord)",
         default=False,
     ):
-        return {}, []
+        return personal_config, []
+    delivery_receipts = _q_confirm(
+        "Keep content-free delivery results for seven days and enable in-product delivery tests?", default=True,
+    )
     pick = _q_select(
         "  Backend:",
         [
@@ -6177,11 +6335,13 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
             "  ntfy topic (any unique string; treat as a password)",
             default="",
         ).strip()
-        return ({"backend": "ntfy", "ntfy_topic": topic}, []) if topic else ({}, [])
+        return ({**personal_config, "backend": "ntfy", "ntfy_topic": topic, "delivery_receipts": delivery_receipts}, []) if topic else (personal_config, [])
     if backend == "pushover":
         return (
             {
+                **personal_config,
                 "backend": "pushover",
+                "delivery_receipts": delivery_receipts,
                 "user_key": "${PUSHOVER_USER_KEY}",
                 "app_token": "${PUSHOVER_APP_TOKEN}",
             },
@@ -6189,12 +6349,12 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         )
     if backend == "slack":
         return (
-            {"backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}"},
+            {**personal_config, "backend": "slack", "slack_webhook": "${SLACK_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
             ["SLACK_NOTIFY_WEBHOOK"],
         )
     if backend == "discord":
         return (
-            {"backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}"},
+            {**personal_config, "backend": "discord", "discord_webhook": "${DISCORD_NOTIFY_WEBHOOK}", "delivery_receipts": delivery_receipts},
             ["DISCORD_NOTIFY_WEBHOOK"],
         )
     return {}, []
@@ -6650,10 +6810,14 @@ def _cfg_providers(
     return lines
 
 
-def _cfg_role_models(role_models: dict[str, str], *, discovery: bool = True) -> list[str]:
-    if not role_models and discovery:
+def _cfg_role_models(role_models: dict[str, str], *, discovery: bool = True, guidance: bool = True, capability_tests: bool = False) -> list[str]:
+    if not role_models and discovery and guidance and not capability_tests:
         return []
     lines = ["[models]"]
+    if capability_tests:
+        lines.append("capability_tests = true")
+    if not guidance:
+        lines.append("guidance = false")
     for role, spec in role_models.items():
         lines.append(f'{role} = "{spec}"')
     if not discovery:
@@ -6810,7 +6974,11 @@ def _cfg_knowledge_access(knowledge_access: dict[str, Any] | None) -> list[str]:
     enabled = knowledge_access.get("enable")
     if type(enabled) is not bool:
         raise ValueError("knowledge access enable must be boolean")
-    return ["", "[knowledge_access]", f"enable = {str(enabled).lower()}"]
+    task_context = knowledge_access.get("task_context", False)
+    if type(task_context) is not bool:
+        raise ValueError("knowledge task context must be boolean")
+    return ["", "[knowledge_access]", f"enable = {str(enabled).lower()}",
+            f"task_context = {str(task_context).lower()}"]
 
 
 def _cfg_ekko(ekko: dict[str, Any] | None) -> list[str]:
@@ -7984,6 +8152,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.append("# Externally-reachable dashboard base URL for signed channel")
             lines.append("# Approve/Reject links (actionable approvals).")
             _emit_kv(lines, "public_url", advanced["flows_public_url"])
+    if "workflow_typed_inputs" in advanced or "workflow_versioning" in advanced:
+        lines.extend(["", "[workflows]"])
+        _emit_kv(lines, "typed_inputs", advanced.get("workflow_typed_inputs", True) is True)
+        _emit_kv(lines, "versioning", advanced.get("workflow_versioning", True) is True)
     if advanced.get("connections"):
         lines.append("")
         lines.append("[connections]")
@@ -7991,6 +8163,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# can be wired from the dashboard without <NAME>_TOKEN env vars; an")
         lines.append("# existing env var still takes precedence (maverick.connections).")
         lines.append("enable = true")
+        _emit_kv(lines, "allow_self_connect", advanced.get("connections_self_connect") is True)
+        _emit_kv(lines, "self_connect_profiles", "google-drive")
     if advanced.get("emergent_protocol"):
         lines.append("")
         lines.append("[emergent_protocol]")
@@ -8161,18 +8335,51 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     # and as ONE [features] table (two tables would be a duplicate-key TOML
     # error). The kernel reads these via config.get_features.
     _feature_locks = []
+    if advanced.get("allow_runtime_configuration_status") is False:
+        lines.extend(["[settings]", "runtime_status = false"])
+    if advanced.get("allow_employee_task_diagnostics") is False:
+        _feature_locks.append("employee_task_diagnostics = false")
+    if advanced.get("allow_employee_activation") is False:
+        _feature_locks.append("employee_activation = false")
     if advanced.get("allow_copilot_operations") is True:
         _feature_locks.append("copilot_operations = true")
+        families = advanced.get("copilot_operation_families", ["learning"])
+        allowed_families = {"learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
+                            "connections", "artifacts", "notifications", "models", "budget", "plugins"}
+        if not isinstance(families, list) or any(value not in allowed_families for value in families):
+            raise ValueError("Choose registered Copilot action families.")
+        lines.append("[copilot]")
+        _emit_kv(lines, "operation_families", list(dict.fromkeys(families)))
     if advanced.get("allow_workflow_readiness") is False:
         _feature_locks.append("workflow_readiness = false")
     if advanced.get("allow_project_reviews") is True:
         _feature_locks.append("project_reviews = true")
+    if advanced.get("allow_task_handoffs") is True:
+        _feature_locks.append("task_handoffs = true")
+    if advanced.get("allow_deliverable_bundles") is True:
+        _feature_locks.append("deliverable_bundles = true")
+    if advanced.get("allow_project_workspaces") is True:
+        _feature_locks.append("project_workspaces = true")
+    if advanced.get("allow_employee_companions") is True:
+        _feature_locks.append("employee_companions = true")
+    if advanced.get("allow_employee_content_access_requests") is True:
+        _feature_locks.append("employee_content_access_requests = true")
+    if advanced.get("allow_personal_data_controls") is True:
+        _feature_locks.append("personal_data_controls = true")
+    if advanced.get("allow_permission_access_requests") is True:
+        _feature_locks.append("permission_access_requests = true")
+    if advanced.get("allow_employee_departures") is True:
+        _feature_locks.append("employee_departures = true")
     if advanced.get("allow_outcome_measurement") is True:
         _feature_locks.append("outcome_measurement = true")
     if advanced.get("allow_workspace_recovery") is True:
         _feature_locks.append("workspace_recovery = true")
     if advanced.get("allow_signing_identity_transition") is True:
         _feature_locks.append("signing_identity_transition = true")
+    if advanced.get("allow_configuration_profiles") is False:
+        _feature_locks.append("configuration_profiles = false")
+    if advanced.get("allow_personal_preferences") is False:
+        _feature_locks.append("personal_preferences = false")
     if advanced.get("allow_draft_recovery") is False:
         _feature_locks.append("draft_recovery = false")
     if advanced.get("allow_support_center") is False:
@@ -8191,6 +8398,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[features]")
         lines.extend(_feature_locks)
+    if advanced.get("allow_conversation_inbox") is True:
+        lines.extend(["", "[conversation_inbox]", "enabled = true", "guidance = true", "queue = true", "independent = true", "max_pending = 20"])
     if advanced.get("tree_of_thought"):
         lines.append("")
         lines.append("[planning]")
@@ -8456,10 +8665,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[memory_guard]")
         lines.append("enable = true")
-    if advanced.get("temporal_memory"):
+    if advanced.get("temporal_memory") or advanced.get("fact_tags"):
         lines.append("")
         lines.append("[memory]")
-        lines.append("temporal = true")
+        if advanced.get("temporal_memory"):
+            lines.append("temporal = true")
+        if advanced.get("fact_tags"):
+            lines.append("fact_tags = true")
     if advanced.get("fairness_monitor"):
         lines.append("")
         lines.append("[fairness_monitor]")
@@ -8634,21 +8846,28 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     dept = advanced.get("department_access") or {}
     compress_off = advanced.get("dashboard_compress") is False
     if isinstance(dept, dict) and (
-        dept.get("default_suites") or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced or compress_off
+        "default_suites" in dept or "default_role" in dept or dept.get("group_roles") or dept.get("group_suites")
+        or "local_owner_setup" in advanced or compress_off or "employee_activation_jobs" in advanced or "extension_form_values" in advanced or "extension_page_structure" in advanced
     ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
         # turn IdP (SCIM) team membership into a role / department grant.
         lines.append("")
         lines.append("[dashboard]")
+        if "employee_activation_jobs" in advanced:
+            _emit_kv(lines, "employee_activation_jobs", advanced["employee_activation_jobs"])
+        for capture_key in ("extension_form_values", "extension_page_structure"):
+            if capture_key in advanced:
+                _emit_kv(lines, capture_key, advanced[capture_key] is True)
         if "local_owner_setup" in advanced:
             _emit_kv(lines, "local_owner_setup", advanced["local_owner_setup"] is True)
         if compress_off:
             # Default-on in the app; only a deliberate "no" is written.
             lines.append("# Response compression off: a proxy in front already compresses.")
             _emit_kv(lines, "compress", False)
-        if dept.get("default_suites"):
+        if "default_role" in dept:
+            _emit_kv(lines, "default_role", dept["default_role"])
+        if "default_suites" in dept:
             lines.append("# Departments a signed-in user may use until an admin grants more.")
             _emit_kv(lines, "default_suites", list(dept["default_suites"]))
         # Group names contain spaces, so the TOML key must be a quoted string
@@ -8708,10 +8927,13 @@ def _cfg_plugins(
     plugin_grant: list[str] | None,
     plugin_enforce: bool,
     ts_plugins: list[list[str]] | None,
+    workbench: bool | None = None,
 ) -> list[str]:
-    if not (plugins or ts_plugins):
+    if not (plugins or ts_plugins or workbench is not None):
         return []
     lines = ["", "[plugins]"]
+    if workbench is not None:
+        _emit_kv(lines, "workbench", workbench is True)
     if plugins:
         _emit_kv(lines, "enabled", plugins)
     if plugin_grant:
@@ -9036,6 +9258,8 @@ def write_config(
     )
     lines += _cfg_role_models(
         role_models, discovery=advanced.get("model_discovery") is not False,
+        guidance=advanced.get("model_guidance") is not False,
+        capability_tests=advanced.get("model_capability_tests") is True,
     )
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)
@@ -9099,7 +9323,7 @@ def write_config(
     lines += _cfg_mcp_servers(mcp_servers)
     lines += _cfg_registries("mcp_registries", mcp_registries)
     lines += _cfg_registries("template_registries", template_registries)
-    lines += _cfg_plugins(plugins, plugin_grant, plugin_enforce, ts_plugins)
+    lines += _cfg_plugins(plugins, plugin_grant, plugin_enforce, ts_plugins, workbench=(advanced or {}).get("plugin_workbench"))
     lines += _cfg_security(
         tool_acl,
         bool((advanced or {}).get("security_autofix")),
@@ -9110,6 +9334,8 @@ def write_config(
     lines += _cfg_table("analytics", analytics)
     lines += _cfg_table("persona", persona)
     lines += _cfg_table("notifications", notifications)
+    lines += _cfg_table("mobile_offline", (advanced or {}).get("mobile_offline"))
+    lines += _cfg_table("device_pairing", (advanced or {}).get("device_pairing"))
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)

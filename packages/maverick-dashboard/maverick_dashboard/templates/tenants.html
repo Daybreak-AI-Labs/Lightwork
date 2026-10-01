@@ -7,7 +7,7 @@
                subtitle='Separate spaces for each client or team',
                lede='Each workspace keeps its own records, documents and daily
                      spending limit. For a summary of each workspace, open
-                     <a href="/tenants/overview">Workspace overview</a>.') %}
+                     <a href="/tenants/overview">Workspace overview</a>.' | safe) %}
     {{ state('Current state',
              tenants | length ~ ' workspace' ~ ('' if tenants | length == 1 else 's') ~ ' set up',
              badge=(active_tenants ~ ' active') if tenants else 'Single workspace',

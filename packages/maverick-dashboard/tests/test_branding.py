@@ -43,7 +43,14 @@ def test_share_page_shows_the_logo(tmp_path, monkeypatch):
     gid = w.create_goal("Forecast", "", domain="finance_cash13w")
     w.set_goal_status(gid, "done", result="ok")
     w.record_signoff(gid, "approved", decided_by="reviewer")
-    token = client.post(f"/api/v1/goals/{gid}/share").json()["url"].split("/share/")[1]
+    preview = client.post(f"/api/v1/goals/{gid}/share/preview")
+    assert preview.status_code == 200, preview.text
+    shared = client.post(f"/api/v1/goals/{gid}/share", json={
+        "confirm": True, "source_sha256": preview.json()["source"]["sha256"],
+        "lifetime_seconds": 3600, "label": "Branding review",
+    })
+    assert shared.status_code == 201, shared.text
+    token = shared.json()["url"].split("/share/")[1]
     page = TestClient(app).get(f"/share/{token}").text   # anon viewer
     assert "/static/daybreak-logo.jpg" in page
     assert "Daybreak Labs" in page

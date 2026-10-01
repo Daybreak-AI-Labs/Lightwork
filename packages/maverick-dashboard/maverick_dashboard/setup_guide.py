@@ -166,35 +166,289 @@ def _check(raw: bytes) -> dict[str, Any]:
                           for f in findings][:80]}
 
 
+def _receipt_path(token: str) -> Path:
+    import re
+
+    from maverick.config import config_path
+
+    if not re.fullmatch(r"[0-9a-f]{64}", token):
+        raise HTTPException(422, "Check this file again before installing it.")
+    return config_path().parent / "settings-install-reviews" / (token + ".json")
+
+
+def _write_receipt(path: Path, receipt: dict) -> None:
+    import json
+
+    from maverick.file_lock import atomic_write_text, ensure_private_directory
+
+    ensure_private_directory(path.parent)
+    atomic_write_text(path, json.dumps(receipt, sort_keys=True), mode=0o600)
+
+
+def _read_receipt(request: Request, token: str) -> tuple[Path, dict]:
+    import json
+
+    from .draft_api import context_for
+
+    path = _receipt_path(token)
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(409, "This file review is unavailable. Check the file again.") from exc
+    if receipt.get("context") != context_for(request):
+        raise HTTPException(409, "The account or workspace changed. Check the file again.")
+    return path, receipt
+
+
+def _file_preview_value(setting, value):
+    from . import settings_all_page as page
+    from .draft_store import validate_payload
+    shown = page._audit_value(setting, value)
+    try:
+        validate_payload({'value': shown})
+    except (ValueError, TypeError):
+        return 'Configured (value withheld)'
+    return shown
+
+
+def _file_review_revision(raw: bytes, layers: dict | None = None) -> str:
+    import hashlib
+    import json
+    import os
+
+    from maverick.config import _ENV_PATTERN
+
+    from . import settings_all_page as page
+    names = set(_ENV_PATTERN.findall(raw.decode("utf-8")))
+    environment = {name: os.environ.get(name, "") for name in names}
+    return hashlib.sha256(json.dumps([page._revision(layers), environment], sort_keys=True).encode()).hexdigest()
+
+
+def _prepare_file(request: Request, raw: bytes) -> dict:
+    import hashlib
+    import secrets
+    import time
+
+    from maverick.config_install import parse_config_bytes
+
+    from . import settings_all_page as page
+    from . import settings_catalog as catalog
+    from . import settings_store
+    from .draft_api import context_for
+
+    with settings_store._locked(strict=True):
+        checked = _check(raw)
+        if not checked["valid"]:
+            return checked
+        layers = page._sources()
+        from maverick.config import _interp
+        preview_layers = {key: _interp(value) for key, value in layers.items()}
+        proposed = {**preview_layers, "base": _interp(parse_config_bytes(raw))}
+        impact = []
+        for setting in catalog.SETTINGS:
+            old, new = page._resolve(setting, preview_layers), page._resolve(setting, proposed)
+            old_base = catalog.lookup(preview_layers["base"], setting.path)
+            new_base = catalog.lookup(proposed["base"], setting.path)
+            if old_base == new_base:
+                continue
+            impact.append({"label": setting.label, "source": page.SOURCE_TEXT[new["source"]],
+                           "change": "Added" if not old_base[0] else "Removed" if not new_base[0] else "Changed",
+                           "before": _file_preview_value(setting, old["value"]),
+                           "after": _file_preview_value(setting, new["value"]),
+                           "overridden": new["source"] in {"here", "deployment"},
+                           "impact": "After restart" if setting.restart else "Next task"})
+        impact.extend(_other_file_impact(preview_layers, proposed['base']))
+        token = secrets.token_hex(32)
+        _write_receipt(_receipt_path(token), {
+            "context": context_for(request), "digest": hashlib.sha256(raw).hexdigest(),
+            "revision": _file_review_revision(raw, layers), "created_at": time.time(), "status": "reviewed",
+        })
+        return {**checked, "review": token, "impact": impact,
+                "scope": "All users and workspaces on this installation"}
+
+
+def _other_file_impact(layers: dict, proposed_base: dict) -> list[dict]:
+    """Account for dedicated/unknown fields without displaying unclassified values.
+
+    The catalog provides typed/redacted values above. Remaining file fields may
+    contain credentials even when their names look innocent, so this projection
+    exposes presence/change/source only. It never guesses that a value is public.
+    """
+    import os
+
+    from . import settings_catalog as catalog
+    from . import settings_store
+
+    def leaves(value, prefix=()):
+        result = {}
+        if isinstance(value, dict) and value:
+            for key, item in value.items():
+                result.update(leaves(item, (*prefix, key)))
+        else:
+            result[prefix] = value
+        return result
+
+    before, after = leaves(layers['base']), leaves(proposed_base)
+    paths = [setting.path for setting in catalog.SETTINGS]
+    providers = {item['name']: item for item in settings_store.PROVIDERS}
+    result = []
+    for path in sorted(before.keys() | after.keys()):
+        if not path or any(path[:len(known)] == known for known in paths):
+            continue
+        existed, exists = path in before, path in after
+        if existed == exists and before.get(path) == after.get(path):
+            continue
+        source = 'Settings file'
+        overridden = False
+        for name, label in [('here', 'Saved dashboard override'), ('operator', 'Deployment override')]:
+            if catalog.lookup(layers[name], path)[0]:
+                source, overridden = label, True
+        if len(path) == 3 and path[0] == 'providers' and path[2] == 'api_key':
+            provider = providers.get(path[1], {})
+            if any(os.environ.get(name, '').strip() for name in provider.get('env', ())):
+                source, overridden = 'Deployment environment', True
+        # Only boolean feature switches are interpreted as enabled/disabled.
+        # Other values remain opaque, including lists of credentials or names.
+        def state(present, value, section=path[0]):
+            if not present:
+                return 'Not present in file'
+            if section in {'features', 'capabilities'} and isinstance(value, bool):
+                return 'Enabled' if value else 'Disabled'
+            return 'Present (value withheld)'
+        result.append({'label': '.'.join(path), 'source': source,
+                       'change': 'Added' if not existed else 'Removed' if not exists else 'Changed',
+                       'before': state(existed, before.get(path)), 'after': state(exists, after.get(path)),
+                       'overridden': overridden,
+                       'impact': 'Dedicated setting: restart may be required; validate this field on its owning page',
+                       'unclassified': True})
+    return result
+
+
 @router.post("/api/v1/setup/settings-file/check")
 async def check_settings_file(request: Request) -> dict:
     from . import app as app_module
     app_module._require_same_origin(request)
     require_global_permission(request, "admin")
-    return await run_in_threadpool(_check, await _file(request))
+    from fastapi.responses import JSONResponse
+    return JSONResponse(await run_in_threadpool(_prepare_file, request, await _file(request)),
+                        headers={"Cache-Control": "private, no-store"})
+
+
+def _install_reviewed(request: Request, raw: bytes, token: str) -> dict:
+    import hashlib
+    import time
+
+    from maverick.config import config_path, reset_config_cache
+    from maverick.config_install import install_config_bytes
+
+    from . import settings_store
+    from .system_checks_api import _record
+
+    with settings_store._locked(strict=True):
+        path, receipt = _read_receipt(request, token)
+        if receipt["digest"] != hashlib.sha256(raw).hexdigest():
+            raise HTTPException(409, "The file changed after review. Check it again.")
+        if receipt["status"] == "confirmed":
+            return {"installed": receipt.get("installed", True), "summary": receipt["summary"],
+                    "review": token, "audit_pending": receipt.get("audit_pending", False)}
+        if receipt["status"] != "reviewed":
+            raise HTTPException(409, "This installation needs its result checked before another attempt.")
+        if time.time() - receipt["created_at"] > 900 or receipt["revision"] != _file_review_revision(raw):
+            raise HTTPException(409, "Settings changed or this review expired. Check the file again.")
+        receipt["status"] = "pending"
+        _write_receipt(path, receipt)
+        try:
+            _record(request, "settings_file_install_requested", review=token)
+            result = install_config_bytes(raw, backup=True)
+            reset_config_cache()
+            if config_path().read_bytes() != raw and not result["unchanged"]:
+                raise OSError("settings readback did not match")
+        except Exception:
+            receipt["status"] = "uncertain"
+            _write_receipt(path, receipt)
+            raise HTTPException(503, "Installation was not confirmed. Check the saved result before trying again.") from None
+        summary = ("This settings file is already installed. Nothing changed." if result["unchanged"] else
+                   "Installed the reviewed settings file. It applies to the next task; some settings need a restart. "
+                   "The previous file was kept as a backup when one existed.")
+        receipt.update(status="confirmed", installed=not result["unchanged"], summary=summary,
+                       installed_digest=hashlib.sha256(config_path().read_bytes()).hexdigest(), audit_pending=True)
+        _write_receipt(path, receipt)
+        try:
+            _record(request, "settings_file_install_confirmed", review=token,
+                    changed=not result["unchanged"])
+        except HTTPException:
+            pass  # durable receipt exposes pending audit; never misreport a failed write as installed
+        else:
+            receipt["audit_pending"] = False
+            _write_receipt(path, receipt)
+        return {"installed": receipt["installed"], "summary": summary, "review": token,
+                "audit_pending": receipt["audit_pending"]}
 
 
 @router.post("/api/v1/setup/settings-file/install")
-async def install_settings_file(request: Request, confirm: bool = False) -> dict:
+async def install_settings_file(request: Request, confirm: bool = False, review: str = "") -> dict:
     from . import app as app_module
     app_module._require_same_origin(request)
     require_global_permission(request, "admin")
     if confirm is not True:
-        raise HTTPException(409, "Confirm to install the settings file. Nothing was changed.")
-    raw = await _file(request)
-    checked = await run_in_threadpool(_check, raw)
-    if not checked["valid"]:
-        raise HTTPException(422, "This isn't a valid settings file, so it can't be installed.")
-    from maverick.config import reset_config_cache
-    from maverick.config_install import install_config_bytes
+        raise HTTPException(409, "Confirm to install the reviewed settings file. Nothing was changed.")
+    from fastapi.responses import JSONResponse
+    return JSONResponse(await run_in_threadpool(_install_reviewed, request, await _file(request), review),
+                        headers={"Cache-Control": "private, no-store"})
 
+
+@router.get("/api/v1/setup/settings-file/result/{review}")
+def settings_file_result(request: Request, review: str) -> dict:
+    import hashlib
+
+    from maverick.config import config_path
+
+    from . import settings_store
+
+    require_global_permission(request, "admin")
+    with settings_store._locked(strict=True):
+        _path, receipt = _read_receipt(request, review)
+        try:
+            matches = hashlib.sha256(config_path().read_bytes()).hexdigest() == receipt.get("installed_digest", receipt["digest"])
+        except OSError:
+            matches = False
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"status": receipt["status"], "matches_review": matches,
+                "audit_pending": receipt.get("audit_pending", receipt["status"] in {"pending", "uncertain"}),
+                "summary": ("The installed file matches your reviewed file." if matches else
+                            "The installed file does not match this review. Check the current settings before proceeding.")},
+                            headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/api/v1/setup/settings-file/reconcile/{review}")
+def reconcile_settings_file(request: Request, review: str):
+    """Record observed current bytes after a lost acknowledgement; never reinstall."""
+    import hashlib
+
+    from fastapi.responses import JSONResponse
+    from maverick.config import config_path
+
+    from . import app as app_module
+    from . import settings_store
     from .system_checks_api import _record
-    await run_in_threadpool(_record, request, "settings_file_installed", sections=checked.get("sections", 0))
-    result = await run_in_threadpool(lambda: install_config_bytes(raw, backup=True))
-    await run_in_threadpool(reset_config_cache)
-    if result["unchanged"]:
-        summary = "This settings file is already installed. Nothing changed."
-    else:
-        summary = ("Installed the settings file. It applies to the next task; some settings need Lightwork "
-                   "to restart." + (" The previous file was kept as a backup copy." if result["backup"] else ""))
-    return {"installed": not result["unchanged"], "summary": summary}
+
+    app_module._require_same_origin(request)
+    require_global_permission(request, "admin")
+    with settings_store._locked(strict=True):
+        path, receipt = _read_receipt(request, review)
+        if receipt['status'] not in {'pending', 'uncertain', 'confirmed'}:
+            raise HTTPException(409, "This review has no installation attempt to reconcile.")
+        try:
+            matches = hashlib.sha256(config_path().read_bytes()).hexdigest() == receipt.get('installed_digest', receipt['digest'])
+        except OSError:
+            matches = False
+        if not matches:
+            raise HTTPException(409, "The current file differs from this review. Review current settings; no installation or activity confirmation was made.")
+        if receipt.get('audit_pending', True):
+            _record(request, 'settings_file_install_reconciled', review=review, observed_match=True)
+        receipt.update(status='confirmed', audit_pending=False,
+                       summary='The current settings file matches this review. This observation is recorded; the file was not reinstalled.')
+        receipt.setdefault('installed', False)
+        _write_receipt(path, receipt)
+        return JSONResponse({'summary': receipt['summary'], 'audit_pending': False},
+                            headers={"Cache-Control": "private, no-store"})

@@ -2,7 +2,7 @@
 
 CI needs no grpcio: the host imports grpc and its generated stubs lazily, so a
 fake ``grpc`` module and fake ``plugin_host_pb2`` / ``plugin_host_pb2_grpc``
-modules are injected via ``sys.modules`` — the same no-real-grpc approach as
+modules are injected via ``sys.modules`` â€” the same no-real-grpc approach as
 the other grpc tests (test_grpc_dispatch fakes the stub seam,
 test_grpc_server_auth fakes the pb2 modules). The fake stub routes
 Describe/Call to a per-test rig the tests script and inspect.
@@ -10,7 +10,7 @@ Describe/Call to a per-test rig the tests script and inspect.
 from __future__ import annotations
 
 import json
-import subprocess
+import queue
 import sys
 import types
 from dataclasses import dataclass, field
@@ -57,6 +57,10 @@ class ToolResult:
     result: str = ""
     error: str = ""
 
+    def WhichOneof(self, name):
+        assert name == "outcome"
+        return "error" if self.error else "result"
+
 
 class FakeRpcError(Exception):
     def __init__(self, code="UNAVAILABLE", details="connection dropped"):
@@ -97,7 +101,7 @@ def rig(monkeypatch):
         DEADLINE_EXCEEDED="DEADLINE_EXCEEDED", UNAVAILABLE="UNAVAILABLE",
     )
 
-    def insecure_channel(target):
+    def insecure_channel(target, **kwargs):
         ch = FakeChannel(target)
         rig.channels.append(ch)
         return ch
@@ -114,6 +118,26 @@ def rig(monkeypatch):
     class MaverickPluginStub:
         def __init__(self, channel):
             self.channel = channel
+            class Rpc:
+                def __init__(self, call):
+                    self.call = call
+                def future(self, *args, **kwargs):
+                    try:
+                        value, error = self.call(*args, **kwargs), None
+                    except Exception as exc:
+                        value, error = None, exc
+                    class Future:
+                        def done(self):
+                            return True
+                        def cancel(self):
+                            return True
+                        def result(self):
+                            if error is not None:
+                                raise error
+                            return value
+                    return Future()
+            self.Describe = Rpc(self.Describe)
+            self.Call = Rpc(self.Call)
 
         def Describe(self, request, timeout=None, wait_for_ready=False):
             rig.describes.append(SimpleNamespace(
@@ -171,9 +195,15 @@ def fake_proc(monkeypatch):
         spawned.append(p)
         return p
 
-    monkeypatch.setattr(gph, "subprocess", SimpleNamespace(
-        Popen=popen, DEVNULL=subprocess.DEVNULL,
-        TimeoutExpired=subprocess.TimeoutExpired))
+    class Owner:
+        def __init__(self, command, *, env):
+            self.proc = popen(command, env=env)
+            self.stdout = queue.Queue()
+            self.stderr = queue.Queue()
+        def close(self):
+            self.proc.kill()
+            self.proc.wait(timeout=5)
+    monkeypatch.setattr(gph, "OwnedProcess", Owner)
     return spawned
 
 
@@ -288,8 +318,8 @@ def test_call_round_trip_serializes_args_and_deadline(rig):
     call = rig.calls[0]
     assert call.request.tool == "echo"
     assert json.loads(call.request.args_json) == {"text": "hi"}
-    assert call.request.deadline_ms == 2500  # mirrored for the plugin side
-    assert call.timeout == 2.5               # enforced as the gRPC deadline
+    assert 2000 < call.request.deadline_ms <= 2500  # mirrored for the plugin side
+    assert 2.0 < call.timeout <= 2.5               # enforced as the gRPC deadline
     assert by_name["echo"].fn({"text": "again"}) == 'ok:{"text": "again"}'
     assert len(rig.channels) == 1            # calls share one channel
 
@@ -313,20 +343,22 @@ def test_deadline_exceeded_maps_to_timeout_error(rig):
     assert "timed out" in out
     # A slow tool is not a dropped channel: no reconnect, no retry.
     assert len(rig.calls) == 1
-    assert not rig.channels[0].closed
+    assert rig.channels[0].closed
+    assert out.attempt.outcome_unknown and not out.attempt.retryable
 
 
 # ---- reconnect-once on a dropped channel ----
 
-def test_dropped_channel_reconnects_once(rig):
+def test_dropped_channel_is_unknown_without_replay(rig):
     rig.manifest = SPECS
     by_name = _by_name(load_grpc_plugin("localhost:50061"))
     rig.call_excs = [FakeRpcError(code="UNAVAILABLE")]
-    assert by_name["echo"].fn({"text": "hi"}) == 'ok:{"text": "hi"}'
-    # The dead channel was closed and a fresh one dialed for the retry,
-    # which queues until the connection is up.
-    assert len(rig.channels) == 2 and rig.channels[0].closed
-    assert [c.wait_for_ready for c in rig.calls] == [False, True]
+    result = by_name["echo"].fn({"text": "hi"})
+    assert result.startswith("ERROR:") and result.attempt.outcome_unknown
+    assert not result.attempt.retryable
+    assert len(rig.calls) == 1 and len(rig.channels) == 1 and rig.channels[0].closed
+    assert by_name["echo"].fn({"text": "new independent invocation"}).startswith("ok:")
+    assert len(rig.calls) == 2 and len(rig.channels) == 2
 
 
 def test_persistently_dropped_channel_is_error(rig):
@@ -336,6 +368,9 @@ def test_persistently_dropped_channel_is_error(rig):
     out = by_name["echo"].fn({})
     assert out.startswith("ERROR:")
     assert "echo" in out
+    # A second independent call also fails once; neither failure replays.
+    assert by_name["echo"].fn({}).attempt.outcome_unknown
+    assert len(rig.calls) == 2
     # The plugin still works afterwards on a fresh channel.
     assert by_name["echo"].fn({"text": "alive"}) == 'ok:{"text": "alive"}'
 
@@ -368,9 +403,7 @@ def test_spawn_failure_raises_plugin_error(rig, monkeypatch):
     def popen(argv, **kwargs):
         raise OSError("no such binary")
 
-    monkeypatch.setattr(gph, "subprocess", SimpleNamespace(
-        Popen=popen, DEVNULL=subprocess.DEVNULL,
-        TimeoutExpired=subprocess.TimeoutExpired))
+    monkeypatch.setattr(gph, "OwnedProcess", popen)
     with pytest.raises(GrpcPluginError, match="failed to run"):
         load_grpc_plugin("localhost:50061", command=["missing-plugin"])
 
@@ -434,3 +467,56 @@ def test_load_configured_grpc_plugins_without_grpcio(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "grpc", None)
     assert load_configured_grpc_plugins() == []  # fail-open: logged, not raised
+
+
+def test_malformed_schema_cannot_pass_strict_qualification(rig, fake_proc):
+    rig.manifest = [ToolSpec("broken", "broken", "{invalid")]
+    with pytest.raises(ValueError):
+        load_grpc_plugin("localhost:50061", command=["synthetic-server"], strict_schema=True)
+    assert fake_proc[0].killed
+    assert not rig.calls
+
+
+def test_control_stop_cancels_rpc_and_preserves_original_exception(rig, fake_proc, monkeypatch):
+    rig.manifest = [SPECS[0]]
+    tool = load_grpc_plugin("localhost:50061", command=["synthetic-server"])[0]
+    channel = gph._CHANNELS[-1]
+    calls = []
+    class Future:
+        def done(self):
+            return False
+        def cancel(self):
+            calls.append("cancel")
+        def result(self):
+            pytest.fail("cancelled operation cannot complete")
+    channel._stub.Call = SimpleNamespace(future=lambda *args, **kwargs: Future())
+    checks = [0]
+    class OriginalStop(BaseException):
+        pass
+    def check():
+        checks[0] += 1
+        if checks[0] >= 3:
+            raise OriginalStop("operator stopped")
+    monkeypatch.setattr(gph, "current_invocation", lambda: SimpleNamespace(check=check))
+    with pytest.raises(OriginalStop):
+        tool.fn({})
+    assert calls == ["cancel"] and fake_proc[0].killed
+    assert channel._owner is None
+
+
+def test_timeout_cleans_owned_server_and_never_replays(rig, fake_proc):
+    rig.manifest = [SPECS[0]]
+    tool = load_grpc_plugin("localhost:50061", command=["synthetic-server"])[0]
+    rig.call_excs = [FakeRpcError(code="DEADLINE_EXCEEDED")]
+    result = tool.fn({})
+    assert len(rig.calls) == 1 and fake_proc[0].killed
+    assert result.attempt.outcome_unknown and not result.attempt.retryable
+
+
+def test_missing_terminal_outcome_is_unknown_and_never_replayed(rig):
+    rig.manifest = [ToolSpec(name="test", input_schema_json='{"type":"object"}')]
+    rig.answer = lambda request: SimpleNamespace(WhichOneof=lambda field: None)
+    result = load_grpc_plugin("localhost:50051")[0].fn({})
+    assert "outcome unknown" in result
+    assert len(rig.calls) == 1
+    assert rig.channels[0].closed

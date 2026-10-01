@@ -1,6 +1,8 @@
 """Model picker spans every provider's catalog, not just Anthropic."""
 from __future__ import annotations
 
+from html.parser import HTMLParser
+
 from fastapi.testclient import TestClient
 
 _ORIGIN = {"origin": "http://testserver"}
@@ -38,7 +40,28 @@ def test_settings_picker_is_multi_provider(monkeypatch, tmp_path):
     assert r.status_code == 200
     # Real pickers with a typed-id escape hatch; every provider's catalog is
     # listed for the allow-list even before a key is saved.
-    assert '<select class="select" name="model"' in r.text and 'value="__custom__"' in r.text
+    class ModelPicker(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.inside = False
+            self.found = False
+            self.options = []
+
+        def handle_starttag(self, tag, attrs):
+            attributes = dict(attrs)
+            if tag == "select":
+                self.inside = attributes.get("name") == "model"
+                self.found |= self.inside and "select" in attributes.get("class", "").split()
+            elif tag == "option" and self.inside:
+                self.options.append(attributes.get("value"))
+
+        def handle_endtag(self, tag):
+            if tag == "select":
+                self.inside = False
+
+    picker = ModelPicker()
+    picker.feed(r.text)
+    assert picker.found and "__custom__" in picker.options
     assert 'name="models" value="openai:gpt-5.4"' in r.text
     assert 'name="models" value="gemini:gemini-3.5-pro"' in r.text
 

@@ -268,9 +268,8 @@ class TestSignoffGroundsLearning:
         assert consequence.resolve(gid, eid) is None
 
 
-class TestCancelGroundsLearning:
-    """A human cancelling an in-progress run is real negative ground truth; when
-    [consequence] is on it must feed the learning loop as a 0.0 outcome."""
+class TestCancelDoesNotJudgeQuality:
+    """Stopping work is not a quality judgment; explicit feedback remains separate."""
 
     def _isolate(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
@@ -279,7 +278,7 @@ class TestCancelGroundsLearning:
         consequence.reset_shared()
         return consequence
 
-    def test_cancel_records_grounded_outcome_0(self, tmp_path, monkeypatch):
+    def test_cancel_does_not_record_a_negative_learning_outcome(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
         consequence = self._isolate(tmp_path, monkeypatch)
         w = _world(tmp_path, monkeypatch)
@@ -287,7 +286,7 @@ class TestCancelGroundsLearning:
         eid = w.start_episode(gid)
         r = client.post(f"/api/v1/goals/{gid}/cancel")
         assert r.status_code == 204
-        assert consequence.resolve(gid, eid) == 0.0
+        assert consequence.resolve(gid, eid) is None
 
     def test_no_outcome_when_consequence_disabled(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MAVERICK_CONSEQUENCE", "0")
@@ -370,7 +369,9 @@ class TestSignoffUi:
         t = client.get(f"/chat/goal/{gid}").text
         assert 'id="signoff-approve"' in t
         assert 'id="signoff-reject"' in t
-        assert "expected_updated_at" in t
+        assert "/static/lightwork-answer-panel.js" in t
+        asset = client.get("/static/lightwork-answer-panel.js")
+        assert asset.status_code == 200 and "expected_updated_at" in asset.text
 
     def test_terminal_gated_prose_playbook_has_review_controls(
         self, tmp_path, monkeypatch,

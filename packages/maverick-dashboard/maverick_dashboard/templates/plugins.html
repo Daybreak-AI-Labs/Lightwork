@@ -286,6 +286,14 @@
     {% endif %}
   </div>
   {% endif %}
+  <section id="plugin-workbench" class="panel" aria-labelledby="plugin-workbench-title">
+    <h2 id="plugin-workbench-title">Qualification workbench</h2>
+    <p>Review exact installed versions and declared access, then check synthetic inputs in a restricted local container. Starting a process is not acceptance by an external service. No credentials, network access, or host execution are permitted in these checks.</p>
+    <p><a href="/settings">Review workbench and immutable image settings</a>. A reviewed Linux image must already contain the exact plugin distribution and input validation library; no image is downloaded here.</p>
+    <button type="button" class="btn" data-workbench-refresh>Refresh qualification evidence</button>
+    <button type="button" class="btn" data-workbench-cancel>Cancel active check</button>
+    <p role="status" aria-live="polite"></p><div data-workbench-list></div>
+  </section>
   <style>
     .plg-flush { margin: 0; }
     .plg-gap { margin-top: var(--space-5); }
@@ -302,5 +310,6 @@
 {% endblock %}
 {% block scripts_extra %}
   <script src="/static/lightwork-plugins.js" defer></script>
+  <script src="/static/lightwork-plugin-workbench.js" defer></script>
   <script src="/static/lightwork-tool-ops.js" defer></script>
 {% endblock %}

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,11 +16,55 @@ from maverick_channels.signal import SignalChannel
 from maverick_channels.transport_worker import TransportWorker
 
 
-async def until(predicate):
+async def until(predicate, *, on_timeout=None):
     async def wait():
         while not predicate():
             await asyncio.sleep(0.005)
-    await asyncio.wait_for(wait(), timeout=5)
+    try:
+        await asyncio.wait_for(wait(), timeout=5)
+    except asyncio.TimeoutError:
+        if on_timeout is not None:
+            try:
+                on_timeout()
+            except Exception:
+                pass  # Diagnostics must not replace the original timeout.
+        raise
+
+
+def transport_timeout_snapshot(worker, handler_started_count):
+    """Report owned queue state and stack locations without message contents."""
+    def frame_location(frame):
+        return {"file": Path(frame.f_code.co_filename).name,
+                "function": frame.f_code.co_name, "line": frame.f_lineno}
+
+    def task_location(task):
+        if task is None:
+            return None
+        locations, seen = [], set()
+        awaiting = task.get_coro()
+        while awaiting is not None and id(awaiting) not in seen:
+            seen.add(id(awaiting))
+            frame = getattr(awaiting, "cr_frame", None) or getattr(awaiting, "gi_frame", None)
+            if frame is not None:
+                locations.append(frame_location(frame))
+            awaiting = getattr(awaiting, "cr_await", None) or getattr(awaiting, "gi_yieldfrom", None)
+        return {"done": task.done(), "cancelled": task.cancelled(), "stack": locations}
+
+    threads = []
+    for current in sys._current_frames().values():
+        locations = []
+        while current is not None:
+            locations.append(frame_location(current))
+            current = current.f_back
+        threads.append(locations)
+    print("TRANSPORT_TIMEOUT " + json.dumps({
+        "handler_started_count": handler_started_count,
+        "pending_count": len(worker.pending), "overflow": worker._overflow,
+        "wake": worker._wake.is_set(), "generation": worker._generation,
+        "closing": worker._closing,
+        "worker": task_location(worker.task), "scan": task_location(worker._scan_task),
+        "threads": threads,
+    }, sort_keys=True))
 
 
 class Adapter(Channel):
@@ -56,9 +102,47 @@ def test_bounded_queue_overflow_is_durable_serial_and_in_intake_order(monkeypatc
             assert len(worker.pending) <= 2
         assert worker.overflow_count and DeliveryJournal().store.count() == 8
         release.set()
-        await until(lambda: len(order) == 8)
+        await until(lambda: len(order) == 8,
+                    on_timeout=lambda: transport_timeout_snapshot(worker, len(order)))
         await worker.close()
         assert worker.task.done() and peak == 1 and order == [str(index) for index in range(8)]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("diagnostic_failure", [False, True])
+def test_transport_timeout_diagnostic_preserves_failure_without_message_content(monkeypatch, capsys, diagnostic_failure):
+    failure = asyncio.TimeoutError("fixture deadline")
+
+    async def timed_out(awaitable, *, timeout):
+        assert timeout == 5
+        awaitable.close()
+        raise failure
+
+    monkeypatch.setattr(asyncio, "wait_for", timed_out)
+
+    async def run():
+        private_text = "private-fixture-message-must-not-appear"
+        worker = TransportWorker(Adapter(AsyncMock()), account=private_text,
+                                 authorize=lambda msg: True, send=AsyncMock())
+        worker.pending.append(private_text)
+        worker.task = asyncio.current_task()
+
+        def diagnose():
+            if diagnostic_failure:
+                raise RuntimeError(private_text)
+            transport_timeout_snapshot(worker, 0)
+
+        with pytest.raises(asyncio.TimeoutError) as raised:
+            await until(lambda: False, on_timeout=diagnose)
+        assert raised.value is failure
+        output = capsys.readouterr().out
+        assert private_text not in output
+        if not diagnostic_failure:
+            diagnostic = json.loads(output.removeprefix("TRANSPORT_TIMEOUT "))
+            assert diagnostic["handler_started_count"] == 0 and diagnostic["pending_count"] == 1
+            assert diagnostic["worker"]["stack"] and diagnostic["threads"]
+        assert worker.pending[0] == private_text and not worker._closing
+
     asyncio.run(run())
 
 

@@ -284,12 +284,98 @@
       const prompt = el('p'), guidance = el('p', 'muted'), save = el('button', 'btn btn--primary', 'Save answer'); save.type = 'submit';
       const discard = el('button', 'btn btn--ghost', 'Discard answer changes'); discard.type = 'button';
       let selected = choices.find(function (choice) { return choice.key === selectedQuestion; }) || choices.find(function (choice) { return !choice.saved.answer; }) || choices[0];
+      const memoryContext = document.querySelector?.('meta[name="lightwork-search-context"]')?.content || '';
+      const memoryHeaders = memoryContext ? {'X-Lightwork-Search-Context': memoryContext} : {};
+      const memory = el('div'), memoryButton = el('button', 'btn', 'Find precedent answers');
+      memoryButton.type = 'button';
+      let memorySuggestions = {}, rejectedSuggestions = new Set(), appliedSuggestion = '';
+      function sourceUrl(source, exact) {
+        let url = '/api/v1/assessment-memory/fragment/' + encodeURIComponent(source.assessment_id) + '/' + encodeURIComponent(source.question_id);
+        if (exact) url += '?revision=' + encodeURIComponent(source.source_revision) + '&policy_digest=' + encodeURIComponent(source.policy_digest);
+        return url;
+      }
+      async function readSource(source, exact) {
+        const response = await fetch(sourceUrl(source, exact), {cache: 'no-store', headers: memoryHeaders});
+        if ([401,403].includes(response.status)) { memorySuggestions = {}; memory.textContent = ''; }
+        if (!response.ok) throw new Error(response.status === 409 ? 'The source changed. Compare the current source and refresh suggestions before using it.' : problem(response, 'open the source answer'));
+        const value = await response.json();
+        if (memoryContext && value.context !== memoryContext) { memorySuggestions = {}; memory.textContent = ''; throw new Error('Workspace changed. Reopen the assessment.'); }
+        return value;
+      }
+      function evidenceText(source) {
+        const date = source.source_date ? new Date(source.source_date * 1000).toLocaleDateString() : 'Date unknown';
+        return source.subject + ' / saved ' + date + ' / revision ' + source.source_revision +
+          ' / questionnaire version ' + (source.policy_version == null ? 'unknown' : source.policy_version) +
+          ' / approval owner: ' + (source.approval_owner ? person(source.approval_owner) : 'Not recorded') +
+          '. ' + (source.reasons || []).join(' ');
+      }
+      function renderSuggestion() {
+        memory.textContent = '';
+        const choice = selected, suggestion = memorySuggestions[choice.id];
+        if (choice.followup || !suggestion) return;
+        if (rejectedSuggestions.has(choice.id)) { memory.appendChild(el('p', 'muted', 'This suggested value was rejected. Other question suggestions are unchanged.')); return; }
+        const label = suggestion.state === 'current_approved' ? 'Current approved assessment precedent' : suggestion.state === 'stale_precedent' ? 'Stale precedent - renewed evidence needed' : 'Unreviewed precedent - not verified evidence';
+        memory.appendChild(el('p', 'badge ' + (suggestion.state === 'current_approved' ? 'done' : 'warn'), label));
+        memory.appendChild(el('p', '', 'Suggested answer: ' + (ANSWER_LABEL[suggestion.answer] || suggestion.answer) + '. ' + suggestion.why_reused));
+        memory.appendChild(el('p', 'muted', Math.round(suggestion.confidence * 100) + '% agreement. ' + suggestion.confidence_meaning));
+        (suggestion.sources || []).concat(suggestion.conflicts || []).forEach(function (source) {
+          const card = el('details'), preview = el('div');
+          card.appendChild(el('summary', '', (source.answer === suggestion.answer ? 'Supporting answer: ' : 'Conflicting answer: ') + source.subject));
+          card.appendChild(el('p', 'muted', evidenceText(source)));
+          const exact = el('button', 'btn btn--ghost', 'Open exact saved answer'), latest = el('button', 'btn btn--ghost', 'Compare current source');
+          exact.type = latest.type = 'button';
+          async function openSource(current) {
+            const generation = viewGeneration, id = currentId;
+            try { const value = await readSource(source, !current); if (generation !== viewGeneration || id !== currentId || selected !== choice) return;
+              preview.textContent = ''; preview.appendChild(el('p', '', value.question + ': ' + (ANSWER_LABEL[value.answer] || value.answer)));
+              preview.appendChild(el('p', '', value.note)); preview.appendChild(el('p', 'muted', evidenceText(value)));
+              preview.appendChild(el('p', 'muted', 'Current questionnaire version: ' + value.current_policy_version + '. Your current question: ' + choice.text));
+            } catch(error) { preview.textContent = error.message; }
+          }
+          exact.addEventListener('click', function () { openSource(false); }); latest.addEventListener('click', function () { openSource(true); });
+          card.append(exact, latest, preview); memory.appendChild(card);
+        });
+        const use = el('button', 'btn', 'Use this value in my draft'), reject = el('button', 'btn btn--ghost', 'Reject this suggested value');
+        use.type = reject.type = 'button';
+        use.addEventListener('click', async function () {
+          if (answerBusy) return;
+          const generation = viewGeneration, id = currentId; use.disabled = true;
+          try {
+            const current = await Promise.all((suggestion.sources || []).map(source => readSource(source, true)));
+            if (generation !== viewGeneration || id !== currentId || selected !== choice) return;
+            if (current.some(source => source.state !== 'current_approved') && !(await mvConfirm('This value comes from stale or unreviewed precedent. Add it only as your draft for independent review?', {okText: 'Use in draft'}))) return;
+            if (answerDirty && !(await mvConfirm('Replace this unsaved answer and note with the reviewed suggestion?', {okText: 'Replace draft'}))) return;
+            if (generation !== viewGeneration || id !== currentId || selected !== choice || answerBusy) return;
+            answer.value = suggestion.answer; note.value = suggestion.note || ''; answerDirty = true; appliedSuggestion = choice.id;
+            statusEl.textContent = 'Suggestion added to this answer only. Review it and save when you can confirm it.';
+          } catch(error) { statusEl.textContent = error.message; } finally { use.disabled = false; }
+        });
+        reject.addEventListener('click', function () {
+          if (answerBusy) return;
+          rejectedSuggestions.add(choice.id);
+          if (appliedSuggestion === choice.id && answer.value === suggestion.answer && note.value === (suggestion.note || '')) hydrate(choice);
+          renderSuggestion();
+        });
+        memory.append(use, reject);
+      }
+      memoryButton.addEventListener('click', async function () {
+        const generation = viewGeneration, id = currentId; memoryButton.disabled = true;
+        try {
+          const response = await fetch('/api/v1/assessment-memory/similar?subject=' + encodeURIComponent(rec.subject || '') + '&type=' + encodeURIComponent(rec.type || '') + '&exclude_id=' + encodeURIComponent(id), {cache:'no-store', headers: memoryHeaders});
+          if (!response.ok) throw new Error(problem(response, 'find permitted precedents'));
+          const value = await response.json(); if (generation !== viewGeneration || id !== currentId) return;
+          if (memoryContext && value.context !== memoryContext) throw new Error('Workspace changed. Reopen the assessment.');
+          memorySuggestions = value.suggestions || {}; renderSuggestion();
+          statusEl.textContent = Object.keys(memorySuggestions).length ? 'Precedents are advisory. Review each answer separately.' : 'No matching precedent answers are available.';
+        } catch(error) { statusEl.textContent = error.message; } finally { memoryButton.disabled = false; }
+      });
       function hydrate(choice) {
         selected = choice; selectedQuestion = choice.key; picker.value = choice.key;
         prompt.textContent = choice.text; guidance.textContent = choice.guidance || '';
         answer.value = choice.saved.answer || ''; note.value = choice.saved.note || '';
         answer.hidden = answerLabel.hidden = !!choice.followup; answer.disabled = !!choice.followup; answer.required = !choice.followup;
         note.required = !!choice.followup; noteLabel.textContent = choice.followup ? 'Your reply' : 'Notes and supporting information (optional)'; answerDirty = false;
+        renderSuggestion();
       }
       picker.addEventListener('change', async function () {
         const next = choices.find(function (choice) { return choice.key === picker.value; });
@@ -302,7 +388,7 @@
       });
       answer.addEventListener('input', function () { answerDirty = true; }); note.addEventListener('input', function () { answerDirty = true; });
       discard.addEventListener('click', function () { if (!answerBusy) hydrate(selected); });
-      form.append(questionLabel, picker, prompt, guidance, answerLabel, answer, noteLabel, note, save, discard);
+      form.append(questionLabel, picker, prompt, guidance, memoryButton, memory, answerLabel, answer, noteLabel, note, save, discard);
       section.appendChild(form); body.appendChild(section); hydrate(selected);
       form.addEventListener('submit', async function (event) {
         event.preventDefault();

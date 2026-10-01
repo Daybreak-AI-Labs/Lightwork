@@ -125,6 +125,14 @@ async function startGoal(s, msg) {
     if (Object.entries(retained).filter(([key, value]) => key.startsWith("pendingGoal:") && value).length >= 8) {
       throw new ClientError("Eight connection scopes have unresolved starts. Reconcile one before starting more work.", "pending");
     }
+    if (msg.capturePolicy) {
+      const policy = await request(s, "/api/v1/extension/policy");
+      if (policy.revision !== msg.capturePolicy.revision ||
+          (msg.capturePolicy.form_values && !policy.form_values) ||
+          (msg.capturePolicy.page_structure && !policy.page_structure)) {
+        throw new ClientError("Page sharing policy changed. Review the page again before sending.", "refused");
+      }
+    }
     const title = String(msg.title || "").slice(0, 200);
     const pending = { scope: s.scope, title, state: "pending", key: crypto.randomUUID() };
     await chrome.storage.local.set({ [pendingKey(s)]: pending });
@@ -160,6 +168,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           await session.set({ pendingGoal: null });
         }
         sendResponse({ ok: true, scope: s.scope, pending: await pendingFor(s) });
+      } else if (msg.type === "capturePolicy") {
+        sendResponse({ok:true, scope:s.scope, data:await request(s,"/api/v1/extension/policy")});
       } else if (msg.type === "chat") {
         sendResponse({ ok: true, scope: s.scope, goal: await startGoal(s, msg) });
       } else if (msg.type === "reconcile") {

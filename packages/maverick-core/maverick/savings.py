@@ -52,6 +52,9 @@ class DepartmentSavings:
 
 @dataclass
 class SavingsReport:
+    available: bool = True
+    incomplete: bool = False
+    unavailable_reason: str = ""
     window_days: int = 0
     currency: str = "USD"
     hourly_rate: float = 0.0
@@ -83,22 +86,26 @@ def assumptions_for(dept: str, cfg: dict | None = None) -> tuple[float, float]:
 
 
 def compute(world: Any, *, window_days: int = 90,
-            cfg: dict | None = None, now: float | None = None) -> SavingsReport:
+            cfg: dict | None = None, now: float | None = None, owner: str | None = None) -> SavingsReport:
     """Assemble the savings report from real completed work (read-only).
 
     ``cfg`` is a pre-loaded ``get_value()`` dict (tests inject one); omitted,
-    the client's live config is read. Never raises -- an unreadable world
-    yields a zero report.
+    the client's live config is read. An unreadable world produces an explicit
+    unavailable report, without claiming zero activity or savings.
     """
     v = cfg if cfg is not None else get_value()
+    if str(v.get("currency", "USD")).upper() != "USD":
+        return SavingsReport(window_days=window_days, available=False,
+            unavailable_reason="Recorded runtime costs are in USD. Review and enter your assumptions in USD before comparing costs; no exchange rate has been assumed.")
 
     def _cost_for(dept: str) -> float:
         rate, hours = assumptions_for(dept, v)
         return rate * hours
 
     wv = workforce_value.compute(world, window_days=window_days,
-                                 human_cost_for=_cost_for, now=now)
+                                 human_cost_for=_cost_for, now=now, owner=owner)
     out = SavingsReport(
+        available=wv.available, incomplete=wv.incomplete, unavailable_reason=wv.unavailable_reason,
         window_days=window_days,
         currency=str(v.get("currency", "USD")),
         hourly_rate=float(v["hourly_rate"]),
@@ -119,7 +126,13 @@ def compute(world: Any, *, window_days: int = 90,
 
 
 def to_dict(r: SavingsReport) -> dict:
+    if not r.available:
+        return {"available": False, "incomplete": True, "unavailable_reason": r.unavailable_reason,
+                "currency": "USD", "window_days": r.window_days, "by_department": [],
+                "assumptions": {"hourly_rate": None, "hours_per_task": None},
+                **dict.fromkeys(("deliverables", "agent_cost", "human_hours", "human_cost", "saved", "roi_multiple"))}
     return {
+        "available": True, "incomplete": r.incomplete, "unavailable_reason": "",
         "window_days": r.window_days,
         "currency": r.currency,
         "assumptions": {

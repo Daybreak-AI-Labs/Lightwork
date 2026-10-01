@@ -12,6 +12,31 @@ labels and error descriptions may remain. Review the report before sharing it.
 The full installation report requires current global administrator permission;
 ordinary workspace members can inspect their own task status instead.
 
+## Task reports and failure references
+
+**Report a problem with a task** searches accessible failed or blocked tasks by
+name and UTC date. **Find older tasks** continues through older history. A
+stopped task also links directly to its authorized selection in Help.
+
+Task report drafts are reviewed and edited inside Lightwork. They are held only
+in the page's memory. Recognized secrets are removed, but business details can
+remain and should be reviewed. Copy and download do not navigate externally.
+Sending the reviewed draft to GitHub transfers its exact reviewed title and body
+to GitHub in the issue-form address; publishing an issue is a separate action.
+Access and secret scrubbing are checked again before these actions. If scrubbing
+changes an edited draft, the updated text must be reviewed again.
+
+Unexpected dashboard failures return a unique reference and UTC time. The same
+reference identifies the exception in restricted server logs. It contains no
+request URL, query string, customer name or stack trace. Following **Help** from
+the failure page includes that reference in an authorized installation report.
+Uncertain changes are checked before retrying; loading a failed read is safe to
+retry. An independent minimal failure page remains available if normal template
+rendering fails.
+
+Regression coverage for these changes is authored but unexecuted. Static syntax
+and whitespace checks are not browser or installed-application acceptance.
+
 Previews are encrypted, account/workspace-bound, valid for ten minutes, and
 bounded to sixteen retained copies per context. Downloads recheck current
 permission, context, feature availability, expiry and the reviewed digest. Access

@@ -157,7 +157,7 @@ def stop_budget(budget) -> Callable[[], None]:
     it lowers the run's own wall-clock limit to the time already used. It
     only ever tightens the limit, so no spending guard is loosened."""
     def _stop() -> None:
-        used = max(0.001, float(budget.elapsed()))
+        used = max(0.0, float(budget.elapsed()))
         current = budget.max_wall_seconds
         if current is None or current > used:
             budget.max_wall_seconds = used

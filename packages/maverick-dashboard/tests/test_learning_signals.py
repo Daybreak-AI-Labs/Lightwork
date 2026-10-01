@@ -97,7 +97,7 @@ class TestDeliverableEditGrounding:
         w.set_goal_status(gid, "done", result="the agent's draft")
         # a near-verbatim keep -> high similarity -> strong positive
         r = client.post(f"/api/v1/goals/{gid}/deliverable/edit",
-                        json={"text": "the agent's draft."})
+                        json={"text": "the agent's draft.", "expected_updated_at": w.get_goal(gid).updated_at, "operation_id": "local-learning-edit-1"})
         assert r.status_code == 200 and r.json()["similarity"] > 0.9
         assert consequence.resolve(gid, eid) > 0.9
         assert w.get_goal(gid).result == "the agent's draft."   # the edit is canonical now
@@ -110,7 +110,7 @@ class TestDeliverableEditGrounding:
         eid = w.start_episode(gid)
         w.set_goal_status(gid, "done", result="aaaaaaaaaaaaaaaaaaaa")
         r = client.post(f"/api/v1/goals/{gid}/deliverable/edit",
-                        json={"text": "completely different text zzzzzzzz"})
+                        json={"text": "completely different text zzzzzzzz", "expected_updated_at": w.get_goal(gid).updated_at, "operation_id": "local-learning-edit-1"})
         assert r.status_code == 200 and r.json()["similarity"] < 0.5
         assert consequence.resolve(gid, eid) < 0.5
 
@@ -118,7 +118,7 @@ class TestDeliverableEditGrounding:
         _isolate(tmp_path, monkeypatch)
         _world(tmp_path, monkeypatch)
         assert client.post("/api/v1/goals/999/deliverable/edit",
-                           json={"text": "x"}).status_code == 404
+                           json={"text": "x", "expected_updated_at": 1.0, "operation_id": "local-learning-edit-missing"}).status_code == 404
 
     def test_edit_with_no_draft_saves_but_grounds_nothing(self, tmp_path, monkeypatch):
         # No agent draft to grade against -> save the human's text but ground
@@ -130,7 +130,7 @@ class TestDeliverableEditGrounding:
         eid = w.start_episode(gid)
         w.set_goal_status(gid, "done", result="")   # the agent produced nothing
         r = client.post(f"/api/v1/goals/{gid}/deliverable/edit",
-                        json={"text": "a human-written memo"})
+                        json={"text": "a human-written memo", "expected_updated_at": w.get_goal(gid).updated_at, "operation_id": "local-learning-edit-1"})
         assert r.status_code == 200 and r.json()["similarity"] is None
         assert w.get_goal(gid).result == "a human-written memo"   # still saved
         assert consequence.resolve(gid, eid) is None               # ...but not grounded

@@ -3189,6 +3189,59 @@ def reconciliation_status(*, actor: str) -> dict:
         }
 
 
+def channel_checkpoint_lookup(item_id: str, *, expected_review_token: str, before: str | None, isolated: bool, actor: str) -> dict:
+    """Read source metadata for an authenticated held item; never release it."""
+    if not isolated or not isinstance(item_id, str) or not _ID.fullmatch(item_id):
+        raise RecoveryError("Look up a held connection only in isolated workspace recovery.")
+    from datetime import datetime, timezone
+
+    from maverick_channels import recovery_lookup
+
+    from . import channel_recovery_controls, config
+
+    def current():
+        marker = _read_bootstrap(actor=actor)
+        if marker is None or marker.get("state") != "reconciliation_required":
+            raise RecoveryError("No restored work is awaiting source review.")
+        items, _ = _classified_bootstrap_reconciliation(marker)
+        item = next((row for row in items if row["id"] == item_id), None)
+        if item is None or item.get("category") != "channel_authority" or item.get("state") != "unresolved":
+            raise RecoveryError("This held connection changed. Refresh recovery.")
+        if not isinstance(expected_review_token, str) or not hmac.compare_digest(expected_review_token, channel_recovery_controls.review_token(marker, item)):
+            raise RecoveryError("The source lookup belongs to an earlier recovery review.")
+        relative = backup._safe_relative_path(item["source"], label="channel source lookup")
+        decryptor = _bootstrap_record_decryptor(marker) if marker.get("retained_keys") is not None else None
+        record = channel_recovery_controls._current_record(_root().joinpath(*relative.parts), item, decryptor=decryptor, tenant=current_tenant_id_strict(), workspace=_root())
+        kind = channel_recovery_controls._kind(item)
+        if kind not in {"imessage_position", "notification_position"} or record["restore_hold"]["state"] != "unresolved":
+            raise RecoveryError("This item uses a date or retained delivery receipt, not source-position lookup.")
+        name = "imessage" if kind == "imessage_position" else "mastodon"
+        options = (config.load_config().get("channels") or {}).get(name) or {}
+        channel = recovery_lookup.configured(name, options)
+        if recovery_lookup.record_identity(channel) != record["id"]:
+            raise RecoveryError("The configured source identity differs from the restored connection. Keep it unresolved; no account was substituted.")
+        minimum = str(record["last_rowid"] if name == "imessage" else record.get("candidate") or record["watermark"])
+        return channel, minimum
+
+    try:
+        with _locked():
+            channel, minimum = current()
+        result = recovery_lookup.lookup(channel, minimum=minimum, before=before)
+        with _locked():
+            refreshed, current_minimum = current()
+            if recovery_lookup.record_identity(refreshed) != recovery_lookup.record_identity(channel) or current_minimum != minimum:
+                raise RecoveryError("The source configuration changed while reading it. Look up the current source again.")
+    except RecoveryError:
+        raise
+    except Exception:
+        # Provider bodies, credentials, local paths and message text stay private.
+        return {"available": False, "candidates": [], "next_before": None,
+                "notice": "The configured source could not establish a checkpoint. Check connection access and availability, then retry. This item stays unresolved; no position or delivery outcome was guessed."}
+    return {**result, "available": True, "observed_at": datetime.now(timezone.utc).isoformat(),
+            "review_token": expected_review_token, "source_label": "iMessage" if channel.name == "imessage" else "Mastodon",
+            "notice": "Read-only source checkpoint metadata. Selecting a position skips collection through that item; it does not prove delivery or repeat work. Review and confirmation remain separate."}
+
+
 def _job_item_path(item: dict) -> Path:
     try:
         relative = backup._safe_relative_path(item["source"], label="reconciliation source")

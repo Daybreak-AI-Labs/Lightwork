@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 # [security] "silently do nothing" -- advice that would delete live config).
 # When adding a new config section, add it here or migrate will lint it.
 KNOWN_SECTIONS = frozenset({
+    "conversation_inbox",
     "a2a", "adaptive_compute", "agent", "agent_factory", "agent_trust",
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.
@@ -48,7 +49,7 @@ KNOWN_SECTIONS = frozenset({
     "consent_publication_signing",
     "analytics", "approval", "assessments", "automation_import",
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
-    "deployment",
+    "deployment", "device_pairing", "personalization", "copilot", "settings", "_dashboard_resets", "mobile_offline", "workflows",
     "benchmark", "billing", "budget", "cache", "calendar", "calibration",
     # Written by the installer's candidate promotion, governed knowledge and
     # agent suites steps, and changeable on Settings > All settings.

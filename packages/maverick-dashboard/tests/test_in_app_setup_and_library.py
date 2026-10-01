@@ -165,7 +165,7 @@ def test_draft_context_changes_with_caller_and_workspace(client, monkeypatch):
     assert client.get("/api/v1/templates/draft-context").json()["context"] != after
 
 
-@pytest.mark.parametrize("name", ["lightwork-facts.js", "lightwork-consent-policy-editor.js", "lightwork-setup.js", "lightwork-template-library.js", "lightwork-guided-actions.js", "lightwork-guided-actions.css"])
+@pytest.mark.parametrize("name", ["lightwork-facts.js", "lightwork-consent-policy-editor.js", "lightwork-setup.js", "lightwork-template-library.js", "lightwork-connections.js", "lightwork-account-inventory.js", "lightwork-schedule-management.js", "lightwork-guided-actions.js", "lightwork-guided-actions.css"])
 def test_new_form_assets_are_served(client, name):
     from pathlib import Path
 

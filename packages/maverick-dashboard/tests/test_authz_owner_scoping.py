@@ -2,8 +2,8 @@
 
 The audit's one HIGH finding: with multi-user OIDC on, any authenticated user
 could read/control ANY user's goals. These tests prove the fix -- every goal
-route (and the fleets surface) is scoped to the caller's principal, with admins
-and the auth-OFF single-user path bypassing the scoping.
+route (and the fleets surface) is scoped to the caller's principal, with no ambient administrator or installation-credential bypass.
+Exceptional employee-content reads require their separately tested reviewed grants.
 
 Hermetic, like ``test_oidc_gate.py``: no real crypto/JWT/network. We monkeypatch
 the OIDC seam so a request's ``Authorization: Bearer <name>`` header maps to a
@@ -207,22 +207,23 @@ def test_create_goal_stamps_caller_as_owner(world, monkeypatch, no_run):
 # --------------------------------- REST: admin --------------------------------
 
 
-def test_admin_sees_and_controls_all(world, monkeypatch, no_run):
+def test_admin_reads_and_controls_only_own_content(world, monkeypatch, no_run):
     _enable_oidc_principal_map(monkeypatch)
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
     a = world.create_goal("a-one", owner="user:alice")
     b = world.create_goal("b-one", owner="user:bob")
 
-    # Admin lists everything (both owners + any others).
+    own = world.create_goal("admin-owned", owner="user:root")
+    # Governance role does not grant employee private content.
     ids = {g["id"] for g in client.get("/api/v1/goals", headers=_as("root")).json()}
-    assert {a, b} <= ids
-    # Admin reads another user's goal.
-    assert client.get(f"/api/v1/goals/{a}", headers=_as("root")).status_code == 200
-    # Admin cancels another user's goal.
+    assert ids == {own}
+    assert client.get(f"/api/v1/goals/{a}", headers=_as("root")).status_code == 404
+    assert client.get(f"/api/v1/goals/{own}", headers=_as("root")).status_code == 200
+    # A read grant would still not authorize mutation.
     assert client.post(
         f"/api/v1/goals/{b}/cancel", headers=_as("root", post=True)
-    ).status_code == 204
-    assert world.get_goal(b).status == "cancelled"
+    ).status_code == 404
+    assert world.get_goal(b).status != "cancelled"
 
 
 def test_admin_via_config_admins_list(world, monkeypatch):
@@ -233,7 +234,7 @@ def test_admin_via_config_admins_list(world, monkeypatch):
 
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"dashboard": {"admins": ["user:root"]}})
     gid = world.create_goal("alice's goal", owner="user:alice")
-    assert client.get(f"/api/v1/goals/{gid}", headers=_as("root")).status_code == 200
+    assert client.get(f"/api/v1/goals/{gid}", headers=_as("root")).status_code == 404
     # A non-listed user is still blocked.
     assert client.get(f"/api/v1/goals/{gid}", headers=_as("mallory")).status_code == 404
 
@@ -241,14 +242,15 @@ def test_admin_via_config_admins_list(world, monkeypatch):
 # ------------------------------- REST: auth OFF -------------------------------
 
 
-def test_auth_off_sees_all_goals(world, monkeypatch):
-    """OIDC off (single-user): listing is unscoped -- the #1 regression risk."""
+def test_auth_off_sees_only_explicit_unowned_goals(world, monkeypatch):
+    """Turning named login off must not make employee content public."""
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
     a = world.create_goal("a-one", owner="user:alice")
     b = world.create_goal("b-one", owner="user:bob")
     legacy = world.create_goal("legacy", owner="")
     ids = {g["id"] for g in client.get("/api/v1/goals").json()}
-    assert ids == {a, b, legacy}
+    assert ids == {legacy}
+    assert a not in ids and b not in ids
 
 
 def test_gallery_delete_requires_goal_owner(world, monkeypatch, tmp_path):
@@ -288,12 +290,12 @@ def test_gallery_delete_requires_goal_owner(world, monkeypatch, tmp_path):
     assert client.get("/api/v1/gallery", headers=_as("alice")).json()["gallery"] == []
 
 
-def test_auth_off_can_get_and_mutate_any_goal(world, monkeypatch, no_run):
+def test_auth_off_cannot_get_or_mutate_named_employee_goal(world, monkeypatch, no_run):
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
     gid = world.create_goal("owned-by-someone", owner="user:alice")
-    assert client.get(f"/api/v1/goals/{gid}").status_code == 200
-    assert client.post(f"/api/v1/goals/{gid}/cancel", headers=_origin()).status_code == 204
-    assert world.get_goal(gid).status == "cancelled"
+    assert client.get(f"/api/v1/goals/{gid}").status_code == 404
+    assert client.post(f"/api/v1/goals/{gid}/cancel", headers=_origin()).status_code == 404
+    assert world.get_goal(gid).status != "cancelled"
 
 
 def test_auth_off_create_leaves_owner_empty(world, monkeypatch, no_run):
@@ -346,6 +348,8 @@ def _patch_fleets(monkeypatch):
     fleets = [
         Fleet(name="alice-fleet", owner="user:alice"),
         Fleet(name="bob-fleet", owner="user:bob"),
+        Fleet(name="admin-fleet", owner="user:root"),
+        Fleet(name="local-fleet", owner=""),
     ]
     import maverick.fleet as fleet_mod
 
@@ -359,19 +363,19 @@ def test_fleets_api_scoped_to_caller(world, monkeypatch):
     assert names == {"alice-fleet"}
 
 
-def test_fleets_api_admin_sees_all(world, monkeypatch):
+def test_fleets_api_admin_sees_only_owned(world, monkeypatch):
     _enable_oidc_principal_map(monkeypatch)
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
     _patch_fleets(monkeypatch)
     names = {f["name"] for f in client.get("/api/v1/fleets", headers=_as("root")).json()["fleets"]}
-    assert names == {"alice-fleet", "bob-fleet"}
+    assert names == {"admin-fleet"}
 
 
-def test_fleets_api_auth_off_sees_all(world, monkeypatch):
+def test_fleets_api_auth_off_sees_only_unowned(world, monkeypatch):
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
     _patch_fleets(monkeypatch)
     names = {f["name"] for f in client.get("/api/v1/fleets").json()["fleets"]}
-    assert names == {"alice-fleet", "bob-fleet"}
+    assert names == {"local-fleet"}
 
 
 def test_fleets_page_filters_to_caller(world, monkeypatch):

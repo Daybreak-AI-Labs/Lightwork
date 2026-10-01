@@ -108,7 +108,8 @@ _MAX_LEARNED_TEXT = {
     "name": 512,
     "source": 2048,
 }
-_LEARNED_FIELDS = frozenset({"ts", "need", "kind", "name", "source", "outcome"})
+_LEARNED_FIELDS = frozenset({"ts", "need", "kind", "name", "source", "outcome",
+                              "content_version", "owner", "goal_id"})
 _MAX_LEARNED_LEDGER_BYTES = 16 * 1024 * 1024
 
 
@@ -156,6 +157,9 @@ class Learned:
     name: str
     source: str = ""
     outcome: str = "acquired"   # acquired | failed
+    content_version: int = 0
+    owner: str | None = None
+    goal_id: int | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -235,6 +239,9 @@ def _record_impl(
     )
     if entry is None:
         return False
+    from .learning_content import allowed, lineage
+    content = lineage()
+    entry = replace(entry, **content)
     with _lock:
         try:
             ensure_private_directory(path.parent)
@@ -246,6 +253,8 @@ def _record_impl(
                 previous = atomic_read_text(path) if path.exists() else ""
                 if previous and not previous.endswith("\n"):
                     previous += "\n"
+                if not allowed(content):
+                    return False
                 if before_write is not None:
                     before_write()
                 atomic_write_text(
@@ -294,8 +303,9 @@ def _record_committed(
     )
 
 
-def history(*, limit: int = 50, path: Path | None = None) -> list[Learned]:
-    """Most-recent-first list of learned capabilities."""
+def history(*, limit: int = 50, path: Path | None = None, owner: str | None = None) -> list[Learned]:
+    """Current-owner learned capabilities, filtered before limiting results."""
+    from .learning_content import allowed
     path = path if path is not None else learned_path()
     if not path.exists():
         return []
@@ -325,8 +335,9 @@ def history(*, limit: int = 50, path: Path | None = None) -> list[Learned]:
                     name=d.get("name"), source=d.get("source"),
                     outcome=d.get("outcome"),
                 )
-                if entry is not None:
-                    out.append((append_index, entry))
+                if entry is not None and allowed(d, owner=owner):
+                    out.append((append_index, replace(entry, content_version=1,
+                        owner=d["owner"], goal_id=d["goal_id"])))
             except (json.JSONDecodeError, TypeError, ValueError):
                 continue
     except (OSError, RuntimeError):
@@ -1405,8 +1416,12 @@ def _generated_tool_proxy(
     from .tools import Tool
 
     name = str(metadata["name"])
+    from .learning_content import source_allowed_now
+    target = generated_tools_dir() / f"{name}.py"
 
     def _run(args: dict[str, Any]) -> str:
+        if not source_allowed_now(target, digest):
+            return "ERROR: generated tool source content is unavailable"
         if not _generated_consent_granted(
             tenant=tenant, name=name, digest=digest,
         ):
@@ -1415,9 +1430,12 @@ def _generated_tool_proxy(
                 "tenant/name/digest consent is missing or revoked"
             )
         try:
-            return _execute_generated_tool(
+            result = _execute_generated_tool(
                 source=source, metadata=metadata, args=args, sandbox=sandbox,
             )
+            if not source_allowed_now(target, digest):
+                return "ERROR: generated tool source content is unavailable"
+            return result
         except Exception as e:
             return (
                 f"ERROR: generated tool {name!r} sandbox execution failed: "
@@ -1443,8 +1461,9 @@ def _read_generated_source(path: Path) -> str:
     return source
 
 
-def generated_tool_names() -> set[str]:
-    """Discover consented generated-tool names without importing/executing source."""
+def generated_tool_names(*, owner: str | None = None) -> set[str]:
+    """Discover authorized consented names without importing/executing source."""
+    from .learning_content import source_allowed_now
     from .paths import current_tenant_id
 
     directory = generated_tools_dir()
@@ -1468,7 +1487,7 @@ def generated_tool_names() -> set[str]:
             if not ok:
                 continue
             digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-            if _generated_consent_granted(
+            if source_allowed_now(path, digest, owner=owner) and _generated_consent_granted(
                 tenant=tenant, name=path.stem, digest=digest,
             ):
                 names.add(path.stem)
@@ -1477,7 +1496,8 @@ def generated_tool_names() -> set[str]:
     return names
 
 
-def delete_generated_tool(name: str, *, actor: str = "system") -> dict[str, Any]:
+def delete_generated_tool(name: str, *, actor: str = "system", owner: str | None = None,
+                          expected_digest: str | None = None) -> dict[str, Any]:
     """Revoke and remove one persisted generated tool, fail-closed.
 
     Deletion is an authority lifecycle transition, not merely ``Path.unlink``:
@@ -1507,6 +1527,11 @@ def delete_generated_tool(name: str, *, actor: str = "system") -> dict[str, Any]
             raise FileNotFoundError(target)
         source = _read_generated_source(target)
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        if expected_digest is not None and digest != expected_digest:
+            raise GeneratedToolRemovalError("The reviewed generated source changed; review it again")
+        from .learning_content import source_allowed_now
+        if not source_allowed_now(target, digest, owner=owner):
+            raise PermissionError("Generated source content is unavailable")
         scope = _generated_consent_scope(tenant, name, digest)
 
         consent_revoked = revoke(
@@ -1528,7 +1553,7 @@ def delete_generated_tool(name: str, *, actor: str = "system") -> dict[str, Any]
             EventKind.LEARNING_UPDATE,
             agent="self_learning",
             operation="generated_tool_authority_revoked",
-            name=name,
+            name_sha256=hashlib.sha256(name.encode("utf-8")).hexdigest(),
             tenant=tenant,
             source_sha256=digest,
             consent_revoked=consent_revoked,
@@ -1543,6 +1568,8 @@ def delete_generated_tool(name: str, *, actor: str = "system") -> dict[str, Any]
         # unlink now fails, the source remains present but cannot execute; the
         # caller can safely retry removal without resurrecting authority.
         target.unlink()
+        from .learning_content import metadata_path
+        metadata_path(target).unlink(missing_ok=True)
 
     return {
         "name": name,
@@ -1567,13 +1594,14 @@ def write_generated_tool(
     ``require_approval`` remains for API compatibility but can no longer bypass
     this security boundary: generated code always requires digest-bound consent.
     """
+    from .learning_content import lineage, publish
     from .paths import current_tenant_id
     from .safety.consent import (
         consume_operation_consent,
         grant_persistent,
         require_operation_consent,
     )
-
+    content_lineage = lineage()
     check_learning_halt("self_learning", "generated_tool_start")
     if not _NAME_RE.match(name):
         raise ValueError(
@@ -1694,6 +1722,7 @@ def write_generated_tool(
             check_learning_halt("self_learning", "generated_tool_persistence")
             atomic_write_text(target, source, mode=0o600)
             try:
+                publish(target, source, content_lineage)
                 # A later process must distinguish these approved bytes from an
                 # AST-safe file swapped in after registration.
                 check_learning_halt(
@@ -1736,6 +1765,7 @@ def load_generated_tools(*, sandbox: Any = None) -> list[Any]:
     skipped without taking down registry assembly. Only consulted when
     self-learning is enabled (see base_registry).
     """
+    from .learning_content import source_allowed_now
     from .paths import current_tenant_id
     from .tools import Tool
 
@@ -1767,6 +1797,8 @@ def load_generated_tools(*, sandbox: Any = None) -> list[Any]:
             if not ok:
                 raise ValueError(f"rejected by Shield: {reason}")
             digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+            if not source_allowed_now(p, digest):
+                continue
             if not _generated_consent_granted(
                 tenant=tenant, name=p.stem, digest=digest,
             ):

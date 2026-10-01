@@ -14,8 +14,9 @@
              learned | length ~ ' learned skill' ~ ('' if learned | length == 1 else 's') ~ ' and tool' ~ ('' if learned | length == 1 else 's') ~ ' on record',
              badge='Self-coaching on' if harness_enabled else 'Self-coaching off',
              badge_class='ok' if harness_enabled else 'idle',
-             copy='Self-learning is switched on or off on the <a href="/learning">Learning</a> page.') }}
+             copy='Self-learning is switched on or off on the <a href="/learning">Learning</a> page.' | safe) }}
   {% endcall %}
+  <p class="muted">This page shows your own learning records and lessons explicitly available to the workspace. Older records without verified ownership are preserved privately and are not reused automatically. Administrator access does not include other employees' content.</p>
   <p id="gt-msg" role="status" aria-live="polite" class="muted"></p>
 
   <div class="section-head"><h2>Learned skills and tools</h2></div>
@@ -52,7 +53,10 @@
   <div class="panel" id="harness-guidance">
     <p class="muted">
       Reminders Lightwork now gives itself before similar work, learned from its own repeated mistakes.
-      Any lesson can be removed.
+      Any displayed lesson can be removed.
+      Older lessons or suggested test cases without verified shared sources are retained
+      separately and withheld from prompts and this page. Private employee work is never
+      made shared by an administrator role.
     </p>
     {% if harness and not harness_enabled %}
       <p><strong>Self-coaching is off.</strong> These lessons are kept but not used until it is switched on on the
@@ -126,7 +130,7 @@
         </div>
       {% endfor %}
     {% else %}
-      <p class="muted" id="no-harness">No lessons learned yet.</p>
+      <p class="muted" id="no-harness">No shared lessons are currently available.</p>
     {% endif %}
   </div>
 

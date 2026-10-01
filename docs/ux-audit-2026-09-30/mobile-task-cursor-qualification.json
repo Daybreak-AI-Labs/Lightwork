@@ -1,0 +1,1162 @@
+{
+  "schema": "lightwork.mobile-task-cursor-qualification.v1",
+  "audit_id": "LW-052",
+  "candidate_commit": "737ba45287df2c09370d5f83056889f2e5be16d0",
+  "changed_file_git_blobs": {
+    "packages/maverick-core/maverick/world_model.py": "554751c55a6e03bc8c221f7b718fa0213a421dee",
+    "packages/maverick-core/maverick/world_model_backends/postgres.py": "98f5adec663465f4411cd0e62574b1ebaf2e8739",
+    "packages/maverick-core/tests/test_goal_list_cursor.py": "1014b87ca951b31af4af848455151b61e3962c72",
+    "packages/maverick-dashboard/maverick_dashboard/api.py": "78747c7087937bc3b983fa94d04b6a918960a6ec",
+    "packages/maverick-dashboard/tests/test_api.py": "8feb2badb276b57c1894ae7f3c909cd9a24fd149",
+    "packages/maverick-dashboard/tests/test_api_goal_cursor.py": "453c2d2e18f20574a71bd10e55e5e0b3613fbc43"
+  },
+  "runs": [
+    {
+      "label": "mobile-cursor-baseline-01",
+      "source_head": "7b6d69d7d07a6a64af0ae0a03024d6cd0b03500f",
+      "posture": "ordinary",
+      "exit_code": 1,
+      "elapsed_seconds": 37.17409634590149,
+      "source_files_before": {
+        "packages\\maverick-core\\tests\\test_goal_list_cursor.py": "eac116fe70b4af0ee552a03833eae573d29080b452b60c7622f52c4c2fb196a9",
+        "packages\\maverick-dashboard\\tests\\test_api_goal_cursor.py": "628f2f6570001f5e8048151f73323e152c24321301c4fdacbaf923ac302c93ff",
+        "packages\\maverick-core\\maverick\\world_model.py": "93a8ce13578c92209d1cdb6b6c6382a71d7c46fa7cb54d7463f1afdbc67545d2",
+        "packages\\maverick-core\\maverick\\world_model_backends\\postgres.py": "fb11a3be3bc53a511e7f9eb92a516cba39e192b45ff14ee9979f769c7e8cd0cb",
+        "packages\\maverick-dashboard\\maverick_dashboard\\api.py": "e4a20ac240b3089636be6c9aaa974f5dde928c085768e5f8cc7fb2a6563b5d9d"
+      },
+      "source_files_after": {
+        "packages\\maverick-core\\tests\\test_goal_list_cursor.py": "eac116fe70b4af0ee552a03833eae573d29080b452b60c7622f52c4c2fb196a9",
+        "packages\\maverick-dashboard\\tests\\test_api_goal_cursor.py": "628f2f6570001f5e8048151f73323e152c24321301c4fdacbaf923ac302c93ff",
+        "packages\\maverick-core\\maverick\\world_model.py": "93a8ce13578c92209d1cdb6b6c6382a71d7c46fa7cb54d7463f1afdbc67545d2",
+        "packages\\maverick-core\\maverick\\world_model_backends\\postgres.py": "fb11a3be3bc53a511e7f9eb92a516cba39e192b45ff14ee9979f769c7e8cd0cb",
+        "packages\\maverick-dashboard\\maverick_dashboard\\api.py": "e4a20ac240b3089636be6c9aaa974f5dde928c085768e5f8cc7fb2a6563b5d9d"
+      },
+      "source_files_unchanged": true,
+      "environment_allowlist": [
+        "APPDATA",
+        "COMSPEC",
+        "LOCALAPPDATA",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+        "PATH",
+        "PATHEXT",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "SYSTEMROOT",
+        "WINDIR"
+      ],
+      "artifacts": {
+        "audit\\mobile-cursor-baseline-01.json": "6a150e7d2fdb925e8e37115059b711e3241476aa8d68bd016618366e605b1117",
+        "audit\\mobile-cursor-baseline-01.log": "1772760b39cfa0078c97642cb18564b7d96895b8e27078fb842c8d794254b467",
+        "audit\\mobile-cursor-baseline-01.xml": "2125655a560b7ace4aa02d407f5b622505057a650957054177bbd061ee0a0df1"
+      },
+      "cases": [
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[sqlite]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_keeps_filters_and_current_owner_after_revocation[sqlite]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_keeps_filters_and_current_owner_after_revocation[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[sqlite]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[sqlite-0]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[sqlite--1]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[sqlite-9223372036854775808]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[postgres-0]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[postgres--1]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[postgres-9223372036854775808]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_postgres_cursor_retains_current_tenant[sqlite]",
+          "outcome": "skipped",
+          "skip_reason": "SQLite workspace isolation uses separate database files"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_postgres_cursor_retains_current_tenant[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_http_cursor_is_current_owner_scoped_even_for_admin",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=0]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=-1]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=9223372036854775808]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=invalid]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=5&offset=1]",
+          "outcome": "failed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_foreign_or_missing_cursor_is_only_numeric_boundary",
+          "outcome": "passed",
+          "skip_reason": null
+        }
+      ]
+    },
+    {
+      "label": "mobile-cursor-fixed-01",
+      "source_head": "7b6d69d7d07a6a64af0ae0a03024d6cd0b03500f",
+      "posture": "ordinary",
+      "exit_code": 0,
+      "elapsed_seconds": 24.414719104766846,
+      "source_files_before": {
+        "packages\\maverick-core\\tests\\test_goal_list_cursor.py": "fdf74ba98546daa7995af6771698cb6b09a1bcf0666f42edc44d3042bd781915",
+        "packages\\maverick-dashboard\\tests\\test_api_goal_cursor.py": "25c8a9348ec533e8707ac1e3fe3cbf25332ec3a841d0780573c79004b00f295c",
+        "packages\\maverick-core\\maverick\\world_model.py": "54a0e83527d9da82a66d0214d8ff24c7eccdf08640fea5455dabb2515bb090e1",
+        "packages\\maverick-core\\maverick\\world_model_backends\\postgres.py": "fa4277b8da06c3b750b178f489e5c0713aa3e18beeb921023407d41f9fd3076b",
+        "packages\\maverick-dashboard\\maverick_dashboard\\api.py": "646b350d1ce1d4d8ccc917ac8922953ba7b83dff75969ae33553c85f94086ada"
+      },
+      "source_files_after": {
+        "packages\\maverick-core\\tests\\test_goal_list_cursor.py": "fdf74ba98546daa7995af6771698cb6b09a1bcf0666f42edc44d3042bd781915",
+        "packages\\maverick-dashboard\\tests\\test_api_goal_cursor.py": "25c8a9348ec533e8707ac1e3fe3cbf25332ec3a841d0780573c79004b00f295c",
+        "packages\\maverick-core\\maverick\\world_model.py": "54a0e83527d9da82a66d0214d8ff24c7eccdf08640fea5455dabb2515bb090e1",
+        "packages\\maverick-core\\maverick\\world_model_backends\\postgres.py": "fa4277b8da06c3b750b178f489e5c0713aa3e18beeb921023407d41f9fd3076b",
+        "packages\\maverick-dashboard\\maverick_dashboard\\api.py": "646b350d1ce1d4d8ccc917ac8922953ba7b83dff75969ae33553c85f94086ada"
+      },
+      "source_files_unchanged": true,
+      "environment_allowlist": [
+        "APPDATA",
+        "COMSPEC",
+        "LOCALAPPDATA",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+        "PATH",
+        "PATHEXT",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "SYSTEMROOT",
+        "WINDIR"
+      ],
+      "artifacts": {
+        "audit\\mobile-cursor-fixed-01.json": "de0eafefff67f52a0b04eecea8dec42fb547b38a5780928f31fee2961bee3230",
+        "audit\\mobile-cursor-fixed-01.log": "fc4cc354d1715ef7e70114c929370ac46bfe2b5dea660cfe9704526c939b12a1",
+        "audit\\mobile-cursor-fixed-01.xml": "42a9739e23fcec808f78f4cccf35396105a67df9f5901a1d2ba75641c4b23c86"
+      },
+      "cases": [
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[sqlite]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_keeps_filters_and_current_owner_after_revocation[sqlite]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_keeps_filters_and_current_owner_after_revocation[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[sqlite]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[sqlite-0]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[sqlite--1]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[sqlite-9223372036854775808]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[postgres-0]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[postgres--1]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[postgres-9223372036854775808]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_retains_current_workspace[sqlite]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_retains_current_workspace[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_postgres_query_binds_cursor_after_owner_filters_and_retains_tenant",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_http_cursor_is_current_owner_scoped_even_for_admin",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=0]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=-1]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=9223372036854775808]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=invalid]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=5&offset=1]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=5&offset=-1]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_foreign_or_missing_cursor_is_only_numeric_boundary",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api.TestGoals",
+          "name": "test_openapi_documents_idempotency_and_pagination_headers",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api.TestGoals",
+          "name": "test_list_pagination_metadata_is_backward_compatible",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_authz_owner_scoping",
+          "name": "test_list_goals_scoped_to_caller",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_authz_owner_scoping",
+          "name": "test_admin_reads_and_controls_only_own_content",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_postgres_rls_unit",
+          "name": "test_list_goals_filters_by_domain_and_project_id",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_postgres_rls_unit",
+          "name": "test_list_goals_omits_domain_and_project_id_predicates_when_unset",
+          "outcome": "passed",
+          "skip_reason": null
+        }
+      ]
+    },
+    {
+      "label": "mobile-cursor-fixed-01-secure",
+      "source_head": "7b6d69d7d07a6a64af0ae0a03024d6cd0b03500f",
+      "posture": "secure",
+      "exit_code": 0,
+      "elapsed_seconds": 28.005492687225342,
+      "source_files_before": {
+        "packages\\maverick-core\\tests\\test_goal_list_cursor.py": "fdf74ba98546daa7995af6771698cb6b09a1bcf0666f42edc44d3042bd781915",
+        "packages\\maverick-dashboard\\tests\\test_api_goal_cursor.py": "25c8a9348ec533e8707ac1e3fe3cbf25332ec3a841d0780573c79004b00f295c",
+        "packages\\maverick-core\\maverick\\world_model.py": "54a0e83527d9da82a66d0214d8ff24c7eccdf08640fea5455dabb2515bb090e1",
+        "packages\\maverick-core\\maverick\\world_model_backends\\postgres.py": "fa4277b8da06c3b750b178f489e5c0713aa3e18beeb921023407d41f9fd3076b",
+        "packages\\maverick-dashboard\\maverick_dashboard\\api.py": "646b350d1ce1d4d8ccc917ac8922953ba7b83dff75969ae33553c85f94086ada"
+      },
+      "source_files_after": {
+        "packages\\maverick-core\\tests\\test_goal_list_cursor.py": "fdf74ba98546daa7995af6771698cb6b09a1bcf0666f42edc44d3042bd781915",
+        "packages\\maverick-dashboard\\tests\\test_api_goal_cursor.py": "25c8a9348ec533e8707ac1e3fe3cbf25332ec3a841d0780573c79004b00f295c",
+        "packages\\maverick-core\\maverick\\world_model.py": "54a0e83527d9da82a66d0214d8ff24c7eccdf08640fea5455dabb2515bb090e1",
+        "packages\\maverick-core\\maverick\\world_model_backends\\postgres.py": "fa4277b8da06c3b750b178f489e5c0713aa3e18beeb921023407d41f9fd3076b",
+        "packages\\maverick-dashboard\\maverick_dashboard\\api.py": "646b350d1ce1d4d8ccc917ac8922953ba7b83dff75969ae33553c85f94086ada"
+      },
+      "source_files_unchanged": true,
+      "environment_allowlist": [
+        "APPDATA",
+        "COMSPEC",
+        "LOCALAPPDATA",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+        "PATH",
+        "PATHEXT",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "SYSTEMROOT",
+        "WINDIR"
+      ],
+      "artifacts": {
+        "audit\\mobile-cursor-fixed-01-secure.json": "3eb278de1d312d3df6478fa573f7c3f5faab9410bd7cec831db8695b8c419949",
+        "audit\\mobile-cursor-fixed-01-secure.log": "cd63d116ca28027d2b7e2c7f8452316d4788d6fa7d85c8fd50c89ea35b1afc42",
+        "audit\\mobile-cursor-fixed-01-secure.xml": "979fc98a389a22be746a3372354b38ff413e1cc2da8415a1bc0aadd95c4b3855"
+      },
+      "cases": [
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[sqlite]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_keeps_filters_and_current_owner_after_revocation[sqlite]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_keeps_filters_and_current_owner_after_revocation[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[sqlite]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[sqlite-0]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[sqlite--1]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[sqlite-9223372036854775808]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[postgres-0]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[postgres--1]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_invalid_cursor_refuses_before_query[postgres-9223372036854775808]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_retains_current_workspace[sqlite]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_cursor_retains_current_workspace[postgres]",
+          "outcome": "skipped",
+          "skip_reason": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_goal_list_cursor",
+          "name": "test_postgres_query_binds_cursor_after_owner_filters_and_retains_tenant",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_http_cursor_is_current_owner_scoped_even_for_admin",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=0]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=-1]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=9223372036854775808]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=invalid]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=5&offset=1]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=5&offset=-1]",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api_goal_cursor",
+          "name": "test_foreign_or_missing_cursor_is_only_numeric_boundary",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api.TestGoals",
+          "name": "test_openapi_documents_idempotency_and_pagination_headers",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_api.TestGoals",
+          "name": "test_list_pagination_metadata_is_backward_compatible",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_authz_owner_scoping",
+          "name": "test_list_goals_scoped_to_caller",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-dashboard.tests.test_authz_owner_scoping",
+          "name": "test_admin_reads_and_controls_only_own_content",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_postgres_rls_unit",
+          "name": "test_list_goals_filters_by_domain_and_project_id",
+          "outcome": "passed",
+          "skip_reason": null
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_postgres_rls_unit",
+          "name": "test_list_goals_omits_domain_and_project_id_predicates_when_unset",
+          "outcome": "passed",
+          "skip_reason": null
+        }
+      ]
+    }
+  ],
+  "static_checks": [
+    "Ruff: six changed Python files passed",
+    "Python3.10 AST: six changed Python files passed",
+    "git diff --check passed"
+  ],
+  "remaining": [
+    "Fresh integrated qualification on the final product source.",
+    "Native mobile-device scrolling and accessibility qualification; local TSX and backend receipts do not substitute for native device execution."
+  ],
+  "private_runner": {
+    "path": "run-mobile-cursor-focused.py",
+    "sha256": "e8eefe901e4d748fb3b627f88d7a9ba75b32dc93afb37a81fd47fc001e8e07d4",
+    "secure_flags_contract": "Both MAVERICK_TEST_SECURE_DEFAULT and MAVERICK_SECURE_DEFAULT are set from the recorded posture before spawning pytest."
+  },
+  "native_postgres_followup": {
+    "source_head": "a0c1da8b9005a15fc80882ce286c75d786a48e57",
+    "review_source": "0d0755b0ba4389d49357a4f6354cd758ab145e4e",
+    "source_relationship": {
+      "packages/maverick-core/maverick/world_model.py": {
+        "native_run_git_blob": "554751c55a6e03bc8c221f7b718fa0213a421dee",
+        "review_source_git_blob": "554751c55a6e03bc8c221f7b718fa0213a421dee",
+        "unchanged": true
+      },
+      "packages/maverick-core/maverick/world_model_backends/postgres.py": {
+        "native_run_git_blob": "98f5adec663465f4411cd0e62574b1ebaf2e8739",
+        "review_source_git_blob": "98f5adec663465f4411cd0e62574b1ebaf2e8739",
+        "unchanged": true
+      },
+      "packages/maverick-core/tests/test_goal_list_cursor.py": {
+        "native_run_git_blob": "1014b87ca951b31af4af848455151b61e3962c72",
+        "review_source_git_blob": "1014b87ca951b31af4af848455151b61e3962c72",
+        "unchanged": true
+      },
+      "packages/maverick-dashboard/maverick_dashboard/api.py": {
+        "native_run_git_blob": "78747c7087937bc3b983fa94d04b6a918960a6ec",
+        "review_source_git_blob": "78747c7087937bc3b983fa94d04b6a918960a6ec",
+        "unchanged": true
+      },
+      "packages/maverick-dashboard/tests/test_api.py": {
+        "native_run_git_blob": "8feb2badb276b57c1894ae7f3c909cd9a24fd149",
+        "review_source_git_blob": "8feb2badb276b57c1894ae7f3c909cd9a24fd149",
+        "unchanged": true
+      },
+      "packages/maverick-dashboard/tests/test_api_goal_cursor.py": {
+        "native_run_git_blob": "453c2d2e18f20574a71bd10e55e5e0b3613fbc43",
+        "review_source_git_blob": "453c2d2e18f20574a71bd10e55e5e0b3613fbc43",
+        "unchanged": true
+      }
+    },
+    "runs": [
+      {
+        "label": "mobile-cursor-native-ordinary-01",
+        "result": {
+          "source_head": "a0c1da8b9005a15fc80882ce286c75d786a48e57",
+          "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-mobile-cursor-final",
+          "targets": [
+            "packages/maverick-core/tests/test_goal_list_cursor.py",
+            "packages/maverick-dashboard/tests/test_api_goal_cursor.py"
+          ],
+          "sequential": true,
+          "secure_defaults": false,
+          "posture_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "0",
+            "MAVERICK_SECURE_DEFAULT": "0"
+          },
+          "postgres": "16.15",
+          "endpoint": "127.0.0.1:60165",
+          "pgvector_available": false,
+          "inherited_environment_allowlist": [
+            "APPDATA",
+            "COMMONPROGRAMFILES",
+            "COMMONPROGRAMFILES(X86)",
+            "COMSPEC",
+            "LOCALAPPDATA",
+            "NUMBER_OF_PROCESSORS",
+            "OS",
+            "PATH",
+            "PATHEXT",
+            "PROCESSOR_ARCHITECTURE",
+            "PROGRAMDATA",
+            "PROGRAMFILES",
+            "PROGRAMFILES(X86)",
+            "SYSTEMROOT",
+            "USERPROFILE",
+            "WINDIR"
+          ],
+          "optional_traceback_seconds": 0,
+          "per_test_timeout_seconds": 180,
+          "started_epoch": 1790834312.7653058,
+          "basetemp": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\pg-gap-ehwae9bd\\tests",
+          "startup_method": "direct_foreground_postgres_default_sandbox",
+          "execution_identity": "\"the_firm\\codexsandboxoffline\",\"S-1-5-21-984168705-3217104990-2788577175-1004\"",
+          "runner_sha256": "6af06e43dcd1f429030d316df9cc7367c29244187dbcd82fdf4438049ed8d291",
+          "direct_start_helper_sha256": "76aebd0a40648dae3986d1e91951bddf14c581e38cb9ff5180cfd523c7e59516",
+          "failure_reporter_sha256": "9e10637776101d25f0d8213811f4575788716db27d8ef24b039d5054b410db40",
+          "helper_timeout_seconds": 2700,
+          "command_without_credentials": [
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-slice-mobile-cursor-final\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "-p",
+            "audit_local_failure_reporter",
+            "-vv",
+            "--tb=short",
+            "--durations=30",
+            "--timeout=180",
+            "--timeout-method=thread",
+            "-o",
+            "faulthandler_timeout=0",
+            "--basetemp",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\pg-gap-ehwae9bd\\tests",
+            "--junitxml",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\mobile-cursor-native-ordinary-01.xml",
+            "packages/maverick-core/tests/test_goal_list_cursor.py",
+            "packages/maverick-dashboard/tests/test_api_goal_cursor.py"
+          ],
+          "server_stopped": true,
+          "exit_code": 0,
+          "elapsed_seconds": 23.09,
+          "direct_start_receipt": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\mobile-cursor-native-ordinary-01-direct-server.json",
+          "no_listener": true,
+          "source_head_after": "a0c1da8b9005a15fc80882ce286c75d786a48e57",
+          "clean_source_after": true
+        },
+        "cases": [
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[sqlite]",
+            "outcome": "passed",
+            "seconds": 0.668
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[postgres]",
+            "outcome": "passed",
+            "seconds": 2.57
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_keeps_filters_and_current_owner_after_revocation[sqlite]",
+            "outcome": "passed",
+            "seconds": 0.106
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_keeps_filters_and_current_owner_after_revocation[postgres]",
+            "outcome": "passed",
+            "seconds": 1.029
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[sqlite]",
+            "outcome": "passed",
+            "seconds": 0.094
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[postgres]",
+            "outcome": "passed",
+            "seconds": 0.914
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[sqlite-0]",
+            "outcome": "passed",
+            "seconds": 0.045
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[sqlite--1]",
+            "outcome": "passed",
+            "seconds": 0.052
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[sqlite-9223372036854775808]",
+            "outcome": "passed",
+            "seconds": 0.061
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres-0]",
+            "outcome": "passed",
+            "seconds": 0.916
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres--1]",
+            "outcome": "passed",
+            "seconds": 0.961
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres-9223372036854775808]",
+            "outcome": "passed",
+            "seconds": 0.946
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_retains_current_workspace[sqlite]",
+            "outcome": "passed",
+            "seconds": 0.125
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_retains_current_workspace[postgres]",
+            "outcome": "passed",
+            "seconds": 0.97
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_postgres_query_binds_cursor_after_owner_filters_and_retains_tenant",
+            "outcome": "passed",
+            "seconds": 0.019
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_http_cursor_is_current_owner_scoped_even_for_admin",
+            "outcome": "passed",
+            "seconds": 0.172
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=0]",
+            "outcome": "passed",
+            "seconds": 0.071
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=-1]",
+            "outcome": "passed",
+            "seconds": 0.067
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=9223372036854775808]",
+            "outcome": "passed",
+            "seconds": 0.084
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=invalid]",
+            "outcome": "passed",
+            "seconds": 0.088
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=5&offset=1]",
+            "outcome": "passed",
+            "seconds": 0.088
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=5&offset=-1]",
+            "outcome": "passed",
+            "seconds": 0.068
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_foreign_or_missing_cursor_is_only_numeric_boundary",
+            "outcome": "passed",
+            "seconds": 0.116
+          }
+        ],
+        "postgres_ids": [
+          "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[postgres]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_keeps_filters_and_current_owner_after_revocation[postgres]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[postgres]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres-0]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres--1]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres-9223372036854775808]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_retains_current_workspace[postgres]"
+        ],
+        "pytest_seconds": 18.711,
+        "artifacts": [
+          {
+            "path": "audit/mobile-cursor-native-ordinary-01-direct-server.json",
+            "bytes": 1472,
+            "sha256": "1f366e79e117c31a95742b9f3784c6be1d88d1c4877eeddcf490974ce792b5ff"
+          },
+          {
+            "path": "audit/mobile-cursor-native-ordinary-01-direct-server.log",
+            "bytes": 3827,
+            "sha256": "040706d8e9ebf0cf366b55bb4e254b77f81d575ca6847753196982c12c22afdd"
+          },
+          {
+            "path": "audit/mobile-cursor-native-ordinary-01.failures.jsonl",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "audit/mobile-cursor-native-ordinary-01.failures.jsonl.reports",
+            "bytes": 18462,
+            "sha256": "bd95a4e2879d098e70a06008ac88c9bc7158c1cdb3f111f4b46397d60e2fe387"
+          },
+          {
+            "path": "audit/mobile-cursor-native-ordinary-01.log",
+            "bytes": 8856,
+            "sha256": "3fa88c6d9fdd90f3c0311bcc855ba76e0e6ba0b0410a876293cfd4d6e4865462"
+          },
+          {
+            "path": "audit/mobile-cursor-native-ordinary-01.result.json",
+            "bytes": 2744,
+            "sha256": "0b122eaba45326ea0e2ff535e13e712f0e116ab75b9fc0be8817a6d8f325bc00"
+          },
+          {
+            "path": "audit/mobile-cursor-native-ordinary-01.source.json",
+            "bytes": 2429,
+            "sha256": "7bd5f8554a540aaacecf2a9d9e28f0b6b02cead58012ffcd7cfeecc9f1383a3f"
+          },
+          {
+            "path": "audit/mobile-cursor-native-ordinary-01.xml",
+            "bytes": 4023,
+            "sha256": "a338031d99624ec7fa20a29f505c20481cf0b86417651e653c3b17797bf16da7"
+          }
+        ]
+      },
+      {
+        "label": "mobile-cursor-native-secure-01",
+        "result": {
+          "source_head": "a0c1da8b9005a15fc80882ce286c75d786a48e57",
+          "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-mobile-cursor-final",
+          "targets": [
+            "packages/maverick-core/tests/test_goal_list_cursor.py",
+            "packages/maverick-dashboard/tests/test_api_goal_cursor.py"
+          ],
+          "sequential": true,
+          "secure_defaults": true,
+          "posture_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "1",
+            "MAVERICK_SECURE_DEFAULT": "1"
+          },
+          "postgres": "16.15",
+          "endpoint": "127.0.0.1:60165",
+          "pgvector_available": false,
+          "inherited_environment_allowlist": [
+            "APPDATA",
+            "COMMONPROGRAMFILES",
+            "COMMONPROGRAMFILES(X86)",
+            "COMSPEC",
+            "LOCALAPPDATA",
+            "NUMBER_OF_PROCESSORS",
+            "OS",
+            "PATH",
+            "PATHEXT",
+            "PROCESSOR_ARCHITECTURE",
+            "PROGRAMDATA",
+            "PROGRAMFILES",
+            "PROGRAMFILES(X86)",
+            "SYSTEMROOT",
+            "USERPROFILE",
+            "WINDIR"
+          ],
+          "optional_traceback_seconds": 0,
+          "per_test_timeout_seconds": 180,
+          "started_epoch": 1790834374.009539,
+          "basetemp": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\pg-gap-4bywipn7\\tests",
+          "startup_method": "direct_foreground_postgres_default_sandbox",
+          "execution_identity": "\"the_firm\\codexsandboxoffline\",\"S-1-5-21-984168705-3217104990-2788577175-1004\"",
+          "runner_sha256": "6af06e43dcd1f429030d316df9cc7367c29244187dbcd82fdf4438049ed8d291",
+          "direct_start_helper_sha256": "76aebd0a40648dae3986d1e91951bddf14c581e38cb9ff5180cfd523c7e59516",
+          "failure_reporter_sha256": "9e10637776101d25f0d8213811f4575788716db27d8ef24b039d5054b410db40",
+          "helper_timeout_seconds": 2700,
+          "command_without_credentials": [
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-slice-mobile-cursor-final\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "-p",
+            "audit_local_failure_reporter",
+            "-vv",
+            "--tb=short",
+            "--durations=30",
+            "--timeout=180",
+            "--timeout-method=thread",
+            "-o",
+            "faulthandler_timeout=0",
+            "--basetemp",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.t\\pg-gap-4bywipn7\\tests",
+            "--junitxml",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\mobile-cursor-native-secure-01.xml",
+            "packages/maverick-core/tests/test_goal_list_cursor.py",
+            "packages/maverick-dashboard/tests/test_api_goal_cursor.py"
+          ],
+          "server_stopped": true,
+          "exit_code": 0,
+          "elapsed_seconds": 26.06,
+          "direct_start_receipt": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\mobile-cursor-native-secure-01-direct-server.json",
+          "no_listener": true,
+          "source_head_after": "a0c1da8b9005a15fc80882ce286c75d786a48e57",
+          "clean_source_after": true
+        },
+        "cases": [
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[sqlite]",
+            "outcome": "passed",
+            "seconds": 2.67
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[postgres]",
+            "outcome": "passed",
+            "seconds": 3.997
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_keeps_filters_and_current_owner_after_revocation[sqlite]",
+            "outcome": "passed",
+            "seconds": 0.277
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_keeps_filters_and_current_owner_after_revocation[postgres]",
+            "outcome": "passed",
+            "seconds": 1.096
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[sqlite]",
+            "outcome": "passed",
+            "seconds": 0.196
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[postgres]",
+            "outcome": "passed",
+            "seconds": 1.198
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[sqlite-0]",
+            "outcome": "passed",
+            "seconds": 0.047
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[sqlite--1]",
+            "outcome": "passed",
+            "seconds": 0.047
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[sqlite-9223372036854775808]",
+            "outcome": "passed",
+            "seconds": 0.047
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres-0]",
+            "outcome": "passed",
+            "seconds": 0.81
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres--1]",
+            "outcome": "passed",
+            "seconds": 0.832
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres-9223372036854775808]",
+            "outcome": "passed",
+            "seconds": 0.816
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_retains_current_workspace[sqlite]",
+            "outcome": "passed",
+            "seconds": 0.155
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_retains_current_workspace[postgres]",
+            "outcome": "passed",
+            "seconds": 0.933
+          },
+          {
+            "id": "packages.maverick-core.tests.test_goal_list_cursor::test_postgres_query_binds_cursor_after_owner_filters_and_retains_tenant",
+            "outcome": "passed",
+            "seconds": 0.018
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_http_cursor_is_current_owner_scoped_even_for_admin",
+            "outcome": "passed",
+            "seconds": 0.301
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=0]",
+            "outcome": "passed",
+            "seconds": 0.068
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=-1]",
+            "outcome": "passed",
+            "seconds": 0.073
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=9223372036854775808]",
+            "outcome": "passed",
+            "seconds": 0.073
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=invalid]",
+            "outcome": "passed",
+            "seconds": 0.071
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=5&offset=1]",
+            "outcome": "passed",
+            "seconds": 0.072
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_invalid_or_mixed_cursor_refuses_before_world_access[before_id=5&offset=-1]",
+            "outcome": "passed",
+            "seconds": 0.073
+          },
+          {
+            "id": "packages.maverick-dashboard.tests.test_api_goal_cursor::test_foreign_or_missing_cursor_is_only_numeric_boundary",
+            "outcome": "passed",
+            "seconds": 0.164
+          }
+        ],
+        "postgres_ids": [
+          "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_reaches_oldest_of_125_after_insert_and_deleted_anchor[postgres]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_keeps_filters_and_current_owner_after_revocation[postgres]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_is_id_bound_even_in_ascending_order_and_preserves_legacy_offset[postgres]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres-0]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres--1]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_invalid_cursor_refuses_before_query[postgres-9223372036854775808]",
+          "packages.maverick-core.tests.test_goal_list_cursor::test_cursor_retains_current_workspace[postgres]"
+        ],
+        "pytest_seconds": 21.741,
+        "artifacts": [
+          {
+            "path": "audit/mobile-cursor-native-secure-01-direct-server.json",
+            "bytes": 1470,
+            "sha256": "a381c2eacb8a7afba79cd63d86f37b9a8b4fedf481cee7e3bf9ce6b5f30673c9"
+          },
+          {
+            "path": "audit/mobile-cursor-native-secure-01-direct-server.log",
+            "bytes": 3827,
+            "sha256": "6c55b0028ae621c8ff32a45cf10cfdacc0e33e2abade66aeb82afcb1f7541d6d"
+          },
+          {
+            "path": "audit/mobile-cursor-native-secure-01.failures.jsonl",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "audit/mobile-cursor-native-secure-01.failures.jsonl.reports",
+            "bytes": 18476,
+            "sha256": "dafbdabe5b1885485ea2f8c25e76d8cd0b82e7436572f9d40b530861be182c9c"
+          },
+          {
+            "path": "audit/mobile-cursor-native-secure-01.log",
+            "bytes": 8831,
+            "sha256": "7be97f6bac65d991b07069df3fbefb5b5d66c3a4fd6778821b1e04778781582f"
+          },
+          {
+            "path": "audit/mobile-cursor-native-secure-01.result.json",
+            "bytes": 2738,
+            "sha256": "54860ebc4932783898d25be887f4f98be9c018af4f552c285d22e8c5f5782adc"
+          },
+          {
+            "path": "audit/mobile-cursor-native-secure-01.source.json",
+            "bytes": 2425,
+            "sha256": "5cda64ad5d2ab77cbaea78c252fade704eae042c9913a1dc43fe5ea69d49d2a6"
+          },
+          {
+            "path": "audit/mobile-cursor-native-secure-01.xml",
+            "bytes": 4023,
+            "sha256": "554c8c9c970cb4bae8828f7ed60c79c9e962c1213c30a6f9473d0e87c1fbf0ee"
+          }
+        ]
+      }
+    ],
+    "distinct_cases": 23,
+    "distinct_postgres_cases": 7,
+    "both_postures_same_case_ids": true,
+    "selection_boundary": "The two complete new files contain 23 cases. The earlier 29-case cohort also selected six existing API/ownership/PostgreSQL-query controls, which are not part of this native follow-up."
+  }
+}

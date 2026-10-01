@@ -37,7 +37,10 @@ from .file_lock import (
     ensure_private_file,
     prepare_private_directory,
 )
+from .goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
+from .metadata_history import SQLITE_INDEXES as _HISTORY_INDEXES
 from .paths import bind_tenant_namespace, current_tenant_id, data_dir
+from .personal_alert_revisions import SQLITE_MIGRATION as _PERSONAL_ALERT_MIGRATION
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +52,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 41
+SCHEMA_VERSION = 46
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -422,6 +425,11 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    46: ["ALTER TABLE goals ADD COLUMN connection_selection TEXT NOT NULL DEFAULT ''"],
+    45: _HISTORY_INDEXES,
+    44: _PERSONAL_ALERT_MIGRATION,
+    43: ["ALTER TABLE facts ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"],
+    42: [_GOAL_MUTATION_SCHEMA],
     40: [statement for statement in _EVENT_ADMISSION_SCHEMA.split(";") if statement.strip()],
     41: [
         "ALTER TABLE event_goal_admissions ADD COLUMN request_digest TEXT",
@@ -1633,7 +1641,8 @@ class WorldModel:
     # ----- goals -----
     def create_goal(self, title: str, description: str = "", parent_id: int | None = None,
                     *, owner: str = "", execution_principal: str = "",
-                    domain: str = "", project_id: int | None = None) -> int:
+                    domain: str = "", project_id: int | None = None,
+                    connection_references: list | None = None) -> int:
         if execution_principal is None:
             execution_principal = ""
         if not isinstance(execution_principal, str):
@@ -1643,16 +1652,22 @@ class WorldModel:
 
             if not valid_principal(execution_principal):
                 raise ValueError("invalid execution principal")
+        from .template_connections import packed
+        selection = packed(owner, connection_references or [])
         now = time.time()
         with self._writing() as conn:
             cur = conn.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
-                "created_at, updated_at, owner, execution_principal, domain, project_id) "
-                "VALUES(?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
+                "created_at, updated_at, owner, execution_principal, domain, project_id, connection_selection) "
+                "VALUES(?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
                 (parent_id, _enc_field(title), _enc_field(description), now, now,
-                 owner, execution_principal, domain or "", project_id),
+                 owner, execution_principal, domain or "", project_id, _enc_field(selection)),
             )
             return cur.lastrowid
+
+    def goal_connection_selection(self, goal_id: int) -> str:
+        row = self._read_one("SELECT connection_selection FROM goals WHERE id=?", (goal_id,))
+        return _dec_field(row[0]) if row and row[0] else ""
 
     def record_goal_origin(self, goal_id: int, kind: str, ref: str) -> None:
         """Record which automation spawned a goal, so the Automations page can
@@ -1935,11 +1950,13 @@ class WorldModel:
     # ---- share links: revocable, expiring read-only access to a goal --------
 
     def create_share_link(self, goal_id: int, *, created_by: str = "",
-                          ttl_seconds: float | None = None) -> tuple[int, str]:
+                          ttl_seconds: float | None = None, token_prefix: str = "") -> tuple[int, str]:
         """Mint a read-only share link for a goal. Returns ``(id, clear_token)``;
         only the token's SHA-256 is persisted, so the clear token is shown to the
         creator exactly once and the DB never holds anything that grants access."""
-        token = secrets.token_urlsafe(32)
+        if token_prefix not in {"", "r1_"}:
+            raise ValueError("Unsupported share token version")
+        token = token_prefix + secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         now = time.time()
         exp = now + float(ttl_seconds) if ttl_seconds else None
@@ -2088,13 +2105,13 @@ class WorldModel:
             )
             return cur.rowcount == 1
 
-    def shoring_measurements(self, department: str, *, since: float, until: float) -> dict:
+    def shoring_measurements(self, department: str, *, since: float, until: float, owner: str | None = None) -> dict:
         """Complete department totals in one read snapshot, without a row cap."""
         from .shoring_metrics import AGGREGATE_SQL, EVENT_TIME_SQL, measurements
 
         row = self._read_one(
-            AGGREGATE_SQL + f" WHERE domain = ? AND {EVENT_TIME_SQL} >= ? AND {EVENT_TIME_SQL} <= ?",
-            (department, since, until),
+            AGGREGATE_SQL + f" WHERE domain = ? AND {EVENT_TIME_SQL} >= ? AND {EVENT_TIME_SQL} <= ?" + (" AND owner = ?" if owner is not None else ""),
+            (department, since, until, *([owner] if owner is not None else [])),
         )
         return measurements(row)
 
@@ -2202,6 +2219,7 @@ class WorldModel:
         limit: int | None = None,
         offset: int = 0,
         order: str = "asc",
+        before_id: int | None = None,
     ) -> list[Goal]:
         """List goals, optionally filtered + paginated.
 
@@ -2211,7 +2229,13 @@ class WorldModel:
         ``order='desc'`` lets the most-recent slice be fetched cheaply.
         ``domain`` scopes to one department (the pack a goal ran as) -- the
         ``domain`` column is plaintext, so it filters in SQL.
+        ``before_id`` excludes that immutable ID and all newer IDs without
+        reading an anchor row. Use descending order for continuation; in
+        ascending order it remains only an upper ID bound. Existing offset
+        callers retain their historical behavior.
         """
+        if before_id is not None and not 0 < int(before_id) <= 2**63 - 1:
+            raise ValueError("before_id must be a positive signed 64-bit goal ID")
         direction = "DESC" if order.lower() == "desc" else "ASC"
         sql = "SELECT * FROM goals"
         clauses: list[str] = []
@@ -2228,6 +2252,9 @@ class WorldModel:
         if project_id is not None:
             clauses.append("project_id = ?")
             params = params + (int(project_id),)
+        if before_id is not None:
+            clauses.append("id < ?")
+            params = params + (int(before_id),)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += f" ORDER BY id {direction}"
@@ -2236,6 +2263,17 @@ class WorldModel:
             params = params + (max(1, int(limit)), max(0, int(offset)))
         rows = self._read_all(sql, params)
         return [_goal_from_row(r) for r in rows]
+
+    def personal_alert_goals(self, owner: str, *, since: float, after_id: int = 0,
+                             limit: int = 250) -> list[tuple]:
+        """Page all current problems and recent changes, scoped before the limit."""
+        rows = self._read_all(
+            "SELECT * FROM goals WHERE owner=? AND id>? AND "
+            "(status NOT IN ('done','cancelled') OR updated_at>=? OR "
+            "EXISTS(SELECT 1 FROM questions q WHERE q.goal_id=goals.id AND q.answer IS NULL)) "
+            "ORDER BY id LIMIT ?", (owner, after_id, since, max(1, min(500, limit))))
+        return [(_goal_from_row(row), int(row["alert_state_revision"]),
+                 int(row["alert_result_revision"])) for row in rows]
 
     def conversation_summaries(self, *, owner: str | None = None,
                                limit: int = 25, before_id: int | None = None):
@@ -2333,7 +2371,7 @@ class WorldModel:
         )
         return _goal_from_row(row) if row else None
 
-    def candidate_goals(self, include_running: bool, limit: int = 500) -> list[Goal]:
+    def candidate_goals(self, include_running: bool, limit: int = 500, *, owner: str = "") -> list[Goal]:
         """Goals with comparable text, for cross-run recall. Locked read.
 
         ``include_running`` widens to in-flight goals too; otherwise only
@@ -2350,9 +2388,9 @@ class WorldModel:
         rows = self._read_all(
             "SELECT id, parent_id, title, description, status, created_at, "
             f"updated_at, deadline, result, owner, execution_principal "
-            f"FROM goals {where} "
+            f"FROM goals {where} AND owner = ? "
             "ORDER BY updated_at DESC LIMIT ?",
-            (limit,),
+            (owner, limit),
         )
         return [_goal_from_row(r) for r in rows]
 
@@ -2658,7 +2696,8 @@ class WorldModel:
     def upsert_fact(
         self, key: str, value: str, episode_id: int | None = None,
         *, source: str = "", trust_tier: int = 3, sensitivity: str = "internal",
-    ) -> None:
+        expected_revision: int | None = None, tags: list[str] | None = None,
+    ) -> int:
         """Write the current value of ``key``.
 
         ``source``/``trust_tier``/``sensitivity`` are Memory Guard provenance
@@ -2668,9 +2707,16 @@ class WorldModel:
         ``fact_history`` and closes the prior open window -- non-destructive
         evolution. An unchanged value refreshes provenance without a new version.
         """
+        from .fact_revision import normalize_tags
+        encoded_tags = json.dumps(normalize_tags(tags)) if tags is not None else None
         now = time.time()
         enc = _enc_field(value)
+        from .fact_revision import check_expected_revision
         with self._writing() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()
+            check_expected_revision(expected_revision, int(current[0]) if current else 0)
             if self._temporal_memory:
                 prior = self._open_temporal_fact(conn, key)
                 # A new version is recorded when the value changes OR the trust
@@ -2706,13 +2752,65 @@ class WorldModel:
                 "INSERT INTO facts(key, value, source_episode_id, updated_at, "
                 "source, trust_tier, sensitivity) VALUES(?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET "
-                "id = (SELECT COALESCE(MAX(id), 0) + 1 FROM facts), "
+                "id = excluded.id, "
                 "value = excluded.value, "
                 "source_episode_id = excluded.source_episode_id, "
                 "updated_at = excluded.updated_at, source = excluded.source, "
                 "trust_tier = excluded.trust_tier, sensitivity = excluded.sensitivity",
                 (key, enc, episode_id, now, source, int(trust_tier), sensitivity),
             )
+            if encoded_tags is not None:
+                conn.execute("UPDATE facts SET tags_json = ? WHERE key = ?", (encoded_tags, key))
+            return int(conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()[0])
+
+    def fact_record(self, key: str) -> dict | None:
+        row = self._read_one(
+            "SELECT key, value, id AS revision, updated_at, source, source_episode_id, "
+            "trust_tier, sensitivity, tags_json FROM facts WHERE key = ?", (key,),
+        )
+        if not row:
+            return None
+        result = dict(row)
+        result["value"] = _dec_field(result["value"])
+        result["tags"] = json.loads(result.pop("tags_json"))
+        return result
+
+    def fact_records(self, *, query: str = "", source: str = "", tag: str = "",
+                     updated_before: float | None = None, limit: int = 50,
+                     offset: int = 0, shared_only: bool = False) -> list[dict]:
+        """Bounded metadata-filtered page; encrypted values are not indexed."""
+        clauses, params = [], []
+        if shared_only:
+            clauses.extend(("LOWER(key) NOT LIKE 'goal:%'", "LOWER(key) NOT LIKE 'user:%'"))
+        for column, value in (("key", query), ("source", source)):
+            if value:
+                clauses.append(f"{column} LIKE ? ESCAPE '\\'")
+                params.append("%" + self._like_escape(value) + "%")
+        if updated_before is not None:
+            clauses.append("updated_at < ?")
+            params.append(float(updated_before))
+        if tag:
+            clauses.append("EXISTS (SELECT 1 FROM json_each(facts.tags_json) WHERE value = ?)")
+            params.append(tag.strip().casefold())
+        sql = ("SELECT key, value, id AS revision, updated_at, source, "
+               "source_episode_id, trust_tier, sensitivity, tags_json FROM facts")
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY key LIMIT ? OFFSET ?"
+        rows = self._read_all(sql, (*params, max(1, min(limit, 101)), max(0, offset)))
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["value"] = _dec_field(item["value"])
+            item["tags"] = json.loads(item.pop("tags_json"))
+            result.append(item)
+        return result
+
+    def fact_catalog_revision(self) -> str:
+        """Metadata clock for shared facts; never decrypt or count private namespaces."""
+        row = self._read_one("SELECT COUNT(*), COALESCE(MAX(id),0) FROM facts "
+                             "WHERE LOWER(key) NOT LIKE 'goal:%' AND LOWER(key) NOT LIKE 'user:%'")
+        return f"{row[0]}:{row[1]}"
 
     def get_facts(self) -> dict[str, str]:
         """All current facts as ``{key: value}``, newest first."""
@@ -2796,7 +2894,8 @@ class WorldModel:
         row = self._read_one("SELECT value FROM facts WHERE key = ? LIMIT 1", (key,))
         return _dec_field(row["value"]) if row else None
 
-    def fact_history(self, key: str, *, limit: int = 50) -> list[FactVersion]:
+    def fact_history(self, key: str, *, limit: int = 50,
+                     owned_only: bool = False) -> list[FactVersion]:
         """Every recorded version of ``key``, newest first (requires ``[memory]
         temporal``). The entry whose ``valid_to is None`` is the current value;
         the rest are superseded values with the window they were believed in."""
@@ -2843,13 +2942,18 @@ class WorldModel:
             ))
         return out
 
-    def delete_fact(self, key: str) -> int:
+    def delete_fact(self, key: str, *, expected_revision: int | None = None) -> int:
         """Delete one fact by exact key; return rows removed (0 or 1).
 
         When ``[memory] temporal`` is on, the open ``fact_history`` window is
         closed (valid_to = now) rather than erased, so the record that the fact
         existed until this moment survives the delete."""
+        from .fact_revision import check_expected_revision
         with self._writing() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT id FROM facts WHERE key = ?", (key,)).fetchone()
+            check_expected_revision(expected_revision, int(current[0]) if current else 0)
             if self._temporal_memory:
                 open_row = self._open_temporal_fact(conn, key)
                 closed_at = self._temporal_write_time(time.time(), open_row)
@@ -3975,6 +4079,7 @@ class WorldModel:
                         "attachments",
                         "goal_events",
                         "goal_origins",
+                        "goal_mutation_receipts",
                         "messages",
                         "processed_messages",
                         "questions",

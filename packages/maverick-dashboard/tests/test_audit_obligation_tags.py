@@ -21,6 +21,15 @@ def _prep(monkeypatch, tmp_path, events):
             return list(events)
 
     monkeypatch.setattr(audit, "default_audit_log", lambda: _Log())
+    from maverick.audit import export
+
+    def recorded_events(**kwargs):
+        yield from events
+        if kwargs.get("report") is not None:
+            kwargs["report"].finished = True
+            kwargs["report"].events = len(events)
+
+    monkeypatch.setattr(export, "iter_audit_events", recorded_events)
 
 
 def test_denial_rows_link_their_obligation_and_tool_calls_list_what_was_checked(
@@ -52,4 +61,5 @@ def test_rows_without_obligations_render_exactly_as_before(monkeypatch, tmp_path
     ])
     body = TestClient(app).get("/audit").text
     assert "aud-obligation" not in body.split("<tbody>", 1)[1]
-    assert "Read file" in body
+    assert "Used a tool" in body
+    assert "Read file" not in body  # generated tool names can contain private text

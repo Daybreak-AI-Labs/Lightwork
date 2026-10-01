@@ -12,6 +12,30 @@
       window.mvWorkspaceTenant = expected;
       if (!expected) return;
 
+      var contextChanged = false;
+      function invalidateWorkspace() {
+        if (contextChanged) return;
+        contextChanged = true;
+        var notice = document.createElement('section');
+        notice.className = 'panel'; notice.setAttribute('role', 'alert');
+        var message = 'Your workspace changed in another tab. Changes here are paused. Keep any draft you need, then reopen this page in the current workspace.';
+        if (window.LightworkI18n) window.LightworkI18n.set(notice, message);
+        else notice.textContent = message;
+        notice.appendChild(document.createTextNode(' '));
+        var reopen = document.createElement('a'); reopen.href = window.location.href;
+        if (window.LightworkI18n) window.LightworkI18n.set(reopen, 'Reopen in current workspace');
+        else reopen.textContent = 'Reopen in current workspace';
+        notice.appendChild(reopen);
+        // Keep recovery inside the content layout so the fixed sidebar cannot
+        // cover the link. The alert announces the change without moving focus
+        // away from a draft the person may still need to copy.
+        var content = document.querySelector('main') || document.body;
+        content.insertBefore(notice, content.firstChild);
+        window.dispatchEvent(new CustomEvent('lightwork:context-changed'));
+      }
+      window.addEventListener('storage', function (event) {
+        if (event.key === 'lightwork-workspace-changed') invalidateWorkspace();
+      });
       var nativeFetch = window.fetch.bind(window);
       window.fetch = function (input, init) {
         var opts = init ? Object.assign({}, init) : {};
@@ -22,6 +46,7 @@
         try { sameOrigin = new URL(String(rawUrl), window.location.href).origin === window.location.origin; }
         catch (e) { sameOrigin = false; }
         if (!unsafe || !sameOrigin) return nativeFetch(input, init);
+        if (contextChanged) return Promise.reject(new Error('Workspace changed. Reopen this page before saving.'));
 
         var headers = new Headers(opts.headers || (input instanceof Request ? input.headers : undefined));
         if (!headers.has('X-Lightwork-Expected-Tenant')) {
@@ -41,6 +66,7 @@
         try { sameOrigin = new URL(form.action || window.location.href, window.location.href).origin === window.location.origin; }
         catch (e) { sameOrigin = false; }
         if (!sameOrigin) return;
+        if (contextChanged) { event.preventDefault(); event.stopImmediatePropagation(); return; }
         var field = form.querySelector('input[name="_expected_tenant"]');
         if (!field) {
           field = document.createElement('input');
@@ -70,6 +96,7 @@
         var t = document.createElement('div');
         t.className = 'mv-toast' + (opts.error ? ' mv-toast--error' : '');
         t.textContent = (opts.error ? '⚠ ' : '') + String(message);
+        if(window.LightworkI18n){t.lang=window.LightworkI18n.languageFor(String(message));t.dir='auto';}
         target.appendChild(t);
         setTimeout(function () {
           t.style.transition = 'opacity 200ms'; t.style.opacity = '0';
@@ -83,12 +110,14 @@
       window.mvConfirm = function (message, opts) {
         opts = opts || {};
         if (!dlg || typeof dlg.showModal !== 'function') {
-          return Promise.resolve(window.confirm(String(message)));
+          return Promise.resolve(window.confirm(opts.productCopy && window.LightworkI18n ? window.LightworkI18n.text(String(message), opts.values) : String(message)));
         }
         if (dlg.open) return Promise.resolve(false);   // not re-entrant (shared dialog)
         var opener = document.activeElement;           // restore focus on close
-        msgEl.textContent = String(message);
-        okBtn.textContent = opts.okText || 'Confirm';
+        if (opts.productCopy && window.LightworkI18n) window.LightworkI18n.set(msgEl, String(message), opts.values);
+        else { msgEl.textContent = String(message); msgEl.lang = 'und'; msgEl.dir = 'auto'; }
+        if (window.LightworkI18n) { window.LightworkI18n.set(okBtn, opts.okText || 'Confirm'); window.LightworkI18n.set(cancelBtn, 'Cancel'); }
+        else okBtn.textContent = opts.okText || 'Confirm';
         return new Promise(function (resolve) {
           function done(val) {
             okBtn.removeEventListener('click', onOk);
@@ -115,6 +144,13 @@
       // a {key:value} object, or null if cancelled. Falls back to sequential
       // prompts where <dialog> is unsupported.
       var fdlg = document.getElementById('mv-form');
+      function productText(source, values) {
+        return window.LightworkI18n ? window.LightworkI18n.text(source, values) : source;
+      }
+      function productSet(element, source, values) {
+        if (window.LightworkI18n) window.LightworkI18n.set(element, source, values);
+        else element.textContent = source;
+      }
       function booleanDefault(value) {
         // Imported fields can carry serialized booleans. Only an explicit
         // affirmative value may preselect a boolean; "false" is not truthy here.
@@ -141,18 +177,18 @@
                 boolField ? String(booleanDefault(s.default)) : s.default != null ? String(s.default) : '');
               if (v0 === null) return Promise.resolve(null);
               v0 = v0.trim();
-              if (!v0 && s.required) { problem = 'This field is required.'; continue; }
+              if (!v0 && s.required) { problem = productText('This field is required.'); continue; }
               if (boolField) {
                 if (!/^(true|false|yes|no|1|0)$/i.test(v0)) {
-                  problem = 'Enter true or false.'; continue;
+                  problem = productText('Enter true or false.'); continue;
                 }
                 out0[s.key] = /^(true|yes|1)$/i.test(v0);
               } else if (v0) {
                 if (s.type === 'number' && !Number.isFinite(Number(v0))) {
-                  problem = 'Enter a valid number.'; continue;
+                  problem = productText('Enter a valid number.'); continue;
                 }
                 if (s.type === 'select' && choices.indexOf(v0) < 0) {
-                  problem = 'Choose one of the listed values.'; continue;
+                  problem = productText('Choose one of the listed values.'); continue;
                 }
                 out0[s.key] = v0;
               }
@@ -167,8 +203,10 @@
         var body = document.getElementById('mv-form-fields');
         var errEl = document.getElementById('mv-form-err');
         var cancelBtn = document.getElementById('mv-form-cancel');
-        document.getElementById('mv-form-title').textContent = String(title || 'Details');
-        document.getElementById('mv-form-ok').textContent = opts.okText || 'OK';
+        var titleElement = document.getElementById('mv-form-title');
+        if (!title || opts.productCopy) productSet(titleElement, String(title || 'Details'));
+        else { titleElement.textContent = String(title); titleElement.lang = 'und'; titleElement.dir = 'auto'; }
+        productSet(document.getElementById('mv-form-ok'), opts.okText || 'OK');
         body.textContent = ''; errEl.textContent = '';
         var controls = [];
         fields.forEach(function (f) {
@@ -178,18 +216,18 @@
           if (f.type === 'bool' || f.type === 'checkbox') {
             wrap.className += ' mv-form__check';
             ctl = document.createElement('input'); ctl.type = 'checkbox'; ctl.checked = booleanDefault(f.default); ctl.id = id;
-            var l1 = document.createElement('label'); l1.setAttribute('for', id); l1.textContent = f.label || f.key;
+            var l1 = document.createElement('label'); l1.setAttribute('for', id); l1.textContent = f.label || f.key; l1.lang = 'und'; l1.dir = 'auto';
             wrap.appendChild(ctl); wrap.appendChild(l1);
           } else {
             var lab = document.createElement('label'); lab.setAttribute('for', id);
-            lab.textContent = (f.label || f.key) + (f.required ? ' *' : '');
+            lab.textContent = (f.label || f.key) + (f.required ? ' *' : ''); lab.lang = 'und'; lab.dir = 'auto';
             wrap.appendChild(lab);
             if (f.type === 'select') {
               ctl = document.createElement('select');
               (f.options || []).forEach(function (o) {
                 var op = document.createElement('option');
                 op.value = (o && o.value != null) ? o.value : o;
-                op.textContent = (o && o.label != null) ? o.label : o;
+                op.textContent = (o && o.label != null) ? o.label : o; op.lang = 'und'; op.dir = 'auto';
                 ctl.appendChild(op);
               });
               if (f.default != null) ctl.value = String(f.default);
@@ -207,7 +245,7 @@
           }
           if (f.help) {
             var h = document.createElement('div'); h.className = 'mv-form__help';
-            h.id = id + '-help'; h.textContent = f.help;
+            h.id = id + '-help'; h.textContent = f.help; h.lang = 'und'; h.dir = 'auto';
             ctl.setAttribute('aria-describedby', h.id); wrap.appendChild(h);
           }
           controls.push({ f: f, ctl: ctl });
@@ -228,7 +266,8 @@
               if (val) out[c.f.key] = val;
             });
             if (missing.length) {
-              errEl.textContent = 'Required: ' + missing.join(', ');
+              if (window.LightworkI18n) window.LightworkI18n.set(errEl, 'Required: {fields}', {fields: missing.join(', ')});
+              else errEl.textContent = 'Required: ' + missing.join(', ');
               firstMissing.focus(); return null;
             }
             return out;
@@ -252,8 +291,8 @@
       };
       // Copy text to the clipboard with a toast; falls back for old browsers.
       window.mvCopy = function (text) {
-        function ok() { mvToast('Copied to clipboard'); }
-        function fail() { mvToast('Copy failed — select and copy manually', { error: true }); }
+        function ok() { mvToast(productText('Copied to clipboard')); }
+        function fail() { mvToast(productText('Copy failed — select and copy manually'), { error: true }); }
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(String(text)).then(ok, fail);
           return;
@@ -278,11 +317,54 @@
         if (text != null) e.textContent = text;
         return e;
       };
+      // Only the business-error envelope carries trusted, authored display copy.
+      // Legacy detail strings continue through the restrictive plain-copy filter.
+      window.mvBusinessError = function (value) {
+        var d = value && (value.detail || value);
+        if (!d || d.schema !== 'lightwork.error.v1' || typeof d.code !== 'string' ||
+            !/^[a-z][a-z0-9_.-]{0,79}$/.test(d.code) || typeof d.message !== 'string' ||
+            !d.message.trim() || d.message.length > 1200 || /[\x00-\x1f]/.test(d.message)) return null;
+        return d;
+      };
+      window.mvErrorResponse = async function (response) {
+        var payload = {};
+        try { payload = await response.clone().json(); } catch (_) {}
+        return {status: response.status, detail: payload.detail};
+      };
+      window.mvRenderError = function (element, failure, action, payload) {
+        var detail = window.mvBusinessError(payload || failure);
+        var legacy = payload && window.mvPlainDetail(payload.detail);
+        element.replaceChildren(document.createTextNode(detail ? detail.message :
+          (legacy || window.mvErrorText(failure, action))));
+        if (!detail) return;
+        var fields = detail.field_errors;
+        if (fields && typeof fields === 'object') Object.keys(fields).slice(0, 30).forEach(function (name) {
+          if (!/^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(name) || typeof fields[name] !== 'string' || fields[name].length > 400) return;
+          var copy = document.createElement('span'); copy.className = 'business-field-error';
+          copy.textContent = ' ' + fields[name]; element.appendChild(copy);
+          var form = element.closest('form');
+          if (form) Array.from(form.elements).forEach(function (input) {
+            if (input.name === name) { input.setAttribute('aria-invalid', 'true');
+              if (element.id) input.setAttribute('aria-describedby', element.id); }
+          });
+        });
+        var next = detail.next_action;
+        if (!next || typeof next.href !== 'string' || typeof next.label !== 'string' || next.label.length > 120) return;
+        try {
+          var decoded = decodeURIComponent(next.href), url = new URL(next.href, location.href);
+          if (next.href[0] !== '/' || /^\/\//.test(decoded) || /[\\\x00-\x1f]/.test(decoded) || url.origin !== location.origin) return;
+          var link = document.createElement('a'); link.href = url.pathname + url.search + url.hash;
+          link.textContent = next.label; link.className = 'business-next-action';
+          element.appendChild(document.createTextNode(' ')); element.appendChild(link);
+        } catch (_) {}
+      };
       // Plain-language error text for a failed request. Pass the fetch
       // Response (or a thrown error) and, optionally, what the person was
       // trying to do ("save the policy"). Never shows HTTP codes, exception
       // class names or server internals.
       window.mvErrorText = function (failure, action) {
+        var business = window.mvBusinessError(failure);
+        if (business) return business.message;
         var what = action ? ('Could not ' + action + '. ') : '';
         var status = failure && typeof failure.status === 'number' ? failure.status : 0;
         if (!status) {
@@ -311,6 +393,15 @@
         }
         if (status >= 500) return what + 'Something went wrong on our side. Please try again in a minute.';
         return what + 'Something went wrong. Please try again.';
+      };
+      var originalErrorText = window.mvErrorText;
+      window.mvErrorText = function(failure, action) {
+        var value=originalErrorText(failure,action), locale=window.LightworkI18n;
+        if(!locale || locale.language==='en')return value;
+        var prefix=action ? 'Could not '+action+'. ' : '';
+        var reason=prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value;
+        if(prefix && locale.has(reason))return locale.text('This action could not be completed. {reason}',{reason:locale.text(reason)});
+        return locale.text(value);
       };
       // A server message is shown only when it is already a plain sentence
       // written for people ("Pick a later date."). Codes, snake_case names,
@@ -355,7 +446,7 @@
         // Unix epoch: (ts || 0) would turn 0/null/undefined/NaN into 1/1/1970,
         // which then leaks into visible text and aria-labels.
         if (!ts || !isFinite(ts)) return '';
-        try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
+        try { return window.LightworkI18n ? window.LightworkI18n.formatDate(ts) : new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
       };
     })();
 
@@ -365,6 +456,7 @@
       const label = document.getElementById('halt-label');
       if (!pill || !label) return;
       const canHalt = pill.dataset.canHalt === 'true';
+      function productText(source) { return window.LightworkI18n ? window.LightworkI18n.text(source) : source; }
       const configuredTimeout = Number(pill.dataset.haltTimeoutMs);
       const haltTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
         ? Math.min(configuredTimeout, 10000)
@@ -392,11 +484,13 @@
         const known = state === 'armed' || state === 'clear';
         pill.classList.toggle('armed', armed);
         pill.classList.toggle('unavailable', !known);
-        label.textContent = detail || (armed
+        const copy = detail || (armed
           ? (canHalt ? 'STOPPED — click to resume' : 'STOPPED')
           : state === 'clear'
             ? (canHalt ? 'Emergency stop' : 'Work is not stopped')
             : 'Stop status unavailable');
+        if (window.LightworkI18n) window.LightworkI18n.set(label, copy);
+        else label.textContent = copy;
         if (canHalt) {
           pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');
         } else {
@@ -474,11 +568,11 @@
       pill.addEventListener('click', async function(ev) {
         ev.preventDefault();
         if (!canHalt) {
-          mvToast('You do not have permission to stop or resume this work.', { error: true });
+          mvToast(productText('You do not have permission to stop or resume this work.'), { error: true });
           return;
         }
         if (pending || !knownState()) {
-          mvToast('Emergency stop status is unavailable. Retry after the dashboard can verify it.', { error: true });
+          mvToast(productText('Emergency stop status is unavailable. Retry after the dashboard can verify it.'), { error: true });
           return;
         }
         const wasArmed = haltState === 'armed';
@@ -491,8 +585,10 @@
             render(haltState, 'Resuming…');
             requestOptions = {method: 'DELETE'};
           } else {
-            const coverage = haltScope === 'cluster' ? 'across connected workers' : 'on this server';
-            if (!(await mvConfirm('Stop work ' + coverage + '? Work covered by this emergency stop pauses at its next step and waits for an authorized resume.', { okText: 'Stop work' }))) return;
+            const consequence = haltScope === 'cluster'
+              ? 'Stop work across connected workers? Work covered by this emergency stop pauses at its next step and waits for an authorized resume.'
+              : 'Stop work on this server? Work covered by this emergency stop pauses at its next step and waits for an authorized resume.';
+            if (!(await mvConfirm(consequence, { productCopy: true, okText: 'Stop work' }))) return;
             pending = true;
             refreshGeneration += 1;
             render(haltState, 'Stopping…');
@@ -515,7 +611,7 @@
             render('unknown');
             mvToast(typeof mvErrorText === 'function'
               ? mvErrorText(response, 'change the emergency stop')
-              : 'Emergency stop change failed. Please try again.', { error: true });
+              : productText('Emergency stop change failed. Please try again.'), { error: true });
           } else {
             // A 204 only acknowledges the mutation request.  It is not a
             // status document and cannot prove either local or cluster state.
@@ -525,7 +621,7 @@
           }
         } catch (e) {
           render('unknown');
-          mvToast('Emergency stop change failed. Lightwork is not responding. Check your connection and try again.', { error: true });
+          mvToast(productText('Emergency stop change failed. Lightwork is not responding. Check your connection and try again.'), { error: true });
         } finally {
           pending = false;
         }
@@ -567,6 +663,13 @@
         errBox.style.display = 'none';
         const kindEl = form.querySelector('[name="authoring_kind"]');
         const kind = kindEl ? kindEl.value : 'goal';
+        const accountSelection=(form.querySelector('[name="connection_references"]')||{}).value||'[]';
+        if(kind!=='goal'&&accountSelection!=='[]'){
+          var accountNotice='This draft has selected accounts. Run it as a task, or return to Templates to prepare a new reusable draft without private account selections.';
+          if(window.LightworkI18n)window.LightworkI18n.set(errBox,accountNotice);else errBox.textContent=accountNotice;
+          errBox.style.display='block';return;
+        }
+
         const files = form.querySelector('input[type="file"]');
         // Stage an unsaved brief in the selected editor; never silently execute
         // a goal when the selected authoring action cannot accept attachments.
@@ -617,10 +720,22 @@
           return;
         }
         if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+        const submittedForm = new FormData(form);
+        const submittedControls = Array.from(form.querySelectorAll('input,textarea,select')).map(function (control) {
+          const wasDisabled = control.disabled; control.disabled = true; return [control,wasDisabled];
+        });
         try {
-          const resp = await fetch(form.action, { method: 'POST', body: new FormData(form) });
-          if (resp.redirected) { window.location.href = resp.url; return; }
-          if (resp.ok) { window.location.reload(); return; }
+          const resp = await fetch(form.action, { method: 'POST', body: submittedForm });
+          if (resp.redirected && resp.ok && new URL(resp.url).pathname.startsWith('/chat/goal/')) {
+            if (form.mvRecovery) await form.mvRecovery.clear();
+            window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: form, recoveryCleared: true}}));
+            window.location.href = resp.url; return;
+          }
+          if (resp.ok && !resp.redirected) {
+            if (form.mvRecovery) await form.mvRecovery.clear();
+            window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: form, recoveryCleared: true}}));
+            window.location.reload(); return;
+          }
           let serverDetail = '';
           try { const j = await resp.json(); if (j && typeof j.detail === 'string') serverDetail = j.detail; } catch (e) {}
           let detail = window.mvErrorText(resp, 'start the task');
@@ -641,6 +756,7 @@
           errBox.textContent = 'Lightwork is not responding. Check your connection and try again.';
           errBox.style.display = 'block';
         } finally {
+          submittedControls.forEach(function (item) { item[0].disabled = item[1]; });
           if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         }
       });
@@ -781,19 +897,78 @@
       syncAria();
     })();
 
+    (function () {
+      var system = window.matchMedia('(prefers-color-scheme: dark)');
+      var themeClass = Array.from(document.body.classList).find(function (name) { return name.startsWith('theme-'); });
+      document.body.dataset.themePreference = themeClass ? themeClass.slice(6) : 'dark';
+      window.mvApplyDisplayPreference = function (key, value) {
+        if (key === 'text_size') {
+          document.documentElement.dataset.textSize = value;
+          document.documentElement.style.fontSize = value === 'larger' ? '125%' : value === 'large' ? '112.5%' : '';
+          return;
+        }
+        if (['theme', 'font', 'density'].indexOf(key) === -1) return;
+        if (key === 'theme') { document.body.dataset.themePreference = value; if (value === 'system') value = system.matches ? 'dark' : 'light'; }
+        Array.from(document.body.classList).forEach(function (name) { if (name.startsWith(key + '-')) document.body.classList.remove(name); });
+        document.body.classList.add(key + '-' + value);
+        window.dispatchEvent(new CustomEvent('lightwork:appearance-changed', {detail:{key:key,value:value}}));
+      };
+      var size = document.querySelector('meta[name="lightwork-text-size"]');
+      window.mvApplyDisplayPreference('text_size', size ? size.content : 'standard');
+      window.mvApplyDisplayPreference('theme', document.body.dataset.themePreference);
+      function sync() { if (document.body.dataset.themePreference === 'system') window.mvApplyDisplayPreference('theme', 'system'); }
+      if (system.addEventListener) system.addEventListener('change', sync); else system.addListener(sync);
+    })();
+
     // Preferences popover: close on outside-click and Escape (it is a native
-    // <details>, so choosing an option already reloads the page and closes it).
+    // <details>; choosing an option keeps both the page and popover open).
     (function () {
       var prefs = document.getElementById('prefs-menu');
       if (!prefs) return;
+      var status = document.getElementById('prefs-status'), undo = document.getElementById('prefs-undo');
+      var saving = false, previous = null;
+      async function savePreference(key, value, select, isUndo) {
+        if (saving) return;
+        saving = true;
+        var old = key === 'interface_language' ? (select.dataset.savedValue || '') : key === 'text_size' ? (document.documentElement.dataset.textSize || 'standard') :
+          key === 'theme' ? (document.body.dataset.themePreference || 'dark') :
+          Array.from(document.body.classList).find(function (name) { return name.startsWith(key + '-'); });
+        if (old && old.startsWith(key + '-')) old = old.slice(key.length + 1);
+        prefs.querySelectorAll('select, button, input').forEach(function (control) { control.disabled = true; });
+        window.mvApplyDisplayPreference(key, value);
+        if (status) window.LightworkI18n ? window.LightworkI18n.set(status, 'Saving…') : status.textContent = 'Saving…';
+        try {
+          var context = document.querySelector('meta[name="lightwork-preference-context"]');
+          var revision = document.querySelector('meta[name="lightwork-preference-revision"]');
+          var device = document.getElementById('prefs-device-only');
+          var response = await fetch('/api/v1/preferences/display', {method: 'POST', credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key:key, value:value,
+              context:context ? context.content : '', expected_revision:revision ? revision.content : null,
+              device_only:!!(device && device.checked)})});
+          var data = await response.json();
+          if (!response.ok) throw response;
+          if (revision && data.revision) revision.content = data.revision;
+          previous = isUndo ? null : {key:key, value:old, select:select};
+          if (undo) undo.hidden = !previous;
+          if (key === 'interface_language') select.dataset.savedValue = value;
+          var savedMessage = key === 'interface_language' ? 'Language saved. Open another page or reload after saving your draft.' : 'Saved. Your editor and unsaved work remain open.';
+          if (status) window.LightworkI18n ? window.LightworkI18n.set(status, savedMessage) : status.textContent = savedMessage;
+        } catch (failure) {
+          window.mvApplyDisplayPreference(key, old);
+          if (select) select.value = old;
+          if (status) { var failureMessage = 'Appearance was not saved. The earlier appearance is restored; retry or refresh preferences after saving your work.'; if (window.LightworkI18n) window.LightworkI18n.set(status, failureMessage); else status.textContent = failureMessage; }
+        } finally {
+          saving = false; prefs.querySelectorAll('select, button, input').forEach(function (control) { control.disabled = false; });
+        }
+      }
       prefs.querySelectorAll('[data-ui-preference]').forEach(function (select) {
         select.addEventListener('change', function () {
           var key = select.getAttribute('data-ui-preference');
-          if (!key || !select.value) return;
-          var target = new URL(window.location.href);
-          target.searchParams.set(key, select.value);
-          window.location.assign(target.toString());
+          if (key && (select.value || key === 'interface_language')) savePreference(key, select.value, select, false);
         });
+      });
+      if (undo) undo.addEventListener('click', function () {
+        if (previous) { previous.select.value = previous.value; savePreference(previous.key, previous.value, previous.select, true); }
       });
       document.addEventListener('click', function (ev) {
         if (prefs.open && !prefs.contains(ev.target)) prefs.open = false;
@@ -872,3 +1047,14 @@
   // field, which would renew the reference on the click that submits it.
   document.addEventListener('input', renew, true);
 })();
+
+// Shared reveal helper respects the person's motion setting on every workspace.
+window.mvReveal = function (element, options) {
+  if (!element) return;
+  var opts = Object.assign({block: 'nearest'}, options || {});
+  opts.behavior = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth';
+  element.scrollIntoView(opts);
+  // Only explicit reveal actions use this helper, never background polling.
+  if (!element.matches('input, button, select, textarea, a[href], [tabindex]')) element.tabIndex = -1;
+  element.focus({preventScroll: true});
+};

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
+_TOKEN = re.compile(r"(?:r1_)?[A-Za-z0-9_-]{43}\Z")
 _MAX_RECORD_BYTES = 4096
 _CLEANUP_LIMIT = 64
 

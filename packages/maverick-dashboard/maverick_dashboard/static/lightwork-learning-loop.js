@@ -252,7 +252,7 @@
     return get('/efficacy?model_id=' + encodeURIComponent(model())).then(function (data) {
       rows.textContent = '';
       if (!data.lessons.length) {
-        var tr = el('tr'); var td = el('td', 'This model has no lessons yet.'); td.colSpan = 4;
+        var tr = el('tr'); var td = el('td', 'This model has no currently available shared lessons.'); td.colSpan = 4;
         tr.appendChild(td); rows.appendChild(tr); return;
       }
       data.lessons.forEach(function (r) {

@@ -86,6 +86,26 @@ class HostedEmbedder:
         return {"provider": self.provider, "model": self.model, "endpoint": self.base_url,
                 "revision": self.revision, "preprocessing": "text-verbatim.v1"}
 
+    def _bounded_response(self, texts: list[str], *, timeout: float) -> dict:
+        """Raw response for the core rebuild's already-reserved physical call.
+
+        Only the bounded rebuild service calls this transport: it owns admission,
+        strict usage accounting and the durable no-retry receipt. Ordinary embed
+        calls continue through the standalone-compatible meter below.
+        """
+        import httpx
+
+        payload = {"model": self.model, "input": texts}
+        if self.provider == "voyage":
+            payload["truncation"] = False
+        response = httpx.post(
+            f"{self.base_url}/embeddings",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json=payload, timeout=timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         import httpx
 
@@ -143,6 +163,20 @@ class CohereEmbedder:
         return {"provider": "cohere", "model": self.model, "endpoint": self.base_url,
                 "revision": self.revision, "document_input_type": self.input_type,
                 "query_input_type": "search_query", "preprocessing": "text-verbatim.v1"}
+
+    def _bounded_response(self, texts: list[str], *, timeout: float) -> dict:
+        """Return native usage under the core rebuild's prior durable admission."""
+        import httpx
+
+        response = httpx.post(
+            f"{self.base_url}/embed",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"model": self.model, "texts": texts, "input_type": self.input_type,
+                  "embedding_types": ["float"], "truncate": "NONE"},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return response.json()
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return self._embed(texts, input_type=self.input_type)

@@ -46,6 +46,7 @@
 <div class="gs">
   <div class="gs__head">
     <h1 class="page-title">Get started</h1>
+    {% if employee_activation_enabled %}<p><a class="btn btn--primary" href="/get-started/employee">Choose a job and review your first result</a></p>{% endif %}
     <p class="gs__sub">Set up your workspace, choose a first workflow, and review its result. Your progress updates from recorded work.</p>
     <div class="gs__progress">
       <div class="gs__bar" role="progressbar" aria-label="Setup progress"

@@ -58,9 +58,9 @@ def test_unifies_every_guardrail(monkeypatch, tmp_path):
         assert label in text
     # And their key details render, in plain words.
     assert "company rule: require human actions" in text
-    assert "prompt injection" in text
-    assert "Not allowed to use s3" in text
-    assert "Not allowed to send data to Openai" in text
+    assert "prompt injection" not in text
+    assert "Not allowed to use this tool" in text
+    assert "Not allowed to send data to That service" in text
     from test_support.plain_language import developer_terms
     assert developer_terms(text) == []
 
@@ -70,9 +70,19 @@ def test_consent_approve_excluded_deny_counted(monkeypatch, tmp_path):
     from maverick.audit import record
     record("consent_result", agent="a", decision="approve", action="deploy")
     record("consent_result", agent="a", decision="deny", action="rm -rf /")
-    text = _client().get("/oversight").text
+    from test_support.element_text import element_texts
+    from test_support.plain_language import visible_text
+
+    response = _client().get("/oversight")
+    assert response.status_code == 200
+    text = visible_text(response.text)
     # A denial is an intervention; an approval is not.
-    assert "rm -rf /" in text
+    assert "1 intervention in this window" in text
+    cells = element_texts(response.text, "td")
+    assert len(cells) == 5  # Exactly one five-column event row, never the approval.
+    assert cells[1] == cells[4] == "Consent refused"
+    assert "Consent refused" in text
+    assert "rm -rf /" not in text
     assert "deploy" not in text
 
 
@@ -82,7 +92,7 @@ def test_non_intervention_events_excluded(monkeypatch, tmp_path):
     record("tool_call", agent="a", name="read_file", input_summary="x")
     text = _client().get("/oversight").text
     # Ordinary activity isn't an intervention -> empty state.
-    assert "No interventions on this day" in text and "Pick another day" in text
+    assert "No recorded interventions on this day." in text and "Pick another day" in text
 
 
 def test_halt_state_reflected(monkeypatch, tmp_path):
@@ -271,16 +281,17 @@ def test_oversight_audit_events_are_owner_scoped(monkeypatch, tmp_path):
 
     text = _client().get("/oversight", headers=_as("alice")).text
 
-    # Names are shown in plain words; the owner scoping is what matters.
+    # Even owned audit rows are metadata; exact source-task links remain scoped.
     lowered = text.lower()
-    assert "alice.agent.internal" in lowered
-    assert "alice secret tool" in lowered
+    assert "alice.agent.internal" not in lowered
+    assert "alice secret tool" not in lowered
+    assert "alice active" in lowered
     assert "bob.agent.internal" not in lowered
     assert "prod admin shell" not in lowered and "prod-admin-shell" not in lowered
     assert '<div class="num">1</div>' in text
 
 
-def test_oversight_admin_still_sees_all_audit_events(monkeypatch, tmp_path):
+def test_oversight_admin_keeps_source_ownership(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _enable_oidc_principal_map(monkeypatch)
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
@@ -296,8 +307,9 @@ def test_oversight_admin_still_sees_all_audit_events(monkeypatch, tmp_path):
 
     text = _client().get("/oversight", headers=_as("root")).text
 
-    assert "alice-block" in text
-    assert "bob-block" in text
+    assert "alice-block" not in text and "alice active" not in text
+    assert "bob-block" not in text and "bob active" not in text
+    assert "No recorded interventions on this day." in text
 
 
 def test_day_traversal_is_neutralized(monkeypatch, tmp_path):
@@ -358,7 +370,7 @@ def _write_event_on_day(audit_dir, day, kind, **payload):
     names by *today*, so multi-day fixtures are written directly)."""
     import json
     audit_dir.mkdir(parents=True, exist_ok=True)
-    ev = {"v": 1, "ts": 1_000_000.0, "kind": kind, "agent": "a", "goal_id": 1, **payload}
+    ev = {"v": 1, "ts": 1_000_000.0, "kind": kind, "agent": "a", "goal_id": None, **payload}
     with open(audit_dir / f"{day}.ndjson", "a", encoding="utf-8") as f:
         f.write(json.dumps(ev) + "\n")
 
@@ -374,8 +386,9 @@ def test_multiday_range_spans_day_files(monkeypatch, tmp_path):
     _write_event_on_day(audit_dir, "2026-03-30", "capability_denied",
                         tool="s3outofrange")  # outside the window
     text = _client().get("/oversight?since=2026-01-01&until=2026-02-28").text
-    assert "jan-hold" in text                  # in range (Jan day-file)
-    assert "feb-block" in text                 # in range (Feb day-file)
+    assert "jan-hold" not in text and "feb-block" not in text
+    assert "Safety filter stopped it at tool" in text
+    assert "Held by a company rule" in text
     assert "s3outofrange" not in text          # March is outside [since, until]
     assert "2026-01-01" in text and "2026-02-28" in text  # range shown in label
 

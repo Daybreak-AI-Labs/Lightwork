@@ -669,3 +669,20 @@ def connector_catalog() -> list[dict]:
     out.extend(_BESPOKE_CATALOG)
     out.sort(key=lambda e: e["name"])
     return out
+
+
+def connection_setup_catalog() -> list[dict]:
+    """Describe existing adapters without resolving credentials or calling providers."""
+    specs = {spec["name"]: spec for spec in _SPECS + _READ_SPECS + _GRAPHQL_SPECS}
+    rows = []
+    for item in connector_catalog():
+        spec = specs.get(item["name"])
+        supported = spec is not None and not spec.get("extra_headers_env")
+        auth = ("Username and API key" if spec.get("basic") else
+                str(spec.get("scheme") or "API key") + " token") if spec is not None else "Dedicated integration"
+        rows.append({"name": item["name"], "label": item["label"], "auth_method": auth,
+                     "key_setup_supported": supported,
+                     "prerequisites": ("Service API address and a credential with only the permissions your task needs."
+                                       if supported else "This adapter requires its dedicated administrator setup; a single saved key is insufficient."),
+                     "live_provider_verified": False})
+    return rows

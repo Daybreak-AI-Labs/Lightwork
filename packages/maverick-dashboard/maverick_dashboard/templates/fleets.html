@@ -9,7 +9,7 @@
                      stop an action or hold it for a person to approve
                      (the EU AI Act human-oversight requirement); holds wait
                      in <a href="/approvals">Approvals</a> and every decision
-                     is listed below.') %}
+                     is listed below.' | safe) %}
     {{ state('Current state', (fleets | length) ~ (' team' if fleets | length == 1 else ' teams'),
              badge=((pending_count ~ ' awaiting sign-off') if pending_count
                     else 'nothing waiting'),

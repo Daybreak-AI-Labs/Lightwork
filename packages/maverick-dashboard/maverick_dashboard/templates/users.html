@@ -6,6 +6,9 @@
      their sign-in. The exact sign-in identity only travels as a form value. #}
   {% macro who(principal) %}{% set p = principal | identity %}{% set label = people_labels.get(principal) or invite_labels.get(principal) %}<span>{% if label %}{{ label }}{% else %}{{ p.name }}{% if p.detail %} <span class="muted users-normal">· {{ p.detail }}</span>{% endif %}{% endif %}</span>{% endmacro %}
   {% macro name_of(principal) %}{{ people_labels.get(principal) or invite_labels.get(principal) or (principal | identity).name }}{% endmacro %}
+  {# Native forms must be bound before the shared script finishes loading.
+     This is the request-rendered workspace, never the current browser cookie. #}
+  {% macro workspace_binding() %}{% if workspace_tenant_selection %}<input type="hidden" name="_expected_tenant" value="{{ workspace_tenant_selection }}">{% endif %}{% endmacro %}
   {% macro person_options(selected='', only_without_role=false) %}
     {% for person in people if not only_without_role or not person.role %}
     <option value="{{ person.principal }}"{% if person.principal == selected %} selected{% endif %}>{{ person.label }}</option>
@@ -18,12 +21,14 @@
       {% endfor %}
     </div>
   {% endmacro %}
-  {% call hero('Administration', 'Users &amp; roles',
+  {% set users_lede %}
+    Who can use this workspace and what each person is
+    allowed to do. A new person who signs in starts as
+    <strong>{{ default_role | role_label }}</strong> until you change it here.
+  {% endset %}
+  {% call hero('Administration', 'Users & roles',
                subtitle='Who can use Lightwork',
-               lede='Who can use this workspace and what each person is
-                     allowed to do. A new person who signs in starts as
-                     <strong>' ~ (default_role | role_label) ~ '</strong> until you change it
-                     here.') %}
+               lede=users_lede) %}
     {{ state('Current state',
              users | length ~ ' ' ~ ('person has' if users | length == 1 else 'people have') ~ ' a role',
              badge='Company sign-in on' if auth_on else 'Sign-in off',
@@ -45,6 +50,22 @@
   </div>
   {% endif %}
 
+  {% if global_admin %}
+  <p><a class="btn" href="/users/departures">Review employee departure</a> Deactivation and retained-work handoffs are separate from resetting a role.</p>
+  <section class="panel"><h2>Installation first-login baseline</h2>
+    <p>Current fallback: <strong>{{ first_login.role | role_label }}</strong>, with powers {{ first_login.permissions | join(', ') }}.
+    Departments: <strong>{% if first_login.departments is none %}Every department{% else %}{{ first_login.departments | join(', ') or 'None' }}{% endif %}</strong>.
+    Explicit account assignments, verified group mappings and workspace memberships take precedence. Tool and task limits still apply.</p>
+    {% if first_login.conservative %}<p>The viewer/no-department baseline is in effect.</p>{% else %}
+    <p>Upgrades keep the existing choice. You can deliberately change the fallback to <strong>Viewer with no departments</strong>: view owned work, no new task runs and no department specialists until access is assigned.</p>
+    <form action="/users/first-login-baseline" method="post" data-users-confirm="Apply viewer with no departments to the installation fallback? This also changes existing accounts that still inherit the default. Explicit roles and workspace memberships remain." data-users-ok="Apply reviewed baseline">
+      {{ workspace_binding() }}
+      <input type="hidden" name="expected_revision" value="{{ first_login.revision }}">
+      <label><input type="checkbox" name="confirm" value="existing-unassigned" required> I reviewed that existing unassigned accounts also inherit this change.</label>
+      <button class="btn" type="submit">Apply viewer and no departments</button>
+    </form>{% endif %}
+  </section>
+  <section class="panel"><h2>Employee content is private</h2><p>Administrator roles manage access and policy. They no longer open another employee's task text, files or chat by default. Existing employee-owned records use their recorded owner; unowned legacy work requires an explicit content review. Shared result packets keep their assigned reviewer access.</p><a class="btn" href="/content-access">Review or request content access</a></section>
   <div class="section-head"><h2>People</h2></div>
   <div class="panel">
     {% if users %}
@@ -56,6 +77,7 @@
           <td>{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</td>
           <td>
             <form method="post" action="/users/set" class="users-row-form" id="role-form-{{ loop.index }}">
+              {{ workspace_binding() }}
               <input type="hidden" name="principal" value="{{ principal }}" />
               <label class="sr-only" for="role-{{ loop.index }}">Role for {{ name_of(principal) }}</label>
               <select class="select" name="role" id="role-{{ loop.index }}">
@@ -66,9 +88,12 @@
           <td class="users-actions">
             <button type="submit" form="role-form-{{ loop.index }}" class="btn btn--primary" aria-label="Save role for {{ name_of(principal) }}">Save role</button>
             <form method="post" action="/users/remove" class="users-inline"
-                  data-users-confirm="Remove {{ name_of(principal) }}'s role? They go back to the standard {{ default_role | role_label }} role." data-users-ok="Remove">
+                  data-users-confirm="Use {{ standard_roles[principal].label }} from {{ standard_roles[principal].source }} for {{ name_of(principal) }}? Powers: {{ standard_roles[principal].permissions | join(', ') or 'none' }}. This may add permissions and does not deactivate their account." data-users-ok="Use standard role">
+              {{ workspace_binding() }}
               <input type="hidden" name="principal" value="{{ principal }}" />
-              <button type="submit" class="btn btn--danger" aria-label="Remove {{ name_of(principal) }}'s role">Remove</button>
+              <input type="hidden" name="expected_standard" value="{{ standard_roles[principal].revision }}" />
+              <button type="submit" class="btn" aria-label="Use standard role for {{ name_of(principal) }}">Use standard role</button>
+              <small>Becomes {{ standard_roles[principal].label }}; {{ standard_roles[principal].source }}. {{ standard_roles[principal].permissions | join(', ') or 'No active powers' }}.</small>
             </form>
           </td>
         </tr>
@@ -85,6 +110,7 @@
     <h3 class="users-subhead">Give someone a role</h3>
     {% if unassigned %}
     <form method="post" action="/users/set" class="users-row-form">
+      {{ workspace_binding() }}
       <label class="users-field">
         <span>Person</span>
         <select class="select" name="principal" required>
@@ -94,7 +120,8 @@
       </label>
       <label class="users-field">
         <span>Role</span>
-        <select class="select" name="role">
+        <select class="select" name="role" required>
+          <option value="" disabled selected>Choose a role</option>
           {% for r in roles %}<option value="{{ r }}">{{ r | role_label }}</option>{% endfor %}
         </select>
       </label>
@@ -132,6 +159,7 @@
     </div>
     {% endif %}
     <form method="post" action="/users/invite" class="users-row-form">
+      {{ workspace_binding() }}
       <label class="users-field users-grow">
         <span>Email address</span>
         <input class="input" type="email" name="email" placeholder="colleague@company.com" autocomplete="off" required />
@@ -157,6 +185,7 @@
         <span class="badge">{{ inv.role | role_label }}</span>
         <form method="post" action="/users/invite/revoke" class="users-inline"
               data-users-confirm="Cancel the invitation for {{ inv.email }}? The link will stop working." data-users-ok="Cancel invitation">
+          {{ workspace_binding() }}
           <input type="hidden" name="invite_id" value="{{ inv.id }}" />
           <button type="submit" class="btn btn--danger" aria-label="Cancel the invitation for {{ inv.email }}">Cancel invitation</button>
         </form>
@@ -178,7 +207,9 @@
   </div>
   {% endif %}
 
+  {% endif %}
   <div class="section-head"><h2>Workspace members</h2></div>
+  {% if not global_admin %}<p class="muted">You manage membership only in the workspaces listed below. Ask an installation administrator to invite a new colleague or change installation-wide access.</p>{% endif %}
   <section id="wm-root" class="panel" data-tenant="{{ wm_tenant }}" data-expected="{{ workspace_tenant_selection }}"
            data-labels='{{ people_labels | tojson }}' data-role-labels='{{ role_labels | tojson }}'
            data-autoload="true" aria-labelledby="wm-title">
@@ -198,7 +229,7 @@
         </select>
       </label>
       <label class="users-field" for="wm-role">Role in this workspace
-        <select id="wm-role" class="select">{% for r in roles %}<option value="{{ r }}"{% if r == 'operator' %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}</select>
+        <select id="wm-role" class="select" required><option value="" disabled selected>Choose a role</option>{% for r in roles %}<option value="{{ r }}">{{ r | role_label }}</option>{% endfor %}</select>
       </label>
       <button type="submit" class="btn btn--primary">Save workspace member</button>
       <button id="wm-refresh" type="button" class="btn btn--ghost">Refresh</button>
@@ -209,6 +240,7 @@
     {% endif %}
   </section>
 
+  {% if global_admin %}
   <div class="section-head"><h2>Department access</h2></div>
   <div class="panel">
     <p class="muted settings-lead">Limit a person to the departments their job needs. Someone in
@@ -222,11 +254,13 @@
       <summary>{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}
         <span class="muted">· {{ suites | length }} department{{ '' if suites | length == 1 else 's' }}</span></summary>
       <form method="post" action="/users/suites/set">
+        {{ workspace_binding() }}
         <input type="hidden" name="principal" value="{{ principal }}" />
         {{ department_boxes('grant-' ~ loop.index, suites) }}
         <p class="users-row-form"><button type="submit" class="btn btn--primary" aria-label="Save departments for {{ name_of(principal) }}">Save departments</button></p>
       </form>
       <form method="post" action="/users/suites/remove" class="users-inline">
+        {{ workspace_binding() }}
         <input type="hidden" name="principal" value="{{ principal }}" />
         {% if grant_can_use_default.get(principal) %}
         <button type="submit" class="btn" aria-label="Use standard departments for {{ name_of(principal) }}">Use standard departments</button>
@@ -241,6 +275,7 @@
     <h3 class="users-subhead">Limit someone's departments</h3>
     {% if people %}
     <form method="post" action="/users/suites/set">
+      {{ workspace_binding() }}
       <label class="users-field">
         <span>Person</span>
         <select class="select" name="principal" required>
@@ -302,6 +337,7 @@
           <td>
             <form method="post" action="/users/roles/delete" class="users-inline"
                   data-users-confirm="Delete the {{ name | role_label }} role? This can't be undone." data-users-ok="Delete role">
+              {{ workspace_binding() }}
               <input type="hidden" name="name" value="{{ name }}" />
               <button type="submit" class="btn btn--danger"
                       aria-label="Delete the {{ name | role_label }} role">Delete</button>
@@ -315,6 +351,7 @@
       deleted. Give those people another role first. Saving the same name again updates it.</p>
     {% endif %}
     <form method="post" action="/users/roles/save" class="users-row-form">
+      {{ workspace_binding() }}
       <label class="users-field">
         <span>Role name</span>
         <input class="input" name="name" required maxlength="32" placeholder="e.g. Privacy officer" autocomplete="off" />
@@ -333,6 +370,7 @@
     </form>
   </div>
 
+  {% endif %}
   <style>
     .users-saved { border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4); }
     .users-note { border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
@@ -361,6 +399,14 @@
   <script>
   (function () {
     'use strict';
+    var rolePermissions = {{ role_permissions | tojson }};
+    var powerNames = {view: 'view work', operate: 'run and change work', audit: 'read the activity record', admin: 'administer people and policy'};
+    document.querySelectorAll('select[name="role"], #wm-role').forEach(function (select) {
+      var preview = document.createElement('p'); preview.className = 'muted users-help'; preview.setAttribute('role', 'status');
+      select.parentNode.appendChild(preview);
+      function update() { preview.textContent = select.value ? 'This role can: ' + (rolePermissions[select.value] || []).map(function (power) { return powerNames[power] || power; }).join(', ') + '.' : 'Choose the access this person needs.'; }
+      select.addEventListener('change', update); update();
+    });
     document.querySelectorAll('form[data-users-confirm]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
         if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }

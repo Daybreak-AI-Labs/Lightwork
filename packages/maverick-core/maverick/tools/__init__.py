@@ -717,6 +717,15 @@ AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES = AMBIENT_CRED_TOOL_NAMES | frozenset({
 
 
 def _ambient_credential_denial(name: str, principal: str | None) -> str | None:
+    from ..template_connections import SelectionUnavailable, active, selected
+    if active() and name in AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES:
+        if name == "gdrive":
+            try:
+                selected("gdrive", principal)
+                return None
+            except SelectionUnavailable:
+                pass
+        return "REFUSED: this connector cannot use the task's exact selected account. No ambient account was substituted."
     if not principal or name not in AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES:
         return None
     from ..enterprise import enterprise_enabled

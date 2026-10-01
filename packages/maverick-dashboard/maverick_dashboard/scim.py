@@ -421,14 +421,12 @@ def _provision_tenant(uid: str, display_name: str) -> None:
 
     if registry.get_tenant(uid) is not None:
         raise RuntimeError("SCIM tenant id already exists")
-    try:
-        registry.create_tenant(uid, display_name=display_name or uid)
-    except Exception:
-        # create_tenant persists the registry row before materializing its
-        # workspace. If that final mkdir fails, compensate the partial row so a
-        # failed SCIM POST cannot leave an orphan active tenant either.
-        _rollback_provisioned_tenant(uid)
-        raise
+    # A refusal does not prove ownership of this UUID: another provisioner may
+    # have reserved it after the read above. Core creates its private namespace
+    # before publication. Preserve ambiguous state for operator review; only
+    # compensate after this call returned successfully and a later SCIM step
+    # failed. A retry chooses a new UUID, never adopts retained state.
+    registry.create_tenant(uid, display_name=display_name or uid)
 
 
 def _rollback_provisioned_tenant(uid: str) -> None:

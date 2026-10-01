@@ -93,14 +93,18 @@ def admit(world, admission_key: str, title: str, description: str, *,
     return goal_id, state
 
 
-def admit_batch(world, entries: list[tuple[str, str, str]], *, owner: str,
+def admit_batch(world, entries: list[tuple], *, owner: str,
                 origin: str, trigger_key: str) -> list[tuple[str, int, str]]:
     """Commit the entire bounded polled batch before dispatching any of it."""
     if len(entries) > 25:
         raise ValueError("event admission batch exceeds poll limit")
     admitted = []
     with _transaction(world, trigger_key) as (db, mark, where, scope, postgres):
-        for admission_key, title, description in entries:
+        for entry in entries:
+            admission_key, title, description = entry[:3]
+            refs = entry[3] if len(entry) == 4 else []
+            from .template_connections import packed
+            selection = packed(owner, refs)
             key = (*scope[:-1], admission_key)
             result = db.execute(
                 f"SELECT goal_id,delivery_state FROM event_goal_admissions WHERE {where}", key)
@@ -112,12 +116,13 @@ def admit_batch(world, entries: list[tuple[str, str, str]], *, owner: str,
             if postgres:
                 from .world_model_backends.postgres import _active_tenant, _seal
                 db.execute(
-                    "INSERT INTO goals(title,description,status,created_at,updated_at,owner,tenant_id) "
-                    "VALUES(%s,%s,'pending',%s,%s,%s,%s) RETURNING id",
-                    (_seal(title), _seal(description), now, now, owner, _active_tenant()))
+                    "INSERT INTO goals(title,description,status,created_at,updated_at,owner,tenant_id,connection_selection) "
+                    "VALUES(%s,%s,'pending',%s,%s,%s,%s,%s) RETURNING id",
+                    (_seal(title), _seal(description), now, now, owner, _active_tenant(), _seal(selection)))
                 goal_id = int(db.fetchone()[0])
             else:
-                goal_id = world.create_goal(title, description, owner=owner)
+                goal_id = world.create_goal(title, description, owner=owner,
+                    **({"connection_references": refs} if refs else {}))
             db.execute(
                 f"INSERT INTO goal_origins(goal_id,kind,ref,created_at) VALUES({mark},{mark},{mark},{mark})",
                 (goal_id, "event", origin, now))

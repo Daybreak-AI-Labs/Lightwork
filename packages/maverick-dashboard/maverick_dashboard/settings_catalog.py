@@ -91,6 +91,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from maverick.persona import STYLES, style_choices
+
 GROUPS: tuple[str, ...] = (
     "Safety",
     "Security",
@@ -636,10 +638,10 @@ SETTINGS: tuple[Setting, ...] = (
       "text", "AI models", "", "maverick.persona", max_length=60,
       pattern=r"[^\n\r<>{}]{0,60}"),
     S("persona", "style", "Writing style",
-      "How much detail agents put in their replies.",
+      "Voice and detail in replies. " + " ".join(f"{label}: {STYLES[key]}"
+          for key, label in style_choices() if key),
       "select", "AI models", "", "maverick.persona",
-      choices=(("", "Balanced (default)"), ("concise", "Short and direct"),
-               ("verbose", "Explains its reasoning"))),
+      choices=style_choices(), aliases="writing tone personality voice"),
     S("voice", "dashboard_commands", "Voice input in chat",
       "Show a microphone button in Chat that turns spoken requests into text.",
       "toggle", "AI models", True, "maverick_dashboard.api", env=("MAVERICK_VOICE_COMMANDS",)),
@@ -719,6 +721,9 @@ SETTINGS: tuple[Setting, ...] = (
       pattern=r"[A-Za-z]{3}"),
 
     # ------------------------------------------------------- Memory & learning
+    S("memory", "fact_tags", "Organize shared facts with tags",
+      "Let operators add metadata tags to shared facts and filter by those tags. Tags never grant access.",
+      "toggle", "Memory & learning", False, "maverick.fact_revision"),
     S("memory", "temporal", "Keep the history of every fact",
       "Remember what was believed on each date instead of only the latest value.",
       "toggle", "Memory & learning", False, "maverick.config", env=("MAVERICK_TEMPORAL_MEMORY",)),
@@ -740,6 +745,16 @@ SETTINGS: tuple[Setting, ...] = (
     S("cortex", "enable", "Company memory",
       "One governed place to look up knowledge, skills, lessons and past decisions, with every look-up recorded.",
       "toggle", "Memory & learning", True, "maverick.cortex"),
+    S("knowledge", "reindex_jobs", "Bounded search index rebuilds",
+      "Review collection size and limits, track rebuild progress, and cancel before publication. Paid adapters require verified cost admission.",
+      "toggle", "Memory & learning", False, "maverick.knowledge_reindex_jobs"),
+    S("knowledge", "reindex_max_chunks", "Maximum passages in a rebuild",
+      "Refuse a rebuild above this collection size.", "number", "Memory & learning", 10000, "maverick.knowledge_reindex_jobs", minimum=1, maximum=100000, integer=True),
+    S("knowledge", "reindex_max_wall_seconds", "Rebuild time limit in seconds",
+      "Stop at a safe boundary after reaching this elapsed time; a batch already running finishes first.", "number", "Memory & learning", 300, "maverick.knowledge_reindex_jobs", minimum=1, maximum=3600, integer=True),
+    S("knowledge", "reindex_max_dollars", "Rebuild provider cost limit",
+      "Maximum USD reservation at reviewed standard embedding rates. Each batch is admitted before sending; uncertain paid requests are never retried automatically. Provider invoices remain authoritative.",
+      "number", "Memory & learning", 5.0, "maverick.knowledge_reindex_jobs", minimum=0, maximum=1000, unit="USD"),
     S("knowledge", "enable", "Document search for agents",
       "Let agents search your uploaded documents by meaning and cite them.",
       "toggle", "Memory & learning", False, "maverick.config"),
@@ -863,6 +878,44 @@ SETTINGS: tuple[Setting, ...] = (
       "toggle", "Data retention", False, "maverick.workspace_journal"),
 
     # ------------------------------------------------------------ Integrations
+    S("mobile_offline", "enabled", "Allow offline copies on mobile devices",
+      "Let current policy-aware companions keep a bounded offline task copy. People can turn saving off; workspace policy can only narrow this installation ceiling.",
+      "toggle", "Data retention", True, "maverick.mobile_offline_policy"),
+    S("mobile_offline", "max_age_seconds", "Keep mobile offline copies for at most",
+      "A cached copy expires after this time, even while the device is offline. Shorter workspace limits take precedence.",
+      "number", "Data retention", 86400, "maverick.mobile_offline_policy", minimum=1, maximum=1440,
+      scale=60, integer=True, unit="minutes"),
+    S("mobile_offline", "max_bytes", "Largest mobile offline copy",
+      "Refuse larger offline copies instead of silently dropping parts of them.",
+      "number", "Data retention", 2097152, "maverick.mobile_offline_policy", minimum=1, maximum=2048,
+      scale=1024, integer=True, unit="KB"),
+    S("device_pairing", "enabled", "Allow personal companion pairing",
+      "Let named members pair devices through an expiring code and explicit browser confirmation. Each credential is limited to its member's own tasks in one workspace. Disabling this denies existing devices on their next request.",
+      "toggle", "People & access", False, "maverick_dashboard.device_pairing"),
+    S("device_pairing", "credential_hours", "Paired-device credential lifetime",
+      "Require protected renewal within this interval. All enrollments expire after 30 days and require new browser approval. Workspace policy can only shorten the organization lifetime.",
+      "number", "People & access", 24, "maverick_dashboard.device_pairing", minimum=1, maximum=168, integer=True, unit="hours"),
+    S("device_pairing", "allow_actions", "Allow reviewed own-task actions on companions",
+      "Permit a separately opted-in device to submit a reviewed answer or Stop on its own tasks. Current role, current task state and explicit review still apply. Approvals and general administrative operations stay on the dashboard.",
+      "toggle", "People & access", False, "maverick_dashboard.device_pairing"),
+    S("notifications", "personal_alerts", "Allow personal notification inboxes",
+      "Let signed-in people choose subscriptions, quiet hours, daily digests and task mutes for their in-product inbox. Requires personal preferences. External personal delivery is not connected.",
+      "toggle", "Integrations", False, "maverick_dashboard.personal_notifications_api"),
+    S("notifications", "personal_critical_bypass", "Allow personal approval and deadline exceptions",
+      "Let people explicitly allow approval and deadline alerts to bypass their personal quiet hours and summary timing. Organization operational alerts are unchanged.",
+      "toggle", "Integrations", False, "maverick_dashboard.personal_notifications_api"),
+    S("notifications", "personal_background", "Refresh personal alerts while pages are closed",
+      "Run a bounded dashboard observer for explicitly enrolled named accounts. It rechecks current identity and owned work, observes changes about every 30 seconds, and releases eligible digests while the dashboard is running.",
+      "toggle", "Integrations", False, "maverick_dashboard.personal_notification_scheduler"),
+    S("notifications", "personal_external", "Allow personal alerts to verified private conversations",
+      "Let people opt into Slack or Telegram private delivery using their explicitly verified My Data identities. Requires background observation, current membership and channel allowlists; organization webhook destinations are never reused.",
+      "toggle", "Integrations", False, "maverick.personal_notification_delivery"),
+    S("notifications", "personal_dashboard_url", "Dashboard address for personal notification links",
+      "The HTTPS origin people use to sign in, without a path, query or credentials. Messages contain minimal update counts and authenticated task links, never task text.",
+      "text", "Integrations", "", "maverick.personal_notification_delivery"),
+    S("notifications", "delivery_receipts", "Keep notification delivery history",
+      "Keep content-free delivery results for seven days, up to 1,000 attempts. View history and send a test on Notification delivery in Settings.",
+      "toggle", "Integrations", True, "maverick.notifications"),
     S("notifications", "backend", "Send finished-task alerts with",
       "Where to send a message when a long task finishes.",
       "select", "Integrations", "ntfy", "maverick.notifications",
@@ -2087,6 +2140,12 @@ _POLICY: tuple[Setting, ...] = (
       "exclusion and deletion.", "toggle", "Memory & learning", True, "maverick.config",
       subgroup="Knowledge library", env=("MAVERICK_KNOWLEDGE_ACCESS",)),
 
+    S("knowledge_access", "task_context", "Tasks that analyze selected approved sources",
+      "Allow named workspace members to select exact source versions for tool-free AI analysis. "
+      "Source permission is checked again before AI use, publication and opening the result.",
+      "toggle", "Memory & learning", False, "maverick.knowledge_task_context",
+      subgroup="Knowledge library"),
+
     # ----------------------------------------------------- AI governance
     S("eu_ai_incidents", "authorities", "People who decide serious AI incident reports",
       "Each person listed may make reporting decisions on serious AI incidents, in the role "
@@ -2211,7 +2270,7 @@ _POLICY: tuple[Setting, ...] = (
     # ------------------------------------------------------ people & access
     S("dashboard", "default_suites", "Departments a person may use by default",
       "People with no departments of their own can use only these. With none ticked, they "
-      "can use every department.", "multiselect", "People & access", [], "maverick.suite_grants",
+      "can use no departments. Removing the setting entirely restores every department.", "multiselect", "People & access", [], "maverick.suite_grants",
       subgroup="Departments", choices_from="suites", weaker="widen",
       warning="People with no departments of their own will be able to use more departments, "
               "or all of them."),
@@ -2250,9 +2309,11 @@ SETTINGS = (SETTINGS + _channel_settings() + _CHANNEL_FIELDS + _MORE + _env_hunt
 # Rows kept in per-group modules (one module per group of settings).
 from . import (  # noqa: E402 -- the row and column types must exist first
     settings_catalog_access,
+    settings_catalog_budget_guidance,
     settings_catalog_governance,
     settings_catalog_integrations,
     settings_catalog_learning,
+    settings_catalog_personalization,
     settings_catalog_privacy,
     settings_catalog_runtime,
     settings_catalog_structured,
@@ -2260,7 +2321,7 @@ from . import (  # noqa: E402 -- the row and column types must exist first
 
 _GROUP_MODULES = (settings_catalog_access, settings_catalog_runtime, settings_catalog_learning,
                   settings_catalog_privacy, settings_catalog_governance,
-                  settings_catalog_integrations, settings_catalog_structured)
+                  settings_catalog_integrations, settings_catalog_structured, settings_catalog_personalization, settings_catalog_budget_guidance)
 for _group in _GROUP_MODULES:
     SETTINGS += tuple(_group.entries(S, C, Column))
 
@@ -2342,6 +2403,11 @@ def coerce(setting: Setting, value: object) -> object:
     ``None`` is only accepted for numbers without a default (meaning "no
     limit"), which callers treat as removing the dashboard value.
     """
+    if setting.id == "budget.warning_thresholds":
+        try:
+            return settings_catalog_budget_guidance.thresholds(value)
+        except ValueError as exc:
+            raise SettingError(str(exc)) from exc
     result = _coerce_value(setting, value)
     if not _storable(result):
         raise SettingError(

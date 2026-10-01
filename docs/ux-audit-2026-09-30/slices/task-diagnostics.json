@@ -1,0 +1,13 @@
+[
+  {
+    "id": "LW-147",
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "task_diagnostics.py: encrypted immutable metadata-only owner reports, exact preview/download SHA, 15-minute link and required audit acknowledgement.",
+      "product_operations_diagnostics.py: current owner/feature/task checks and deterministic report recovery through shared Copilot operation.",
+      "Stopped-task result panel links native report UI."
+    ],
+    "validation": "4 local diagnostic tests passed and shared catalog/budget regression group20 passed; focused Ruff and Node syntax passed.",
+    "remaining": "Final integrated and authenticated browser qualification pending."
+  }
+]

@@ -41,7 +41,9 @@ def audit_rows(monkeypatch):
 
 
 def _save(changes, confirm=True):
-    return client.post(API, json={"changes": [{"id": k, "value": v} for k, v in changes.items()],
+    from test_support.settings_pages import save_catalog
+
+    return save_catalog(client, API, json={"changes": [{"id": k, "value": v} for k, v in changes.items()],
                                   "confirm": confirm})
 
 

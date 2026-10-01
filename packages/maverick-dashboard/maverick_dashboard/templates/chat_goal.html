@@ -259,6 +259,7 @@
 {% endblock %}
 
 {% block chat %}
+{% if display_signed_in %}<p><a class="btn btn--ghost" href="/preferences?thread={{ goal.id }}">{{ ui('Conversation response style') }}</a></p>{% endif %}
 {% macro agent_mark() -%}
       <svg width="16" height="16" viewBox="0 0 22 22" aria-hidden="true">
         <rect x="1" y="1" width="20" height="20" rx="6.5" fill="var(--brand)"/>
@@ -271,21 +272,26 @@
   <p>Printed from your Lightwork workspace</p>
 </header>
 <div class="convo">
+  <div id="earlier-history" data-goal="{{ goal.id }}" data-before="{{ thread_turns[0].id if thread_turns else '' }}">
+    <button type="button" class="btn btn--ghost" id="history-load">{{ ui('Load earlier conversation') }}</button>
+    <p id="history-status" role="status" aria-live="polite">{{ ui('Earlier conversation is loaded in pages.') }}</p>
+    <div id="history-turns"></div>
+  </div>
   {% if latest_chat_goal_id and latest_chat_goal_id != goal.id %}
-  <p class="muted" id="newer-chat-turn">You are viewing an earlier message.
-    <a href="/chat/goal/{{ latest_chat_goal_id }}">Open the latest message in this chat</a>.</p>
+  <p class="muted" id="newer-chat-turn">{{ ui('You are viewing an earlier message.') }}
+    <a href="/chat/goal/{{ latest_chat_goal_id }}">{{ ui('Open the latest message in this chat') }}</a>.</p>
   {% endif %}
   {% if submission and (goal.status == 'draft' or submission.detail.coverage) %}
   <section class="panel" id="submission-status" role="status">
-    {% if goal.status == 'draft' %}<h2>Submission saved as a draft</h2>{% endif %}
+    {% if goal.status == 'draft' %}<h2>{{ ui('Submission saved as a draft') }}</h2>{% endif %}
     <p>{{ submission.detail.message }}</p>
     {% if submission.detail.coverage %}
-    <ul>{% for item in submission.detail.coverage %}<li>{{ item.filename }}: {% if item.status in ('ready', 'admitted', 'complete', 'ok') %}readable text ready{% elif item.status in ('pending', 'queued') %}still being read{% else %}could not be read ({{ item.status | humanize | lower }}){% endif %}</li>{% endfor %}</ul>
+    <ul>{% for item in submission.detail.coverage %}<li><bdi lang="und" dir="auto" data-user-content>{{ item.filename }}</bdi>: {% if item.status in ('ready', 'admitted', 'complete', 'ok') %}{{ ui("Readable text ready") }}{% elif item.status in ('pending', 'queued') %}{{ ui("Still being read") }}{% else %}{{ ui("Could not be read ({status})", status=item.status|humanize|lower) }}{% endif %}</li>{% endfor %}</ul>
     {% endif %}
-    {% if goal.status == 'draft' and can_create_goal %}
-    <p>AI work has not started. If all your files uploaded, try preparing the task again from this saved draft.</p>
+    {% if goal.status == 'draft' and can_operate %}
+    <p>{{ ui('AI work has not started. If all your files uploaded, try preparing the task again from this saved draft.') }}</p>
     <form method="post" action="/chat/goal/{{ goal.id }}/recover-submission">
-      <button class="btn" type="submit">Retry preparation</button>
+      <button id="recover-submission-btn" class="btn" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Retry preparation') }}</button>
     </form>
     {% endif %}
   </section>
@@ -297,7 +303,7 @@
   {% for t in thread_turns or [] %}
     {% if t.role == 'user' %}
   <div class="msg msg--user">
-    <div class="bubble"><div class="bubble__text">{{ t.content }}</div></div>
+    <div class="bubble"><div class="bubble__text" lang="und" dir="auto" data-user-content>{{ t.content }}</div></div>
   </div>
   {% for exchange in (thread_questions or {}).get(t.goal_id, []) %}
   <div class="qa">
@@ -308,7 +314,7 @@
     {% else %}
   <div class="msg msg--agent">
     <div class="agent__label">{{ agent_mark() }} Lightwork</div>
-    <div class="prose" data-markdown>{{ t.content }}</div>
+    <div class="prose" lang="und" dir="auto" data-user-content data-markdown>{{ t.content }}</div>
     <div class="answer-actions" role="group" aria-label="Earlier answer actions">
       <button type="button" class="btn btn--ghost turn-copy">Copy answer</button>
       <button type="button" class="btn btn--ghost turn-print">Print conversation</button>
@@ -327,24 +333,23 @@
 
   <div class="msg msg--user">
     <div class="bubble">
-      <div class="bubble__title">{{ goal.title }}</div>
+      <div class="bubble__title" lang="und" dir="auto" data-user-content>{{ goal.title }}</div>
       {% if goal.description and goal.description != goal.title %}
-      <div class="bubble__desc">{{ goal.description }}</div>
+      <div class="bubble__desc" lang="und" dir="auto" data-user-content>{{ goal.description }}</div>
       {% endif %}
     </div>
   </div>
 
   <details id="attachments-panel" style="display: none; margin: var(--space-2) 0;">
     <summary style="cursor: pointer; color: var(--muted); font-size: var(--text-sm); width: max-content;">
-      📎 Attachments (<span id="attachments-count">0</span>)
+      📎 {{ ui('Attachments') }} (<span id="attachments-count" data-product-number="0">0</span>)
     </summary>
     <ul id="attachments-list" style="list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1);"></ul>
     <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2);">
-      {% if can_create_goal %}<button type="button" id="attach-add-btn" class="btn btn--ghost">+ Add file</button>{% endif %}
-      <input type="file" id="attach-add" multiple aria-label="Add files to this task"
-             {% if not can_create_goal %}disabled{% endif %}
+      <button type="button" id="attach-add-btn" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('+ Add file') }}</button>
+      <input type="file" id="attach-add" multiple aria-label="{{ ut('Add files to this task') }}"
              tabindex="-1"
-             style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
+             style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %} />
       <span id="attach-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-xs);"></span>
     </div>
   </details>
@@ -357,234 +362,143 @@
       </svg>
       Lightwork
     </div>
+    <p><a href="/my-work">{{ ui('View my background work') }}</a></p>
+    <details><summary>{{ ui('Organize this conversation') }}</summary>
+      <p>{{ ui('Names, pins and archive status apply to all its turns. Archive hides it from recents without deleting task or audit history; workspace retention still applies. You can pin up to 20 conversations.') }}</p>
+      <form id="conversation-organization" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}" data-draft-recovery="off">
+        <label for="conversation-name">{{ ui('Conversation name') }}</label><input id="conversation-name" class="input" maxlength="200" autocomplete="off">
+        <label><input id="conversation-pin" type="checkbox"> {{ ui('Pin this conversation') }}</label>
+        <label><input id="conversation-archive" type="checkbox"> {{ ui('Archive from recents') }}</label>
+        <button id="conversation-save" type="submit" class="btn" disabled>{{ ui('Save organization') }}</button>
+        <button id="conversation-refresh" type="button" class="btn btn--ghost">{{ ui('Refresh saved values') }}</button>
+        <button id="conversation-undo" type="button" class="btn btn--ghost" hidden>{{ ui('Undo last organization change') }}</button>
+        <p id="conversation-organization-status" role="status" aria-live="polite"></p>
+      </form>
+      <a href="/conversations">{{ ui('Browse, search and restore archived conversations') }}</a>
+    </details>
+    <script src="/static/lightwork-conversation-organization.js" defer></script>
+    <p id="task-authority" role="status" data-goal="{{ goal.id }}" data-operate="{{ '1' if can_operate else '0' }}">{% if not can_operate %}This task is read-only for your current account. Permission requests explains who can review access; your draft remains available.{% endif %}</p>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
     <details class="activity" id="work-activity"{% if goal.status == 'draft' %} hidden{% endif %}>
-      <summary class="activity__bar" aria-label="Agent activity — expand to show the full work log">
+      <summary class="activity__bar" aria-label="{{ ut('Agent activity — expand to show the full work log') }}">
         <span class="spinner" id="work-spin" aria-hidden="true"></span>
-        <span class="activity__now is-live" id="work-now">Working…</span>
+        <span class="activity__now is-live" id="work-now">{{ ui('Working…') }}</span>
         <span class="activity__meta" id="work-meta"></span>
-        <span class="activity__toggle">Show work
+        <span class="activity__toggle">{{ ui('Show work') }}
           <svg class="activity__caret" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </span>
       </summary>
       <div class="worklog">
-        <div id="events" role="log" aria-live="polite" aria-label="Goal progress" tabindex="0"
+        <div id="events" role="log" aria-live="polite" aria-label="{{ ut('Goal progress') }}" tabindex="0"
              class="steps" data-steps="0" data-withheld="0"></div>
         <p id="loading-placeholder" class="muted" aria-busy="true" style="margin: 0;">
-          <span class="spinner" aria-hidden="true"></span> Working…
+          <span class="spinner" aria-hidden="true"></span> {{ ui('Working…') }}
         </p>
       </div>
     </details>
     <div id="qa-thread" class="qa" aria-live="polite">
       {% for exchange in answered_questions or [] %}
-      <p class="qa__q">{{ exchange.question }}</p>
-      <div class="msg msg--user"><div class="bubble">{{ exchange.answer }}</div></div>
+      <p class="qa__q" lang="und" dir="auto" data-user-content>{{ exchange.question }}</p>
+      <div class="msg msg--user"><div class="bubble" lang="und" dir="auto" data-user-content>{{ exchange.answer }}</div></div>
       {% endfor %}
     </div>
+    <button type="button" id="stream-retry" class="btn btn--ghost" hidden>{{ ui('Reconnect updates') }}</button>
+    <p id="question-status" role="status" aria-live="polite"></p>
+    <button type="button" id="question-retry" class="btn btn--ghost" hidden>{{ ui('Retry loading question') }}</button>
+    <button type="button" id="answer-receipt-check" class="btn btn--ghost" hidden>{{ ui('Check answer receipt') }}</button>
+    <p class="muted">{{ ui('Question answers can include documents, PDFs, images and text. Audio and video need a separately reviewed transcription task.') }}</p>
     <p id="stream-error" role="alert" class="muted" style="display: none; margin: 0 0 var(--space-4); color: var(--danger);"></p>
-    <p id="answer-refresh-notice" role="status" aria-live="polite" hidden>
-      <span id="answer-refresh-text"></span>
-      <button id="answer-refresh-retry" class="btn btn--ghost" type="button" hidden>Try again</button>
-      <a id="answer-refresh-open" href="/chat/goal/{{ goal.id }}" hidden>Open current conversation</a>
-    </p>
-    <div id="answer-panel" data-goal-id="{{ goal.id }}" data-status="{{ goal.status }}" data-updated-at="{{ goal.updated_at }}" data-structured="{{ 'true' if rendered and rendered.structured else 'false' }}" data-can-operate="{{ 'true' if can_create_goal else 'false' }}">
-    <div id="result-section" class="answer" style="display: {% if goal.result %}block{% else %}none{% endif %};">
-      {% if rendered and rendered.structured %}
-        {% include "_deliverable.html" %}
-        <p id="deliverable-stale" class="muted" style="display: none; margin-top: var(--space-3);">
-          Deliverable updated — <a href="/chat/goal/{{ goal.id }}">reload to view it</a>.
-        </p>
-      {% else %}
-        <div id="result" tabindex="0" aria-label="Goal result" class="prose" data-markdown>{{ goal.result or '' }}</div>
-      {% endif %}
-      {% if deliverable and deliverable.gate %}
-        <div class="signoff">
-          {% if signoff %}
-            <div class="signoff__head">
-              <span class="badge {{ 'success' if signoff.decision == 'approved' else 'failure' }}">{{ signoff.decision | humanize }}</span>
-              <span class="muted">by {{ (signoff.decided_by | identity).name if signoff.decided_by else 'a reviewer' }} · <span data-when="{{ signoff.created_at }}"></span></span>
-            </div>
-            {% if signoff.note %}<p class="signoff__note muted">{{ signoff.note }}</p>{% endif %}
-            {% if signoff.decision == 'approved' and rendered.table %}
-              <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">Download for hand-off (CSV)</a>
-            {% endif %}
-          {% elif goal.status == 'done' and can_create_goal %}
-            <p class="signoff__prompt">Needs <strong>{{ "a manager's approval" if deliverable.gate == 'approval' else "a reviewer's sign-off" }}</strong> before it's acted on.</p>
-            <textarea id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
-            <div class="signoff__actions">
-              <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">Approve</button>
-              <button id="signoff-reject" class="btn btn--ghost" type="button" data-decision="rejected">Reject</button>
-            </div>
-            <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
-          {% elif goal.status == 'done' %}
-            <p class="signoff__prompt muted">An authorized reviewer must approve this result before it is acted on.</p>
-          {% else %}
-            <p class="signoff__prompt muted">{{ "Approval" if deliverable.gate == 'approval' else "Sign-off" }} opens when the result is finished.</p>
-          {% endif %}
-        </div>
-      {% endif %}
-      {% if goal.status in ('done', 'completed', 'blocked', 'failed', 'cancelled', 'error') %}
-        {# Always-available thumbs up/down (unlike the gated sign-off above): any
-           finished result can be rated, and the verdict grounds a real outcome
-           into the learning loop. #}
-        {% if can_create_goal %}<div id="feedback" class="feedback" role="group" aria-label="Rate this result">
-          <span class="feedback__q muted">Was this useful?</span>
-          <button id="feedback-up" class="btn btn--ghost" type="button"
-                  data-rating="up" aria-label="Yes, useful">👍</button>
-          <button id="feedback-down" class="btn btn--ghost" type="button"
-                  data-rating="down" aria-label="No, not useful">👎</button>
-          <span id="feedback-msg" role="status" aria-live="polite" class="muted"
-                style="min-height: 1em;"></span>
-        </div>{% endif %}
-        {% if goal.result %}
-        <div class="answer-actions" role="group" aria-label="Answer actions">
-          <button id="copy-result" class="btn btn--ghost" type="button">Copy answer</button>
-          <button id="print-result" class="btn btn--ghost" type="button">Print conversation</button>
-          {% if can_download_chat_answer %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/download.md" download="lightwork-answer-{{ goal.id }}.md">Download answer</a>{% endif %}
-          <button id="read-aloud" class="btn btn--ghost" type="button"
-                  data-voice-only="{{ '1' if voice_only else '0' }}"
-                  aria-label="Read the result aloud" aria-pressed="false">Read aloud</button>
-          {% if can_create_goal %}<button id="edit-toggle" class="btn btn--ghost" type="button">Edit &amp; save</button>{% endif %}
-          {% if goal.status == 'done' and goal.result and can_create_goal %}<button id="share-open" class="btn btn--ghost" type="button" aria-controls="share-panel" aria-expanded="false">Share</button>{% endif %}
-        </div>
-        <textarea id="saved-answer-source" hidden>{{ chat_answer_text }}</textarea>
-        <span id="answer-action-msg" class="muted" role="status" aria-live="polite"></span>
-        {% if chat_answer_download_note %}<p class="muted">{{ chat_answer_download_note }}</p>{% endif %}
-        {% endif %}
-        {% if can_create_goal %}<div id="edit-box" style="display:none; margin-top: var(--space-3);">
-          <textarea id="edit-text" class="input" rows="8" aria-label="Edit the deliverable"
-                    style="width:100%;">{{ goal.result or '' }}</textarea>
-          <div style="display:flex; gap:var(--space-2); margin-top: var(--space-2);">
-            <button id="edit-save" class="btn btn--primary" type="button">Save my version</button>
-            <span id="edit-msg" role="status" aria-live="polite" class="muted"></span>
-          </div>
-          <p class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">Your revisions train your workforce — how much you change tells it how close it got.</p>
-        </div>{% endif %}
-      {% endif %}
-    </div>
-    {% if can_create_goal and (share_links or (goal.status == 'done' and goal.result)) %}
-    <details class="share-panel" id="share-panel">
-      <summary>Share this answer</summary>
-      <p class="share-panel__note muted">A link lets anyone who can reach your workspace read this finished answer for seven days. You can revoke it here at any time.{% if deliverable and deliverable.gate and (not signoff or signoff.decision != 'approved') %} A reviewer must approve this result before a new link can be created.{% endif %}</p>
-      <div class="goal-share" data-goal="{{ goal.id }}">
-        {% if goal.status == 'done' and goal.result %}<button type="button" id="share-create" class="btn btn--ghost"{% if deliverable and deliverable.gate and (not signoff or signoff.decision != 'approved') %} disabled title="This result needs approval before sharing"{% endif %}>Create share link</button>{% endif %}
-        <input type="text" id="share-url" class="input" readonly aria-label="Share link" hidden onclick="this.select()">
-        <button type="button" id="share-copy" class="btn btn--ghost" hidden>Copy link</button>
-        <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
-        <ul id="share-list" class="share-list">
-          {% for s in share_links %}
-          <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
-            <button type="button" class="btn btn--ghost share-revoke" data-id="{{ s.id }}">Revoke</button></li>
-          {% endfor %}
-        </ul>
-      </div>
-    </details>
-    {% endif %}
-    {% if artifacts %}
-    <div class="artifacts" aria-label="Files and results">
-      <div class="artifacts__head">Files and results <span class="badge">{{ artifacts|length }}</span></div>
-      {% for a in artifacts %}
-        <div class="artifact">
-          <div class="artifact__head">
-            <span class="artifact__title">{{ a.title or 'Untitled' }}</span>
-            <span class="badge">{{ {'markdown': 'Document', 'table': 'Table', 'text': 'Text', 'code': 'Code', 'json': 'Data', 'csv': 'Table'}.get(a.kind, a.kind | humanize) }}</span>
-            <span class="muted artifact__ver">Version {{ a.version }}{% if a.versions > 1 %} of {{ a.versions }}{% endif %}</span>
-          </div>
-          {% if a.table %}
-            <div class="deliverable__table-wrap">
-              <table class="deliverable__table">
-                <thead><tr>{% for h in a.table.headers %}<th scope="col">{{ h }}</th>{% endfor %}</tr></thead>
-                <tbody>
-                  {% for row in a.table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
-                </tbody>
-              </table>
-            </div>
-          {% else %}
-            <div class="artifact__body prose" tabindex="0" data-markdown>{{ a.prose }}</div>
-          {% endif %}
-          {% if a.versions > 1 %}
-            <details class="artifact__history" data-goal="{{ goal.id }}" data-title="{{ a.title }}">
-              <summary>Version history ({{ a.versions }})</summary>
-              <div class="artifact__history-body muted">Loading…</div>
-            </details>
-          {% endif %}
-        </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-    </div>
-    {% if can_create_goal %}<details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
-      <summary>Show planning steps</summary>
-      <p class="muted">See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the
-        result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI,
-        counts toward your spending limits and costs at most $2.00.</p>
-      <label for="ps-passes">How many review rounds</label>
-      <select id="ps-passes" class="select">
-        <option value="1">One round</option>
-        <option value="2" selected>Up to two rounds</option>
-        <option value="3">Up to three rounds</option>
+    <p id="answer-refresh-status" class="muted" role="status" aria-live="polite"></p>
+    <button type="button" id="answer-refresh" class="btn btn--ghost" hidden>{{ ui('Refresh saved result and controls') }}</button>
+    {% include "_chat_answer_panel.html" %}
+    <script src="/static/lightwork-answer-panel.js" defer></script>
+    {% if can_operate %}<details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
+      <summary>{{ ui('Show planning steps') }}</summary>
+      <p class="muted">{{ ui('See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI, counts toward your spending limits and costs at most $2.00.') }}</p>
+      <label for="ps-passes">{{ ui('How many review rounds') }}</label>
+      <select id="ps-passes" class="select"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
+        <option value="1" lang="{{ ul('One round') }}">{{ ut('One round') }}</option>
+        <option value="2" selected lang="{{ ul('Up to two rounds') }}">{{ ut('Up to two rounds') }}</option>
+        <option value="3" lang="{{ ul('Up to three rounds') }}">{{ ut('Up to three rounds') }}</option>
       </select>
-      <button type="button" class="btn btn--primary" id="ps-run">Show planning steps</button>
+      <button type="button" class="btn btn--primary" id="ps-run"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Show planning steps') }}</button>
       <p id="ps-status" role="status" aria-live="polite" tabindex="-1"></p>
       <div id="ps-result" hidden></div>
     </details>{% endif %}
-    <details class="more">
-      <summary>More</summary>
-    {% if projects and can_create_goal %}
+    <details class="more" id="share-panel">
+      <summary>{{ ui('More') }}</summary>
+    {% if projects %}
     <form method="post" action="/chat/goal/{{ goal.id }}/project" class="goal-project">
-      <label class="muted" for="goal-project-sel">Project</label>
-      <select id="goal-project-sel" name="project_id" class="input" onchange="this.form.submit()">
-        <option value="">— none —</option>
+      <label class="muted" for="goal-project-sel">{{ ui('Project') }}</label>
+      <select id="goal-project-sel" name="project_id" class="input" onchange="this.form.requestSubmit()"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
+        <option value="" lang="{{ ul('— none —') }}">{{ ut('— none —') }}</option>
         {% for p in projects %}
           <option value="{{ p.id }}"{% if p.id == goal.project_id %} selected{% endif %}>{{ p.name or 'Untitled' }}</option>
         {% endfor %}
       </select>
-      <noscript><button type="submit" class="btn btn--ghost">Set</button></noscript>
+      <noscript><button type="submit" id="goal-project-save" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Set') }}</button></noscript>
     </form>
     {% endif %}
-    <div class="cs-row">
-      {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">Review task files</a>{% endif %}
-      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">Download full history</a>
+    <div class="goal-share" data-goal="{{ goal.id }}" data-can-operate="{{ '1' if can_operate else '0' }}">
+      {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">{{ ui('Review task files') }}</a>{% endif %}
+      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">{{ ui('Download or share full history') }}</a>
+      {% if can_operate %}
+      {% if goal.status == 'done' and goal.result %}<button type="button" id="share-create" class="btn btn--ghost">{{ ui('Review share link') }}</button>{% endif %}
+      <input type="text" id="share-url" class="input" readonly aria-label="{{ ut('Share link') }}"
+             style="display: none; max-width: 28rem;" onclick="this.select()">
+      <button type="button" id="share-copy" class="btn btn--ghost" hidden>{{ ui('Copy link') }}</button>
+      <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
+      <ul id="share-list" class="share-list">
+        {% for s in share_links %}
+          <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
+            <button type="button" class="btn btn--ghost share-revoke" data-id="{{ s.id }}">{{ ui('Revoke') }}</button></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
     </div>
     <div class="task-ops">
-      <h3 class="task-ops__title">Task Health</h3>
-      <p class="muted task-ops__note">A score out of 100 from how the task went: whether it finished, tool errors, and how much AI it used.</p>
-      <button type="button" class="btn btn--ghost" id="task-health-check" data-goal="{{ goal.id }}">Check this task's health</button>
+      <h3 class="task-ops__title">{{ ui('Task Health') }}</h3>
+      <p class="muted task-ops__note">{{ ui('A score out of 100 from how the task went: whether it finished, tool errors, and how much AI it used.') }}</p>
+      <button type="button" class="btn btn--ghost" id="task-health-check" data-goal="{{ goal.id }}">{{ ui("Check this task's health") }}</button>
       <p id="task-health-status" class="muted" role="status" aria-live="polite"></p>
       <div id="task-health-out"></div>
     </div>
     </details>
-    {% if can_create_goal %}<details class="more" id="code-sandbox" data-goal="{{ goal.id }}">
-      <summary>Run code for this task</summary>
-      <p class="muted task-ops__note">Run small pieces of Python for this task in Lightwork's sandbox, step by step.
-        Values carry over between steps. Every step is checked, recorded and counted against the task's limits.</p>
+    {% if can_operate %}<details class="more" id="code-sandbox" data-goal="{{ goal.id }}">
+      <summary>{{ ui('Run code for this task') }}</summary>
+      <p class="muted task-ops__note">{{ ui("Run small pieces of Python for this task in Lightwork's sandbox, step by step. Values carry over between steps. Every step is checked, recorded and counted against the task's limits.") }}</p>
       <p id="code-sandbox-status" class="muted" role="status" aria-live="polite"></p>
       <div id="code-sandbox-body"></div>
     </details>{% endif %}
     <div id="halt-card" class="halt-card" style="display: none;">
       {% set pilot_prepared = goal.result == 'Prepared for a workflow pilot. Start this task after the pilot plan is frozen.' %}
-      <div class="halt-card__title">{{ 'Ready to start' if pilot_prepared else 'Lightwork stopped' }}</div>
+      <div class="halt-card__title">{{ ui('Ready to start' if pilot_prepared else 'Lightwork stopped') }}</div>
       <p id="halt-reason" class="muted" style="margin: var(--space-1) 0 0;"></p>
       {% if pilot_prepared %}
       <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">
-        This task was prepared without running it. Freeze your <a href="/outcome-pilots">workflow pilot plan</a>,
-        review the spending limit, then start when you are ready.
+        {{ ui('This task was prepared without running it. Review and freeze its workflow pilot plan and spending limit before starting.') }} <a href="/outcome-pilots">{{ ui('Workflow pilot plan') }}</a>
       </p>
       {% endif %}
-      {% if can_create_goal %}<form id="halt-resume-form" class="halt-card__row">
-        <button id="halt-resume" class="btn btn--primary" type="submit">{{ 'Start this task' if pilot_prepared else 'Try again' }}</button>
+      <details class="panel" data-budget-launch data-goal="{{ goal.id }}">
+        <summary>{{ ui('Review allowance before this attempt') }}</summary><p role="status" aria-live="polite"></p>
+        <div data-budget-summary></div><button class="btn btn--ghost" type="button">{{ ui('Refresh budget') }}</button>
+      </details>
+      <script src="/static/lightwork-budget-guidance.js" defer></script>
+      {% if can_operate %}<form id="halt-resume-form" class="halt-card__row" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}">
+        <button id="halt-resume" class="btn btn--primary" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Start this task' if pilot_prepared else 'Try again') }}</button>
         <details class="halt-card__budget">
-          <summary>Set a spending limit for this attempt</summary>
+          <summary>{{ ui('Set a spending limit for this attempt') }}</summary>
           <div class="field">
-            <label for="halt-resume-budget">Spending limit (USD, optional)</label>
-            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling is not none %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling is not none %}Up to ${{ spend_ceiling_text }}{% else %}Optional task limit{% endif %}" aria-describedby="halt-resume-budget-hint">
-            <p id="halt-resume-budget-hint" class="muted">This limits the next attempt.{% if spend_ceiling %} Leave it empty to use your workspace’s spending limit of ${{ spend_ceiling_text }}.{% endif %} Your organization’s spending and safety limits still apply.</p>
+            <label for="halt-resume-budget">{{ ui('Spending limit (USD, optional)') }}</label>
+            <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01"{% if spend_ceiling is not none %} max="{{ '%.2f'|format(spend_ceiling) }}"{% endif %} placeholder="{% if spend_ceiling is not none %}{{ ut('Up to {amount}', amount='$' ~ spend_ceiling_text) }}{% else %}{{ ut('Optional task limit') }}{% endif %}" aria-describedby="halt-resume-budget-hint"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
+            <p id="halt-resume-budget-hint" class="muted">{{ ui("This limits the next attempt. Your organization’s spending and safety limits still apply.") }}{% if spend_ceiling %} <span id="halt-inherited-limit">{{ ui("Leave it empty to use your workspace’s spending limit of {amount}.", amount='$' ~ spend_ceiling_text) }}</span>{% endif %}</p>
           </div>
         </details>
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
       </form>{% endif %}
     </div>
   </div>
+  {% include "_conversation_inbox_panel.html" %}
 
 </div>
 {% endblock %}
@@ -594,29 +508,43 @@
      when there is one, and otherwise sends the next message of this thread
      (a follow-up goal run with the earlier turns as context). #}
   <div id="composer" class="ask">
-    <p id="chat-read-only" class="muted" role="status"{% if can_create_goal %} hidden{% endif %}>You can read this conversation. Ask a workspace administrator for permission to send messages or change its work.</p>
+    <p id="chat-read-only" class="muted" role="status"{% if can_operate %} hidden{% endif %}>{{ ui('You can read this conversation. Ask a workspace administrator for permission to send messages or change its work.') }}</p>
+    <div id="conversation-send-options" hidden>
+      <label for="conversation-send-mode">{{ ui('Use this message to') }}</label>
+      <select id="conversation-send-mode" class="input" aria-describedby="conversation-send-explanation"{% if not can_operate %} disabled{% endif %}>
+        <option value="guidance" lang="{{ ul('Send guidance to this task') }}">{{ ut('Send guidance to this task') }}</option>
+        <option value="queue" lang="{{ ul('Queue the next task') }}">{{ ut('Queue the next task') }}</option>
+        <option value="independent" lang="{{ ul('Start a separate task') }}">{{ ut('Start a separate task') }}</option>
+      </select>
+      <label for="conversation-independent-context" id="conversation-independent-context-label" hidden>{{ ui('Context for separate task') }}</label>
+      <select id="conversation-independent-context" class="input" hidden{% if not can_operate %} disabled{% endif %}>
+        <option value="none" lang="{{ ul('Only this message and selected files') }}">{{ ut('Only this message and selected files') }}</option><option value="conversation_snapshot" lang="{{ ul('Include this authorized conversation snapshot') }}">{{ ut('Include this authorized conversation snapshot') }}</option>
+      </select>
+      <p id="conversation-send-explanation" class="ask__hint"></p>
+    </div>
     <div id="question-panel" class="ask__question" style="display: none;" role="alert" aria-live="assertive">
-      <p class="ask__eyebrow">Lightwork needs one thing from you</p>
-      <p id="question-text" class="ask__text"></p>
+      <p class="ask__eyebrow">{{ ui('Lightwork needs one thing from you') }}</p>
+      <p id="question-text" lang="und" dir="auto" data-user-content class="ask__text" role="status" aria-live="polite"></p>
     </div>
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
-      <fieldset id="composer-controls" style="display: contents;"{% if not can_create_goal %} disabled{% endif %}>
+      <fieldset id="composer-controls" style="display: contents;"{% if not can_operate %} disabled{% endif %}>
       <input type="hidden" name="submission_key" value="{{ submission_key }}" />
-      <textarea id="answer-input" name="message" rows="1" required
-                placeholder="{{ 'Lightwork is working… you can type while you wait' if run_open|default(true) else 'Message Lightwork…' }}"
-                aria-label="Your answer to the agent's question, or your next message"
+      <label id="answer-input-label" class="sr-only" for="answer-input">{{ ui("Your answer to the agent's question, or your next message") }}</label>
+      <textarea id="answer-input" lang="und" dir="auto" data-user-content name="message" rows="1" required
+                placeholder="{{ ut('Lightwork is working… you can type while you wait' if run_open|default(true) else 'Message Lightwork…') }}"
+                aria-labelledby="answer-input-label"
                 aria-describedby="question-text" class="ask__field"></textarea>
-      <input type="file" name="files" id="reply-files" multiple aria-label="Attach files to your message" tabindex="-1"
-             style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
-      <button type="button" id="reply-attach" class="ask__icon" aria-label="Attach files">
+      <input type="file" name="files" id="reply-files" multiple aria-label="{{ ut('Attach files to your message') }}" tabindex="-1"
+             style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %} />
+      <button type="button" id="reply-attach" class="ask__icon" aria-label="{{ ut('Attach files') }}"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11.7 5.3 6 11a2 2 0 0 1-2.83-2.83l5.66-5.66a3 3 0 0 1 4.24 4.24l-5.65 5.66" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button type="button" id="answer-mic" class="ask__icon" aria-label="Dictate by voice"
-              aria-pressed="false" hidden>
+      <button type="button" id="answer-mic" class="ask__icon" aria-label="{{ ut('Dictate by voice') }}"
+              aria-pressed="false" hidden{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="6" y="1.5" width="4" height="8" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
       </button>
-      <button id="cancel-btn" class="ask__stop" type="button"{% if not run_open %} hidden{% endif %}>Stop</button>
-      <button type="submit" id="answer-send" class="ask__send" aria-label="Send">
+      <button id="cancel-btn" class="ask__stop" type="button"{% if not run_open %} hidden{% endif %}{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Stop') }}</button>
+      <button type="submit" id="answer-send" class="ask__send" aria-label="{{ ut('Send') }}"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
           <path d="M9 14.5V4M9 4l-4.5 4.5M9 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
@@ -627,6 +555,10 @@
   </div>
 {% endblock %}
 {% block scripts_extra %}
+<script src="/static/lightwork-thread-history.js" defer></script>
+<script src="/static/lightwork-conversation-inbox.js" defer></script>
+<script src="/static/lightwork-task-authority.js" defer></script>
+<script src="/static/lightwork-file-selection.js" defer></script>
   <style>
     .task-ops { margin-top: var(--space-3); }
     .task-ops__title { font-size: var(--text-base); margin: var(--space-2) 0 var(--space-1); }
@@ -640,7 +572,14 @@
   <script src="/static/lightwork-insight-ops.js" defer></script>
   <script src="/static/lightwork-code-sandbox.js" defer></script>
   <script src="/static/lightwork-planning-steps.js" defer></script>
+  <script src="{{ asset('lightwork-read-aloud.js') }}"></script>
   <script>
+    // Explicit product bindings. Source text is passed only to textContent/renderers.
+    function cgText(source,values) { return window.LightworkI18n ? window.LightworkI18n.text(source,values) : String(source||'').replace(/\{(\w+)\}/g,function(whole,key){return values&&Object.prototype.hasOwnProperty.call(values,key)?String(values[key]):whole;}); }
+    function cgCopy(node,source,values) { if(window.LightworkI18n)window.LightworkI18n.set(node,source,values);else node.textContent=cgText(source,values); }
+    function cgAppend(node,source,values) { var span=document.createElement('span');cgCopy(span,source,values);node.append(' ',span); }
+    function cgNumber(value,options) { return window.LightworkI18n ? window.LightworkI18n.number(value,options) : String(value); }
+    function cgDate(value) { return window.LightworkI18n ? window.LightworkI18n.formatDate(value) : new Date(value*1000).toLocaleString(); }
     // Plain-language failure text for this page (no status codes or server text).
     function cgErr(failure, what) {
       return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
@@ -674,81 +613,16 @@
       // composer never flashes the working state on a finished chat.
       let done = {{ (not run_open|default(true))|tojson }};
       let pollDelay = 2000;
-      let currentQuestionId = null;
+      let currentQuestionId = null, currentQuestionVersion = null, pendingClarification = null;
       let currentStatus = {{ goal.status|tojson }};
-      let canOperate = {{ can_create_goal|tojson }};
+      let canOperate = {{ can_operate|tojson }};
       let lastResult = {{ (goal.result or '')|tojson }};
-      let answerNeedsRefresh = {{ run_open|default(true)|tojson }};
-      let answerRefreshInFlight = false;
-      const refreshNotice = document.getElementById('answer-refresh-notice');
-      const refreshText = document.getElementById('answer-refresh-text');
-      const refreshRetry = document.getElementById('answer-refresh-retry');
-      const refreshOpen = document.getElementById('answer-refresh-open');
-
-      function applyOperatePermission(allowed) {
-        canOperate = allowed;
+      document.addEventListener('lightwork:task-access-lost', function () {
+        canOperate = false;
+        const readOnly = document.getElementById('chat-read-only');
+        if (readOnly) readOnly.hidden = false;
         syncComposer();
-        const readOnlyNote = document.getElementById('chat-read-only');
-        if (readOnlyNote) readOnlyNote.hidden = canOperate;
-        if (!canOperate) {
-          document.querySelectorAll('#attach-add-btn, #attach-add, #planning-steps button, #code-sandbox button, #halt-resume-form button, #submission-status form button').forEach(function (control) { control.disabled = true; });
-          document.querySelectorAll('#planning-steps, #code-sandbox, #halt-resume-form, .goal-project, #submission-status form').forEach(function (control) { control.hidden = true; });
-        }
-      }
-
-      async function refreshAnswerPanel() {
-        if (answerRefreshInFlight) return;
-        answerRefreshInFlight = true;
-        refreshNotice.hidden = false;
-        refreshText.textContent = 'Opening your answer actions…';
-        refreshRetry.hidden = true;
-        refreshOpen.hidden = true;
-        try {
-          const response = await fetch('/chat/goal/' + goalId, { credentials: 'same-origin', cache: 'no-store' });
-          if (response.status === 401 || response.status === 403 || response.redirected) {
-            applyOperatePermission(false);
-            const oldPanel = document.getElementById('answer-panel');
-            if (oldPanel) { oldPanel.replaceChildren(); oldPanel.hidden = true; }
-            refreshText.textContent = 'Your access has changed. Reopen this conversation to check your access.';
-            refreshOpen.hidden = false;
-            return;
-          }
-          if (!response.ok) throw new Error('answer view unavailable');
-          const page = new DOMParser().parseFromString(await response.text(), 'text/html');
-          const fresh = page.getElementById('answer-panel');
-          if (!fresh || fresh.dataset.goalId !== String(goalId)) throw new Error('answer view unavailable');
-          if (!done || !['done', 'completed', 'blocked', 'failed', 'cancelled', 'error'].includes(currentStatus)) {
-            refreshNotice.hidden = true;
-            return;
-          }
-          if (!['done', 'completed', 'blocked', 'failed', 'cancelled', 'error'].includes(fresh.dataset.status)) {
-            refreshText.textContent = 'This task has restarted. Open its current view to follow its progress.';
-            refreshOpen.hidden = false;
-            return;
-          }
-          const oldPanel = document.getElementById('answer-panel');
-          if (!oldPanel) throw new Error('answer view unavailable');
-          const replacement = document.importNode(fresh, true);
-          oldPanel.replaceWith(replacement);
-          applyOperatePermission(replacement.dataset.canOperate === 'true');
-          resultEl = replacement.querySelector('#result');
-          resultSection = replacement.querySelector('#result-section');
-          deliverableStaleEl = replacement.querySelector('#deliverable-stale');
-          STRUCTURED = replacement.dataset.structured === 'true';
-          const saved = replacement.querySelector('#saved-answer-source');
-          lastResult = saved ? saved.value : '';
-          if (window.lwMarkdown) window.lwMarkdown.upgrade(replacement);
-          document.dispatchEvent(new CustomEvent('lightwork:answer-ready'));
-          refreshNotice.hidden = true;
-          answerNeedsRefresh = false;
-        } catch (_) {
-          refreshText.textContent = 'Your answer is finished, but its actions could not be loaded. Try again.';
-          refreshRetry.hidden = false;
-        } finally {
-          answerRefreshInFlight = false;
-        }
-      }
-      refreshRetry.addEventListener('click', refreshAnswerPanel);
+      });
 
       // Plain-words labels for the work log: one line per step, in the
       // language of a person reading along, never the kernel's event names.
@@ -792,7 +666,7 @@
         currentStatus = status;
         statusEl.className = 'badge ' + status;
         statusEl.dataset.status = status;
-        statusEl.textContent = STATUS_LABELS[status] || status;
+        cgCopy(statusEl,STATUS_LABELS[status] || status);
       }
 
       function fmtAgent(a) {
@@ -813,7 +687,7 @@
         // have given up — otherwise transient blips stay silent.
         hidePlaceholder();
         if (streamErrorEl) {
-          streamErrorEl.textContent = text;
+          cgCopy(streamErrorEl,text);
           streamErrorEl.style.display = 'block';
         }
       }
@@ -825,15 +699,15 @@
         hidePlaceholder();
         done = true;
         cancelBtn.disabled = true;
-        resultSection.style.display = 'none';
-        haltReasonEl.textContent = lastResult || 'The run stopped before producing a result.';
+        // Keep any earlier result visible separately from the stop reason.
+        if(lastResult){haltReasonEl.textContent=lastResult;haltReasonEl.lang='und';haltReasonEl.dir='auto';haltReasonEl.dataset.userContent='';}else{delete haltReasonEl.dataset.userContent;cgCopy(haltReasonEl,'The run stopped before producing a result.');}
         haltCard.style.display = 'block';
       }
 
       let withheldRow = null;  // the one folded line standing in for withheld steps
       let stepCount = 0;
 
-      function stepRow(kind, label, text, agent) {
+      function stepRow(kind, label, text, agent, productText=false) {
         const row = document.createElement('div');
         row.className = 'step step--' + kind;
         row.dataset.kind = kind;
@@ -843,19 +717,19 @@
         const head = document.createElement('div');
         const lab = document.createElement('span');
         lab.className = 'step__label';
-        lab.textContent = label;
+        cgCopy(lab,label);
         head.appendChild(lab);
         if (agent && agent !== 'orchestrator') {
           const who = document.createElement('span');
           who.className = 'step__agent';
-          who.textContent = agent;
+          who.textContent = agent;who.lang='und';who.dir='auto';who.dataset.userContent='';
           head.appendChild(who);
         }
         body.appendChild(head);
         if (text) {
           const t = document.createElement('div');
           t.className = 'step__text';
-          t.textContent = text;
+          if(productText)cgCopy(t,text);else{t.textContent=text;t.lang='und';t.dir='auto';t.dataset.userContent='';}
           body.appendChild(t);
         }
         row.appendChild(body);
@@ -872,9 +746,9 @@
         if (WITHHELD.has(content.trim())) {
           const n = Number(eventsEl.dataset.withheld || 0) + 1;
           eventsEl.dataset.withheld = String(n);
-          const text = (n === 1 ? '1 step' : n + ' steps') + ' completed. Step details will appear when the answer is ready.';
-          if (!withheldRow) withheldRow = stepRow('withheld', KIND_LABELS.withheld, text, '');
-          else withheldRow.querySelector('.step__text').textContent = text;
+          const text = cgText(n===1?'{count} step completed. Step details will appear when the answer is ready.':'{count} steps completed. Step details will appear when the answer is ready.',{count:cgNumber(n)});
+          if (!withheldRow) withheldRow = stepRow('withheld', KIND_LABELS.withheld, text, '',true);
+          else cgCopy(withheldRow.querySelector('.step__text'),text);
           eventsEl.appendChild(withheldRow);  // stays the latest line
           return;
         }
@@ -884,12 +758,17 @@
         const tool = TOOL_LINE.exec(content);
         if (tool) {
           kind = 'observation';
-          label = tool[1] === 'ask_user' ? 'Asked you a question' : 'Used ' + humanTool(tool[1]);
+          label = tool[1] === 'ask_user' ? 'Asked you a question' : cgText('Used {tool}',{tool:humanTool(tool[1])});
           text = tool[2].trim();
         }
         eventsEl.appendChild(stepRow(kind, label, text, fmtAgent(e.agent)));
       }
 
+      document.addEventListener('lightwork:answer-panel-updated', function () {
+        resultEl = document.getElementById('result'); resultSection = document.getElementById('result-section');
+        deliverableStaleEl = document.getElementById('deliverable-stale');
+        const panel = document.getElementById('answer-panel'); STRUCTURED = !!(panel && panel.dataset.structured === '1');
+      });
       function renderResult(text) {
         if (!resultEl) return;
         if (window.lwMarkdown) window.lwMarkdown.renderInto(resultEl, text);
@@ -903,18 +782,17 @@
         if (!qaThread) return;
         const q = document.createElement('p');
         q.className = 'qa__q';
-        q.textContent = question;
+        q.textContent = question;q.lang='und';q.dir='auto';q.dataset.userContent='';
         qaThread.appendChild(q);
         const wrap = document.createElement('div');
         wrap.className = 'msg msg--user';
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
-        bubble.textContent = answer;
+        bubble.textContent = answer;bubble.lang='und';bubble.dir='auto';bubble.dataset.userContent='';
         wrap.appendChild(bubble);
         qaThread.appendChild(wrap);
       }
       function resumeFollowing() {
-        answerNeedsRefresh = true;
         // Answering the last open question restarts the run server-side; pick
         // the live stream back up so the page keeps following it in place.
         done = false;
@@ -925,31 +803,61 @@
         openStream();
       }
 
-      async function pollQuestions() {
+      async function pollQuestions(reviewChange = false) {
+        if (questionLoading) return;
+        questionLoading = true;
+        const status = document.getElementById('question-status');
+        const retry = document.getElementById('question-retry');
+        const control = new AbortController();
+        const timeout = setTimeout(function () { control.abort(); }, 12000);
         try {
-          const r = await fetch('/api/v1/goals/' + goalId + '/open_questions');
-          if (!r.ok) return;
+          const r = await fetch('/api/v1/goals/' + goalId + '/open_questions', {credentials: 'same-origin', cache: 'no-store', signal: control.signal});
+          if (!r.ok || r.redirected) {
+            if (r.status === 401 || r.status === 403 || r.redirected) { currentQuestionId = null; questionText.textContent = ''; questionPanel.style.display = 'none'; }
+            throw new Error(r.status === 401 || r.redirected ? 'Sign in again to load this question.' : r.status === 403 ? 'Access to this question is no longer available.' : 'Could not refresh the question. Last shown question may be out of date.');
+          }
           const j = await r.json();
-          const qs = j.open_questions || [];
+          if (!Array.isArray(j.open_questions)) throw new Error('The question response could not be read. Retry loading it.');
+          const qs = ['cancelled', 'done', 'failed'].includes(currentStatus) ? [] : j.open_questions;
+          if (submitting || (pendingClarification && pendingClarification.unconfirmed)) {
+            cgCopy(status,'Check the pending answer receipt before answering another question.');
+            return;
+          }
+          if (!reviewChange && qs.length && currentQuestionId != null &&
+              (qs[0].id !== currentQuestionId || qs[0].version !== currentQuestionVersion) && answerInput.value.trim()) {
+            questionsFresh = false; retry.hidden = false;
+            cgCopy(status,'The current question changed. Your draft is kept. Refresh and review the question before sending it.');
+            return;
+          }
+          questionsFresh = true; if(j.last_answer)cgCopy(status,j.last_answer.file_count===1?'Earlier answer accepted with {count} prepared file on {time}. Any recovered composer draft is kept for you to review.':'Earlier answer accepted with {count} prepared files on {time}. Any recovered composer draft is kept for you to review.',{count:cgNumber(j.last_answer.file_count),time:cgDate(j.last_answer.created_at)});else cgCopy(status,''); retry.hidden = true;
           if (qs.length) {
+            const changed = currentQuestionId !== qs[0].id;
             currentQuestionId = qs[0].id;
-            questionText.textContent = qs[0].question;
+            currentQuestionVersion = qs[0].version;
             questionPanel.style.display = 'block';
-            answerInput.focus();
+            if (changed) questionText.textContent = qs[0].question;
           } else {
             currentQuestionId = null;
             questionPanel.style.display = 'none';
             if (currentStatus === 'blocked') renderHalted();
           }
           syncComposer();
-        } catch (e) { /* swallow */ }
+        } catch (e) {
+          questionsFresh = false;
+          cgCopy(status,e.name === 'AbortError' ? 'Loading the question timed out. Your draft has been kept.' : (e.message || 'Could not load the question. Your draft has been kept.'));
+          retry.hidden = false;
+        } finally { clearTimeout(timeout); questionLoading = false; syncComposer(); }
       }
 
+      document.getElementById('question-retry').addEventListener('click', function () { pollQuestions(true); });
       const sendBtn = document.getElementById('answer-send');
       const composerHint = document.getElementById('composer-hint');
       const replyFiles = document.getElementById('reply-files');
       const replyAttach = document.getElementById('reply-attach');
       let submitting = false;
+      let stopRequested = false;
+      let questionsFresh = false;
+      let questionLoading = false;
 
       function submissionError(detail, fallback) {
         if (typeof detail === 'string') return detail;
@@ -968,27 +876,35 @@
         return plain || cgErr(response, 'send your message');
       }
 
-      function composerMessage(text, danger) {
+      function composerMessage(text, danger, values) {
         if (!composerHint) return;
         composerHint.style.color = danger ? 'var(--danger)' : '';
-        composerHint.textContent = text || '';
+        cgCopy(composerHint,text || '',values);
       }
       // The composer follows the run: answer an open question, wait (Stop
       // available) while Lightwork works, or send the next message.
       function syncComposer() {
+        if (submitting) return;
         const asking = currentQuestionId != null;
         const running = !done && !asking;
-        answerInput.placeholder = asking ? 'Reply to Lightwork…'
-          : running ? 'Lightwork is working… you can type while you wait'
-          : 'Message Lightwork…';
-        if (sendBtn) sendBtn.disabled = running || !canOperate;
-        cancelBtn.hidden = !running || !canOperate;
-        cancelBtn.disabled = !running || !canOperate;
+        const stoppable = ['pending', 'running', 'blocked'].includes(currentStatus);
+        const inbox = window.mvConversationInbox;
+        const inboxReady = !!(inbox && inbox.available);
+        if (replyAttach) { replyAttach.disabled = !canOperate; replyAttach.title = cgText(asking ? 'Attach a document, PDF, image or text file to your answer' : 'Attach files to your next message'); }
+        if (replyFiles) replyFiles.disabled = !canOperate;
+        answerInput.placeholder = cgText(asking ? 'Reply to Lightwork…'
+          : running ? (inboxReady ? 'Add guidance, queue the next task, or start separate work…' : 'Lightwork is working… you can type while you wait')
+          : 'Message Lightwork…');
+        if (sendBtn) sendBtn.disabled = !canOperate || (running && !inboxReady);
+        if (inbox) inbox.updateComposer({asking:asking,running:running,status:currentStatus});
+        cancelBtn.hidden = !stoppable || !canOperate;
+        cancelBtn.disabled = !stoppable || stopRequested || !canOperate;
         answerInput.disabled = !canOperate || submitting;
         const controls = document.getElementById('composer-controls');
         if (controls) controls.disabled = !canOperate;
         answerForm.dataset.mode = asking ? 'answer' : 'reply';
       }
+      document.addEventListener('lightwork:conversation-inbox-ready', syncComposer);
       function resetField() {
         answerInput.value = '';
         answerInput.style.height = '';
@@ -1009,88 +925,166 @@
         replyAttach.addEventListener('click', function () { replyFiles.click(); });
         replyFiles.addEventListener('change', function () {
           const names = Array.prototype.map.call(replyFiles.files, function (f) { return f.name; });
-          composerMessage(names.length ? 'Attached: ' + names.join(', ') : '');
+          composerMessage(names.length ? 'Attached: {files}' : '',false,{files:names.join(', ')});
         });
       }
 
+      function clarificationSignature() {
+        return JSON.stringify([answerInput.value.trim(), currentQuestionId, currentQuestionVersion,
+          Array.from(replyFiles ? replyFiles.files : []).map(function (file) { return [file.name,file.size,file.type,file.lastModified]; })]);
+      }
+      async function acceptClarificationReceipt(receipt, attempt) {
+        const unchanged = clarificationSignature() === attempt.signature;
+        if (unchanged) {
+          if (answerForm.mvRecovery) await answerForm.mvRecovery.clear();
+          resetField();
+          window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail:{form:answerForm,recoveryCleared:true}}));
+        }
+        pendingClarification = null; document.getElementById('answer-receipt-check').hidden = true;
+        currentQuestionId = null; currentQuestionVersion = null; questionPanel.style.display = 'none';
+        recordExchange(attempt.question, attempt.answer);
+        cgCopy(actionMsg,receipt.attachment_ids.length===1?'Answer and {count} prepared file accepted.':'Answer and {count} prepared files accepted.',{count:cgNumber(receipt.attachment_ids.length)});
+        cgAppend(actionMsg,receipt.admitted?'A restart was reserved; task updates show its actual progress.':'Waiting for the remaining question or current worker checkpoint.');
+        if(!unchanged)cgAppend(actionMsg,'Your newer draft has been kept.');
+        if (receipt.admitted) resumeFollowing();
+        else { await pollQuestions(); syncComposer(); }
+      }
+      document.getElementById('answer-receipt-check').addEventListener('click', async function () {
+        if (!pendingClarification || submitting) return;
+        const attempt = pendingClarification, button = this; button.disabled = true;
+        const controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); },12000);
+        try {
+          const response = await fetch('/api/v1/goals/' + goalId + '/answer-receipts/' + encodeURIComponent(attempt.operation),
+            {credentials:'same-origin',cache:'no-store',signal:controller.signal});
+          const receipt = await response.json();
+          if (response.ok && receipt.received && receipt.operation_id === attempt.operation) await acceptClarificationReceipt(receipt, attempt);
+          else if (response.ok) cgCopy(actionMsg,'No accepted answer receipt is available yet. The original request may still be finishing. Keep the draft and retry the same answer to check safely.');
+          else window.mvRenderError(actionMsg,response,'check the answer receipt',receipt);
+        } catch (failure) { cgCopy(actionMsg,'The answer receipt could not be checked. Keep the draft and retry this check.'); }
+        finally { clearTimeout(timeout); button.disabled = false; }
+      });
       answerForm.addEventListener('submit', async function(ev) {
         ev.preventDefault();
         if (submitting || !canOperate) return;
         const text = answerInput.value.trim();
         if (!text) return;
         if (currentQuestionId != null) {
-          const qid = currentQuestionId;
-          const ans = text;
-          submitting = true;
-          answerInput.disabled = true;
-          actionMsg.textContent = '';
+          if (!questionsFresh || !currentQuestionVersion) { composerMessage('Refresh the question before answering. Your answer has been kept.', true); return; }
+          const signature = clarificationSignature();
+          if (pendingClarification && pendingClarification.unconfirmed && signature !== pendingClarification.signature) {
+            composerMessage('Check the earlier answer receipt before sending an edited answer. Your draft and files have been kept.', true); return;
+          }
+          if (!pendingClarification || signature !== pendingClarification.signature) pendingClarification = {
+            operation: crypto.randomUUID(), questionId: currentQuestionId, questionVersion: currentQuestionVersion,
+            signature: signature, answer: text, question: questionText.textContent, unconfirmed: false
+          };
+          const attempt = pendingClarification;
+          const body = new FormData(answerForm);
+          body.set('question_id', String(attempt.questionId)); body.set('answer', text);
+          body.set('expected_question', attempt.questionVersion); body.set('operation_id', attempt.operation);
+          body.set('expected_context', {{ conversation_context|tojson }});
+          const controls = Array.from(answerForm.querySelectorAll('input,select,textarea,button'));
+          const before = controls.map(function (control) { return control.disabled; });
+          controls.forEach(function (control) { control.disabled = true; });
+          submitting = true; cgCopy(actionMsg,'Preparing the selected evidence and saving your answer.');
+          const controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 45000);
           try {
-            const r = await fetch('/api/v1/goals/' + goalId + '/answer', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({question_id: qid, answer: ans}),
+            const r = await fetch('/api/v1/goals/' + goalId + '/answer-with-files', {
+              method: 'POST', body: body, credentials: 'same-origin', signal: controller.signal
             });
-            if (r.ok) {
-              resetField();
-              currentQuestionId = null;
-              questionPanel.style.display = 'none';
-              recordExchange(questionText.textContent, ans);
-              resumeFollowing();
-            } else {
-              const j = await r.json().catch(function() { return {}; });
-              actionMsg.style.color = 'var(--danger)';
-              actionMsg.textContent = cgErr(r, 'send your answer');
+            const receipt = await r.json().catch(function () { return {}; });
+            if (receipt.detail && receipt.detail.code === 'context_changed') {
+              resetField(); pendingClarification = null;
+              cgCopy(actionMsg,'Your signed-in workspace changed. Reopen the task before sending private content.');
+              return;
             }
-          } catch (e) {
-            actionMsg.style.color = 'var(--danger)';
-            actionMsg.textContent = 'Could not send — check your connection and try again.';
+            if (r.redirected) {
+              attempt.unconfirmed = true; document.getElementById('answer-receipt-check').hidden = false;
+              cgCopy(actionMsg,'Sign in again to check the answer receipt. Your draft and files have been kept.'); return;
+            }
+            if (r.ok && receipt.received && receipt.operation_id === attempt.operation) {
+              await acceptClarificationReceipt(receipt, attempt);
+            } else {
+              attempt.unconfirmed = r.status >= 500;
+              document.getElementById('answer-receipt-check').hidden = !attempt.unconfirmed;
+              window.mvRenderError(actionMsg, r, 'save your answer', receipt);
+              if (r.status === 409 && !attempt.unconfirmed) questionsFresh = false;
+            }
+          } catch (_) {
+            attempt.unconfirmed = true; document.getElementById('answer-receipt-check').hidden = false;
+            cgCopy(actionMsg,'The answer receipt is unconfirmed. Your text and files are kept. Check the receipt or retry the same answer; an accepted answer will not restart twice.');
           } finally {
-            submitting = false;
-            answerInput.disabled = false;
+            clearTimeout(timeout); submitting = false;
+            controls.forEach(function (control, index) { control.disabled = before[index]; }); syncComposer();
           }
           return;
         }
+        if (window.mvConversationInbox && window.mvConversationInbox.available) {
+          submitting = true;
+          try { await window.mvConversationInbox.send(answerForm); }
+          finally { submitting = false; syncComposer(); }
+          return;
+        }
         if (!done) {
-          composerMessage('Lightwork is still working on the last message. Stop it, or wait for it to finish.', true);
+          composerMessage('Background message availability has not been confirmed. Refresh messages or wait for this task to finish; your draft is kept.', true);
           return;
         }
         // The next message of this chat: a follow-up goal, run with the
         // earlier turns as context. The server answers with the new page.
         // Disabled controls are excluded from native form serialization.
         const formData = new FormData(answerForm);
+        let navigatingAfterReceipt = false;
+        const submittedControls = Array.from(answerForm.querySelectorAll('input,select,textarea,button'));
+        const disabledBefore = submittedControls.map(function (control) { return control.disabled; });
+        submittedControls.forEach(function (control) { control.disabled = true; });
         submitting = true;
         if (sendBtn) sendBtn.disabled = true;
         answerInput.disabled = true;
         composerMessage('Sending…');
         try {
           const r = await fetch(answerForm.action, { method: 'POST', body: formData });
-          if (r.redirected) { window.location.href = r.url; return; }
+          if (r.redirected) {
+            const destination = new URL(r.url, window.location.origin);
+            if (destination.origin === window.location.origin && /^\/chat\/goal\/\d+$/.test(destination.pathname)) {
+              if (answerForm.mvRecovery) await answerForm.mvRecovery.clear();
+              window.dispatchEvent(new CustomEvent('lightwork:composer-sent', {detail: {form: answerForm, recoveryCleared: true}})); navigatingAfterReceipt = true; window.location.href = r.url; return;
+            }
+            composerMessage('Your sign-in changed. The message was not confirmed; your draft has been kept.', true); return;
+          }
           const j = await r.json().catch(function () { return {}; });
           composerMessage(replyFailureText(r, j), true);
         } catch (e) {
           composerMessage('Could not send — check your connection and try again.', true);
         } finally {
           submitting = false;
-          if (sendBtn) sendBtn.disabled = false;
-          answerInput.disabled = false;
+          if (!navigatingAfterReceipt) {
+            submittedControls.forEach(function (control, index) { control.disabled = disabledBefore[index]; });
+            syncComposer();
+          }
         }
       });
 
       cancelBtn.addEventListener('click', async function() {
         if (!canOperate) return;
-        if (!(await mvConfirm('Stop this task? Lightwork will stop after the step it is on.', { okText: 'Stop task' }))) return;
+        if (!(await mvConfirm('Stop this task? Lightwork will stop after the step it is on.', { okText: 'Stop task',productCopy:true }))) return;
         cancelBtn.disabled = true;
-        actionMsg.textContent = '';
+        cgCopy(actionMsg,'Requesting stop…');
         let accepted = false;
         try {
           const r = await fetch('/api/v1/goals/' + goalId + '/cancel', { method: 'POST' });
-          if (r.ok || r.status === 204) { accepted = true; return; }
+          if (r.ok || r.status === 204) {
+            accepted = true; stopRequested = true;
+            cgCopy(actionMsg,'Stop requested. The current step may still be cleaning up. Already completed external changes are not undone.');
+            currentQuestionId = null; questionPanel.style.display = 'none';
+            openPollingFallback(true); return;
+          }
           const j = await r.json().catch(function () { return {}; });
           actionMsg.style.color = 'var(--danger)';
-          actionMsg.textContent = cgErr(r, 'stop the task');
+          cgCopy(actionMsg,cgErr(r, 'stop the task'));
         } catch (e) {
           actionMsg.style.color = 'var(--danger)';
-          actionMsg.textContent = 'Could not stop the task. Check your connection and try again.';
+          cgCopy(actionMsg,'The stop response was lost. Checking task state; the request may have been accepted.');
+          openPollingFallback(true);
         } finally {
           if (!accepted) cancelBtn.disabled = false;
         }
@@ -1107,6 +1101,9 @@
         // connected: clear the "Waiting…" placeholder and any stale error.
         hidePlaceholder();
         if (streamErrorEl) streamErrorEl.style.display = 'none';
+        lastPayloadAt = Date.now();
+        clearTimeout(reconnectTimer); reconnectTimer = null;
+        document.getElementById('stream-retry').hidden = true;
         const evs = Array.isArray(d.events) ? d.events : [];
         for (const e of evs) {
           // Skip ids we've already rendered, so an SSE reconnect that
@@ -1123,7 +1120,7 @@
         eventsEl.scrollTop = eventsEl.scrollHeight;
         if (d.status) {
           setStatus(d.status);
-          if (d.status !== 'blocked' && haltCard) haltCard.style.display = 'none';
+          if (!['blocked', 'failed', 'cancelled'].includes(d.status) && haltCard) haltCard.style.display = 'none';
         }
         if (d.result) {
           const changed = d.result !== lastResult;
@@ -1157,13 +1154,21 @@
         if (d.terminal === true) {
           done = true;
           cancelBtn.disabled = true;
-          if (answerNeedsRefresh) refreshAnswerPanel();
         }
+        if (['failed', 'cancelled'].includes(currentStatus)) renderHalted();
+        if (stopRequested && currentStatus === 'cancelled') cgCopy(actionMsg,'Stop recorded. Cleanup may still be finishing; already completed changes are not undone.');
+        if (stopRequested && currentStatus === 'done') cgCopy(actionMsg,'The task completed before the stop took effect. Review its result and any external changes.');
         syncComposer();
+        document.dispatchEvent(new CustomEvent('lightwork:task-projection', {detail: {
+          status: d.status, terminal: d.terminal === true, result: d.result,
+          artifactsChanged: evs.some(function (event) { return event.kind === 'artifact'; })
+        }}));
       }
 
       let stream = null;
+      let reconnectTimer = null, pollTimer = null, polling = false, lastPayloadAt = null;
       function openStream() {
+        polling = false; clearTimeout(pollTimer); clearTimeout(reconnectTimer);
         if (typeof EventSource === 'undefined') return openPollingFallback();
         if (stream) { try { stream.close(); } catch (_) {} }
         const es = new EventSource('/api/goal/' + goalId + '/events/stream?since=' + sinceId);
@@ -1178,47 +1183,52 @@
         es.onerror = function() {
           // EventSource auto-reconnects; if it permanently fails (network
           // gone, server down), fall back to polling so the UI still works.
-          if (es.readyState === EventSource.CLOSED && stream === es) openPollingFallback();
+          if (stream !== es) return;
+          showStreamError('Updates interrupted. Task state is unknown until reconnected.' + (lastPayloadAt ? ' Last refreshed ' + new Date(lastPayloadAt).toLocaleTimeString() + '.' : ''));
+          document.getElementById('stream-retry').hidden = false;
+          if (es.readyState === EventSource.CLOSED) openPollingFallback();
+          else if (!reconnectTimer) reconnectTimer = setTimeout(function () { if (stream === es) openPollingFallback(); }, 10000);
         };
       }
 
       let pollFailures = 0;
       const MAX_POLL_FAILURES = 5;  // ~25s of dead polling before we surface it
 
-      function openPollingFallback() {
+      function openPollingFallback(force) {
+        if (stream) { stream.close(); stream = null; }
+        clearTimeout(reconnectTimer); reconnectTimer = null;
+        if (polling) return;
+        polling = true;
         async function poll() {
-          if (done) return;
-          if (document.visibilityState === 'hidden') {
-            setTimeout(poll, 5000);
-            return;
-          }
+          if (!polling || (done && !force)) { polling = false; return; }
+          if (document.visibilityState === 'hidden') { pollTimer = setTimeout(poll, 5000); return; }
+          const controller = new AbortController();
+          const timeout = setTimeout(function () { controller.abort(); }, 12000);
           try {
-            const url = '/api/goal/' + goalId + '/events?since=' + sinceId;
-            const resp = await fetch(url);
-            if (resp.status === 404) { done = true; return; }  // goal gone; stop polling
-            if (!resp.ok) {
-              pollFailures++;
-              if (pollFailures >= MAX_POLL_FAILURES) {
-                showStreamError('Lost connection to the agent. Both the live stream and polling failed — reload the page to retry.');
-                return;
-              }
-              setTimeout(poll, 5000);
-              return;
+            const resp = await fetch('/api/goal/' + goalId + '/events?since=' + sinceId,
+              {credentials: 'same-origin', cache: 'no-store', signal: controller.signal});
+            if ([401, 403, 404].includes(resp.status) || resp.redirected) {
+              showStreamError(resp.status === 401 || resp.redirected ? 'Sign in again to reconnect task updates.' : 'Task access is no longer available.');
+              eventsEl.replaceChildren(); if (resultSection) resultSection.style.display = 'none';
+              document.dispatchEvent(new CustomEvent('lightwork:task-access-lost'));
+              polling = false; document.getElementById('stream-retry').hidden = false; return;
             }
-            pollFailures = 0;
-            applyPayload(await resp.json());
-            if (done) return;
-          } catch (e) {
+            if (!resp.ok) throw new Error('unavailable');
+            applyPayload(await resp.json()); pollFailures = 0; force = false;
+            if (done) { polling = false; return; }
+          } catch (_) {
             pollFailures++;
-            if (pollFailures >= MAX_POLL_FAILURES) {
-              showStreamError('Lost connection to the agent. Both the live stream and polling failed — reload the page to retry.');
-              return;
-            }
-          }
-          setTimeout(poll, pollDelay);
+            showStreamError('Updates are unavailable. The task may still be running. Your draft has been kept.');
+            document.getElementById('stream-retry').hidden = false;
+            if (pollFailures >= MAX_POLL_FAILURES) { polling = false; return; }
+          } finally { clearTimeout(timeout); }
+          pollTimer = setTimeout(poll, Math.min(30000, pollDelay * Math.max(1, pollFailures)));
         }
         poll();
       }
+      document.getElementById('stream-retry').addEventListener('click', function () { pollFailures = 0; openPollingFallback(true); });
+      window.addEventListener('pagehide', function () { polling = false; clearTimeout(pollTimer); clearTimeout(reconnectTimer); if (stream) stream.close(); });
+      if (['failed', 'cancelled'].includes(currentStatus)) renderHalted();
 
       syncComposer();
       // A thread with earlier turns opens on its latest message, like a chat.
@@ -1232,184 +1242,11 @@
       if (currentStatus === 'blocked') pollQuestions();
       // Poll questions on a longer cadence so the form picks up on
       // ask_user that happens between event ticks.
-      setInterval(function() { if (!done) pollQuestions(); }, 5000);
+      setInterval(function() { if (!done && document.visibilityState !== 'hidden') pollQuestions(); }, 5000);
     })();
   </script>
-  <script>
-    // Resume a halted goal in-app: same endpoint the CLI parity route exposes
-    // (POST /api/v1/goals/{id}/resume flips blocked/cancelled/failed back to
-    // pending and re-queues the runner).
-    (function () {
-      var btn = document.getElementById('halt-resume');
-      if (!btn) return;
-      var msg = document.getElementById('halt-resume-msg');
-      var goalId = {{ goal.id }};
-      var form = document.getElementById('halt-resume-form');
-      form.addEventListener('submit', function (event) {
-        event.preventDefault();
-        if (btn.disabled || !form.reportValidity()) return;
-        var raw = document.getElementById('halt-resume-budget').value.trim();
-        var payload = raw ? { max_dollars: Number(raw) } : {};
-        btn.disabled = true;
-        msg.textContent = 'Resuming…';
-        fetch('/api/v1/goals/' + goalId + '/resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-          .then(function (r) {
-            if (r.ok || r.status === 204) { location.reload(); return null; }
-            return r.json().catch(function () { return {}; }).then(function (j) {
-              msg.textContent = cgErr(r, 'continue the task') + ' Check the spending limit too.';
-              btn.disabled = false;
-            });
-          })
-          .catch(function () {
-            msg.textContent = 'Could not resume — check your connection.';
-            btn.disabled = false;
-          });
-      });
-    })();
-  </script>
-  <script>
-    // Deliverable sign-off: record the human certify/reject decision, then
-    // reload to show the signed-off state (and the hand-off download).
-    (function () {
-      function setupSignoff() {
-        document.querySelectorAll('.signoff [data-when]').forEach(function (el) {
-          var ts = parseFloat(el.getAttribute('data-when'));
-          if (ts) el.textContent = window.mvWhen(ts);
-        });
-        var approve = document.getElementById('signoff-approve');
-        var reject = document.getElementById('signoff-reject');
-        if (!approve && !reject) return;
-        var panel = document.getElementById('answer-panel');
-        if (!panel || panel.dataset.signoffBound) return;
-        panel.dataset.signoffBound = '1';
-        var note = document.getElementById('signoff-note');
-        var msg = document.getElementById('signoff-msg');
-        var goalId = {{ goal.id }};
-        // Bind the decision to the exact deliverable this page rendered. The
-        // server rejects this version if a result or artifact changed meanwhile.
-        var reviewedUpdatedAt = Number(panel.dataset.updatedAt);
-        var btns = [approve, reject];
-        function submit(decision) {
-          btns.forEach(function (b) { if (b) b.disabled = true; });
-          msg.style.color = 'var(--muted)';
-          msg.textContent = 'Recording…';
-          fetch('/api/v1/goals/' + goalId + '/signoff', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-              decision: decision,
-              expected_updated_at: reviewedUpdatedAt,
-              note: (note && note.value.trim()) || null,
-            }),
-          }).then(function (r) {
-            if (r.ok) { location.reload(); return; }
-            return r.json().catch(function () { return {}; }).then(function (j) {
-              msg.style.color = 'var(--danger)';
-              msg.textContent = cgErr(r, 'record the sign-off');
-              btns.forEach(function (b) { if (b) b.disabled = false; });
-            });
-          }).catch(function (e) {
-            msg.style.color = 'var(--danger)';
-            msg.textContent = cgErr(e, 'record the sign-off');
-            btns.forEach(function (b) { if (b) b.disabled = false; });
-          });
-        }
-        if (approve) approve.addEventListener('click', function () { submit('approved'); });
-        if (reject) reject.addEventListener('click', function () { submit('rejected'); });
-      }
-      setupSignoff();
-      document.addEventListener('lightwork:answer-ready', setupSignoff);
-    })();
-  </script>
+  <script src="/static/lightwork-task-resume.js" defer></script>
 
-  <script>
-    // Thumbs up/down feedback: grounds a real outcome into the learning loop for
-    // any finished result. Reflects the current rating on load; textContent only.
-    (function () {
-      function setupFeedback() {
-        var box = document.getElementById('feedback');
-        if (!box || box.dataset.bound) return;
-        box.dataset.bound = '1';
-        var up = document.getElementById('feedback-up');
-        var down = document.getElementById('feedback-down');
-        var msg = document.getElementById('feedback-msg');
-        var goalId = {{ goal.id }};
-        function show(rating) {
-          [up, down].forEach(function (b) { if (b) b.classList.remove('is-active'); });
-          if (rating === 'up' && up) up.classList.add('is-active');
-          if (rating === 'down' && down) down.classList.add('is-active');
-        }
-        fetch('/api/v1/goals/' + goalId + '/feedback').then(function (r) {
-          return r.ok ? r.json() : {};
-        }).then(function (j) {
-          if (j && j.feedback && j.feedback.rating) show(j.feedback.rating);
-        }).catch(function () {});
-        function submit(rating) {
-          [up, down].forEach(function (b) { if (b) b.disabled = true; });
-          msg.style.color = 'var(--muted)';
-          msg.textContent = 'Recording…';
-          fetch('/api/v1/goals/' + goalId + '/feedback', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({rating: rating}),
-          }).then(function (r) {
-            [up, down].forEach(function (b) { if (b) b.disabled = false; });
-            if (r.ok) { show(rating); msg.textContent = 'Thanks — this trains your workforce.'; return; }
-            return r.json().catch(function () { return {}; }).then(function (j) {
-              msg.style.color = 'var(--danger)';
-              msg.textContent = cgErr(r, 'save your feedback');
-            });
-          }).catch(function (e) {
-            [up, down].forEach(function (b) { if (b) b.disabled = false; });
-            msg.style.color = 'var(--danger)';
-            msg.textContent = cgErr(e, 'save your feedback');
-          });
-        }
-        if (up) up.addEventListener('click', function () { submit('up'); });
-        if (down) down.addEventListener('click', function () { submit('down'); });
-      }
-      setupFeedback();
-      document.addEventListener('lightwork:answer-ready', setupFeedback);
-    })();
-  </script>
-  <script>
-    // Saved answer actions also initialize when a live answer finishes.
-    (function () {
-      function setupAnswerActions() {
-        var copy = document.getElementById('copy-result');
-        var msg = document.getElementById('answer-action-msg');
-        if (!copy || !msg || copy.dataset.bound) return;
-        copy.dataset.bound = '1';
-        if (copy) copy.addEventListener('click', function () {
-          var source = document.getElementById('saved-answer-source');
-          var text = source ? source.value : '';
-          if (!text) { msg.textContent = 'There is no saved answer to copy yet.'; return; }
-          if (!navigator.clipboard || !navigator.clipboard.writeText) {
-            msg.style.color = 'var(--danger)'; msg.textContent = 'Copy is unavailable here. Use Download answer instead.'; return;
-          }
-          navigator.clipboard.writeText(text).then(function () {
-            msg.style.color = 'var(--muted)'; msg.textContent = 'Copied.';
-          }).catch(function () {
-            msg.style.color = 'var(--danger)'; msg.textContent = 'Could not copy. Use Download answer instead.';
-          });
-        });
-        var print = document.getElementById('print-result');
-        if (print) print.addEventListener('click', function () { window.print(); });
-        var share = document.getElementById('share-open');
-        var panel = document.getElementById('share-panel');
-        if (share && panel) {
-          share.addEventListener('click', function () {
-            panel.open = true;
-            share.setAttribute('aria-expanded', 'true');
-            panel.scrollIntoView({block: 'nearest'});
-            var create = document.getElementById('share-create');
-            if (create && !create.disabled) create.focus(); else panel.querySelector('summary').focus();
-          });
-          panel.addEventListener('toggle', function () { share.setAttribute('aria-expanded', panel.open ? 'true' : 'false'); });
-        }
-      }
-      setupAnswerActions();
-      document.addEventListener('lightwork:answer-ready', setupAnswerActions);
-    })();
-  </script>
   <script>
     // Earlier answers retain the exact text shown in the conversation.
     (function () {
@@ -1448,7 +1285,7 @@
       var SETTLED = { done: 'Complete', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped' };
 
       function stepTotal() { return Number(events.dataset && events.dataset.steps || 0) || events.children.length; }
-      function steps(n) { return n + (n === 1 ? ' step' : ' steps'); }
+      function steps(n) { return cgText(n===1?'{count} step':'{count} steps',{count:cgNumber(n)}); }
       function refreshFromEvents() {
         var lines = events.children;
         if (lines.length) {
@@ -1456,8 +1293,8 @@
           var progress = { plan: 'Planning the next step…', finding: 'Preparing an answer…',
             observation: 'Working through the steps…', error: 'An issue needs attention — open Show work for details.',
             verify: 'Checking the result…', artifact: 'Preparing a result…' };
-          nowEl.textContent = progress[kind] || 'Working…';
-          metaEl.textContent = steps(stepTotal());
+          cgCopy(nowEl,progress[kind] || 'Working…');
+          cgCopy(metaEl,steps(stepTotal()));
         }
       }
       function settle() {
@@ -1471,8 +1308,8 @@
         activity.open = false;
         if (nowEl.classList) nowEl.classList.remove('is-live');
         if (spin) spin.style.display = 'none';
-        nowEl.textContent = 'Work log: ' + steps(stepTotal());
-        metaEl.textContent = SETTLED[st] || (window.mvHuman ? window.mvHuman(st) : st);
+        cgCopy(nowEl,'Work log: {steps}',{steps:steps(stepTotal())});
+        cgCopy(metaEl,SETTLED[st] || (window.mvHuman ? window.mvHuman(st) : st));
         return true;
       }
 
@@ -1492,216 +1329,11 @@
     })();
   </script>
 
-  <script>
-    // Edit & save the deliverable: the human's revision replaces the result and
-    // its distance from the agent's draft grounds a graded learning signal.
-    (function () {
-      function setupEditing() {
-        var toggle = document.getElementById('edit-toggle');
-        if (!toggle || toggle.dataset.bound) return;
-        toggle.dataset.bound = '1';
-        var box = document.getElementById('edit-box');
-        var textEl = document.getElementById('edit-text');
-        var saveBtn = document.getElementById('edit-save');
-        var editMsg = document.getElementById('edit-msg');
-        var goalId = {{ goal.id }};
-        toggle.addEventListener('click', function () {
-          box.style.display = box.style.display === 'none' ? 'block' : 'none';
-          if (box.style.display === 'block') textEl.focus();
-        });
-        saveBtn.addEventListener('click', function () {
-          saveBtn.disabled = true; editMsg.style.color = 'var(--muted)'; editMsg.textContent = 'Saving…';
-          fetch('/api/v1/goals/' + goalId + '/deliverable/edit', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({text: textEl.value}),
-          }).then(function (r) {
-            saveBtn.disabled = false;
-            if (r.ok) { editMsg.textContent = 'Saved — thanks, this trains your workforce.';
-                        setTimeout(function () { location.reload(); }, 900); return; }
-            return r.json().catch(function () { return {}; }).then(function (j) {
-              editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(r, 'save your edit');
-            });
-          }).catch(function (e) { saveBtn.disabled = false; editMsg.style.color = 'var(--danger)'; editMsg.textContent = cgErr(e, 'save your edit'); });
-        });
-      }
-      setupEditing();
-      document.addEventListener('lightwork:answer-ready', setupEditing);
-    })();
-  </script>
 
-  <script>
-    // Artifact version history: fetch on first expand, render newest-first with
-    // a unified diff per version (server-computed). textContent throughout — no
-    // untrusted content reaches innerHTML.
-    (function () {
-    function setupArtifactHistory() {
-      document.querySelectorAll('.artifact__history').forEach(function (d) {
-        if (d.dataset.historyBound) return;
-        d.dataset.historyBound = '1';
-        d.addEventListener('toggle', function () {
-          if (!d.open || d.dataset.loaded) return;
-          d.dataset.loaded = '1';
-          const body = d.querySelector('.artifact__history-body');
-          body.textContent = 'Loading…';
-          body.classList.add('muted');
-          const url = '/api/v1/goals/' + encodeURIComponent(d.dataset.goal) +
-                      '/artifacts/history?title=' + encodeURIComponent(d.dataset.title);
-          // W3-75: a non-2xx (auth lapsed, goal gone, server error) used to
-          // render as "No history." or leave "Loading…" forever, and the loaded
-          // flag meant re-opening never retried. Check the status, and on any
-          // failure show why and clear the flag so the next toggle retries.
-          fetch(url).then(function (r) {
-            if (!r.ok) {
-              return r.json().catch(function () { return {}; }).then(function (j) {
-                throw new Error(cgErr(r, 'load earlier versions'));
-              });
-            }
-            return r.json();
-          }).then(function (j) {
-            body.textContent = '';
-            body.classList.remove('muted');
-            const versions = (j.versions || []).slice().reverse();  // newest first
-            if (!versions.length) { body.textContent = 'No history.'; return; }
-            versions.forEach(function (v) {
-              const wrap = document.createElement('div');
-              wrap.className = 'artifact__version';
-              const head = document.createElement('div');
-              head.className = 'artifact__version-head';
-              head.textContent = 'v' + v.version +
-                (v.created_at ? ' · ' + new Date(v.created_at * 1000).toLocaleString() : '');
-              wrap.appendChild(head);
-              if (v.diff) {
-                const pre = document.createElement('pre');
-                pre.className = 'artifact__diff';
-                v.diff.split('\n').forEach(function (line) {
-                  const span = document.createElement('span');
-                  if (line[0] === '+') span.className = 'add';
-                  else if (line[0] === '-') span.className = 'del';
-                  span.textContent = line + '\n';
-                  pre.appendChild(span);
-                });
-                wrap.appendChild(pre);
-              } else {
-                const p = document.createElement('div');
-                p.className = 'muted';
-                p.textContent = '(initial version)';
-                wrap.appendChild(p);
-              }
-              body.appendChild(wrap);
-            });
-          }).catch(function (e) {
-            body.classList.add('muted');
-            body.textContent = 'Could not load history: ' + String(e && e.message || e) +
-                               '. Close and reopen to retry.';
-            delete d.dataset.loaded;
-          });
-        });
-      });
-    }
-    setupArtifactHistory();
-    document.addEventListener('lightwork:answer-ready', setupArtifactHistory);
-    })();
-  </script>
 
-  <script>
-    // Share links: create (token shown once, in a copyable field) + revoke.
-    (function () {
-      function setupSharing() {
-        const wrap = document.querySelector('.goal-share');
-        if (!wrap || wrap.dataset.bound) return;
-        wrap.dataset.bound = '1';
-        const goal = wrap.dataset.goal;
-        const createBtn = document.getElementById('share-create');
-        const urlField = document.getElementById('share-url');
-        const copyBtn = document.getElementById('share-copy');
-        const msg = document.getElementById('share-msg');
-        const list = document.getElementById('share-list');
 
-        if (createBtn) createBtn.addEventListener('click', async function () {
-          createBtn.disabled = true;
-          msg.textContent = 'Creating…';
-          try {
-            const r = await fetch('/api/v1/goals/' + encodeURIComponent(goal) + '/share', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-            });
-            const j = await r.json().catch(function () { return {}; });
-            if (r.ok && j.url) {
-              urlField.value = j.url;
-              urlField.dataset.shareId = String(j.id || '');
-              urlField.dataset.localOnly = j.local_only ? '1' : '0';
-              urlField.hidden = false;
-              copyBtn.hidden = false;
-              urlField.focus();
-              urlField.select();
-              msg.textContent = j.local_only
-                ? 'This address is limited to this computer or its private network. Recipients need an address they can reach.'
-                : 'Copy this link now — it is shown only once.';
-              if (j.id) addRow(j.id);
-            } else {
-              msg.textContent = cgErr(r, 'create the link');
-            }
-          } catch (e) { msg.textContent = cgErr(e, 'create the link'); }
-          finally { createBtn.disabled = false; }
-        });
 
-        copyBtn.addEventListener('click', async function () {
-          if (!urlField.value) return;
-          try {
-            if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable');
-            await navigator.clipboard.writeText(urlField.value);
-            msg.textContent = urlField.dataset.localOnly === '1'
-              ? 'Link copied. This address is limited to this computer or its private network. Recipients need an address they can reach.'
-              : 'Link copied. Anyone who can reach your workspace can read this answer until it expires or you revoke it.';
-          } catch (_) {
-            urlField.focus(); urlField.select();
-            msg.textContent = 'Copy was unavailable. The link is selected; press Ctrl+C or Command+C.';
-          }
-        });
-
-        function addRow(id) {
-          const li = document.createElement('li');
-          li.dataset.id = id;
-          li.appendChild(document.createTextNode('Read-only link '));
-          const b = document.createElement('button');
-          b.type = 'button'; b.className = 'btn btn--ghost share-revoke';
-          b.dataset.id = id; b.textContent = 'Revoke';
-          li.appendChild(b);
-          list.appendChild(li);
-        }
-
-        list.addEventListener('click', async function (ev) {
-          const btn = ev.target.closest('.share-revoke');
-          if (!btn) return;
-          if (!(await mvConfirm('Revoke this share link? Anyone using it will immediately lose access.', { okText: 'Revoke link' }))) return;
-          btn.disabled = true;
-          msg.textContent = '';
-          try {
-            const r = await fetch('/api/v1/goals/' + encodeURIComponent(goal) +
-                                  '/share/' + encodeURIComponent(btn.dataset.id) + '/revoke',
-                                  { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-            if (r.ok) {
-              const li = btn.closest('li');
-              if (li) li.remove();
-              if (urlField.dataset.shareId === btn.dataset.id) {
-                urlField.value = ''; delete urlField.dataset.shareId; delete urlField.dataset.localOnly;
-                urlField.hidden = true; copyBtn.hidden = true;
-              }
-              msg.textContent = 'Link revoked.';
-            } else {
-              const detail = await r.json().catch(function () { return {}; });
-              msg.textContent = cgErr(r, 'turn off the link');
-              btn.disabled = false;
-            }
-          } catch (e) {
-            msg.textContent = 'Could not turn off the link. Check your connection and try again.';
-            btn.disabled = false;
-          }
-        });
-      }
-      setupSharing();
-      document.addEventListener('lightwork:answer-ready', setupSharing);
-    })();
-  </script>
+  <script src="/static/lightwork-deliverable-sharing.js" defer></script>
   <script>
     // Attachments panel: list the goal's files (uploads + machine-generated
     // transcript/extract companions), download each, add more to a goal.
@@ -1714,8 +1346,35 @@
       var input = document.getElementById('attach-add');
       var msg = document.getElementById('attach-msg');
       if (!panel || !list) return;
+      var denied = false, generation = 0, requests = new Set(), loading = false, refreshAgain = false;
+      var pending = [], uploading = false, progress = null, t = null, polls = 0;
+      function clearPrivate() {
+        denied = true; generation++; requests.forEach(function (controller) { controller.abort(); });
+        clearInterval(t); list.replaceChildren(); count.textContent = ''; input.value = '';
+        pending.forEach(function (item) { item.file = null; }); pending = [];
+        if (progress) progress.replaceChildren();
+        addBtn.disabled = true; input.disabled = true;
+        cgCopy(msg, 'Task access is no longer available.');
+      }
+      async function fileRequest(options) {
+        if (denied) throw new Error('Task access is no longer available.');
+        var ticket = generation, controller = new AbortController(); requests.add(controller);
+        var timer = setTimeout(function () { controller.abort(); }, options && options.method === 'POST' ? 60000 : 12000);
+        try {
+          var response = await fetch('/api/v1/goals/' + goalId + '/attachments', Object.assign({credentials:'same-origin',cache:'no-store',signal:controller.signal}, options));
+          if (denied || ticket !== generation) throw new Error('Task access is no longer available.');
+          if (response.redirected || [401,403,404].includes(response.status)) {
+            clearPrivate(); throw new Error('Task access is no longer available.');
+          }
+          if (!response.ok) throw new Error(cgErr(response, 'load the attached files'));
+          var body = await response.json();
+          if (denied || ticket !== generation) throw new Error('Task access is no longer available.');
+          return body;
+        } finally { clearTimeout(timer); requests.delete(controller); }
+      }
 
       function fmtSize(n) {
+        if(window.LightworkI18n)return window.LightworkI18n.number(n>=1048576?n/1048576:n>=1024?n/1024:n,{style:'unit',unit:n>=1048576?'megabyte':n>=1024?'kilobyte':'byte',unitDisplay:'short',maximumFractionDigits:n>=1048576?1:0});
         if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
         if (n >= 1024) return Math.round(n / 1024) + ' KB';
         return n + ' B';
@@ -1725,12 +1384,12 @@
       }
       function render(items) {
         list.textContent = '';
-        count.textContent = items.length;
-        panel.style.display = items.length ? 'block' : 'none';
+        count.textContent = cgNumber(items.length);count.lang=window.LightworkI18n?window.LightworkI18n.locale:'en';
+        panel.style.display = 'block';
         if (!items.length) {
           var empty = document.createElement('li');
           empty.className = 'muted';
-          empty.textContent = 'No files attached yet.';
+          cgCopy(empty,'No files attached to this task yet. Adding a file does not confirm the runner has read it.');
           list.appendChild(empty);
         }
         items.forEach(function (a) {
@@ -1738,65 +1397,101 @@
           li.style.cssText = 'display:flex;align-items:center;gap:0.5rem;font-size:var(--text-sm);';
           var link = document.createElement('a');
           link.href = '/api/v1/goals/' + goalId + '/attachments/' + a.id + '/download';
-          link.textContent = a.filename;
+          link.textContent = a.filename;link.lang='und';link.dir='auto';link.dataset.userContent='';
           link.setAttribute('download', a.filename);
           li.appendChild(link);
           var meta = document.createElement('span');
           meta.className = 'muted';
           meta.style.fontSize = 'var(--text-xs)';
-          meta.textContent = fmtSize(a.size_bytes) + (isCompanion(a.filename) ? ' · auto-generated' : '');
+          if(isCompanion(a.filename))cgCopy(meta,'{size} · auto-generated',{size:fmtSize(a.size_bytes)});else{meta.textContent=fmtSize(a.size_bytes);meta.lang=window.LightworkI18n?window.LightworkI18n.locale:'en';}
           li.appendChild(meta);
           list.appendChild(li);
         });
       }
-      function refresh() {
-        fetch('/api/v1/goals/' + goalId + '/attachments')
-          .then(function (r) {
-            if (r.ok) return r.json();
-            return r.json().catch(function () { return {}; }).then(function (body) {
-              throw new Error(cgErr(r, 'load the attached files'));
-            });
-          })
-          .then(render)
-          .catch(function (error) {
+      async function refresh() {
+        if (denied || document.hidden) return;
+        if (loading) { refreshAgain = true; return; }
+        loading = true;
+        try {
+          var items = await fileRequest();
+          if (!Array.isArray(items)) throw new Error('Attachments could not be loaded. You can still add a file or retry by reloading.');
+          render(items);
+        } catch (error) {
+            if (denied) return;
             panel.style.display = 'block';
             list.textContent = '';
             var failed = document.createElement('li');
             failed.className = 'muted';
-            failed.textContent = 'Attachments could not be loaded. You can still add a file or retry by reloading.';
+            cgCopy(failed,'Attachments could not be loaded. You can still add a file or retry by reloading.');
             list.appendChild(failed);
-            msg.textContent = String(error.message || error);
-          });
+            cgCopy(msg,String(error.message || error));
+        } finally {
+          loading = false;
+          if (refreshAgain) { refreshAgain = false; refresh(); }
+        }
       }
       if (addBtn && input) {
         addBtn.addEventListener('click', function () { input.click(); });
+        progress = document.createElement('ul');
+        progress.setAttribute('aria-label',cgText('Upload progress'));progress.lang=window.LightworkI18n?window.LightworkI18n.languageFor('Upload progress'):'en'; msg.after(progress);
+        function row(item) {
+          cgCopy(item.row,'{name} — {state}',{name:item.name,state:cgText({queued:'Queued',uploading:'Uploading',complete:'Complete',failed:'Failed'}[item.state]||item.state)});
+          if (item.state === 'failed') {
+            var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn--ghost';
+            cgCopy(retry,'Retry {name}',{name:item.name});
+            retry.addEventListener('click', function () { item.state = 'queued'; row(item); drain(); });
+            item.row.append(retry);
+          }
+        }
+        async function drain() {
+          if (uploading || denied) return;
+          uploading = true; addBtn.disabled = true;
+          try {
+            for (var item of pending) {
+              if (denied) return;
+              if (item.state !== 'queued') continue;
+              item.state = 'uploading'; row(item);
+              try {
+                var fd = new FormData(); fd.append('file', item.file, item.name);
+                await fileRequest({method: 'POST', body: fd});
+                item.state = 'complete'; item.file = null;
+              } catch (_) { item.state = 'failed'; }
+              if (denied) return;
+              row(item);
+            }
+            cgCopy(msg,pending.some(function (i) { return i.state === 'failed'; })
+              ? 'Some files were not confirmed. Retry only those files. Previously admitted files are preserved.'
+              : 'Files added to this task. Extracted text may still be preparing; this does not confirm the runner has read them.');
+            refresh(); pollCompanions();
+          } finally { uploading = false; addBtn.disabled = denied; }
+        }
         input.addEventListener('change', function () {
-          var files = Array.prototype.slice.call(input.files);
-          input.value = '';
-          if (!files.length) return;
-          msg.textContent = 'Uploading…';
-          var chain = Promise.resolve();
-          files.forEach(function (f) {
-            chain = chain.then(function () {
-              var fd = new FormData();
-              fd.append('file', f, f.name);
-              return fetch('/api/v1/goals/' + goalId + '/attachments', { method: 'POST', body: fd })
-                .then(function (r) {
-                  if (!r.ok) throw new Error(cgErr(r, 'upload ' + f.name));
-                });
-            });
+          if (denied) { input.value = ''; return; }
+          Array.from(input.files).forEach(function (file) {
+            var item = {file: file, name: file.name, state: 'queued', row: document.createElement('li')};
+            pending.push(item); progress.append(item.row); row(item);
           });
-          chain.then(function () { msg.textContent = ''; refresh(); })
-               .catch(function (e) { msg.textContent = e && /^Could not/.test(e.message || '') ? e.message : cgErr(e, 'upload the file'); refresh(); });
+          input.value = ''; drain();
         });
       }
       refresh();
       // Companions land seconds after upload; refresh a few times so they appear.
-      var polls = 0;
-      var t = setInterval(function () {
-        refresh();
-        if (++polls >= 6) clearInterval(t);
-      }, 5000);
+      function pollCompanions() {
+        clearInterval(t); polls = 0;
+        t = setInterval(function () {
+          refresh();
+          if (++polls >= 6) clearInterval(t);
+        }, 5000);
+      }
+      pollCompanions();
+      document.addEventListener('lightwork:task-projection', function (event) {
+        if (event.detail && (event.detail.terminal || event.detail.artifactsChanged)) refresh();
+      });
+      document.addEventListener('lightwork:answer-panel-updated', refresh);
+      document.addEventListener('lightwork:task-access-lost', clearPrivate);
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
+      window.addEventListener('focus', refresh);
+      window.addEventListener('pagehide', clearPrivate);
     })();
   </script>
   <script>
@@ -1826,7 +1521,7 @@
         function fallback() {
           if (!SpeechRec) return;
           var rec = new SpeechRec();
-          rec.lang = document.documentElement.lang || 'en';
+          rec.lang = window.LightworkI18n ? window.LightworkI18n.locale : document.documentElement.lang || 'en';
           setRec(true);
           rec.onresult = function (e) { fill(e.results[0][0].transcript); };
           rec.onend = function () { setRec(false); };
@@ -1840,7 +1535,7 @@
             onResult: fill,
           })
             .catch(function () {
-              if (window.mvToast) window.mvToast('We couldn\u2019t turn your recording into text. Try again, or type your answer.', { error: true });
+              if (window.mvToast) window.mvToast(cgText('We couldn\u2019t turn your recording into text. Try again, or type your answer.'), { error: true });
             })
             .finally(function () { busy = false; });
         }
@@ -1863,115 +1558,7 @@
         });
       }
 
-    })();
-  </script>
-  <script>
-    // Read-aloud controls report errors and can stop preparation or playback.
-    (function () {
-      function setupReadAloud() {
-        var speakBtn = document.getElementById('read-aloud');
-        if (!speakBtn || speakBtn.dataset.bound) return;
-        speakBtn.dataset.bound = '1';
-        var msg = document.getElementById('answer-action-msg');
-        var panel = document.getElementById('answer-panel');
-        var player = null, audioUrl = null, controller = null, fallbackTimer = null;
-        var active = false, fallbackActive = false, sequence = 0;
-        function stopReading(message) {
-          sequence += 1;
-          if (controller) { controller.abort(); controller = null; }
-          if (player) { player.pause(); player = null; }
-          if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
-          if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null; }
-          if (fallbackActive) {
-            if (window.lwVoice) window.lwVoice.stop();
-            else if (window.speechSynthesis) window.speechSynthesis.cancel();
-            fallbackActive = false;
-          }
-          active = false;
-          speakBtn.setAttribute('aria-pressed', 'false');
-          speakBtn.setAttribute('aria-label', 'Read the result aloud');
-          speakBtn.textContent = 'Read aloud';
-          if (msg && message) msg.textContent = message;
-        }
-        function browserRead(text, readingMessage, finishedMessage, requestSequence) {
-          if (sequence !== requestSequence) return;
-          var started = false;
-          try {
-            if (window.lwVoice) started = window.lwVoice.speak(text);
-            else if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
-              var utterance = new window.SpeechSynthesisUtterance(text);
-              utterance.onend = function () { if (sequence === requestSequence) stopReading(finishedMessage); };
-              utterance.onerror = function () { if (sequence === requestSequence) stopReading('Could not read this answer aloud. Try again, or use Copy or Download.'); };
-              window.speechSynthesis.speak(utterance);
-              started = true;
-            }
-          } catch (_) { started = false; }
-          if (!started) {
-            stopReading('Read aloud is unavailable here. Use Copy or Download to read this answer elsewhere.');
-            return;
-          }
-          fallbackActive = true;
-          if (msg) msg.textContent = readingMessage;
-          if (window.speechSynthesis) {
-            fallbackTimer = setInterval(function () {
-              if (sequence === requestSequence && !window.speechSynthesis.speaking && !window.speechSynthesis.pending) stopReading(finishedMessage);
-            }, 500);
-          }
-        }
-        speakBtn.addEventListener('click', async function () {
-          if (active) { stopReading('Reading stopped.'); return; }
-          var src = document.getElementById('result') || document.getElementById('deliverable');
-          var fullText = src ? (src.innerText || src.textContent || '').trim() : '';
-          if (!fullText) { if (msg) msg.textContent = 'There is no answer to read aloud yet.'; return; }
-          var text = Array.from(fullText).slice(0, 4096).join('');
-          var readingMessage = fullText.length > text.length
-            ? 'Reading the first part of this answer. Copy or download the full answer.'
-            : 'Reading this answer.';
-          var finishedMessage = fullText.length > text.length
-            ? 'Finished reading the first part. Copy or download the full answer.'
-            : 'Finished reading.';
-          active = true;
-          sequence += 1;
-          var requestSequence = sequence;
-          speakBtn.setAttribute('aria-pressed', 'true');
-          speakBtn.setAttribute('aria-label', 'Stop reading');
-          speakBtn.textContent = 'Stop reading';
-          if (msg) msg.textContent = 'Preparing audio…';
-          if (!panel || panel.dataset.canOperate !== 'true') {
-            browserRead(text, readingMessage, finishedMessage, requestSequence);
-            return;
-          }
-          controller = typeof AbortController === 'function' ? new AbortController() : null;
-          try {
-            var response = await fetch('/api/v1/voice/speak', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text: text }), signal: controller ? controller.signal : undefined,
-            });
-            if (sequence !== requestSequence) return;
-            if (!response.ok) {
-              browserRead(text, readingMessage, finishedMessage, requestSequence);
-              return;
-            }
-            var blob = await response.blob();
-            if (sequence !== requestSequence) return;
-            if (!blob || !blob.size) throw new Error('empty audio');
-            audioUrl = URL.createObjectURL(blob);
-            player = new Audio(audioUrl);
-            player.onended = function () { if (sequence === requestSequence) stopReading(finishedMessage); };
-            player.onerror = function () { if (sequence === requestSequence) stopReading('Could not play the audio. Try again, or use Copy or Download.'); };
-            await player.play();
-            if (sequence === requestSequence && msg) msg.textContent = readingMessage;
-          } catch (error) {
-            if (sequence !== requestSequence || (error && error.name === 'AbortError')) return;
-            stopReading('Could not read this answer aloud. Check your connection and try again, or use Copy or Download.');
-          }
-        });
-        document.addEventListener('lightwork:answer-ready', function () { stopReading(); }, { once: true });
-        window.addEventListener('beforeunload', function () { stopReading(); }, { once: true });
-        // Voice-only mode: read the finished result aloud as soon as it is
-        // shown (the browser may still ask for a click before playing sound).
-        if (speakBtn.getAttribute('data-voice-only') === '1') speakBtn.click();
-      }
+      function setupReadAloud() { if (window.lwReadAloud) window.lwReadAloud(document.getElementById('read-aloud')); }
       setupReadAloud();
       document.addEventListener('lightwork:answer-ready', setupReadAloud);
     })();

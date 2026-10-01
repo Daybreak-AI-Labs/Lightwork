@@ -37,7 +37,8 @@ def test_demo_page_embeds_component_and_documents_limits():
     assert "<lightwork-analytics>" in r.text
     assert 'src="/static/lightwork-analytics.js"' in r.text
     # honest usage notes on the page, not just in the JS comment
-    assert "Treat the access key like a password" in r.text
+    assert "Do not paste an administrator access key into shared HTML" in r.text
+    assert "use individual sessions" in r.text
     assert "Copy the code" in r.text  # the snippet sits under Technical details
     assert "View-only" in r.text
 

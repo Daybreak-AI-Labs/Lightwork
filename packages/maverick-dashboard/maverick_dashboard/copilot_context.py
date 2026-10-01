@@ -86,6 +86,111 @@ _CONTEXTS = tuple(
     _ensure_read_only(context)
     for context in (
         CopilotPageContext(
+            path="/facts", title="Shared business facts",
+            summary="Browse shared facts by name, source, tag and age, then inspect exact current details and recorded versions.",
+            capabilities=("Search bounded server pages and select facts for read-only review.",
+                          "Review an exact single-fact edit, tag change, historical restore or removal through native controls and authorized Copilot actions."),
+            boundaries=("Shared facts are visible to workspace viewers; personal and task working notes are excluded.",
+                        "An edit needs current operate permission and the reviewed version. A read grant cannot grant a write.",
+                        "Removal stops new recall; retained history and minimal operation receipts are not permanent erasure."),
+            next_steps=("Choose Details and history on one fact to set the current Copilot selection.",
+                        "Compare the saved value with your draft if another person changed the fact."),
+            suggested_questions=("Find shared business facts", "Review selected facts and history", "Edit the selected fact's tags"),
+        ),
+        CopilotPageContext(
+            path="/content-access", title="Employee content access",
+            summary="Employee content stays private while administrators govern policy and audit metadata.",
+            capabilities=("Request a specific task, approval-card read or exact chat-identity export for a stated purpose.",
+                          "Review, deny or revoke an independently requested read and inspect its receipts."),
+            boundaries=("Another administrator or the current content owner must approve; approvals expire within an hour.",
+                        "A read never grants mutation, publication, whole-conversation access or companion history.",
+                        "Reading an approval card does not grant a vote; current role, claim and separation-of-duties checks still apply.",
+                        "Use the page controls; this guidance does not submit or approve requests."),
+            next_steps=("Choose the exact record, purpose and duration, then request independent review.",
+                        "Confirm the activity receipt before opening approved content."),
+            suggested_questions=("Who can approve this read?", "Why did my content approval stop working?"),
+        ),
+        CopilotPageContext(
+            path="/users/departures", title="Employee departures",
+            summary="Review employee access and retained work before deactivating an exact named identity.",
+            capabilities=("Preview owned work, memberships, connections and pending run-goal schedules.",
+                          "Deactivate local access and record named responsibility for unresolved handoffs."),
+            boundaries=("Removing local credentials does not revoke external provider consent.",
+                        "Data and holds remain retained; a custodian receives no private-content access.",
+                        "Running work and other module queues remain unresolved; no complete-offboarding claim is made.",
+                        "Use the reviewed page controls; guidance does not deactivate accounts."),
+            next_steps=("Preview a known employee and name a retained-data owner.",
+                        "Review saved per-step receipts and record external handoff evidence."),
+            suggested_questions=("What remains after deactivation?", "Does a handoff owner receive private task access?"),
+        ),
+        CopilotPageContext(
+            path="/companion/admin",
+            title="Employee companions",
+            summary=(
+                "Workspace administrators enroll employees and set the policy "
+                "for personal task status and optional AI draft conversations."
+            ),
+            capabilities=(
+                "Enroll or disable a specific employee using the page's controls.",
+                "Allow access to the employee's own task status and choose conversation retention.",
+                "Separately allow an employee to request AI drafts using the installation's configured AI service.",
+                "Review policy and audit metadata for companions in this workspace.",
+            ),
+            boundaries=(
+                "Companion policy requires administrator authority in the current workspace and current employee membership.",
+                "Companion administration does not grant access to private companion history.",
+                "AI drafts send messages, eligible retained history and permitted own-task titles and status to the configured AI service.",
+                "Retained context is checked against current source access; no-history drafts are stateless.",
+                "Companions cannot execute model tools or task actions, use connected sources, or create learned memory.",
+                "Copilot can explain these controls but cannot enroll employees or change companion policy.",
+            ),
+            next_steps=(
+                "Check whether employee companions are enabled in Settings.",
+                "Select an employee and review task access, AI draft permission and retention before saving.",
+                "Before permitting AI drafts, confirm that the configured AI service is an approved destination for the employee's messages and allowed context.",
+                "Refresh the policy after a conflict before making another change.",
+            ),
+            suggested_questions=(
+                "What can an employee companion access?",
+                "Can administrators read companion conversations?",
+                "How do I change an employee's companion policy?",
+            ),
+        ),
+        CopilotPageContext(
+            path="/companion",
+            title="My companion",
+            summary=(
+                "Check your own task status and, when your administrator permits "
+                "it, ask for AI drafts alongside work that is still running."
+            ),
+            capabilities=(
+                "Read the status of your own tasks when your workspace policy allows it.",
+                "Ask the companion for an AI draft when your administrator has enabled draft conversations for you.",
+                "View your current companion policy and conversation retention.",
+                "Clear your retained companion conversation using the page's controls.",
+            ),
+            boundaries=(
+                "A workspace administrator must enroll you before you use a companion.",
+                "AI drafts use the configured AI service, which receives your message, eligible retained history and permitted own-task titles and status.",
+                "Without task-source access, drafts use your current message only; without conversation retention, drafts do not carry history forward.",
+                "Retained context is rechecked against current source access before it is used.",
+                "Drafts may be wrong and need your review; the companion cannot execute tools or task actions.",
+                "It cannot read another employee's tasks, use connected sources or create learned memory.",
+                "Companion administration exposes policy and audit metadata, not private companion history.",
+                "Copilot explains this page; it cannot read or clear your companion conversation.",
+            ),
+            next_steps=(
+                "Review your access, AI draft permission, destination and retention policy before sending a message.",
+                "Ask about task status or request a draft, then review the reply and any task sources before using it.",
+                "If access is unavailable, ask your workspace administrator to review enrollment, policy or the configured AI service.",
+            ),
+            suggested_questions=(
+                "What can my companion do today?",
+                "What does the AI service receive?",
+                "How do I clear my conversation history?",
+            ),
+        ),
+        CopilotPageContext(
             path="/assurance/cloud-agents",
             title="Cloud Agent Governance",
             summary=(

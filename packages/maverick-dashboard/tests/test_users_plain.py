@@ -47,8 +47,10 @@ def test_users_page_has_no_typed_ids_and_no_jargon(client):
     assert 'value="user:okta|newcomer-42"' in picker
     # Departments are checkboxes, not a multi-select.
     assert 'type="checkbox" name="suites"' in page and "multiple" not in page
-    # Destructive actions confirm first.
-    assert page.count("data-users-confirm=") >= 1 and "btn btn--danger" in page
+    # Returning to the inherited role is a reviewed access change, not account
+    # deletion; the current inherited revision and powers must be explicit.
+    assert page.count("data-users-confirm=") >= 1
+    assert 'name="expected_standard"' in page and 'data-users-ok="Use standard role"' in page
     assert 'data-autoload="true"' in page
 
 

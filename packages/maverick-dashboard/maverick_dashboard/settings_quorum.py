@@ -109,6 +109,45 @@ def is_settings_approval(approval) -> bool:
             and approval.provenance == PROVENANCE)
 
 
+def _proposal_binds_approval(proposal, approval) -> bool:
+    """Only a native proposal grants administrators this redacted card read."""
+    from maverick.approval_cards import ApprovalCardError, decode_approval_detail, digest
+    from maverick.paths import current_tenant_id_strict
+
+    if not is_settings_approval(approval) or approval.goal_id is not None or approval.scope != "settings":
+        return False
+    saved = proposal.new
+    if (not isinstance(saved, dict) or type(saved.get("approval")) is not int
+            or saved["approval"] != approval.id or proposal.proposer != approval.requested_by
+            or proposal.required != approval.approvals_required):
+        return False
+    try:
+        card = decode_approval_detail(approval.detail)
+        settings = sorted(proposal.key.split(","))
+        return bool(card and card["action"] == ACTION
+                    and card["binding_sha256"] == saved.get("card_binding")
+                    and card["parameters"]["sha256"] == digest({"change_id": proposal.change_id})
+                    and card["target"]["sha256"] == digest({"settings": settings})
+                    and card["authority"]["actor"] == proposal.proposer
+                    and card["authority"]["role"] == "admin"
+                    and card["authority"]["workspace"] == (current_tenant_id_strict() or "local"))
+    except (ApprovalCardError, KeyError, TypeError, ValueError):
+        return False
+
+
+def has_bound_admin_review(approval) -> bool:
+    """Verify the independent proposal ledger, never caller-selected labels."""
+    if not is_settings_approval(approval) or approval.goal_id is not None:
+        return False
+    from maverick import quorum
+
+    try:
+        proposals = quorum.ProposalStore().all()
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+    return len(proposals) <= 10000 and any(_proposal_binds_approval(proposal, approval) for proposal in proposals)
+
+
 def require_decider(request, approval, who: str, *, approving: bool) -> None:
     """Only a global administrator decides a settings request, and never the
     person who asked approves it (whatever self-approval allows elsewhere)."""
@@ -167,20 +206,25 @@ def review(changes: list[dict], actor: str, shown) -> tuple[dict | None, str | N
         approval_id = int((proposal.new or {}).get("approval", 0))
         approval = world.get_approval(approval_id) if approval_id else None
         expired = quorum.status(change_id, store=store, policy=policy) == quorum.EXPIRED
-        if approval is not None and not expired and approval.status == "approved":
+        bound = approval is not None and _proposal_binds_approval(proposal, approval)
+        if bound and not expired and approval.status == "approved":
             return None, change_id
-        if approval is not None and not expired and approval.status == "pending":
+        if bound and not expired and approval.status == "pending":
             return _held(approval_id, approval.approvals_required,
                          _votes(world, approval_id), fresh=False), None
         store.delete([change_id])  # denied, gone or too old: ask again
+    from maverick.approval_cards import decode_approval_detail
+
+    detail = _card(changes, shown, actor, change_id, policy.ttl_days)
+    card_binding = decode_approval_detail(detail)["binding_sha256"]
     approval_id = world.create_approval(
         ACTION, risk="high", scope="settings",
-        detail=_card(changes, shown, actor, change_id, policy.ttl_days),
+        detail=detail,
         provenance=PROVENANCE, approvals_required=policy.required, requested_by=actor,
     )
     try:
         quorum.propose(change_id, ",".join(sorted(c["setting"].id for c in changes)),
-                       None, {"approval": approval_id}, actor, policy=policy, store=store)
+                       None, {"approval": approval_id, "card_binding": card_binding}, actor, policy=policy, store=store)
     except quorum.QuorumError:
         # The same change was requested at the same moment: keep that request.
         log.info("settings quorum: request %s already open", change_id)

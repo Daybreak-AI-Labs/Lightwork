@@ -41,6 +41,7 @@
   <div class="ge-wrap">
     <svg id="ge-svg" role="img" aria-label="Map of {{ node_count }} tasks. Use the editor beside the map to select and edit tasks with the keyboard."></svg>
     <div class="ge-form panel" style="margin-bottom: 0;">
+      <button type="button" id="ge-refresh">Refresh current map</button>
       <h2 style="margin: 0; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Edit a task</h2>
 
       <label for="ge-select">Selected task</label>
@@ -406,12 +407,20 @@
     }
   }
 
+  function announceSelection() {
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {
+      detail: {selection: selected === null ? {} : {kind: 'goal', id: selected, goal_id: selected}}
+    }));
+  }
+
   function select(id) {
+    if (mutationBusy || contextChanged) return;
     selected = id;
     const n = id == null ? null : byId[id];
     titleEl.value = n ? n.title : "";
     rebuildSelects();
     paint();
+    announceSelection();
     setStatus(n ? ("Selected: " + (n.title || "Untitled task")) : count(state.nodes.length));
   }
 
@@ -434,20 +443,49 @@
     });
   }
 
+  const pendingRequests = new Set();
+  let contextChanged = false;
+  async function boundedRequest(url, options) {
+    const controller = new AbortController();
+    pendingRequests.add(controller);
+    let timer;
+    const timeout = new Promise((_resolve, reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error('Request outcome is unknown.')); }, 15000);
+    });
+    const request = (async () => {
+      const response = await fetch(url, Object.assign({}, options || {}, {signal: controller.signal}));
+      const body = response.ok && response.status !== 204 ? await response.json() : null;
+      return {response, body};
+    })();
+    try { return await Promise.race([request, timeout]); }
+    finally { clearTimeout(timer); pendingRequests.delete(controller); }
+  }
+  function abandonRequests() { pendingRequests.forEach(controller => controller.abort()); }
+  window.addEventListener('pagehide', abandonRequests);
+  window.addEventListener('lightwork:context-changed', () => {
+    contextChanged = true; abandonRequests();
+    document.querySelectorAll('.ge-form input,.ge-form select,.ge-form button').forEach(control => { control.disabled = true; });
+    selected = null; announceSelection();
+  });
+
+  let loadGeneration = 0;
   async function load() {
+    const generation = ++loadGeneration;
     showError("");
     try {
-      const r = await fetch("/api/v1/goal-tree", { headers: { Accept: "application/json" } });
+      const reply = await boundedRequest("/api/v1/goal-tree", { headers: { Accept: "application/json" } });
+      if (contextChanged || generation !== loadGeneration) return false;
+      const r = reply.response;
       if (!r.ok) { setStatus("Could not load your tasks. Refresh the page to try again."); return; }
-      const data = await r.json();
+      const data = reply.body;
       state = { nodes: data.nodes || [], edges: data.edges || [] };
       if (selected !== null && !state.nodes.some((n) => n.id === selected)) selected = null;
       if (!state.nodes.length) {
         while (svg.firstChild) svg.removeChild(svg.firstChild);
         edgeRefs = []; labelEls = []; byId = {};
         setStatus("No tasks yet — start one in chat or the task builder");
-        rebuildSelects();
-        return;
+        rebuildSelects(); announceSelection();
+        return true;
       }
       setStatus(count(state.nodes.length));
       seedLayout();
@@ -460,53 +498,113 @@
       } else {
         requestAnimationFrame(loop);
       }
-      rebuildSelects();
+      rebuildSelects(); announceSelection();
+      return true;
     } catch (e) { setStatus("Can't reach Lightwork. Check your connection and refresh."); }
   }
 
+  let mutationBusy = false;
+  async function refreshDraft() {
+    const draftTitle = titleEl.value, draftParent = parentEl.value;
+    const controls = Array.from(document.querySelectorAll('.ge-form input,.ge-form select,.ge-form button'))
+      .map(control => { const before = control.disabled; control.disabled = true; return [control, before]; });
+    let updated;
+    try { updated = await load(); }
+    finally { controls.forEach(([control, before]) => { control.disabled = contextChanged || before; }); }
+    if (!updated || selected === null) return false;
+    titleEl.value = draftTitle;
+    if (draftParent && !Array.from(parentEl.options).some(option => option.value === draftParent)) {
+      const unavailable = document.createElement('option'); unavailable.value = draftParent;
+      unavailable.textContent = 'Previously selected parent is unavailable; choose again';
+      unavailable.disabled = true; parentEl.appendChild(unavailable);
+    }
+    parentEl.value = draftParent;
+    return true;
+  }
   async function post(url, body, action) {
+    if (mutationBusy || contextChanged) return false;
+    mutationBusy = true;
+    const controls = Array.from(document.querySelectorAll('.ge-form input,.ge-form select,.ge-form button'))
+      .map(control => { const before = control.disabled; control.disabled = true; return [control, before]; });
     action = action || "save that";
     showError("");
     try {
-      const r = await fetch(url, {
+      const reply = await boundedRequest(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (contextChanged) return false;
+      const r = reply.response;
+      if (r.status === 409) {
+        const refreshed = await refreshDraft();
+        showError(refreshed
+          ? "This task changed. Your draft is kept. The map now shows current state; review it before saving again."
+          : "This task changed. Your draft is kept, but current state could not be verified. Refresh the map before saving again.");
+        return false;
+      }
       if (!r.ok) {
         showError(window.mvErrorText ? window.mvErrorText({ status: r.status }, action)
                                      : "Could not " + action + ". Please try again.");
         return false;
       }
-      return true;
-    } catch (e) { showError("Could not " + action + " — check your connection and try again."); return false; }
+      return r.status === 204 ? true : reply.body;
+    } catch (e) {
+      showError("The result is not confirmed. Your draft is kept. Refresh current map to check it before deciding whether to retry. No retry was sent.");
+      return false;
+    } finally {
+      mutationBusy = false;
+      controls.forEach(([control, before]) => { control.disabled = contextChanged || before; });
+    }
   }
+  document.getElementById('ge-refresh').addEventListener('click', async () => {
+    if (mutationBusy || contextChanged) return;
+    if (await refreshDraft()) showError('Current map refreshed. Your typed draft is kept; compare it before saving.');
+  });
 
   selectEl.addEventListener("change", () => {
     select(selectEl.value ? parseInt(selectEl.value, 10) : null);
   });
   document.getElementById("ge-retitle").addEventListener("click", async () => {
+    if (mutationBusy || contextChanged) return;
     if (selected === null) { showError("Select a task first."); return; }
     if (!titleEl.value.trim()) { showError("Type a title first."); return; }
-    if (await post("/api/v1/goals/" + selected + "/retitle", { title: titleEl.value }, "save the title")) {
-      setStatus("Title saved"); await load();
+    if (await post("/api/v1/goals/" + selected + "/retitle", { title: titleEl.value, expected_updated_at: byId[selected].updated_at, operation_id: crypto.randomUUID() }, "save the title")) {
+      setStatus("Title saved"); await refreshDraft();
     }
   });
   document.getElementById("ge-reparent").addEventListener("click", async () => {
+    if (mutationBusy || contextChanged) return;
     if (selected === null) { showError("Select a task first."); return; }
     const pid = parentEl.value ? parseInt(parentEl.value, 10) : null;
-    if (await post("/api/v1/goals/" + selected + "/reparent", { parent_id: pid }, "move the task")) {
-      setStatus("Moved"); await load();
+    if (await post("/api/v1/goals/" + selected + "/reparent", { parent_id: pid, expected_updated_at: byId[selected].updated_at, operation_id: crypto.randomUUID() }, "move the task")) {
+      setStatus("Moved"); await refreshDraft();
     }
   });
-  document.getElementById("ge-add-child").addEventListener("click", async () => {
+  const childButton = document.getElementById("ge-add-child");
+  childButton.addEventListener("click", async () => {
+    if (mutationBusy || contextChanged || childButton.disabled) return;
     if (selected === null) { showError("Select the task to add it under first."); return; }
-    const t = document.getElementById("ge-child-title").value;
+    const parentId = selected;
+    const input = document.getElementById("ge-child-title"), t = input.value;
     if (!t.trim()) { showError("Type a title for the smaller task first."); return; }
-    if (await post("/api/v1/goals/" + selected + "/children", { title: t }, "add the smaller task")) {
-      document.getElementById("ge-child-title").value = "";
-      setStatus("Smaller task added — start it when you are ready"); await load();
-    }
+    childButton.disabled = true; input.readOnly = true;
+    childButton.setAttribute('aria-busy', 'true'); setStatus('Adding the smaller task.');
+    try {
+      const context = document.querySelector('meta[name="lightwork-draft-context"]');
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+      const fingerprint = Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('');
+      const key = 'lightwork-child:' + (context ? context.content : '') + ':' + parentId + ':' + fingerprint;
+      let operation = sessionStorage.getItem(key);
+      if (!operation) { operation = crypto.randomUUID(); sessionStorage.setItem(key, operation); }
+      const created = await post('/api/v1/goals/' + parentId + '/children', {title: t, operation_id: operation}, 'add the smaller task');
+      if (created) {
+        sessionStorage.removeItem(key); input.value = '';
+        await refreshDraft(); select(created.id);
+        setStatus('Added ' + (created.title || t) + '. It has not started.');
+      }
+    } catch (error) { showError('Could not prepare a recoverable request. Your title is kept; allow session storage and retry.'); }
+    finally { childButton.disabled = contextChanged; input.readOnly = false; childButton.removeAttribute('aria-busy'); }
   });
 
   // Pan (pointer drag on the empty canvas) + zoom (wheel, anchored at cursor).

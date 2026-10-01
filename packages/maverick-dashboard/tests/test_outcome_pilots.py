@@ -385,14 +385,21 @@ def test_goal_resume_api_blocks_pending_pilot_without_state_change_and_allows_ex
     client = TestClient(app, headers={"Origin": "http://testserver"})
     refused = client.post(f"/api/v1/goals/{goal_id}/resume")
     assert refused.status_code == 409, refused.text
-    assert refused.json()["detail"]["code"] == "outcome_pilot_admission_incomplete"
+    assert refused.json()["detail"]["code"] == "admission_hold"
     assert world.get_goal(goal_id).status == "blocked"
     assert world.get_goal(goal_id).result == sources.PREPARED
     assert not dispatched and world.list_episodes(goal_id=goal_id) == []
 
     finish_admission(pending, runtime_records)
-    resumed = client.post(f"/api/v1/goals/{goal_id}/resume")
-    assert resumed.status_code == 204, resumed.text
+    review = client.get(f"/api/v1/goals/{goal_id}/resume-review")
+    assert review.status_code == 200, review.text
+    state = review.json()
+    body = {"operation_id": "e" * 32, "expected_context": state["context"],
+            "expected_updated_at": state["expected_updated_at"],
+            "expected_owner": state["expected_owner"]}
+    resumed = client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body)
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["admitted"]
     assert world.get_goal(goal_id).status == "pending"
     assert len(dispatched) == 1
     world.close()
@@ -472,25 +479,41 @@ def test_independent_review_api_requires_global_admin_and_reauthorizes_every_sou
     monkeypatch.setattr(api, "context_for", lambda request: "bob")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:bob")
     monkeypatch.setattr(api, "require_permission", lambda *a: None)
-    monkeypatch.setattr(api, "_resolver", lambda request: lambda k, r: records[r])
-    monkeypatch.setattr(sources, "resolve", lambda request, k, r: records[r])
+    resolutions = []
+
+    def resolve_source(request, kind, reference, *, independent_review=False):
+        resolutions.append((kind, reference, independent_review))
+        return records[reference]
+
+    # Exercise the native resolver's independent-review dispatch rather than
+    # replacing it with a mock that silently omits the authority mode.
+    monkeypatch.setattr(sources, "resolve", resolve_source)
     route = "/api/v1/outcome-pilots/independent-review/" + record["id"]
     client = TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Pilot-Context": "bob"})
     def denied(*_a):
         raise HTTPException(403, "Global administrator required")
     monkeypatch.setattr(api, "require_global_permission", denied)
     assert client.get(route).status_code == 403
+    assert resolutions == []
     monkeypatch.setattr(api, "require_global_permission", lambda *a: None)
     packet = client.get(route)
     assert packet.status_code == 200 and packet.json()["context"] == "bob"
+    assert {reference for _, reference, _ in resolutions} == set(records)
+    resolutions.clear()
     body = {"expected_revision": record["revision"], "operation_id": "actual-api-review-operation",
             "evidence_version": packet.json()["learning_policy"]["evidence_version"], "decision": "accepted_local_scope",
             "notes": "Independent local policy evidence checked; provider limitations retained.", "confirm": True}
     assert client.post(route, json=body).status_code == 200
-    def source_revoked(*_a):
+    assert {(kind, reference) for kind, reference, _ in resolutions} == {
+        ("goal", reference) for reference in records
+    }
+    assert all(independent for _, _, independent in resolutions)
+
+    def source_revoked(*_a, **_kwargs):
         raise PermissionError("Revoked source")
     monkeypatch.setattr(sources, "resolve", source_revoked)
     assert client.get(route).status_code == 403
+    assert client.post(route, json=body).status_code == 403
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
     assert client.get(route).status_code == 403
 

@@ -18,6 +18,7 @@ from pathlib import Path
 
 CONFIG = '''
 [features]
+employee_content_access_requests = true
 draft_recovery = true
 record_search = true
 action_center = true
@@ -71,6 +72,11 @@ enable = false
 auto_fetch_model = false
 [budget.provider_caps]
 browser-spend = 20.0
+[dashboard.themes.browser-white]
+bg = "#ffffff"
+panel = "#ffffff"
+text = "#111111"
+accent = "#111111"
 '''
 
 

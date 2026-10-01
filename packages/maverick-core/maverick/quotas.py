@@ -505,6 +505,14 @@ def record_usage(
         except Exception as e:  # pragma: no cover -- reservation release is fail-soft
             log.warning("quotas: failed to release reservation %r: %s",
                         reservation_id, e)
+    if recorded:
+        try:
+            from .budget_guidance import observe_warnings
+            observe_warnings(principal)
+        except Exception:
+            # Warnings must never turn an acknowledged charge into a failed
+            # settlement. The interactive preview can recover the same notice.
+            log.warning("Budget warning observation unavailable; usage remains recorded.")
     return recorded
 
 

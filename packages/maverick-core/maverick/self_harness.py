@@ -320,6 +320,37 @@ def screen_stored_line(line: str) -> str | None:
     return _screen_addendum_line(line)
 
 
+def _shared_sources_current(source_ids) -> bool:
+    """Unknown, deleted, excluded or newly private sources never grant shared recall."""
+    from .memory_ownership import source_allowed
+    if not isinstance(source_ids, (list, tuple)) or not 0 < len(source_ids) <= _MAX_MINE_TRACES:
+        return False
+    return all(type(goal_id) is int and goal_id >= 0 and source_allowed(goal_id, "")
+               for goal_id in source_ids)
+
+
+def _shared_line_current(key: str, line: str, meta: dict) -> bool:
+    row = meta.get(_line_id(key, line)) or {}
+    return (row.get("privacy_schema") == "shared-unowned-sources-v1"
+            and row.get("model_id") == key and row.get("text") == line
+            and _shared_sources_current(row.get("source_goal_ids")))
+
+
+def shared_addenda(path: Path | None = None) -> dict[str, str]:
+    """Source-authorized shared guidance. Raw storage is retained for CAS and erasure.
+
+    Missing/corrupt legacy provenance withholds the line from prompts, searches,
+    models and shared read-outs. It is never silently assigned to the operator.
+    """
+    meta = load_line_meta(path)
+    out = {}
+    for key, block in load_addenda(path).items():
+        lines = [line for line in _bullets(block) if _shared_line_current(key, line, meta)]
+        if lines:
+            out[key] = _ADDENDUM_HEADER + "\n" + "\n".join("- " + line for line in lines)
+    return out
+
+
 def recall_addendum(model_id: str | None, path: Path | None = None, *,
                     domain: str | None = None,
                     tools: list[str] | tuple[str, ...] | None = None,
@@ -338,7 +369,7 @@ def recall_addendum(model_id: str | None, path: Path | None = None, *,
     (see :func:`_rescreen_block`) every contributing block passes through."""
     if not model_id or not enabled():
         return ""
-    store = load_addenda(path)
+    store = shared_addenda(path)
     block = _rescreen_block(store.get(str(model_id), ""))
     for ctx in _scope_contexts(domain, tools, role):
         scoped = _rescreen_block(store.get(_scoped_key(str(model_id), ctx), ""))
@@ -352,9 +383,9 @@ def recall_addendum(model_id: str | None, path: Path | None = None, *,
 # (its determinism is a proven property). Per-line PROVENANCE (why a line was
 # learned, when, on what evidence) lives in a SIBLING ``*.meta.json`` keyed by a
 # content-addressed line id, reconciled to the block under the same lock. It is
-# strictly auxiliary: a missing/corrupt sidecar never affects recall, and a
-# legacy line with no record simply has no provenance (and is never auto-retired,
-# since its age is unknown). This is the structured-record foundation that
+# required for shared recall: missing/corrupt source lineage withholds the line.
+# Legacy lines remain in the raw store for governed retention and rollback; no
+# ownership is inferred from their old metadata or their age. This foundation
 # unblocks retirement, conflict detection, and post-promotion efficacy.
 
 def _meta_path(addenda_path: Path | None = None) -> Path:
@@ -422,6 +453,13 @@ def _upsert_line_meta(meta: dict[str, dict], model_id: str, line: str,
         "learned_at": rec.get("learned_at", now),
         "updated_at": now,
     })
+    # Publication authority is refreshed with every promotion, never inherited
+    # from a previous normalized line or a legacy best-effort sidecar.
+    rec.pop("privacy_schema", None)
+    rec.pop("source_goal_ids", None)
+    if _shared_sources_current(provenance.get("source_goal_ids")):
+        rec["privacy_schema"] = "shared-unowned-sources-v1"
+        rec["source_goal_ids"] = list(provenance["source_goal_ids"])
     # Canary is only touched when the caller passes it (a non-canary re-promote
     # must not clear a probation flag, nor stamp canary=False on every record).
     if "canary" in provenance:
@@ -436,7 +474,7 @@ def line_provenance(model_id: str, path: Path | None = None) -> list[dict]:
     ``None`` for a legacy line with no record, and ``domain`` is ``None`` for a
     model-wide line. Includes domain-scoped lines (which the pre-fix version
     missed). Read-only; powers ``self-harness show --verbose``."""
-    store = load_addenda(path)
+    store = shared_addenda(path)
     meta = load_line_meta(path)
     fields = ("signature", "rationale", "hypothesis", "held_out_delta", "samples",
               "learned_at", "updated_at", "last_recalled_at", "recall_notes")
@@ -563,7 +601,7 @@ def detect_store_conflicts(model_id: str | None = None,
     An optional ``classifier_fn`` (see :func:`find_conflicts`) refines the lexical
     heuristic with a semantic judge."""
     out: list[tuple[str, str, str]] = []
-    for store_key, block in load_addenda(path).items():
+    for store_key, block in shared_addenda(path).items():
         mid, ctx = _split_key(store_key)
         if model_id is not None and mid != model_id:
             continue
@@ -593,7 +631,7 @@ def list_learned(path: Path | None = None) -> dict[str, list[str]]:
     toggle, so an operator can still inspect/roll back what was learned while the
     feature is paused."""
     out: dict[str, list[str]] = {}
-    for store_key, block in load_addenda(path).items():
+    for store_key, block in shared_addenda(path).items():
         lines = _bullets(block)
         if not lines:
             continue
@@ -762,6 +800,7 @@ class FailureSignature:
     context: str = ""           # optional mining scope (e.g. "domain=finance")
                                 # when failures were bucketed by a finer dimension;
                                 # "" = model-wide (the default, backward compatible)
+    source_goal_ids: tuple[int, ...] = ()  # server-derived, never proposer supplied
 
 
 def _tokens(text: str) -> set[str]:
@@ -821,7 +860,9 @@ def _is_minable(r: object, model_id: str) -> bool:
     considers."""
     return (isinstance(r, dict)
             and str(r.get("model_id") or "") == str(model_id)
-            and r.get("channel") is None and r.get("user_id") is None)
+            and r.get("channel") is None and r.get("user_id") is None
+            and r.get("owner") == ""
+            and _shared_sources_current([r.get("goal_id", 0)]))
 
 
 def count_eligible(reflexions: list[dict], *, model_id: str) -> int:
@@ -1014,6 +1055,7 @@ def mine_failures(
                 model_id=str(model_id), failure_class=fclass,
                 signature=sig_text, support=len(cluster), examples=examples,
                 context=context,
+                source_goal_ids=tuple(sorted({c.get("goal_id", 0) for c in cluster})),
             ))
     # Strongest weaknesses first.
     out.sort(key=lambda s: s.support, reverse=True)
@@ -1049,6 +1091,7 @@ class HarnessProposal:
     context: str = ""            # mining scope carried from the signature (e.g.
                                  # "domain=finance"); routes the line to a
                                  # scoped store key so recall can target it.
+    source_goal_ids: tuple[int, ...] = ()  # exact unowned-source lineage
 
 
 # An injected proposer: given a signature, return EITHER a single short guidance
@@ -1247,6 +1290,8 @@ def llm_proposer(llm, *, budget=None, model: str | None = None,
     ``_sanitize_line`` + length + policy gates, so an attacker-influenced model
     cannot smuggle control chars, secrets, or multi-line break-outs."""
     def _propose(sig: FailureSignature):
+        if not _shared_sources_current(sig.source_goal_ids):
+            return ""
         try:
             if structured:
                 system = (
@@ -1343,6 +1388,7 @@ def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = No
     return HarnessProposal(
         model_id=sig.model_id, signature=sig.signature,
         addendum_line=line, hypothesis=hypothesis, context=sig.context,
+        source_goal_ids=sig.source_goal_ids,
         rationale=f"targets {sig.support} '{sig.failure_class}' failures",
     )
 
@@ -2125,11 +2171,14 @@ def _apply_addendum_locked(
     try:
         meta = load_line_meta(path)
         _upsert_line_meta(meta, store_key, proposal.addendum_line,
-                          provenance or {}, now=time.time())
+                          {**(provenance or {}), "source_goal_ids": proposal.source_goal_ids},
+                          now=time.time())
         _reconcile_meta(meta, store_key, _bullets(new_block))
         _write_line_meta(meta, path)
-    except Exception:  # pragma: no cover -- sidecar is best-effort
-        log.debug("self_harness: line-meta update failed", exc_info=True)
+    except Exception:  # source provenance is mandatory for a shared promotion
+        if proposal.source_goal_ids:
+            raise
+        log.debug("self_harness: quarantined line-meta update failed", exc_info=True)
     return after
 
 
@@ -2189,7 +2238,7 @@ def note_recall(model_id: str | None, *, now: float | None = None,
         from .file_lock import cross_process_lock
         with _lock, cross_process_lock(p), _store_rmw_lock(p):
             meta = load_line_meta(p)
-            store = load_addenda(p)
+            store = shared_addenda(p)
             changed = False
             for key in keys:
                 for ln in _bullets(store.get(key, "")):
@@ -2301,7 +2350,7 @@ def line_efficacy(model_id: str, path: Path | None = None) -> list[dict]:
     success/total (``None`` until an outcome lands) and ``domain`` is the scope
     (``None`` for model-wide). Read-only. Includes domain-scoped lines, which the
     pre-fix version was blind to."""
-    store = load_addenda(path)
+    store = shared_addenda(path)
     meta = load_line_meta(path)
     out = []
     for k, ln in _iter_model_lines(store, str(model_id)):
@@ -2338,7 +2387,7 @@ def review_efficacy(model_id: str, cases: list[str], *,
     try:
         # Snapshot the (key, line) pairs first: forget_addendum mutates the store
         # mid-loop, so iterating a live view would skip lines. Spans every scope.
-        for _k, ln in list(_iter_model_lines(load_addenda(path), str(model_id))):
+        for _k, ln in list(_iter_model_lines(shared_addenda(path), str(model_id))):
             try:
                 w, *_ = _score_parts(score_with(ln, cases))
                 wo, *_ = _score_parts(score_without(ln, cases))
@@ -2395,7 +2444,7 @@ def list_canaries(model_id: str, path: Path | None = None) -> list[str]:
     """The model's lines currently on canary probation, across ALL scopes
     (model-wide + domain). Includes domain-scoped canaries, which the pre-fix
     version was blind to."""
-    store = load_addenda(path)
+    store = shared_addenda(path)
     meta = load_line_meta(path)
     return [ln for k, ln in _iter_model_lines(store, str(model_id))
             if (meta.get(_line_id(k, ln)) or {}).get("canary")]
@@ -2416,7 +2465,7 @@ def review_canaries(model_id: str, *, graduate_after: int = 3,
     graduated: list[str] = []
     demoted: list[str] = []
     try:
-        store = load_addenda(path)
+        store = shared_addenda(path)
         meta = load_line_meta(path)
         # Snapshot pairs first -- forget/mark mutate the store/meta mid-loop.
         for k, ln in list(_iter_model_lines(store, str(model_id))):
@@ -2454,7 +2503,7 @@ def review_relapses(model_id: str, *, failure_share: float,
     try:
         if not failure_share or failure_share <= 0:
             return relapsed
-        store = load_addenda(path)
+        store = shared_addenda(path)
         meta = load_line_meta(path)
         for k, ln in list(_iter_model_lines(store, str(model_id))):
             rec = meta.get(_line_id(k, ln)) or {}
@@ -2561,7 +2610,7 @@ def transferable_lines(source_model: str, path: Path | None = None, *,
     out = []
     for ln in _bullets(store.get(str(source_model), "")):
         rec = meta.get(_line_id(str(source_model), ln)) or {}
-        if rec.get("canary"):
+        if rec.get("canary") or not _shared_line_current(str(source_model), ln, meta):
             continue
         if _is_relapsing(rec, failure_share=share, min_outcomes=min_out):
             continue
@@ -2604,9 +2653,9 @@ def run_transfer(source_model: str, targets: list[str], *,
     try:
         if not enabled():
             return report
-        store = load_addenda(path)
-        lines = transferable_lines(source_model, path, store=store,
-                                   meta=load_line_meta(path))
+        store = load_addenda(path)  # preserve capacity of retained/quarantined records
+        source_meta = load_line_meta(path)
+        lines = transferable_lines(source_model, path, store=store, meta=source_meta)
         tried = {} if (force or not lines) else _load_transfer_tried(path)
         # Dedup while preserving order: a repeated --to target must not
         # re-spend evaluation or double-audit the gate.
@@ -2655,7 +2704,9 @@ def run_transfer(source_model: str, targets: list[str], *,
                     proposal = HarnessProposal(
                         model_id=tgt, signature=f"transfer from {source_model}",
                         addendum_line=ln,
-                        rationale=f"proven on {source_model}; transfer trial")
+                        rationale=f"proven on {source_model}; transfer trial",
+                        source_goal_ids=tuple((source_meta.get(_line_id(str(source_model), ln)) or {})
+                                              .get("source_goal_ids", ())))
                     res["attempted"].append(ln)
                     if holdout_rotations and int(holdout_rotations) > 1 and ho:
                         vr = _validate_rotated(
@@ -2974,7 +3025,7 @@ def run_self_harness(  # noqa: C901 - fail-closed orchestration boundary
             # (the scoped key for a domain line); flag any EXISTING line it appears
             # to contradict (operator review, not a block).
             block_key = _scoped_key(str(model_id), proposal.context)
-            existing = [ln for ln in _bullets(load_addenda(path).get(block_key, ""))
+            existing = [ln for ln in _bullets(shared_addenda(path).get(block_key, ""))
                         if _norm_line(ln) != _norm_line(proposal.addendum_line)]
             for c in find_conflicts(proposal.addendum_line, existing):
                 report.conflicts.append((proposal.addendum_line, c))
@@ -3006,6 +3057,8 @@ def _gate_and_apply(  # noqa: C901 - durable promotion transaction boundary
     from .file_lock import cross_process_lock
 
     check_learning_halt("self_harness", "promotion")
+    if not _shared_sources_current(proposal.source_goal_ids):
+        return False, "current shared source ownership is unavailable"
     if promotion_authorize is not None:
         try:
             if promotion_authorize() is not True:
@@ -3119,6 +3172,8 @@ def _gate_and_apply(  # noqa: C901 - durable promotion transaction boundary
                 )
                 if not authorization.ok:
                     return False, authorization.blocking_reason or "refused"
+                if not _shared_sources_current(proposal.source_goal_ids):
+                    raise ValueError("shared source ownership changed before application")
                 written = _apply_addendum_locked(
                     proposal, p, before_store, provenance=apply_prov)
                 observed = _addenda_artifact_revision(p, _load_addenda_strict(p))

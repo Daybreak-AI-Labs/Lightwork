@@ -98,10 +98,6 @@ def _models(S, C) -> tuple:
           "A sentence added to every agent's instructions, for example: Always cite your "
           "sources.", "text", "AI models", "", "maverick.persona",
           subgroup="Effort and planning", max_length=500, pattern=r"[^\n\r<>{}]{0,500}"),
-        S("persona", "user_name", "What agents call you",
-          "The name agents use for the person they work for. Leave empty for no name.",
-          "text", "AI models", "", "maverick.persona", subgroup="Effort and planning",
-          max_length=60, pattern=r"[^\n\r<>{}]{0,60}"),
         S("agent_factory", "jd_hiring", "Hire agents from a job description",
           "Offer the page that turns a written job description into a new agent.", "toggle",
           "AI models", True, "maverick.jd_hiring", subgroup="Effort and planning"),
@@ -179,6 +175,12 @@ def _models(S, C) -> tuple:
           env=("MAVERICK_COMPACTION_HYBRID",)),
 
         # ------------------------------------------------------- model routing
+        S("models", "guidance", "Show model choice guidance",
+          "Show provider-reported capabilities and dated pricing evidence alongside model choices. Unknown details remain unknown.",
+          "toggle", "AI models", True, "maverick.model_guidance", subgroup="Model choices"),
+        S("models", "capability_tests", "Allow bounded model generation tests",
+          "Let administrators review and explicitly confirm one synthetic model call, capped at USD 0.05 and 64 output tokens or lower workspace limits. Cancellation cannot retract a sent request; uncertain calls are never retried.",
+          "toggle", "AI models", False, "maverick.model_tests", subgroup="Model choices"),
         S("models", "catalog", "Extra models to offer",
           "Models that are not in the built-in list, so they can be chosen everywhere. Write "
           "each as the service name, a colon and the model name.", "list", "AI models", [],

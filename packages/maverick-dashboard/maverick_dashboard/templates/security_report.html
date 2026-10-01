@@ -19,7 +19,7 @@
 
 {% from "_hero.html" import hero, state %}
 {% set readiness = r.get('readiness', {}) or {} %}
-{% call hero('Governed workspaces', 'Security &amp; GRC readiness',
+{% call hero('Governed workspaces', 'Security & GRC readiness',
              subtitle='Board pack',
              lede='Made ' ~ r.get('generated','unknown') ~ ' from your security records: every control, what it
                    does, how far it is put in place, the reviewed evidence behind that, and who owns it.') %}

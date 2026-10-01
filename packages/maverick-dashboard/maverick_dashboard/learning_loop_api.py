@@ -344,10 +344,9 @@ def _log_rows(limit: int) -> list[dict]:
     rows = rows[-limit:]
     rows.reverse()
     return [{"when": ev.get("ts") if isinstance(ev.get("ts"), (int, float)) else None,
-             "what": _PHASE_LABELS.get(str(ev.get("phase") or "apply"),
-                                       str(ev.get("phase") or "").replace("_", " ").capitalize()),
-             "model": str(ev.get("model_id") or ""),
-             "lesson": "" if ev.get("line") in (None, "*") else _clip(ev.get("line"))}
+             "what": _PHASE_LABELS.get(str(ev.get("phase") or ""), "Learning activity"),
+             "model": "",
+             "lesson": ""}
             for ev in rows]
 
 
@@ -358,7 +357,9 @@ async def learning_log(request: Request, limit: int = Query(default=30, ge=1, le
         events = await run_in_threadpool(_log_rows, limit)
     except Exception as exc:  # noqa: BLE001 -- plain message, no internals
         raise HTTPException(status_code=503, detail="The learning activity is not available right now.") from exc
-    return {"events": events}
+    return {"events": events, "privacy_notice": (
+        "Activity shows metadata only. Lesson content is available only when its "
+        "current shared-source ownership can be verified.")}
 
 
 def _preview(model_id: str | None, min_support: int) -> dict:
@@ -370,7 +371,7 @@ def _preview(model_id: str | None, min_support: int) -> dict:
     if not model_id:
         from maverick.llm import model_for_role
         model_id = model_for_role("orchestrator")
-    records = [r.to_dict() for r in reflexion.list_recent(limit=500)]
+    records = [r.to_dict() for r in reflexion.list_recent(limit=500) if r.owner == ""]
     eligible = self_harness.count_eligible(records, model_id=model_id)
     sigs = self_harness.mine_failures(records, model_id=model_id, min_support=min_support)
     out = []

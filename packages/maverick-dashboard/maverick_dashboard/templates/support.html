@@ -34,13 +34,30 @@
   {% else %}<div class="panel"><p>Your administrator can make a support report. You can see each task's status and problems on its task page.</p><p><a class="btn" href="/goals">Open your tasks</a></p></div>{% endif %}
   <section class="panel" id="issue-report" aria-labelledby="issue-report-title">
     <h2 id="issue-report-title">Report a Problem With a Task</h2>
-    <p class="muted">Choose a task that stopped with a problem. Lightwork prepares a bug report for Lightwork's makers with the task's name and error messages filled in, after removing passwords and keys. You review it on their public page before anything is sent.</p>
+    <p class="muted">Choose a task that stopped with a problem. Review the draft here and remove business details before sharing. Recognized passwords and keys are removed. Opening GitHub sends the reviewed title and body to GitHub; publishing an issue is a separate action there.</p>
+    <form id="issue-report-search" class="support-followups">
+      <label for="issue-report-query">Task name</label><input id="issue-report-query" class="input" maxlength="160" type="search">
+      <label for="issue-report-after">From date (UTC)</label><input id="issue-report-after" class="input" type="date">
+      <label for="issue-report-before">Through date (UTC)</label><input id="issue-report-before" class="input" type="date">
+      <button type="submit" class="btn">Search tasks</button>
+    </form>
     <form id="issue-report-form" class="support-followups">
       <label for="issue-report-task">Task that stopped</label>
       <select class="select" id="issue-report-task" name="task" required><option value="">Loading…</option></select>
       <button type="submit" class="btn btn--primary">Prepare the bug report</button>
     </form>
+    <button type="button" class="btn" id="issue-report-more" disabled>Find older tasks</button>
     <p id="issue-report-status" role="status" aria-live="polite"></p>
+    <section id="issue-report-preview" hidden data-draft-recovery="off">
+      <h3>Review the exact draft</h3>
+      <label for="issue-report-title-input">Title</label><input class="input" id="issue-report-title-input" maxlength="120" autocomplete="off">
+      <label for="issue-report-body">Report details</label><textarea class="input" id="issue-report-body" rows="16" maxlength="6000" autocomplete="off"></textarea>
+      <p class="muted">This draft is kept only in this page's memory. Customer names and other business details may remain; edit them before sharing.</p>
+      <button type="button" class="btn" id="issue-report-copy">Copy draft</button>
+      <button type="button" class="btn" id="issue-report-download">Download draft</button>
+      <p><label><input type="checkbox" id="issue-report-confirm"> I reviewed these exact fields and want to send them to GitHub.</label></p>
+      <button type="button" class="btn btn--primary" id="issue-report-open" disabled>Send reviewed draft to GitHub</button>
+    </section>
   </section>
 </section>
 <script src="/static/lightwork-support-ops.js" defer></script>

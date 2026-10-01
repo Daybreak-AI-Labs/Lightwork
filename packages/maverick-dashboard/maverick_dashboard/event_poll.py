@@ -193,7 +193,7 @@ def _fire_template(world, trig, tpl, events, owner, fire, summary, durable=False
     and fire a goal. Mutates ``summary``."""
     from maverick_dashboard import trigger_events_store
     name = trig["name"]
-    declared = set(tpl.params)
+    declared = set(tpl.params) - {key for key, spec in tpl.parameter_schema.get("fields", {}).items() if spec["type"] == "connection"}
     trigger_key = _trigger_key(trig)
     entries = []
     for index, event in enumerate(events):
@@ -202,7 +202,9 @@ def _fire_template(world, trig, tpl, events, owner, fire, summary, durable=False
             if k in declared:
                 params[str(k)] = str(v)[:2000]
         try:
-            title, description = tpl.render(**params)
+            from maverick.template_connections import parameters as connection_parameters
+            _, refs = connection_parameters(tpl, owner, params)
+            title, description = tpl.render_for(owner, **params)
         except ValueError as e:         # a required param the event didn't supply
             detail = _safe_error(e, fallback="template parameters are invalid")
             summary["notes"].append(f"skipped an event: {detail}")
@@ -214,7 +216,7 @@ def _fire_template(world, trig, tpl, events, owner, fire, summary, durable=False
             )
             continue
         key = _event_key(trigger_key, event, event_ids[index] if event_ids is not None else None)
-        entries.append((key, title[:200], description[:8000]))
+        entries.append((key, title[:200], description[:8000], refs))
     from maverick import event_admission
     admissions = event_admission.admit_batch(
         world, entries, owner=owner, origin=name, trigger_key=trigger_key)

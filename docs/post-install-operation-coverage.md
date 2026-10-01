@@ -17,6 +17,24 @@ Local service tests and synthetic browser fixtures provide distinct evidence;
 neither alone is an authenticated installed-application acceptance test. Track
 those gaps explicitly instead of calling a screen complete because it renders.
 
+## Employee companion preview (September 30, 2026)
+
+This increment is untested at the user's request. Static source review does not
+qualify the authenticated or visual journey. See [the bounded feature contract](employee-companions.md).
+
+| Customer job | Direct entry and shared operation | Current-state and authority checks | Observable result / recovery | Copilot and evidence |
+| --- | --- | --- | --- | --- |
+| Enable the preview | Settings or installer; existing feature toggle service | Installation admin; effective-switch readback | Effective setting or explicit conflict | Page guidance only; authored tests unrun |
+| Enroll/restrict an employee | Employee companions; policy update service | Named workspace admin and explicit membership; current target membership, SCIM activity, account/workspace binding, revision comparison | Metadata receipt; refresh stale policy and review again | Operational Copilot missing; no browser acceptance |
+| Ask about current work | My companion; closed supervision intent + owned world-model reads | Named current member; enabled employee policy; exact owner, department and project scope | Bounded current snapshot, source links and policy receipt; retry unavailable stores | Companion status implemented; global Copilot integration missing; tests unrun |
+| Converse and write drafts | My companion; configured writer LLM facade and existing Budget | Explicit AI grant; current identity, policy, generation, source ACL and pinned route before dispatch/publication; no tools | Draft label, context provenance and receipt; metadata recovery with no automatic paid retry; task refresh remains available | Provider and browser acceptance unrun; global Copilot operations missing |
+| Review/clear companion history | My companion; encrypted history read/clear service | Current exact owner and workspace; no admin content override; same-origin mutation | Cleared live history plus metadata receipt; refresh on uncertainty | Copilot action missing; retention/backup qualification pending |
+| Review companion activity | Employee companions; metadata projection | Current workspace admin, explicit membership | Policy/event metadata without conversation text | Copilot action missing; no immutable archive qualification |
+
+Connector access, learned memory, writes/approvals, active-run steering and
+voice are unavailable. Deadline-driven purge, replicated policy
+authority and existing task/chat administrator visibility remain separate work.
+
 ## Learning operations
 
 The current review groups seven learning families into 36 operations covering

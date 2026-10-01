@@ -281,3 +281,40 @@ def test_postgres_fence_rejects_changed_membership_version(setup):
     changed = {**authority, "revision": authority["revision"] + 1}
     with pytest.raises(RecordConflict):
         fence.validate(changed, 0)
+
+
+def test_review_revision_is_one_private_unstarted_draft_with_exact_comments(setup):
+    world, _, goal, _, service, _ = setup
+    packet, _ = send(setup)
+    requested = respond(service("user:reviewer"), packet, action="request_changes", note="Correct the assumptions and retain the evidence.")
+    owner = service("user:owner")
+    request = {"expected_revision": requested["revision"], "source_version": requested["source_version"], "request_id": "prepare-revision"}
+    first = owner.revision_draft(packet["id"], **request)
+    second = owner.revision_draft(packet["id"], **{**request, "request_id": "another-browser-click"})
+    assert first["goal_id"] == second["goal_id"] and first["started"] is False
+    draft = world.get_goal(first["goal_id"])
+    assert draft.owner == "user:owner" and draft.status == "draft"
+    assert packet["id"] in draft.description and "Correct the assumptions" in draft.description
+    assert world.signoff_for(draft.id) is None
+    assert world.get_goal(goal).status == "done"
+    with pytest.raises(ProjectReviewDenied):
+        service("user:reviewer").revision_draft(packet["id"], **request)
+
+
+def test_resubmission_has_new_approval_identity_and_exact_predecessor(setup):
+    world, project, goal, _, service, team = setup
+    packet, _ = send(setup)
+    respond(service("user:reviewer"), packet, action="request_changes")
+    world.set_goal_status(goal, "done", result="Changed result after feedback")
+    owner = service("user:owner")
+    prepared = owner.prepare(project, goal)
+    request = {"goal_id": goal, "reviewer": "user:reviewer", "note": "Review the correction",
+               "due_at": owner.packets.authoritative_time() + 3600, "source_version": prepared["source_version"],
+               "expected_team_revision": team["revision"], "request_id": "resubmission-two",
+               "previous_packet_id": packet["id"], "change_summary": "Corrected the assumptions"}
+    fresh = owner.send(project, **request)
+    assert owner.send(project, **request)["id"] == fresh["id"]
+    assert fresh["id"] != packet["id"] and fresh["status"] == "pending"
+    assert fresh["previous_source_version"] == packet["source_version"]
+    assert fresh["snapshot"]["result"] == "Changed result after feedback"
+    assert world.signoff_for(goal) is None

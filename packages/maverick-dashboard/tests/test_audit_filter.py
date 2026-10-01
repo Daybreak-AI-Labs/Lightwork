@@ -18,6 +18,8 @@ def _tmp_audit(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     log = AuditLog(tmp_path / "audit")
     monkeypatch.setattr(audit, "default_audit_log", lambda: log)
+    from maverick.audit import reader
+    monkeypatch.setattr(reader, "resolve_audit_dir", lambda tenant: log.audit_dir)
     return log
 
 
@@ -41,7 +43,8 @@ def test_audit_page_lists_kinds_and_filters(monkeypatch, tmp_path):
 
     # Filtered to shield_block: the tool_call events are gone.
     filtered = client.get("/audit?kind=shield_block").text
-    assert "jailbreak attempt" in filtered
+    assert "Stopped by the safety filter" in filtered
+    assert "jailbreak attempt" not in filtered
     assert "input_summary" not in filtered  # tool_call rows filtered out
 
 

@@ -36,12 +36,19 @@ class MembershipIn(MutationIn):
 
 
 class SendIn(MutationIn):
+    previous_packet_id: str | None = Field(None, pattern=r"^PRP-[0-9a-f]{32}$")
+    change_summary: str = Field("", max_length=4000)
     goal_id: int = Field(..., ge=1)
     reviewer: str = Field(..., min_length=6, max_length=256)
     note: str = Field(..., min_length=1, max_length=4000)
     due_at: float = Field(..., gt=0)
     source_version: str = Field(..., pattern=r"^[0-9a-f]{64}$")
     expected_team_revision: int = Field(..., ge=1)
+
+
+class RevisionIn(MutationIn):
+    expected_revision: int = Field(..., ge=1)
+    source_version: str = Field(..., pattern=r"^[0-9a-f]{64}$")
 
 
 class ResponseIn(MutationIn):
@@ -121,7 +128,7 @@ async def _call(request, response, operation, *, write=False):
     except Exception as exc:
         raise HTTPException(
             503,
-            "Project review authority is unavailable. No live task was changed; reload before retrying.",
+            "Project review authority is unavailable. The operation could not be confirmed; reload and retry the same request before creating another.",
         ) from exc
 
 
@@ -253,3 +260,9 @@ async def respond(request: Request, response: Response, packet_id: str, body: Re
         lambda: _service(request).respond(packet_id, **body.model_dump()),
         write=True,
     )
+
+
+@router.post(BASE + "/packets/{packet_id}/revision-draft")
+async def revision_draft(request: Request, response: Response, packet_id: str, body: RevisionIn):
+    return await _call(request, response,
+                       lambda: _service(request).revision_draft(packet_id, **body.model_dump()), write=True)

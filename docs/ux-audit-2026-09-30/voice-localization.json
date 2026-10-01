@@ -1,0 +1,21 @@
+{
+  "audit_ids": ["LW-043", "LW-046"],
+  "scope": "External playback, installed voice selection, and explicit local voice-model setup controls",
+  "catalog": "i18n_journey_voice_controls.py: 72 draft message rows for French, German, Japanese and Chinese; Arabic unchanged",
+  "implementation": [
+    "Playback start, pause, resume, stop, chunk progress, fallback and recovery messages use explicitly authored product copy.",
+    "Result text is never translated. Device playback honors an explicitly selected installed voice, otherwise matches only the result element's own declared language or uses the browser's default. An unknown result never inherits the interface language or receives English prose substitutions.",
+    "Voice-model setup localizes its consent, policy, verified-readiness distinction, model names, progress and errors. Model source, checksum, backend and unknown service reasons remain verbatim escaped parameters or independent user-content regions.",
+    "Existing exact model/hash/size confirmation, current-context checks, cancellation acknowledgement, no automatic write retry and no autoplay on refreshed results remain intact."
+  ],
+  "validation": {
+    "javascript": "27/27 passed: audit_accessibility.test.js, voice_setup.test.js, voice_language.test.js, journey_i18n.test.js. Four new regressions cover unknown/declared content language, saved multilingual voice selection and localized setup with opaque backend errors.",
+    "python": "27/27 passed in 49.96s: test_voice_module.py, test_voice_setup_api.py, test_journey_i18n.py; audit/voice-localization.xml. Matching-source Python3.12 venv, synthetic local fixtures, actual Windows native handles.",
+    "static": "Python AST, Jinja parse, catalog placeholders, Ruff, JavaScript syntax, git diff --check."
+  },
+  "remaining_qualification": [
+    "Native-language and consequence-copy review remains pending; these catalogs are draft translations.",
+    "Actual installed speech engines, voice quality, browser autoplay and assistive-technology behavior require native qualification; speech and provider boundaries here were mocked.",
+    "No speech model was downloaded and no provider synthesis/transcription was called."
+  ]
+}

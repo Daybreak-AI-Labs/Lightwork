@@ -313,7 +313,7 @@
       ], d.items || [], [
         { label: "Review", kind: "primary", when: function (f) { return (!f.disposition || f.disposition === "pending_review") && !mine(f.detected_by); }, run: function (f) { reviewFinding(r, f); } },
       ], { text: "No possible matches recorded." });
-      host.scrollIntoView({ behavior: "smooth" });
+      window.mvReveal(host);
     }, fail("load the possible matches"));
   }
   function recordFinding(r) {
@@ -506,7 +506,7 @@
       { label: "Not needed", when: function (t) { return !c.decision && t.status === "open"; }, run: function (t) { caseTask(c, t, "waived"); } },
     ], { text: "No tasks yet." });
     host.appendChild(R.el("p", "muted", (c.evidence || []).length + " piece(s) of evidence recorded."));
-    host.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(host);
   }
   function caseTask(c, t, status) {
     var fields = t ? [] : [

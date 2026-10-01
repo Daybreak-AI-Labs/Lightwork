@@ -122,7 +122,9 @@ async def _call(function, *args, **kwargs):
         raise HTTPException(503, "Pilot records are unavailable. Refresh before retrying; your inputs have been retained.") from exc
 
 
-def _resolver(request):
+def _resolver(request, *, independent_review=False):
+    if independent_review:
+        return partial(outcome_pilot_sources.resolve, request, independent_review=True)
     return partial(outcome_pilot_sources.resolve, request)
 
 
@@ -269,6 +271,6 @@ async def independent_decision(request: Request, response: Response, pilot_id: s
     context = _context(request, mutation=True)
     require_global_permission(request, "admin")
     record = await _call(outcome_pilots.independent_review, pilot_id, body.model_dump(),
-                         actor=caller_principal(request) or "", resolve=_resolver(request))
+                         actor=caller_principal(request) or "", resolve=_resolver(request, independent_review=True))
     response.headers["Cache-Control"] = "private, no-store"
     return {"id": record["id"], "revision": record["revision"], "context": context}

@@ -183,6 +183,7 @@ class TestWriteRecord:
         """
         monkeypatch.setattr(donation, "_donations_enabled", lambda: True)
         monkeypatch.setattr(donation, "_text_donations_enabled", lambda: False)
+        monkeypatch.setattr("maverick.memory_ownership.current_owner", lambda **kwargs: "")
         rec = TrajectoryRecord(
             task_brief_hash="abc", goal_id=42, outcome="success",
             verifier_confidence=0.9, disagreement_entropy=0.7,

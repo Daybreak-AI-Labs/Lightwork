@@ -31,6 +31,13 @@ class ChatRestart:
     conversation_id: int | None
 
 
+def question_version(question_id, asked_at, question):
+    import json
+
+    return hashlib.sha256(json.dumps([int(question_id), float(asked_at), str(question)],
+                                     ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+
 class ChatThreads:
     def __init__(self, world):
         self.store = SubmissionStore(world)
@@ -84,6 +91,31 @@ class ChatThreads:
         members = self.members(binding, limit=1) if binding else []
         return int(members[0][0]) if members else int(goal_id)
 
+    def history(self, goal_id, *, before_id=None, limit=50):
+        """Page authorized earlier turns relative to the selected task."""
+        from .world_model import Turn
+
+        binding = self.binding(goal_id)
+        if binding is None:
+            return [], False
+        gs, gv = self._scope("g")
+        cs, cv = self._scope("c")
+        cursor = " AND t.id < ?" if before_id is not None else ""
+        cursor_values = (int(before_id),) if before_id is not None else ()
+        size = max(1, min(100, int(limit)))
+        rows = self._rows(
+            "SELECT t.id,t.conversation_id,t.goal_id,t.role,t.content,t.ts "
+            "FROM turns t JOIN goals g ON g.id=t.goal_id "
+            "JOIN conversations c ON c.id=t.conversation_id "
+            "WHERE t.conversation_id=? AND g.owner=? AND (g.id=? OR g.parent_id=?) "
+            f"AND g.id < ? AND {gs} AND {cs}{cursor} "
+            "AND t.role IN ('user','assistant') ORDER BY t.id DESC LIMIT ?",
+            (binding.conversation_id, binding.owner, binding.root_id, binding.root_id,
+             goal_id, *gv, *cv, *cursor_values, size + 1),
+        )
+        return list(reversed([Turn(r[0], r[1], r[2], r[3], self.store.open(r[4]), r[5])
+                              for r in rows[:size]])), len(rows) > size
+
     def _lock(self, connection, root_id):
         if not self.store.sqlite:
             key = int.from_bytes(hashlib.sha256(
@@ -92,6 +124,7 @@ class ChatThreads:
 
     def require_idle(self, connection, root_id, owner, *, except_goal=None):
         self._lock(connection, root_id)
+        self._require_open(connection, root_id)
         scope, values = self._scope("g")
         rows = self._rows("SELECT g.status FROM goals g WHERE g.id=? AND g.parent_id IS NULL "
                           f"AND g.owner=? AND {scope}", (root_id, owner, *values), connection=connection)
@@ -157,7 +190,18 @@ class ChatThreads:
             binding = self.binding(goal_id, connection=connection)
             yield connection, binding, current[0][2]
 
+    def _require_open(self, connection, goal_id):
+        from .goal_mutations import GoalMutationConflict
+        from .task_handoffs import require_open
+        try:
+            require_open(self.world, goal_id,
+                         execute=lambda sql, args: self.store.execute(connection, sql, args),
+                         decode=self.store.open)
+        except GoalMutationConflict as exc:
+            raise SubmissionConflict(str(exc)) from exc
+
     def _pending(self, connection, goal_id):
+        self._require_open(connection, goal_id)
         advance = "MAX" if self.store.sqlite else "GREATEST"
         scope, values = self._scope("goals")
         changed = self.store.execute(connection, "UPDATE goals SET status='pending',completed_at=NULL,"
@@ -180,6 +224,56 @@ class ChatThreads:
             self._pending(connection, goal_id)
         return binding.conversation_id if binding is not None else None
 
+    def answer_with_evidence(self, goal_id, question_id, text, *, expected_question,
+                             operation_id, actor, request_hash, records, publish,
+                             require_admission, require_authority):
+        """Admit ready evidence, answer and last-question restart in one transaction.
+
+        Evidence publishers run only after the exact question and fresh owner
+        authority pass. Exact receipt replay never publishes or reserves again.
+        """
+        from .goal_mutations import _receipt, _record
+
+        with self._restart_transaction(goal_id) as (connection, binding, status):
+            require_authority()
+            def execute(sql, args=()):
+                return self.store.execute(connection, sql, args)
+            prior = _receipt(execute, self.store.open, goal_id, "clarification", operation_id, actor, request_hash)
+            if prior is not None:
+                return prior
+            if status in {"cancelled", "done", "completed", "failed", "error"}:
+                raise SubmissionConflict("This task is no longer waiting for an answer. Review it before restarting.")
+            questions = self._rows("SELECT id,asked_at,question FROM questions WHERE goal_id=? AND answer IS NULL",
+                                   (goal_id,), connection=connection)
+            question = next((row for row in questions if int(row[0]) == question_id), None)
+            if question is None or question_version(question[0], question[1], self.store.open(question[2])) != expected_question:
+                raise SubmissionConflict("The question changed or was answered. Your draft and selected files have been kept.")
+            restart = status == "blocked" and len(questions) == 1
+            if restart:
+                if binding is not None:
+                    self.require_idle(connection, binding.root_id, binding.owner, except_goal=goal_id)
+                require_admission()
+            # Identical filenames with different evidence would misbind companion text.
+            existing = execute("SELECT filename,sha256 FROM attachments WHERE goal_id=?", (goal_id,)).fetchall()
+            names = {row[0]: row[1] for row in existing}
+            for record in records:
+                if record.filename in names and names[record.filename] != record.sha256:
+                    raise SubmissionConflict("A different file already uses this name. Rename the selected file before answering.")
+                names[record.filename] = record.sha256
+            attachment_ids = list(dict.fromkeys(self.store.admit(goal_id, records, publish=publish, connection=connection, verify_existing=True)))
+            changed = execute("UPDATE questions SET answer=?,answered_at=? WHERE id=? AND goal_id=? AND answer IS NULL",
+                              (self.store.seal(text), time.time(), question_id, goal_id))
+            if changed.rowcount != 1:
+                raise SubmissionConflict("The question changed; reload before answering")
+            if restart:
+                self._pending(connection, goal_id)
+            result = {"received": True, "goal_id": goal_id, "question_id": question_id,
+                      "question_version": expected_question, "attachment_ids": attachment_ids,
+                      "admitted": restart, "conversation_id": binding.conversation_id if binding is not None else None,
+                      "operation_id": operation_id, "replayed": False}
+            _record(execute, self.store.seal, goal_id, "clarification", operation_id, actor, request_hash, result)
+        return result
+
     def answer(self, goal_id, question_id, text, *, require_admission):
         """Save a clarification and reserve its last-question restart atomically.
 
@@ -187,6 +281,8 @@ class ChatThreads:
         retry the same answer after the newer turn or admission hold clears.
         """
         with self._restart_transaction(goal_id) as (connection, binding, status):
+            if status in {"cancelled", "done", "completed", "failed", "error"}:
+                raise SubmissionConflict("This task is no longer waiting for an answer. Review it before restarting.")
             questions = self._rows("SELECT id FROM questions WHERE goal_id=? AND answer IS NULL",
                                    (goal_id,), connection=connection)
             if question_id not in {int(row[0]) for row in questions}:

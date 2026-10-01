@@ -26,6 +26,7 @@
     );
     var pageOptions = options.slice();
     var recordOptions = [];
+    var settingOptions = [];
     var activeIndex = -1;
     var returnFocus = null;
     var isOpen = false;
@@ -73,7 +74,16 @@
 
       var visible = visibleOptions();
       var pages = pageOptions.filter(function (option) { return !option.hidden; }).length;
-      count.textContent = (pages === 1 ? "1 page" : pages + " pages") +
+      if (global.LightworkI18n) {
+        var locale = global.LightworkI18n;
+        locale.set(count, locale.plural("{count} page", "{count} pages", pages));
+        if (recordOptions.length) {
+          count.appendChild(doc.createTextNode(", "));
+          var recordCount = doc.createElement("span");
+          locale.set(recordCount, locale.plural("{count} record shown", "{count} records shown", recordOptions.length));
+          count.appendChild(recordCount);
+        }
+      } else count.textContent = (pages === 1 ? "1 page" : pages + " pages") +
         (recordOptions.length ? ", " + recordOptions.length + " records shown" : "");
       empty.hidden = visible.length !== 0;
       results.hidden = visible.length === 0;
@@ -163,13 +173,43 @@
         option.href = row.href; option.setAttribute("role", "option"); option.setAttribute("tabindex", "-1");
         option.setAttribute("aria-selected", "false");
         var label = doc.createElement("span"); label.className = "navfinder__label"; label.textContent = row.title;
+        label.lang = "und"; label.dir = "auto"; label.setAttribute("data-user-content", "");
         var description = doc.createElement("span"); description.className = "navfinder__group";
-        description.textContent = row.kind + " · " + row.id + (row.revision ? " · version " + row.revision : "") + (row.state ? " · " + row.state.replaceAll("_", " ") : "");
+        var reference = doc.createElement("bdi"); reference.lang = "und"; reference.dir = "auto"; reference.setAttribute("data-user-content", "");
+        reference.textContent = row.kind + " \u00b7 " + row.id; description.appendChild(reference);
+        if (row.revision) {
+          description.appendChild(doc.createTextNode(" \u00b7 "));
+          var version = doc.createElement("span");
+          if (global.LightworkI18n) global.LightworkI18n.set(version, "Version"); else version.textContent = "version";
+          var revision = doc.createElement("bdi"); revision.lang = "und"; revision.dir = "auto"; revision.setAttribute("data-user-content", "");
+          revision.textContent = row.revision; description.append(version, doc.createTextNode(" "), revision);
+        }
+        if (row.state) {
+          var state = doc.createElement("bdi"); state.lang = "und"; state.dir = "auto"; state.setAttribute("data-user-content", "");
+          state.textContent = row.state.replaceAll("_", " "); description.append(doc.createTextNode(" \u00b7 "), state);
+        }
         option.appendChild(label); option.appendChild(description); entry.appendChild(option); results.appendChild(entry);
         recordOptions.push(option); bindOption(option);
       });
-      options = pageOptions.concat(recordOptions); filterResults();
+      options = pageOptions.concat(recordOptions, settingOptions); filterResults();
       if (!isOpen) input.removeAttribute("aria-activedescendant");
+    }
+
+    function setSettings(rows) {
+      settingOptions.forEach(function (option) { option.parentElement.remove(); }); settingOptions = [];
+      rows.forEach(function (row,index) {
+        var entry=doc.createElement('li');entry.setAttribute('role','none');
+        var option=doc.createElement('a');option.id='navfinder-setting-'+index;option.href=row.href;option.setAttribute('role','option');option.setAttribute('tabindex','-1');option.setAttribute('aria-selected','false');
+        var label=doc.createElement('span');label.className='navfinder__label';label.textContent=row.title;label.lang='und';label.dir='auto';label.setAttribute('data-user-content','');
+        var group=doc.createElement('span');group.className='navfinder__group';
+        var prefix=doc.createElement('span');
+        if (global.LightworkI18n) global.LightworkI18n.set(prefix, 'Setting'); else prefix.textContent='Setting';
+        var metadata=doc.createElement('bdi');metadata.lang='und';metadata.dir='auto';metadata.setAttribute('data-user-content','');
+        metadata.textContent=row.group + (row.effective ? ' - '+row.effective : '') + (row.required_role ? ' - '+row.required_role : '');
+        group.append(prefix,doc.createTextNode(' - '),metadata);
+        option.appendChild(label);option.appendChild(group);entry.appendChild(option);results.appendChild(entry);settingOptions.push(option);bindOption(option);
+      });
+      options=pageOptions.concat(recordOptions,settingOptions);filterResults();
     }
 
     dialog.addEventListener("cancel", function (event) {
@@ -218,6 +258,7 @@
       filter: filterResults,
       visibleOptions: visibleOptions,
       setRecords: setRecords,
+      setSettings: setSettings,
     };
     dialog.lightworkFinder = controller;
     return controller;

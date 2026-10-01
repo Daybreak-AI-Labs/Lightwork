@@ -81,7 +81,7 @@
     else { box.appendChild(R.el("p", "muted", "Your IT team hasn't set up the vendor web address yet. Send the access code once they have.")); }
     row("Access code", result.token);
     box.appendChild(R.button("I've copied it", "ghost", function () { box.hidden = true; box.textContent = ""; }));
-    box.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(box);
   }
 
   // ---- lists ----------------------------------------------------------------
@@ -249,7 +249,7 @@
     document.getElementById("tpc-notice-name").textContent = "No file chosen yet.";
     syncRespondents();
     panel.hidden = false;
-    panel.scrollIntoView({ behavior: "smooth" });
+    window.mvReveal(panel);
     F("assessment").focus();
   }
   F("assessment").addEventListener("change", syncRespondents);

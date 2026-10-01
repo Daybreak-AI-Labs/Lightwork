@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import caller_principal, require_permission
+from .auth import caller_principal, execution_user_id_from_request, require_permission
 
 log = logging.getLogger(__name__)
 ASSET = "lightwork-code.js"
@@ -210,8 +210,12 @@ async def start_feature(request: Request, body: FeatureIn, bg: BackgroundTasks) 
         raise HTTPException(status_code=503, detail=(
             "Set up an AI provider in Settings before asking Lightwork to build a change."))
     _audit(request, "start_feature", repo=body.repo)
+    owner = caller_principal(request) or ""
+    user_id = execution_user_id_from_request(request)
+    if owner and owner != f"user:{user_id}":
+        raise HTTPException(status_code=403, detail="A current named execution identity is required.")
     bg.add_task(_run_feature, body.repo, body.title.strip(), body.description.strip(),
-                body.max_dollars)
+                body.max_dollars, owner, user_id)
     return {"started": True, "repo": body.repo}
 
 @router.get("/code/proposals/{pid}")
@@ -315,15 +319,23 @@ def _provider_missing() -> bool:
     return bool(missing)
 
 
-def _run_feature(repo: str, title: str, description: str, max_dollars: float | None) -> None:
+def _run_feature(repo: str, title: str, description: str, max_dollars: float | None,
+                 owner: str, user_id: str | None) -> None:
     """Background: the governed swarm builds the change and parks its approval."""
     from maverick.codebase import features
     from maverick.world_model import close_world_if_owned, open_world
+
+    from . import auth, rbac
     world = open_world()
     try:
+        current_owner, current_user_id, suites = auth.stored_automation_identity(owner)
+        if (current_owner != owner or current_user_id != user_id
+                or (owner and "admin" not in rbac.permissions_for(auth.role_for_principal(owner)))):
+            raise PermissionError("Current code-change authority is required")
         features.propose(world, repo, title, description,
-                         features.default_runner(max_dollars=max_dollars),
-                         reviewer=features.default_reviewer())
+                         features.default_runner(max_dollars=max_dollars, user_id=user_id,
+                                                 allowed_suites=suites),
+                         reviewer=features.default_reviewer(), owner=owner)
     except Exception as exc:  # noqa: BLE001 -- the failed goal carries the outcome
         log.warning("code feature for %s did not finish (%s)", repo, type(exc).__name__)
     finally:

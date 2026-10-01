@@ -315,6 +315,7 @@ def _entry(
     detail: str,
     fetched_at: float | None,
     free_models: list[str] | None = None,
+    capabilities: dict | None = None,
 ) -> dict[str, Any]:
     return {
         "provider": provider,
@@ -323,6 +324,7 @@ def _entry(
         # Ids the provider's own listing priced at $0 (OpenRouter today); the
         # budget prices those at zero instead of refusing them as unpriced.
         "free_models": list(free_models or []),
+        "capabilities": capabilities or {},
         "detail": detail[:MAX_DETAIL_CHARS],
         "fetched_at": fetched_at,
     }
@@ -353,6 +355,7 @@ def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
             pass
     models: list[str] = []
     free: list[str] = []
+    capabilities: dict = {}
     seen: set[str] = set()
     token: str | None = None
     try:
@@ -362,6 +365,8 @@ def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
                 return _entry(name, "unavailable", [], f"provider returned HTTP {int(status)} for the model list", now)
             payload = json.loads(body.decode("utf-8"))
             ids, token = parse_models(style, payload)
+            from .model_guidance import parse_capabilities
+            capabilities.update(parse_capabilities(style, payload))
             if name == "openrouter":
                 free.extend(parse_free_models(style, payload))
             if name == "gemini":
@@ -389,6 +394,7 @@ def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
         f"{len(models)} models reachable with the configured key",
         now,
         free_models=[m for m in _ids(free) if m in kept],
+        capabilities={m: capabilities[m] for m in kept if m in capabilities},
     )
 
 
@@ -418,7 +424,11 @@ def _load_cache() -> dict[str, dict[str, Any]]:
         models = row.get("models") if isinstance(row.get("models"), list) else []
         free = row.get("free_models") if isinstance(row.get("free_models"), list) else []
         detail = row.get("detail") if isinstance(row.get("detail"), str) else ""
-        out[name] = _entry(name, status, _ids(models), detail, fetched, free_models=_ids(free))
+        from .model_guidance import clean_capabilities
+        raw_caps = row.get("capabilities")
+        capabilities = {m: clean_capabilities(raw_caps.get(m)) for m in _ids(models)} if isinstance(raw_caps, dict) else {}
+        out[name] = _entry(name, status, _ids(models), detail, fetched,
+                           free_models=_ids(free), capabilities=capabilities)
     return out
 
 

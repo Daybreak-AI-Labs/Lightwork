@@ -129,6 +129,14 @@ class AssessmentEvidenceIn(BaseModel):
     evidence: str = Field(..., max_length=2000)
 
 
+class ShareLinkIn(BaseModel):
+    """Informed confirmation of the exact current public release preview."""
+    confirm: bool = False
+    source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    lifetime_seconds: int = Field(86400, ge=3600, le=604800)
+    label: str = Field("Read-only deliverable", min_length=1, max_length=120)
+
+
 class SignoffIn(BaseModel):
     """A human's sign-off on a finished, gated deliverable -- the certify/reject
     decision the pack's output gate calls for, bound to the version the client
@@ -149,9 +157,29 @@ class RoleOverrideIn(BaseModel):
 
 
 class GoalResumeIn(BaseModel):
-    """Optional spending limit for a resumed attempt; deployment caps still apply."""
+    """Optional spending limit plus exact reviewed restart receipt binding."""
 
+    expected_context: str | None = Field(default=None, max_length=256)
+    expected_updated_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    expected_owner: str | None = Field(default=None, max_length=256)
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     max_dollars: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+class TaskSourceReference(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["dataset"]
+    asset_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    version: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reference_schema: Literal["lightwork.research-registry-ref.v1"] = Field(default="lightwork.research-registry-ref.v1", alias="schema")
+
+
+class KnowledgeContextIn(BaseModel):
+    model_config = {"extra": "forbid"}
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    purpose: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
+    references: list[TaskSourceReference] = Field(min_length=1, max_length=5)
 
 
 class GoalIn(BaseModel):
@@ -172,6 +200,8 @@ class GoalIn(BaseModel):
     # Director mode: an autonomy level from [director] profiles. It can only
     # tighten consent and review checkpoints and lower the spending cap.
     director_profile: str | None = Field(None, max_length=40)
+    knowledge_context: KnowledgeContextIn | None = None
+    connection_references: list[dict[str, str]] = Field(default_factory=list, max_length=100)
 
 
 class GoalOut(BaseModel):
@@ -356,8 +386,10 @@ class GoalEventsResponse(BaseModel):
 
 
 class FactIn(BaseModel):
-    key: str
-    value: str
+    key: str = Field(max_length=200)
+    value: str = Field(max_length=20000)
+    expected_revision: int = Field(default=0, ge=0, strict=True)
+    context: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class OutcomeIn(BaseModel):
@@ -380,6 +412,8 @@ class DeliverableEditIn(BaseModel):
     (vs. the agent's draft) grounds a graded outcome -- a verbatim keep is a strong
     positive, a heavy rewrite is graded-negative ground truth."""
     text: str = Field(..., max_length=200_000)
+    expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
+    operation_id: str = Field(..., min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class OutcomeLinkIn(BaseModel):
@@ -486,6 +520,8 @@ class ConnectionIn(BaseModel):
     access: str | None = Field(None, pattern="^(owner|tenant)$")
     allowed_principals: list[str] | None = Field(None, max_length=100)
     expected_revision: str | None = Field(None, min_length=1, max_length=128)
+    impact_version: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
+    context: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
 
 
 class FlowSaveIn(BaseModel):
@@ -667,14 +703,19 @@ class CachePurgeIn(BaseModel):
 
 
 class RetitleIn(BaseModel):
+    expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
+    operation_id: str | None = Field(None, min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     title: str = Field(..., max_length=200)
 
 
 class ReparentIn(BaseModel):
+    expected_updated_at: float = Field(..., gt=0, allow_inf_nan=False)
+    operation_id: str | None = Field(None, min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     parent_id: int | None = None
 
 
 class ChildIn(BaseModel):
+    operation_id: str = Field(..., min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     title: str = Field(..., max_length=200)
     description: str = ""
 
@@ -692,6 +733,7 @@ class WorkflowDraftIn(BaseModel):
     artifact — a reusable ``"template"`` (default) or an agent ``"playbook"``."""
     description: str = Field("", max_length=8000)
     form: str = Field("template", max_length=16)
+    source_text: str = Field("", max_length=8000)
 
 
 class WorkflowRefineIn(BaseModel):
@@ -712,6 +754,7 @@ class WorkflowSaveIn(BaseModel):
     title: str = Field(..., max_length=200)
     body: str = Field(..., max_length=20000)
     params: list[str] = Field(default_factory=list)
+    parameter_schema: dict = Field(default_factory=dict)
     budget_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     budget_wall_seconds: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     overwrite: bool = False

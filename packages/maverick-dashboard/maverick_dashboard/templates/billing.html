@@ -17,7 +17,7 @@
 
 <h1 class="page-title">Billing</h1>
 <p class="page-subtitle">
-  Charges for {{ tenant_label }}, from finished tasks, by month.
+  Recorded runtime costs for {{ tenant_label }}, from all accessible finished attempts, by UTC month. Figures use runtime pricing in USD; they are not reconciled provider invoices and exclude subscription fees and activity outside these attempts.
 </p>
 
 <div class="toolbar">
@@ -27,7 +27,7 @@
 <div class="grid">
   <div class="stat">
     <div class="num" title="${{ '%.6f'|format(current.cost) }}">{{ current.cost | money }}</div>
-    <div class="label">Charges so far</div>
+    <div class="label">Recorded cost subtotal{% if current.unknown_cost_runs %}; {{ current.unknown_cost_runs }} attempts have unknown cost{% endif %}</div>
   </div>
   <div class="stat">
     <div class="num">{{ current.runs }}</div>
@@ -47,8 +47,9 @@
   </div>
 </div>
 
-<div class="section-head"><h2>Charges over time</h2></div>
+<div class="section-head"><h2>Recorded cost subtotals over time</h2></div>
 <div class="panel">
+  <p class="muted">The chart shows up to 12 active months. Unknown costs are excluded from subtotals and identified in the monthly table; they are not free usage. Each download contains the full accessible finished-attempt population for its month.</p>
   {% if series %}
     {% set _max = (series | map(attribute='cost') | max) or 0 %}
     <div class="bill-bars" role="img"
@@ -83,7 +84,7 @@
       {% for p in series %}
         <tr>
           <td>{{ month(p.period) }}</td>
-          <td title="${{ '%.6f'|format(p.cost) }}">{{ p.cost | money }}</td>
+          <td title="${{ '%.6f'|format(p.cost) }}">{{ p.cost | money }}{% if p.unknown_cost_runs %} + {{ p.unknown_cost_runs }} unknown-cost attempts{% endif %}</td>
           <td>{{ p.runs }}</td>
           <td>{{ '{:,}'.format(p.input_tokens + p.output_tokens) }}</td>
           <td><a class="btn btn--ghost" href="/billing?format=csv&period={{ p.period }}" download aria-label="Download {{ month(p.period) }}">Download</a></td>
@@ -131,7 +132,6 @@
   if (!form) return;
   var msg = document.getElementById('invoice-msg'), out = document.getElementById('invoice-out');
   var download = document.getElementById('invoice-download');
-  function money(v) { return new Intl.NumberFormat(undefined, {style: 'currency', currency: 'USD'}).format(v || 0); }
   function query() {
     var data = new FormData(form), params = new URLSearchParams();
     ['tenant', 'since', 'until', 'markup', 'minimum'].forEach(function (k) { var v = String(data.get(k) || '').trim(); if (v) params.set(k, v); });
@@ -144,8 +144,8 @@
       var r = await fetch('/api/v1/admin/billing/invoice?' + query(), {credentials: 'same-origin'});
       if (!r.ok) { msg.textContent = r.status === 422 ? 'Check the dates: the start must be on or before the end.' : window.mvErrorText(r, 'make the invoice'); return; }
       var data = await r.json();
-      msg.textContent = 'Total: ' + money(data.total) + (data.lines.length ? '' : '. There was no recorded usage in these dates.')
-        + (data.closed_period ? '' : ' Choose both dates to give the invoice a fixed number.');
+      msg.textContent = 'Total: ' + data.total_display + ' ' + data.currency + (data.lines.length ? '' : '. There was no recorded usage in these dates.')
+        + (data.closed_period ? '' : ' Choose both dates to give the invoice a fixed number.') + ' ' + data.rounding;
       if (data.lines.length) {
         var table = document.createElement('table'), head = document.createElement('tr');
         ['Day', 'Person', 'Charge', 'AI usage (tokens)'].forEach(function (h) { var th = document.createElement('th'); th.scope = 'col'; th.textContent = h; head.appendChild(th); });
@@ -153,7 +153,7 @@
         var body = document.createElement('tbody');
         data.lines.forEach(function (line) {
           var tr = document.createElement('tr');
-          [line.day, line.person, money(line.charge), line.usage.toLocaleString()].forEach(function (v) { var td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+          [line.day, line.person, line.charge_display + ' ' + data.currency, line.usage.toLocaleString()].forEach(function (v) { var td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
           body.appendChild(tr);
         });
         table.appendChild(body); out.appendChild(table);

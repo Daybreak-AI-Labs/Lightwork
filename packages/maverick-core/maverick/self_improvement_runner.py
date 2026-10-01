@@ -591,6 +591,7 @@ def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, str]]]:
     """
     if not isinstance(raw, Mapping):
         return {}
+    from .self_harness_eval import case_current
     out: dict[str, list[dict[str, str]]] = {}
     for key, rows in raw.items():
         if not isinstance(rows, list):
@@ -598,10 +599,12 @@ def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, str]]]:
         cases = []
         for row in rows:
             if isinstance(row, Mapping) and str(row.get("goal") or "").strip():
-                cases.append({
-                    "goal": str(row["goal"]),
-                    "expected": str(row.get("expected") or ""),
-                })
+                if not case_current(row):
+                    continue
+                case = {"goal": str(row["goal"]), "expected": str(row.get("expected") or "")}
+                if "privacy_schema" in row:
+                    case.update(privacy_schema=row["privacy_schema"], source_goal_ids=list(row["source_goal_ids"]))
+                cases.append(case)
         if cases:
             out[str(key)] = cases
     return out
@@ -1227,6 +1230,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
         # holdout authorization and construction. Re-resolving a role between
         # those steps creates a TOCTOU gap: the ledger can authorize judge A
         # while judge B actually sees the sealed cases.
+        source_cases = []
         bound_verifier_model: str | None = None
         bound_metamorphic_model: str | None = None
         calibration_evaluator_id: str | None = None
@@ -1246,6 +1250,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                 # family digest and every evaluator built below. Never reopen
                 # a mutable corpus path after spending authorization for it.
                 corpus_manifest = eval_module._load_raw(str(corpus_path))
+                source_cases = [case for rows in _normalize_eval_manifest(corpus_manifest).values() for case in rows]
                 try:
                     bound_verifier_model = str(
                         model_for_role("verifier")
@@ -1374,7 +1379,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                 if not bound_metamorphic_model:
                     raise ValueError("metamorphic model is unavailable")
                 pass_kwargs["metamorphic_fn"] = ev.llm_paraphraser(
-                    LLM(bound_metamorphic_model), budget=eval_budget)
+                    LLM(bound_metamorphic_model), budget=eval_budget,
+                    authorize_sources=lambda: ev.require_cases_current(source_cases))
             except Exception:
                 log.debug("self-harness paraphraser construction failed",
                           exc_info=True)
@@ -1558,6 +1564,9 @@ def _memo_scorer(fn, *, draws: int = 2, by_line: bool = False,
         return float("nan")
 
     def _scored(line, goals):
+        authorize = getattr(fn, "authorize_sources", None)
+        if authorize is not None:
+            authorize()
         key = ((str(line), tuple(goals)) if by_line else tuple(goals))
         if key in cache:
             cached = cache[key]
@@ -1639,9 +1648,10 @@ def _transfer_context(st: dict, corpus_path: str):
         try:
             from . import self_harness_eval as ev
             from .llm import LLM, model_for_role
+            source_cases = [case for rows in ev.load_eval_corpus(corpus_path).values() for case in rows]
             validate_kwargs["metamorphic_fn"] = _memo_paraphraser(
                 ev.llm_paraphraser(LLM(model_for_role("summarizer")),
-                                   budget=budget))
+                                   budget=budget, authorize_sources=lambda: ev.require_cases_current(source_cases)))
         except Exception:  # pragma: no cover -- no paraphraser = check off
             log.debug("transfer paraphraser construction failed", exc_info=True)
     return eval_for_target, validate_kwargs
@@ -1756,7 +1766,7 @@ def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None
             from .llm import model_for_role
             key = model_for_role("orchestrator")
         refl = [r.to_dict() for r in reflexion.list_recent(limit=500)
-                if _scope_matches(r, channel=None, user_id=None)]
+                if _scope_matches(r, channel=None, user_id=None) and r.owner == ""]
         # Isolation parity with the reflexion side: owner-scoped goals stay
         # out of the shared corpus -- one tenant's goal text must never be
         # mined into ground truth other contexts evaluate against.
@@ -1769,7 +1779,7 @@ def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None
         # The corpus/pending files are plaintext sidecars; goal content can be
         # sealed at rest and is secret-redacted on every other persistence
         # path -- redact here too, before it leaves the world DB.
-        cands = [{"goal": _sanitize_text(c["goal"]),
+        cands = [{**c, "goal": _sanitize_text(c["goal"]),
                   "expected": _sanitize_text(c["expected"])}
                  for c in ev.harvest_corpus_candidates(refl, goals, known=known)]
         # The files hold REDACTED text, so re-check known post-redaction too

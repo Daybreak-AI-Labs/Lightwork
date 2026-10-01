@@ -49,6 +49,14 @@ from . import rbac
 # not in the Settings visibility matrix. Flip it back to ready when the page
 # speaks to a non-technical user.
 PAGES: tuple[dict, ...] = (
+    {"path": "/my-data", "label": "My data", "group": "Operate",
+     "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/account", "label": "Account", "group": "Operate",
+     "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/content-access", "label": "Reviewed content access", "group": "Observe",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/preferences", "label": "Your preferences", "group": "Operate", "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/today", "label": "Today", "group": "Operate", "icon": "check", "floor": "view", "default": "view", "in_nav": True},
     {"path": "/workflow-readiness", "label": "Workflow readiness", "group": "Observe",
      "icon": "check", "floor": "view", "default": "view"},
     # Software development: vaulted repositories and swarm-built change
@@ -60,6 +68,10 @@ PAGES: tuple[dict, ...] = (
     {"path": "/research", "ready": False, "label": "Research lab", "aliases": "experiments candidates evaluation",
      "group": "Operate", "icon": "bench", "floor": "operate", "default": "operate"},
     {"path": "/project-reviews", "label": "Project team reviews", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/deliverable-bundles", "label": "Selected deliverable bundles", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/task-handoffs", "label": "Accepted task handoffs", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {
         "path": "/action-center", "label": "Action Center", "group": "Operate",
@@ -84,6 +96,15 @@ PAGES: tuple[dict, ...] = (
         "icon": "chat",
         "floor": "view",
         "default": "operate",
+    },
+    {
+        "path": "/companion",
+        "label": "My companion",
+        "aliases": "personal employee companion task status",
+        "group": "Work",
+        "icon": "chat",
+        "floor": "view",
+        "default": "view",
     },
     {
         "path": "/goals",
@@ -1120,6 +1141,16 @@ PAGES: tuple[dict, ...] = (
         "default": "admin",
     },
     {
+        "path": "/companion/admin",
+        "label": "Employee companions",
+        "aliases": "enrollment companion policy retention",
+        "group": "Admin",
+        "icon": "agents",
+        "floor": "admin",
+        "default": "admin",
+        "scope": "workspace",
+    },
+    {
         "path": "/users",
         "label": "Users",
         "group": "Admin",
@@ -1279,14 +1310,24 @@ def clear_overrides() -> None:
         _write({})
 
 
+def _permission(page: dict, kind: str) -> str:
+    # Self-service opens only the page shell. Native APIs still enforce own
+    # account, approved fixed scopes and admin-only application management.
+    if page["path"] == "/connections":
+        from maverick.connection_oauth import self_connect_profiles
+        if self_connect_profiles():
+            return "operate"
+    return page[kind]
+
+
 def eligible(page: dict, role: str) -> bool:
     """Whether ``role``'s permissions reach the page's security floor at all."""
-    return page["floor"] in rbac.permissions_for(role)
+    return _permission(page, "floor") in rbac.permissions_for(role)
 
 
 def default_visible(page: dict, role: str) -> bool:
     """The page's out-of-the-box visibility for ``role`` (no overrides)."""
-    return page["default"] in rbac.permissions_for(role)
+    return _permission(page, "default") in rbac.permissions_for(role)
 
 
 def is_visible(page: dict, role: str | None) -> bool:
@@ -1484,7 +1525,7 @@ def matrix() -> list[dict]:
             {
                 "path": page["path"],
                 "label": page["label"],
-                "floor": page["floor"],
+                "floor": _permission(page, "floor"),
                 "in_nav": page.get("in_nav", True),
                 "cells": cells,
             }

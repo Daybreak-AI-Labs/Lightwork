@@ -1247,3 +1247,14 @@ def test_bedrock_auth_mode_is_written_and_iam_needs_no_key(tmp_path, monkeypatch
 
     monkeypatch.setattr(wizard, "_q_select", lambda *a, **k: "api_key - Bedrock bearer token in BEDROCK_API_KEY")
     assert wizard.pick_bedrock_auth() == {"auth_mode": "api_key"}
+
+
+def test_fact_tags_share_one_memory_table(tmp_path, monkeypatch):
+    cfg = tomllib.loads(_write(tmp_path, monkeypatch, {"fact_tags": True, "temporal_memory": True}))
+    assert cfg["memory"] == {"fact_tags": True, "temporal": True}
+
+
+def test_bounded_rebuild_setting_is_written_by_knowledge_wizard():
+    from maverick_installer.wizard import _cfg_knowledge
+    cfg = tomllib.loads("\n".join(_cfg_knowledge({"enable": True, "reindex_jobs": True})))
+    assert cfg["knowledge"]["reindex_jobs"] is True

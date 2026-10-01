@@ -9,6 +9,16 @@ from maverick import backup, config, control_plane_lease, paths, quotas
 from maverick import installation_recovery as maintenance
 
 
+def reviewed_authorize(**kwargs):
+    from maverick.installation_handoff import save_review
+    if not kwargs.get("rollback_id"):
+        release = {"version": "1.0.1", "runtime_sha256": hashlib.sha256(b"new-runtime").hexdigest(),
+                   "installer_sha256": hashlib.sha256(b"new").hexdigest(), "signature": "fixture-reviewed-signature"}
+        kwargs["review_id"] = save_review(release)["id"]
+    return maintenance.authorize(**kwargs)
+
+
+
 def _digest(value):
     return hashlib.sha256(value).hexdigest()
 
@@ -41,10 +51,10 @@ def accounting_installation(tmp_path, monkeypatch):
 
 def _upgrade(installation, monkeypatch):
     _, runtime, selected_runtime = installation
-    grant = maintenance.authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True)
+    grant = reviewed_authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True)
     directory = maintenance._directory(grant["id"])
     metadata = {"public_key": "fixture-only", "old": {"version": "1.0.0", "runtime_sha256": _digest(b"old-runtime")},
-                "new": {"version": "1.0.1", "runtime_sha256": _digest(b"new-runtime")}}
+                "new": {"version": "1.0.1", "runtime_sha256": _digest(b"new-runtime"), "signature": "fixture-reviewed-signature"}}
     (directory / "downloads.json").write_text(json.dumps(metadata))
     for name in ("old", "new"):
         (directory / (name + ".msi")).write_bytes(name.encode())
@@ -91,7 +101,7 @@ def test_completed_rollback_refuses_new_usage_before_preparing_or_running_msi(ac
     grant, directory, events = _upgrade(accounting_installation, monkeypatch)
     _new_spend(ledger, principal)
     original_snapshot = backup._sha256(directory / "before.tgz")
-    rollback = maintenance.authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
+    rollback = reviewed_authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
     with pytest.raises(backup.BackupError, match="accounting"):
         maintenance.prepare(rollback["authorization"])
     assert not events
@@ -108,7 +118,7 @@ def test_prepared_rollback_rechecks_new_usage_before_msi_and_retains_startup_blo
     ledger = quotas.UsageLedger()
     ledger.record_cumulative(principal, "a" * 32, 10, 100, 100)
     grant, directory, events = _upgrade(accounting_installation, monkeypatch)
-    rollback = maintenance.authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
+    rollback = reviewed_authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True, rollback_id=grant["id"])
     maintenance.prepare(rollback["authorization"])
     prepared = maintenance._read(directory / "record.json")
     snapshot_hashes = {name: backup._sha256(directory / name) for name in ("before.tgz", prepared["safety"]["name"])}

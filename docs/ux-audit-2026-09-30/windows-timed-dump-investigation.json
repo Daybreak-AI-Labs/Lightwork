@@ -1,0 +1,133 @@
+{
+  "source": "stdlib-only; no Lightwork or ctypes imports",
+  "attempts": [
+    {
+      "mode": "timed",
+      "command": [
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.python\\cpython-3.12.12-windows-x86_64-none\\python.exe",
+        "-I",
+        "-S",
+        "-X",
+        "faulthandler",
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\standalone_frame_churn.py",
+        "timed"
+      ],
+      "returncode": 0,
+      "returncode_hex": "0x0",
+      "timeout_seconds": 30,
+      "timed_out": false,
+      "elapsed_seconds": 8.266,
+      "log": "audit\\standalone-frame-churn-1-timed.log",
+      "sha256": "1c20129e9b8cae4987e8cc5a200f80835c95a68f0bb30874d91181df4fa530a3"
+    },
+    {
+      "mode": "timed",
+      "command": [
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.python\\cpython-3.12.12-windows-x86_64-none\\python.exe",
+        "-I",
+        "-S",
+        "-X",
+        "faulthandler",
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\standalone_frame_churn.py",
+        "timed"
+      ],
+      "returncode": 0,
+      "returncode_hex": "0x0",
+      "timeout_seconds": 30,
+      "timed_out": false,
+      "elapsed_seconds": 8.296,
+      "log": "audit\\standalone-frame-churn-2-timed.log",
+      "sha256": "e754b9487032b01aa44da9dc208cbd27449f223b44d6a729000438057cb7f284"
+    },
+    {
+      "mode": "control",
+      "command": [
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.python\\cpython-3.12.12-windows-x86_64-none\\python.exe",
+        "-I",
+        "-S",
+        "-X",
+        "faulthandler",
+        "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\standalone_frame_churn.py",
+        "control"
+      ],
+      "returncode": 0,
+      "returncode_hex": "0x0",
+      "timeout_seconds": 30,
+      "timed_out": false,
+      "elapsed_seconds": 8.297,
+      "log": "audit\\standalone-frame-churn-3-control.log",
+      "sha256": "d1e840b8052ce06fa0d283b415c2de6e763eeb0b34d760b326ad654cac2070dc"
+    }
+  ],
+  "runtime": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.python\\cpython-3.12.12-windows-x86_64-none\\python.exe",
+  "script_sha256": "50e04c88e11561ec0ae05c72a0ddd77f7f8406bf5ff0e15a62c258714f46fbf0",
+  "upstream_context": [
+    "https://github.com/python/cpython/issues/140815",
+    "https://github.com/python/cpython/pull/140921",
+    "https://github.com/python/cpython/issues/158200"
+  ],
+  "reproducer_source": "\"\"\"Bounded CPython-only diagnostic stress; no project or ctypes imports.\n\nIndependently constructed code-metadata churn, informed by CPython issue 158200.\nThe parent enforces a 30-second child limit. Output intentionally uses only the\nstandard interpreter's fatal handler; repetitive diagnostic output goes to NUL.\n\"\"\"\nimport faulthandler\nimport json\nimport os\nimport sys\nimport threading\nimport time\nimport types\n\nassert sys.version_info[:3] == (3, 12, 12), sys.version\nassert \"ctypes\" not in sys.modules\nassert not any(name.startswith((\"maverick\", \"lightwork\")) for name in sys.modules)\n\n\ndef seed(argument):\n    return argument + 1\n\n\nclosing = threading.Event()\ncounter = [0]\n\n\ndef churn():\n    index = 0\n    while not closing.is_set():\n        dynamic = seed.__code__.replace(\n            co_filename=\"synthetic_frame_\" + str(index) + \".py\",\n            co_name=\"synthetic_function_\" + str(index),\n        )\n        action = types.FunctionType(dynamic, {})\n        assert action(7) == 8\n        del action, dynamic\n        index += 1\n    counter[0] = index\n\n\ntimed = sys.argv[1] == \"timed\"\nduration = 8.0\nprint(json.dumps({\"event\": \"start\", \"version\": sys.version, \"timed\": timed,\n                  \"seconds\": duration, \"ctypes_loaded\": False, \"project_imports\": False}), flush=True)\nfaulthandler.enable(all_threads=True)\nthread = threading.Thread(target=churn)\nthread.start()\nwith open(os.devnull, \"w\", encoding=\"ascii\") as sink:\n    if timed:\n        faulthandler.dump_traceback_later(0.000001, repeat=True, file=sink)\n    try:\n        time.sleep(duration)\n    finally:\n        if timed:\n            faulthandler.cancel_dump_traceback_later()\n        closing.set()\n        thread.join(2.0)\nassert not thread.is_alive()\nassert \"ctypes\" not in sys.modules\nassert not any(name.startswith((\"maverick\", \"lightwork\")) for name in sys.modules)\nprint(json.dumps({\"event\": \"completed\", \"calls\": counter[0], \"timed\": timed,\n                  \"ctypes_loaded\": False, \"project_imports\": False}), flush=True)\n",
+  "controller_source": "\"\"\"Run at most three bounded CPython-only child attempts, sequentially.\"\"\"\nimport hashlib\nimport json\nimport os\nfrom pathlib import Path\nimport re\nimport subprocess\nimport tempfile\nimport time\n\nbase = Path(__file__).resolve().parent\nexecutable = base / \".python/cpython-3.12.12-windows-x86_64-none/python.exe\"\nscript = base / \"audit/standalone_frame_churn.py\"\nresults = []\nfor number, mode in enumerate([\"timed\", \"timed\", \"control\"], 1):\n    state = Path(tempfile.mkdtemp(prefix=\"pure-frame-\", dir=base / \".t\"))\n    env = dict(os.environ)\n    for name in list(env):\n        if re.search(r\"^(?:PYTHON|MAVERICK_|LIGHTWORK_|AWS_|AZURE_|OPENAI_|ANTHROPIC_|GOOGLE_|GCP_|HF_|EMAIL_|PG)|(?:API_KEY|TOKEN|SECRET|PASSWORD|DSN|CREDENTIAL)\", name, re.I):\n            env.pop(name)\n    env.update({\"TEMP\": str(state), \"TMP\": str(state), \"HOME\": str(state), \"USERPROFILE\": str(state)})\n    command = [str(executable), \"-I\", \"-S\", \"-X\", \"faulthandler\", str(script), mode]\n    log = base / \"audit\" / (\"standalone-frame-churn-\" + str(number) + \"-\" + mode + \".log\")\n    started = time.monotonic()\n    timed_out = False\n    with log.open(\"wb\") as output:\n        try:\n            run = subprocess.run(command, env=env, cwd=state, stdout=output,\n                                 stderr=subprocess.STDOUT, timeout=30,\n                                 creationflags=subprocess.CREATE_NO_WINDOW)\n            code = run.returncode\n        except subprocess.TimeoutExpired:\n            timed_out, code = True, None\n    entry = {\"mode\": mode, \"command\": command, \"returncode\": code,\n             \"returncode_hex\": hex(code & 0xffffffff) if code is not None else None,\n             \"timeout_seconds\": 30, \"timed_out\": timed_out,\n             \"elapsed_seconds\": round(time.monotonic() - started, 3),\n             \"log\": str(log.relative_to(base)), \"sha256\": hashlib.sha256(log.read_bytes()).hexdigest()}\n    results.append(entry)\n    print(json.dumps(entry), flush=True)\nreceipt = {\"source\": \"stdlib-only; no Lightwork or ctypes imports\", \"attempts\": results,\n           \"runtime\": str(executable), \"script_sha256\": hashlib.sha256(script.read_bytes()).hexdigest(),\n           \"upstream_context\": [\"https://github.com/python/cpython/issues/140815\",\n                                \"https://github.com/python/cpython/pull/140921\",\n                                \"https://github.com/python/cpython/issues/158200\"]}\n(base / \"audit/standalone-frame-churn-results.json\").write_text(json.dumps(receipt, indent=2) + \"\\n\", encoding=\"utf-8\")\n",
+  "reproduced": false,
+  "per_run_details": [
+    {
+      "event": "start",
+      "version": "3.12.12 (main, Feb  3 2026, 22:54:57) [MSC v.1944 64 bit (AMD64)]",
+      "timed": true,
+      "seconds": 8.0,
+      "ctypes_loaded": false,
+      "project_imports": false
+    },
+    {
+      "event": "completed",
+      "calls": 12123162,
+      "timed": true,
+      "ctypes_loaded": false,
+      "project_imports": false
+    },
+    {
+      "event": "start",
+      "version": "3.12.12 (main, Feb  3 2026, 22:54:57) [MSC v.1944 64 bit (AMD64)]",
+      "timed": true,
+      "seconds": 8.0,
+      "ctypes_loaded": false,
+      "project_imports": false
+    },
+    {
+      "event": "completed",
+      "calls": 12628380,
+      "timed": true,
+      "ctypes_loaded": false,
+      "project_imports": false
+    },
+    {
+      "event": "start",
+      "version": "3.12.12 (main, Feb  3 2026, 22:54:57) [MSC v.1944 64 bit (AMD64)]",
+      "timed": false,
+      "seconds": 8.0,
+      "ctypes_loaded": false,
+      "project_imports": false
+    },
+    {
+      "event": "completed",
+      "calls": 12436968,
+      "timed": false,
+      "ctypes_loaded": false,
+      "project_imports": false
+    }
+  ],
+  "supporting_logs": [
+    {
+      "path": "audit/qualification-final-03-secure.log",
+      "sha256": "05e5cff0187088a6ae66b6cd8583964c97b20dd9ad62e55efd8a664e1f70045e"
+    },
+    {
+      "path": "audit/self-harness-secure-timed-01.log",
+      "sha256": "c43ef46147fb24f8f08b44ba7acecf3daeeedbe5f05cbe818bfa1ecaaf46520f"
+    },
+    {
+      "path": "audit/self-harness-secure-untimed-01.log",
+      "sha256": "a1600a20ceb1e75b67635c80348ae8c1b387b5a3c4d0b6d7329ee2557023dda1"
+    }
+  ]
+}

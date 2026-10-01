@@ -36,7 +36,7 @@ runs:
         # provider compatibility/retry tests run once on every supported
         # interpreter without adding parallel status contexts.
         python -m pip install \
-          -e './packages/maverick-core[openai,evidence-analysis,spreadsheet,pdf,postgres]' \
+          -e './packages/maverick-core[openai,evidence-analysis,spreadsheet,pdf,postgres,plugin-workbench]' \
           -e ./packages/maverick-shield \
           -e './packages/maverick-channels[sms]' \
           -e ./packages/maverick-evolve \

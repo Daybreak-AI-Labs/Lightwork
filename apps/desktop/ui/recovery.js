@@ -7,12 +7,15 @@
     while (Date.now() < deadline) {
       var controller = new AbortController(), timer;
       try {
-        await Promise.race([
-          fetch("http://127.0.0.1:8765/livez", { mode: "no-cors", cache: "no-store", signal: controller.signal }),
+        var result = await Promise.race([
+          window.__TAURI__.core.invoke("dashboard_readiness"),
           new Promise(function (_, reject) {
             timer = setTimeout(function () { controller.abort(); reject(new Error("Readiness request timed out.")); }, Math.min(5000, deadline - Date.now()));
           })
         ]);
+        if (!result || result.service !== "lightwork-dashboard" || ["ready", "setup_required"].indexOf(result.state) < 0) {
+          throw new Error(result && result.state === "conflict" ? "Port 8765 belongs to an unrecognized service; no process was stopped." : "Lightwork has not completed its identity check.");
+        }
         return;
       } catch (_) {
         if (Date.now() < deadline) await new Promise(function (resolve) { setTimeout(resolve, Math.min(1000, deadline - Date.now())); });

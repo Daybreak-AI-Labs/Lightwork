@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard.plain_labels import fill_placeholders, pack_display_name
 from maverick_dashboard.tool_summary import plain_tool_summary
 
-from test_support.plain_language import developer_terms
+from test_support.plain_language import developer_terms, visible_text
 
 HTML = {"Accept": "text/html", "Origin": "http://testserver"}
 _TECHNICAL = re.compile(
@@ -199,16 +199,23 @@ def test_feature_off_and_named_sign_in_pages_say_what_is_actually_wrong():
                         raise_server_exceptions=False)
     off = client.get("/__off", headers=HTML)
     assert off.status_code == 403
-    assert "This page is turned off" in off.text and 'href="/settings#settings-sections"' in off.text
-    assert "Permission required" not in off.text and "disabled in Settings" not in off.text
+    off_text = visible_text(off.text)
+    assert "This page is turned off" in off_text and 'href="/settings#settings-sections"' in off.text
+    assert "Permission required" not in off_text and "disabled in Settings" not in off_text
     named = client.get("/__named", headers=HTML)
-    assert "Sign in with your own account" in named.text and "Choose a workspace" in named.text
-    assert "named account" not in named.text
+    assert named.status_code == 403
+    named_text = visible_text(named.text)
+    assert "Sign in with your own account" in named_text and "Choose a workspace" in named_text
+    assert "named account" not in named_text
     role = client.get("/__role", headers=HTML)
-    assert "Permission required" in role.text and "admin required" not in role.text
+    assert role.status_code == 403
+    role_text = visible_text(role.text)
+    assert "Permission required" in role_text and "admin required" not in role_text
     expired = client.get("/__expired", headers=HTML)
-    assert "Your sign-in has expired. Sign in again." in expired.text
-    assert "access token" not in expired.text and "session or" not in expired.text
+    assert expired.status_code == 401
+    expired_text = visible_text(expired.text)
+    assert "Your sign-in has expired. Sign in again." in expired_text
+    assert "access token" not in expired_text and "session or" not in expired_text
     # API callers keep the exact machine-readable reason.
     assert client.get("/__off", headers={"Accept": "application/json"}).json() == {
         "detail": "Action Center is disabled in Settings or configuration is unavailable."

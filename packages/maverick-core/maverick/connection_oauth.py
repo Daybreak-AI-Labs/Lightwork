@@ -541,15 +541,37 @@ def _validated_prepare_ticket(actor, ticket, *, profile, selected, application, 
     return payload
 
 
+def self_connect_profiles() -> frozenset[str]:
+    """Administrator-approved fixed OAuth profiles; unavailable config fails closed."""
+    if config.config_source_errors(include_tenant=True):
+        return frozenset()
+    settings = config.load_config().get("connections") or {}
+    if settings.get("allow_self_connect") is not True:
+        return frozenset()
+    raw = settings.get("self_connect_profiles", "google-drive")
+    if not isinstance(raw, str):
+        return frozenset()
+    return frozenset(item.strip() for item in raw.split(",") if item.strip() in PROFILES)
+
+
+def _self_connect_allowed(profile):
+    if profile not in self_connect_profiles():
+        raise PermissionError("Your administrator no longer permits connecting this account profile.")
+
+
 def begin(actor, *, profile, name, redirect_uri, context, expected_revision="", site_url="", return_profile="browser",
-          native_handle="", prepare_ticket=""):
+          native_handle="", prepare_ticket="", self_connect=False):
     _authority(actor)
+    if self_connect:
+        _self_connect_allowed(profile)
     selected, site_url = _intent(profile, name, site_url)
     redirect_uri = _redirect_uri(redirect_uri, return_profile)
     _network_allowed(oauth_providers.get_provider(selected["provider"]).token_url)
     with connections._mutation_lock():
         store = _load()
         application_key, application = _selected_application(store, actor, selected["provider"])
+        if self_connect and application_key != _workspace_app_key(selected["provider"]):
+            raise PermissionError("An administrator must approve the workspace application before you connect your own account.")
         if not application:
             raise ValueError("Ask your installation administrator to enable this account provider, then try again.")
         if return_profile == DESKTOP_PROFILE and (application_key != _workspace_app_key(selected["provider"]) or application.get("desktop_return") is not True):
@@ -557,6 +579,8 @@ def begin(actor, *, profile, name, redirect_uri, context, expected_revision="", 
         current = connections.get_connection(name)
         if current and current.get("owner") != actor:
             raise PermissionError("This connection name is already owned by another account.")
+        if self_connect and current and (current.get("access") != "owner" or current.get("allowed_principals")):
+            raise PermissionError("An administrator must review reconnection of a shared account.")
         if (current or {}).get("revision", "") != expected_revision:
             raise connections.ConnectionVersionConflict("Connection changed. Reload before authorizing.")
         prepared = None
@@ -584,7 +608,7 @@ def begin(actor, *, profile, name, redirect_uri, context, expected_revision="", 
         )
         if pending_count >= _PENDING_CONSENT_LIMIT:
             raise ValueError("Too many account authorizations are pending. Wait ten minutes.")
-        store["consents"][key] = {"owner": actor, "profile": profile, "name": name, "context": context,
+        store["consents"][key] = {"owner": actor, "profile": profile, "name": name, "context": context, "self_connect": self_connect,
             "application_key": application_key, "application_revision": application["revision"], "expected_revision": expected_revision,
             "redirect_uri": redirect_uri, "return_profile": return_profile,
             "site_url": site_url, "verifier": verifier, "expires_at": now + 600,
@@ -655,6 +679,8 @@ def finish(actor, *, state, code, context, redirect_uri, return_profile="browser
                 or consent["redirect_uri"] != redirect_uri or consent.get("return_profile", "browser") != return_profile
                 or consent["expires_at"] <= time.time()):
             raise PermissionError("Authorization expired or belongs to a different account or workspace. Start again.")
+        if consent.get("self_connect"):
+            _self_connect_allowed(consent["profile"])
         selected = PROFILES[consent["profile"]]
         application = _bound_application(store, actor, selected["provider"], consent)
         records = connections._load()
@@ -688,11 +714,14 @@ def finish(actor, *, state, code, context, redirect_uri, return_profile="browser
             workspace = {"provider_id": cloud_id,
                          "name": _identity_text(matches[0].get("name"), maximum=512),
                          "url": consent["site_url"]}
+        _authority(actor)
+        if consent.get("self_connect"):
+            _self_connect_allowed(consent["profile"])
         records[consent["name"]] = {"name": consent["name"], "connector": selected["connector"], "base_url": selected["origin"], "token": access,
             "created": (previous or {}).get("created", time.time()), "owner": actor,
             "access": (previous or {}).get("access", "owner"), "allowed_principals": (previous or {}).get("allowed_principals", []),
             "revision": uuid.uuid4().hex,
-            "oauth": {"profile": consent["profile"], "application_key": consent.get("application_key", _app_key(actor, selected["provider"])),
+            "oauth": {"profile": consent["profile"], "self_connect": consent.get("self_connect", False), "application_key": consent.get("application_key", _app_key(actor, selected["provider"])),
                 "application_revision": application["revision"], "refresh_token": refresh,
                 "expires_at": expires, "refresh_state": "ready", "api_prefix": prefix,
                 "site_url": consent["site_url"], "identity": identity,
@@ -769,6 +798,8 @@ def _renew_owned(record, *, actor):
                 or not connections._may_use(current, actor)):
             raise connections.ConnectionVersionConflict("Connection authority changed. Reload before continuing.")
         oauth = current.get("oauth") or {}
+        if oauth.get("self_connect"):
+            _self_connect_allowed(oauth.get("profile"))
         selected = PROFILES.get(oauth.get("profile"))
         if (not selected or current.get("connector") != selected["connector"] or current.get("base_url") != selected["origin"]):
             raise PermissionError("Renewable connection destination does not match its authorization.")
@@ -833,6 +864,8 @@ def _renew_owned(record, *, actor):
             bound_app = _bound_application(_load(), latest["owner"], selected["provider"], latest["oauth"])
             if not bound_app or _refresh_binding(bound_app) != app_binding:
                 raise connections.ConnectionVersionConflict("App registration changed during renewal.")
+            if latest["oauth"].get("self_connect"):
+                _self_connect_allowed(latest["oauth"].get("profile"))
             latest["token"] = access
             latest["oauth"].update(refresh_token=refresh, expires_at=expires, refresh_state="ready",
                                    identity=identity, workspace=workspace,

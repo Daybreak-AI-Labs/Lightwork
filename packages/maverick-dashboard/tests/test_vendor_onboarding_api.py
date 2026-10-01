@@ -1115,10 +1115,14 @@ def stock_workspace(web, monkeypatch):
 
     from maverick import connections
     from maverick.paths import tenant_scope
+    from maverick.tenant import registry
     from maverick_dashboard import rbac, workspace_tenants
     from maverick_dashboard import vendor_onboarding_composition as composition
 
     _, original, ctx, tickets = web
+    # Native provisioning precedes membership and retained workflow data;
+    # the lifecycle guard correctly refuses adopting a previously used name.
+    registry.create_tenant(ctx.tenant)
     rbac.set_role(ctx.actor, "operator")
     rbac.set_tenant_role(ctx.tenant, ctx.actor, "operator")
     workspace_tenants.set_selection(ctx.actor, ctx.tenant)
@@ -1178,7 +1182,6 @@ def test_stock_worker_denies_suspended_tenant(stock_workspace):
     from maverick_dashboard import vendor_onboarding_composition as composition
 
     service, ctx, row, tickets, request = stock_workspace
-    registry.create_tenant(ctx.tenant)
     registry.suspend_tenant(ctx.tenant)
     with tenant_scope(tenant=ctx.tenant), pytest.raises(HTTPException):
         composition._context(request)
@@ -1348,16 +1351,17 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
     client, *_ = web
     response = client.get("/third-party/vendor-onboarding")
     assert response.status_code == 200, response.text
-    assert "Human review" in response.text
-    assert "Approve this exact Jira task" in response.text
-    assert "What this request delivers" in response.text
-    assert "Cancel local work" in response.text
-    assert "any Jira ticket already created remains" in response.text
-    from test_support.plain_language import developer_terms
+    from test_support.plain_language import developer_terms, visible_text
 
+    page_text = visible_text(response.text)
+    assert "Human review" in page_text
+    assert "Approve this exact Jira task" in page_text
+    assert "What this request delivers" in page_text
+    assert "Cancel local work" in page_text
+    assert "any Jira ticket already created remains" in page_text
     assert developer_terms(response.text) == []
     for gone in ("file IDs", "SHA-256", "JSON export", "No OCR", "MiB"):
-        assert gone not in response.text
+        assert gone not in page_text
     assert "no-store" in response.headers["cache-control"]
     asset = client.get("/static/lightwork-vendor-onboarding.js")
     assert asset.status_code == 200

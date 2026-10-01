@@ -186,3 +186,24 @@ def test_a_refused_audit_record_undoes_turning_off(client, monkeypatch):
     response = client.post("/api/v1/connection-setup/disable", json={"confirm": True, "context": current["context"]})
     assert response.status_code == 503
     assert state(client)["enabled"] is True
+
+
+def test_employee_self_connection_cannot_manage_app_registration(monkeypatch, client):
+    monkeypatch.setattr(connection_oauth, "self_connect_profiles", lambda: frozenset({"google-drive"}))
+    response = client.get("/api/v1/connection-setup", headers={"X-Test-User": "other"})
+    assert response.status_code == 200
+    data = response.json()
+    assert [row["id"] for row in data["profiles"]] == ["google-drive"]
+    assert data["can_manage_applications"] is False
+    assert data["can_manage_keys"] is False
+    denied = client.put("/api/v1/connection-setup/application", headers={"X-Test-User": "other"}, json={
+        "confirm": True, "context": data["context"], "provider": "google", "client_id": "not-allowed"})
+    assert denied.status_code == 403
+
+
+def test_self_connection_policy_fails_closed_when_disabled(monkeypatch):
+    monkeypatch.setattr(config, "config_source_errors", lambda **kwargs: [])
+    monkeypatch.setattr(config, "load_config", lambda: {"connections": {"allow_self_connect": False, "self_connect_profiles": "google-drive"}})
+    assert not connection_oauth.self_connect_profiles()
+    with pytest.raises(PermissionError):
+        connection_oauth._self_connect_allowed("google-drive")

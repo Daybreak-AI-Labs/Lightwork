@@ -24,7 +24,7 @@ async function fixture(action) {
   const start=queue.indexOf("    document.addEventListener('mv-assessment-decided'");
   w.eval(queue.slice(start,queue.indexOf("\n  })();",start)));
   const mutate=queue.indexOf("  (function() {\n    const msg = document.getElementById('approval-msg')");
-  w.eval(queue.slice(mutate,queue.lastIndexOf("</script>")));
+  w.eval(queue.slice(mutate,queue.indexOf("</script>",mutate)));
   await w.mvAssessmentReview.open("A");
   return {dom,w,doc,calls,events,resolve:body=>resolve(body),reject:error=>reject(error)};
 }

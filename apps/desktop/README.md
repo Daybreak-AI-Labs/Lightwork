@@ -21,8 +21,7 @@ guide for its scope, failure recovery and unverified native release gates.
 Native desktop window for the **local** Lightwork dashboard. A Tauri v2 shell:
 the window opens on a bundled splash, the Rust side starts
 `maverick dashboard --host 127.0.0.1 --port 8765` if nothing is listening
-there, and the splash navigates to `http://127.0.0.1:8765` the moment
-`/healthz` answers.
+there, and the splash navigates to `http://127.0.0.1:8765` only after the native bounded `/healthz` handshake identifies Lightwork dashboard-v1 with ready/setup-required status.
 
 ```
   +--------------------+        spawn if 8765 closed        +----------------------+
@@ -31,7 +30,7 @@ there, and the splash navigates to `http://127.0.0.1:8765` the moment
   +---------+----------+                                    |   Python CLI)        |
             │ loads                                         +----------+-----------+
             ▼                                                          │
-  ui/index.html + app.js ── polls /healthz (no-cors) ── navigates ─────┘
+  ui/index.html + app.js ── native identity IPC ── navigates ─────┘
                                                        http://127.0.0.1:8765
 ```
 
@@ -56,12 +55,10 @@ the platform build SDK and linker; they do not prove packaged app startup.
 The original shell could not actually connect, and was bare. This version
 addresses:
 
-1. **Cross-origin probe.** The splash runs at the Tauri origin, so a request
-   to `127.0.0.1:8765` is cross-origin and the dashboard sends no CORS header
-   for it — a normal `fetch` is blocked and *rejects forever*. The probe now
-   uses `mode: "no-cors"` (resolves when the server answers, rejects only on a
-   refused connection) and then does a top-level navigation, which is not
-   subject to CORS. (`ui/app.js`)
+1. **Dashboard identity.** The bundled splash asks native IPC for a bounded
+   fixed-loopback health probe. HTTP 200 alone and opaque browser responses
+   cannot authorize navigation. An unrelated listener yields an actionable
+   conflict; valid setup-required 503 remains available.
 2. **CSP blocked the splash script.** The old CSP had no `script-src`, so under
    `default-src 'self'` the inline `<script>` was itself blocked. The script is
    now an external `app.js` and the CSP grants `script-src 'self'` plus
@@ -140,3 +137,31 @@ the graph when Tauri/Wry moves to maintained dependencies.
 
 Any locally produced bundles are **unsigned**, so SmartScreen (Windows) and
 Gatekeeper (macOS) will warn until code-signing certificates exist.
+
+## Protected maintenance and offline packages
+
+Check for updates first. Workspace recovery reviews the exact version and
+installer/runtime identities and writes an administrator-bound, expiring private
+handoff. Load protected approval in Install & updates, review its administrator,
+action and scope, then explicitly install. The manual code fallback uses the same
+exact release review. The secret remains in OS-private local records and native
+memory, not either webview. Harmless page navigation retains the pending release.
+
+For offline repair, an administrator supplies a local folder with `new.msi` and
+`downloads.json`. The metadata is the same bounded object used by online repair:
+`public_key` (the compiled pinned key), `identity_transition: null`, and `new`
+containing `version`, `signature`, `runtime_sha256`, `installer_sha256`. Keep the
+exact signed release package and its release metadata together when distributing
+an offline package. Local metadata does not confer trust: Minisign, Windows
+Authenticode, registered product/package, publisher, exact version and bundled
+runtime are all checked. Online URLs are unused. Select its folder under **Repair
+without a network connection**, verify the displayed identities, then confirm.
+A working separately bundled recovery executable/native pair can repair a missing
+primary runtime. Missing both trusted copies requires the signed release installer.
+
+**Choose a supported recovery** identifies changed protected files and coordinated
+external-resource blockers. Repair preserves current data; workspace recovery
+opens its explicit isolation confirmation and offers existing per-workspace export
+and restore drill controls. Save the metadata-only plan for the responsible
+administrators. Plan evidence never waives accounting or action-history checks.
+Native/installer/release qualification remains unrun in this audit implementation.

@@ -94,7 +94,7 @@ Each node is one of these kinds (include only the fields for its kind):
 Any "agent" or "action" node may also set "retries":<n> (re-try on failure; optional "retry_backoff":<seconds> for exponential wait), "on_error":"<id>" (route there if it fails), and "timeout":<seconds> (per-node execution cap).
 
 Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. Transforms: text (upper lower trim title concat replace split join slice regex), data (default length first last index keys json), number (add sub mul div round abs int), time (now today add_days datefmt -- UTC, ISO-formatted so dates compare lexically). E.g. {{datefmt(now(),"%Y-%m-%d")}}, {{add_days('', 3)}} (3 days from today), {{regex(email,"@(.+)$")}}, {{join(split(csv,","),"; ")}}.
-For a connector credential in an action param, use {{secret('NAME')}} -- it resolves from the secure vault at run time and never lands in the flow definition or run data. Never inline a raw API key.
+Never put credentials or secret(...) expressions in action parameters. Native connector actions resolve their own authorized Connections account after current workspace, owner, tool, origin and credential-revision checks. If the intended connector lacks that binding, explain the missing account/setup step; do not invent a credential mapping or use deployment environment secrets.
 A "branch"/"while" condition is "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data, composable with and/or. A "switch" routes by matching a data key against each case value."""
 
 FLOW_DRAFT_SYSTEM = """You design automation FLOWS and output STRICT JSON only.

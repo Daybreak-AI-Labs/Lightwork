@@ -151,6 +151,7 @@ from .api_schemas import (
     ScheduleIn,
     ScheduleOut,
     SchemaImportIn,
+    ShareLinkIn,
     SharePointSyncIn,
     SignoffIn,
     SiteScanIn,
@@ -184,6 +185,7 @@ from .api_schemas import (
 )
 from .auth import (
     assert_goal_access,
+    assert_template_access,
     auth_genuinely_off,
     caller_principal,
     caller_suites,
@@ -199,8 +201,10 @@ from .auth import (
     require_suite,
     stored_automation_identity,
 )
+from .product_errors import next_action, product_error
 
 log = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
 
@@ -398,6 +402,10 @@ async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
     selected tenant, and a preference never grants access by itself.
     """
     require_permission(request, "view")
+    import os
+
+    if os.environ.get("MAVERICK_TENANT", "").strip():
+        raise HTTPException(409, "This installation uses a fixed workspace. Ask your installation administrator to change it.")
     from maverick import config as _cfg
     from maverick.tenant import registry as tenant_registry
 
@@ -665,12 +673,12 @@ def _board_spend(w, owner, days: int) -> dict:
     totals, prev = _tot(since), _tot(prev_since)
     episodes = w.list_episodes(limit=200, owner=owner)
     outcomes = {"success": 0, "failed": 0, "running": 0}
-    for e in episodes:
-        if e.started_at < since:
-            continue
-        if not e.outcome:
+    from maverick.episode_reporting import iter_episodes
+    from maverick.workforce_value import _is_done
+    for e in iter_episodes(w, owner=owner, since=since, until=since + days * 86400 + 1):
+        if e.ended_at is None:
             outcomes["running"] += 1
-        elif e.outcome == "success":
+        elif _is_done(e.outcome):
             outcomes["success"] += 1
         else:
             outcomes["failed"] += 1
@@ -702,6 +710,7 @@ def _board_spend(w, owner, days: int) -> dict:
         "prev": prev,
         "daily": list(daily.values()),
         "outcomes": outcomes,
+        "outcomes_population": "All authorized episode attempts started in the selected period; running attempts are separate from the finished-attempt cost totals.",
         "per_run": per_run,
         "top_goals": top_goals,
         "by_platform": _external_platform_spend(w, owner, since),
@@ -924,29 +933,39 @@ def _board_savings(w, owner, days: int) -> dict:
     ):
         if day in daily:
             daily[day]["n"] = int(n)
-    report = savings_mod.to_dict(savings_mod.compute(w, window_days=days, cfg=get_value()))
+    report = savings_mod.to_dict(savings_mod.compute(w, window_days=days, cfg=get_value(), owner=owner))
     return {"report": report, "daily_done": list(daily.values())}
 
 
-def _board_oversight(w, owner, days: int) -> dict:
-    """Mission-control rollup: guardrail interventions from the audit log
-    (fail-soft: unreadable log yields an empty board, never a 500), the
-    pending human queue, and the halt state."""
+def _board_oversight(w, owner, days: int, request=None) -> dict:
+    """Scoped guardrail metadata with explicit availability for each source."""
     from datetime import datetime, timedelta, timezone
+
+    from .app import _audit_event_visible_to_caller, _is_intervention
 
     day_list, since, _prev = _board_day_list(days)
     daily = {d.isoformat(): {"d": d.isoformat(), "n": 0} for d in day_list}
     by_kind: dict[str, int] = {}
     total = 0
+    owner_cache = {}
+    sources = {name: {"state": "available", "checked_at": time.time(), "repair_href": href}
+               for name, href in (("audit", "/audit"), ("approvals", "/action-center"), ("halt", "/oversight"))}
     try:
         from maverick.audit.export import iter_audit_events
+        from maverick.audit.segments import ReadReport
 
         since_day = (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
+        report = ReadReport()
         scanned = 0
-        for e in iter_audit_events(since=since_day):
+        for e in iter_audit_events(since=since_day, report=report):
             scanned += 1
             if scanned > 100_000:
+                sources["audit"]["state"] = "partial"
                 break
+            if not _is_intervention(e) or not _audit_event_visible_to_caller(
+                e, principal=owner, owner_filter=owner, world=w, goal_owner_cache=owner_cache,
+            ):
+                continue
             total += 1
             kind = str(e.get("kind") or "event")
             by_kind[kind] = by_kind.get(kind, 0) + 1
@@ -955,18 +974,30 @@ def _board_oversight(w, owner, days: int) -> dict:
                 day = datetime.fromtimestamp(float(ts), tz=timezone.utc).date().isoformat()
                 if day in daily:
                     daily[day]["n"] += 1
+        if report.as_dict().get("failures"):
+            sources["audit"]["state"] = "partial"
     except Exception:  # pragma: no cover -- fail-soft like the page
-        pass
+        total = None
+        sources["audit"]["state"] = "unavailable"
     try:
-        pending = sum(
-            1 for a in w.list_approvals(limit=500) if getattr(a, "status", "") == "pending"
-        )
+        clauses = "a.status = 'pending'"
+        values = ()
+        if owner is not None:
+            clauses += " AND COALESCE(a.requested_by, '') = ?"
+            values = (owner,)
+        if request is None:
+            pending = int(w.query("SELECT COUNT(*) FROM approvals a WHERE " + clauses, values)[0][0])
+        else:
+            from .content_access import can_read_approval
+            pending = sum(can_read_approval(request, row, world=w) for row in w.pending_approvals())
     except Exception:  # pragma: no cover
-        pending = 0
+        pending = None
+        sources["approvals"]["state"] = "unavailable"
     try:
         halted = bool(w.active_halt())
     except Exception:  # pragma: no cover
-        halted = False
+        halted = None
+        sources["halt"]["state"] = "unavailable"
     kinds = sorted(
         ({"kind": k.replace("_", " "), "n": n} for k, n in by_kind.items()),
         key=lambda r: r["n"],
@@ -978,6 +1009,8 @@ def _board_oversight(w, owner, days: int) -> dict:
         "daily": list(daily.values()),
         "pending_approvals": pending,
         "halted": halted,
+        "sources": sources,
+        "degraded": any(source["state"] != "available" for source in sources.values()),
     }
 
 
@@ -998,7 +1031,7 @@ def dashboard_board(request: Request, board: str, days: int | None = None) -> di
             "savings": _board_savings,
             "oversight": _board_oversight,
         }[board]
-        payload = build(w, owner, d)
+        payload = build(w, owner, d, request=request) if board == "oversight" else build(w, owner, d)
     else:
         raise HTTPException(status_code=404, detail="unknown board")
     payload.update({"board": board, "days": d, "generated_at": time.time()})
@@ -1011,6 +1044,7 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
     from maverick.tenant import registry as tenant_registry
 
     tenant_id = body.id.strip()
+    generated_identifier = not tenant_id
     if not tenant_id:
         # People name a workspace; the stable id is made from that name.
         from .plain_labels import unique_slug
@@ -1027,6 +1061,7 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
             plan=body.plan,
             display_name=body.display_name,
             max_daily_dollars=body.max_daily_dollars,
+            allocate_suffix=generated_identifier,
         )
     except ValueError as e:
         # Already exists, or an invalid/over-long id.
@@ -1061,7 +1096,7 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
             ) from rollback_exc
         raise HTTPException(
             status_code=503,
-            detail="audit custody refused tenant creation; tenant was not published",
+            detail="Audit custody refused tenant creation. The workspace is unavailable and its identifier remains reserved; retry with a new identifier or a display name.",
         ) from exc
     return _to_tenant_out(rec)
 
@@ -1338,6 +1373,13 @@ def create_goal(
     from maverick_dashboard.app import check_goal_rate_limit
 
     check_goal_rate_limit(request)
+    source_selection = _source_analysis_selection(request, payload)
+    from maverick.template_connections import parameters as connection_parameters
+    from maverick.template_connections import validate as validate_connections
+    try:
+        connection_refs = validate_connections(caller_principal(request) or "", payload.connection_references)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     title = payload.title
     description = payload.description
     if payload.template:
@@ -1345,6 +1387,7 @@ def create_goal(
 
         try:
             tpl = load_template(payload.template)
+            assert_template_access(request, tpl)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except FileNotFoundError as e:
@@ -1355,7 +1398,9 @@ def create_goal(
                 status_code=404, detail=f"template not found: {payload.template!r}"
             ) from e
         try:
-            title, description = tpl.render(**(payload.params or {}))
+            _, template_refs = connection_parameters(tpl, caller_principal(request) or "", payload.params or {})
+            connection_refs = validate_connections(caller_principal(request) or "", connection_refs + template_refs)
+            title, description = tpl.render_for(caller_principal(request) or "", **(payload.params or {}))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
     title = (title or "").strip()
@@ -1389,6 +1434,7 @@ def create_goal(
 
         receipt = reserve_api(w, key=idem_key, owner=caller_principal(request) or "",
             payload=payload, title=title, description=description, domain=domain,
+            connection_references=connection_refs,
             caps={"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds, "max_depth": max_depth})
         goal_id = receipt["goal_id"]
         if not receipt["created"]:
@@ -1410,9 +1456,11 @@ def create_goal(
         else:
             replay_resume = False
     else:
-        goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
+        goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "",
+            **({"connection_references": connection_refs} if connection_refs else {}))
         if domain:
             w.set_goal_domain(goal_id, domain)
+    _bind_source_analysis(w, goal_id, caller_principal(request) or "", source_selection)
     _record_api_director(w, goal_id, director, receipt)
     from maverick.runner import run_goal_in_background_async
 
@@ -1461,6 +1509,35 @@ def create_goal(
     response.headers["Location"] = f"/api/v1/goals/{goal_id}"
     response.headers["Idempotency-Replayed"] = "true" if receipt is not None and replay_resume else "false"
     return _to_goal_out(g)
+
+
+def _bind_source_analysis(world, goal_id, actor, selection):
+    if selection is None:
+        return
+    from maverick.knowledge_task_context import SourceContextUnavailable, bind
+    try:
+        bind(world, goal_id, actor, selection)
+    except SourceContextUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+def _source_analysis_selection(request: Request, payload: GoalIn):
+    if payload.knowledge_context is None:
+        return None
+    from maverick.knowledge_task_context import SourceContextUnavailable, validate_selection
+    if payload.template or payload.domain or payload.director_profile or payload.params:
+        raise HTTPException(422, "Selected knowledge is available only for a source analysis task, without specialist tools or workflow execution.")
+    if not (request.headers.get("Idempotency-Key") or "").strip():
+        raise HTTPException(422, "Keep one request identity for this source analysis and reconcile it before retrying.")
+    from .draft_api import context_for
+    if payload.knowledge_context.context != context_for(request):
+        raise HTTPException(409, "Account or workspace changed. Select sources again in the current workspace.")
+    selection = payload.knowledge_context.model_dump(exclude={"context"}, by_alias=True)
+    try:
+        validate_selection(caller_principal(request) or "", selection)
+    except SourceContextUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return selection
 
 
 def _api_director(payload: GoalIn, title: str, description: str):
@@ -1518,6 +1595,7 @@ def reconcile_goal_submission(request: Request, response: Response, kind: str = 
                 "Pagination-Offset": {"schema": {"type": "integer"}},
                 "Pagination-Has-More": {"schema": {"type": "boolean"}},
                 "Pagination-Next-Offset": {"schema": {"type": "integer"}},
+                "Pagination-Next-Before-Id": {"schema": {"type": "integer"}},
             },
         },
     },
@@ -1528,6 +1606,7 @@ def list_goals(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    before_id: int | None = None,
 ) -> list[GoalOut]:
     """List goals (newest first), paginated.
 
@@ -1535,18 +1614,26 @@ def list_goals(
     Python via ``list_goals()``, then sliced. Now the LIMIT/OFFSET are
     pushed to SQL.
 
-    Owner-scoped: a non-admin authenticated caller sees only their own goals;
-    auth-off and admin callers see all (``goal_owner_filter`` returns None).
+    ``before_id`` continues below an immutable ID even if that task has been
+    removed or is no longer accessible. It cannot be combined with an offset.
+    Current content authority still scopes every request: administrator policy
+    authority does not grant automatic access to employee task content.
     """
-    w = _world()
+    if before_id is not None:
+        if not 0 < before_id <= 2**63 - 1:
+            raise HTTPException(status_code=422, detail="before_id must be a positive signed 64-bit goal ID")
+        if offset != 0:
+            raise HTTPException(status_code=422, detail="before_id cannot be combined with a nonzero offset")
     limit = max(1, min(int(limit or 50), 500))
     offset = max(0, int(offset or 0))
+    w = _world()
     goals = w.list_goals(
         status=status,
         owner=goal_owner_filter(request),
         limit=limit + 1,
         offset=offset,
         order="desc",
+        **({"before_id": before_id} if before_id is not None else {}),
     )
     has_more = len(goals) > limit
     goals = goals[:limit]
@@ -1554,7 +1641,9 @@ def list_goals(
     response.headers["Pagination-Offset"] = str(offset)
     response.headers["Pagination-Has-More"] = str(has_more).lower()
     if has_more:
-        response.headers["Pagination-Next-Offset"] = str(offset + limit)
+        if before_id is None:
+            response.headers["Pagination-Next-Offset"] = str(offset + limit)
+        response.headers["Pagination-Next-Before-Id"] = str(goals[-1].id)
     return [_to_goal_out(g) for g in goals]
 
 
@@ -1679,6 +1768,50 @@ async def goal_events_stream(
                                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@router.get("/goals/{goal_id}/thread-history")
+def goal_thread_history(request: Request, goal_id: int, before_id: int | None = None) -> dict:
+    from dataclasses import asdict
+
+    from maverick.chat_threads import ChatThreads
+
+    require_permission(request, "view")
+    world = _world()
+    goal = world.get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(404, "No such task.")
+    assert_goal_access(request, goal)
+    if before_id is not None and before_id < 1:
+        raise HTTPException(400, "The history position is invalid.")
+    principal = caller_principal(request)
+    if (principal or "") != (goal.owner or ""):
+        raise HTTPException(403, "Access to one task does not grant access to the employee conversation.")
+    turns, more = ChatThreads(world).history(goal_id, before_id=before_id)
+    return {"turns": [asdict(turn) for turn in turns], "has_more": more,
+            "before_id": turns[0].id if turns else before_id}
+
+
+@router.post("/goals/{goal_id}/answer-with-files")
+async def answer_question_with_files(
+    request: Request, goal_id: int, bg: BackgroundTasks,
+    question_id: int = Form(...), answer: str = Form(...),
+    expected_question: str = Form(...), operation_id: str = Form(...),
+    expected_context: str = Form(...), files: list[UploadFile] = File(default=[]),
+) -> dict:
+    from .clarification_submission import submit
+
+    receipt = await submit(request, _world(), goal_id, question_id=question_id, answer=answer,
+                           expected_question=expected_question, operation_id=operation_id, files=files, expected_context=expected_context)
+    if receipt["admitted"] and not receipt["replayed"]:
+        _dispatch_requeued_goal(request, bg, goal_id, conversation_id=receipt["conversation_id"])
+    return receipt
+
+
+@router.get("/goals/{goal_id}/answer-receipts/{operation_id}")
+def clarification_receipt(request: Request, goal_id: int, operation_id: str) -> dict:
+    from .clarification_submission import receipt
+    return receipt(request, _world(), goal_id, operation_id)
+
+
 @router.post("/goals/{goal_id}/answer", status_code=204)
 def answer_question(
     request: Request, goal_id: int, payload: AnswerIn, bg: BackgroundTasks
@@ -1692,6 +1825,8 @@ def answer_question(
     answer = (payload.answer or "").strip()
     if not answer:
         raise HTTPException(status_code=400, detail="answer is required")
+    if g.status in {"cancelled", "done", "failed"}:
+        raise HTTPException(409, "This task is no longer waiting for an answer. Review its current state before restarting.")
     qs = w.open_questions(goal_id=goal_id)
     if not any(q.id == payload.question_id for q in qs):
         raise HTTPException(status_code=404, detail="no such open question for this goal")
@@ -5043,12 +5178,58 @@ async def bulk_import_assessments(
     }
 
 
+def _memory_response_context(request, response):
+    from .draft_api import context_for
+    context = context_for(request)
+    expected = request.headers.get("X-Lightwork-Search-Context")
+    if expected and expected != context:
+        raise HTTPException(409, "Account or workspace changed. Reopen the assessment before using a precedent.")
+    response.headers["Cache-Control"] = "private, no-store"
+    return context
+
+
+def _permitted_memory_assessment_types(request):
+    from maverick.assessment import custom_template_records
+
+    from .app import FINANCE_ASSESSMENT_TYPES, PRIVACY_ASSESSMENT_TYPES, SECURITY_ASSESSMENT_TYPES
+    from .auth import suite_allowed
+    mapping = {kind: suite for suite, kinds in (("finance", FINANCE_ASSESSMENT_TYPES),
+        ("privacy", PRIVACY_ASSESSMENT_TYPES), ("security", SECURITY_ASSESSMENT_TYPES)) for kind in kinds}
+    mapping.update({kind: record.get("department", "privacy") for kind, record in custom_template_records().items()})
+    return {kind for kind, suite in mapping.items() if suite_allowed(request, suite)}
+
+
+@router.get("/assessment-memory/fragment/{assessment_id}/{question_id}")
+async def assessment_memory_fragment(request: Request, response: Response, assessment_id: str, question_id: str,
+                                     revision: int | None = None, policy_digest: str = ""):
+    from maverick.assessment import load_saved
+    from maverick.assessment_memory import source_evidence
+    require_permission(request, "operate")
+    context = _memory_response_context(request, response)
+    record = await run_in_threadpool(load_saved, assessment_id)
+    if not record or record.get("type") not in _permitted_memory_assessment_types(request):
+        raise HTTPException(404, "This source answer is unavailable in your current workspace.")
+    if question_id not in (record.get("answers") or {}):
+        raise HTTPException(404, "This source question has no saved answer.")
+    if ((revision is not None and revision != record.get("revision")) or
+            (policy_digest and policy_digest != record.get("template_digest"))):
+        raise HTTPException(409, "This source changed after the suggestion was prepared. Refresh to compare its current answer.")
+    evidence = source_evidence(record, question_id)
+    require_permission(request, "operate")
+    if (_memory_response_context(request, response) != context or
+            record.get("type") not in _permitted_memory_assessment_types(request)):
+        raise HTTPException(409, "Workspace or department access changed. Reopen the source.")
+    return {"context": context, **evidence}
+
+
 @router.get("/assessment-memory/similar")
 async def assessment_memory_similar(
     request: Request,
+    response: Response,
     subject: str,
     type: str = "",
     k: int = 3,
+    exclude_id: str | None = None,
 ) -> dict:
     """What the org already knows about subjects like this one: similar past
     assessments (with ratings), advisory per-question answer suggestions from
@@ -5059,16 +5240,21 @@ async def assessment_memory_similar(
     require_permission(request, "operate")
     from maverick import assessment_memory
 
+    context = _memory_response_context(request, response)
     subject = subject.strip()[:300]
     k = max(1, min(k, 10))
     if not subject:
         raise HTTPException(status_code=422, detail="subject is required")
+    allowed_types = _permitted_memory_assessment_types(request)
+    if type and type not in allowed_types:
+        raise HTTPException(403, "Current department access is required for these precedents.")
     sim = await run_in_threadpool(
-        assessment_memory.similar, subject, assessment_type=(type or None), k=k
+        assessment_memory.similar, subject, assessment_type=(type or None), k=k,
+        exclude_id=exclude_id, allowed_types=allowed_types
     )
     suggestions = {}
     if type:
-        suggestions = await run_in_threadpool(assessment_memory.suggest_answers, type, subject, k=k)
+        suggestions = await run_in_threadpool(assessment_memory.suggest_answers, type, subject, k=k, exclude_id=exclude_id, allowed_types=allowed_types)
     governed_reader = None
     try:
         from maverick.paths import current_tenant_id_strict
@@ -5104,7 +5290,12 @@ async def assessment_memory_similar(
         k=k,
         reader=governed_reader,
     )
+    require_permission(request, "operate")
+    if (_memory_response_context(request, response) != context or
+            _permitted_memory_assessment_types(request) != allowed_types):
+        raise HTTPException(409, "Workspace or department access changed. Refresh the precedents.")
     return {
+        "context": context,
         "enabled": assessment_memory.enabled(),
         "similar": sim,
         "suggestions": suggestions,
@@ -5193,17 +5384,38 @@ async def download_goal_attachment(
 
 
 @router.get("/facts", response_model=dict[str, str])
-def list_facts() -> dict[str, str]:
-    return _world().get_facts()
+def list_facts(request: Request) -> dict[str, str]:
+    require_permission(request, "view")
+    from maverick.fact_revision import is_private_fact_key
+    return {key: value for key, value in _world().get_facts().items()
+            if not is_private_fact_key(key)}
 
 
 @router.post("/facts", status_code=204)
 def set_fact(request: Request, payload: FactIn) -> None:
+    save_fact(request, payload)
+
+
+def save_fact(request: Request, payload: FactIn) -> int:
+    """Native save boundary, returning the actual global database revision."""
     require_permission(request, "operate")
     key = (payload.key or "").strip()
     if not key:
         raise HTTPException(status_code=400, detail="fact key is required")
-    _world().upsert_fact(key, payload.value)
+    from maverick.fact_revision import FactConflict, is_private_fact_key
+    if is_private_fact_key(key):
+        raise HTTPException(400, "Choose a shared fact name without a reserved personal or task prefix.")
+    from .auth import caller_principal
+    from .draft_api import context_for
+    if (payload.context is not None and payload.context != context_for(request)) or (
+        payload.expected_revision > 0 and payload.context is None
+    ):
+        raise HTTPException(409, "Your account or workspace changed. Reload before saving.")
+    try:
+        return _world().upsert_fact(key, payload.value, expected_revision=payload.expected_revision,
+                                   source=caller_principal(request) or "dashboard")
+    except FactConflict as exc:
+        raise HTTPException(409, "This fact changed. Compare the current value with your draft.") from exc
 
 
 @router.post("/outcomes", status_code=204)
@@ -5439,11 +5651,7 @@ def _require_connections() -> None:
     if not connections.enabled():
         raise HTTPException(
             status_code=403,
-            detail=(
-                "Connections aren't enabled on this server yet — an "
-                "administrator can switch them on (enable [connections] in "
-                "the server configuration, or set MAVERICK_CONNECTIONS=1)."
-            ),
+            detail={"code": "connections_disabled", "message": "Connections are turned off. An administrator can enable them in Settings."},
         )
 
 
@@ -5456,12 +5664,102 @@ async def list_connections_endpoint(request: Request) -> dict:
     from maverick import connections
 
     try:
-        rows = connections.list_connections(owner=_request_identity(request))
+        from .connection_dependencies import owned_connections
+
+        rows = owned_connections(request)
     except connections.ConnectionStoreUnavailable as exc:
         raise HTTPException(
             status_code=503, detail="connection credential registry is unavailable"
         ) from exc
-    return {"connections": rows}
+    from .draft_api import context_for
+
+    return {"connections": rows, "context": context_for(request)}
+
+
+@router.get("/extension/policy")
+def extension_capture_policy(request: Request) -> dict:
+    """Current authorized disclosure; no page content or credentials are retained."""
+    import hashlib
+
+    from maverick.config import config_source_errors, get_role_model, load_config
+
+    from .draft_api import context_for
+
+    require_permission(request, "operate")
+    if config_source_errors(include_tenant=True):
+        raise HTTPException(503, "Extension settings are unavailable. Try again after an administrator repairs settings.")
+    dashboard = load_config().get("dashboard") or {}
+    policy = {"form_values": dashboard.get("extension_form_values") is True,
+              "page_structure": dashboard.get("extension_page_structure", True) is True,
+              "context": context_for(request), "model": str(get_role_model("orchestrator") or "configured service")}
+    policy["revision"] = hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()
+    return policy
+
+
+@router.get("/connections/inventory")
+async def account_inventory_endpoint(request: Request) -> dict:
+    """Read-only facade; named credentials and provider vault entries stay distinct."""
+    from maverick import connections, oauth_providers, oauth_vault
+
+    from .auth import has_permission
+    from .draft_api import context_for
+
+    require_permission(request, "operate")
+    rows = []
+    coverage = []
+    if connections.enabled():
+        try:
+            from .connection_dependencies import owned_connections
+
+            for record in owned_connections(request):
+                identity = record.get("oauth") or {}
+                rows.append({"id": "named:" + record["name"], "name": record["name"],
+                             "provider": record["connector"], "domain": "Named workflows and sources",
+                             "owner": "Your account" if _request_identity(request) else "Workspace-managed",
+                             "identity": (identity.get("identity") or {}).get("display_name") or "See account details in Connections",
+                             "sharing": "Workspace" if record["access"] == "tenant" else "Owner and explicitly selected people",
+                             "repair_url": "/connections", "credential_kind": "named", "revision": record["revision"],
+                             "workspace": identity.get("workspace") or {}, "site_url": identity.get("site_url", ""),
+                             "granted_scopes": identity.get("granted_scopes", []), "scope_status": identity.get("scope_status", "not recorded"),
+                             "expires_at": identity.get("expires_at"), "renewal_state": identity.get("renewal_state", "not configured"),
+                             "renews": identity.get("available", False), "recovery_action": identity.get("recovery_action", ""),
+                             "used_by_href": "/connections?review=" + record["name"],
+                             "usage_coverage": "Review declared dependencies and dynamic selection limits before changing this account."})
+            coverage.append({"domain": "Named connections", "state": "available"})
+        except connections.ConnectionStoreUnavailable:
+            coverage.append({"domain": "Named connections", "state": "unavailable"})
+    else:
+        coverage.append({"domain": "Named connections", "state": "disabled"})
+    if has_permission(request, "admin") and oauth_vault.enabled():
+        try:
+            vault = oauth_vault.get_vault()
+            labels = {item["name"]: item["label"] for item in oauth_providers.provider_catalog()}
+            for provider in vault.providers():
+                status = vault.status(provider) or {}
+                rows.append({"id": "automation:" + provider, "name": labels.get(provider, provider) + " automation account",
+                             "provider": provider, "domain": "Provider-wide automation account",
+                             "owner": "Workspace-managed", "identity": "Account identity was not recorded by this legacy connection",
+                             "sharing": "Existing automation vault policy", "repair_url": "/automations#oauth-connect",
+                             "credential_kind": "automation", "expires_at": status.get("expires_at"),
+                             "expired": status.get("expired", False), "renews": status.get("has_refresh_token", False),
+                             "usage_coverage": "Provider-wide automation contract; per-task account bindings were not recorded. Review connected automations before disconnecting.",
+                             "used_by_href": "/automations#oauth-connect"})
+            coverage.append({"domain": "Automation accounts", "state": "available"})
+        except Exception:
+            coverage.append({"domain": "Automation accounts", "state": "unavailable"})
+    else:
+        coverage.append({"domain": "Automation accounts", "state": "administrator-only" if oauth_vault.enabled() else "disabled"})
+    return {"accounts": rows, "coverage": coverage, "context": context_for(request)}
+
+
+@router.get("/connections/catalog")
+async def connection_catalog_endpoint(request: Request) -> dict:
+    """Public setup metadata only; a catalog listing is not live qualification."""
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick.tools.enterprise_connectors import connection_setup_catalog
+
+    return {"connectors": connection_setup_catalog(), "live_provider_verified": False}
 
 
 @router.post("/connections", status_code=201)
@@ -5479,18 +5777,28 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
         # tenant's connection by reusing its name. Enforced INSIDE the store
         # lock (expected_owner) so the check and the write are atomic.
         owner = _request_identity(request)
-        rec = connections.set_connection(
-            payload.name,
-            connector=payload.connector,
-            base_url=payload.base_url,
-            token=payload.token,
-            owner=owner or "",
-            expected_owner=owner,
-            access=payload.access,
-            allowed_principals=payload.allowed_principals,
-            expected_revision=payload.expected_revision,
-            require_revision=True,
-        )
+        def save_reviewed():
+            from .connection_dependencies import require_review
+
+            with connections._mutation_lock():
+                existing = connections.get_connection(payload.name)
+                if existing is not None:
+                    widens = (payload.access == "tenant" and existing.get("access") != "tenant") or bool(set(payload.allowed_principals or []) - set(existing.get("allowed_principals") or []))
+                    rotates = payload.token is not None or (payload.base_url is not None and payload.base_url.rstrip("/") != existing.get("base_url")) or (payload.connector is not None and payload.connector != existing.get("connector"))
+                    require_review(request, connections.normalize_name(payload.name), payload.expected_revision, payload.impact_version, expected_context=payload.context or "", rotation=rotates or widens)
+                return connections.set_connection(
+                    payload.name,
+                    connector=payload.connector,
+                    base_url=payload.base_url,
+                    token=payload.token,
+                    owner=owner or "",
+                    expected_owner=owner,
+                    access=payload.access,
+                    allowed_principals=payload.allowed_principals,
+                    expected_revision=payload.expected_revision,
+                    require_revision=True,
+                )
+        rec = await run_in_threadpool(save_reviewed)
     except connections.ConnectionStoreUnavailable as e:
         raise HTTPException(
             status_code=503, detail="connection credential registry is unavailable"
@@ -5524,7 +5832,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     # connection (else a name-guess is a cross-owner reachability oracle AND
     # sends another owner's token). A 404 (not 403) so it can't confirm the name.
     owner_filter = _request_identity(request)
-    if rec is None or (owner_filter is not None and rec.get("owner", "") != owner_filter):
+    if rec is None or ((rec.get("owner") or None) != owner_filter):
         raise HTTPException(status_code=404, detail="no such connection")
     probe_revision = str(rec.get("revision") or "")
 
@@ -5537,6 +5845,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
                 status=result.get("status"),
                 expected_owner=owner_filter,
                 expected_revision=probe_revision,
+                outcome=result.get("outcome"),
             )
         except connections.ConnectionVersionConflict as exc:
             raise HTTPException(
@@ -5556,6 +5865,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
             "reachable": False,
             "authenticated": False,
             "detail": "no base URL set",
+            "outcome": "address_missing",
         }
         _persist_probe(result)
         return result
@@ -5642,6 +5952,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
                 "reachable": False,
                 "authenticated": False,
                 "detail": "base URL host is not permitted",
+                "outcome": "blocked_by_policy",
             }
         except Exception as e:  # pragma: no cover -- network varies
             return {
@@ -5652,6 +5963,9 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
             }
 
     result = await run_in_threadpool(_probe)
+    result.setdefault("outcome", "authenticated" if result.get("authenticated") else
+                      "sign_in_refused" if result.get("status") in (401, 403) else
+                      "access_unverified" if result.get("reachable") else "unreachable")
     _persist_probe(result)
     return result
 
@@ -5660,6 +5974,8 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
 async def delete_connection_endpoint(
     request: Request, name: str,
     expected_revision: str | None = Query(default=None, min_length=1, max_length=64),
+    impact_version: str | None = Query(default=None, pattern=r"^[a-f0-9]{64}$"),
+    context: str | None = Query(default=None, pattern=r"^[a-f0-9]{64}$"),
 ) -> dict:
     require_permission(request, "admin")  # managing credentials is admin-only
     _require_connections()
@@ -5671,9 +5987,13 @@ async def delete_connection_endpoint(
             status_code=422, detail="Reload Connections and review the current account before removing it.",
         )
     try:
-        deleted = connections.delete_connection(
-            name, owner=owner, expected_revision=expected_revision,
-        )
+        def remove_reviewed():
+            from .connection_dependencies import require_review
+
+            with connections._mutation_lock():
+                require_review(request, connections.normalize_name(name), expected_revision, impact_version, expected_context=context or "")
+                return connections.delete_connection(name, owner=owner, expected_revision=expected_revision)
+        deleted = await run_in_threadpool(remove_reviewed)
     except connections.ConnectionVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except connections.ConnectionStoreUnavailable as exc:
@@ -5879,16 +6199,12 @@ def _require_flows() -> None:
 
 
 def _can_access_flow(request: Request, flow) -> bool:
-    """Whether the caller may read or mutate a saved flow definition.
+    """Private definitions are visible only to their exact owner.
 
-    Auth-off and dashboard admins keep the historical unscoped behavior.
-    Authenticated non-admins may only access flows they own; legacy ownerless
-    flows remain reachable only from the auth-off/admin paths.
+    Administration controls policy, not employee content. An auth-off local
+    session may inspect only legacy ownerless definitions.
     """
-    principal = caller_principal(request)
-    if principal is None or is_dashboard_admin(principal):
-        return True
-    return getattr(flow, "owner", "") == principal
+    return flow is not None and getattr(flow, "owner", "") == (caller_principal(request) or "")
 
 
 def _assert_flow_access(request: Request, flow) -> None:
@@ -6350,6 +6666,14 @@ def list_flow_runs_endpoint(request: Request, flow_id: str = "", limit: int = 50
 
     owner = goal_owner_filter(request)
     runs = store.list_run_metadata(flow_id=flow_id or None, owner=owner, limit=max(1, min(500, limit)))
+    if owner == "":
+        from .auth import anonymous_local_access_allowed
+        if caller_principal(request) is None and anonymous_local_access_allowed():
+            for label in ("operator", "local:dashboard"):
+                candidates = store.list_run_metadata(flow_id=flow_id or None, owner=label, limit=max(1, min(500, limit)))
+                runs.extend(run for run in candidates if _legacy_local_flow_run(request, run))
+            runs.sort(key=lambda run: (run.updated, run.run_id), reverse=True)
+            runs = runs[:max(1, min(500, limit))]
     return {"runs": [_run_out(r) for r in runs]}
 
 
@@ -6453,6 +6777,27 @@ def _run_out(run) -> dict:
     return d
 
 
+def _legacy_local_flow_run(request: Request, run) -> bool:
+    """Recognize only demonstrably unowned pre-ownership local checkpoints."""
+    from maverick.flow import store
+
+    from .auth import anonymous_local_access_allowed
+
+    if (caller_principal(request) is not None or not anonymous_local_access_allowed()
+            or run is None or run.owner not in {"operator", "local:dashboard"}
+            or run.execution_user_id or run.execution_channel
+            or not run.definition_digest):
+        return False
+    try:
+        definition = store.load_flow_snapshot(run.definition_digest)
+        if definition.id != run.flow_id or definition.owner:
+            return False
+        store.validate_snapshot_bundle_owners(definition, run.subflow_digests)
+        return all(run.subflow_digests.values())
+    except (store.FlowSnapshotError, OSError, ValueError):
+        return False
+
+
 def _load_owned_run(request: Request, run_id: str):
     """A flow run the caller may see, or a 404 (indistinguishable from missing,
     so a run's existence isn't leaked across owners)."""
@@ -6460,6 +6805,16 @@ def _load_owned_run(request: Request, run_id: str):
 
     owner = goal_owner_filter(request)
     run = store.load_run(run_id, owner=owner)
+    if run is None and owner == "":
+        # The reserved labels were attribution defaults, not employee owners.
+        # Never open arbitrary named records or use this under token/SSO auth.
+        from .auth import anonymous_local_access_allowed
+        if caller_principal(request) is None and anonymous_local_access_allowed():
+            for label in ("operator", "local:dashboard"):
+                candidate = store.load_run(run_id, owner=label)
+                if _legacy_local_flow_run(request, candidate):
+                    run = candidate
+                    break
     if run is None:
         raise HTTPException(status_code=404, detail="no such run")
     return run
@@ -6486,7 +6841,6 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
     require_permission(request, "operate")
     _require_flows()
     _load_owned_run(request, run_id)  # 404 before holding a stream slot
-    from maverick.flow import store as flow_store
     from maverick.flow.payloads import FlowPayloadError
 
     from ._event_stream import LeasedStreamingResponse, StreamCadence, StreamLease
@@ -6502,7 +6856,6 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
     await sem.acquire()
 
     lease = StreamLease(sem)
-    owner = goal_owner_filter(request)
     # completed/failed/rejected are final; a run parked on a human or an
     # external event won't change until someone acts -- close the stream and
     # let the page's actions (approve / resume) drive the next one.
@@ -6531,7 +6884,8 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
                 # timing -- matches the goal-events stream.
                 if await request.is_disconnected():
                     return
-                run = await run_in_threadpool(flow_store.load_run, run_id, owner=owner)
+                require_permission(request, "operate")
+                run = await run_in_threadpool(_load_owned_run, request, run_id)
                 if run is None:
                     yield 'event: error\ndata: {"detail": "run vanished"}\n\n'
                     return
@@ -6549,6 +6903,9 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
                     cadence.sent(clock())
                 cadence.backoff(changed)
                 await _asyncio.sleep(cadence.delay(clock()))
+        except HTTPException:
+            yield 'event: error\ndata: {"detail": "Current workflow access is unavailable. Reopen the run.", "code": "permission_denied"}\n\n'
+            return
         except FlowPayloadError:
             yield (
                 'event: error\ndata: {"detail": "complete workflow data is unavailable; '
@@ -7252,7 +7609,8 @@ def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dic
             status_code=409,
             detail="published flow release changed since preview; review it before running",
         )
-    owner = _supervisor(request)
+    # Ownership is the employee principal, distinct from audit actor labels.
+    owner = caller_principal(request) or ""
     # Validate/coerce the payload against the flow's declared inputs (a no-op when
     # the flow declares none): reject a missing required input or a bad number/date
     # up front, and coerce number/bool/date so a node's condition sees typed values.
@@ -7521,7 +7879,7 @@ async def list_installed_skills() -> list[SkillOut]:
 
 
 @router.get("/flywheel")
-def get_flywheel_state() -> dict:
+def get_flywheel_state(request: Request) -> dict:
     """What the Cognitive Data Engine has learned from the workforce's own outcomes.
 
     A read-only window into the moat: the **guardrails** it has mined (actions it
@@ -7552,7 +7910,7 @@ def get_flywheel_state() -> dict:
 
         out["signal"] = {
             "grounded_outcomes": consequence.count(),
-            "human_feedback": goal_feedback_store.count(),
+            "human_feedback": goal_feedback_store.count(owner=goal_owner_filter(request)),
         }
     except Exception:  # pragma: no cover
         pass
@@ -7668,12 +8026,13 @@ async def marketplace_stats() -> dict:
 
 
 @router.get("/templates")
-async def templates_catalog() -> dict:
+async def templates_catalog(request: Request) -> dict:
     """The goal-template catalog with the operator's own ratings — the JSON
     face of the /templates marketplace page."""
     from maverick_dashboard.app import template_market_entries
 
-    return {"templates": template_market_entries()}
+    require_permission(request, "view")
+    return {"templates": template_market_entries(caller_principal(request))}
 
 
 @router.get("/templates/suggested")
@@ -8043,12 +8402,12 @@ async def remove_skill_endpoint(request: Request, name: str) -> None:
 # ---------- self-learning: learned ledger + generated tools (#427) ----------
 
 
-def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False) -> dict:
+def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False, request: Request | None = None) -> dict:
     """Read-only view of the self-learning ledger + on-disk generated tools.
 
     Powers the /learned page and GET /api/v1/learned. Pending corpus
-    counts are safe for viewers, but staged candidate details may contain
-    harvested operator text and are included only for admin callers. Degrades
+    counts and details use current source ownership. Administrative authority
+    alone does not grant employee content access. Degrades
     to empty lists if the self-learning module / ledger / dir is unavailable, so a
     fresh install (feature never enabled) renders "nothing learned yet"
     instead of 500ing.
@@ -8066,11 +8425,11 @@ def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False) -
             for e in self_learning.history(
                 limit=limit,
                 path=self_learning.LEARNED_PATH,
+                owner=goal_owner_filter(request) if request is not None else None,
             )
         ]
-        d = self_learning.GENERATED_TOOLS_DIR
-        if d.exists():
-            tools = sorted(p.name for p in d.glob("*.py") if not p.name.startswith((".", "_")))
+        tools = sorted(name + ".py" for name in self_learning.generated_tool_names(
+            owner=goal_owner_filter(request) if request is not None else None))
     except Exception as e:  # pragma: no cover -- never block the page
         log.debug("learned snapshot failed: %s", e)
     harness, harness_enabled = _harness_guidance()
@@ -8217,7 +8576,7 @@ def _resolve_generated_tool(name: str):
 async def learned_api(request: Request) -> dict:
     """Learned-capability ledger entries + on-disk generated tool filenames."""
     return _learned_snapshot(
-        include_pending_items=has_global_permission(request, "admin")
+        include_pending_items=has_global_permission(request, "admin"), request=request,
     )
 
 
@@ -8244,13 +8603,14 @@ async def remove_generated_tool(request: Request, name: str) -> None:
             self_learning.delete_generated_tool,
             target.stem,
             actor=caller_principal(request) or "local",
+            owner=goal_owner_filter(request),
         )
     except ValueError:
         raise HTTPException(
             status_code=400,
             detail="invalid generated-tool name",
         ) from None
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
         raise HTTPException(
             status_code=404,
             detail="no such generated tool",
@@ -8358,7 +8718,7 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     days = max(1, min(int(days), 730))
     resolution = _value_assumptions_resolution()
     cfg = resolution["effective_assumptions"]
-    report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg)
+    report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg, owner=goal_owner_filter(request))
     return {
         "enabled": cfg["enable"],
         "report": savings_mod.to_dict(report),
@@ -8425,6 +8785,8 @@ def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) -> dict:
     stay one source of truth. Global-operate-gated: a tenant-local role cannot
     alter the assumptions used by other tenants."""
     require_global_permission(request, "operate")
+    if body.currency is not None and body.currency.upper() != "USD":
+        raise HTTPException(422, "Savings compares USD runtime costs. Review and enter human cost assumptions in USD; currency conversion is not configured.")
     from maverick.config import reset_config_cache
 
     from . import settings_store
@@ -9373,10 +9735,15 @@ def cancel_goal(request: Request, goal_id: int) -> None:
     assert_goal_access(request, g)
     if g.status in ("done", "cancelled", "failed"):
         return
-    w.set_goal_status(goal_id, "cancelled", result="cancelled via dashboard")
-    # A human killing an in-progress run is real negative ground truth (the run
-    # wasn't worth finishing) -- feed it to the learning loop, best-effort.
-    _ground_outcome(w, goal_id, 0.0, kind="cancel")
+    from uuid import uuid4
+
+    from .reviewed_stop import StopInput, apply
+    # Legacy direct controls use the same atomic native primitive. New reviewed
+    # clients retain their operation ID and expected revision across retries.
+    apply(request, goal_id, StopInput(expected_updated_at=float(g.updated_at),
+          expected_owner=g.owner or "", operation_id=uuid4().hex))
+    # A request to stop is not a quality rating. Preserve partial output.
+
 
 
 @router.get("/goals/{goal_id}/open_questions")
@@ -9387,10 +9754,15 @@ def goal_open_questions(request: Request, goal_id: int) -> dict:
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
+    from maverick.chat_threads import question_version
+
+    from .clarification_submission import latest_receipt
     qs = w.open_questions(goal_id=goal_id)
     return {
+        "last_answer": latest_receipt(request, w, goal_id),
         "open_questions": [
-            {"id": q.id, "question": q.question, "asked_at": q.asked_at} for q in qs
+            {"id": q.id, "question": q.question, "asked_at": q.asked_at,
+             "version": question_version(q.id, q.asked_at, q.question)} for q in qs
         ],
     }
 
@@ -9465,10 +9837,8 @@ def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
     if _goal_gate(g.domain) is None:
         raise HTTPException(status_code=400, detail="this deliverable has no sign-off gate")
     if g.status != "done":
-        raise HTTPException(
-            status_code=409,
-            detail="the deliverable must be finished before it can be signed off",
-        )
+        raise product_error(409, "task_unfinished", "This task must finish before its result can be signed off.",
+                            next_action=next_action("Review task progress", f"/chat/goal/{goal_id}"))
     who = _supervisor(request)
     try:
         changed = w.record_signoff(
@@ -9481,7 +9851,8 @@ def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
     except ValueError as exc:
         # Optimistic version binding: a concurrent edit/rerun means the human
         # reviewed stale bytes. Reload and require a fresh decision.
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise product_error(409, "stale_version", "The result changed after you reviewed it. Review the current result before deciding.",
+                            next_action=next_action("Review the current result", f"/chat/goal/{goal_id}")) from exc
     # Feed the human's certify/reject verdict back into the learning loop as a
     # GROUNDED outcome: a person judging the actual deliverable is the cleanest
     # ground-truth signal in the system, and it lands as exactly the
@@ -9500,14 +9871,18 @@ def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
     }
 
 
-def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> None:
+def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> bool:
     """Record a real human/world outcome for the goal's latest episode as
     grounded reward the learning flywheel prefers over its proxy. Delegates to
     the shared core helper (no-op unless ``[consequence]`` is enabled; never
     raises -- grounding is best-effort and must not fail the request)."""
-    from maverick import consequence
+    try:
+        from maverick import consequence
 
-    consequence.record_self_outcome(w, goal_id, value, kind=kind)
+        return consequence.record_self_outcome(w, goal_id, value, kind=kind)
+    except Exception:
+        log.warning("Optional learning observation unavailable for goal %s", goal_id)
+        return False
 
 
 def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
@@ -9525,7 +9900,7 @@ def get_feedback(request: Request, goal_id: int) -> dict:
     assert_goal_access(request, g)
     from maverick_dashboard import goal_feedback_store
 
-    return {"feedback": goal_feedback_store.latest_for_goal(goal_id)}
+    return {"feedback": goal_feedback_store.latest_for_goal(goal_id, owner=g.owner or "")}
 
 
 @router.post("/goals/{goal_id}/feedback")
@@ -9551,8 +9926,9 @@ def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
     row = goal_feedback_store.record(
         goal_id, g.owner or "", payload.rating, value=value, note=payload.note or "", by=who
     )
-    _ground_outcome(w, goal_id, value, kind="feedback")
-    return {"feedback": row}
+    observed = _ground_outcome(w, goal_id, value, kind="feedback")
+    return {"feedback": row, "saved": True, "learning_observation": "recorded" if observed else "not_recorded",
+            "training_completed": False}
 
 
 @router.post("/goals/{goal_id}/deliverable/edit")
@@ -9570,17 +9946,31 @@ def edit_deliverable(request: Request, goal_id: int, payload: DeliverableEditIn)
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    original = g.result or ""
+    from maverick.goal_mutations import GoalMutationConflict, edit_result
+
     revised = payload.text or ""
-    w.set_goal_status(goal_id, g.status, result=revised)  # the edit is the deliverable now
+    try:
+        receipt = edit_result(w, goal_id, text=revised, expected_updated_at=payload.expected_updated_at,
+                              operation_id=payload.operation_id, actor=caller_principal(request) or "local administrator")
+    except GoalMutationConflict as exc:
+        current = w.get_goal(goal_id)
+        raise HTTPException(status_code=409, detail={"message": str(exc),
+            "current_text": current.result if current else "",
+            "current_updated_at": current.updated_at if current else None}) from exc
+    original = receipt.pop("original")
+    receipt.pop("text")
     if not original:
         # Nothing to grade against: the agent produced no draft to keep or
         # rewrite. Grounding this as 0.0 would punish it for text it never wrote,
         # so we save the human's text but ground nothing.
-        return {"similarity": None}
+        return {"similarity": None, **receipt, "saved": True, "learning_observation": "not_applicable", "training_completed": False}
     similarity = _deliverable_edit_similarity(original, revised)
-    _ground_outcome(w, goal_id, similarity, kind="edit")
-    return {"similarity": round(similarity, 3)}
+    observed = False
+    if not receipt["replayed"]:
+        observed = _ground_outcome(w, goal_id, similarity, kind="edit")
+    return {"similarity": round(similarity, 3), **receipt, "saved": True,
+            "learning_observation": "not_repeated" if receipt["replayed"] else ("recorded" if observed else "not_recorded"),
+            "training_completed": False}
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:
@@ -9710,57 +10100,82 @@ def goal_artifact_history(request: Request, goal_id: int, title: str) -> dict:
     return {"title": title, "versions": out}
 
 
-# Default share-link lifetime (7 days). Operators revoke early from the goal page.
-_SHARE_TTL_SECONDS = 7 * 24 * 3600
+def _share_goal(request, goal_id):
+    from .app import _require_same_origin
+    require_permission(request, "operate")
+    if request.method != "GET":
+        _require_same_origin(request)
+    world = _world()
+    goal = world.get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(404, "No such task.")
+    assert_goal_access(request, goal)
+    if (caller_principal(request) or "") != (goal.owner or ""):
+        raise HTTPException(403, "Only the task owner can release its content publicly.")
+    return world, goal
+
+
+def _share_prerequisites(world, goal):
+    from maverick.domain import available_domains
+    if goal.status != "done" or not (goal.result or "").strip():
+        raise product_error(409, "task_unfinished", "Finish this task with a saved result before creating a public link.",
+                            next_action=next_action("Review task progress", f"/chat/goal/{goal.id}"))
+    if goal.domain and goal.domain not in available_domains():
+        raise HTTPException(409, "This task's release policy is unavailable. Ask an administrator to restore its department before sharing.")
+    gate = _goal_gate(goal.domain)
+    signoff = world.signoff_for(goal.id)
+    if gate is not None and (signoff is None or signoff.get("decision") != "approved"):
+        raise product_error(409, "signoff_required", "The current result needs human sign-off before it can be shared.",
+                            next_action=next_action("Review the sign-off", f"/chat/goal/{goal.id}#signoff"))
+
+
+@router.post("/goals/{goal_id}/share/preview")
+def preview_goal_share(request: Request, goal_id: int) -> dict:
+    from .deliverable_sharing import LIFETIMES, snapshot
+    world, goal = _share_goal(request, goal_id)
+    _share_prerequisites(world, goal)
+    source = snapshot(world, goal)
+    return {"source": source, "allowed_lifetimes": LIFETIMES,
+            "audience": "Anyone holding the link can read this title, saved result and listed artifacts until expiry or revocation. Forwarded or downloaded copies cannot be recalled.",
+            "scope": "Conversation history, attachments, task activity and controls are excluded. Editing this result or its artifacts makes this link unavailable; create a newly reviewed link to release changes."}
+
+
+@router.get("/goals/{goal_id}/share")
+def goal_share_links(request: Request, goal_id: int) -> dict:
+    from .deliverable_sharing import listing
+    world, goal = _share_goal(request, goal_id)
+    return {"links": listing(world, goal)}
 
 
 @router.post("/goals/{goal_id}/share", status_code=201)
-def create_goal_share(request: Request, goal_id: int) -> dict:
-    """Mint a read-only share link to a goal's deliverable (default 7-day
-    expiry). Operator role + goal access. The clear token is returned ONCE --
-    only its hash is stored, so it can't be re-fetched later, only revoked."""
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-    require_permission(request, "operate")
-    if g.status != "done" or not g.result:
-        raise HTTPException(
-            status_code=409,
-            detail="only a finished answer can be shared",
-        )
-    gate = _goal_gate(g.domain)
-    signoff = w.signoff_for(goal_id)
-    if gate is not None and (signoff is None or signoff.get("decision") != "approved"):
-        raise HTTPException(
-            status_code=403,
-            detail=f"{gate} sign-off is required before sharing this deliverable",
-        )
+def create_goal_share(request: Request, goal_id: int, body: ShareLinkIn) -> dict:
+    """Publish a fresh, reviewed result through a resolvable, expiring link."""
     from . import share_link_routing
-
+    from .deliverable_sharing import LIFETIMES, remember, snapshot
+    world, goal = _share_goal(request, goal_id)
+    _share_prerequisites(world, goal)
+    if body.confirm is not True or body.lifetime_seconds not in LIFETIMES:
+        raise HTTPException(409, "Review the audience and choose an allowed lifetime before confirming.")
+    source = snapshot(world, goal)
+    if not hmac.compare_digest(source["sha256"], body.source_sha256):
+        raise product_error(409, "stale_version", "The result changed after your preview. Review the new version before creating a link.",
+                            next_action=next_action("Review the current result", f"/chat/goal/{goal.id}"))
     try:
         base, local_only = share_link_routing.share_base_url(str(request.base_url))
     except share_link_routing.ShareRouteError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="set Lightwork's address for others in Settings before creating a share link",
-        ) from exc
-    link_id, token = w.create_share_link(
-        goal_id, created_by=caller_principal(request) or "", ttl_seconds=_SHARE_TTL_SECONDS
-    )
+        raise HTTPException(409, "Set Lightwork's address for others in Settings before creating a share link.") from exc
+    link_id, token = world.create_share_link(goal_id, created_by=caller_principal(request) or "",
+                                            ttl_seconds=body.lifetime_seconds, token_prefix="r1_")
     try:
-        link = next(s for s in w.share_links_for_goal(goal_id) if s["id"] == link_id)
+        remember(world, goal, link_id=link_id, source=source, label=body.label.strip(),
+                 lifetime=body.lifetime_seconds, actor=caller_principal(request) or "")
+        link = next(row for row in world.share_links_for_goal(goal_id) if row["id"] == link_id)
         share_link_routing.register(token, expires_at=link["expires_at"])
     except Exception as exc:
-        # Never return a link that an external reader cannot resolve. The
-        # destination store remains authoritative even if rollback fails.
-        w.revoke_share_link(link_id, goal_id=goal_id)
-        raise HTTPException(
-            status_code=503, detail="a share link could not be prepared; please try again",
-        ) from exc
-    url = base + "/share/" + token
-    return {"id": link_id, "url": url, "local_only": local_only}
+        world.revoke_share_link(link_id, goal_id=goal_id)
+        raise HTTPException(503, "This link could not be published. Review the link list before trying again.") from exc
+    return {"id": link_id, "url": base + "/share/" + token, "local_only": local_only,
+            "label": body.label.strip(), "expires_at": link["expires_at"]}
 
 
 @router.post("/goals/{goal_id}/share/{link_id}/revoke")
@@ -9871,20 +10286,15 @@ def _schedule_out(job) -> ScheduleOut:
 
 @router.get("/schedules")
 async def list_schedules(request: Request) -> dict:
-    """Armed recurring schedules: pending cron jobs in the worker queue.
-
-    Owner-scoped like ``delete_schedule``: an authenticated non-admin sees only
-    the schedules stamped with their own principal (``create_schedule`` records
-    it in ``payload['owner']``), so one tenant can't enumerate another's
-    schedule titles. Admin / auth-off callers see all."""
+    """Durable schedule definitions remain visible during runs and while paused."""
     from maverick.job_queue import JobQueue
+    from maverick.schedule_definitions import list_definitions
 
-    owner = goal_owner_filter(request)
-    jobs = [j for j in JobQueue().list(status="pending") if (j.payload or {}).get("__cron__")]
-    if owner is not None:
-        jobs = [j for j in jobs if (j.payload or {}).get("owner") == owner]
-    jobs.sort(key=lambda j: j.run_at)
-    return {"schedules": [_schedule_out(j).model_dump() for j in jobs]}
+    from .draft_api import context_for
+
+    require_permission(request, "view")
+    return {"schedules": list_definitions(JobQueue(), owner=goal_owner_filter(request)),
+            "context": context_for(request)}
 
 
 @router.post("/schedules", response_model=ScheduleOut, status_code=201)
@@ -9908,10 +10318,16 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     title = (payload.title or "").strip()
     if payload.template:
         from maverick.templates import load_template
+        from maverick.workflow_versions import execution_template
 
         try:
-            tpl = load_template(payload.template)
-            rtitle, body = tpl.render(**(payload.params or {}))
+            assert_template_access(request, load_template(payload.template))
+            tpl, published_version = execution_template(payload.template)
+            if tpl.owner:
+                assert_template_access(request, tpl)
+            from maverick.template_connections import parameters as connection_parameters
+            _, connection_refs = connection_parameters(tpl, caller_principal(request) or "", payload.params or {})
+            rtitle, body = tpl.render_for(caller_principal(request) or "", **(payload.params or {}))
         except ValueError as e:  # unknown template / missing params
             raise HTTPException(status_code=400, detail=str(e)) from e
         except FileNotFoundError as e:
@@ -9934,11 +10350,16 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
 
     schedule_id = uuid4().hex
     job_payload = {"text": text, "title": title, "__cron__": cron, "schedule_id": schedule_id}
+    if payload.template:
+        job_payload["template_name"] = tpl.name
+        job_payload["template_generation"] = tpl.generation
+        job_payload["template_version"] = published_version
+        job_payload["connection_references"] = connection_refs
+
     if tz:
         job_payload["__tz__"] = tz
     owner = caller_principal(request) or ""
-    if owner:
-        job_payload["owner"] = owner
+    job_payload["owner"] = owner
     allowed_suites = caller_suites(request)
     if allowed_suites is not None:
         job_payload["allowed_suites"] = sorted(allowed_suites)
@@ -9980,8 +10401,11 @@ async def delete_schedule(request: Request, job_id: int) -> dict:
     owner = goal_owner_filter(request)
     if owner is not None:
         job = q.get(job_id)
-        if job is None or (job.payload or {}).get("owner") != owner:
+        if job is None or (job.payload or {}).get("owner", "") != owner:
             raise HTTPException(status_code=404, detail="no pending schedule with that id")
+    job = q.get(job_id)
+    if job is not None and job.recurrence_id:
+        raise HTTPException(status_code=409, detail="This is a durable schedule. Review its current version in Automations and choose Retire.")
     if not q.cancel(job_id):
         raise HTTPException(status_code=404, detail="no pending schedule with that id")
     return {"cancelled": job_id}
@@ -10118,7 +10542,8 @@ def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
 
         try:
             target_template = load_template(payload.template)
-            target_template.render(**(payload.params or {}))
+            assert_template_access(request, target_template)
+            target_template.render_for(caller_principal(request) or "", **(payload.params or {}))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except FileNotFoundError as e:
@@ -10323,6 +10748,7 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
 
         try:
             target_template = load_template(template)
+            assert_template_access(request, target_template)
         except FileNotFoundError as e:
             raise HTTPException(status_code=404, detail=f"template not found: {template!r}") from e
         except ValueError as e:
@@ -10647,7 +11073,8 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             imported_template = None
             try:
                 imported_template = load_template(res.template_name)
-                imported_template.render(**sug_params)
+                assert_template_access(request, imported_template)
+                imported_template.render_for(caller_principal(request) or "", **sug_params)
             except (ValueError, FileNotFoundError) as e:
                 res.notes.append(
                     f"webhook trigger not created: template needs param values "
@@ -11910,6 +12337,9 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
 
     permissions = _copilot_permissions(request)
     result = public_context(context_for_page(page), permissions)
+    from .draft_api import context_for
+
+    result["client_context"] = context_for(request)
     configured = bool(_any_provider_key_set())
     result["model_provider_configured"] = configured
     from maverick.config import get_features
@@ -11964,7 +12394,14 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
         public_context,
         sanitize_model_reply,
     )
+    from .draft_api import context_for
 
+    expected_context = request.headers.get("X-Lightwork-Copilot-Context")
+    if expected_context is not None:
+        import hmac
+
+        if not hmac.compare_digest(expected_context, context_for(request)):
+            raise HTTPException(409, "Your account or workspace changed. Reopen Copilot before sending this question.")
     check_goal_rate_limit(request, source="copilot")
     msg = payload.message.strip()
     if not msg:
@@ -12451,6 +12888,8 @@ async def audit_tail(request: Request, n: int = 100, day: str | None = None) -> 
     def read():
         report = ReadReport()
         events = default_audit_log().tail(n, day=safe_day, report=report)
+        from .content_access import audit_metadata
+        events = [audit_metadata(event) for event in events]
         return {"events": events, "read_report": report.as_dict()}
 
     return await run_in_threadpool(read)
@@ -12494,6 +12933,8 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
         total_matches = 0
         for event in iter_events(day=effective_day, audit_dir=audit_dir, report=report):
             scanned += 1
+            from .content_access import audit_metadata
+            event = audit_metadata(event)
             if needle in json.dumps(event, ensure_ascii=False, default=str).casefold():
                 total_matches += 1
                 if len(matches) < 200:
@@ -12945,7 +13386,11 @@ def list_approvals(request: Request) -> dict:
     """
     require_permission(request, "operate")
     w = _world()
-    return {"approvals": [_approval_api_row(a) for a in w.pending_approvals()]}
+    from .content_access import can_read_approval
+    rows = list(w.pending_approvals())
+    readable = [a for a in rows if can_read_approval(request, a, w)]
+    return {"approvals": [_approval_api_row(a) for a in readable],
+            "private_count": len(rows) - len(readable), "content_access_url": "/content-access"}
 
 
 def _approval_api_row(approval) -> dict:
@@ -13223,6 +13668,8 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
         "X-Lightwork-Decision-Id": event.event_id,
         "X-Lightwork-Approval-Audit": ("delivered" if audit_delivered else "pending"),
         "X-Lightwork-Approval-State": approval_status,
+        "X-Lightwork-Approval-Count": str(state.get("approved_count", 0)),
+        "X-Lightwork-Approval-Required": str(state.get("approvals_required", 1)),
     }
     if audit_delivered:
         return Response(status_code=204, headers=common_headers)
@@ -13396,15 +13843,59 @@ async def revise_approval(request: Request, approval_id: int) -> Response:
     )
 
 
+@router.get("/approvals/history")
+def requested_approval_history(request: Request, before_id: int | None = None) -> dict:
+    """Requester-scoped decision records, independent from global audit access."""
+    from maverick.attachment_submissions import SubmissionStore
+    from maverick.safety.secret_detector import redact
+
+    from .app import _approval_queue_context
+    from .auth import can_access_goal
+
+    require_permission(request, "operate")
+    world = _world()
+    who = _supervisor(request)
+    store = SubmissionStore(world)
+    scope, values = ("1=1", ()) if store.sqlite else store.scope("tenant_id")
+    cursor = " AND id < ?" if before_id is not None else ""
+    cursor_values = (before_id,) if before_id is not None else ()
+    rows = world.query(f"SELECT id FROM approvals WHERE requested_by=? AND {scope}{cursor} ORDER BY id DESC LIMIT 51",
+                       (who, *values, *cursor_values))
+    result = []
+    for row in rows[:50]:
+        approval = world.get_approval(int(row[0]))
+        if approval is None or approval.requested_by != who:
+            continue
+        goal = world.get_goal(approval.goal_id) if approval.goal_id else None
+        if approval.goal_id and (goal is None or not can_access_goal(request, goal)):
+            continue
+        context = _approval_queue_context([approval])
+        card = context["cards"].get(approval.id)
+        def text(value):
+            return redact(str(value or ""))[0]
+        result.append({"id": approval.id, "action": context["approval_actions"][approval.id],
+                       "summary": text(context["approval_details"][approval.id]), "status": approval.status,
+                       "decided_by": text(approval.decided_by), "decided_at": approval.decided_at,
+                       "expires_at": card.get("expires_at") if card else None,
+                       "before": text(card["preview"]["before"]) if card else "",
+                       "after": text(card["preview"]["after"]) if card else "",
+                       "goal_id": approval.goal_id,
+                       "execution": "Current task state: " + goal.status if goal else "No task execution outcome is attached to this decision."})
+    return {"items": result, "has_more": len(rows) > 50,
+            "before_id": int(rows[min(49, len(rows) - 1)][0]) if rows else before_id}
+
+
 @router.get("/approvals/{approval_id}/state")
 def approval_state(request: Request, approval_id: int) -> dict:
     """N-of-M quorum progress for an approval (status, approvers so far vs.
     required) — the operator view of an in-flight multi-party decision."""
     require_permission(request, "operate")
+    from .content_access import require_approval_content
+    require_approval_content(request, approval_id)
     st = _world().approval_state(approval_id)
     if st is None:
         raise HTTPException(status_code=404, detail="no such approval")
-    return st
+    return {**st, "your_approval_recorded": _supervisor(request) in st.get("approvers", [])}
 
 
 @router.post("/approvals/{approval_id}/claim")
@@ -13417,6 +13908,8 @@ def claim_approval(request: Request, approval_id: int) -> dict:
     # human-oversight queue, so a read-only `viewer` must not be able to lock
     # pending approvals (or learn the claiming supervisor's identity via the 409).
     require_permission(request, "operate")
+    from .content_access import require_approval_content
+    require_approval_content(request, approval_id)
     who = _supervisor(request)
     if _world().claim_approval(approval_id, who):
         return {"claimed_by": who}
@@ -13562,8 +14055,9 @@ def run_fleet_agent(
     the dispatching user's capability, while keeping its own audit principal
     (``agent:<fleet>.<agent>``), so the oversight control plane
     governs the work automatically (mirrors ``maverick fleet run``). Owner-scoped:
-    only the fleet's owner -- or an admin / auth-off caller -- may dispatch; a
-    cross-owner (or missing) fleet 404s, never revealing existence.
+    only the fleet's exact owner may dispatch, including administrators. An
+    auth-off caller may dispatch only unowned local fleets. Cross-owner and
+    missing fleets both return 404 without revealing existence.
     """
     # Dispatching a fleet agent queues a governed goal that spends provider
     # money and runs tools -- an "operate" action, exactly like compose/resume
@@ -13586,7 +14080,7 @@ def run_fleet_agent(
     fleet = load_fleet(fleet_name)
     principal = caller_principal(request)
     is_admin = principal is not None and is_dashboard_admin(principal)
-    if fleet is None or (principal is not None and not is_admin and fleet.owner != principal):
+    if fleet is None or fleet.owner != (principal or ""):
         raise HTTPException(status_code=404, detail="no such fleet")
     agent = next((a for a in fleet.agents if a.name == payload.agent), None)
     if agent is None:
@@ -13721,12 +14215,7 @@ async def create_fleet(request: Request, payload: FleetCreateIn) -> dict:
     principal = caller_principal(request)
     owner = principal or ""
     existing = load_fleet(payload.name)
-    if (
-        existing is not None
-        and existing.owner != owner
-        and principal is not None
-        and not is_dashboard_admin(principal)
-    ):
+    if existing is not None and existing.owner != owner:
         raise HTTPException(status_code=404, detail="no such fleet")
 
     try:
@@ -13755,12 +14244,7 @@ async def add_fleet_agent(request: Request, fleet_name: str, payload: FleetAgent
         raise HTTPException(status_code=400, detail="invalid fleet name")
     principal = caller_principal(request)
     existing = load_fleet(fleet_name)
-    if (
-        existing is not None
-        and existing.owner != (principal or "")
-        and principal is not None
-        and not is_dashboard_admin(principal)
-    ):
+    if existing is not None and existing.owner != (principal or ""):
         raise HTTPException(status_code=404, detail="no such fleet")
     try:
         ensure_suite_allowed(principal, suite_for(payload.pack))
@@ -13785,8 +14269,7 @@ async def delete_fleet(request: Request, fleet_name: str) -> None:
 
     fleet = load_fleet(fleet_name)
     principal = caller_principal(request)
-    is_admin = principal is not None and is_dashboard_admin(principal)
-    if fleet is None or (principal is not None and not is_admin and fleet.owner != principal):
+    if fleet is None or fleet.owner != (principal or ""):
         raise HTTPException(status_code=404, detail="no such fleet")
     remove_fleet(fleet_name)
 
@@ -13930,11 +14413,15 @@ def watch_glance(request: Request) -> dict:
 
 
 @router.get("/offline/bundle")
-async def offline_bundle(request: Request) -> dict:
+async def offline_bundle(request: Request, response: Response) -> dict:
     """Bounded, versioned snapshot (``maverick-offline/1``) for the mobile
     companion's offline cache. Read-only; owner-scoped like ``/goals``."""
     from maverick.offline_bundle import build_bundle
 
+    if request.headers.get("X-Lightwork-Offline-Policy") != "1":
+        raise HTTPException(status_code=403, detail="Update the companion to support organization offline-retention policy.")
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Authorization, Cookie, X-Lightwork-Offline-Policy"
     return await run_in_threadpool(
         build_bundle,
         _world(),
@@ -14105,9 +14592,7 @@ def goal_tree_api(request: Request, limit: int = 300) -> dict:
 def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> None:
     """Rename a goal (graph editor).
 
-    Uses the world model's public ``set_goal_title`` so it works identically on
-    the SQLite and Postgres backends (the earlier raw-SQL path used SQLite-only
-    internals and 500'd under Postgres).
+    Uses the shared SQLite/Postgres revision and receipt transaction.
     """
     w = _world()
     g = w.get_goal(goal_id)
@@ -14118,7 +14603,15 @@ def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> None:
     title = (payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    w.set_goal_title(goal_id, title[:200])
+    from maverick.goal_mutations import GoalMutationConflict, edit_structure
+    from maverick.task_handoffs import require_open
+
+    try:
+        require_open(w, goal_id)
+        edit_structure(w, goal_id, title=title[:200], expected_updated_at=payload.expected_updated_at,
+                       operation_id=payload.operation_id, actor=caller_principal(request) or "local administrator")
+    except GoalMutationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/goals/{goal_id}/reparent", status_code=204)
@@ -14149,7 +14642,16 @@ def reparent_goal(request: Request, goal_id: int, payload: ReparentIn) -> None:
                 status_code=400,
                 detail="cannot re-parent a goal under its own descendant",
             )
-    w.set_goal_parent(goal_id, new_parent)
+    from maverick.goal_mutations import GoalMutationConflict, edit_structure
+    from maverick.task_handoffs import require_open
+
+    try:
+        require_open(w, goal_id)
+        edit_structure(w, goal_id, move=True, parent_id=new_parent,
+                       expected_updated_at=payload.expected_updated_at,
+                       operation_id=payload.operation_id, actor=caller_principal(request) or "local administrator")
+    except GoalMutationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/goals/{goal_id}/children", response_model=GoalOut, status_code=201)
@@ -14172,12 +14674,17 @@ def create_child_goal(request: Request, goal_id: int, payload: ChildIn) -> GoalO
     title = (payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    child_id = w.create_goal(
-        title[:200],
-        (payload.description or "")[:8000],
-        parent_id=goal_id,
-        owner=g.owner or (caller_principal(request) or ""),
-    )
+    from maverick.goal_mutations import GoalMutationConflict, create_child
+
+    try:
+        receipt = create_child(w, goal_id, title=title[:200],
+                               description=(payload.description or "")[:8000],
+                               owner=g.owner or (caller_principal(request) or ""),
+                               actor=caller_principal(request) or "local administrator",
+                               operation_id=payload.operation_id)
+    except GoalMutationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    child_id = receipt["child_id"]
     c = w.get_goal(child_id)
     if c is None:
         raise HTTPException(status_code=500, detail="goal vanished after create")
@@ -14373,7 +14880,7 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
 
     check_goal_rate_limit(request, source="workflow-draft")
     brief = (payload.description or "").strip()
-    if not brief:
+    if not brief and not payload.source_text.strip():
         raise HTTPException(status_code=400, detail="describe the workflow you want")
     channel, user_id = _workflow_authoring_identity(request)
     try:
@@ -14385,9 +14892,10 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
             if form == "playbook":
                 return drafter(
                     brief,
+                    source_text=payload.source_text,
                     available_tools=_playbook_available_tools(channel=channel, user_id=user_id),
                 )
-            return drafter(brief)
+            return drafter(brief, **({"source_text": payload.source_text} if payload.source_text else {}))
 
         return await run_in_threadpool(_draft)
     except Exception as e:
@@ -14396,6 +14904,33 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
         # rather than an unhandled 500.
         detail = _safe_workflow_drafting_error(e)
         raise HTTPException(status_code=502, detail=f"workflow drafting failed: {detail}") from e
+
+
+@router.post("/workflows/extract-source")
+async def extract_workflow_source(request: Request, file: UploadFile = File(...)) -> dict:
+    """Review existing document extraction before any paid drafting call."""
+    from pathlib import Path
+
+    require_permission(request, "operate")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".txt", ".md", ".json", ".csv", ".yaml", ".yml", ".pdf", ".docx"}:
+        raise HTTPException(422, "Choose a text, PDF or Word document.")
+    raw = await file.read(_WORKFLOW_DOC_MAX_BYTES + 1)
+    if not raw or len(raw) > _WORKFLOW_DOC_MAX_BYTES:
+        raise HTTPException(422, "Choose a non-empty document smaller than 512 KB, or paste the relevant section.")
+    if suffix in {".pdf", ".docx"}:
+        text = await run_in_threadpool(_extract_binary_doc_text, raw, file.filename or "upload")
+        if text is None:
+            raise HTTPException(422, "The document could not be read. Use an unlocked PDF with selectable text or a valid Word document. Your administrator may need to enable document parsers.")
+    else:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(422, "Save this text document with UTF-8 encoding, or paste its text.") from exc
+    if not text.strip():
+        raise HTTPException(422, "No readable text was found. Paste the relevant procedure or choose another document.")
+    return {"text": text[:8000], "truncated": len(text) > 8000,
+            "review_required": True, "started": False}
 
 
 @router.post("/workflows/draft-from-file")
@@ -14503,16 +15038,25 @@ async def refine_workflow_draft(request: Request, payload: WorkflowRefineIn) -> 
 
 @router.post("/workflows", status_code=201)
 async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
+    """Save through the shared synchronous service without blocking the event loop."""
+    return await run_in_threadpool(save_workflow_native, request, payload)
+
+
+def save_workflow_native(request: Request, payload: WorkflowSaveIn) -> dict:
     """Persist an (AI-drafted, edited) workflow as a runnable user template."""
     require_permission(request, "operate")
+    from maverick.config import load_config
     from maverick.templates import save_user_template
 
+    if payload.parameter_schema and (load_config().get("workflows") or {}).get("typed_inputs", True) is not True:
+        raise HTTPException(403, "Typed workflow input authoring is disabled by your administrator.")
     try:
         tpl = save_user_template(
             payload.name,
             title=payload.title,
             body=payload.body,
             params=payload.params,
+            parameter_schema=payload.parameter_schema,
             budget_dollars=payload.budget_dollars,
             budget_wall_seconds=payload.budget_wall_seconds,
             overwrite=payload.overwrite,
@@ -14530,7 +15074,7 @@ async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
     return {
         "name": tpl.name,
         "title": tpl.title,
-        "params": tpl.params,
+        "params": tpl.params, "parameter_schema": tpl.parameter_schema,
         "generation": tpl.generation,
         "saved": True,
     }
@@ -14703,36 +15247,44 @@ async def export_walkthrough(request: Request, goal_id: int) -> dict:
 def resume_goal(
     goal_id: int, request: Request, bg: BackgroundTasks, payload: GoalResumeIn | None = None
 ) -> None:
-    """Resume a blocked / cancelled goal.
+    """Use the shared guarded admission; legacy clients retain runner defaults."""
+    from .reviewed_resume import apply
+    apply(request, goal_id, bg, payload or GoalResumeIn())
 
-    Capabilities-seat finding: the CLI has ``maverick resume`` but the
-    dashboard's only way to flip a cancelled goal back was to start a
-    brand-new one. This route flips status back to 'pending' and
-    re-queues the runner, so the next goal-event poll picks it back up.
-    """
-    require_permission(request, "operate")
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-    # Block resuming things that have no parked work.
-    if g.status not in ("blocked", "cancelled", "failed"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"goal is {g.status!r}; only blocked/cancelled/failed goals can resume",
-        )
-    max_dollars = payload.max_dollars if payload is not None else None
-    spend_ceiling = configured_max_dollars()
-    if max_dollars is not None and spend_ceiling is not None and max_dollars > spend_ceiling:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "The spending limit for this attempt cannot exceed "
-                f"${spend_ceiling:,.2f}, this deployment's spend cap."
-            ),
-        )
-    _requeue_goal(request, bg, goal_id, max_dollars=max_dollars)
+
+@router.get("/goals/{goal_id}/resume-review")
+def resume_goal_review(goal_id: int, request: Request) -> dict:
+    from .reviewed_resume import status
+    return status(request, goal_id)
+
+
+@router.post("/goals/{goal_id}/resume-reviewed")
+def resume_goal_reviewed(goal_id: int, request: Request, bg: BackgroundTasks, payload: GoalResumeIn) -> dict:
+    from .app import _require_same_origin
+    from .reviewed_resume import apply
+    _require_same_origin(request)
+    if not payload.operation_id or not payload.expected_context or payload.expected_updated_at is None or payload.expected_owner is None:
+        raise HTTPException(422, "Review the current task and keep its exact restart reference.")
+    return apply(request, goal_id, bg, payload)
+
+
+@router.post("/goals/{goal_id}/resume-receipt")
+def resume_goal_receipt(goal_id: int, request: Request, payload: GoalResumeIn) -> dict:
+    from .reviewed_resume import recover
+    return recover(request, goal_id, payload) or {"received": False}
+
+
+@router.get("/goals/{goal_id}/resume-receipt/{operation_id}")
+def resume_goal_receipt_read(goal_id: int, operation_id: str, request: Request) -> dict:
+    from maverick import goal_resume
+
+    from .draft_api import context_for
+    from .reviewed_resume import current
+    world, _goal, actor = current(request, goal_id)
+    if len(operation_id) != 32 or any(char not in "abcdef0123456789" for char in operation_id):
+        raise HTTPException(422, "Choose a valid restart receipt reference.")
+    result = goal_resume.lookup(world, goal_id, actor=actor, operation_id=operation_id)
+    return {"context": context_for(request), **(result or {"received": False})}
 
 
 def _require_goal_restart_admission(goal_id: int) -> None:
@@ -14744,19 +15296,9 @@ def _require_goal_restart_admission(goal_id: int) -> None:
     try:
         require_work_item_admission("goal", str(goal_id))
     except OutcomePilotAdmissionRequired as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "schema": "lightwork.error.v1",
-                "code": exc.code,
-                "message": str(exc),
-                "retryable": True,
-                "next_action": (
-                    "Open the outcome pilot in the app and retry its admission "
-                    "recovery before starting this task."
-                ),
-            },
-        ) from exc
+        raise product_error(409, "admission_hold", "This task is waiting for its outcome pilot's admission recovery. Recover the pilot before starting the task.",
+                            next_action=next_action("Open outcome pilots", "/outcome-pilots"),
+                            retryable=True) from exc
 
 
 def _requeue_goal(
@@ -14786,6 +15328,10 @@ def _requeue_goal(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    _dispatch_requeued_goal(request, bg, goal_id, conversation_id=conversation_id, max_dollars=max_dollars)
+
+
+def _dispatch_requeued_goal(request, bg, goal_id, *, conversation_id=None, max_dollars=None):
     from maverick.runner import run_goal_in_background_async
 
     allowed_suites = caller_suites(request)
@@ -15108,7 +15654,7 @@ def _learning_snapshot(request: Request) -> dict:
             # (the old path silently capped the count at 50).
             from maverick import self_learning
 
-            learned_n = len(self_learning.history(limit=1_000_000, path=self_learning.LEARNED_PATH))
+            learned_n = len(self_learning.history(limit=1_000_000, path=self_learning.LEARNED_PATH, owner=goal_owner_filter(request)))
         except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()
@@ -15125,9 +15671,12 @@ def _learning_snapshot(request: Request) -> dict:
             accumulated["flow_self_improvements"] = improvements
     # Autonomous flow self-improvement: its own opt-in, deliberately NOT folded
     # into the blanket "turn learning on" button -- autonomously rewriting a live
-    # workflow is a heavier consequence than passive learning. Admin/unscoped view.
+    # workflow is a heavier consequence than passive learning. Policy visibility
+    # uses installation authority separately from private content ownership.
+    from .auth import has_global_permission
+    can_manage = has_global_permission(request, "admin")
     flow_autonomy = None
-    if owner is None:
+    if can_manage:
         try:
             from maverick import flow as _flow_mod
 
@@ -15139,7 +15688,7 @@ def _learning_snapshot(request: Request) -> dict:
         except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
             flow_autonomy = None
     dgm = None
-    if owner is None:
+    if can_manage:
         try:
             from maverick import self_modify
 

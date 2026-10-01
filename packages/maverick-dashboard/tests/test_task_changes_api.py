@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -130,37 +131,55 @@ def test_before_and_now_for_files_the_task_changed(env):
 
 def test_forged_records_never_expose_files_outside_the_work_folder(env):
     (env.work / "sub").mkdir()
-    (env.work / "link.txt").symlink_to(env.outside / "secret.txt")
-    (env.work / "linked-dir").symlink_to(env.outside, target_is_directory=True)
     os.link(env.outside / "secret.txt", env.work / "hard.txt")
     _forge(env, 1, path="../outside/secret.txt")
     _forge(env, 2, path="sub/../../outside/secret.txt")
     _forge(env, 3, path=str(env.outside / "secret.txt"))
     _forge(env, 4, path="secret.txt", workdir=str(env.outside))
-    _forge(env, 5, path="link.txt")
-    _forge(env, 6, path="linked-dir/secret.txt")
     _forge(env, 7, path="hard.txt")
     _forge(env, 8, path="C:/Windows/win.ini")
+
+    response = env.client.get(env.url)
+    assert response.status_code == 200, response.text
+    assert OUTSIDE_TEXT not in response.text
+    assert response.json()["left_out"] == 6
+    assert response.json()["files"] == []
+
+
+def _symlink(link, target, *, directory=False):
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except OSError as exc:
+        if os.name == "nt" and exc.winerror == 1314:
+            pytest.skip("Windows host does not grant symbolic-link creation privileges")
+        raise
+
+
+def test_symbolic_links_never_expose_outside_files_or_saved_copies(env):
+    _symlink(env.work / "link.txt", env.outside / "secret.txt")
+    _symlink(env.work / "linked-dir", env.outside, directory=True)
+    _forge(env, 5, path="link.txt")
+    _forge(env, 6, path="linked-dir/secret.txt")
     # A saved "earlier copy" that is really a link to a file outside.
     (env.work / "real.txt").write_text("now")
     folder = _forge(env, 9, path="real.txt", existed=True, blob=True)
-    (folder / "000009.pre").symlink_to(env.outside / "secret.txt")
+    _symlink(folder / "000009.pre", env.outside / "secret.txt")
 
     response = env.client.get(env.url)
     assert response.status_code == 200, response.text
     assert OUTSIDE_TEXT not in response.text
     data = response.json()
-    assert data["left_out"] == 8
+    assert data["left_out"] == 2
     assert data["files"] == [{"name": "real.txt", "change": "not_saved", "lines": [], "shortened": False}]
 
 
-def test_linked_journal_folder_and_broad_or_remote_work_folders_are_refused(env, monkeypatch):
+def test_broad_or_remote_work_folders_are_refused(env):
     _task_writes(env, [("a.txt", "one\n")])
     env.cfg.write_text(f'[sandbox]\nworkdir = "{env.home.as_posix()}"\n')
     config.reset_config_cache()
     data = env.client.get(env.url).json()
     assert data["available"] is False and "too broad" in data["message"] and data["files"] == []
-    env.cfg.write_text('[sandbox]\nworkdir = "/"\n')
+    env.cfg.write_text(f'[sandbox]\nworkdir = "{Path(env.work.anchor).as_posix()}"\n')
     config.reset_config_cache()
     assert "too broad" in env.client.get(env.url).json()["message"]
     env.cfg.write_text(f'[sandbox]\nbackend = "ssh"\nworkdir = "{env.work.as_posix()}"\n')
@@ -168,19 +187,23 @@ def test_linked_journal_folder_and_broad_or_remote_work_folders_are_refused(env,
     assert "another computer" in env.client.get(env.url).json()["message"]
     env.cfg.write_text(f'[sandbox]\nworkdir = "{env.work.as_posix()}"\n')
     config.reset_config_cache()
-    with tenant_scope(tenant=TENANT):
-        folder = workspace_journal.goal_dir(env.goal)
-    moved = folder.with_name("elsewhere")
-    folder.rename(moved)
-    folder.symlink_to(moved, target_is_directory=True)
-    data = env.client.get(env.url).json()
-    assert data["available"] is False and "can't be read safely" in data["message"]
     # A history folder shared by every workspace is not shown for one of them.
     shared = env.home.parent / "shared-history"
     env.cfg.write_text(f'[sandbox]\nworkdir = "{env.work.as_posix()}"\n[workspace]\njournal_dir = "{shared.as_posix()}"\n')
     config.reset_config_cache()
     data = env.client.get(env.url).json()
     assert data["available"] is False and "shared between workspaces" in data["message"]
+
+
+def test_linked_journal_folder_is_refused(env):
+    _task_writes(env, [("a.txt", "one\n")])
+    with tenant_scope(tenant=TENANT):
+        folder = workspace_journal.goal_dir(env.goal)
+    moved = folder.with_name("elsewhere")
+    folder.rename(moved)
+    _symlink(folder, moved, directory=True)
+    data = env.client.get(env.url).json()
+    assert data["available"] is False and "can't be read safely" in data["message"]
 
 
 def test_owner_permission_and_workspace_scoping(env):
@@ -195,7 +218,7 @@ def test_owner_permission_and_workspace_scoping(env):
 
 
 def test_no_history_says_so_and_page_offers_the_view_plainly(env):
-    from test_support.plain_language import developer_terms
+    from test_support.plain_language import developer_terms, visible_text
 
     data = env.client.get(env.url).json()
     assert {key: data[key] for key in ("available", "files", "left_out", "more", "incomplete")} == {
@@ -203,7 +226,7 @@ def test_no_history_says_so_and_page_offers_the_view_plainly(env):
     page = env.client.get(f"/chat/goal/{env.goal}/files")
     assert page.status_code == 200
     assert "What changed during this task" in page.text and 'id="tc-show"' in page.text
-    assert "in-between versions can't be compared" in page.text
+    assert "in-between versions can't be compared" in visible_text(page.text)
     assert "/static/lightwork-task-changes.js" in page.text
     assert developer_terms(page.text) == []
     script = env.client.get("/static/lightwork-task-changes.js")

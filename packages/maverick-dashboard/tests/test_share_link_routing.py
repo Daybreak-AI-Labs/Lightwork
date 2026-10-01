@@ -26,6 +26,15 @@ def share_env(tmp_path, monkeypatch):
     return TestClient(app.app, headers={"Origin": "http://testserver"})
 
 
+def _create(client, goal_id):
+    preview = client.post(f"/api/v1/goals/{goal_id}/share/preview")
+    assert preview.status_code == 200, preview.text
+    return client.post(f"/api/v1/goals/{goal_id}/share", json={
+        "confirm": True, "source_sha256": preview.json()["source"]["sha256"],
+        "lifetime_seconds": 3600, "label": "Read-only answer",
+    })
+
+
 def test_selected_workspace_link_reaches_external_reader_and_revokes(share_env):
     from maverick.paths import current_tenant_id, reset_tenant, set_tenant
     from maverick_dashboard import app
@@ -39,7 +48,7 @@ def test_selected_workspace_link_reaches_external_reader_and_revokes(share_env):
         world = app._world()
         gid = world.create_goal("Partner answer", "")
         world.set_goal_status(gid, "done", result="selected-workspace content")
-        created = client.post(f"/api/v1/goals/{gid}/share")
+        created = _create(client, gid)
         assert created.status_code == 201, created.text
         data = created.json()
     finally:
@@ -126,7 +135,7 @@ def test_routing_failure_revokes_new_link(share_env, monkeypatch):
         raise OSError("synthetic routing persistence failure")
 
     monkeypatch.setattr(share_link_routing, "register", fail)
-    assert share_env.post(f"/api/v1/goals/{gid}/share").status_code == 503
+    assert _create(share_env, gid).status_code == 503
     links = world.share_links_for_goal(gid)
     assert len(links) == 1 and links[0]["revoked"]
 
@@ -217,7 +226,7 @@ def test_invalid_configured_share_address_is_rejected_before_mint(share_env, mon
     world = app._world()
     gid = world.create_goal("Answer", "")
     world.set_goal_status(gid, "done", result="answer")
-    assert share_env.post(f"/api/v1/goals/{gid}/share").status_code == 409
+    assert _create(share_env, gid).status_code == 409
     assert world.share_links_for_goal(gid) == []
 
 
@@ -228,7 +237,7 @@ def test_configured_share_address_and_local_boundary(share_env, monkeypatch):
     gid = world.create_goal("Answer", "")
     world.set_goal_status(gid, "done", result="answer")
     monkeypatch.setenv("MAVERICK_PUBLIC_URL", "https://lightwork.example.com/app")
-    response = share_env.post(f"/api/v1/goals/{gid}/share")
+    response = _create(share_env, gid)
     assert response.status_code == 201
     assert response.json()["url"].startswith("https://lightwork.example.com/app/share/")
     assert response.json()["local_only"] is False

@@ -53,8 +53,11 @@ def _world():
 
 
 class _OwnedWorld:
-    """The world as one person may see it: only the goals the owner filter
-    allows (``None`` = every goal, for administrators and sign-in-off)."""
+    """The world restricted by the request's content-owner filter.
+
+    Dashboard callers, including administrators, supply their exact owner
+    scope. Unidentified installation access supplies the unowned-work scope.
+    """
 
     def __init__(self, world, owner: str | None) -> None:
         self._world, self._owner = world, owner
@@ -173,9 +176,10 @@ async def analytics_query(body: QueryIn, request: Request) -> dict:
     analytics language, with the kernel's limits and a time limit."""
     same_origin(request)
     require_global_permission(request, "admin")
+    owner = goal_owner_filter(request)
 
     def _do() -> list[dict]:
-        wa = _analytics(None)
+        wa = _analytics(owner)
         try:
             return wa.query(body.query, timeout=_SQL_SECONDS)
         finally:

@@ -128,6 +128,25 @@ class ChannelReviewIn(ConfirmIn):
               | ChannelNotificationPositionAnswers | ChannelPollTimeAnswers | ChannelFinishAnswers) = Field(discriminator="kind")
 
 
+class ChannelLookupIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    item_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    expected_review_token: str = Field(pattern=r"^[a-f0-9]{64}$")
+    before: str | None = Field(default=None, pattern=r"^[0-9]{1,40}$", max_length=40)
+
+
+@router.post("/api/v1/recovery/operations/channel-source-lookup")
+async def lookup_channel_source(request: Request, body: ChannelLookupIn):
+    actor = _admit(request, mutation=True)
+    result = await _call(recovery.channel_checkpoint_lookup, body.item_id,
+                         expected_review_token=body.expected_review_token, before=body.before,
+                         isolated=isolated(request.app), actor=actor)
+    if _admit(request, mutation=True) != actor:
+        raise HTTPException(409, "Recovery access changed during lookup. Refresh and review again.")
+    return Response(json.dumps(result), media_type="application/json",
+                    headers={"Cache-Control": "private, no-store"})
+
+
 class RestoreIn(ConfirmIn):
     review: str = Field(pattern=r"^[0-9a-f]{32}$")
     target: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -143,6 +162,8 @@ class InstallationIn(ConfirmIn):
     identity_transition: str | None = Field(default=None, max_length=65536)
     transition_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     confirm_identity_transition: bool = Field(default=False, strict=True)
+    native_handoff: bool = Field(default=False, strict=True)
+    review_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 
 class IdentityTransitionIn(BaseModel):
@@ -167,18 +188,29 @@ class ComparisonIn(ReportIn):
 @router.get("/api/v1/recovery/installation")
 async def installation_status(request: Request):
     _admit(request)
-    return await _call(installation_recovery.status)
+    from maverick.installation_handoff import current_review
+    result = await _call(installation_recovery.status)
+    result["native_review"] = await _call(current_review)
+    return result
 
 
 @router.post("/api/v1/recovery/installation/authorize")
 async def authorize_installation(request: Request, body: InstallationIn):
     actor = _admit(request, mutation=True)
     _confirm(body)
+    if body.rollback_id is None and body.review_id is None:
+        raise HTTPException(409, "Check for updates in the native app first, then review the exact release here.")
     result = await _call(installation_recovery.authorize, actor=actor, isolated=isolated(request.app),
                          confirm_all_workspaces=body.confirm_all_workspaces, rollback_id=body.rollback_id,
+                         **({"review_id": body.review_id} if body.review_id is not None else {}),
                          **({"identity_transition": body.identity_transition, "transition_sha256": body.transition_sha256,
                              "confirm_identity_transition": body.confirm_identity_transition}
                             if body.identity_transition is not None or body.transition_sha256 is not None else {}))
+    if body.native_handoff:
+        from maverick.installation_handoff import publish
+        result = await _call(publish, result["authorization"],
+                             actor_label=_authorization_principal(request) or "Authenticated local administrator")
+        result["native_handoff"] = True
     return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
 
 

@@ -101,7 +101,7 @@ test('VS Code halt and clear require checked state, exact zero exit, and no sign
         showErrorMessage:async message=>{errors.push(message);},showInformationMessage:message=>information.push(message)}};
     const spawn=(_cli,args)=>{
       if(mode==='missing')throw new Error('not found');
-      const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();
+      const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>{};
       queueMicrotask(()=>{
         assert.equal(args[1],'--json');
         if(mode!=='empty')child.stdout.emit('data',Buffer.from(JSON.stringify({command:args[0],acknowledged:true,
@@ -111,7 +111,7 @@ test('VS Code halt and clear require checked state, exact zero exit, and no sign
       return child;
     };
     const extension=source('apps/vscode-extension/src/extension.ts',{require:name=>name==='vscode'?vscode:
-      name==='child_process'?{spawn}:name==='./eventWatch'?{watchEvents(){}}:require(name)});
+      name==='./ownedCli'?source('apps/vscode-extension/src/ownedCli.ts',{require:name=>name==='child_process'?{spawn}:require(name)}):name==='./dashboardConnection'?{DashboardConnections:class{dispose(){}}}:name==='./eventWatch'?{watchEvents(){}}:require(name)});
     extension.activate({subscriptions:[]});await commands.get(mode==='unhalt'?'maverick.unhalt':'maverick.halt')();
     if(mode==='halt'||mode==='unhalt') {
       assert.equal(information.length,1);assert.equal(errors.length,0);
@@ -127,4 +127,15 @@ test('synchronous connection rejection clears owned timer and reports one failur
   watchEvents({url:new URL('http://127.0.0.1'),headers:{},cursor:0,connect(){throw new Error('invalid transport');},
     onEvent(){},onCursor(){},onNotice(){},onStop:reason=>stops.push(reason)});
   assert.equal(timers.size,0);assert.equal(stops.length,1);
+});
+
+for(const address of ['http://dashboard.example','http://localhost.evil.example','http://192.168.1.5']) test(`remote token transport rejects ${address} before any request`,()=>{
+  const {watchEvents}=source('apps/vscode-extension/src/eventWatch.ts'); let requests=0; const stops=[];
+  watchEvents({url:new URL(address),headers:{authorization:'Bearer secret'},cursor:0,
+    connect(){requests++;throw new Error('must not connect');},onEvent(){},onCursor(){},onNotice(){},onStop:reason=>stops.push(reason)});
+  assert.equal(requests,0);assert.equal(stops.length,1);
+});
+for(const address of ['https://dashboard.example','http://127.0.0.1','http://localhost','http://[::1]']) test(`explicit safe token transport permits ${address}`,()=>{
+  const {assertDashboardTransport}=source('apps/vscode-extension/src/eventWatch.ts');
+  assert.doesNotThrow(()=>assertDashboardTransport(new URL(address),true));
 });
