@@ -1,0 +1,388 @@
+{
+  "schema": 1,
+  "scope": "LW-064/LW-065: short visual viewport widget accessibility follow-up",
+  "product_commit": "88cd66f29309ba64026077a835b1c755d0c19256",
+  "product_tree": "3b007cbcbf2732896eb53d3be278ca8620c63982",
+  "parent_commit": "af07f6dc6e18b4feb145c12dd5ef7e25e3f90b64",
+  "historical_full_browser_js_commit": "1719f2fc0e01216e8daea5f77228da9835409657",
+  "source_relationship": "Both runs used a dirty working tree based on parent_commit. Baseline added only the seventh test; repaired added the same test and the panel overflow fix. They were not immutable HEAD runs. Per-run source snapshots, diffs and hashes are retained. The subsequent product_commit has exactly the runtime product/spec content after Git CRLF normalization.",
+  "changed_paths": [
+    "packages/maverick-dashboard/tests/browser/widget_acceptance.spec.js",
+    "web/widget/maverick-widget.js"
+  ],
+  "files": {
+    "web/widget/maverick-widget.js": {
+      "parent_and_historical_blob": "adab0ee3022e263979c110e42ad5c48fa4dcd498",
+      "committed_and_runtime_normalized_blob": "7f0d2c61c2c195df6a11e15dd21c730c06fc0f98",
+      "runtime_working_bytes_sha256": "ff23dab709d97c955ff0e35b949a6deafd7e32ce35828716eb176b9fb76fd72f",
+      "committed_bytes_sha256": "b0cd44600e3a80889e4366da39576ff16b370676553001d10a09aaaee66ac32c",
+      "matches_runtime_after_crlf_normalization": true,
+      "original_six_test_definitions_unchanged": false
+    },
+    "packages/maverick-dashboard/tests/browser/widget_acceptance.spec.js": {
+      "parent_and_historical_blob": "e15dabfdf59a9ae260634a58ad116f76ae8b22d8",
+      "committed_and_runtime_normalized_blob": "0233060c582937728d6b9e23eb0d361b97cd5f30",
+      "runtime_working_bytes_sha256": "61537212374fa4c6f08c15fb9ed6335669c50c9c851db996f537958f123b49e0",
+      "committed_bytes_sha256": "b0e573e329c19d03daf4df676c9ee58c4ebdc7fce9e0755c19a644bdd0860176",
+      "matches_runtime_after_crlf_normalization": true,
+      "original_six_test_definitions_unchanged": true
+    }
+  },
+  "runs": [
+    {
+      "label": "widget-fit-be34965-focused-03",
+      "receipt": {
+        "label": "widget-fit-be34965-focused-03",
+        "phase": "baseline_short",
+        "before": {
+          "head": "af07f6dc6e18b4feb145c12dd5ef7e25e3f90b64",
+          "tracked_status": " M packages/maverick-dashboard/tests/browser/widget_acceptance.spec.js\n",
+          "diff_sha256": "d8abcdf02bad4914ff1d33a14dfbf6c1b5e3bf583cc19018c57dfec079788399",
+          "files": {
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\web\\widget\\maverick-widget.js": "636dcbdeed9409bc3dfcdef2ca2d4334153ff5c5f556e2c12d0a171fc6f82591",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\packages\\maverick-dashboard\\tests\\browser\\widget_acceptance.spec.js": "61537212374fa4c6f08c15fb9ed6335669c50c9c851db996f537958f123b49e0",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\widget-fit-be34965-focused.config.js": "96b6d1190f1ecae686f74d57e5c99ca80d846e3012f43bff0ca6e4f3231e98fc"
+          }
+        },
+        "command": [
+          "C:\\Program Files\\nodejs\\node.exe",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\packages\\maverick-dashboard\\tests\\browser\\node_modules\\@playwright\\test\\cli.js",
+          "test",
+          "--config",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\widget-fit-be34965-focused.config.js",
+          "--grep",
+          "a 200px keyboard viewport"
+        ],
+        "outer_timeout_seconds": 180,
+        "test_timeout_ms": 45000,
+        "expect_timeout_ms": 10000,
+        "retries": 0,
+        "workers": 1,
+        "state": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.test-tmp\\widget-fit-be34965-focused-03",
+        "helper_sha256": "ed211e50e1edae04082455815fa1e7ed7750a783c1877672dce619b106841e6a",
+        "started_at": 1790839565.1817162,
+        "node_sha256": "d14ba95cdce1ef7dc9ad3ac74949ca5db38b27378ee30f30a23cf26f9e875a11",
+        "chrome_sha256": "96512cf816b5c7d6d82b53aeb314f6c95cd971c0288202852ba56cbaec8a842a",
+        "playwright_package": "1.58.2",
+        "status": "finished",
+        "owned_pid": 6548,
+        "after": {
+          "head": "af07f6dc6e18b4feb145c12dd5ef7e25e3f90b64",
+          "tracked_status": " M packages/maverick-dashboard/tests/browser/widget_acceptance.spec.js\n",
+          "diff_sha256": "d8abcdf02bad4914ff1d33a14dfbf6c1b5e3bf583cc19018c57dfec079788399",
+          "files": {
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\web\\widget\\maverick-widget.js": "636dcbdeed9409bc3dfcdef2ca2d4334153ff5c5f556e2c12d0a171fc6f82591",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\packages\\maverick-dashboard\\tests\\browser\\widget_acceptance.spec.js": "61537212374fa4c6f08c15fb9ed6335669c50c9c851db996f537958f123b49e0",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\widget-fit-be34965-focused.config.js": "96b6d1190f1ecae686f74d57e5c99ca80d846e3012f43bff0ca6e4f3231e98fc"
+          }
+        },
+        "source_unchanged": true,
+        "controller_error": null,
+        "pytest_exit_code": null,
+        "playwright_exit_code": 1,
+        "process_still_running": false,
+        "elapsed_seconds": 12.462,
+        "exit_code": 1,
+        ".log_sha256": "8efe5ec3d6da43319a9f6cae5f645cd2dc8f72f7899f3da801853ca965be2499",
+        "-results.json_sha256": "2dbd666b9f6c3f30e619bf62b916c5a999ac269fec5e5aa61ce6547a70a00540"
+      },
+      "stats": {
+        "startTime": "2026-10-01T07:26:06.150Z",
+        "duration": 11270.557,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "id": "dfdb76a805876128dee5-b73336cf65bf79d1d118",
+          "title": "a 200px keyboard viewport scrolls uncertain status and keeps receipt and Close reachable",
+          "status": "failed",
+          "retry": 0,
+          "duration_ms": 9743,
+          "errors": [
+            {
+              "location": {
+                "file": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\packages\\maverick-dashboard\\tests\\browser\\widget_acceptance.spec.js",
+                "column": 3,
+                "line": 182
+              },
+              "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m0\u001b[39m\nReceived:   \u001b[31m0\u001b[39m\n\nCall Log:\n- Timeout 10000ms exceeded while waiting on the predicate\n\n  180 |   await ui.panel.hover({position: {x: 20, y: 120}});\n  181 |   await page.mouse.wheel(0, 600);\n> 182 |   await expect.poll(() => ui.panel.evaluate(node => node.scrollTop)).toBeGreaterThan(0);\n      |   ^\n  183 |   await reachable(ui.status);\n  184 |   await info.attach('widget-200px-unknown-status', {body: await page.screenshot(), contentType: 'image/png'});\n  185 |   await ui.input.focus(); await page.keyboard.press('Tab');\n    at C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\packages\\maverick-dashboard\\tests\\browser\\widget_acceptance.spec.js:182:3"
+            }
+          ]
+        }
+      ],
+      "artifacts": [
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-03-receipt.json",
+          "sha256": "3b72ccda38cf1657a84392a9b04363439af0325ad2a44dff5ae183491395a397",
+          "bytes": 3285
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-03-results.json",
+          "sha256": "2dbd666b9f6c3f30e619bf62b916c5a999ac269fec5e5aa61ce6547a70a00540",
+          "bytes": 26901
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-03.log",
+          "sha256": "8efe5ec3d6da43319a9f6cae5f645cd2dc8f72f7899f3da801853ca965be2499",
+          "bytes": 3360
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-03-source.diff",
+          "sha256": "d8abcdf02bad4914ff1d33a14dfbf6c1b5e3bf583cc19018c57dfec079788399",
+          "bytes": 21685
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-03-widget.js",
+          "sha256": "636dcbdeed9409bc3dfcdef2ca2d4334153ff5c5f556e2c12d0a171fc6f82591",
+          "bytes": 13973
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-03-spec.js",
+          "sha256": "61537212374fa4c6f08c15fb9ed6335669c50c9c851db996f537958f123b49e0",
+          "bytes": 13092
+        }
+      ]
+    },
+    {
+      "label": "widget-fit-be34965-focused-04",
+      "receipt": {
+        "label": "widget-fit-be34965-focused-04",
+        "phase": "complete_widget",
+        "before": {
+          "head": "af07f6dc6e18b4feb145c12dd5ef7e25e3f90b64",
+          "tracked_status": " M packages/maverick-dashboard/tests/browser/widget_acceptance.spec.js\n M web/widget/maverick-widget.js\n",
+          "diff_sha256": "fc0adaddabd2c80c0102bb6a6019a71c46f76d495b5ae46fc7890dc650ca3e87",
+          "files": {
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\web\\widget\\maverick-widget.js": "ff23dab709d97c955ff0e35b949a6deafd7e32ce35828716eb176b9fb76fd72f",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\packages\\maverick-dashboard\\tests\\browser\\widget_acceptance.spec.js": "61537212374fa4c6f08c15fb9ed6335669c50c9c851db996f537958f123b49e0",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\widget-fit-be34965-focused.config.js": "96b6d1190f1ecae686f74d57e5c99ca80d846e3012f43bff0ca6e4f3231e98fc"
+          }
+        },
+        "command": [
+          "C:\\Program Files\\nodejs\\node.exe",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\packages\\maverick-dashboard\\tests\\browser\\node_modules\\@playwright\\test\\cli.js",
+          "test",
+          "--config",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\widget-fit-be34965-focused.config.js"
+        ],
+        "outer_timeout_seconds": 180,
+        "test_timeout_ms": 45000,
+        "expect_timeout_ms": 10000,
+        "retries": 0,
+        "workers": 1,
+        "state": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.test-tmp\\widget-fit-be34965-focused-04",
+        "helper_sha256": "45c7e31adf1528a97aa540738a53f76549a6626132862b6aaf03817d8136bd05",
+        "started_at": 1790839638.6265495,
+        "node_sha256": "d14ba95cdce1ef7dc9ad3ac74949ca5db38b27378ee30f30a23cf26f9e875a11",
+        "chrome_sha256": "96512cf816b5c7d6d82b53aeb314f6c95cd971c0288202852ba56cbaec8a842a",
+        "playwright_package": "1.58.2",
+        "status": "finished",
+        "owned_pid": 52476,
+        "after": {
+          "head": "af07f6dc6e18b4feb145c12dd5ef7e25e3f90b64",
+          "tracked_status": " M packages/maverick-dashboard/tests/browser/widget_acceptance.spec.js\n M web/widget/maverick-widget.js\n",
+          "diff_sha256": "fc0adaddabd2c80c0102bb6a6019a71c46f76d495b5ae46fc7890dc650ca3e87",
+          "files": {
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\web\\widget\\maverick-widget.js": "ff23dab709d97c955ff0e35b949a6deafd7e32ce35828716eb176b9fb76fd72f",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-widget-fit-be34965\\packages\\maverick-dashboard\\tests\\browser\\widget_acceptance.spec.js": "61537212374fa4c6f08c15fb9ed6335669c50c9c851db996f537958f123b49e0",
+            "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\widget-fit-be34965-focused.config.js": "96b6d1190f1ecae686f74d57e5c99ca80d846e3012f43bff0ca6e4f3231e98fc"
+          }
+        },
+        "source_unchanged": true,
+        "controller_error": null,
+        "pytest_exit_code": null,
+        "playwright_exit_code": 0,
+        "process_still_running": false,
+        "elapsed_seconds": 6.019,
+        "exit_code": 0,
+        ".log_sha256": "4696cdb03e01adfcee246a37810577fe44b4c637000b299db334ca7a396a6756",
+        "-results.json_sha256": "5a41c257e9750cd7282a9dc60ace4115a385c7fb87f4fa39acf6e683bc19a5fb"
+      },
+      "stats": {
+        "startTime": "2026-10-01T07:27:19.568Z",
+        "duration": 4847.415000000001,
+        "expected": 7,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "id": "dfdb76a805876128dee5-dcf40b588a660071ec89",
+          "title": "widget controls and uncertain receipt fit 320px portrait",
+          "status": "passed",
+          "retry": 0,
+          "duration_ms": 521,
+          "errors": []
+        },
+        {
+          "id": "dfdb76a805876128dee5-2053845ebbba5e6fd8ec",
+          "title": "widget controls and uncertain receipt fit landscape",
+          "status": "passed",
+          "retry": 0,
+          "duration_ms": 379,
+          "errors": []
+        },
+        {
+          "id": "dfdb76a805876128dee5-7b120542fe8f532ad388",
+          "title": "widget controls and uncertain receipt fit 200% content zoom",
+          "status": "passed",
+          "retry": 0,
+          "duration_ms": 432,
+          "errors": []
+        },
+        {
+          "id": "dfdb76a805876128dee5-5eb51e92b606820e4bd3",
+          "title": "widget controls and uncertain receipt fit 320px RTL",
+          "status": "passed",
+          "retry": 0,
+          "duration_ms": 345,
+          "errors": []
+        },
+        {
+          "id": "dfdb76a805876128dee5-798d059dd5848471ed4c",
+          "title": "widget controls and uncertain receipt fit emulated keyboard viewport",
+          "status": "passed",
+          "retry": 0,
+          "duration_ms": 381,
+          "errors": []
+        },
+        {
+          "id": "dfdb76a805876128dee5-1a700d690bdea938fc28",
+          "title": "keyboard follows pending, refused, unknown and accepted receipts without duplicate starts",
+          "status": "passed",
+          "retry": 0,
+          "duration_ms": 517,
+          "errors": []
+        },
+        {
+          "id": "dfdb76a805876128dee5-b73336cf65bf79d1d118",
+          "title": "a 200px keyboard viewport scrolls uncertain status and keeps receipt and Close reachable",
+          "status": "passed",
+          "retry": 0,
+          "duration_ms": 854,
+          "errors": []
+        }
+      ],
+      "artifacts": [
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-04-receipt.json",
+          "sha256": "cfe16937ab86b70c61c34559b906cc12c069f74399dec457f4f8ef0f7c51f3e1",
+          "bytes": 3305
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-04-results.json",
+          "sha256": "5a41c257e9750cd7282a9dc60ace4115a385c7fb87f4fa39acf6e683bc19a5fb",
+          "bytes": 306321
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-04.log",
+          "sha256": "4696cdb03e01adfcee246a37810577fe44b4c637000b299db334ca7a396a6756",
+          "bytes": 1495
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-04-source.diff",
+          "sha256": "fc0adaddabd2c80c0102bb6a6019a71c46f76d495b5ae46fc7890dc650ca3e87",
+          "bytes": 46263
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-04-widget.js",
+          "sha256": "ff23dab709d97c955ff0e35b949a6deafd7e32ce35828716eb176b9fb76fd72f",
+          "bytes": 14130
+        },
+        {
+          "task_relative_path": "audit/widget-fit-be34965-focused-04-spec.js",
+          "sha256": "61537212374fa4c6f08c15fb9ed6335669c50c9c851db996f537958f123b49e0",
+          "bytes": 13092
+        }
+      ]
+    }
+  ],
+  "images": [
+    {
+      "task_relative_path": "slice-widget-fit-be34965/docs/ux-audit-2026-09-30/widget-short-viewport-88cd66f/widget-200px-unknown-status.png",
+      "sha256": "f660a61192a982fcac296aa70f71f32e84720be502766c5c7e99d3b628876a1f",
+      "bytes": 15085,
+      "source_report": "audit/widget-fit-be34965-focused-04-results.json",
+      "attachment": "widget-200px-unknown-status"
+    },
+    {
+      "task_relative_path": "slice-widget-fit-be34965/docs/ux-audit-2026-09-30/widget-short-viewport-88cd66f/widget-200px-close-reachable.png",
+      "sha256": "9ddeb7769c61003c65b5dcea312cc8a9282142124751dbd3f94e410d460c6c74",
+      "bytes": 14405,
+      "source_report": "audit/widget-fit-be34965-focused-04-results.json",
+      "attachment": "widget-200px-close-reachable"
+    },
+    {
+      "task_relative_path": "slice-widget-fit-be34965/docs/ux-audit-2026-09-30/widget-short-viewport-88cd66f/baseline-200px-clipped-status.png",
+      "sha256": "afa55df334be1e4efad2cc814565414845bc5b0d038a9f7ee46a52c5aafef555",
+      "bytes": 14384,
+      "source_artifact": "audit/widget-fit-be34965-focused-03-artifacts/widget_acceptance-a-200px--ae490-receipt-and-Close-reachable/test-failed-1.png"
+    }
+  ],
+  "historical_evidence_policy": "The historical 108 distinct browser passes and 1711 JavaScript passes in 181 files remain evidence for unchanged surfaces. This follow-up reran only the complete seven-case widget spec; no full 109-case browser or new complete JavaScript run is claimed.",
+  "limits": [
+    "Real committed widget code is rendered in headless installed Chrome with a same-origin synthetic host and synthetic receipt responses; this is not a live provider or dashboard-server qualification.",
+    "The 200px visualViewport and existing 200% CSS content zoom are explicit emulations, not native keyboard, operating-system text zoom, physical-device, nonzero native safe-area, touch scrolling or human screen-reader qualification.",
+    "The retained live-style contract checks safe-area env terms; no nonzero device inset was available.",
+    "Whole-panel scrolling intentionally allows controls to be revealed sequentially when the viewport cannot show them together.",
+    "The native process query recorded no remaining processes matching the owned helper/clone/run labels; it is not an assertion that all system processes stopped."
+  ],
+  "warnings": "Both logs retain two NO_COLOR/FORCE_COLOR warnings; neither run is described as warning-free.",
+  "baseline_post_receipt_console_error": {
+    "type": "UnicodeEncodeError",
+    "phase": "Printing the already retained baseline log to the controller's cp1252 console, after process completion, source verification and final receipt write.",
+    "evidence": "Observed in the tool execution output; not included in the Playwright log or the receipt's managed-run controller_error field, which is null. The original receipt/log/report remain unchanged.",
+    "resolution": "The helper added sys.stdout.reconfigure(errors='backslashreplace') before the repaired run. The baseline assertion failure is separately confirmed by Playwright's JSON report, retained trace and screenshot."
+  },
+  "baseline_failure_artifacts": [
+    {
+      "task_relative_path": "audit/widget-fit-be34965-focused-03-artifacts/widget_acceptance-a-200px--ae490-receipt-and-Close-reachable/test-failed-1.png",
+      "sha256": "afa55df334be1e4efad2cc814565414845bc5b0d038a9f7ee46a52c5aafef555",
+      "bytes": 14384
+    },
+    {
+      "task_relative_path": "audit/widget-fit-be34965-focused-03-artifacts/widget_acceptance-a-200px--ae490-receipt-and-Close-reachable/error-context.md",
+      "sha256": "c24f4fc3a11776b6fa3e133c14c8b72a25ddc5ae9b36c9dd640be59ed9181733",
+      "bytes": 1101
+    },
+    {
+      "task_relative_path": "audit/widget-fit-be34965-focused-03-artifacts/widget_acceptance-a-200px--ae490-receipt-and-Close-reachable/trace.zip",
+      "sha256": "257ec91ef5dc61896c7b6ac6029032a04abfc823d7a5834f94729433db94b40a",
+      "bytes": 263051
+    }
+  ],
+  "runtime_release": {
+    "artifact": {
+      "task_relative_path": "audit/widget-200px-runtime-release.json",
+      "sha256": "88eedc1546061bfd722d4979f66fd816d7fbc73a2461597022eef32e2d798d4c",
+      "bytes": 99
+    },
+    "receipt": {
+      "checked_at": "2026-10-01T07:27:57.2249894Z",
+      "owned_remaining": 0,
+      "processes": []
+    }
+  },
+  "config": {
+    "task_relative_path": "audit/widget-fit-be34965-focused.config.js",
+    "sha256": "96b6d1190f1ecae686f74d57e5c99ca80d846e3012f43bff0ca6e4f3231e98fc",
+    "bytes": 1744
+  },
+  "current_controller": {
+    "task_relative_path": "run_widget_viewport_qualification.py",
+    "sha256": "45c7e31adf1528a97aa540738a53f76549a6626132862b6aaf03817d8136bd05",
+    "bytes": 5824
+  },
+  "runtime": {
+    "node_version": "24.13.0",
+    "chrome_version": "154.0.8037.58",
+    "playwright_version": "1.58.2",
+    "version_basis": "Previously verified installed executables/private Playwright; each run independently hashes Node and Chrome and reads Playwright package version into its receipt.",
+    "environment": "Fresh private HOME/USERPROFILE/TEMP per attempt; launch config restores only Chrome USERPROFILE to C:/Users/Cstep. Explicit installed Chrome and clone-local pinned Playwright are used; no NODE_PATH dependency resolution fallback.",
+    "bounds": "One worker, zero retries, unchanged 45s test and 10s expectation budgets. Controller bounds each run at 180s; config globalTimeout is 1800000ms, superseded by that outer bound. No timeout occurred."
+  }
+}
