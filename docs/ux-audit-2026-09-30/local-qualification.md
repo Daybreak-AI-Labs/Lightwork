@@ -7,12 +7,12 @@ No deployment configuration or credentials were changed.
 
 ## Current evidence snapshot, 2026-10-01
 
-This snapshot was recorded while the final07 Python ordinary phase was running.
+This snapshot includes the completed final07 Python ordinary phase and the subsequent native PostgreSQL cursor receipts.
 The register has **190 implemented entries awaiting acceptance and five
 qualification entries**. LW-052's 125-task regression reproduced a missing
 page-boundary task and retained deleted content. The scoped cursor/window repair
 is integrated; all 108 mobile tests and the 22-case backend group pass locally.
-Seven real-PostgreSQL cursor variants and final integrated checks remain queued.
+Both complete new backend files now pass against native PostgreSQL in each posture (23 cases, including all seven service-gated variants). Final integrated checks remain queued.
 The five separately approved security repairs remain implemented with final
 integrated qualification pending.
 
@@ -25,7 +25,7 @@ cases have been authored and collected, not yet executed. The plan controller's
 API module passes 18 cases in each posture on Python 3.10. These focused results
 do not replace a complete run on the later source.
 
-The running final07 ordinary phase has one unresolved failure in
+The completed final07 ordinary phase has one unresolved failure in
 `test_bounded_queue_overflow_is_durable_serial_and_in_intake_order`. Its preserved
 receipt journal shows all eight items admitted but only the first executed,
 remaining in `completed / sending`; the remaining seven did not execute before
@@ -35,13 +35,13 @@ increasing the test deadline or treating the original failure as a pass.
 
 | Evidence | Exact execution source | Current result and limit |
 | --- | --- | --- |
-| Full Python 3.12 ordinary | `2a765aa3e93cc7775090f574f027bd855b33aef5` (`qualification-final-07`) | Ordinary is active. Later cursor/mobile fixes are outside this frozen run; subsequent secure, serial-heavy and floor-interpreter phases require a new source binding. No complete pass is claimed. Source/process receipts are retained under `audit/qualification-final-07-*`. |
+| Full Python 3.12 ordinary | `2a765aa3e93cc7775090f574f027bd855b33aef5` (`qualification-final-07`) | 40,072 passed, one failed, 590 skipped and 22 warnings in 3,281.79 seconds; source unchanged. The transport failure remains unresolved. [Exact skip reconciliation](skip-reconciliation-final07.md): 457 executable identities have supplementary passes in both postures, five collection placeholders expanded, 128 entries retain explicit boundaries. These do not rewrite the full-run outcomes. Later cursor/mobile fixes are outside this source; subsequent phases require a new binding. |
 | [Static gates and package builds](static-build-qualification-3640fcf.md) | `3640fcf7906d3f7129df1b34bc1718492a164bcf` | All 26 checks passed: Ruff, Vulture, 16 offline contracts and eight wheels. All 4,827 payload files match the exact Git archive. Later product changes require renewed build/static verification. |
 | [Complete browser and JavaScript](browser-quiet-qualification-2026-10-01.md) | `11c30996c98a0ad0c9583005223019ad0d75b8b4` | All 90 distinct Chrome journeys across default/setup profiles and all 1,695 JavaScript tests passed. [Exact source comparison](browser-source-relationship-2a765aa.md) proves the unchanged dashboard/frontend relationship to `2a765aa`; it does not claim a browser rerun there or cover the active mobile change. |
 | [Current-client Qdrant repair](qdrant-current-client-qualification-e22ffbc.md) | `e22ffbcca2af43887ed4c142b2633fd86a51471c` | 75 distinct passing IDs across native adapter and real loopback-server checks; both postures include actual offline ONNX inference. One intentional parameter skip remains. Repeated executions are not additional unique tests. |
 | [Secure PostgreSQL follow-up](postgresql-secure-gap-qualification.md) | `aa37a5a58d81940af4ab87434f6c33e6af96c75e` | All 363 cases in 29 complete files passed with both secure flags, zero skips/errors/failures. This covers all 270 identities previously lacking secure PostgreSQL evidence. The private server stopped; twelve pgvector extension cases still require the absent native compiler prerequisites. |
 | [Python 3.10 / 3.11 compatibility](supported-python-qualification-3640fcf.md) | Full collection at `3640fcf`; critical test source `f1f41a3e13a8d3f574546e8a577a48555e3ec8bc`, unchanged `3640fcf` product wheels | Each interpreter collected the same 40,660 executable IDs before the two later admission tests. All four ordinary/secure critical cohorts passed the same 405 cases, with seven explicit database-service skips each. Full Python 3.10 ordinary/heavy runtime remains scheduled after Python 3.12; no full Python 3.11 runtime is claimed. |
-| [Mobile pagination](mobile-pagination-qualification-4d8dedb.md) and [scoped backend cursor](mobile-task-cursor-qualification.md) | Mobile `4d8dedb11b940e98875867021b70f151e74c7fcb`; backend `737ba45287df2c09370d5f83056889f2e5be16d0` | Complete mobile suite: 108 passed; TypeScript passed. Backend: 22 passed in each posture with seven native-PostgreSQL variants pending. Original failing reproductions are retained. Native device scrolling/accessibility remains separate. |
+| [Mobile pagination](mobile-pagination-qualification-4d8dedb.md) and [scoped backend cursor](mobile-task-cursor-qualification.md) | Mobile `4d8dedb11b940e98875867021b70f151e74c7fcb`; backend `737ba45287df2c09370d5f83056889f2e5be16d0` | Complete mobile suite: 108 passed; TypeScript passed. Backend: earlier 22-pass/seven-skip expanded cohorts; native PostgreSQL follow-up at `a0c1da8b9005a15fc80882ce286c75d786a48e57` passes all 23 cases in both complete new files in each posture, including all seven PostgreSQL variants. Six changed Python blobs match review source `0d0755b`. Original failing reproductions are retained. Native device scrolling/accessibility remains separate. |
 
 The dated sections below preserve earlier failed, incomplete and focused runs,
 including their then-pending work. Their historical present-tense wording does

@@ -44,7 +44,7 @@ request refusal before database access. The seven remaining variants require a
 real PostgreSQL service. The SQL-recording control verifies bound predicates, but
 does not substitute for executing them against PostgreSQL.
 
-Each run used the isolated matching-source Python 3.12 environment, OS-only
+Each historical synthetic run used the isolated matching-source Python 3.12 environment, OS-only
 inherited environment allowlist, temporary home/configuration, synthetic identity
 and local SQLite fixtures, serial execution and unchanged 180-second per-test
 timeouts. Secure execution set both secure-default flags before collection.
@@ -54,7 +54,34 @@ new test and product files captured by the runner; the additional OpenAPI
 expectation change is separately bound by its committed Git blob.
 
 Ruff, Python 3.10 AST parsing of all six changed Python files and whitespace checks
-passed. Native PostgreSQL execution and final integrated qualification remain
-pending. Source-candidate runs used base `7b6d69d` plus the recorded working-tree
+passed. Native PostgreSQL execution was subsequently completed below; final
+integrated qualification remains pending. Source-candidate runs used base `7b6d69d` plus the recorded working-tree
 changes, subsequently committed unchanged as `737ba45`; they are not reported as
 an already-complete repository-wide run at that commit.
+
+## Native PostgreSQL follow-up
+
+Both complete new cursor test files subsequently passed against a private
+PostgreSQL 16.15 loopback service: **23 passed, zero failed/errors/skips** in
+ordinary mode (18.78 seconds) and with both secure-default flags (21.81 seconds).
+The immutable clean execution source was
+`a0c1da8b9005a15fc80882ce286c75d786a48e57`; all six changed Python file blobs
+are identical at review source `0d0755b0ba4389d49357a4f6354cd758ab145e4e`.
+The [JSON receipt](mobile-task-cursor-qualification.json) includes every case,
+all seven native PostgreSQL identities, source comparisons and artifact hashes.
+
+This resolves the seven service-gated variants above, including deleted cursor
+anchors, insertion while paging, owner revocation, scoped filters, ascending
+filter semantics and tenant isolation. The 23-case native cohort is the two new
+files; the historical 29-case cohort additionally selected six existing API,
+ownership and PostgreSQL-query controls. Repeated posture executions are not
+additional distinct cases.
+
+Runs were serial with synthetic users/data, a temporary local database/home,
+an explicit inherited-environment allowlist and unchanged 180-second per-test
+timeouts. Source was unchanged after each run. Both owned servers stopped and
+the port had no listener; no provider or production service was used. The
+existing Starlette warning remains visible. These backend receipts accompany
+the [108-case mobile suite](mobile-pagination-qualification-4d8dedb.md), while
+fresh integrated checks and installed Android/iOS scroll/focus qualification
+remain explicit boundaries.
