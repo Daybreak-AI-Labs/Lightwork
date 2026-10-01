@@ -338,10 +338,11 @@ def test_current_department_and_project_scope_applies_to_admin_owned_tasks(envir
     own_project = world.create_project("Own project", owner=ADMIN)
     foreign_project = world.create_project("Employee private project", owner=ALICE)
     missing_project = world.create_project("Unavailable project", owner=ADMIN)
-    allowed = world.create_goal("Finance task", owner=ADMIN, domain="finance_planning", project_id=own_project)
-    world.create_goal("No legal access", owner=ADMIN, domain="legal_review")
-    world.create_goal("Foreign project", owner=ADMIN, domain="finance_planning", project_id=foreign_project)
-    world.create_goal("Missing project", owner=ADMIN, domain="finance_planning", project_id=missing_project)
+    allowed = world.create_goal("Finance task", owner=ADMIN, domain="finance_fpa", project_id=own_project)
+    world.create_goal("No legal access", owner=ADMIN, domain="legal_contract_review")
+    world.create_goal("Foreign project", owner=ADMIN, domain="finance_fpa", project_id=foreign_project)
+    world.create_goal("Missing project", owner=ADMIN, domain="finance_fpa", project_id=missing_project)
+    world.create_goal("Unavailable finance specialist", owner=ADMIN, domain="finance_planning")
     original_get_project = world.get_project
     monkeypatch.setattr(
         world, "get_project",
@@ -483,7 +484,7 @@ def test_current_revocation_prevents_source_fetch(environment, monkeypatch, revo
 
 def test_department_revocation_hides_current_sources_and_historical_links(environment):
     world = environment.worlds["acme"]
-    world.create_goal("Previously allowed confidential finance title", owner=ALICE, domain="finance_planning")
+    world.create_goal("Previously allowed confidential finance title", owner=ALICE, domain="finance_fpa")
     environment.policy()
     environment.suites[ALICE] = frozenset({"finance"})
     first = _ok(environment.message())
@@ -653,11 +654,11 @@ def test_conversation_sources_respect_owner_tenant_department_and_project(
     world = environment.worlds["acme"]
     project = world.create_project("Owned finance project", owner=actor)
     foreign_project = world.create_project("Foreign project", owner=BOB)
-    allowed = world.create_goal("Allowed task context", owner=actor, domain="finance_planning", project_id=project)
-    world.create_goal("Other employee secret", owner=BOB, domain="finance_planning")
-    world.create_goal("Other department secret", owner=actor, domain="legal_review")
-    world.create_goal("Other project secret", owner=actor, domain="finance_planning", project_id=foreign_project)
-    environment.worlds["globex"].create_goal("Other tenant secret", owner=actor, domain="finance_planning")
+    allowed = world.create_goal("Allowed task context", owner=actor, domain="finance_fpa", project_id=project)
+    world.create_goal("Other employee secret", owner=BOB, domain="finance_fpa")
+    world.create_goal("Other department secret", owner=actor, domain="legal_contract_review")
+    world.create_goal("Other project secret", owner=actor, domain="finance_fpa", project_id=foreign_project)
+    environment.worlds["globex"].create_goal("Other tenant secret", owner=actor, domain="finance_fpa")
     environment.suites[actor] = frozenset({"finance"})
     environment.policy(actor, allowed_tools=["draft_reply", "task_status"])
 
@@ -703,7 +704,7 @@ def test_conversation_revalidates_authority_at_dispatch_and_before_publication(
 ):
     from maverick.employee_companion import EmployeeCompanionStore
 
-    environment.worlds["acme"].create_goal("Sensitive finance task", owner=ALICE, domain="finance_planning")
+    environment.worlds["acme"].create_goal("Sensitive finance task", owner=ALICE, domain="finance_fpa")
     environment.suites[ALICE] = frozenset({"finance"})
     policy = environment.policy(allowed_tools=["draft_reply"])
     view = environment.view()
@@ -1017,7 +1018,7 @@ def test_conversation_requires_bounded_request_identity_and_payload(
 
 def test_revoked_history_sources_are_not_sent_into_later_model_context(environment, draft_generation):
     world = environment.worlds["acme"]
-    world.create_goal("Restricted finance plan", owner=ALICE, domain="finance_planning")
+    world.create_goal("Restricted finance plan", owner=ALICE, domain="finance_fpa")
     environment.suites[ALICE] = frozenset({"finance"})
     environment.policy(allowed_tools=["draft_reply"])
     draft_generation.reply = "The restricted finance plan has a sensitive acquisition budget."
