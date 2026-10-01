@@ -6104,9 +6104,14 @@ def record_verify(capsule: str, pubkeys: tuple[str, ...], trusted_file: str | No
     if pubkeys or trusted_file:
         trusted = list(pubkeys)
         if trusted_file:
-            with open(trusted_file, encoding="utf-8") as handle:
-                lines = (ln.split("#", 1)[0].strip() for ln in handle)
-                trusted += [ln for ln in lines if ln]
+            try:
+                with open(trusted_file, encoding="utf-8") as handle:
+                    lines = (ln.split("#", 1)[0].strip() for ln in handle)
+                    trusted += [ln for ln in lines if ln]
+            except (OSError, UnicodeDecodeError) as e:
+                raise click.ClickException(
+                    "cannot read the trusted keys file: it must be a text file "
+                    "with one public key per line") from e
     ok, reason = orec.verify_capsule(capsule, trusted_pubkeys=trusted)
     click.echo(reason)
     if not ok:

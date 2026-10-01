@@ -278,3 +278,20 @@ def test_cli_record_verify_takes_a_published_key_or_a_key_file(genuine, tmp_path
     empty = tmp_path / "empty.txt"
     empty.write_text("# nothing\n", encoding="utf-8")
     assert run(main, ["record", "verify", str(forged), "--trusted-keys", str(empty)]).exit_code != 0
+
+
+def test_cli_record_verify_unreadable_key_file_is_a_clean_error(genuine, tmp_path):
+    """A trusted-keys file that cannot be decoded is reported plainly and still
+    fails closed -- never a Python traceback."""
+    from click.testing import CliRunner
+    from maverick.cli import main
+    path, _pub = genuine
+    binary = tmp_path / "trusted.bin"
+    binary.write_bytes(b"\xff\xfe\x00\x80 not text")
+
+    result = CliRunner().invoke(
+        main, ["record", "verify", str(path), "--trusted-keys", str(binary)])
+
+    assert result.exit_code != 0
+    assert "trusted keys file" in result.output
+    assert not isinstance(result.exception, UnicodeDecodeError), result.exception
