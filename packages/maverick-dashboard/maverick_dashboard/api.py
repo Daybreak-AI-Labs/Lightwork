@@ -11256,8 +11256,8 @@ def pack_editing_denial(request: Request) -> str | None:
 
     if not get_features().get("pack_editing", True):
         return (
-            "pack editing is disabled ([features] pack_editing = false). "
-            "Edit override TOML on the host, or re-enable it in config."
+            "Specialist editing is disabled by this installation's policy. "
+            "Ask an installation administrator to enable it."
         )
     return None
 
@@ -11289,7 +11289,6 @@ async def list_agents_endpoint(request: Request) -> dict:
 async def get_agent_endpoint(request: Request, name: str) -> dict:
     """The merged pack the agent runs, plus provenance (overridden vs inherited)
     and lint findings -- the payload the editor renders."""
-    from maverick.domain import suite_for
     from maverick.domain_edit import resolved_view
 
     view = resolved_view(name)
@@ -11298,7 +11297,7 @@ async def get_agent_endpoint(request: Request, name: str) -> dict:
     # Job-function scoping: pack config (persona, tool allowlist, risk ceiling)
     # for another department is not this caller's to read. 404 first (catalog
     # existence is public), 403 on grant, mirroring /departments/{key}.
-    require_suite(request, suite_for(name))
+    require_suite(request, view.get("suite"))
     return view
 
 
@@ -11327,13 +11326,12 @@ async def agent_jobcard(request: Request, name: str, days: int = 90) -> dict:
     (role, mission, responsibilities, deliverable, tools, guardrails, risk,
     department), its manager scorecard (runs, cost, value, ROI, success rate),
     and its model's cost tier. Read-only. Suite-scoped like /agents/{name}."""
-    from maverick.domain import suite_for
     from maverick.domain_edit import resolved_view
 
     view = await run_in_threadpool(resolved_view, name)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
-    require_suite(request, suite_for(name))
+    require_suite(request, view.get("suite"))
 
     from maverick import agent_scorecard, model_cost_tier
 
@@ -12636,6 +12634,8 @@ async def delete_agent_override(request: Request, name: str, expected_generation
         raise HTTPException(status_code=422, detail=str(e)) from e
     view = resolved_view(name)
     if view is None:
+        if removed:
+            return {"removed": True, "agent": None}
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
     return {"removed": removed, "agent": view}
 

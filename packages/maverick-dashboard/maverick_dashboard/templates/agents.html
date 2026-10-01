@@ -178,6 +178,54 @@
   <p><span class="badge">read-only</span> <span class="muted">Agent editing is turned off by your administrator — viewing only.</span></p>
   {% endif %}
 
+  {% if rejected_agents %}
+  <section class="af-card" id="agent-setup-review" aria-labelledby="agent-setup-review-title" style="margin-bottom: var(--space-4);">
+    <h2 id="agent-setup-review-title" class="af-card__title">Specialists paused for setup review</h2>
+    <p class="muted">These specialists cannot run. Restore a standard specialist to its original setup, or remove an unavailable custom specialist.</p>
+    {% for item in rejected_agents %}
+    <div style="display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; padding:var(--space-2) 0; border-top:1px solid var(--hairline);">
+      <strong>{{ item.name | humanize }}</strong>
+      {% if item.generation %}
+      <button type="button" class="btn btn--ghost af-recover" data-name="{{ item.name }}" data-generation="{{ item.generation }}" data-builtin="{{ '1' if item.is_builtin else '0' }}">
+        {{ 'Restore original setup' if item.is_builtin else 'Remove unavailable specialist' }}
+      </button>
+      {% else %}
+      <span class="muted">Installation support must repair this setup.</span>
+      {% endif %}
+      <span class="muted af-recover-status" role="status" aria-live="polite"></span>
+    </div>
+    {% endfor %}
+  </section>
+  <script>
+    document.querySelectorAll('.af-recover').forEach(function (button) {
+      button.addEventListener('click', async function () {
+        const name = button.dataset.name;
+        const builtIn = button.dataset.builtin === '1';
+        const status = button.parentElement.querySelector('.af-recover-status');
+        const question = builtIn
+          ? 'Restore “' + name + '” to its original setup? Its custom changes will be removed.'
+          : 'Remove “' + name + '”? Its saved custom setup will be removed.';
+        if (!(await mvConfirm(question, { okText: builtIn ? 'Restore specialist' : 'Remove specialist' }))) return;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        try {
+          const path = '/api/v1/agents/' + encodeURIComponent(name)
+            + '/override?expected_generation=' + encodeURIComponent(button.dataset.generation);
+          const response = await fetch(path, { method: 'DELETE' });
+          if (!response.ok) throw new Error('This specialist changed or could not be restored. Refresh and try again.');
+          const result = await response.json();
+          if (!result.removed) throw new Error('No saved setup was removed. Refresh to check its status.');
+          window.location.href = builtIn ? '/agents?name=' + encodeURIComponent(name) : '/agents';
+        } catch (error) {
+          status.textContent = error.message || 'Could not restore this specialist.';
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+        }
+      });
+    });
+  </script>
+  {% endif %}
+
   <details class="af-card" id="jd-card" style="margin-bottom: var(--space-4);">
     <summary style="cursor: pointer; font-weight: 600;">Hire from a job description
       <span class="muted" style="font-weight: 400;">— paste a JD to meet the specialists you already employ, or draft a new one</span>

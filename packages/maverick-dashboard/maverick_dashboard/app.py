@@ -6739,34 +6739,43 @@ async def agents_page(request: Request) -> HTMLResponse:
     rendered server-side; the page JS only drives the save/validate/reset
     calls to /api/v1/agents."""
     agents: list = []
+    rejected_agents: list = []
     selected = None
-    editable = True
+    editable = False
     # ``?new=1`` opens a blank builder for a brand-new, from-scratch custom agent
     # (no built-in base): the save posts to /api/v1/agents/<the id you type>, which
     # coerces a standalone pack. ``?name=`` still tailors an existing specialist.
     creating = request.query_params.get("new") in ("1", "true", "yes")
     try:
-        from maverick.config import get_features
-        from maverick.domain import suite_for
-        from maverick.domain_edit import list_agents, resolved_view
+        from maverick.domain import rejected_workspace_domains
+        from maverick.domain_edit import list_agents, rejected_override_view, resolved_view
 
+        from .api import pack_editing_denial
         from .auth import scope_to_suites, suite_allowed
 
-        editable = bool(get_features().get("pack_editing", True))
+        editable = pack_editing_denial(request) is None
         # Job-function scoping: mirror GET /api/v1/agents — a caller with a
         # department grant browses their departments' specialists plus generic
         # packs; a non-granted selection renders nothing rather than its config.
         agents = scope_to_suites(request, list_agents(), suite_of=lambda a: a.get("suite"))
+        if editable:
+            rejected_agents = [
+                view for name in sorted(rejected_workspace_domains())
+                if (view := rejected_override_view(name)) is not None
+            ]
         name = request.query_params.get("name")
-        if name and suite_allowed(request, suite_for(name)):
-            selected = resolved_view(name)
+        if name:
+            view = resolved_view(name)
+            if view and suite_allowed(request, view.get("suite")):
+                selected = view
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
     return templates.TemplateResponse(
         request,
         "agents.html",
-        {"agents": agents, "selected": selected, "editable": editable, "creating": creating},
+        {"agents": agents, "rejected_agents": rejected_agents,
+         "selected": selected, "editable": editable, "creating": creating},
     )
 
 

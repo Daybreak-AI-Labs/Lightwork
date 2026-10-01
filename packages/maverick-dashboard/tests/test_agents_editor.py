@@ -116,6 +116,51 @@ class TestOverrideLifecycle:
         assert r.status_code == 200
         assert client.get(f"/api/v1/agents/{name}").json()["is_override"] is False
 
+    def test_rejected_builtin_can_be_restored_in_app_with_generation(self, tmp_path):
+        from maverick.domain_edit import rejected_override_view
+
+        name = _clean_builtin_name()
+        path = tmp_path / "domains" / f"{name}.toml"
+        path.parent.mkdir()
+        path.write_text(f'name = "{name}"\nallow_tools = []\n', encoding="utf-8")
+        state = rejected_override_view(name)
+        assert state and state["generation"] and state["is_builtin"]
+        page = client.get("/agents").text
+        assert "Specialists paused for setup review" in page
+        assert f'data-name="{name}"' in page
+        assert f'data-generation="{state["generation"]}"' in page
+        assert "Restore original setup" in page
+        assert client.get(f"/api/v1/agents/{name}").status_code == 404
+
+        path.write_text(f'name = "{name}"\nallow_tools = ["shell"]\n', encoding="utf-8")
+        stale = client.delete(f"/api/v1/agents/{name}/override", params={
+            "expected_generation": state["generation"],
+        })
+        assert stale.status_code == 409 and path.exists()
+        current = rejected_override_view(name)
+        restored = client.delete(f"/api/v1/agents/{name}/override", params={
+            "expected_generation": current["generation"],
+        })
+        assert restored.status_code == 200 and restored.json()["removed"] is True
+        assert not path.exists()
+        assert client.get(f"/api/v1/agents/{name}").status_code == 200
+
+    def test_rejected_custom_specialist_can_be_removed_in_app(self, tmp_path):
+        path = tmp_path / "domains" / "custom_bad.toml"
+        path.parent.mkdir()
+        path.write_text('name = "custom_bad"\nmax_risk = "low"\n', encoding="utf-8")
+        from maverick.domain_edit import rejected_override_view
+
+        state = rejected_override_view("custom_bad")
+        assert state and not state["is_builtin"]
+        assert "Remove unavailable specialist" in client.get("/agents").text
+        response = client.delete("/api/v1/agents/custom_bad/override", params={
+            "expected_generation": state["generation"],
+        })
+        assert response.status_code == 200
+        assert response.json() == {"removed": True, "agent": None}
+        assert not path.exists()
+
     @pytest.mark.parametrize("method", ["post", "delete"])
     def test_windows_backslash_name_cannot_escape_domains_directory(
         self, tmp_path, method,
@@ -169,6 +214,33 @@ class TestPackEditingAuthorization:
 
         assert r.status_code == 200
         assert r.json()["description"] == "admin tuned"
+
+    def test_non_admin_cannot_see_recovery_controls(self, tmp_path, monkeypatch):
+        import maverick_dashboard.api as api
+
+        name = _clean_builtin_name()
+        path = tmp_path / "domains" / f"{name}.toml"
+        path.parent.mkdir()
+        path.write_text(f'name = "{name}"\nallow_tools = []\n', encoding="utf-8")
+        monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
+        monkeypatch.setattr(api, "is_dashboard_admin", lambda principal: False)
+
+        assert "af-recover" not in client.get("/agents").text
+        assert client.delete(f"/api/v1/agents/{name}/override").status_code == 403
+        assert path.exists()
+
+
+def test_fork_agent_detail_requires_inherited_suite(tmp_path, monkeypatch):
+    import maverick_dashboard.auth as auth
+
+    path = tmp_path / "domains" / "client_fork.toml"
+    path.parent.mkdir()
+    path.write_text('name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8")
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"finance"}))
+
+    assert client.get("/api/v1/agents/client_fork").status_code == 403
+    assert client.get("/api/v1/agents/client_fork/jobcard").status_code == 403
+    assert 'data-name="client_fork"' not in client.get("/agents?name=client_fork").text
 
 
 def _pack_with_denied_tool_and_risk_below_high() -> tuple[str, str]:

@@ -22,22 +22,28 @@ import hashlib
 import hmac
 import json
 import re
+import stat
 from pathlib import Path
 
 from .domain import (
+    _MAX_DOMAIN_FILE_BYTES,
     _OVERLAYABLE,
     DomainProfile,
     _coerce,
     _envelope_errors,
     _load_raw_domains,
+    _profile_field_type_errors,
+    _unsafe_domain_alias,
     available_domains,
     builtin_dir,
+    builtin_domains,
     declared_prompt_gate,
     enforced_gate,
     lint_profile,
     load_domains,
     overlay_profile,
     overridden_fields,
+    rejected_workspace_domains,
     suite_for,
     user_dir,
 )
@@ -141,7 +147,7 @@ def validate_override(name: str, patch: dict) -> tuple[list[str], list[str]]:
     patch = dict(patch)
     merged = _resolve(name, patch)
     errors, warnings = lint_profile(merged)
-    if not errors:
+    if not _profile_field_type_errors(merged):
         errors.extend(_envelope_errors(_base_profile(name, patch), merged))
     return errors, warnings
 
@@ -277,6 +283,30 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
     }
 
 
+def rejected_override_view(name: str) -> dict | None:
+    """Minimal admin recovery state for an unavailable workspace pack."""
+    try:
+        name = _validated_override_name(name)
+    except ValueError:
+        return None
+    if name not in rejected_workspace_domains():
+        return None
+    path = user_dir() / f"{name}.toml"
+    generation = None
+    try:
+        info = path.lstat()
+        if (stat.S_ISREG(info.st_mode) and not _unsafe_domain_alias(info)
+                and info.st_nlink == 1 and info.st_size <= _MAX_DOMAIN_FILE_BYTES):
+            generation = _override_generation(name, path)
+    except (OSError, ValueError):
+        pass
+    return {
+        "name": name,
+        "generation": generation,
+        "is_builtin": name in builtin_domains(),
+    }
+
+
 def list_agents(directory: str | Path | None = None) -> list[dict]:
     """Roster for the editor: every available pack, flagged by whether the
     client has overridden it and whether it carries a workflow."""
@@ -295,5 +325,5 @@ def list_agents(directory: str | Path | None = None) -> list[dict]:
 
 __all__ = [
     "overlay_toml", "validate_override", "write_override", "read_override",
-    "remove_override", "resolved_view", "list_agents",
+    "remove_override", "resolved_view", "list_agents", "rejected_override_view",
 ]
