@@ -69,6 +69,66 @@ def test_long_sqlite_query_stops_at_progress_deadline_and_releases_connection(sq
         assert connection.execute("SELECT count(*) FROM items").fetchone()[0] == 1
 
 
+@pytest.mark.parametrize("read_only", [True, False])
+def test_sqlite_admission_deadline_returns_public_error_without_dispatch(tmp_path, monkeypatch, read_only):
+    path = tmp_path / "admission.db"
+    with closing(sqlite3.connect(path)) as connection, connection:
+        connection.execute("CREATE TABLE items(value INTEGER)")
+    executions = []
+    connections = []
+    connect = sqlite3.connect
+
+    def expired_execution(**kwargs):
+        execution = QueryExecution(**kwargs)
+        execution.deadline = time.monotonic() - 1
+        executions.append(execution)
+        return execution
+
+    def observe_connect(*args, **kwargs):
+        connections.append(args)
+        return connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite_module, "QueryExecution", expired_execution)
+    monkeypatch.setattr(sqlite3, "connect", observe_connect)
+    result = sql_query().fn({"database": str(path), "read_only": read_only,
+                             "query": "SELECT 1" if read_only else "INSERT INTO items VALUES (1)"})
+    assert result == ("ERROR: database query failed (QueryDeadlineExceeded); "
+                      "transaction_status=not_started; no complete result was admitted")
+    assert not connections
+    assert executions[0].finished and executions[0].monitor_stopped
+    assert executions[0].state == "not_started" and executions[0]._watcher is None
+    with closing(connect(path)) as connection:
+        assert connection.execute("SELECT count(*) FROM items").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("control", ["budget", "halt", "cancel"])
+def test_sqlite_admission_preserves_control_stop(tmp_path, monkeypatch, control):
+    from maverick.killswitch import Halted
+
+    path = tmp_path / "admission-control.db"
+    with closing(sqlite3.connect(path)):
+        pass
+    error = {"budget": BudgetExceeded, "halt": Halted, "cancel": asyncio.CancelledError}[control]("stop")
+    connections = []
+    connect = sqlite3.connect
+
+    def stopped_execution(**kwargs):
+        execution = QueryExecution(**kwargs)
+        execution.request_cancel(error)
+        return execution
+
+    def observe_connect(*args, **kwargs):
+        connections.append(args)
+        return connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite_module, "QueryExecution", stopped_execution)
+    monkeypatch.setattr(sqlite3, "connect", observe_connect)
+    with pytest.raises(type(error)) as raised:
+        sql_query().fn({"database": str(path), "query": "SELECT 1"})
+    assert raised.value is error
+    assert not connections
+
+
 def test_sqlite_async_cancellation_stops_worker_before_executor_join_returns(sqlite_call, monkeypatch):
     monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 30)
     executions = capture_execution(monkeypatch, sqlite_call.module)
@@ -380,11 +440,28 @@ def _configure_mysql(monkeypatch):
 
 
 def _mysql_read_is_stopped(monkeypatch):
+    import sqlalchemy
+
+    # Initialize the real dialect before measuring a statement's deadline.
+    # The measured tool call still opens and owns a fresh native connection.
+    warmup = json.loads(database_tool().fn({"op": "query", "sql": "SELECT 1 AS value",
+                                           "response_format": "json"}))
+    assert warmup["rows"] == [[1]] and warmup["complete"]
     monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 0.3)
     executions = capture_execution(monkeypatch, database_module)
+    statements = []
+
+    def capture_statement(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+
+    sqlalchemy.event.listen(sqlalchemy.engine.Engine, "before_cursor_execute", capture_statement)
     began = time.monotonic()
-    result = database_tool().fn({"op": "query", "sql": _SLOW_MYSQL_READ})
+    try:
+        result = database_tool().fn({"op": "query", "sql": _SLOW_MYSQL_READ})
+    finally:
+        sqlalchemy.event.remove(sqlalchemy.engine.Engine, "before_cursor_execute", capture_statement)
     assert time.monotonic() - began < 5
+    assert _SLOW_MYSQL_READ in statements
     assert result.startswith("ERROR:") and executions[0].finished
     assert executions[0].cancellation_support == "mysql_statement_timeout_and_kill_query"
     monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 5)

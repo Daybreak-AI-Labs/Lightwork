@@ -16,7 +16,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from ..query_execution import QueryExecution
+from ..query_execution import QueryDeadlineExceeded, QueryExecution
 from ..query_results import QueryResult, render_effect
 from . import Tool
 from .ffmpeg_tool import _safe_path
@@ -137,54 +137,61 @@ def _write_authorizer(action: int, _arg1: str | None, _arg2: str | None,
 def _execute_sqlite_query(path, query, params, read_only, max_rows, response_format):
     conn = None
     cur = None
-    with QueryExecution(mutation=not read_only) as execution:
-        try:
-            if read_only:
-                conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True,
-                                       timeout=min(10, execution.remaining()))
-                conn.set_authorizer(_read_only_authorizer)
-            else:
-                conn = sqlite3.connect(str(path), timeout=min(10, execution.remaining()))
-                conn.set_authorizer(_write_authorizer)
-            execution.bind_sqlite(conn)
-            # Explicit ownership covers SQLite DDL as well as implicit DML.
-            # Nontransactional maintenance is not admitted through this tool.
-            conn.execute("BEGIN").close()
-            execution.started()
-            cur = conn.execute(query, params)
-            if cur.description is None:
-                affected = cur.rowcount
+    execution = QueryExecution(mutation=not read_only)
+    try:
+        with execution:
+            try:
+                if read_only:
+                    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True,
+                                           timeout=min(10, execution.remaining()))
+                    conn.set_authorizer(_read_only_authorizer)
+                else:
+                    conn = sqlite3.connect(str(path), timeout=min(10, execution.remaining()))
+                    conn.set_authorizer(_write_authorizer)
+                execution.bind_sqlite(conn)
+                # Explicit ownership covers SQLite DDL as well as implicit DML.
+                # Nontransactional maintenance is not admitted through this tool.
+                conn.execute("BEGIN").close()
+                execution.started()
+                cur = conn.execute(query, params)
+                if cur.description is None:
+                    affected = cur.rowcount
+                    cur.close()
+                    cur = None
+                    execution.commit(conn)
+                    return render_effect(affected, execution.state, execution.cancellation_support,
+                                         response_format=response_format, style="sqlite")
+                cols = [column[0] for column in cur.description]
+                rows = cur.fetchmany(max_rows + 1)
                 cur.close()
                 cur = None
-                execution.commit(conn)
-                return render_effect(affected, execution.state, execution.cancellation_support,
-                                     response_format=response_format, style="sqlite")
-            cols = [column[0] for column in cur.description]
-            rows = cur.fetchmany(max_rows + 1)
-            cur.close()
-            cur = None
-            execution.check()
-            if not read_only:
-                execution.commit(conn)
-            else:
-                conn.rollback()
-                execution.state = "read_only"
-            result = QueryResult.from_rows(cols, rows, row_limit=max_rows,
-                                           transaction_status=execution.state,
-                                           cancellation_support=execution.cancellation_support)
-            execution.check()
-            return result.render(style="sqlite", response_format=response_format)
-        except BaseException as exc:
-            if cur is not None:
-                with contextlib.suppress(Exception):
-                    cur.close()
-            if conn is not None:
-                execution.rollback(conn)
-            return execution.failure(exc)
-        finally:
-            execution.stop_monitor()
-            if conn is not None:
-                conn.close()
+                execution.check()
+                if not read_only:
+                    execution.commit(conn)
+                else:
+                    conn.rollback()
+                    execution.state = "read_only"
+                result = QueryResult.from_rows(cols, rows, row_limit=max_rows,
+                                               transaction_status=execution.state,
+                                               cancellation_support=execution.cancellation_support)
+                execution.check()
+                return result.render(style="sqlite", response_format=response_format)
+            except BaseException as exc:
+                if cur is not None:
+                    with contextlib.suppress(Exception):
+                        cur.close()
+                if conn is not None:
+                    execution.rollback(conn)
+                return execution.failure(exc)
+            finally:
+                execution.stop_monitor()
+                if conn is not None:
+                    conn.close()
+    except QueryDeadlineExceeded as exc:
+        # Admission can exhaust the deadline before __enter__ returns.
+        # No driver exists yet; preserve the public tool error contract.
+        execution.finish()
+        return execution.failure(exc)
 
 
 def _run_sql_query(args: dict[str, Any], sandbox) -> str:
