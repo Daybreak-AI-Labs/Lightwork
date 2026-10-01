@@ -1810,7 +1810,7 @@
     "id": "LW-122",
     "title": "Knowledge reindex lacks bounded job supervision",
     "category": "Memory knowledge and search",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "implementation_evidence": [
       "knowledge_reindex_jobs provides durable bounded jobs, exact collection/model/limit preview, a zero-provider-cost local ceiling, 64-passage cancellation checkpoints, private shadow vectors and source-CAS atomic publication. Interrupted jobs recover status and explicitly resume saved work; native admin controls and shared Copilot use the same service. Settings/installer gates and caps are implemented."
     ],
@@ -1819,8 +1819,8 @@
       "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
     ],
     "remaining": [
-      "Only the supported deterministic/local embedding adapters are admitted. Paid/custom embedding is deliberately unavailable without a verified per-request price/usage ceiling; no provider config or credentials changed. Installed local-model and PostgreSQL qualification remain pending.",
-      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+      "Reopened during final acceptance review: the existing hosted embedding path still lacks supervised per-request cost/usage admission. Local-only rebuild supervision does not complete this item for the existing hosted default. Implement and qualify the supported hosted adapters without deployment credential changes or live provider calls.",
+      "The local deterministic/local adapter job, shadow publication, cancellation and recovery remain implemented. Unsupported custom adapters must remain fail-closed; no pricing or paid-outcome guarantees may be invented."
     ],
     "evidence_slice": "slices/memory-knowledge-final-qualification.json",
     "source_evidence_status": "code-supported",

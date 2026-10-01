@@ -235,7 +235,7 @@
   },
   {
     "id": "LW-122",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "source_evidence_status": "code-supported",
     "source_acceptance_criteria": "1. Provide a durable bounded job with previewed collection size and cost ceiling, progress, safe-boundary cancellation and recoverable status after disconnect.\n2. A synthetic interruption recovers the existing job status without blindly reindexing again.\n3. Cancellation cannot corrupt the live index; preserve existing administrator confirmation and AI cost warning.",
     "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
@@ -247,8 +247,8 @@
       "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
     ],
     "remaining": [
-      "Only the supported deterministic/local embedding adapters are admitted. Paid/custom embedding is deliberately unavailable without a verified per-request price/usage ceiling; no provider config or credentials changed. Installed local-model and PostgreSQL qualification remain pending.",
-      "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
+      "Reopened during final acceptance review: the existing hosted embedding path still lacks supervised per-request cost/usage admission. Local-only rebuild supervision does not complete this item for the existing hosted default. Implement and qualify the supported hosted adapters without deployment credential changes or live provider calls.",
+      "The local deterministic/local adapter job, shadow publication, cancellation and recovery remain implemented. Unsupported custom adapters must remain fail-closed; no pricing or paid-outcome guarantees may be invented."
     ]
   }
 ]
