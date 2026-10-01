@@ -3,6 +3,9 @@ rollback restores an earlier one non-destructively (the rollback is itself a new
 version, so nothing is ever lost)."""
 from __future__ import annotations
 
+import json
+import os
+
 import pytest
 from maverick.flow import Flow, FlowNode, store
 
@@ -14,6 +17,50 @@ def _dd(tmp_path, monkeypatch):
 def _flow(brief="do a"):
     return Flow(id="f", name="F", start="a",
                 nodes={"a": FlowNode(id="a", kind="agent", brief=brief)})
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_maximum_tenant_segment_definition_publication_and_idempotency(tmp_path, monkeypatch):
+    from maverick.paths import MAX_TENANT_SEGMENT_LENGTH, data_dir, tenant_scope
+
+    home = tmp_path / ("h" * max(1, 90 - len(os.path.abspath(tmp_path)) - 1))
+    monkeypatch.setenv("MAVERICK_HOME", str(home))
+    with tenant_scope(tenant="t" * MAX_TENANT_SEGMENT_LENGTH):
+        assert len(os.path.abspath(data_dir("flows") / ".definitions.lock")) > 260
+        saved = store.save_flow(_flow("first"))
+        assert store.load_flow(saved.id).nodes["a"].brief == "first"
+        assert [item.id for item in store.list_flows()] == [saved.id]
+        assert [item["id"] for item in store.list_flow_summaries()] == [saved.id]
+
+        current = store.save_flow(_flow("second"), expected_version=1,
+                                  expected_revision=saved.revision)
+        assert [item.version for item in store.list_versions(current.id)] == [1, 2]
+        assert store.load_version(current.id, 1).nodes["a"].brief == "first"
+        release = store.publish_flow(current.id, expected_version=current.version,
+                                     expected_revision=current.revision)
+        assert store.load_published_bundle(current.id)[1]["release_id"] == release["release_id"]
+        assert [item[0].id for item in store.list_published_bundles()] == [current.id]
+
+        with store.idempotency_lock(current.id, "request"):
+            assert store.save_idempotency_claim(current.id, "request", "first-run", overwrite=False)
+            assert not store.save_idempotency_claim(current.id, "request", "second-run", overwrite=False)
+        claim = store._read_json(store._idempotency_claim_path(current.id, "request"))
+        assert claim["run_id"] == "first-run"
+        assert "\\\\?\\" not in json.dumps({"flow": current.to_dict(),
+                                                "release": release, "claim": claim})
+
+        store._write_json(store._schema_dir() / f"{current.id}.json", {"field": "string"})
+        snapshot = store._objects_dir() / f"{release['definition_digest']}.json"
+        store._write_json(snapshot, {"id": "tampered"})
+        with pytest.raises(store.FlowSnapshotError, match="corrupt"):
+            store.publish_flow(current.id, expected_version=current.version,
+                               expected_revision=current.revision)
+
+        assert store.delete_flow(current.id)
+        assert store.list_flows() == []
+        assert store.list_versions(current.id) == []
+        assert store.list_published_bundles() == []
+        assert store.load_flow_schema(current.id) == {}
 
 
 def test_first_save_is_version_1(tmp_path, monkeypatch):

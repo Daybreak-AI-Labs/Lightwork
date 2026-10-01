@@ -20,35 +20,35 @@ _MAX_FLOW_DEFINITION_BYTES = 1_000_000
 
 
 def _flows_dir():
-    from ..paths import data_dir
-    return data_dir("flows")
+    return _flow_dir()
 
 
 def _history_dir(flow_id: str):
-    from ..paths import data_dir
-    return data_dir("flows", "history", _safe_id(flow_id))
+    return _flow_dir("history", _safe_id(flow_id))
 
 
-def _runs_dir():
+def _flow_dir(*parts: str) -> Path:
     import os
 
     from ..file_lock import _windows_extended_path
     from ..paths import data_dir
 
-    path = data_dir("flows", "runs")
-    # All checkpoint descendants (sidecars, SQLite journals, JSON rows, and
-    # payload artifacts) must retain the extended spelling on Windows.
+    path = data_dir("flows", *parts)
+    # Keep every derived flow path on one spelling: definitions, history,
+    # snapshots, release pointers, claims, checkpoint rows and SQLite journals.
     return Path(_windows_extended_path(path)) if os.name == "nt" else path
 
 
+def _runs_dir():
+    return _flow_dir("runs")
+
+
 def _objects_dir():
-    from ..paths import data_dir
-    return data_dir("flows", "objects")
+    return _flow_dir("objects")
 
 
 def _published_dir():
-    from ..paths import data_dir
-    return data_dir("flows", "published")
+    return _flow_dir("published")
 
 
 @contextmanager
@@ -68,13 +68,11 @@ def _activation_lock(flow_id: str):
 
 
 def _idempotency_dir():
-    from ..paths import data_dir
-    return data_dir("flows", "idempotency")
+    return _flow_dir("idempotency")
 
 
 def _schema_dir():
-    from ..paths import data_dir
-    return data_dir("flows", "schema")
+    return _flow_dir("schema")
 
 
 def load_flow_schema(flow_id: str) -> dict:
