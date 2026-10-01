@@ -64,10 +64,10 @@
   },
   {
     "id": "LW-052",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "implementation_evidence": "RunsListScreen uses scoped server search/status and load-older offset pages with unique-ID merge, generation invalidation, scrollable search/status header, distinct empty-search copy and explicit 200-search-result bound; api.ts uses existing scoped endpoints.",
     "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
-    "remaining": "125-task, incoming-task scroll and permission runtime acceptance unrun."
+    "remaining": "Reopened during final acceptance review: the locally feasible 125-task pagination scenario remains untested, and static tracing found a possible dropped boundary row when a new task shifts the first page during refresh. A focused synthetic regression and repair are in progress, including owner/permission invalidation. Native installed-device scroll/accessibility qualification remains separate."
   },
   {
     "id": "LW-053",
