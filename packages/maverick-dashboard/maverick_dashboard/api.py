@@ -183,6 +183,14 @@ from .api_schemas import (
     WorkflowRefineIn,
     WorkflowSaveIn,
 )
+from .approval_decisions import (  # noqa: F401 -- re-exported for tests
+    _audit_approval_decision,
+    _deliver_approval_audit_event,
+    _record_vote_or_raise,
+    _require_acknowledgement,
+    _safe_action_label,
+    require_current_decision_card,
+)
 from .auth import (
     assert_goal_access,
     auth_genuinely_off,
@@ -12995,34 +13003,9 @@ def _require_settings_decider(request: Request, world, approval_id: int, who: st
 
 def _require_current_decision_card(world, approval_id: int, request: Request) -> None:
     """Reject a stale page, expired card, or corrupted structured approval."""
-    from maverick.approval_cards import (
-        ApprovalCardError,
-        decode_approval_detail,
-        require_current_approval_card,
+    require_current_decision_card(
+        world, approval_id, request.headers.get("X-Lightwork-Approval-Binding", ""),
     )
-
-    approval = world.get_approval(approval_id)
-    if approval is None or approval.status != "pending":
-        return
-    try:
-        card = decode_approval_detail(approval.detail)
-        if card is None:
-            raise ApprovalCardError(
-                "this approval predates exact-operation review; reject it and "
-                "ask the requester to prepare a fresh review"
-            )
-        if not hmac.compare_digest(card["action"], approval.action):
-            raise ApprovalCardError(
-                "the approval card does not match the queued action; request a fresh review"
-            )
-        supplied = request.headers.get("X-Lightwork-Approval-Binding", "")
-        if not supplied:
-            raise ApprovalCardError(
-                "review the current approval card before submitting this decision"
-            )
-        require_current_approval_card(card, expected_binding=supplied)
-    except ApprovalCardError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _supervisor(request: Request) -> str:
@@ -13036,86 +13019,6 @@ def _supervisor(request: Request) -> str:
     return caller_principal(request) or "operator"
 
 
-def _deliver_approval_audit_event(world, event) -> bool:
-    """Deliver exactly one queued vote and persist its delivery marker."""
-    if event.delivered_at is not None:
-        return True
-
-    from maverick.audit import AuditRefused, EventKind, audit_event
-
-    try:
-        written = audit_event(
-            EventKind.APPROVAL_DECISION,
-            approval_event_id=event.event_id,
-            approval_id=int(event.approval_id),
-            status=event.status,
-            decided_by=event.decided_by,
-            occurred_at=float(event.created_at),
-            summary=_decision_summary(world, event),
-        )
-    except AuditRefused as exc:
-        # This is not refusal swallowing: no approval becomes effective. The
-        # exact event remains in the durable outbox for a policy/key repair and
-        # idempotent retry.
-        log.error(
-            "approval audit refused; decision remains non-effective (event_id=%s): %s",
-            event.event_id,
-            exc,
-        )
-        return False
-    if not written:
-        log.error(
-            "approval audit write failed; decision remains non-effective (event_id=%s)",
-            event.event_id,
-        )
-        return False
-
-    try:
-        return bool(world.mark_approval_audit_delivered(event.event_id))
-    # The signed append may have succeeded while the delivery-marker commit
-    # acknowledgement failed. Reconcile instead of returning an error that
-    # invites an unsafe, differently-keyed retry.
-    # failure-policy: fail_soft_with_audit
-    except Exception:
-        log.exception(
-            "approval audit was written but delivery finalization failed (event_id=%s)",
-            event.event_id,
-        )
-        try:
-            reconciled = world.get_approval_audit_event(event.event_id)
-        except Exception:
-            return False
-        return bool(reconciled and reconciled.delivered_at is not None)
-
-
-def _safe_action_label(approval) -> str:
-    """The queued action as plain, redacted text for audit summaries."""
-    from maverick.safety.secret_detector import redact
-
-    try:
-        text, _matches = redact(" ".join(str(getattr(approval, "action", "") or "").split()))
-    except Exception:
-        return "the reviewed action"
-    return (text[:200] or "the reviewed action").replace(".", " ").replace("_", " ")
-
-
-def _decision_summary(world, event) -> str:
-    """One plain sentence for the audit log: who decided what."""
-    try:
-        approval = world.get_approval(int(event.approval_id))
-    except Exception:
-        approval = None
-    label = _safe_action_label(approval) if approval is not None else "the reviewed action"
-    risk = str(getattr(approval, "risk", "") or "").strip() or "unrated"
-    verb = "approved" if event.status == "approved" else "rejected"
-    if event.final_status is None:
-        return (
-            f"{event.decided_by} {verb} '{label}' ({risk} risk); "
-            "more approvers are needed before it takes effect."
-        )
-    return f"{event.decided_by} {verb} '{label}' ({risk} risk)."
-
-
 async def _decision_payload(request: Request) -> dict:
     """The optional JSON body of a decision (acknowledgement, reason)."""
     if not (request.headers.get("content-type") or "").lower().startswith("application/json"):
@@ -13125,161 +13028,6 @@ async def _decision_payload(request: Request) -> dict:
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="the decision details could not be read") from None
     return payload if isinstance(payload, dict) else {}
-
-
-def _require_acknowledgement(world, approval_id: int, payload: dict, who: str) -> None:
-    """High and critical risk approvals need an explicit acknowledgement.
-
-    The Approvals page collects it in its confirmation step; API callers send
-    ``{"acknowledged": true}`` and, for critical risk, ``"confirmation":
-    "approve"`` typed by the person. Off via ``[approval]
-    require_acknowledgement = false``. The outcome is written to the audit log.
-    """
-    from maverick.safety.consent import approval_requires_acknowledgement
-
-    approval = world.get_approval(approval_id)
-    if approval is None or approval.status != "pending":
-        return
-    risk = str(approval.risk or "").lower()
-    if risk not in ("high", "critical") or not approval_requires_acknowledgement():
-        return
-    acknowledged = payload.get("acknowledged") is True
-    typed = " ".join(str(payload.get("confirmation") or "").split()).lower()
-    if not acknowledged:
-        raise HTTPException(
-            status_code=422,
-            detail="Confirm you have read what this action will do before approving it.",
-        )
-    if risk == "critical" and typed != "approve":
-        raise HTTPException(
-            status_code=422,
-            detail="Type APPROVE to confirm this critical action.",
-        )
-    from maverick import audit
-
-    label = _safe_action_label(approval)
-    recorded = audit.audit_event(
-        audit.EventKind.CONSENT_RESULT,
-        agent=who,
-        action="approval_confirmation",
-        approval_id=int(approval_id),
-        risk=risk,
-        acknowledged=True,
-        typed_confirmation=(risk == "critical"),
-        summary=(
-            f"{who} confirmed reading what '{label}' will do ({risk} risk) before approving it."
-        ),
-    )
-    if not recorded:
-        log.warning("approval confirmation audit write failed (approval_id=%s)", approval_id)
-
-
-def _audit_approval_decision(world, event) -> bool:
-    """Deliver an approval's queued votes in durable occurrence order.
-
-    The world-model outbox is the authority seam: an audit refusal leaves every
-    later vote durable but non-effective. A retry uses stable event ids and
-    resumes at the oldest undelivered row, so a quorum-reaching vote cannot
-    overtake an earlier sign-off in the signed chain.
-    """
-    try:
-        pending = world.pending_approval_audit_events(
-            approval_id=event.approval_id,
-            limit=1000,
-        )
-    # The vote/outbox commit already succeeded. A read failure here is an
-    # explicit audit-pending response, not a 500 that falsely invites a new
-    # decision.
-    # failure-policy: fail_soft_with_audit
-    except Exception:
-        log.exception(
-            "approval audit outbox could not be read (event_id=%s)",
-            event.event_id,
-        )
-        return False
-    for queued in pending:
-        if not _deliver_approval_audit_event(world, queued):
-            return False
-    try:
-        current = world.get_approval_audit_event(event.event_id)
-    except Exception:
-        return False
-    return bool(current and current.delivered_at is not None)
-
-
-def _record_vote_or_raise(world, approval_id: int, status: str, who: str):
-    """Apply one approver's vote, mapping rejection to the right HTTP error.
-
-    Under N-of-M dual control a vote can be refused for segregation-of-duties
-    reasons (the requester can't self-approve, or an approver identity is needed)
-    -- distinguish that (403) from an unknown/already-decided approval (404)."""
-    event_id = world.approval_audit_event_id(approval_id, status, who)
-    try:
-        event = world.decide_approval_audited(
-            approval_id,
-            status,
-            decided_by=who,
-        )
-    except Exception as decision_error:
-        # A commit acknowledgement can be lost after both the vote and outbox
-        # row are durable. The stable id lets us prove that outcome before
-        # deciding whether this request failed.
-        try:
-            event = world.get_approval_audit_event(event_id)
-        except Exception as reconcile_error:
-            log.exception(
-                "approval decision outcome is uncertain (event_id=%s)",
-                event_id,
-            )
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "decision": "outcome_uncertain",
-                    "decision_id": event_id,
-                    "retry_safe": True,
-                },
-                headers={
-                    "Retry-After": "1",
-                    "X-Lightwork-Decision-Id": event_id,
-                    "X-Lightwork-Approval-State": "uncertain",
-                },
-            ) from reconcile_error
-        if event is not None and not event.matches(approval_id, status, who):
-            log.critical(
-                "approval outbox identity mismatch during commit reconciliation (event_id=%s)",
-                event_id,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "decision": "outbox_integrity_error",
-                    "decision_id": event_id,
-                    "retry_safe": False,
-                },
-                headers={
-                    "X-Lightwork-Decision-Id": event_id,
-                    "X-Lightwork-Approval-State": "integrity_error",
-                },
-            ) from decision_error
-        if event is None:
-            raise decision_error
-    if event is not None:
-        return event
-
-    st = world.approval_state(approval_id)
-    if st is None or st.get("status") != "pending":
-        raise HTTPException(status_code=404, detail="no such pending approval")
-    if world.approval_has_pending_finalization(approval_id):
-        raise HTTPException(
-            status_code=409,
-            detail="a final decision is accepted and awaiting signed audit delivery",
-        )
-    raise HTTPException(
-        status_code=403,
-        detail="vote not accepted: the requester can't approve their own request "
-        "(segregation of duties), or an approver identity is required for "
-        "multi-party approval",
-    )
 
 
 def _approval_decision_response(world, event, audit_delivered: bool) -> Response:
@@ -13364,7 +13112,7 @@ async def approve_approval(request: Request, approval_id: int) -> Response:
     world = _world()
     _require_settings_decider(request, world, approval_id, who, approving=True)
     _require_current_decision_card(world, approval_id, request)
-    _require_acknowledgement(world, approval_id, payload, who)
+    _require_acknowledgement(world, approval_id, payload, who, channel="dashboard")
     event = _record_vote_or_raise(world, approval_id, "approved", who)
     return _approval_decision_response(
         world,

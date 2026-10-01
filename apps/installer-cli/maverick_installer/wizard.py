@@ -98,6 +98,8 @@ CHANNELS: list[tuple[str, str, list[str]]] = [
     ("telegram", "Telegram bot (free, easiest)", ["TELEGRAM_BOT_TOKEN"]),
     ("discord", "Discord bot (Gateway WS)", ["DISCORD_BOT_TOKEN"]),
     ("slack", "Slack (Socket Mode)", ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]),
+    ("teams", "Microsoft Teams (Azure Bot, needs a public HTTPS address)",
+     ["TEAMS_APP_ID", "TEAMS_APP_PASSWORD"]),
     ("signal", "Signal (via signal-cli)", []),
     ("email", "Email (IMAP/SMTP, stdlib only)", ["EMAIL_USER", "EMAIL_APP_PASSWORD"]),
     ("matrix", "Matrix (federated)", ["MATRIX_ACCESS_TOKEN"]),
@@ -795,6 +797,7 @@ _ALLOWLIST_CHANNELS = {
     "telegram",
     "discord",
     "slack",
+    "teams",
     "signal",
     "email",
     "matrix",
@@ -812,6 +815,7 @@ _ALLOWLIST_HINT = {
     "telegram": "numeric Telegram user IDs",
     "discord": "numeric Discord user IDs",
     "slack": "Slack user IDs, e.g. U01ABC",
+    "teams": "Microsoft Entra object IDs of the people allowed, e.g. 12345678-abcd-abcd-abcd-1234567890ab",
     "signal": "phone numbers, e.g. +12345550199",
     "email": "email addresses",
     "matrix": "MXIDs, e.g. @you:matrix.org",
@@ -841,6 +845,22 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
     elif ch_id == "slack":
         cfg["app_token"] = "${SLACK_APP_TOKEN}"
         cfg["bot_token"] = "${SLACK_BOT_TOKEN}"
+    elif ch_id == "teams":
+        cfg["app_id"] = "${TEAMS_APP_ID}"
+        cfg["app_password"] = "${TEAMS_APP_PASSWORD}"
+        cfg["tenant_id"] = _q_text(
+            "  Microsoft Entra tenant ID (blank only for a multi-tenant app registration)",
+            default="",
+        ).strip()
+        cfg["port"] = _safe_int(_q_text("  Webhook port (forward /webhook/teams here)", default="8771"),
+                                default=8771)
+        cfg["approvals_enabled"] = _q_confirm(
+            "  Let linked approvers decide approval requests from Teams cards?", default=False,
+        )
+        console.print(
+            "  [dim]Register the bot in Azure and point its messaging endpoint at "
+            "https://<your address>/webhook/teams. Steps: docs/channels/teams.md[/dim]"
+        )
     elif ch_id == "signal":
         cfg["phone_number"] = _q_text("  Signal phone number (e.g., +12345550199)", default="")
     elif ch_id == "email":

@@ -3587,6 +3587,9 @@ class PostgresWorldModel:
                  (requested_by or None), goal[0] if goal else None, goal[1] if goal else ""),
             )
             row = cur.fetchone()
+        from ..world_model import _notify_approval_created
+
+        _notify_approval_created(int(row[0]), provenance)
         return int(row[0])
 
     def get_approval(self, approval_id: int):
