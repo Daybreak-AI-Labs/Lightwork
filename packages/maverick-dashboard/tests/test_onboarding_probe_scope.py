@@ -10,11 +10,19 @@ def _unexpected_catalog():
 
 
 def test_empty_and_malformed_overrides_do_not_hydrate_catalog(tmp_path, monkeypatch):
+    calls = []
+
+    def catalog_probe():
+        calls.append(True)
+        return []
+
     monkeypatch.setattr(domain, "user_dir", lambda: tmp_path)
-    monkeypatch.setattr(domain_edit, "list_agents", _unexpected_catalog)
+    monkeypatch.setattr(domain_edit, "list_agents", catalog_probe)
     assert onboarding_state._has_user_agent() is False
+    assert calls == []
     (tmp_path / "broken.toml").write_text("this is not valid TOML [", encoding="utf-8")
     assert onboarding_state._has_user_agent() is False
+    assert calls == []
 
 
 def test_override_probe_rechecks_scope_and_deletion(tmp_path, monkeypatch):
@@ -42,10 +50,17 @@ def test_override_probe_rechecks_scope_and_deletion(tmp_path, monkeypatch):
 
 
 def test_parseable_override_still_requires_resolved_agent(tmp_path, monkeypatch):
+    calls = []
+
+    def unresolved_roster():
+        calls.append(True)
+        return [{"is_override": False}]
+
     (tmp_path / "specialist.toml").write_text('name = "specialist"\n', encoding="utf-8")
     monkeypatch.setattr(domain, "user_dir", lambda: tmp_path)
-    monkeypatch.setattr(domain_edit, "list_agents", lambda: [{"is_override": False}])
+    monkeypatch.setattr(domain_edit, "list_agents", unresolved_roster)
     assert onboarding_state._has_user_agent() is False
+    assert calls == [True]
 
 
 def test_existing_owned_task_completes_built_step_without_catalog(monkeypatch):
