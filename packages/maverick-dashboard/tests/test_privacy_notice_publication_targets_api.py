@@ -117,7 +117,8 @@ def test_the_last_target_cannot_be_removed_while_publishing_is_on(audit_rows):
     settings_store.set_module_enables(
         ["privacy_automation", "privacy_automation.notice_governance",
          "consent_preferences", "consent_preferences.publishing"], True)
-    r = client.post("/api/v1/settings/catalog", json={"changes": [
+    revision = client.get("/api/v1/settings/catalog", params={"q": "__revision__"}).json()["revision"]
+    r = client.post("/api/v1/settings/catalog", json={"expected_revision": revision, "changes": [
         {"id": "privacy_automation.notice_governance.publication_runtime.enable",
          "value": True}]})
     assert r.status_code == 200, r.text

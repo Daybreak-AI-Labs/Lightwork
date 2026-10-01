@@ -64,12 +64,12 @@ def entry(source, lang):
     return row[actual], actual
 
 
-def text(source, lang="en", **values):
+def text(source, lang="en", /, **values):
     value, _ = entry(source, lang)
     return value.format_map(values) if values else value
 
 
-def region(source, lang="en", **values):
+def region(source, lang="en", /, **values):
     """A product-copy region, with caller-supplied content escaped and isolated."""
     value, actual = entry(source, lang)
     safe = escape(value)
@@ -133,8 +133,8 @@ def context(request, lang):
     metadata = {"language": lang, "locale": locale_for(request, lang),
                 "review_status": "source" if lang == "en" else "community_seed" if lang == "ar" else "draft_partial"}
     revision, _ = browser_catalog_asset(lang)
-    return {"ui": lambda source, **values: region(source, lang, **values),
-            "ut": lambda source, **values: text(source, lang, **values),
+    return {"ui": lambda source, /, **values: region(source, lang, **values),
+            "ut": lambda source, /, **values: text(source, lang, **values),
             "ul": lambda source: entry(source, lang)[1],
             "journey_i18n": {**metadata, "catalog": catalog},
             "journey_i18n_bootstrap": metadata,

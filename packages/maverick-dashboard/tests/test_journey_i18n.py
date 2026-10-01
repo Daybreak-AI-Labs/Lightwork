@@ -57,6 +57,27 @@ def test_interpolation_cannot_add_html_or_change_user_text():
         i18n_journeys.region("Showing {start}–{end} of {total}", "fr", start=1)
 
 
+def test_placeholder_names_do_not_collide_with_translation_arguments(monkeypatch):
+    monkeypatch.setattr(auth, "caller_principal", lambda request: None)
+    helpers = i18n_journeys.context(request(), "fr")
+    value = '<img src=x onerror=alert(1)>'
+    rendered = str(helpers["ui"]("Source: {source}", source=value))
+    assert '<img' not in rendered and '&lt;img' in rendered
+    assert helpers["ut"]("Source: {source}", source="private preference").endswith("private preference")
+    assert i18n_journeys.text("{source}: {lang}", "en", source="account", lang="French") == "account: French"
+
+
+def test_native_preferences_page_renders_memory_source(monkeypatch):
+    from fastapi.testclient import TestClient
+    from maverick_dashboard.app import app
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+        response = client.get("/preferences")
+    assert response.status_code == 200, response.text[:500]
+    assert 'data-product-copy' in response.text and 'Source:' in response.text
+
+
 def test_display_language_legacy_key_does_not_change_response_preferences(monkeypatch):
     saved = []
     monkeypatch.setattr(preferences_api, "_app", lambda: SimpleNamespace(_require_same_origin=lambda request: None))
