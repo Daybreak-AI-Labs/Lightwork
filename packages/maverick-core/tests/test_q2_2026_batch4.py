@@ -168,12 +168,12 @@ def test_postgres_without_dep_raises_actionable():
 
 
 def test_postgres_requires_dsn(monkeypatch):
-    """No DSN -> actionable RuntimeError."""
+    """No DSN -> actionable RuntimeError before loading connection I/O."""
+    import sys
+
     monkeypatch.delenv("MAVERICK_PG_DSN", raising=False)
     if not _HAS_PSYCOPG:
-        # Constructor raises ImportError before checking DSN; create
-        # an instance via a lightly mocked psycopg.
-        import sys
+        # Preserve the optional-driver check without requiring a real driver.
         import types
         fake = types.ModuleType("psycopg")
 
@@ -184,6 +184,9 @@ def test_postgres_requires_dsn(monkeypatch):
         monkeypatch.setitem(sys.modules, "psycopg", fake)
 
     from maverick.world_model_backends import PostgresWorldModel
+    # A missing DSN must be reported without importing the socket I/O layer,
+    # even when the real psycopg package happens to be installed.
+    monkeypatch.setitem(sys.modules, "maverick.postgres_io", None)
     with pytest.raises(RuntimeError, match="MAVERICK_PG_DSN"):
         PostgresWorldModel(dsn=None)
 

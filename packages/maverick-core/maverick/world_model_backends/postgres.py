@@ -1212,14 +1212,14 @@ class PostgresWorldModel:
             raise ImportError(
                 "psycopg not installed. Run: python -m pip install -e './packages/maverick-core[postgres]'"
             ) from e
-        from ..postgres_io import BoundedConnection, postgres_io_timeout_seconds
-
         self._dsn = dsn or os.environ.get("MAVERICK_PG_DSN") or _configured_dsn()
         if not self._dsn:
             raise RuntimeError(
                 "Postgres world model requires MAVERICK_PG_DSN or "
                 "[world_model] dsn in config.toml."
             )
+        from ..postgres_io import BoundedConnection, postgres_io_timeout_seconds
+
         self._rls = _rls_enabled()
         # Optional connection pool (opt-in via [world_model] pool_size). Pooled
         # mode hands each transaction its own connection from the pool, so the
