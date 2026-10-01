@@ -161,8 +161,8 @@
     "implementation_evidence": [
       "ChatThreads.history uses owner/tenant-bound keyset pagination relative to the selected goal; thread-history API and progressive retryable history UI."
     ],
-    "validation": "SQLite test_chat_threads.py includes the passing >200-turn history pagination around an early selected goal, stable ordering and duplicate exclusion. Twelve configured PostgreSQL variants across that file were skipped without a dedicated DSN. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
-    "remaining": "Dedicated PostgreSQL pagination/concurrency is skipped without MAVERICK_PG_DSN; installed long-thread performance remains to qualify.",
+    "validation": "SQLite history pagination and duplicate exclusion passed. The disposable PostgreSQL 16.15 run also passed all 25 cases in test_chat_threads.py, including its native database variants. Exact source and cohort limits: postgresql-qualification.md and audit/postgres-de699-01.xml.",
+    "remaining": "Final-source consolidated regression and deployed multi-host/long-thread performance remain separate. PostgreSQL pagination is no longer an unexecuted dependency.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -199,8 +199,8 @@
       "chat_goal attachments retain per-file states and File objects for selective retry; publish_batch/SubmissionStore.admit already deduplicate exact file identities.",
       "Attachment upload retains each current File until acknowledged, aborts at a bounded deadline, retries only explicit failed entries and prevents stale acknowledgement after revocation."
     ],
-    "validation": "New attachment_lifecycle.test.js proves success/failed/pending states concurrently and retries only the failed file without losing text; test_attachment_submission.py verifies exact HTTP retry deduplication and core submission/companion tests pass. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
-    "remaining": "Optional real-DOCX extraction and Windows symlink behavior were skipped (missing python-docx and unavailable symlink creation); native deduplication/partial retry cases pass. Multi-host companion preparation remains deployment qualification.",
+    "validation": "New attachment_lifecycle.test.js proves success/failed/pending states concurrently and retries only the failed file without losing text; test_attachment_submission.py verifies exact HTTP retry deduplication and core submission/companion tests pass. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md. Subsequent private parser qualification exercised real python-docx 1.2.0 extraction, tables and exact original bytes in ordinary and secure postures; see optional-parser-qualification.md for exact source and overlapping cohort accounting.",
+    "remaining": "Native Windows symbolic-link privilege checks and deployed multi-host companion preparation remain separate qualification. Real DOCX extraction is no longer blocked by a missing local dependency; no production or provider calls were made.",
     "evidence_slice": "slices/conversation.json"
   },
   {
@@ -2105,7 +2105,7 @@
     "implementation_evidence": [
       "fb292c5: maverick.budget_guidance uses launch resolver and scoped non-additive ledgers; durable threshold notices.",
       "budget_guidance_api.py, budget_guidance.html, lightwork-budget-guidance.js: owned previews, local/UTC reset, due-work forecast and CAS audited accounting escalation with original-period verification.",
-      "docs/budget-guidance.md; core/tests/test_budget_guidance.py authored unrun.",
+      "docs/budget-guidance.md; core/tests/test_budget_guidance.py executed in the focused qualification recorded below.",
       "product_operations_budget.py: same native preview/help/CAS accounting controls in sealed, typed, reviewed Copilot catalog; named-case selection in budget UI."
     ],
     "validation": "Local budget/core, billing and cost provenance tests: 12 passed. Budget adapter, diagnostics and shared catalog tests: 20 passed. Node syntax and focused Ruff passed.",
@@ -2120,7 +2120,7 @@
     "implementation_evidence": [
       "fb292c5: maverick.budget_guidance uses launch resolver and scoped non-additive ledgers; durable threshold notices.",
       "budget_guidance_api.py, budget_guidance.html, lightwork-budget-guidance.js: owned previews, local/UTC reset, due-work forecast and CAS audited accounting escalation with original-period verification.",
-      "docs/budget-guidance.md; core/tests/test_budget_guidance.py authored unrun.",
+      "docs/budget-guidance.md; core/tests/test_budget_guidance.py executed in the focused qualification recorded below.",
       "product_operations_budget.py: same native preview/help/CAS accounting controls in sealed, typed, reviewed Copilot catalog; named-case selection in budget UI."
     ],
     "validation": "Local budget/core, billing and cost provenance tests: 12 passed. Budget adapter, diagnostics and shared catalog tests: 20 passed. Node syntax and focused Ruff passed.",
@@ -2135,7 +2135,7 @@
     "implementation_evidence": [
       "fb292c5: maverick.budget_guidance uses launch resolver and scoped non-additive ledgers; durable threshold notices.",
       "budget_guidance_api.py, budget_guidance.html, lightwork-budget-guidance.js: owned previews, local/UTC reset, due-work forecast and CAS audited accounting escalation with original-period verification.",
-      "docs/budget-guidance.md; core/tests/test_budget_guidance.py authored unrun.",
+      "docs/budget-guidance.md; core/tests/test_budget_guidance.py executed in the focused qualification recorded below.",
       "product_operations_budget.py: same native preview/help/CAS accounting controls in sealed, typed, reviewed Copilot catalog; named-case selection in budget UI."
     ],
     "validation": "Local budget/core, billing and cost provenance tests: 12 passed. Budget adapter, diagnostics and shared catalog tests: 20 passed. Node syntax and focused Ruff passed.",

@@ -103,8 +103,8 @@
     "id": "LW-013",
     "status": "implemented-test-needed",
     "implementation_evidence": "ChatThreads.history uses owner/tenant-bound keyset pagination relative to the selected goal; thread-history API and progressive retryable history UI.",
-    "validation": "SQLite test_chat_threads.py includes the passing >200-turn history pagination around an early selected goal, stable ordering and duplicate exclusion. Twelve configured PostgreSQL variants across that file were skipped without a dedicated DSN. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
-    "remaining": "Dedicated PostgreSQL pagination/concurrency is skipped without MAVERICK_PG_DSN; installed long-thread performance remains to qualify."
+    "validation": "SQLite history pagination and duplicate exclusion passed. The disposable PostgreSQL 16.15 run also passed all 25 cases in test_chat_threads.py, including its native database variants. Exact source and cohort limits: postgresql-qualification.md and audit/postgres-de699-01.xml.",
+    "remaining": "Final-source consolidated regression and deployed multi-host/long-thread performance remain separate. PostgreSQL pagination is no longer an unexecuted dependency."
   },
   {
     "id": "LW-014",
@@ -130,8 +130,8 @@
       "chat_goal attachments retain per-file states and File objects for selective retry; publish_batch/SubmissionStore.admit already deduplicate exact file identities.",
       "Attachment upload retains each current File until acknowledged, aborts at a bounded deadline, retries only explicit failed entries and prevents stale acknowledgement after revocation."
     ],
-    "validation": "New attachment_lifecycle.test.js proves success/failed/pending states concurrently and retries only the failed file without losing text; test_attachment_submission.py verifies exact HTTP retry deduplication and core submission/companion tests pass. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md.",
-    "remaining": "Optional real-DOCX extraction and Windows symlink behavior were skipped (missing python-docx and unavailable symlink creation); native deduplication/partial retry cases pass. Multi-host companion preparation remains deployment qualification."
+    "validation": "New attachment_lifecycle.test.js proves success/failed/pending states concurrently and retries only the failed file without losing text; test_attachment_submission.py verifies exact HTTP retry deduplication and core submission/companion tests pass. Detailed run provenance and limits: slices/conversation-acceptance-qualification.md. Subsequent private parser qualification exercised real python-docx 1.2.0 extraction, tables and exact original bytes in ordinary and secure postures; see optional-parser-qualification.md for exact source and overlapping cohort accounting.",
+    "remaining": "Native Windows symbolic-link privilege checks and deployed multi-host companion preparation remain separate qualification. Real DOCX extraction is no longer blocked by a missing local dependency; no production or provider calls were made."
   },
   {
     "id": "LW-017",
