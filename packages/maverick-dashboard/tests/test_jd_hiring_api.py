@@ -73,19 +73,23 @@ def test_jd_match_disabled_by_config_knob(monkeypatch, tmp_path):
 
 
 def test_department_scope_filters_catalog_before_ranking(monkeypatch):
+    from types import SimpleNamespace
+
     import maverick.domain as domain
     import maverick.jd_hiring as jd_hiring
     import maverick_dashboard.api as api
 
     profiles = {
-        "finance_ap": object(),
-        "legal_privacy": object(),
-        "generic_helper": object(),
+        "finance_ap": SimpleNamespace(name="finance_ap"),
+        "legal_privacy": SimpleNamespace(name="legal_privacy"),
+        "generic_helper": SimpleNamespace(name="generic_helper"),
+        "generic_legal_fork": SimpleNamespace(name="legal_privacy"),
     }
     suites = {
         "finance_ap": "finance",
         "legal_privacy": "legal",
         "generic_helper": None,
+        "generic_legal_fork": None,
     }
     seen = {}
 
@@ -104,6 +108,7 @@ def test_department_scope_filters_catalog_before_ranking(monkeypatch):
     assert seen["k"] == 2
     assert set(seen["domains"]) == {"finance_ap", "generic_helper"}
     assert "legal_privacy" not in seen["domains"]
+    assert "generic_legal_fork" not in seen["domains"]
 
 
 # ---- /agents/jd/draft -----------------------------------------------------------
