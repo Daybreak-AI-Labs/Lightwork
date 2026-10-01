@@ -1,6 +1,6 @@
 # Post-install operation coverage
 
-Source review: September 30, 2026. This is a working gap register against the
+Source review: October 1, 2026. This is a working gap register against the
 [customer experience contract](./customer-experience-contract.md), not a claim
 that the entire platform has been inventoried or accepted. A working backend,
 command or settings file does not complete a customer operation.
@@ -17,16 +17,19 @@ Local service tests and synthetic browser fixtures provide distinct evidence;
 neither alone is an authenticated installed-application acceptance test. Track
 those gaps explicitly instead of calling a screen complete because it renders.
 
-## Employee companion preview (September 30, 2026)
+## Employee companion preview (October 1, 2026)
 
-This increment is untested at the user's request. Static source review does not
-qualify the authenticated or visual journey. See [the bounded feature contract](employee-companions.md).
+The 90 focused Python cases pass serially and with eight local workers. One
+companion case failed during a broader parallel repository run and has not been
+reproduced in isolation; that suite result remains unresolved. These tests do
+not qualify the authenticated installed-app, provider or visual journey. See
+[the bounded feature contract](employee-companions.md).
 
 | Customer job | Direct entry and shared operation | Current-state and authority checks | Observable result / recovery | Copilot and evidence |
 | --- | --- | --- | --- | --- |
-| Enable the preview | Settings or installer; existing feature toggle service | Installation admin; effective-switch readback | Effective setting or explicit conflict | Page guidance only; authored tests unrun |
+| Enable the preview | Settings or installer; existing feature toggle service | Installation admin; effective-switch readback | Effective setting or explicit conflict | Page guidance only; installed-app acceptance open |
 | Enroll/restrict an employee | Employee companions; policy update service | Named workspace admin and explicit membership; current target membership, SCIM activity, account/workspace binding, revision comparison | Metadata receipt; refresh stale policy and review again | Operational Copilot missing; no browser acceptance |
-| Ask about current work | My companion; closed supervision intent + owned world-model reads | Named current member; enabled employee policy; exact owner, department and project scope | Bounded current snapshot, source links and policy receipt; retry unavailable stores | Companion status implemented; global Copilot integration missing; tests unrun |
+| Ask about current work | My companion; closed supervision intent + owned world-model reads | Named current member; enabled employee policy; exact owner, department and project scope | Bounded current snapshot, source links and policy receipt; retry unavailable stores | Companion status implemented; global Copilot integration and installed-app acceptance open |
 | Converse and write drafts | My companion; configured writer LLM facade and existing Budget | Explicit AI grant; current identity, policy, generation, source ACL and pinned route before dispatch/publication; no tools | Draft label, context provenance and receipt; metadata recovery with no automatic paid retry; task refresh remains available | Provider and browser acceptance unrun; global Copilot operations missing |
 | Review/clear companion history | My companion; encrypted history read/clear service | Current exact owner and workspace; no admin content override; same-origin mutation | Cleared live history plus metadata receipt; refresh on uncertainty | Copilot action missing; retention/backup qualification pending |
 | Review companion activity | Employee companions; metadata projection | Current workspace admin, explicit membership | Policy/event metadata without conversation text | Copilot action missing; no immutable archive qualification |
@@ -85,6 +88,7 @@ specific gaps closed.
 | Diagnostic parity | Cache controls, readiness and support-report preparation exist. Selected circuit/rate-limit/health/trace CLI diagnostics have no equivalent dashboard callers found. | Give customers readable health, affected work and actual repair actions. Support export alone does not replace operational diagnostics. |
 | Global Copilot | The shared page guide still has a zero tool-call budget. A separate default-off, closed operation catalog covers learning-example status and withdrawal. On a saved learned workflow, Copilot can open the same labelled run form as the designer after checking the current published release; the form and native run endpoint recheck that release and access before accepting work. Connected-service recovery has a separate restricted local form. These bounded operations do not constitute whole-platform coverage or installed-app acceptance. | Extend the typed catalog and current state across every supported job, including work in another panel or background job. Preserve each native service's authority, result and recovery contract. |
 | Chat and answer actions | Chat exposes the dashboard's role-filtered product destinations. Live completion refreshes answer controls without losing a drafted reply and offers recovery on failure. Copy uses saved content; historical downloads select the stored turn and recheck access and review requirements. Structured exports use reviewed table cells. Print retains stored clarifications and wraps wide content. Expiring public links route to the selected workspace; existing links remain revocable during a rerun or empty result. Mobile navigation supports a visible Close button and contained keyboard focus. Local route, DOM and Chromium journeys exercise these paths with synthetic data. | Qualify the installed desktop and real customer content. Full ChatGPT/Claude interaction and whole-platform Copilot operation parity remain open; these answer actions do not establish either. |
+| Public form intake | A live form can accept a submission for workflow A, then dispatch it to workflow B if an administrator rebinds the same form before polling. The accepted row does not retain its original trigger generation or target. Intake also reaches a fixed 5,000-row or 32 MiB storage limit without in-product archive or rotation. | Bind each accepted submission to an immutable target generation and durable disposition. Give administrators a pending-count, drain and audited abandonment journey before rebind or delete, and a safe storage-rotation path. Do not present the form as customer-ready until interleaved admission/rebind and restart tests pass. |
 
 Implementation references:
 [recovery controls](../packages/maverick-dashboard/maverick_dashboard/static/lightwork-workspace-recovery.js),
