@@ -372,19 +372,24 @@ def _normalize_origin(value: object) -> str:
 
 
 def _validate_public_origin(origin: str) -> None:
-    if os.environ.get("MAVERICK_FETCH_ALLOW_PRIVATE") == "1":
-        raise ConsentDeliveryConfigError(
-            "consent delivery refuses the process-wide private-fetch override"
-        )
     try:
+        from .enterprise import enterprise_egress_denial
         from .tools import _ssrf
     except ImportError as exc:
         raise ConsentDeliveryConfigError(
-            "SSRF-safe destination resolution is unavailable"
+            "Destination safety checks are unavailable"
         ) from exc
+    if _ssrf.allow_private():
+        raise ConsentDeliveryConfigError(
+            "Consent delivery cannot run while private-network browsing is enabled"
+        )
+    if enterprise_egress_denial(origin, tool="consent_delivery"):
+        raise ConsentDeliveryConfigError(
+            "Destination is not on the approved outbound hosts list"
+        )
     host = urllib.parse.urlsplit(origin).hostname or ""
     try:
-        _ssrf.resolve_pinned_ip(host)
+        _ssrf.resolve_pinned_ip(host, require_public=True)
     except Exception as exc:
         raise ConsentDeliveryConfigError(
             "destination failed SSRF-safe public resolution"
@@ -703,19 +708,24 @@ class HTTPSConsentDeliveryTransport:
             maximum=_MAX_RESPONSE_BYTES,
         )
         headers = _validated_request_headers(request)
-        if os.environ.get("MAVERICK_FETCH_ALLOW_PRIVATE") == "1":
-            raise ConsentDeliveryTransportError(
-                "consent delivery refuses the process-wide private-fetch override"
-            )
         try:
-            from .tools._ssrf import safe_client
+            from .enterprise import enterprise_egress_denial
+            from .tools._ssrf import allow_private, safe_client
         except ImportError as exc:
             raise ConsentDeliveryTransportError(
-                "SSRF-safe delivery transport is unavailable"
+                "Destination safety checks are unavailable"
             ) from exc
+        if allow_private():
+            raise ConsentDeliveryTransportError(
+                "Consent delivery cannot run while private-network browsing is enabled"
+            )
+        if enterprise_egress_denial(request.url, tool="consent_delivery"):
+            raise ConsentDeliveryTransportError(
+                "Destination is not on the approved outbound hosts list"
+            )
 
         try:
-            with safe_client(request.url, timeout=timeout) as client:
+            with safe_client(request.url, timeout=timeout, require_public=True) as client:
                 with client.stream(
                     "POST",
                     request.url,
