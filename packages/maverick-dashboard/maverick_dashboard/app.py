@@ -448,13 +448,14 @@ def _theme_context(request: Request) -> dict:
         "density": resolve_density(request),
         "custom_theme_css": theme_css(custom),
         "custom_theme_names": sorted(custom),
-        # ``lang`` is the selected UI language (drives ``t()`` and ``dir``);
-        # ``page_lang`` is what the page body is actually written in and is
-        # what ``<html lang>`` declares (W3-73). They differ until the
-        # templates are translated.
+        # ``lang`` is the selected UI language (drives ``t()``); ``page_lang``
+        # is what the page body is actually written in and is what
+        # ``<html lang>`` and ``dir`` declare (W3-73, UX-198). They differ
+        # until the templates are translated, so an English body is never
+        # mirrored because a few chrome strings are Arabic.
         "lang": lang,
         "page_lang": content_lang(lang),
-        "dir": dir_for(lang),
+        "dir": dir_for(content_lang(lang)),
         "t": lambda key: _t(key, lang),
         **journey_context(request, lang),
     }
