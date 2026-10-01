@@ -108,7 +108,8 @@ def test_sqlite_admission_preserves_control_stop(tmp_path, monkeypatch, control)
     path = tmp_path / "admission-control.db"
     with closing(sqlite3.connect(path)):
         pass
-    error = {"budget": BudgetExceeded, "halt": Halted, "cancel": asyncio.CancelledError}[control]("stop")
+    error = (Halted("stop", "test") if control == "halt" else
+             {"budget": BudgetExceeded, "cancel": asyncio.CancelledError}[control]("stop"))
     connections = []
     connect = sqlite3.connect
 
