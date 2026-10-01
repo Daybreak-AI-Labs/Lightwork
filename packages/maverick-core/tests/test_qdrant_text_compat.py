@@ -305,3 +305,33 @@ def test_encoder_initialization_failure_never_creates_or_overwrites_collection(n
     with pytest.raises(RuntimeError, match="initialization failure"):
         empty.add(["needle"], ids=["new"])
     assert not empty._client.collection_exists(empty._collection)
+
+
+@pytest.mark.parametrize("vectors", [[], [[float("nan"), 0.0]], [[1.0, 0.0, 0.0]]])
+def test_invalid_embedding_batch_preserves_existing_points(native_text, monkeypatch, vectors):
+    make_store, _, encoder = native_text
+    store = make_store(embedding_model="synthetic/legacy")
+    _seed(store)
+    original = _snapshot(store)
+    monkeypatch.setattr(encoder, "passage_embed", lambda self, documents: iter(vectors))
+    with pytest.raises(ValueError):
+        store.add(["replacement needle"], ids=["original"])
+    assert _snapshot(store) == original
+
+
+def test_uncertain_native_upsert_is_not_retried_or_followed_by_deletion(native_text, monkeypatch):
+    make_store, _, _ = native_text
+    store = make_store(embedding_model="synthetic/legacy")
+    _seed(store)
+    original = _snapshot(store)
+    attempts = []
+
+    def ambiguous_upsert(*args, **kwargs):
+        attempts.append(kwargs)
+        raise TimeoutError("native write outcome is unknown")
+
+    monkeypatch.setattr(store._client, "upsert", ambiguous_upsert)
+    with pytest.raises(TimeoutError, match="unknown"):
+        store.add(["replacement needle"], ids=["original"])
+    assert len(attempts) == 1
+    assert _snapshot(store) == original
