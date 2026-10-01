@@ -29,6 +29,20 @@ def test_tool_links_key_to_latest_episode(tmp_path, monkeypatch):
     assert consequence.shared_correlation().resolve("invoice:INV-3") == (7, 55)
 
 
+def test_tool_does_not_claim_a_refused_learning_write(monkeypatch):
+    monkeypatch.setattr(consequence, "link_outcome_key", lambda *args: False)
+    tool = remember_outcome_key(_World([_Ep(55)]), goal_id=7)
+    assert tool.fn({"key": "invoice:INV-3"}).startswith("ERROR: outcome key was not linked")
+
+
+def test_failed_persistent_link_is_not_visible_in_memory(tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory", encoding="utf-8")
+    store = consequence.CorrelationStore(path=blocked / "links.ndjson")
+    assert store.link("invoice:INV-3", 7, 55) is False
+    assert store.resolve("invoice:INV-3") is None
+
+
 def test_tool_runs_through_the_registry_with_a_dict_payload(tmp_path, monkeypatch):
     """The registry calls every executor as fn(args) with ONE dict. The tool used
     to take ``key=`` and crashed on every live call ('dict' has no attribute

@@ -260,8 +260,8 @@ class CorrelationStore:
         row = {"ts": ts if ts is not None else time.time(), "key": k[:256],
                "goal_id": int(goal_id), "episode_id": int(episode_id)}
         with self._lock:
-            self._latest[row["key"]] = (row["ts"], row["goal_id"], row["episode_id"])
             if self.path is None:
+                self._latest[row["key"]] = (row["ts"], row["goal_id"], row["episode_id"])
                 return True
             try:
                 p = Path(self.path)
@@ -269,6 +269,9 @@ class CorrelationStore:
                 with open(os.open(p, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600),
                           "a", encoding="utf-8") as fh:
                     fh.write(json.dumps(row, sort_keys=True) + "\n")
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                self._latest[row["key"]] = (row["ts"], row["goal_id"], row["episode_id"])
                 return True
             except Exception:  # pragma: no cover -- best-effort
                 log.debug("outcome-link record failed", exc_info=True)
