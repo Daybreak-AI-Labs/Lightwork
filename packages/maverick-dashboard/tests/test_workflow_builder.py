@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from test_support.navigation import assert_navigation_link
+
 
 def _client():
     # Mutating /api/v1 requests in no-token mode must pass the same-origin CSRF check.
@@ -843,7 +845,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     assert '<summary class="wf__sched-title">' in r.text
     # Reachable from the primary nav (Operate group): the redesigned Flows
     # builder is the sidebar entry; the workflow builder is linked in-page from it.
-    assert '<span class="nav-label">Flows</span>' in r.text
+    assert_navigation_link(r.text, "/flows/designer", "Flows")
     # A Chat handoff is verified before filling the ordinary brief for review.
     assert "lightwork.authoring-handoff" in r.text
     assert "/api/v1/templates/draft-context" in r.text

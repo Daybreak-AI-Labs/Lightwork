@@ -201,8 +201,8 @@ def test_lineage_service_callbacks_recheck_current_authority_after_context_creat
     from maverick_dashboard import api_flow_recipe_lineage as routes
     from maverick_dashboard import rbac, workspace_tenants
 
-    sources, value = package(enabled)
     registry.create_tenant(TENANT)
+    sources, value = package(enabled)
     rbac.set_tenant_role(TENANT, OWNER, "operator")
     workspace_tenants.set_selection(OWNER, TENANT)
     request = SimpleNamespace(state=SimpleNamespace(

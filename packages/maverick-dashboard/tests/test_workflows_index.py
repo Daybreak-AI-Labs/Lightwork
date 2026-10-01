@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from test_support.navigation import assert_navigation_link
+
 
 def _client():
     from maverick_dashboard.app import app
@@ -33,7 +35,9 @@ def test_index_lists_user_templates_and_playbooks(monkeypatch, tmp_path):
         {"name": "vanilla", "suite": "x", "description": "",
          "is_override": False, "has_workflow": True},   # not overridden -> excluded
     ])
-    t = _client().get("/workflows").text
+    response = _client().get("/workflows")
+    assert response.status_code == 200, response.text
+    t = response.text
     # user template listed with edit + automate deep-links
     assert "Weekly report" in t and "/workflow-builder?edit=weekly-report" in t
     assert "/workflow-builder?template=weekly-report" in t
@@ -61,5 +65,4 @@ def test_nav_workflows_points_to_index(monkeypatch, tmp_path):
     # The primary flow entry in the sidebar is now the redesigned Flows builder
     # (/flows/designer); the saved-workflows index is reached in-page, not from
     # the nav, so the sidebar shows one clear "Flows" job.
-    assert '<span class="nav-label">Flows</span>' in t
-    assert 'href="/flows/designer"' in t
+    assert_navigation_link(t, "/flows/designer", "Flows")

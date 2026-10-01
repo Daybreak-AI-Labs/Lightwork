@@ -336,8 +336,10 @@ def test_service_rechecks_current_dashboard_authority_not_just_context_creation(
     from maverick_dashboard import api_flow_action_episodes as routes
     from maverick_dashboard import rbac, workspace_tenants
 
-    source, run, record = _accepted(harness) if operation == "export" else _awaiting_review(harness)
+    # Provision before saved flows reserve this namespace. Existing retained
+    # work must never be silently adopted by a new workspace registry entry.
     registry.create_tenant(TENANT)
+    source, run, record = _accepted(harness) if operation == "export" else _awaiting_review(harness)
     rbac.set_tenant_role(TENANT, OWNER, "operator")
     workspace_tenants.set_selection(OWNER, TENANT)
     request = SimpleNamespace(state=SimpleNamespace(
