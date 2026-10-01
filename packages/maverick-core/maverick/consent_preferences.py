@@ -778,9 +778,11 @@ class ConsentPreferenceStore:
 
     @staticmethod
     def _ensure_restoration_floor_schema(conn: sqlite3.Connection) -> None:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS consent_profile_restoration_floors (
+        # executescript commits a caller's active transaction in both SQLite
+        # and the shared-store adapter. A store move must keep these DDL writes
+        # in the same transaction as its copied rows and authority backfill.
+        for statement in (
+            """CREATE TABLE IF NOT EXISTS consent_profile_restoration_floors (
                 marker_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                 tenant TEXT NOT NULL,
                 profile_id TEXT NOT NULL,
@@ -791,17 +793,17 @@ class ConsentPreferenceStore:
                 )),
                 created_at REAL NOT NULL,
                 record_sha256 TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS consent_restoration_floor_profile
-                ON consent_profile_restoration_floors(tenant, profile_id, marker_sequence DESC);
-            CREATE TRIGGER IF NOT EXISTS consent_restoration_floors_no_update
+            )""",
+            """CREATE INDEX IF NOT EXISTS consent_restoration_floor_profile
+                ON consent_profile_restoration_floors(tenant, profile_id, marker_sequence DESC)""",
+            """CREATE TRIGGER IF NOT EXISTS consent_restoration_floors_no_update
                 BEFORE UPDATE ON consent_profile_restoration_floors
-                BEGIN SELECT RAISE(ABORT, 'consent restoration floors are immutable'); END;
-            CREATE TRIGGER IF NOT EXISTS consent_restoration_floors_no_delete
+                BEGIN SELECT RAISE(ABORT, 'consent restoration floors are immutable'); END""",
+            """CREATE TRIGGER IF NOT EXISTS consent_restoration_floors_no_delete
                 BEFORE DELETE ON consent_profile_restoration_floors
-                BEGIN SELECT RAISE(ABORT, 'consent restoration floors are immutable'); END;
-            """
-        )
+                BEGIN SELECT RAISE(ABORT, 'consent restoration floors are immutable'); END""",
+        ):
+            conn.execute(statement)
 
     @staticmethod
     def _link_current_body(

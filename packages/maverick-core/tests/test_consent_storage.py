@@ -86,6 +86,27 @@ def test_sqlite_stores_are_unchanged_when_nothing_is_set(tmp_path):
     assert "consent_receipts" in tables and "lw_sqlite_pragma" not in tables
 
 
+def test_restoration_schema_does_not_commit_an_outer_move_transaction():
+    from maverick.consent_preferences import ConsentPreferenceStore
+
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("CREATE TABLE copied_record(value TEXT NOT NULL)")
+        connection.execute("INSERT INTO copied_record(value) VALUES ('customer-data')")
+        ConsentPreferenceStore._ensure_restoration_floor_schema(connection)
+        assert connection.in_transaction
+        connection.execute("ROLLBACK")
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'copied_record'"
+        ).fetchone() is None
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'consent_profile_restoration_floors'"
+        ).fetchone() is None
+    finally:
+        connection.close()
+
+
 # --------------------------------------------------------------- translation
 def test_statements_are_translated_to_postgres():
     t = storage.translate
