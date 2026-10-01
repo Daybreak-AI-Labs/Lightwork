@@ -20,8 +20,8 @@ _MAX_ROWS = 100_000
 
 
 def _path():
-    from ..paths import data_dir
-    return data_dir("flows", "node-outcomes.ndjson")
+    from .store import _flow_dir
+    return _flow_dir("node-outcomes.ndjson")
 
 
 def _current_revision(flow_id: str) -> str:
