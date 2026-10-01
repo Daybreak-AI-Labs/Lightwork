@@ -90,6 +90,7 @@ def _audits(suite: str | None):
 
 
 def _inventory(suite: str | None) -> dict:
+    from maverick.agent_autonomy import levels_enabled
     from maverick.domain_audit import summarize
     audits, suites = _audits(suite)
     s = summarize(audits)
@@ -102,6 +103,7 @@ def _inventory(suite: str | None) -> dict:
         "sign_off_only_asked": s["packs_with_unenforced_prompt_gate"],
         "extra_refusals": s["packs_with_refusals_beyond_universal"],
         "with_deliverable": s["packs_with_deliverable"],
+        "levels_enabled": levels_enabled(),
         "independence": s.get("autonomy_posture", {}),
         "still_supervised": s.get("packs_onboarding", 0),
         "flagged": [{"specialist": _name(a.name),

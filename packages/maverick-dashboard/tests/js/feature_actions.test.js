@@ -231,11 +231,28 @@ test('independence levels and spending groups read in words', async (t) => {
       graduation_candidates: [{name: 'finance_clerk', sample: 20, approve_rate: 0.95, confidence: 0.9, reason: 'clean record'}]});
   });
   t.after(() => ui.window.close());
-  assert.match(ui.document.getElementById('fa-autonomy').textContent, /Suggest: 2/);
+  // Levels are off in this fixture: one plain line, no per-level counts that
+  // would read as a real split of the workforce.
+  assert.match(ui.document.getElementById('fa-autonomy-status').textContent, /Independence levels are turned off/);
+  assert.doesNotMatch(ui.document.getElementById('fa-autonomy').textContent, /Suggest: 2|Watch only: 1|Ask before acting|Still learning/);
   assert.match(ui.document.getElementById('fa-autonomy').textContent, /finance clerk2095%/);
   ui.document.getElementById('fa-tags-run').click();
   await ui.settle();
   assert.match(ui.document.getElementById('fa-tags-out').textContent, /Not labelled/);
+});
+
+test('independence levels show each level count once the levels are on', async (t) => {
+  const markup = slice('workforce.html', '<section class="panel" aria-labelledby="fa-autonomy-title">', '</section>');
+  const ui = await fixture(markup, () => response({levels_enabled: true, autonomy_posture: {observe: 1, suggest: 2, request: 3, auto: 4},
+    packs_onboarding: 5, graduation_candidates: []}));
+  t.after(() => ui.window.close());
+  const text = ui.document.getElementById('fa-autonomy').textContent;
+  assert.match(text, /Watch only: 1/);
+  assert.match(text, /Suggest: 2/);
+  assert.match(text, /Ask before acting: 3/);
+  assert.match(text, /Act on their own: 4/);
+  assert.match(text, /Still learning the ropes: 5/);
+  assert.match(ui.document.getElementById('fa-autonomy-status').textContent, /own level of independence/);
 });
 
 test('a skill file is checked and problems stay in technical details', async (t) => {

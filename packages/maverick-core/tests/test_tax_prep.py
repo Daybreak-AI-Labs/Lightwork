@@ -109,6 +109,18 @@ class TestExtractionHardening:
         txt = "1099-DIV Dividends\nBox 1a Ordinary dividends: -$500.00\n"
         assert extract(txt).ordinary_dividends == -500.0
 
+    def test_qualified_dividends_box_1b_is_read_separately_from_box_1a(self):
+        txt = ("Form 1099-DIV Dividends and Distributions 2025\n"
+               "Box 1a Total ordinary dividends: $3,000.00\n"
+               "Box 1b Qualified dividends: $2,400.00\n"
+               "Box 4 Federal income tax withheld: $0.00\n")
+        doc = extract(txt)
+        assert doc.ordinary_dividends == 3000.0
+        assert doc.qualified_dividends == 2400.0
+        # No box 1b on the form: nothing is invented.
+        only_1a = "1099-DIV Dividends\nBox 1a Ordinary dividends: $3,000.00\n"
+        assert extract(only_1a).qualified_dividends == 0.0
+
     def test_bare_unformatted_year_skipped_but_real_money_kept(self):
         # The one input we intentionally skip is a bare year-range integer;
         # formatted money ($/comma/cents) at the same magnitude is kept.
@@ -522,6 +534,48 @@ class TestMissingItems:
             assert needle in joined, needle
         # and none of them leak into the federal computation
         assert compute_first_pass(wp).total_income == 0.0
+
+    def test_qualified_dividends_are_flagged_not_silently_taxed_at_ordinary_rates(self):
+        """The first pass taxes all of box 1a at ordinary rates. A client with
+        qualified dividends (box 1b) therefore gets an overstated estimate, so
+        the preparer must be told to apply the qualified-dividend worksheet."""
+        wp = Workpaper(filing_status="single", docs=[
+            SourceDoc("W-2", "W-2 — Acme", wages=50000.0),
+            SourceDoc("1099-DIV", "DIV — Broker", ordinary_dividends=3000.0,
+                      qualified_dividends=2400.0),
+        ])
+        items = compute_first_pass(wp).open_items
+        flagged = [i for i in items if "DIV — Broker" in i and "qualified" in i.lower()]
+        assert len(flagged) == 1, items
+        assert "$2,400.00" in flagged[0]
+        assert "ordinary rates" in flagged[0]
+        assert "may be too high" in flagged[0]
+        assert "Qualified Dividends and Capital Gain Tax Worksheet" in flagged[0]
+        assert "PREPARER MUST" in flagged[0]
+        # The computation itself is unchanged and stays conservative: all of
+        # box 1a is still in income.
+        assert compute_first_pass(wp).total_income == 53000.0
+
+    def test_dividends_without_a_box_1b_still_ask_the_preparer_to_confirm(self):
+        wp = Workpaper(filing_status="single", docs=[
+            SourceDoc("1099-DIV", "DIV", ordinary_dividends=600.0)])
+        flagged = [i for i in missing_items(wp) if "qualified" in i.lower()]
+        assert len(flagged) == 1, flagged
+        assert "no box 1b" in flagged[0]
+
+    def test_no_qualified_dividend_item_without_dividends(self):
+        wp = Workpaper(filing_status="single", docs=[
+            SourceDoc("W-2", "a", wages=50000.0),
+            SourceDoc("1099-INT", "INT", interest=400.0)])
+        assert not any("qualified" in i.lower() for i in missing_items(wp))
+
+    def test_dividend_forms_differing_only_in_box_1b_are_not_duplicates(self):
+        wp = Workpaper(filing_status="single", docs=[
+            SourceDoc("1099-DIV", "DIV A", ordinary_dividends=1000.0,
+                      qualified_dividends=900.0),
+            SourceDoc("1099-DIV", "DIV B", ordinary_dividends=1000.0,
+                      qualified_dividends=100.0)])
+        assert not any("DUPLICATE" in i for i in missing_items(wp))
 
     def test_empty_and_bad_status_flagged(self):
         items = missing_items(Workpaper(filing_status="married"))

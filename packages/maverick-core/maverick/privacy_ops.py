@@ -3086,16 +3086,8 @@ def dsar_estate_worksheet(request_id: str) -> dict:
         raise KeyError(f"no such request: {request_id}")
     subject = str(record.get("subject_id") or "")
 
-    platform: dict = {"enabled": True}
     try:
-        from . import dsar as dsar_export
-
-        bundle = dsar_export.export_subject_data(subject)
-        platform["sections"] = {
-            key: len(value)
-            for key, value in bundle.items()
-            if isinstance(value, list)
-        }
+        platform = _dsar_platform_holdings(record)
     except Exception:
         platform = {"enabled": False, "error": "unavailable"}
 
@@ -3163,6 +3155,40 @@ def dsar_estate_worksheet(request_id: str) -> dict:
         "processors": processors,
         "documents": documents,
     }
+
+
+def _dsar_platform_holdings(record: dict) -> dict:
+    """Count what Lightwork itself holds for the request's subject, by area.
+
+    Reads exactly as :func:`fulfill_dsar` does -- the request's own channel and
+    the current tenant -- so the plan matches what the export would deliver.
+    ``resolved`` is False when the account could not be pinned to one channel:
+    nothing is read then, and a zero must not be mistaken for "holds nothing".
+    """
+    from . import dsar as dsar_export
+    from .paths import current_tenant_id
+
+    bundle = dsar_export.export_subject_data(
+        str(record.get("subject_id") or ""),
+        channel=record.get("channel") or None,
+        tenant=current_tenant_id() or None,
+    )
+    # Use the export's canonical row counts. Counting top-level containers
+    # misses nested turns/episodes and counts history subjects instead of the
+    # actual number of fact revisions.
+    counts = bundle["counts"]
+    sections = {
+        "conversations": counts["conversations"],
+        "turns": counts["turns"],
+        "goals": counts["goals"],
+        "episodes": counts["episodes"],
+        "facts": counts["facts"],
+        "fact_history": counts["fact_history"],
+        "audit": counts["audit_events"],
+    }
+    subject = bundle.get("subject")
+    resolved = bool(isinstance(subject, dict) and subject.get("channel"))
+    return {"enabled": True, "sections": sections, "resolved": resolved}
 
 
 def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:

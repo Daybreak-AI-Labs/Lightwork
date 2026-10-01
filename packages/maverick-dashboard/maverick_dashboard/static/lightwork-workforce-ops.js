@@ -36,8 +36,10 @@
           (d.sign_off_only_asked ? '; ' + plural(d.sign_off_only_asked, 'more') + ' only ask for it in their instructions.' : '.'),
         plural(d.extra_refusals, 'specialist') + ' refuse extra kinds of requests for their field; ' +
           plural(d.with_deliverable, 'specialist') + ' produce a defined piece of work.',
-        'Independence: ' + Object.keys(RUNGS).map(function (r) { return RUNGS[r] + ' ' + ((d.independence || {})[r] || 0); }).join(', ') +
-          '. ' + plural(d.still_supervised, 'specialist') + ' still supervised while new.'
+        d.levels_enabled === false
+          ? 'Independence levels are turned off, so every specialist follows the same approval rules.'
+          : 'Independence: ' + Object.keys(RUNGS).map(function (r) { return RUNGS[r] + ' ' + ((d.independence || {})[r] || 0); }).join(', ') +
+            '. ' + plural(d.still_supervised, 'specialist') + ' still supervised while new.'
       ];
       var nodes = [el('ul')];
       facts.forEach(function (f) { nodes[0].appendChild(el('li', f)); });

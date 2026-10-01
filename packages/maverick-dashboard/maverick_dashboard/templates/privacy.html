@@ -1495,7 +1495,9 @@
               var list = document.createElement('ul');
               function item(text) { var li = document.createElement('li'); li.textContent = text; list.appendChild(li); }
               var holdings = d.platform_holdings || {};
-              if (holdings.sections) {
+              if (holdings.resolved === false) {
+                item('Inside Lightwork: could not match this person to one account, so its own records are not counted here.');
+              } else if (holdings.sections) {
                 var total = 0;
                 Object.keys(holdings.sections).forEach(function (k) { total += holdings.sections[k]; });
                 item('Inside Lightwork: ' + total + ' record(s) in ' + Object.keys(holdings.sections).length + ' area(s).');

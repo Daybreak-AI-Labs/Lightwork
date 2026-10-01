@@ -327,12 +327,16 @@
       var data = await request('/api/v1/workforce/posture');
       say(status, data.levels_enabled ? 'Each specialist has its own level of independence.' :
         'Independence levels are turned off, so every specialist follows the same approval rules.');
-      var list = el('ul', 'fa-inline');
-      Object.keys(RUNGS).forEach(function (rung) {
-        list.appendChild(el('li', 'badge', RUNGS[rung] + ': ' + ((data.autonomy_posture || {})[rung] || 0)));
-      });
-      if (data.packs_onboarding) list.appendChild(el('li', 'badge', 'Still learning the ropes: ' + data.packs_onboarding));
-      box.appendChild(list);
+      // With levels off the per-level split is not applied to anything, so it
+      // is not shown: the line above already says every specialist is treated alike.
+      if (data.levels_enabled) {
+        var list = el('ul', 'fa-inline');
+        Object.keys(RUNGS).forEach(function (rung) {
+          list.appendChild(el('li', 'badge', RUNGS[rung] + ': ' + ((data.autonomy_posture || {})[rung] || 0)));
+        });
+        if (data.packs_onboarding) list.appendChild(el('li', 'badge', 'Still learning the ropes: ' + data.packs_onboarding));
+        box.appendChild(list);
+      }
       var cands = data.graduation_candidates || [];
       if (!cands.length) {
         box.appendChild(el('p', 'muted', 'No specialist has earned more independence yet. They qualify after a run of approved work.'));

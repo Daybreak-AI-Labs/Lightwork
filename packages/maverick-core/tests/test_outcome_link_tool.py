@@ -24,24 +24,56 @@ def test_tool_links_key_to_latest_episode(tmp_path, monkeypatch):
     monkeypatch.setattr("maverick.paths.data_dir", lambda *p, **k: tmp_path.joinpath(*p))
     consequence.reset_shared()
     tool = remember_outcome_key(_World([_Ep(55)]), goal_id=7)
-    msg = tool.fn(key="invoice:INV-3")
+    msg = tool.fn({"key": "invoice:INV-3"})
     assert "Linked" in msg
     assert consequence.shared_correlation().resolve("invoice:INV-3") == (7, 55)
 
 
+def test_tool_runs_through_the_registry_with_a_dict_payload(tmp_path, monkeypatch):
+    """The registry calls every executor as fn(args) with ONE dict. The tool used
+    to take ``key=`` and crashed on every live call ('dict' has no attribute
+    'strip'), so no run could ever link an outcome."""
+    import asyncio
+
+    from maverick.tools import ToolRegistry
+
+    monkeypatch.setattr("maverick.paths.data_dir", lambda *p, **k: tmp_path.joinpath(*p))
+    consequence.reset_shared()
+    reg = ToolRegistry()
+    reg.register(remember_outcome_key(_World([_Ep(55)]), goal_id=7))
+
+    out = asyncio.run(reg.run("remember_outcome_key", {"key": "renewal-2026"}))
+
+    assert out.startswith("Linked"), out
+    assert consequence.shared_correlation().resolve("renewal-2026") == (7, 55)
+
+
+def test_tool_through_the_registry_rejects_a_missing_key():
+    import asyncio
+
+    from maverick.tools import ToolRegistry
+
+    reg = ToolRegistry()
+    reg.register(remember_outcome_key(_World([_Ep(1)]), goal_id=1))
+
+    for payload in ({}, {"key": None}, {"key": "   "}):
+        out = asyncio.run(reg.run("remember_outcome_key", payload))
+        assert out.startswith("ERROR: remember_outcome_key requires a non-empty"), out
+
+
 def test_tool_requires_key():
     tool = remember_outcome_key(_World([_Ep(1)]), goal_id=1)
-    assert tool.fn(key="  ").startswith("ERROR")
+    assert tool.fn({"key": "  "}).startswith("ERROR")
 
 
 def test_tool_requires_active_goal():
     tool = remember_outcome_key(None, goal_id=None)
-    assert tool.fn(key="x").startswith("ERROR")
+    assert tool.fn({"key": "x"}).startswith("ERROR")
 
 
 def test_tool_handles_no_episode_yet():
     tool = remember_outcome_key(_World([]), goal_id=1)
-    assert tool.fn(key="x").startswith("ERROR")
+    assert tool.fn({"key": "x"}).startswith("ERROR")
 
 
 def test_tool_registered_only_when_consequence_on(tmp_path, monkeypatch):

@@ -7,7 +7,7 @@ const { JSDOM } = require("jsdom");
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-dsar-detail.js"), "utf8");
 const html = `<div id="dsar-page" data-request-id="DSAR-1" data-subject="a@example.com" data-channel="email" data-kind="erasure" data-fulfillment-id="F-1" data-revision="4">
-<div id="dsar-status"></div><div id="dsar-worksheet-result"></div>
+<div id="dsar-status"></div><div id="dsar-worksheet-result"></div><button id="dsar-worksheet"></button>
 <button id="dsar-identity"></button><button id="dsar-link"></button><button id="dsar-erase"></button><button id="dsar-close"></button>
 <div id="dsar-link-box" hidden><input id="dsar-link-url"><button id="dsar-link-copy"></button></div></div>`;
 const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
@@ -82,4 +82,24 @@ test("closing needs confirmation and errors stay plain", async (t) => {
   ui.doc.getElementById("dsar-close").click(); await ui.settle();
   assert.equal(ui.confirms.length, 1);
   assert.equal(ui.doc.getElementById("dsar-status").textContent, "Could not close the request.");
+});
+
+test("the search checklist counts what Lightwork holds, including conversations and goals", async (t) => {
+  const ui = await fixture({ formValues: [], reply: () => json({
+    platform_holdings: { enabled: true, resolved: true, sections: { conversations: 2, goals: 1, facts: 0, fact_history: 0, audit: 4 } },
+    data_map: { enabled: false }, processors: { enabled: false }, documents: { enabled: false } }) });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("dsar-worksheet").click(); await ui.settle();
+  assert.match(ui.doc.getElementById("dsar-worksheet-result").textContent, /Lightwork itself: 7 record\(s\) found\./);
+});
+
+test("the search checklist does not report zero records when the person could not be matched", async (t) => {
+  const ui = await fixture({ formValues: [], reply: () => json({
+    platform_holdings: { enabled: true, resolved: false, sections: { conversations: 0, goals: 0, facts: 0, fact_history: 0, audit: 0 } },
+    data_map: { enabled: false }, processors: { enabled: false }, documents: { enabled: false } }) });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("dsar-worksheet").click(); await ui.settle();
+  const text = ui.doc.getElementById("dsar-worksheet-result").textContent;
+  assert.match(text, /could not match this person to one account/);
+  assert.doesNotMatch(text, /0 record\(s\)/);
 });

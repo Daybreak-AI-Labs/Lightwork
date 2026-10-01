@@ -104,6 +104,15 @@ def test_inventory_summarises_every_specialist_in_plain_words(client, monkeypatc
     assert [r["verb"] for r in audit_rows] == ["specialist_inventory_download"]
 
 
+def test_inventory_says_whether_independence_levels_are_on(client, monkeypatch):
+    """The per-level split is only meaningful when levels are on, so the page
+    needs to know which it is (it used to list the split either way)."""
+    monkeypatch.delenv("MAVERICK_WORKFORCE_LEVELS", raising=False)
+    assert client.get(f"{API}/inventory").json()["levels_enabled"] is False
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
+    assert client.get(f"{API}/inventory").json()["levels_enabled"] is True
+
+
 def test_setup_check_runs_every_specialist_through_the_lint(client, monkeypatch):
     from maverick import domain
     real = domain.lint_profile

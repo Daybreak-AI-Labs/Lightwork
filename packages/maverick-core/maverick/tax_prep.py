@@ -26,8 +26,10 @@ Division of labor (the architecture's spine):
   "agents draft; humans file and certify" discipline as the finance suite).
 
 Scope of the v1 computation (stated, not hidden): Form 1040 with W-2 wages,
-1099-INT interest, ordinary 1099-DIV dividends, the standard deduction, the
-child tax credit, and federal withholding; plus state returns for no-tax
+1099-INT interest, ordinary 1099-DIV dividends (all taxed at ordinary rates;
+box 1b qualified dividends are read and flagged for the preparer, who applies
+the preferential rates), the standard deduction, the child tax credit, and
+federal withholding; plus state returns for no-tax
 and flat-rate states (graduated states are flagged for the preparer / the
 tax engine). Itemizing, Schedules C/D/E, retirement and benefit taxability,
 and credits beyond the CTC are workpaper line items flagged FOR PREPARER
@@ -170,6 +172,9 @@ class SourceDoc:
     federal_withholding: float = 0.0  # W-2 box 2 / 1099 box 4
     interest: float = 0.0            # 1099-INT box 1
     ordinary_dividends: float = 0.0  # 1099-DIV box 1a
+    # 1099-DIV box 1b: part of box 1a. NOT used to compute -- the draft taxes
+    # all of box 1a at ordinary rates -- but read so the preparer is told.
+    qualified_dividends: float = 0.0
     nonemployee_comp: float = 0.0    # 1099-NEC box 1 (flagged, not computed)
     state: str = ""                  # W-2 box 15 state code
     state_withholding: float = 0.0   # W-2 box 17
@@ -460,6 +465,8 @@ def extract(text: str, *, label: str = "") -> SourceDoc:
     elif doc_type == "1099-DIV":
         doc.ordinary_dividends = _amount_after(
             text, "ordinary dividends", "box 1a")
+        doc.qualified_dividends = _amount_after(
+            text, "qualified dividends", "box 1b")
         doc.federal_withholding = _amount_after(
             text, "federal income tax withheld", "box 4")
     elif doc_type == "1099-NEC":
@@ -557,7 +564,8 @@ def _money_fingerprint(d: SourceDoc) -> tuple:
             round(d.retirement_gross, 2), round(d.retirement_taxable, 2),
             round(d.social_security, 2), round(d.unemployment, 2),
             round(d.student_loan_interest, 2), round(d.tuition, 2),
-            round(d.broker_proceeds, 2), round(d.state_withholding, 2))
+            round(d.broker_proceeds, 2), round(d.state_withholding, 2),
+            round(d.qualified_dividends, 2))
 
 
 def duplicate_groups(wp: Workpaper) -> list[list[str]]:
@@ -573,6 +581,25 @@ def duplicate_groups(wp: Workpaper) -> list[list[str]]:
         if any(fp[i] for i in range(1, len(fp))):
             seen.setdefault(fp, []).append(_report_safe(d.label))
     return [labels for labels in seen.values() if len(labels) > 1]
+
+
+def _dividend_rate_item(d: SourceDoc, label: str) -> str | None:
+    """Flag that the first pass taxes box 1a at ordinary rates.
+
+    This may overstate tax when any dividends qualify; the exact effect depends
+    on taxable income, credits, and the preparer's completed worksheet.
+    """
+    if d.ordinary_dividends <= 0 and d.qualified_dividends <= 0:
+        return None
+    if d.qualified_dividends > 0:
+        return (f"{label}: qualified dividends of ${d.qualified_dividends:,.2f} "
+                "(box 1b) are taxed at ordinary rates in this draft, so the "
+                "estimate may be too high -- apply the Qualified Dividends and "
+                "Capital Gain Tax Worksheet -- PREPARER MUST COMPLETE")
+    return (f"{label}: no box 1b qualified dividends read -- if any of these "
+            "dividends are qualified, this draft taxes them at ordinary rates "
+            "and may overstate the estimate (the Qualified Dividends and Capital "
+            "Gain Tax Worksheet is not applied) -- PREPARER MUST EVALUATE")
 
 
 def missing_items(wp: Workpaper) -> list[str]:
@@ -596,6 +623,8 @@ def missing_items(wp: Workpaper) -> list[str]:
         flag = _PREPARER_DOC_ITEMS.get(d.doc_type)
         if flag:
             items.append(f"{label}: {flag}")
+        if dividend_item := _dividend_rate_item(d, label):
+            items.append(dividend_item)
         if d.doc_type == "W-2" and d.wages <= 0:
             items.append(f"{label}: W-2 with no box-1 wages extracted -- "
                          "verify the document")

@@ -238,9 +238,12 @@
       var h = doc.createElement('h3'); h.textContent = 'Where to search'; out.appendChild(h);
       var ul = doc.createElement('ul'); ul.className = 'dsar-list';
       function item(text) { var li = doc.createElement('li'); li.textContent = text; ul.appendChild(li); }
-      var held = (w.platform_holdings || {}).sections || {};
+      var holdings = w.platform_holdings || {};
+      var held = holdings.sections || {};
       var total = Object.keys(held).reduce(function (n, k) { return n + (held[k] || 0); }, 0);
-      item('Lightwork itself: ' + total + ' record(s) found.');
+      item(holdings.resolved === false
+        ? 'Lightwork itself: could not match this person to one account, so its own records are not counted here.'
+        : 'Lightwork itself: ' + total + ' record(s) found.');
       var dm = w.data_map || {};
       if (dm.enabled) {
         (dm.assets || []).forEach(function (a) {

@@ -37,8 +37,9 @@ _SCHEMA: dict[str, Any] = {
 
 
 def _run_factory(world, goal_id: int | None):
-    def run(key: str = "") -> str:
-        k = (key or "").strip()
+    def run(args: dict[str, Any]) -> str:
+        # The registry calls every executor as fn(args) with ONE dict payload.
+        k = str(args.get("key") or "").strip()
         if not k:
             return "ERROR: remember_outcome_key requires a non-empty 'key'"
         if world is None or goal_id is None:

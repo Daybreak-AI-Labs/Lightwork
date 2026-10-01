@@ -19,7 +19,7 @@ function defaults(admin) {
     "/api/v1/value-proof/access": { admin: admin, audit: admin },
     "/api/v1/workforce-ops/inventory": { suites: [{ value: "finance", label: "Finance" }], specialists: 40, departments: 3,
       builders: 1, can_change_things_while_drafting: 1, sign_off_enforced: 30, sign_off_only_asked: 2, extra_refusals: 5,
-      with_deliverable: 20, independence: { observe: 1, suggest: 30, request: 8, auto: 1 }, still_supervised: 12,
+      with_deliverable: 20, levels_enabled: true, independence: { observe: 1, suggest: 30, request: 8, auto: 1 }, still_supervised: 12,
       flagged: [{ specialist: "Invoice drafter", can_reach: ["send_payment"] }] },
     "/api/v1/workforce-ops/test-suite": { cases: 4, specialists: 3, problems: 0, technical: [],
       list: [{ specialist: "Payroll", task: "Run payroll", expects: ["refuses"] }] },
@@ -32,11 +32,12 @@ function defaults(admin) {
   };
 }
 
-async function fixture(markup, { admin = true } = {}) {
+async function fixture(markup, { admin = true, inventory = {} } = {}) {
   const dom = new JSDOM(markup, { url: "https://lightwork.example/workforce", runScripts: "outside-only" });
   const { window } = dom;
   const calls = [];
   const table = defaults(admin);
+  Object.assign(table["/api/v1/workforce-ops/inventory"], inventory);
   window.mvErrorText = (failure, action) => `Could not ${action}.`;
   window.mvPlainDetail = () => "";
   window.mvHuman = (v) => String(v).replace(/_/g, " ");
@@ -65,6 +66,18 @@ test("the inventory reads plainly and flags specialists to review", async (t) =>
   assert.equal(ui.doc.getElementById("wo-inv-suite").options.length, 2);
   assert.equal(ui.doc.getElementById("wo-lint-run").closest("section").hidden, false);
   assert.match(ui.doc.getElementById("wo-suite").textContent, /4 tests across 3 specialists\. Every test is complete\./);
+});
+
+test("the inventory lists the independence split only when the levels are on", async (t) => {
+  const on = await fixture(partial("_workforce_ops.html"));
+  t.after(() => on.window.close());
+  assert.match(on.doc.getElementById("wo-inv").textContent, /Independence: Watch only 1, Suggest 30, Ask before acting 8, Act on their own 1\. 12 specialists still supervised/);
+
+  const off = await fixture(partial("_workforce_ops.html"), { inventory: { levels_enabled: false } });
+  t.after(() => off.window.close());
+  const text = off.doc.getElementById("wo-inv").textContent;
+  assert.match(text, /Independence levels are turned off, so every specialist follows the same approval rules\./);
+  assert.doesNotMatch(text, /Suggest 30|Ask before acting 8|still supervised/);
 });
 
 test("the setup check runs as a job and lists what to fix", async (t) => {
