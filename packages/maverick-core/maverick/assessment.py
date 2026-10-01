@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -50,6 +51,8 @@ from .security_framework_catalog import (
     SECURITY_CATALOG_PROVENANCE,
     SecurityPractice,
 )
+
+_log = logging.getLogger(__name__)
 
 # Answer vocabulary. ``na`` = not applicable (clears the question); ``unknown`` =
 # the assessor could not confirm it (a diligence gap, scored as "unverified").
@@ -5116,7 +5119,18 @@ def _iter_saved_raw():
     for p in d.glob("*.json"):
         if not _ASSESSMENT_ID_RE.fullmatch(p.stem):
             continue
-        data = _load_saved_raw(p.stem)
+        try:
+            data = _load_saved_raw(p.stem)
+        except AssessmentStateError as exc:
+            # Same tolerance as list_saved(): a file whose name passes the
+            # id pattern but which is not a genuine per-assessment record
+            # (the capability-review register.json shares this directory)
+            # must not take down the metrics, the audit binder or the
+            # finance board that read this iterator. Say so in the log.
+            _log.warning(
+                "skipping %s in the assessments directory: %s", p.name, exc,
+            )
+            continue
         if data is not None:
             yield data
 
