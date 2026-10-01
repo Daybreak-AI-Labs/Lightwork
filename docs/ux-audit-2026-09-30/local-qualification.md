@@ -9,7 +9,7 @@ No deployment configuration or credentials were changed.
 
 The register has **190 implemented entries awaiting final acceptance and five
 qualification entries**. All five separately approved security repairs are
-implemented. Fresh static/build qualification passes all 26 gates at `57a027a`,
+implemented. Fresh static/build qualification passes all 26 gates at `2decc28`,
 including all 4,827 exact-source wheel payload checks. Final integrated Python
 qualification remains pending.
 
@@ -18,7 +18,14 @@ recorded failures and no final JUnit result. Read-only Windows probes establishe
 an execution-account access limitation. All 156 cases in the four affected
 modules then passed unchanged with fresh native-owned directories. The
 [account diagnosis](final08-windows-account-diagnosis.md) retains both results;
-the corrected full ordinary run remains in progress. Both Python 3.10/3.11
+the native full ordinary run subsequently finished with **40,098 passes, one
+failure, 597 skips and 23 warnings** at unchanged `57a027a`. The failure was
+traced to a corruption test replacing a randomized artifact's final byte with
+the same byte. The [deterministic test repair](flow-payload-fault-injection-57a027a.md)
+changes that byte with XOR and retains the original denial assertion; production
+code is unchanged. All 18 cases in the complete payload module pass in each
+posture at frozen `2decc28`. Fresh full qualification on that corrected source
+remains pending. Both Python 3.10/3.11
 environments now pass [exact final08 installation and native-access checks](compatibility-final08-installation-57a027a.md),
 with full compatibility runtime still pending.
 
@@ -48,16 +55,19 @@ service-gated variants. The unchanged native editor fixtures also now pass:
 two Emacs ERT tests and one Neovim Lua fixture. Their initial sandbox crash and
 successful native-host recovery are preserved in [editor evidence](native-editor-qualification.md).
 
-The completed final07 ordinary phase has one unresolved failure in
+The completed final07 ordinary phase retains one unexplained failure in
 `test_bounded_queue_overflow_is_durable_serial_and_in_intake_order`. Its preserved
 receipt journal shows all eight items admitted but only the first executed,
 remaining in `completed / sending`; the remaining seven did not execute before
 the test deadline. Unchanged focused passes do not explain that failure. The
-investigation is following delivery confirmation and journal operations, without
-increasing the test deadline or treating the original failure as a pass.
+later full final08 native run passed this same case in 4.9409 seconds with the
+original deadline. That pass does not establish the cause of the earlier timeout
+or rewrite its failed outcome. Content-free timeout diagnostics remain in place.
 
 | Evidence | Exact execution source | Current result and limit |
 | --- | --- | --- |
+| [Complete final08 ordinary run](python-ordinary-final08-57a027a.md) | `57a027adfdd8df955d33aaea88ec7089aafc6c60` | 40,098 passed, one proven corruption-test failure, 597 skipped, 23 warnings and zero errors; source unchanged. Seven added skips are PostgreSQL cursor cases with separate passing evidence in both postures. The deterministic test repair and fresh final09 runtime are tracked separately. |
+| [Corrected-source static gates and package builds](static-build-qualification-2decc28.md) | `2decc28d5a2709ec1d362bdfb8499aaa13aacfce` | All 26 checks pass, including eight wheels and 4,827 exact-source payload files. Both full payload-module probes pass 18 cases. Full runtime phases remain pending. |
 | [Final08 static gates and package builds](static-build-qualification-57a027a.md) | `57a027adfdd8df955d33aaea88ec7089aafc6c60` | All 26 checks pass: Ruff, Vulture, 16 offline contracts and eight wheels. All 4,827 payload files match the exact Git archive. Frozen checkout unchanged. Runtime qualification remains separate. |
 | Full Python 3.12 ordinary | `2a765aa3e93cc7775090f574f027bd855b33aef5` (`qualification-final-07`) | 40,072 passed, one failed, 590 skipped and 22 warnings in 3,281.79 seconds; source unchanged. The transport failure remains unresolved. [Exact skip reconciliation](skip-reconciliation-final07.md), followed by [real-speaker recovery](speechbrain-real-model-qualification.md): 458 executable identities have supplementary passes in both postures, five collection placeholders expanded, 127 entries retain explicit boundaries. The prior 457 + five + 128 checkpoint remains preserved. These do not rewrite the full-run outcomes. Later cursor/mobile fixes are outside this source; subsequent phases require a new binding. |
 | Expanded browser acceptance | `be3496571342c242af6ba956206e2446781996bb` | Default: 95 passed, six failed, seven setup-only skips. Setup: all seven passed. Therefore 102 distinct passes and six failures across all 108 registrations. Subsequent widget, native-form, error-page and workspace-alert repairs are integrated. All 18 focused cases pass at `1719f2f`; the complete 108-case browser and 1,711-case JavaScript reruns now pass at 1719f2f. Earlier failed Chrome launch attempts did not execute test bodies and remain separate infrastructure evidence. |

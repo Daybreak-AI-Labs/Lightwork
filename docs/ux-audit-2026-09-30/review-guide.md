@@ -19,12 +19,16 @@ form and workspace recovery repairs are now integrated, and all 18 focused
 acceptance cases pass at `1719f2f`. The complete 108-case browser and 1,711-case
 JavaScript cohorts also pass there. A subsequent short-viewport widget boundary
 was reproduced and repaired; [all seven updated widget cases pass](widget-short-viewport-88cd66f.md).
-[All 26 fresh static/build gates pass](static-build-qualification-57a027a.md).
+[All 26 fresh static/build gates pass](static-build-qualification-2decc28.md).
 Final full Python qualification remains in progress.
 
-The latest complete ordinary run still has one
-[unresolved transport timeout](transport-timeout-investigation-95aa61e.md).
-Its focused passes do not replace fresh integrated qualification. The
+The latest complete ordinary run at `57a027a` has 40,098 passes and one
+[proven corruption-test fault](flow-payload-fault-injection-57a027a.md).
+Its deterministic repair passes all 18 cases in the complete payload module
+in each posture at `2decc28`; fresh full qualification remains pending. The
+[earlier transport timeout](transport-timeout-investigation-95aa61e.md)
+passed in the later full run with its original deadline, but its historical
+cause remains unexplained. The
 [skip identity ledger](skip-reconciliation-final07.md) distinguishes separate
 dependency-cohort passes from tests that remain unavailable.
 
