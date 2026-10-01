@@ -51,8 +51,8 @@ for (const graph of ['CDN unavailable', 'initialization failure', 'layout failur
     const ui = fixture(t, {cytoscape});
     await settle();
     assert.equal(ui.list.querySelector('ul > li > ul > li > a').getAttribute('href'), '/chat/goal/8');
-    assert.equal(ui.list.querySelector('a').textContent, 'Root task - active  $1.2500');
-    assert.equal(ui.list.querySelectorAll('a')[1].textContent, 'Child task - pending  $0.5000');
+    assert.equal(ui.list.querySelector('a').textContent, 'Root task \u2014 active  $1.2500');
+    assert.equal(ui.list.querySelectorAll('a')[1].textContent, 'Child task \u2014 pending  $0.5000');
     if (graph === 'working graph') assert.equal(graphElements[0].data.label, 'Root task  $1.2500');
     else assert.equal(ui.window.document.getElementById('plan-tree').hidden, true);
     assert.match(ui.status.textContent, /^Live \u2014 active\. Refreshed /);

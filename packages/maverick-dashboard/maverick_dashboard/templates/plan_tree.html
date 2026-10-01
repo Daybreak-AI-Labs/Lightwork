@@ -47,8 +47,9 @@
 </div>
 
 <p class="muted">
-  The task list is available even when live updates or the map are unavailable.
-  Open a step to review its current state. Reload the page to refresh the saved view.
+  When connected, this view updates automatically. The task list remains available
+  when the map or live updates are unavailable. Open a step to review its current
+  state, or reload the page to refresh the saved view.
 </p>
 <p><a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory">Review task activity</a></p>
 
@@ -73,7 +74,7 @@
       function item(node) {
         const li = document.createElement('li'), link = document.createElement('a');
         link.href = '/chat/goal/' + encodeURIComponent(node.id);
-        link.textContent = (node.title || 'Untitled task') + ' - ' + String(node.status || 'Waiting').replace(/_/g, ' ') + costLabel(node);
+        link.textContent = (node.title || 'Untitled task') + ' — ' + String(node.status || 'Waiting').replace(/_/g, ' ') + costLabel(node);
         li.appendChild(link);
         if ((node.children || []).length) {
           const children = document.createElement('ul');
