@@ -150,15 +150,25 @@ wheel payload files match the exact Git archive. The complete JavaScript run
 passed 1,695 cases across 179 files. The default and setup browser profiles
 executed all 90 unique journeys: 87 passed and three timed out. Two failures
 exhausted the navigation scenario's overall deadline; one accounting-summary
-assertion remained in its loading state. These are unresolved qualification
-failures pending unchanged-deadline quiet-host reruns, not assumed contention.
+assertion remained in its loading state. A later unchanged-deadline quiet run passed six of seven selected journeys;
+only cold navigation failed. The first `/start` response took 25.8 seconds,
+while warm navigation and accounting passed. Native route profiling and a
+measured onboarding repair are active; contention alone is not a sufficient
+explanation. The original failures and all quiet-run traces remain retained.
 
 The ordinary Python run ended incomplete after 12,170 passes, 133 skips and two
 failures: one outdated complete-theme expectation and a lost worker in the
 large-corpus knowledge search case. No fatal traceback or timeout diagnostic
 appeared in that log, so the worker-loss cause is not established. The complete
 417-test theme module passes after its expectation repair in both postures,
-with two POSIX-only skips each. The secure full run is still active. Original
+with two POSIX-only skips each. The complete secure run finished with
+**40,054 passed, three failed and 558 skipped**, zero errors or worker losses.
+Its three failed expectations were the theme palette, implicit unsigned replay
+and plaintext streaming under inherited encryption. The latter two corrected
+complete modules pass 27 and nine cases in each posture, including real signature
+and GCM-tag tamper rejection. See [the complete secure receipt](complete-secure-500fc873.md),
+[signing qualification](control-plane-signing-qualification.md) and
+[attachment qualification](attachment-posture-qualification.md). Original
 failed/incomplete results remain retained; focused reruns do not convert them
 into complete-suite passes.
 
@@ -176,3 +186,32 @@ pass after repair. Its seven complete database files passed 210 cases in each
 posture, with real loopback PostgreSQL and MariaDB and no skips. This later
 product change requires renewed integrated qualification; the frozen wheels and
 runtime runs above do not include it.
+
+## Later source and qualification follow-up
+
+The SQLite repair is included in `7d38f76`, where Ruff, Vulture, all 16 offline
+contracts and all eight wheels pass. Every one of 4,826 wheel payload files
+matches the exact source archive; [the receipt](static-build-qualification-7d38f76.md)
+records commands and hashes. Later test/documentation repairs do not alter that
+product payload. Active Qdrant and onboarding changes still require a new source
+freeze and consolidated validation.
+
+A private native Qdrant server reproduced the removed `.add` text-helper failure
+with qdrant-client 1.19.1. The compatibility repair is being qualified with
+explicit vector/model identity, reset preservation, invocation budgets and
+no automatic resend. Public model assets may be prefetched into a private cache
+for bounded offline CPU inference; no live provider inference is authorized.
+
+The [skip reconciliation](skip-reconciliation-7d38f76.md) maps every one of the
+558 earlier skipped entries to supplemental execution or an explicit remaining
+gate. Counts overlap integrated cases and collection placeholders are not
+reported as passed tests. Additional secure PostgreSQL coverage and supported
+Python 3.10/3.11 compatibility qualification are prepared. These jobs are held
+while the browser performance investigation needs a quiet machine.
+
+The [knowledge worker investigation](knowledge-worker-exit-500fc873.md)
+reproduced the timeout plugin's silent-exit signature with a controlled trigger.
+The original failure lacks a timer receipt, so its cause remains an inference.
+The unchanged case passed focused execution and the complete secure run. Future
+full-run diagnostics record timer invocation before calling the original timeout
+handler; deadlines and failure behavior remain unchanged.
