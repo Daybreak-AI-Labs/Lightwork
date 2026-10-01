@@ -1,0 +1,264 @@
+{
+  "recorded_status": "qualification blocked; incomplete original attempt; no passing secure rerun",
+  "source_head": "aa37a5a58d81940af4ab87434f6c33e6af96c75e",
+  "selected_complete_files": 29,
+  "target_original_identities_without_completed_secure_rerun": 270,
+  "first_attempt": {
+    "collected_cases": 363,
+    "last_displayed_progress": "33%",
+    "completion_receipt": false,
+    "junit_receipt": false,
+    "cause_established": false,
+    "artifacts_verified_unchanged": [
+      {
+        "name": "postgres-gap-secure-final06-01-test-blobs.json",
+        "bytes": 7402,
+        "sha256": "8c840d59825932af0aca5d8e97c1f939f937d99d5589e8d3366ec191e5805453"
+      },
+      {
+        "name": "postgres-gap-secure-final06-01.failures.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "postgres-gap-secure-final06-01.failures.jsonl.reports",
+        "bytes": 77661,
+        "sha256": "0ff8d0bdb6a4449f3417a652ad321abafd8ace8bfbcbd9e024f12d7fb14030d1"
+      },
+      {
+        "name": "postgres-gap-secure-final06-01.log",
+        "bytes": 17993,
+        "sha256": "408d88f13625de09dc27448949db16b98887af9b3f9d1a1fd0155d7583d32d04"
+      },
+      {
+        "name": "postgres-gap-secure-final06-01.source.json",
+        "bytes": 5667,
+        "sha256": "647396b6e3c17b86dfb6b5f9e4fddaeaf069c0b02e700b7aae4810d47cddf729"
+      }
+    ]
+  },
+  "native_review_attempts": [
+    {
+      "action": "native_read_only_status",
+      "executed": false,
+      "result": "automatic_permission_approval_review_did_not_finish_before_deadline"
+    },
+    {
+      "action": "single_narrow_retry_owned_pg_ctl_recovery",
+      "executed": false,
+      "result": "automatic_permission_approval_review_did_not_finish_before_deadline"
+    }
+  ],
+  "additional_coordinator_attempts": {
+    "count": 2,
+    "outcome": "automatic approval review timed out before execution",
+    "evidence": "Coordinator message to documentation worker; no separate raw receipt supplied"
+  },
+  "sandbox_recovery": {
+    "sandbox": "default",
+    "exit_code": 1,
+    "failure_phase": "native_pg_ctl_start",
+    "failure": "could not create restricted token: error code 87; could not start server: error code 87",
+    "server_started": false,
+    "recorded_pid_absent": true,
+    "loopback_port_bind_succeeded_after": true,
+    "stale_postmaster_pid_file_retained": true,
+    "original_artifacts_unchanged": true,
+    "qualification_attempt02_started": false,
+    "product_test_or_acl_changes": false,
+    "classification": "sandbox process-token limitation; no product test executed"
+  },
+  "native_status_before_start": {
+    "exit_code": 3,
+    "output": "pg_ctl: no server running\n"
+  },
+  "source_test_blobs_verified": {
+    "source": "aa37a5a58d81940af4ab87434f6c33e6af96c75e",
+    "inventory_source": "7d38f76ccc7c8b1752eaeb44d65dccfd0646d4d5",
+    "all29_files_unchanged": true,
+    "files": [
+      {
+        "file": "packages/maverick-core/tests/test_a2a_migration_pg.py",
+        "git_blob": "f1597537aeb227390d5e3cecfb7f51bc4b0b09f2",
+        "working_sha256": "946a6d0ea98482faccdbb83163774ad1d6e640b297b14f9d261ed8581137cea1"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_a2a_shared_tasks_pg.py",
+        "git_blob": "03ba6163ff1388ce5ec870bdde208b70f21367cf",
+        "working_sha256": "1017fc638924b498c6cc551fa96484a399c32b4d13ac4aa8b87d5fcc257c317e"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_attachment_submission_postgres.py",
+        "git_blob": "8a227cc957b72a4e4908d81eab2055c06b4e6630",
+        "working_sha256": "379c11df2ac7e8e3894dd4a6eaa42fdcede79043cb3caa78eb73949e7cf07c51"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_channel_delivery_postgres.py",
+        "git_blob": "f4836dda32a08e34878bfc8ed29fb25e7a5be526",
+        "working_sha256": "5219143b28ec45221ee235f9e1ecf2d5568af669c21c1f87b1b2f5b7efa12bf7"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_chat_threads.py",
+        "git_blob": "fc29c9e770bb1821dadc514725e44965c4e67ff4",
+        "working_sha256": "935594028b9d1fc8ed950df2931de3fc8167df52e7718a19151d1f491cb1250e"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_consent_storage.py",
+        "git_blob": "8ba347adc192c431ea34ed889c95359dd4c5d382",
+        "working_sha256": "613d4922cc45e81dbf403b9998b40172664a815e3d7dc385ede063869bfcbb9d"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_control_plane_authority_pg.py",
+        "git_blob": "a263eb06a5800c787b5029dd13e3f98062eaaff9",
+        "working_sha256": "7e0f82d125449b1485c485f4981442c65dabbc00adc357df2e1fb5894bfadb66"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_event_admission_postgres.py",
+        "git_blob": "7193753ffdb050881c9e19b15011fd1dfb145e0c",
+        "working_sha256": "2896d6aa33ad3457700fbdc6899271624bf50c15c703ba39f16213b17d9635ee"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_federation_held_admission.py",
+        "git_blob": "1f8c8cd905e64378d8b15d6eb214f7bf588a0b8f",
+        "working_sha256": "ae8ba193e9a9a9d306eef2497b382b2132a72c7ecc724a3f37644936ebbb9a34"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_flow_action_choice_lineage_pg.py",
+        "git_blob": "303051d726a2a434ae54f23aebeefbe77dcf7f96",
+        "working_sha256": "1aaf64af4a63bbd552e8369defc6ebcc5cb99365872b62b0f8181c5dcdb1f341"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_flow_action_choice_teaching_capture_pg.py",
+        "git_blob": "05be0570715fe3f39d521e3c7cf8784ae509e7bf",
+        "working_sha256": "cb750726275842642c13a753d1bf2c9372a614c1c9e69761f89bff151b872eb4"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_flow_action_episode_review_pg.py",
+        "git_blob": "c8a24807e911fea91d239047432a9f149f9deca9",
+        "working_sha256": "f143dee51d306f22831b5c1c7425486ca334842fcff46c279b6f0c27fed5a368"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_flow_operator_review_pg.py",
+        "git_blob": "9b77796258ae7f1f2f643a367747f2516a46483a",
+        "working_sha256": "377d94516704053b58f143268b3b7e9a24786da0dae37a1653b7b28bfc407483"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_flow_recipe_lineage_pg.py",
+        "git_blob": "feac2aec6007e346a71d4f919f18a5c93f4111e1",
+        "working_sha256": "51d3e7635d3025f55ab3c829909fd2dc0afa94fa6ff1059c1661ea30fdb780cc"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_flow_thread_context.py",
+        "git_blob": "b06047989ef11ac248249f6588fe9c9d590350b3",
+        "working_sha256": "665d15387c5a1c0a651a2357cf4fc4f115f7fd8a7db7de1ce57edccf7804d4ec"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_flow_workflow_memory_pg.py",
+        "git_blob": "5f2caa5cc8f9b206778fa829b77812ccca1ffe78",
+        "working_sha256": "8797f77e2f4d7cf96b54c4bb610afbde2c78af1bda6813a49717c7cf0ec87b59"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_flow_workflow_transducer_pg.py",
+        "git_blob": "f4f822e34de049f70f29409c7bce0fd7cf1d3a12",
+        "working_sha256": "364892ff8c6efd5c7a3ab736b8419dbe95566898d698c2be138f2a41a3623777"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_governed_record_lookup_pg.py",
+        "git_blob": "08d2903eb38b4e6aa046ba535a1be9d412dda8bb",
+        "working_sha256": "dde9940f8b4045262f3515e6d8e4e3866275f492629730b9f48d726e650385e2"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_governed_records_pool_pg.py",
+        "git_blob": "fef3e617daeed09ea9e0e19f6ba08ac6c61b2bde",
+        "working_sha256": "f09d34f78ac36fe6bba7958c6318360928fee2389c84af9fd6ce4bcc6a77e40f"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_governed_records_rls_pg.py",
+        "git_blob": "bd3ac8b556818746c46839012a2d569bb8137c97",
+        "working_sha256": "91037d0101e0c14e73cfe63f1f136bcd7396d578d81eb990de92083999066268"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_learning_store_pg_migration.py",
+        "git_blob": "f5a3506863d3b2b608fca06173a94458219dd581",
+        "working_sha256": "c5a817afe1d53542ecbeb06e4f53f71726e23a2bef374a8258d49252b8dd5ce1"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_learning_store_tenant_isolation.py",
+        "git_blob": "802843fafbc4e6521b2e6dfff3e1005141281fcb",
+        "working_sha256": "0b556c443f7ee3118b43d8541cd5dc39831e78cd3dca9936239265015d8c6874"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_pg_rls.py",
+        "git_blob": "a9a5164d29b23e28725f501f447cb46f2e4860a9",
+        "working_sha256": "15a771eae2aa405e42ffebc45e839bebb01f23a59888d9092cb7a6ee5d47becc"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_postgres_fact_history.py",
+        "git_blob": "4f9c92601145df0bf93127fdac5c25a1580831ea",
+        "working_sha256": "9700b7524aa39902f2c4afbb5d977da0f8ec39d5f84f689defd092f847bbc4ab"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_postgres_facts_trust.py",
+        "git_blob": "73e6443736c37c317c4006d93f17f9085cc69ebb",
+        "working_sha256": "1ad994a053e3f065faf47ff4b4b6fdb1c85f5e86331c8da1db2ecf660f65936f"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_postgres_governed_records_capacity.py",
+        "git_blob": "bbb41a2298368b5eb18774e85932660edf00412c",
+        "working_sha256": "900c264507127ea907734bd5fd711fe261d74f40544ef013e640022405ed3c3a"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_postgres_io_deadlines.py",
+        "git_blob": "74b08bdc091cbb34a9e831eb3a88120892912e53",
+        "working_sha256": "e3b4444e6bfc665138549067a41113a3fe718875cfa07753b6ee7d810fb437c4"
+      },
+      {
+        "file": "packages/maverick-core/tests/test_postgres_world.py",
+        "git_blob": "2f153ce5d67aa317bee4a988f11d286853fcf779",
+        "working_sha256": "17e5ccdb2901df661ac7ac59462ca729c775a58689fb00182dcc3ef80793cdc7"
+      },
+      {
+        "file": "packages/maverick-dashboard/tests/test_boards_postgres.py",
+        "git_blob": "69fa94081275310bb877bb5b0c83f50c74873f3b",
+        "working_sha256": "7f027c1d31d4f0e939f3ce25698ce52a5a526f56062a7684751895252019b1f3"
+      }
+    ],
+    "run_label": "postgres-gap-secure-final06-02",
+    "original_inventory_cases": 270,
+    "runner_sha256": "564e4b8aa08373d8f31ed90d7c7426840f66ad2c40cc1de841fae55b48851ffd",
+    "reporter_sha256": "876de7bb39c503d805c25c237a83cedf8b963cb6d8ebf2c3e04648b0fbc18fa5"
+  },
+  "boundary": "Tests remain user-authorized. Review timeout is not a safety rejection. No data/PID deletion, ACL change, credential change, source/test change, or weakened deadline was used. Separate 12 pgvector cases remain compiler/extension-gated.",
+  "artifacts": [
+    {
+      "path": "audit/postgresql-secure-gap-blocker.md",
+      "bytes": 2594,
+      "sha256": "01f1518f543afc946340031b8cad8f66307266f6bdfb809e3f6ded254b6fe867"
+    },
+    {
+      "path": "audit/postgres-gap-secure-final06-02-approval-block.json",
+      "bytes": 1810,
+      "sha256": "295fb2ad64bb240805949d4a0d52dbe1a265f5f07a4d972c33ece64023f2a595"
+    },
+    {
+      "path": "audit/postgres-gap-secure-final06-02-recovery.json",
+      "bytes": 2051,
+      "sha256": "07d496f6c2014165cd4d910b3ff3870e4d7dd4c9a799a54e0fefd501d288f8c8"
+    },
+    {
+      "path": "audit/postgres-gap-secure-final06-02-sandbox-recovery.json",
+      "bytes": 986,
+      "sha256": "f98a15f53962f56f98292ac5ac8a6f28586e2ca441853d64adc9ccec9e21cd07"
+    },
+    {
+      "path": "audit/postgres-gap-secure-final06-02-sandbox-recovery.log",
+      "bytes": 177,
+      "sha256": "f81b5c837432c510834e32745c25f2901f9adf0282150f0e2c7e6cb192870ee7"
+    },
+    {
+      "path": "audit/postgres-gap-secure-final06-02-test-blobs.json",
+      "bytes": 7668,
+      "sha256": "ff180be1bb1325ace6704f750d888e6bcaabd5786e7655e7ff6145449d4c87f0"
+    }
+  ]
+}

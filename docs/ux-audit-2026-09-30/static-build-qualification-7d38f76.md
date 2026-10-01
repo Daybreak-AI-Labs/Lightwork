@@ -1,5 +1,8 @@
 # Static and build qualification after the SQLite admission repair
 
+The later [final06 checkpoint](static-build-qualification-3640fcf.md) includes
+the Qdrant compatibility repair and supersedes this static/build result.
+
 Source: `7d38f76ccc7c8b1752eaeb44d65dccfd0646d4d5`. All **26 checks pass**:
 Ruff, Vulture, 16 offline contract/governance gates and eight package wheels.
 The matching-source checkout remained clean before and after execution; builds
