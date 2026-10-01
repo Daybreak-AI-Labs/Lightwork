@@ -10737,7 +10737,7 @@ def _owned_event_triggers(request: Request) -> list[dict]:
 
 
 @router.get("/event-triggers")
-async def list_event_triggers_endpoint(request: Request) -> dict:
+def list_event_triggers_endpoint(request: Request) -> dict:
     """Registered polled event triggers (owner-scoped) + the available sources."""
     from maverick import form_store
     from maverick.automation_events import available_sources
