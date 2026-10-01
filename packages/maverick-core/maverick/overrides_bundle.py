@@ -79,7 +79,10 @@ def load_overrides(src: str | Path) -> dict:
         dst.mkdir(parents=True, exist_ok=True)
         for p in sorted(bsrc.glob("*.toml")):
             try:
-                errs, _ = lint_profile(load_domain(p))
+                profile = load_domain(p)
+                if profile.name != p.stem:
+                    raise ValueError("agent name does not match its file")
+                errs, _ = lint_profile(profile)
             except Exception as e:  # malformed TOML, etc.
                 out["skipped"].append(f"domains/{p.name}: {e}")
                 continue

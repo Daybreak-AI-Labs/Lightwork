@@ -54,13 +54,25 @@ class TestValidationOnLoad:
         (bundle / "domains").mkdir(parents=True)
         # Empty allow_tools => lint error => must be skipped, not written.
         (bundle / "domains" / "bad.toml").write_text('name = "bad"\nallow_tools = []\nmax_risk = "low"\n')
-        (bundle / "domains" / "ok.toml").write_text(VALID_PACK)
+        (bundle / "domains" / "client_fin.toml").write_text(VALID_PACK)
 
         out = load_overrides(bundle)
         assert out["domains"] == 1                       # only the good one
         assert any("domains/bad.toml" in s for s in out["skipped"])
         assert "client_fin" in available_domains()
         assert "bad" not in available_domains()
+
+    def test_pack_name_mismatch_is_skipped(self, tmp_path, monkeypatch):
+        _use_workspace(monkeypatch, tmp_path / "ws")
+        bundle = tmp_path / "bundle"
+        (bundle / "domains").mkdir(parents=True)
+        (bundle / "domains" / "ok.toml").write_text(VALID_PACK)
+
+        out = load_overrides(bundle)
+        assert out["domains"] == 0
+        assert any("domains/ok.toml" in s for s in out["skipped"])
+        assert not (tmp_path / "ws" / "domains" / "ok.toml").exists()
+        assert "client_fin" not in available_domains()
 
     def test_unknown_role_is_skipped(self, tmp_path, monkeypatch):
         _use_workspace(monkeypatch, tmp_path / "ws")
