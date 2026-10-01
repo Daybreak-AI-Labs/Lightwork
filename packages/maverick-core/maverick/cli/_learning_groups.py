@@ -383,7 +383,10 @@ def insights_import(bundle: str) -> None:
     """
     from ..insight_exchange import import_insights
     from ..orchestrator import _build_shield
-    imported, reason = import_insights(bundle, shield=_build_shield())
+    imported, reason = import_insights(
+        bundle, shield=_build_shield(), operator_ref="local CLI operator",
+        operator_basis="local_process",
+    )
     if reason != "ok":
         raise click.ClickException(reason)
     click.echo(f"Imported {imported} peer insight(s).")

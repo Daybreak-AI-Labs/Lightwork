@@ -122,6 +122,24 @@ test('sharing lessons previews the file and adds only after confirming', async (
   assert.match(ui.document.getElementById('fa-lessons-status').textContent, /Added 2 lessons/);
 });
 
+test('a published lesson with incomplete activity evidence is not shown as clean success', async (t) => {
+  const markup = slice('learning.html', '<div data-fa-needs="installation_admin" hidden>', '</section>') + '</div>';
+  const ui = await fixture(markup, (url) => {
+    if (url.endsWith('/preview')) return response({usable: true, count: 1, lessons: ['Check totals'], summary: 'Ready.', technical: []});
+    if (url.endsWith('/import')) return response({added: 1, audit_complete: false, message: 'The lesson was added, but the activity record is incomplete.'}, 202);
+    return response({});
+  });
+  t.after(() => ui.window.close());
+  choose(ui.window, ui.document.getElementById('fa-lessons-file'), 'lessons.json', '{}', 'application/json');
+  await ui.settle();
+  const add = [...ui.document.querySelectorAll('#fa-lessons-out button')].find((b) => b.textContent === 'Add these lessons');
+  add.click();
+  await ui.settle();
+  assert.match(ui.document.getElementById('fa-lessons-status').textContent, /activity record is incomplete/);
+  assert.doesNotMatch(ui.document.getElementById('fa-lessons-status').textContent, /Added 1 lesson/);
+  assert.equal(add.disabled, true);
+});
+
 test('an untrusted lesson file offers no add button', async (t) => {
   const markup = slice('learning.html', '<div data-fa-needs="installation_admin" hidden>', '</section>') + '</div>';
   const ui = await fixture(markup, () => response({usable: false, count: 0, lessons: [], summary: 'This file comes from an installation you have not chosen to trust yet.', technical: [{text: 'untrusted peer key'}]}));

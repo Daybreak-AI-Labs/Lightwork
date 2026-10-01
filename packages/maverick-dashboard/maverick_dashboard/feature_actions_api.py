@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -212,6 +212,18 @@ _INSIGHT_LIMIT = 256 * 1024
 
 def _plain_insight_problem(reason: str) -> str:
     text = reason.lower()
+    if "learning halted" in text:
+        return "Learning is paused. No lessons were added. Ask an administrator to resume it, then try again."
+    if "replay claim could not be released" in text:
+        return "No lessons were added, and this file cannot be retried. Ask for a new lesson file."
+    if "learning audit" in text:
+        return "Lightwork could not record the required activity entry. No lessons were added. Try again after activity recording is restored."
+    if "bundle replay rejected" in text:
+        return "This lesson file has already been used. Ask for a new file to share more lessons."
+    if "sanitization unavailable" in text:
+        return "The safety check is unavailable. No lessons were added. Try again when it is restored."
+    if "no insight change was published" in text:
+        return "This file contained no new lesson to add."
     if "untrusted" in text or "trust anchor" in text or "trusted_insight_pubkeys" in text:
         return ("This file comes from an installation you have not chosen to trust yet. "
                 "Whoever installed Lightwork can add it to the trusted list.")
@@ -303,17 +315,36 @@ async def learning_exchange_import(request: Request) -> dict:
     raw = await _body(request, _INSIGHT_LIMIT)
     from maverick.insight_exchange import import_insights
     from maverick.orchestrator import _build_shield
+    principal = auth.caller_principal(request)
 
     def _do() -> tuple[int, str]:
         with tempfile.TemporaryDirectory(prefix="lw-insights-") as folder:
             path = Path(folder) / "lessons.json"
             path.write_bytes(raw)
-            return import_insights(path, shield=_build_shield())
+            return import_insights(
+                path, shield=_build_shield(),
+                operator_ref=principal or "local administrator",
+                operator_basis="dashboard_session" if principal else "local_mode",
+            )
     imported, reason = await run_in_threadpool(_do)
+    if reason == "import published but completion audit is unavailable":
+        return JSONResponse(status_code=202, content={
+            "added": int(imported), "audit_complete": False,
+            "message": ("The lessons were added, but their final activity entry could not be recorded. "
+                        "Do not add this file again. Ask an administrator to review the activity record."),
+        })
+    if reason == "insight write outcome is uncertain; replay claim retained":
+        return JSONResponse(status_code=202, content={
+            "added": 0, "outcome": "unconfirmed",
+            "message": ("Lightwork could not confirm whether these lessons were saved. "
+                        "Do not add this file again. Check the Learning page and activity record first."),
+        })
     if reason != "ok":
-        raise HTTPException(409, _plain_insight_problem(reason))
-    await run_in_threadpool(lambda: _record(request, "insights_import", installation=True, lessons=imported))
-    return {"added": int(imported)}
+        operational = any(token in reason for token in ("learning halted", "learning audit", "sanitization unavailable"))
+        raise HTTPException(503 if operational else 409, _plain_insight_problem(reason))
+    # The shared importer recorded the caller identity basis and both learning phases
+    # before this endpoint can report a clean success.
+    return {"added": int(imported), "audit_complete": True}
 
 
 # ---- Move customizations (overrides export / load) --------------------------

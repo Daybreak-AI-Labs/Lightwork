@@ -122,6 +122,38 @@ def test_lesson_file_from_an_untrusted_installation_is_refused_plainly(client, m
     assert client.post("/api/v1/learning-exchange/preview", content=b"").status_code == 422
 
 
+def test_lesson_import_reports_halt_and_incomplete_audit_honestly(client, monkeypatch):
+    from maverick import insight_exchange
+
+    captured = []
+
+    def outcome(_path, **kwargs):
+        captured.append(kwargs)
+        return 0, "learning halted: operator stop"
+
+    monkeypatch.setattr(insight_exchange, "import_insights", outcome)
+    stopped = client.post("/api/v1/learning-exchange/import", content=b"{}")
+    assert stopped.status_code == 503
+    assert "No lessons were added" in stopped.json()["detail"]
+    assert captured[0]["operator_basis"] == "local_mode"
+
+    monkeypatch.setattr(insight_exchange, "import_insights", lambda *_a, **_k: (
+        2, "import published but completion audit is unavailable",
+    ))
+    incomplete = client.post("/api/v1/learning-exchange/import", content=b"{}")
+    assert incomplete.status_code == 202
+    assert incomplete.json()["added"] == 2
+    assert incomplete.json()["audit_complete"] is False
+    assert "final activity entry" in incomplete.json()["message"]
+
+    monkeypatch.setattr(insight_exchange, "import_insights", lambda *_a, **_k: (
+        0, "insight write outcome is uncertain; replay claim retained",
+    ))
+    unconfirmed = client.post("/api/v1/learning-exchange/import", content=b"{}")
+    assert unconfirmed.status_code == 202
+    assert unconfirmed.json()["outcome"] == "unconfirmed"
+
+
 # ---- Copy customizations ---------------------------------------------------------
 
 def _bundle(files: dict[str, str]) -> bytes:

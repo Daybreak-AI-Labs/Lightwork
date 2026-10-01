@@ -6,6 +6,10 @@ the bundle with this instance's Ed25519 key (the audit-signing keypair, so
 one identity covers both); ``import_insights`` verifies a bundle against the
 operator's explicit trust anchors, Shield-scans and redacts every insight,
 and merges through the same dedup/cap gate local dreaming uses.
+An operator HALT is checked again at publication. A digest-only learning
+record is required before imported lessons can be recalled; a separate
+completion record distinguishes a published import from one left in a
+prepared or uncertain state.
 
 Poisoning posture — deliberately stricter than skill installs:
 
@@ -63,6 +67,10 @@ class _BundleError(ValueError):
 
 class _SanitizationError(RuntimeError):
     """A required content safety screen was unavailable or malformed."""
+
+
+class _ImportAuditUnavailable(Exception):
+    """The pre-publication learning record could not be written."""
 
 
 def _canonical_bytes(ts: float, insights: list[dict[str, Any]]) -> bytes:
@@ -250,6 +258,23 @@ class _InsightReplayLedger:
                 conn.rollback()
             except sqlite3.Error:
                 pass
+            raise
+        finally:
+            conn.close()
+
+    def release(self, peer_key: str, sig: str) -> None:
+        """Undo a claim only when publication was refused before its write."""
+        signature_hash = hashlib.sha256(bytes.fromhex(sig)).hexdigest()
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM replay_claims WHERE peer_key = ? AND signature_hash = ?",
+                (peer_key, signature_hash),
+            )
+            conn.commit()
+        except BaseException:
+            conn.rollback()
             raise
         finally:
             conn.close()
@@ -502,6 +527,28 @@ def _validate_envelope(
     return peer_key, sig, ts, rows
 
 
+def _record_import_phase(
+    *, phase: str, peer_key: str, bundle_sha256: str,
+    signature_sha256: str, store_sha256: str, operator_ref: str,
+    operator_basis: str, **counts: int,
+) -> bool:
+    """Record one digest-only learning phase; a refusal is never success."""
+    from .audit import AuditRefused, EventKind, audit_event
+
+    try:
+        return audit_event(
+            EventKind.LEARNING_UPDATE, agent="insight_exchange",
+            operation="insights_import", phase=phase,
+            peer_public_key=peer_key, bundle_sha256=bundle_sha256,
+            signature_sha256=signature_sha256,
+            store_after_sha256=store_sha256,
+            operator_ref=operator_ref, operator_basis=operator_basis,
+            **counts,
+        ) is True
+    except AuditRefused:
+        return False
+
+
 def _verify_bundle(
     peer_key: str, sig: str, ts: float, rows: list[Any],
 ) -> None:
@@ -526,12 +573,15 @@ def import_insights(
     path: Path | str | None = None, shield: Any | None = None,
     max_insights: int = 100, now: float | None = None,
     replay_path: Path | str | None = None,
+    operator_ref: str = "unspecified", operator_basis: str = "unspecified",
 ) -> tuple[int, str]:
     """Verify + merge a peer bundle. Returns ``(imported, reason)``.
 
     Fail-closed: no trust anchors, an untrusted key, or a bad signature
     imports nothing. Merging goes through ``append_insights`` so peer
-    lessons obey the same dedup and capacity rules as local dreams.
+    lessons obey the same dedup and capacity rules as local dreams. A non-``ok``
+    reason may still mean the atomic write happened when completion evidence
+    failed; callers must show that state instead of claiming clean success.
     """
     try:
         anchors = _normalise_trust_anchors(
@@ -567,13 +617,20 @@ def import_insights(
         return 0, f"malformed bundle: {exc}"
     if not incoming:
         return 0, "bundle verified but contained no importable insights"
+    from .learning_guard import Halted, check_learning_halt
+
+    try:
+        check_learning_halt("insight_exchange", "import_start")
+    except Halted as exc:
+        return 0, f"learning halted: {exc}"
     if replay_path is None and path is not None:
         destination = Path(path)
         replay_path = destination.parent / (
             f".{destination.name}.insight-replay.sqlite3"
         )
+    ledger = _InsightReplayLedger(replay_path)
     try:
-        replayed = _InsightReplayLedger(replay_path).claim(
+        replayed = ledger.claim(
             peer_key,
             sig,
             now=current,
@@ -586,7 +643,55 @@ def import_insights(
     kwargs: dict = {"max_insights": max_insights}
     if path is not None:
         kwargs["path"] = path
-    written = append_insights(incoming, **kwargs)
+    bundle_sha256 = hashlib.sha256(_canonical_bytes(ts, rows)).hexdigest()
+    signature_sha256 = hashlib.sha256(bytes.fromhex(sig)).hexdigest()
+    prepared_store_sha256: str | None = None
+
+    def before_write(added: int, refreshed: int, store_sha256: str) -> None:
+        nonlocal prepared_store_sha256
+        # The insight-store lock is held here. A fresh HALT read and an
+        # acknowledged audit row must precede the atomic publication, even if
+        # HALT arrived after signature verification or replay claiming.
+        check_learning_halt("insight_exchange", "import_persistence")
+        if not _record_import_phase(
+            phase="prepared", peer_key=peer_key,
+            bundle_sha256=bundle_sha256, signature_sha256=signature_sha256,
+            store_sha256=store_sha256, novel_candidates=added,
+            refreshed_candidates=refreshed, operator_ref=operator_ref,
+            operator_basis=operator_basis,
+        ):
+            raise _ImportAuditUnavailable("learning audit is unavailable")
+        check_learning_halt("insight_exchange", "import_publish")
+        prepared_store_sha256 = store_sha256
+
+    try:
+        written = append_insights(
+            incoming, before_write=before_write, raise_on_error=True, **kwargs,
+        )
+    except (Halted, _ImportAuditUnavailable) as exc:
+        # The callback ran before atomic publication. A refusal cannot consume
+        # the only signed bundle the operator has; unlike an uncertain write,
+        # this claim can safely be released for a later retry.
+        try:
+            ledger.release(peer_key, sig)
+        except Exception:
+            return 0, f"{exc}; replay claim could not be released"
+        return 0, str(exc)
+    except (OSError, RuntimeError):
+        # The atomic writer may have published before reporting an error; keep
+        # the replay claim so the same external lesson cannot be applied twice.
+        return 0, "insight write outcome is uncertain; replay claim retained"
+    if prepared_store_sha256 is None:
+        return 0, "bundle verified but no insight change was published"
+    if not _record_import_phase(
+        phase="published", peer_key=peer_key,
+        bundle_sha256=bundle_sha256, signature_sha256=signature_sha256,
+        store_sha256=prepared_store_sha256, reported_added=written,
+        operator_ref=operator_ref, operator_basis=operator_basis,
+    ):
+        # The prepared row still binds the intended bytes, but do not describe
+        # the full audit trail as clean when the completion row is absent.
+        return written, "import published but completion audit is unavailable"
     return written, "ok"
 
 

@@ -457,6 +457,10 @@
           try {
             var result = await request('/api/v1/learning-exchange/import', {method: 'POST', body: raw, type: 'application/json'});
             out.textContent = '';
+            if (result.audit_complete === false || result.outcome === 'unconfirmed') {
+              say(status, result.message);
+              return;
+            }
             say(status, 'Added ' + plural(result.added, 'lesson') + '. Anything private or unsafe was left out.');
           } catch (failure) {
             say(status, await failText(failure, 'add the lessons'));

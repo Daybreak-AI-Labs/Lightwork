@@ -1954,7 +1954,11 @@ here.
   (never raw trajectories) cross instance boundaries as Ed25519-signed
   bundles; imports are fail-closed against `[dreaming]
   trusted_insight_pubkeys`, Shield-scanned, provenance-tagged, and merged
-  through the normal dedup gate. Transport is deliberately operator-managed
+  through the normal dedup gate. Import checks the operator HALT again at the
+  write boundary and requires a learning audit preparation record before any
+  lesson becomes usable. A separate completion record distinguishes a clean
+  import from a published one whose final activity record is missing.
+  Transport is deliberately operator-managed
   (a file), never a network call. **Fleet aggregation:** a central
   `maverick dream --donations-dir` replays the whole fleet's donated
   trajectory records through the same consolidation.

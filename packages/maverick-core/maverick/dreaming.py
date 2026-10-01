@@ -39,6 +39,7 @@ broken or steered by injected text even with the LLM on.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -46,6 +47,7 @@ import re
 import stat
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -543,6 +545,8 @@ def load_insights(path: Path | str | None = None) -> list[DreamInsight]:
 def append_insights(
     new: list[DreamInsight], *, path: Path | str | None = None,
     max_insights: int = 100,
+    before_write: Callable[[int, int, str], None] | None = None,
+    raise_on_error: bool = False,
 ) -> int:
     """Append novel insights, dedup against the store, cap to most recent.
 
@@ -591,11 +595,22 @@ def append_insights(
                 return 0
             existing.sort(key=lambda i: i.ts)
             keep = existing[-max(1, max_insights):]
+            if before_write is not None:
+                lines = [json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep]
+                # The existing text writer uses platform-default newline
+                # translation, so hash the bytes that it will actually publish.
+                encoded = "".join(lines).replace("\n", os.linesep).encode("utf-8")
+                digest = hashlib.sha256(encoded).hexdigest()
+                before_write(written, refreshed, digest)
+            else:
+                lines = (json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep)
             _atomic_write_lines(
                 path,
-                (json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep),
+                lines,
             )
     except (OSError, RuntimeError) as e:
+        if raise_on_error:
+            raise
         log.warning("dreaming: insight write failed: %s", e)
         return 0
     return written
