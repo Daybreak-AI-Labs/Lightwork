@@ -17,11 +17,24 @@
 {{ hero('Governance', 'Cloud AI agents', lede='See the AI agents running in AWS Bedrock, Azure AI Foundry and Google Vertex AI, check them against your policies, and send approved changes to the provider.') }}
 
 {% if not ai_cloud_agent_governance_configuration_available %}
+{% if cag_unavailable_reason == 'workspace' %}
+<section class="panel" aria-labelledby="cag-unavailable-title">
+  <h2 id="cag-unavailable-title">Choose a workspace first</h2>
+  <p>Cloud AI agents are kept separately for each workspace. Choose a workspace, then open this page again. If there is no workspace to pick, ask an administrator.</p>
+  <p><a class="btn" href="/workspace/tenant?next=/assurance/cloud-agents">Choose a workspace</a></p>
+</section>
+{% elif cag_unavailable_reason == 'unreachable' %}
 <section class="panel" aria-labelledby="cag-unavailable-title">
   <h2 id="cag-unavailable-title">This page isn't ready yet</h2>
-  <p>Lightwork couldn't confirm which workspace you're in or reach the cloud agent service. Choose a workspace, then reload this page. If it keeps happening, ask an administrator to finish setting up cloud AI agents.</p>
+  <p>Lightwork couldn't reach the cloud agent service just now. Reload this page in a moment. If it keeps happening, ask an administrator to check how cloud AI agents are set up.</p>
   <p><a class="btn" href="/assurance/cloud-agents">Reload</a></p>
 </section>
+{% else %}
+<section class="panel" aria-labelledby="cag-unavailable-title">
+  <h2 id="cag-unavailable-title">Cloud AI agents aren't available yet</h2>
+  <p>This is a preview feature, and it hasn't been connected on this installation, so there is nothing to show here. Your workspace is not the problem. Ask an administrator, or prepare a support report on the <a href="/help">Help</a> page, to ask about setting it up.</p>
+</section>
+{% endif %}
 {% elif not ai_cloud_agent_governance_enabled %}
 <section class="panel" aria-labelledby="cag-off-title">
   <h2 id="cag-off-title">Cloud AI agents are turned off</h2>
