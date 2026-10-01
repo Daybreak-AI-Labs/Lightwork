@@ -1,5 +1,7 @@
 # Lightwork invention register
 
+For current code evidence, see the [28-item implementation status](lightwork-invention-implementation-status-2026-10-01.md). The register retains hypotheses and rejected experiments; its entries are not release claims.
+
 Updated October 1, 2026. This cumulative register retains the ideas from the current discussion and the retained invention research, including unsuccessful experiments. Its purpose is to help choose a genuinely differentiated capability for Lightwork without losing earlier work or repeatedly renaming established methods.
 
 The strongest new research candidates are preserving achievable customer commitments and turning private operational failures into transferable executable challenges. Neither is implemented or established as a novel algorithm. Earlier learning proposals remain in the register. Useful engineering, comparative advantage, scientific novelty, customer benefit, and acquisition interest are separate claims.
