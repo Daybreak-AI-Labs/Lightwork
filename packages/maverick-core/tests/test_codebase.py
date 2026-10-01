@@ -392,6 +392,27 @@ def test_a_run_cannot_reach_host_git_config_beside_its_working_copy(tmp_path, mo
     assert seen == [["work"]] and not mark.exists() and "a.py" in p["files"]
 
 
+def test_vault_git_never_runs_automatic_maintenance(tmp_path):
+    """git 2.54+ follows a fetch with a detached geometric repack. In the host
+    repository that deleted a pack while clone_work was copying it ("failed to
+    copy file ... pack-*.rev"), so vault git runs with automatic maintenance
+    off. The thresholds are forced to fire in the foreground here."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _sh("init", "-q", "-b", "main", cwd=src)
+    host = tmp_path / "host.git"
+    vault._git(["init", "-q", "--bare", str(host)])
+    eager = {"GIT_CONFIG_PARAMETERS": "'gc.autopacklimit'='1' 'fetch.unpacklimit'='1' "
+                                      "'gc.autodetach'='false' 'maintenance.autodetach'='false'"}
+    for n in range(2):
+        (src / f"f{n}.txt").write_text(f"{n}\n")
+        _sh("add", "-A", cwd=src)
+        _sh("commit", "-q", "-m", str(n), cwd=src)
+        vault._git(["fetch", "-q", str(src), "+refs/heads/*:refs/heads/*"],
+                   git_dir=host, env=eager)
+    assert len(list((host / "objects" / "pack").glob("*.pack"))) == 2
+
+
 def test_the_merge_approval_is_a_structured_card_committing_to_the_head():
     from maverick.approval_cards import decode_approval_detail, digest
     from maverick.codebase.features import _approval_detail

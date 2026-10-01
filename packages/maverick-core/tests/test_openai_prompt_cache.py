@@ -160,3 +160,24 @@ class TestReasoningEffortMapping:
             max_tokens=256, model="o3-mini", thinking_budget=None,
         )
         assert "reasoning_effort" not in kwargs
+
+
+class TestMaxCompletionTokensOnTheWire:
+    def test_gpt_6_sends_max_completion_tokens(self, client):
+        """Production 400 on gpt-6.1-sol: "'max_tokens' is not supported with
+        this model. Use 'max_completion_tokens' instead." """
+        for model in ("gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra"):
+            kwargs = client._build_kwargs(
+                "sys", [{"role": "user", "content": "q"}], None,
+                max_tokens=256, model=model,
+            )
+            assert kwargs.get("max_completion_tokens") == 256, model
+            assert "max_tokens" not in kwargs, model
+
+    def test_older_models_keep_max_tokens(self, client):
+        kwargs = client._build_kwargs(
+            "sys", [{"role": "user", "content": "q"}], None,
+            max_tokens=256, model="gpt-4-turbo",
+        )
+        assert kwargs.get("max_tokens") == 256
+        assert "max_completion_tokens" not in kwargs

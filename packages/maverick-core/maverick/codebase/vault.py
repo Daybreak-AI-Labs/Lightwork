@@ -81,9 +81,11 @@ def _unseal(data: bytes, context: str) -> bytes:
 
 # Every host-side git call runs with these on top of git_safety's scrubbed
 # environment: repository hooks, external diff drivers and textconv can never run,
-# whatever a working tree or its metadata says.
+# whatever a working tree or its metadata says. Automatic maintenance is off too:
+# git 2.54+ follows a fetch with a detached geometric repack, which deleted packs
+# while clone_work copied them, and these repositories are temporary anyway.
 _HARDEN = {"core.hooksPath": os.devnull, "diff.external": "", "core.fsmonitor": "false",
-           "protocol.ext.allow": "never"}
+           "protocol.ext.allow": "never", "maintenance.auto": "false", "gc.auto": "0"}
 
 
 def _env(token_env: str | None, extra: dict[str, str] | None = None) -> dict[str, str]:
