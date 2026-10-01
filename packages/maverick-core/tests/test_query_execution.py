@@ -338,11 +338,27 @@ def test_psycopg2_statement_deadline_and_fresh_next_query(request, monkeypatch):
                                        password=params.get("password"), host=params["host"],
                                        port=int(params["port"]), database=params["dbname"])
     monkeypatch.setenv("DATABASE_URL", url.render_as_string(hide_password=False))
+    # Qualify a statement deadline, not first-import/native-driver startup.
+    # Warm the real dialect with its own fresh connection before the unchanged
+    # 150ms budget; the measured call still opens and owns another connection.
+    warm = json.loads(database_tool().fn({"op": "query", "sql": "SELECT 1 AS value",
+                                          "response_format": "json"}))
+    assert warm["rows"] == [[1]] and warm["complete"]
     monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 0.15)
     executions = capture_execution(monkeypatch, database_module)
+    statements = []
+
+    def capture_statement(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+
+    sqlalchemy.event.listen(sqlalchemy.engine.Engine, "before_cursor_execute", capture_statement)
     began = time.monotonic()
-    result = database_tool().fn({"op": "query", "sql": "SELECT pg_sleep(5)"})
+    try:
+        result = database_tool().fn({"op": "query", "sql": "SELECT pg_sleep(5)"})
+    finally:
+        sqlalchemy.event.remove(sqlalchemy.engine.Engine, "before_cursor_execute", capture_statement)
     assert time.monotonic() - began < 2.5
+    assert "SELECT pg_sleep(5)" in statements
     assert result.startswith("ERROR:") and executions[0].finished
     assert executions[0].cancellation_support == "postgres_statement_timeout_and_cancel"
     monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 3)
