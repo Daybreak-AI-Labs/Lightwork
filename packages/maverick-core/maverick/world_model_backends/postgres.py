@@ -3607,7 +3607,7 @@ class PostgresWorldModel:
             row = cur.fetchone()
         from ..world_model import _notify_approval_created
 
-        _notify_approval_created(int(row[0]), provenance)
+        _notify_approval_created(self, int(row[0]), provenance)
         return int(row[0])
 
     def get_approval(self, approval_id: int):

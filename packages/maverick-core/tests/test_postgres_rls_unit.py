@@ -758,3 +758,40 @@ class TestReconnectOnBrokenConnection:
             ("SELECT set_config('maverick.tenant', %s, true)", ("acme",)),
             ("SELECT 1", None),
         ]
+
+
+def test_create_approval_notifies_with_the_committing_world(monkeypatch):
+    # The kernel notifier takes the world that committed the row first
+    # (``_notify_approval_created(world, approval_id, provenance)``); the
+    # Postgres backend must call it with the same shape, or every live
+    # create_approval dies with a TypeError after the row is durable.
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    rows = iter([None, (42,)])  # no context goal, then RETURNING id
+
+    class _Cur(RecordingCursor):
+        def fetchone(self):
+            return next(rows)
+
+    cur = _Cur()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    seen: list[tuple[int, str | None, object]] = []
+
+    def fake_created(approval_id, *, provenance=None, world=None):
+        seen.append((approval_id, provenance, world))
+
+    import maverick.approval_notify as approval_notify
+
+    monkeypatch.setattr(approval_notify, "approval_created", fake_created)
+
+    assert world.create_approval("payment", detail="support", provenance="slack") == 42
+    assert seen == [(42, "slack", world)]
+    insert_sql, insert_params = cur.calls[-1]
+    assert insert_sql.startswith("INSERT INTO approvals(")
+    assert insert_params[4] == "slack"
