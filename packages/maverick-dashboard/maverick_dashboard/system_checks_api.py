@@ -591,7 +591,9 @@ def _client_status() -> dict[str, Any]:
     bound = bool(st.get("bound"))
     if bound:
         summary = (f"This installation holds data for one organisation: {st.get('client_id')}. "
-                   "You can download all of it, or erase all of it when they leave.")
+                   "You can request a local data export here. To remove its local folder, "
+                   "Lightwork must be stopped first. Other workspaces, connected services, "
+                   "and saved copies need separate review.")
     elif st.get("enforced"):
         summary = ("This installation must be set up for one organisation, but none is set. "
                    "Whoever installed Lightwork needs to fix this.")

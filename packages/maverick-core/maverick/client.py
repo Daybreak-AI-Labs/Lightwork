@@ -235,11 +235,11 @@ def _erase_client_bound(cid: str, *, keep_audit: bool, actor: str | None) -> dic
     try:
         ensure_private_directory(home)
         ensure_private_directory(root.parent)
-        if root.exists() or root.is_symlink():
-            ensure_private_directory(root)
+        ensure_private_directory(root)
         if root.resolve().parent != (home.resolve() / "tenants"):
             raise ValueError("the client root is outside this installation")
         canonical_root = root.resolve()
+        root_identity = _erase_root_identity(root, canonical_root)
     except (OSError, ValueError) as exc:
         raise ClientErasureError("The client data folder could not be verified. Nothing was erased.") from exc
 
@@ -251,7 +251,7 @@ def _erase_client_bound(cid: str, *, keep_audit: bool, actor: str | None) -> dic
         with cross_process_lock(receipts / f".erase-{cid}", strict=True):
             entered = True
             return _erase_client_locked(root, home, cid, keep_audit, actor or f"local:{getpass.getuser()}",
-                                        ErasureReceipt, audit, canonical_root)
+                                        ErasureReceipt, audit, canonical_root, root_identity)
     except ClientErasureError:
         raise
     except (OSError, RuntimeError, ValueError) as exc:
@@ -282,12 +282,19 @@ def _erase_root_identity(root, canonical_root):
     return info.st_dev, info.st_ino
 
 
-def _erase_client_locked(root, home, cid, keep_audit, actor, receipt_type, audit, canonical_root) -> dict:
+def _require_erase_root_identity(root, canonical_root, expected):
+    if _erase_root_identity(root, canonical_root) != expected:
+        raise ValueError("the client data folder identity changed")
+
+
+def _erase_client_locked(root, home, cid, keep_audit, actor, receipt_type, audit,
+                         canonical_root, root_identity) -> dict:
     import hashlib
     import json
 
     receipt = None
     try:
+        _require_erase_root_identity(root, canonical_root, root_identity)
         targets = list(_erase_targets(root, keep_audit=keep_audit)) if root.exists() else []
         relative = sorted(p.relative_to(root).as_posix() for p in targets)
         areas: dict[str, int] = {}
@@ -310,7 +317,7 @@ def _erase_client_locked(root, home, cid, keep_audit, actor, receipt_type, audit
             raise OSError("the retained activity record was not saved")
         # First-use signing may provision verification material in the client
         # audit tree. Include it in deletion rather than leave a fresh key behind.
-        root_identity = _erase_root_identity(root, canonical_root)
+        _require_erase_root_identity(root, canonical_root, root_identity)
         targets = list(_erase_targets(root, keep_audit=keep_audit)) if root.exists() else []
         deletion = {"deletion_target_count": len(targets),
                     "deletion_manifest_sha256": hashlib.sha256(json.dumps(sorted(

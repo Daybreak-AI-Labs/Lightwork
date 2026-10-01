@@ -28,12 +28,17 @@
                    pause a run for a human decision; playbook review instructions
                    do not pause it automatically.') }}
   {% endcall %}
+  {% if not can_operate_workflows %}
+  <p class="panel">You can review saved work here. Ask someone with workflow access to create or edit it, or to review flow results.</p>
+  {% endif %}
+  {% if can_operate_workflows %}
   <div class="wfx__head">
     <span style="display:flex;gap:var(--space-2);margin-inline-start:auto;">
       {% if flows_enabled %}<a class="btn" href="/flows/designer">New flow</a>{% endif %}
       <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
     </span>
   </div>
+  {% endif %}
 
   {% if flows_enabled %}
   <section class="wfx__section" aria-labelledby="wfx-flow-h">
@@ -47,16 +52,16 @@
           <div class="mv-row__sub">{{ f.nodes }} step{{ '' if f.nodes == 1 else 's' }}</div>
           <details hidden><summary>Technical details</summary><p class="muted">Flow reference: <code>{{ f.id }}</code></p></details>
         </div>
-        <div class="mv-row__actions">
+        {% if can_operate_workflows %}<div class="mv-row__actions">
           <a class="btn btn--ghost" href="/flows/designer/{{ f.id | urlencode }}">Edit</a>
           <a class="btn btn--ghost" href="/flows/analytics">Analytics</a>
-        </div>
+        </div>{% endif %}
       </li>
       {% endfor %}
     </ul>
     {% else %}
     <div class="mv-empty"><p class="mv-empty__title">No flows yet</p>
-      <p class="mv-empty__sub">Open the flow designer, or ask Copilot to build one for you.</p><a class="btn btn--primary" href="/flows/designer">Open the flow designer</a></div>
+      {% if can_operate_workflows %}<p class="mv-empty__sub">Build your first flow in the visual designer. Copilot can explain the steps while you work.</p><a class="btn btn--primary" href="/flows/designer">Open the flow designer</a>{% endif %}</div>
     {% endif %}
   </section>
   {% else %}
@@ -82,12 +87,12 @@
           <div class="mv-row__sub">{% if t.params %}You'll be asked for: {{ t.params|map('humanize')|map('lower')|join(', ') }}{% else %}Ready to use with your instructions{% endif %}</div>
           <details hidden><summary>Technical details</summary><p class="muted">Template reference: <code>{{ t.name }}</code></p></details>
         </div>
-        <div class="mv-row__actions">
+        {% if can_operate_workflows %}<div class="mv-row__actions">
           <a class="btn btn--ghost" href="/workflow-builder?edit={{ t.name | urlencode }}">Edit</a>
           <a class="btn btn--ghost" href="/flows/designer?from_template={{ t.name | urlencode }}" title="Open this template as a one-step flow, then add branches, approvals, and loops around it">Open as flow</a>
           {% if scheduling_enabled or triggers_enabled %}<a class="btn btn--ghost" href="/workflow-builder?template={{ t.name | urlencode }}">Automate</a>{% endif %}
           <a class="btn btn--ghost" href="/chat?title={{ t.title | urlencode }}">Use</a>
-        </div>
+        </div>{% endif %}
       </li>
       {% endfor %}
     </ul>
@@ -95,7 +100,7 @@
     <div class="mv-empty">
       <p class="mv-empty__title">No templates yet</p>
       <p class="mv-empty__body">Draft a reusable workflow in the builder, then schedule or trigger it.</p>
-      <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
+      {% if can_operate_workflows %}<a class="btn btn--primary" href="/workflow-builder">New workflow</a>{% endif %}
     </div>
     {% endif %}
   </section>
@@ -111,7 +116,7 @@
           <div class="mv-row__sub">{% if p.description %}{{ p.description }}{% endif %}{% if p.suite %} · {{ p.suite|humanize }}{% endif %}</div>
         </div>
         <div class="mv-row__actions">
-          <a class="btn btn--ghost" href="/workflow-builder?edit_agent={{ p.name | urlencode }}">Edit</a>
+          {% if can_operate_workflows %}<a class="btn btn--ghost" href="/workflow-builder?edit_agent={{ p.name | urlencode }}">Edit</a>{% endif %}
           <a class="btn btn--ghost" href="/agents?name={{ p.name | urlencode }}">Open in Agents</a>
         </div>
       </li>
@@ -121,7 +126,7 @@
     <div class="mv-empty">
       <p class="mv-empty__title">No agent playbooks yet</p>
       <p class="mv-empty__body">Build a governed specialist agent in the builder — choose “Agent playbook”.</p>
-      <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
+      {% if can_operate_workflows %}<a class="btn btn--primary" href="/workflow-builder">New workflow</a>{% endif %}
     </div>
     {% endif %}
   </section>

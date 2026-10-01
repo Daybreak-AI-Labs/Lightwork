@@ -4,6 +4,7 @@ Workflows nav opens a blank builder" finding by making it a real list.
 """
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from test_support.navigation import assert_navigation_link
@@ -83,6 +84,20 @@ def test_flows_off_index_does_not_offer_admin_control_to_others(monkeypatch, tmp
     assert 'href="/learning#lrn-flows-on"' not in page.text
 
 
+def test_no_flows_guide_uses_the_designer_without_promising_copilot_creation(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import flow
+    from maverick.flow import store
+
+    monkeypatch.setattr(flow, "enabled", lambda: True)
+    monkeypatch.setattr(store, "list_flow_summaries", lambda *, owner: [])
+    page = _client().get("/workflows")
+    assert page.status_code == 200
+    assert 'href="/flows/designer">Open the flow designer</a>' in page.text
+    assert "Copilot can explain the steps" in page.text
+    assert "ask Copilot to build one" not in page.text
+
+
 def test_nav_workflows_points_to_index(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import maverick.domain_edit as de
@@ -108,3 +123,31 @@ def test_saved_flows_are_reachable_from_nav(monkeypatch, tmp_path):
     assert_navigation_link(page.text, "/workflows", "Flows")
     assert "Customer renewals" in page.text
     assert 'href="/flows/designer/renewals"' in page.text
+
+
+@pytest.mark.parametrize(("role", "can_operate"), [("viewer", False), ("operator", True)])
+def test_workflow_index_actions_match_current_role(monkeypatch, tmp_path, role, can_operate):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick import flow
+    from maverick.flow import store
+    from maverick_dashboard import app as dashboard
+    from maverick_dashboard import auth, rbac, ui_visibility
+
+    principal = f"user:{role}"
+    rbac.set_role(principal, role)
+    monkeypatch.setattr(auth, "caller_principal", lambda _request: principal)
+    monkeypatch.setattr(dashboard, "caller_principal", lambda _request: principal)
+    if role == "viewer":
+        ui_visibility.set_visibility("/workflows", role, True)
+    monkeypatch.setattr(flow, "enabled", lambda: True)
+    monkeypatch.setattr(store, "list_flow_summaries", lambda *, owner: [
+        {"id": "renewals", "name": "Customer renewals", "nodes": 4},
+    ])
+    page = _client().get("/workflows")
+    assert page.status_code == 200
+    assert "Customer renewals" in page.text
+    assert ('href="/flows/designer/renewals"' in page.text) is can_operate
+    assert ('href="/flows/designer">New flow</a>' in page.text) is can_operate
+    assert ('href="/flows/analytics">Analytics</a>' in page.text) is can_operate
+    assert ("You can review saved work here." in page.text) is not can_operate

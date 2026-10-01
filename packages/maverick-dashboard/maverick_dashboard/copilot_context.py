@@ -35,7 +35,6 @@ _ACTION_VERBS = frozenset({
 })
 _ACTION_LEADS = (
     ("can", "you"), ("could", "you"), ("would", "you"), ("will", "you"),
-    ("can", "i"), ("could", "i"), ("how", "do", "i"), ("how", "can", "i"),
     ("i", "want", "to"), ("i", "need", "to"), ("i", "would", "like", "to"),
     ("i", "would", "like", "you", "to"), ("help", "me"), ("let", "s"),
 )
@@ -118,6 +117,25 @@ _GENERIC = CopilotPageContext(
 _CONTEXTS = tuple(
     _ensure_read_only(context)
     for context in (
+        CopilotPageContext(
+            path="/workflows", title="Flows",
+            summary="Find your saved flows, reusable templates, and specialist instructions.",
+            capabilities=(
+                "Create and edit visual flows when the flow engine is on and you have operator access.",
+                "Review saved flows and their results from this page.",
+            ),
+            boundaries=(
+                "Copilot can guide you through a flow; it cannot create one for you from this page.",
+            ),
+            next_steps=(
+                "Choose New flow to open the visual designer, add the steps, then save the flow.",
+                "If flows are turned off, ask an administrator to turn them on in Learning.",
+            ),
+            suggested_questions=(
+                "How do I create a flow?",
+                "How do I review the results of a flow?",
+            ),
+        ),
         CopilotPageContext(
             path="/facts", title="Shared business facts",
             summary="Browse shared facts by name, source, tag and age, then inspect exact current details and recorded versions.",
@@ -1690,7 +1708,7 @@ def built_in_reply(
     elif terms & {"start", "started", "next", "how", "ready", "readiness", "status"}:
         lead = "Start here: "
         body = " ".join(context.next_steps)
-    elif terms & {"can", "capability", "capabilities", "do", "feature", "features"}:
+    elif terms & {"can", "could", "capability", "capabilities", "do", "feature", "features"}:
         lead = f"When role and server composition permit, {context.title} can: "
         body = " ".join(context.capabilities)
     else:

@@ -4,6 +4,7 @@ import pytest
 from maverick_dashboard import copilot_context
 
 CANONICAL_CONTEXTS = {
+    "/workflows": "Flows",
     "/facts": "Shared business facts",
     "/content-access": "Employee content access",
     "/users/departures": "Employee departures",
@@ -316,7 +317,6 @@ def test_built_in_reply_is_deterministic_read_only_and_bounded(
         ("/goals", "Can you please cancel my running goal?"),
         ("/privacy", "Show me the documents about vendors"),
         ("/help", "Download a support bundle"),
-        ("/security/assurance", "How do I delete this record?"),
     ],
 )
 def test_built_in_guide_does_not_claim_to_perform_requested_actions(
@@ -332,6 +332,30 @@ def test_built_in_guide_does_not_claim_to_perform_requested_actions(
     assert "current status and your access" in reply
     assert "can:" not in reply
     assert len(reply.split()) <= copilot_context._MAX_BUILT_IN_REPLY_WORDS
+
+
+def test_how_to_question_gets_flow_steps_without_claiming_execution() -> None:
+    question = "How do I create a flow?"
+    context = copilot_context.context_for_page("/workflows")
+
+    assert copilot_context.is_action_request(question) is False
+    reply = copilot_context.built_in_reply(context, question)
+    assert reply.startswith("Start here: ")
+    assert "Choose New flow" in reply
+    assert "save the flow" in reply
+    assert "can't do that for you" not in reply
+    assert copilot_context.is_action_request("Create a flow for me") is True
+
+
+@pytest.mark.parametrize("question", ["Can I create a flow?", "Could I create a flow?"])
+def test_personal_capability_question_is_not_an_execution_request(question: str) -> None:
+    context = copilot_context.context_for_page("/workflows")
+
+    assert copilot_context.is_action_request(question) is False
+    reply = copilot_context.built_in_reply(context, question)
+    assert reply.startswith("When role and server composition permit, ")
+    assert "operator access" in reply
+    assert copilot_context.is_action_request("Can you create a flow for me?") is True
 
 
 def test_built_in_guide_matches_whole_words_and_offers_relevant_questions() -> None:

@@ -12427,6 +12427,7 @@ def workflows_index_page(request: Request) -> HTMLResponse:
             "flows": flows,
             "flows_enabled": flows_enabled,
             "can_manage_flows": has_global_permission(request, "admin"),
+            "can_operate_workflows": has_permission(request, "operate"),
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
         },

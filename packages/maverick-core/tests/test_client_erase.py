@@ -268,6 +268,28 @@ def test_root_replaced_after_preparation_stops_without_deleting_replacement(monk
     assert events[-1]["status"] == "incomplete"
 
 
+def test_root_replaced_during_receipt_creation_refuses_before_deletion(monkeypatch, tmp_path):
+    from maverick import client_erasure
+
+    root = _seed()
+    parked = tmp_path / "parked-original-client"
+    original = client_erasure.ErasureReceipt.__init__
+
+    def replace_root(receipt, home, detail):
+        original(receipt, home, detail)
+        root.rename(parked)
+        root.mkdir()
+        (root / "replacement.txt").write_text("replacement data must survive")
+
+    monkeypatch.setattr(client_erasure.ErasureReceipt, "__init__", replace_root)
+    with pytest.raises(client.ClientErasureError, match="Nothing was erased") as caught:
+        client.erase_client()
+    assert (parked / "world.db").exists()
+    assert (root / "replacement.txt").read_text() == "replacement data must survive"
+    _, events = _receipt(caught.value.receipt_id)
+    assert [event["status"] for event in events] == ["requested"]
+
+
 def test_target_moved_out_of_client_root_after_preparation_is_not_claimed_erased(monkeypatch, tmp_path):
     from maverick import client_erasure
     root = _seed()
@@ -382,7 +404,7 @@ def test_cli_status_and_erase_confirm():
     r = _run("client", "status")
     assert r.exit_code == 0 and "acme" in r.output
     r = _run("client", "erase", "--confirm")
-    assert r.exit_code == 0 and "erased client" in r.output
+    assert r.exit_code == 0 and "erased local data for client" in r.output
     assert "Activity receipt:" in r.output and "events.ndjson" in r.output
     from maverick.paths import data_dir
     assert not (data_dir() / "world.db").exists()
@@ -401,7 +423,7 @@ def test_cli_reports_partial_erasure_as_failure(monkeypatch):
     result = _run("client", "erase", "--confirm")
     assert result.exit_code != 0 and "Erasure is incomplete" in result.output
     assert "Activity receipt:" in result.output
-    assert "erased client" not in result.output
+    assert "erased local data for client" not in result.output
 
 
 def test_cli_export():

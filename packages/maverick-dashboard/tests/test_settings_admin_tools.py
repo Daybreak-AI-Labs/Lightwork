@@ -402,6 +402,8 @@ def test_organisation_data_download_and_erase(client, monkeypatch, tmp_path, aud
         world.create_goal("Acme task")
         status = client.get("/api/v1/admin/system/client").json()
         assert status["bound"] is True and status["organisation"] == "acme"
+        assert "Lightwork must be stopped" in status["summary"]
+        assert "Other workspaces" in status["summary"]
         started = client.post("/api/v1/admin/system/client/export")
         assert started.status_code == 202, started.text
         job = started.json()["job"]
