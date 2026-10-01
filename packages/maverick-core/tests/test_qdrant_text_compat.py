@@ -375,3 +375,138 @@ def test_failed_legacy_model_initialization_releases_native_path_lock(native_tex
     assert retained_error.value.__traceback__ is not None
     recovered = real_client(path=str(path))
     recovered.close()
+
+
+@pytest.mark.parametrize("operation", ["add", "query"])
+def test_exhausted_budget_stops_text_before_encoder_or_native_rpc(native_text, monkeypatch, operation):
+    from maverick.budget import Budget, BudgetExceeded
+    from maverick.connector_attempts import bind_tool_budget, invocation_scope
+
+    make_store, calls, _ = native_text
+    store = make_store(embedding_model="synthetic/legacy")
+    _seed(store)
+    original = _snapshot(store)
+    budget = Budget(max_dollars=1.0, dollars=2.0)
+
+    def unexpected_rpc(*args, **kwargs):
+        pytest.fail("an exhausted invocation must stop before any native RPC")
+
+    with monkeypatch.context() as blocked:
+        for method in ("collection_exists", "get_collection", "create_collection", "upsert", "query_points"):
+            blocked.setattr(store._client, method, unexpected_rpc)
+        with bind_tool_budget(budget), invocation_scope(), pytest.raises(BudgetExceeded):
+            if operation == "add":
+                store.add(["needle replacement"], ids=["original"])
+            else:
+                store.query("needle")
+    assert calls == []
+    assert _snapshot(store) == original
+
+
+@pytest.mark.parametrize("operation", ["add", "query"])
+def test_cancellation_during_encoder_init_stops_embedding_and_native_effects(native_text, monkeypatch, operation):
+    import asyncio
+
+    from maverick.budget import Budget
+    from maverick.connector_attempts import bind_tool_budget, invocation_scope
+
+    make_store, calls, encoder = native_text
+    store = make_store(embedding_model="synthetic/legacy")
+    _seed(store)
+    original = _snapshot(store)
+    original_init = encoder.__init__
+
+    def cancel_during_init(self, model_name="synthetic/current", **kwargs):
+        original_init(self, model_name=model_name, **kwargs)
+        invocation.cancel()
+
+    def unexpected_rpc(*args, **kwargs):
+        pytest.fail("cancelled model initialization must not dispatch a native effect")
+
+    monkeypatch.setattr(encoder, "__init__", cancel_during_init)
+    for method in ("create_collection", "upsert", "query_points"):
+        monkeypatch.setattr(store._client, method, unexpected_rpc)
+    with bind_tool_budget(Budget()), invocation_scope() as invocation:
+        with pytest.raises(asyncio.CancelledError, match="connector invocation cancelled"):
+            if operation == "add":
+                store.add(["needle replacement"], ids=["original"])
+            else:
+                store.query("needle")
+    assert calls == [("init", "synthetic/legacy")]
+    assert _snapshot(store) == original
+
+
+@pytest.mark.parametrize("cancel_after", [1, 16])
+def test_cancelled_passage_batch_stops_remaining_vectors_batches_and_upsert(native_text, monkeypatch, cancel_after):
+    import asyncio
+
+    from maverick.budget import Budget
+    from maverick.connector_attempts import bind_tool_budget, invocation_scope
+
+    make_store, _, encoder = native_text
+    store = make_store(embedding_model="synthetic/legacy")
+    _seed(store)
+    original = _snapshot(store)
+    original_passage = encoder.passage_embed
+    batches, generated, closed = [], [], []
+    documents = [f"needle passage {index}" for index in range(33)]
+
+    def cancelling_passage(self, texts, **kwargs):
+        texts = list(texts)
+        batches.append(texts)
+        try:
+            for vector in original_passage(self, texts, **kwargs):
+                generated.append(vector)
+                if len(generated) == cancel_after:
+                    invocation.cancel()
+                yield vector
+        finally:
+            closed.append(True)
+
+    def unexpected_write(*args, **kwargs):
+        pytest.fail("cancelled passage encoding must not write any prepared points")
+
+    monkeypatch.setattr(encoder, "passage_embed", cancelling_passage)
+    monkeypatch.setattr(store._client, "upsert", unexpected_write)
+    monkeypatch.setattr(store._client, "create_collection", unexpected_write)
+    with bind_tool_budget(Budget()), invocation_scope() as invocation:
+        with pytest.raises(asyncio.CancelledError, match="connector invocation cancelled"):
+            store.add(documents, ids=["original", *[f"new-{index}" for index in range(32)]])
+    assert batches == [documents[:16]]
+    assert len(generated) == cancel_after
+    assert closed == [True]
+    assert _snapshot(store) == original
+
+
+def test_wall_budget_expiring_during_query_embedding_prevents_native_search(native_text, monkeypatch):
+    from maverick.budget import Budget, BudgetExceeded
+    from maverick.connector_attempts import bind_tool_budget, invocation_scope
+
+    make_store, calls, encoder = native_text
+    store = make_store(embedding_model="synthetic/legacy")
+    _seed(store)
+    original = _snapshot(store)
+    budget = Budget(max_wall_seconds=3600)
+    original_query = encoder.query_embed
+    closed = []
+
+    def expiring_query(self, text, **kwargs):
+        try:
+            for vector in original_query(self, text, **kwargs):
+                # Advance this real Budget's elapsed duration without sleeping
+                # or changing the invocation/SDK clocks used by other code.
+                budget._started_monotonic -= 3601
+                yield vector
+        finally:
+            closed.append(True)
+
+    def unexpected_search(*args, **kwargs):
+        pytest.fail("a query embedding that exhausted wall time must not reach Qdrant")
+
+    monkeypatch.setattr(encoder, "query_embed", expiring_query)
+    monkeypatch.setattr(store._client, "query_points", unexpected_search)
+    with bind_tool_budget(budget), invocation_scope(), pytest.raises(BudgetExceeded, match="wall time"):
+        store.query("needle")
+    assert ("query", "synthetic/legacy", ["needle"]) in calls
+    assert closed == [True]
+    assert _snapshot(store) == original

@@ -5,6 +5,7 @@ collection without an explicit model uses FastEmbed's current default.
 """
 from __future__ import annotations
 
+from ..connector_attempts import current_invocation
 from ._provider_accounting import metered_transport_call
 
 
@@ -20,7 +21,11 @@ class TextBridge:
         self.model = None
 
     def call(self, callback, category="retrieval"):
-        return metered_transport_call("qdrant", callback, hosted=self.store._remote, category=category)
+        invocation = current_invocation()
+        invocation.check()
+        result = metered_transport_call("qdrant", callback, hosted=self.store._remote, category=category)
+        invocation.check()
+        return result
 
     def info(self):
         client, collection = self.store._client, self.store._collection
@@ -28,7 +33,8 @@ class TextBridge:
             return None
         return self.call(lambda: client.get_collection(collection))
 
-    def space(self, info):
+    def space(self, info, invocation):
+        invocation.check()
         from fastembed import TextEmbedding
         from qdrant_client.models import Distance, VectorParams
 
@@ -53,7 +59,9 @@ class TextBridge:
         if selected is None:
             # Do not introduce an application model default. This branch is
             # reachable only for a collection with no prior vectors/schema.
+            invocation.check()
             self.encoder = TextEmbedding()
+            invocation.check()
             selected = self.encoder.model_name
         candidates = [row for row in models if row["model"] == selected]
         if len(candidates) != 1:
@@ -69,9 +77,39 @@ class TextBridge:
             if existing is None or existing.size != dimension or existing.distance != Distance.COSINE:
                 raise ValueError("The embedding model does not match the existing Qdrant vector space; use its original model or rebuild explicitly")
         if self.encoder is None or self.model not in {None, selected}:
+            invocation.check()
             self.encoder = TextEmbedding(model_name=selected)
+            invocation.check()
         self.model = selected
         return field, params
+
+    def encode(self, inputs, *, query, dimension, invocation):
+        from ..skill.embeddings import validate_vectors
+
+        vectors = []
+        for offset in range(0, len(inputs), 16):
+            invocation.check()
+            batch = inputs[offset:offset + 16]
+            generated = iter(self.encoder.query_embed(batch[0]) if query else self.encoder.passage_embed(batch))
+            raw = []
+            try:
+                while True:
+                    invocation.check()
+                    try:
+                        value = next(generated)
+                    except StopIteration:
+                        break
+                    invocation.check()
+                    if len(raw) >= len(batch):
+                        raise ValueError("embedding batch does not match its inputs")
+                    raw.append(value.tolist() if hasattr(value, "tolist") else value)
+            finally:
+                close = getattr(generated, "close", None)
+                if callable(close):
+                    close()
+            invocation.check()
+            vectors.extend(validate_vectors(raw, len(batch), dimension))
+        return vectors
 
     @staticmethod
     def identity(model, field, dimension):
@@ -80,13 +118,11 @@ class TextBridge:
     def add(self, documents, point_ids, metadatas):
         from qdrant_client.models import PointStruct
 
-        from ..skill.embeddings import validate_vectors
-
+        invocation = current_invocation()
+        invocation.check()
         info = self.info()
-        field, params = self.space(info)
-        raw = [value.tolist() if hasattr(value, "tolist") else value
-               for value in self.encoder.passage_embed(documents)]
-        vectors = validate_vectors(raw, len(documents), params.size)
+        field, params = self.space(info, invocation)
+        vectors = self.encode(documents, query=False, dimension=params.size, invocation=invocation)
         points = [PointStruct(id=point_id, vector={field: vector},
                               payload={"document": document, **metadata})
                   for point_id, vector, metadata, document in
@@ -101,20 +137,18 @@ class TextBridge:
                 self.store._collection, vectors_config={field: params},
                 metadata={"lightwork_text_embedding": self.identity(self.model, field, params.size)}), "storage")
         else:
-            self.space(latest)
+            self.space(latest, invocation)
         self.call(lambda: self.store._client.upsert(
             self.store._collection, points=points, wait=True), "storage")
 
     def query(self, text, *, tenant_id, top_k):
-        from ..skill.embeddings import validate_vectors
-
+        invocation = current_invocation()
+        invocation.check()
         info = self.info()
         if info is None:
             return []
-        field, params = self.space(info)
-        raw = [value.tolist() if hasattr(value, "tolist") else value
-               for value in self.encoder.query_embed(text)]
-        vector = validate_vectors(raw, 1, params.size)[0]
+        field, params = self.space(info, invocation)
+        vector = self.encode([text], query=True, dimension=params.size, invocation=invocation)[0]
         want = max(1, min(top_k, 100))
         prefix = f"tenant:{tenant_id}:" if tenant_id is not None else None
         # Older text records have no __recall_tenant__ field. Retain the bounded
