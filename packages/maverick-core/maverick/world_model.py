@@ -2219,6 +2219,7 @@ class WorldModel:
         limit: int | None = None,
         offset: int = 0,
         order: str = "asc",
+        before_id: int | None = None,
     ) -> list[Goal]:
         """List goals, optionally filtered + paginated.
 
@@ -2228,7 +2229,13 @@ class WorldModel:
         ``order='desc'`` lets the most-recent slice be fetched cheaply.
         ``domain`` scopes to one department (the pack a goal ran as) -- the
         ``domain`` column is plaintext, so it filters in SQL.
+        ``before_id`` excludes that immutable ID and all newer IDs without
+        reading an anchor row. Use descending order for continuation; in
+        ascending order it remains only an upper ID bound. Existing offset
+        callers retain their historical behavior.
         """
+        if before_id is not None and not 0 < int(before_id) <= 2**63 - 1:
+            raise ValueError("before_id must be a positive signed 64-bit goal ID")
         direction = "DESC" if order.lower() == "desc" else "ASC"
         sql = "SELECT * FROM goals"
         clauses: list[str] = []
@@ -2245,6 +2252,9 @@ class WorldModel:
         if project_id is not None:
             clauses.append("project_id = ?")
             params = params + (int(project_id),)
+        if before_id is not None:
+            clauses.append("id < ?")
+            params = params + (int(before_id),)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += f" ORDER BY id {direction}"

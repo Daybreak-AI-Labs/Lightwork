@@ -36,6 +36,7 @@ class TestGoals:
             "Pagination-Offset",
             "Pagination-Has-More",
             "Pagination-Next-Offset",
+            "Pagination-Next-Before-Id",
         }
 
     def test_create_requires_api_key(self, monkeypatch):

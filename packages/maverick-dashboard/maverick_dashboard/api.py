@@ -1595,6 +1595,7 @@ def reconcile_goal_submission(request: Request, response: Response, kind: str = 
                 "Pagination-Offset": {"schema": {"type": "integer"}},
                 "Pagination-Has-More": {"schema": {"type": "boolean"}},
                 "Pagination-Next-Offset": {"schema": {"type": "integer"}},
+                "Pagination-Next-Before-Id": {"schema": {"type": "integer"}},
             },
         },
     },
@@ -1605,6 +1606,7 @@ def list_goals(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    before_id: int | None = None,
 ) -> list[GoalOut]:
     """List goals (newest first), paginated.
 
@@ -1612,18 +1614,26 @@ def list_goals(
     Python via ``list_goals()``, then sliced. Now the LIMIT/OFFSET are
     pushed to SQL.
 
-    Owner-scoped: a non-admin authenticated caller sees only their own goals;
-    auth-off and admin callers see all (``goal_owner_filter`` returns None).
+    ``before_id`` continues below an immutable ID even if that task has been
+    removed or is no longer accessible. It cannot be combined with an offset.
+    Current content authority still scopes every request: administrator policy
+    authority does not grant automatic access to employee task content.
     """
-    w = _world()
+    if before_id is not None:
+        if not 0 < before_id <= 2**63 - 1:
+            raise HTTPException(status_code=422, detail="before_id must be a positive signed 64-bit goal ID")
+        if offset != 0:
+            raise HTTPException(status_code=422, detail="before_id cannot be combined with a nonzero offset")
     limit = max(1, min(int(limit or 50), 500))
     offset = max(0, int(offset or 0))
+    w = _world()
     goals = w.list_goals(
         status=status,
         owner=goal_owner_filter(request),
         limit=limit + 1,
         offset=offset,
         order="desc",
+        **({"before_id": before_id} if before_id is not None else {}),
     )
     has_more = len(goals) > limit
     goals = goals[:limit]
@@ -1631,7 +1641,9 @@ def list_goals(
     response.headers["Pagination-Offset"] = str(offset)
     response.headers["Pagination-Has-More"] = str(has_more).lower()
     if has_more:
-        response.headers["Pagination-Next-Offset"] = str(offset + limit)
+        if before_id is None:
+            response.headers["Pagination-Next-Offset"] = str(offset + limit)
+        response.headers["Pagination-Next-Before-Id"] = str(goals[-1].id)
     return [_to_goal_out(g) for g in goals]
 
 

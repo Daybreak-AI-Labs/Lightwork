@@ -2493,6 +2493,7 @@ class PostgresWorldModel:
         limit: int | None = None,
         offset: int = 0,
         order: str = "asc",
+        before_id: int | None = None,
     ) -> list[PGGoal]:
         """List goals, optionally filtered by status + paginated (mirrors SQLite).
 
@@ -2501,7 +2502,12 @@ class PostgresWorldModel:
         domain-scoped inbox both 500 on this backend --
         ``list_goals(project_id=...)`` / ``list_goals(domain=...)`` raised
         ``TypeError`` for a keyword this method didn't accept.
+        ``before_id`` is an exclusive immutable ID bound, combined with all
+        current tenant/owner filters without reading its anchor. Descending
+        order provides continuation; ascending order only applies the bound.
         """
+        if before_id is not None and not 0 < int(before_id) <= 2**63 - 1:
+            raise ValueError("before_id must be a positive signed 64-bit goal ID")
         direction = "DESC" if str(order).lower() == "desc" else "ASC"
         sql = (
             "SELECT id, parent_id, title, description, status, "
@@ -2523,6 +2529,9 @@ class PostgresWorldModel:
         if project_id is not None:
             conds.append("project_id = %s")
             params.append(int(project_id))
+        if before_id is not None:
+            conds.append("id < %s")
+            params.append(int(before_id))
         frag, fparams = _tenant_scope()
         if frag:
             conds.append(frag)
