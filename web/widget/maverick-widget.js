@@ -45,7 +45,9 @@
     position: "fixed", bottom: "calc(84px + env(safe-area-inset-bottom, 0px))", insetInlineEnd: "12px", width: "min(320px, calc(100% - 24px))", boxSizing: "border-box",
     maxHeight: "min(60dvh, calc(100dvh - 100px))", display: "none", flexDirection: "column",
     background: "#fff", border: "1px solid #ddd", borderRadius: "12px",
-    boxShadow: "0 8px 30px rgba(0,0,0,.18)", overflow: "hidden",
+    // Let the whole panel scroll when a very short viewport cannot contain
+    // the nonshrinking controls and receipt status together.
+    boxShadow: "0 8px 30px rgba(0,0,0,.18)", overflowX: "hidden", overflowY: "auto",
     font: "14px/1.4 system-ui, sans-serif", zIndex: 2147483647
   });
 

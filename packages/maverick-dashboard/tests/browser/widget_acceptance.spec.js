@@ -141,3 +141,58 @@ test('keyboard follows pending, refused, unknown and accepted receipts without d
   }
   expect(escaped).toBe(true);
 });
+
+test('a 200px keyboard viewport scrolls uncertain status and keeps receipt and Close reachable', async ({page}, info) => {
+  let posts = 0, receipts = 0;
+  await page.route('**/chat/send', route => {
+    posts++; return route.fulfill({status: 503, contentType: 'application/json', body: '{}'});
+  });
+  await page.route('**/api/v1/goal-submissions/receipt?kind=chat', route => {
+    receipts++; return route.fulfill({status: 503, contentType: 'application/json', body: '{}'});
+  });
+  const ui = await host(page, {width: 390, height: 844, keyboardHeight: 200});
+  const check = page.getByRole('button', {name: 'Check start status'});
+  const close = page.getByRole('button', {name: 'Close Lightwork'});
+  async function reachable(control) {
+    const state = await control.evaluate(node => {
+      const box = node.getBoundingClientRect(), panel = node.closest('[role="region"]').getBoundingClientRect();
+      const viewport = window.visualViewport;
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return {box: {top: box.top, bottom: box.bottom, left: box.left, right: box.right},
+        panel: {top: panel.top, bottom: panel.bottom, left: panel.left, right: panel.right},
+        viewport: {top: viewport.offsetTop, bottom: viewport.offsetTop + viewport.height},
+        pointerReachable: node === hit || node.contains(hit)};
+    });
+    expect(state.panel.top, JSON.stringify(state)).toBeGreaterThanOrEqual(state.viewport.top - 1);
+    expect(state.panel.bottom, JSON.stringify(state)).toBeLessThanOrEqual(state.viewport.bottom + 1);
+    expect(state.box.top, JSON.stringify(state)).toBeGreaterThanOrEqual(state.panel.top - 1);
+    expect(state.box.bottom, JSON.stringify(state)).toBeLessThanOrEqual(state.panel.bottom + 1);
+    expect(state.box.left, JSON.stringify(state)).toBeGreaterThanOrEqual(state.panel.left - 1);
+    expect(state.box.right, JSON.stringify(state)).toBeLessThanOrEqual(state.panel.right + 1);
+    expect(state.pointerReachable, JSON.stringify(state)).toBe(true);
+  }
+  await ui.input.fill('Keep the draft while the keyboard leaves little room.');
+  await page.keyboard.press('Enter');
+  await expect(ui.status).toContainText('Start not confirmed');
+  expect(await ui.panel.evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
+  // User scrolling must reveal the entire status; no DOM scrollTop assignment
+  // or locator scrollIntoView may conceal an overflow:hidden failure here.
+  await ui.panel.hover({position: {x: 20, y: 120}});
+  await page.mouse.wheel(0, 600);
+  await expect.poll(() => ui.panel.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+  await reachable(ui.status);
+  await info.attach('widget-200px-unknown-status', {body: await page.screenshot(), contentType: 'image/png'});
+  await ui.input.focus(); await page.keyboard.press('Tab');
+  await expect(check).toBeFocused(); await reachable(check);
+  await check.click();
+  await expect(ui.status).toContainText('No confirmed receipt is visible yet');
+  expect(posts).toBe(1); expect(receipts).toBe(1);
+  await expect(ui.input).toHaveValue('Keep the draft while the keyboard leaves little room.');
+  for (let i = 0; i < 6 && !(await close.evaluate(node => node === document.activeElement)); i++) {
+    await page.keyboard.press('Shift+Tab');
+  }
+  await expect(close).toBeFocused(); await reachable(close);
+  await info.attach('widget-200px-close-reachable', {body: await page.screenshot(), contentType: 'image/png'});
+  await close.click();
+  await expect(ui.panel).toBeHidden(); await expect(ui.button).toBeFocused();
+});
