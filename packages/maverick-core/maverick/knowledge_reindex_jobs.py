@@ -243,7 +243,7 @@ def run(kb, *, context: str, job_id: str, authority) -> dict:
             if current["state"] == "cancelled":
                 return _public(current)
             _update(path, state="unconfirmed" if uncertain else "failed", message=(
-                "A paid batch has no confirmed completion. Its reservation remains held; this job will not resend it. Review provider usage before starting a separately confirmed rebuild. The live index was preserved."
+                "A paid batch has no confirmed completion. Its cost receipt needs review; this job will not resend it. Review provider usage before starting a separately confirmed rebuild. The live index was preserved."
                 if uncertain else "Rebuild stopped before a confirmed replacement. Inspect the collection and this job before starting a new review."))
         finally:
             _update(path, elapsed=job["elapsed"] + time.monotonic() - started)

@@ -769,8 +769,8 @@
     "implementation_evidence": [
       "Integrated chat_base.html places the default hidden Close rule before its mobile override and retains the accessible named keyboard-operable Close control. Desktop transitions release the drawer and its covered-content isolation. Equivalent historical overlap in PR2529 is provenance only, not an outstanding adoption dependency."
     ],
-    "validation": "2026-10-01: installed Chrome theme_drawer.spec.js passed the actual Close visibility/focus behavior at 390x844 and its hidden desktop state after resizing to 1280x900, within 4/4 targeted cases. The tested tree is 205d2753877341f8635cdc92443fce55c81a3d88 (a4b6cfd and committed 8db2fc1; root integration 3f8dc75). Focused drawer/theme Node tests passed 9/9, including keyboard wrap and return behavior. Exact report: audit/browser-theme-drawer-fixed-results.json.",
-    "remaining": "Drawer-specific 320/768-width, RTL and enlarged-text rendered acceptance is not established by the 390-width case or unrelated narrow-page coverage. Human screen-reader checks and final-source complete rerun remain pending.",
+    "validation": "2026-10-01: installed Chrome theme_drawer.spec.js passed the actual Close visibility/focus behavior at 390x844 and its hidden desktop state after resizing to 1280x900, within 4/4 targeted cases. The tested tree is 205d2753877341f8635cdc92443fce55c81a3d88 (a4b6cfd and committed 8db2fc1; root integration 3f8dc75). Focused drawer/theme Node tests passed 9/9, including keyboard wrap and return behavior. Exact report: audit/browser-theme-drawer-fixed-results.json. Additional installed-Chrome drawer_rendered.spec.js qualification at a19fc945cc5d8293d2ee0e20d7f32cc0c77438f4 passed 6/6 cases (20.048 seconds): widths 320, 390 and 768, each in LTR standard text and CSS-emulated RTL with the actual acknowledged maximum Larger preset (20px root, 125%). Every case verified Close accessible name, native keyboard reachability, viewport-bounded geometry, Enter returning focus to Menu, covered main inert/released state, and hidden Close at desktop width1280. Report: audit/browser-drawer-rendered-a19fc94-results.json.",
+    "remaining": "Final consolidated-source complete browser/JavaScript rerun is pending. The recorded RTL direction and 125% text preset are browser CSS/product-setting checks, not native OS scaling or Arabic translation qualification. Human screen-reader navigation/announcements and additional browser engines remain unqualified.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -781,8 +781,8 @@
     "implementation_evidence": [
       "The integrated chat drawer saves/restores prior inert state, isolates covered body content, wraps Tab/Shift+Tab, and releases isolation on close/finder/resize. 8db2fc1 (root 3f8dc75) records actual drawer focus before CSS hides Close; desktop resize restores visible brand focus only when the open drawer lost Close focus to body/documentElement, preserving a visible link or deliberate dialog focus. No PR2529 adoption dependency remains."
     ],
-    "validation": "2026-10-01: 9/9 focused drawer/theme DOM tests passed, including explicit blur-to-body before the media-query callback, preserved visible-link/dialog focus, keyboard wrapping and original inert-state restoration. Four actual Chrome cases passed on the exact same committed tree, including 390x844 to 1280x900 Close-focus recovery and subsequent keyboard navigation, plus separate visible-link and search-dialog preservation. Report: audit/browser-theme-drawer-fixed-results.json. Earlier complete d4b71e3 JavaScript cohort passed all 1,686 cases; it predates this native-resize repair.",
-    "remaining": "Final consolidated-source complete browser/JavaScript rerun is pending. Human assistive-technology navigation through inert content, additional desktop/mobile engines, RTL and enlarged-text drawer checks remain unqualified; synthetic DOM and installed Chrome are reported separately.",
+    "validation": "2026-10-01: 9/9 focused drawer/theme DOM tests passed, including explicit blur-to-body before the media-query callback, preserved visible-link/dialog focus, keyboard wrapping and original inert-state restoration. Four actual Chrome cases passed on the exact same committed tree, including 390x844 to 1280x900 Close-focus recovery and subsequent keyboard navigation, plus separate visible-link and search-dialog preservation. Report: audit/browser-theme-drawer-fixed-results.json. Earlier complete d4b71e3 JavaScript cohort passed all 1,686 cases; it predates this native-resize repair. Additional installed-Chrome drawer_rendered.spec.js qualification at a19fc945cc5d8293d2ee0e20d7f32cc0c77438f4 passed 6/6 cases (20.048 seconds): widths 320, 390 and 768, each in LTR standard text and CSS-emulated RTL with the actual acknowledged maximum Larger preset (20px root, 125%). Every case verified Close accessible name, native keyboard reachability, viewport-bounded geometry, Enter returning focus to Menu, covered main inert/released state, and hidden Close at desktop width1280. Report: audit/browser-drawer-rendered-a19fc94-results.json.",
+    "remaining": "Final consolidated-source complete browser/JavaScript rerun is pending. The recorded RTL direction and 125% text preset are browser CSS/product-setting checks, not native OS scaling or Arabic translation qualification. Human screen-reader navigation/announcements and additional browser engines remain unqualified.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -1711,10 +1711,11 @@
     ],
     "validation": [
       "Native facts/core/CAS checks passed in the 319-pass batch; all 12 new shared fact tests passed in the final 27-case batch, including stale edit/delete/tag, actual revision, lost response, audit failure, post-delete replay, selection/role/context changes and shared token recovery. All 19 form JS cases passed.",
-      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls.",
+      "Receipt recovery integration is complete: fact-receipt-recovery.json records 15 passing inventory/authority cases for authenticated byte preservation and held startup reconciliation. An old receipt absence does not authorize replay."
     ],
     "remaining": [
-      "Real PostgreSQL concurrency remains unqualified. Explicit trusted maintenance writers can still omit expected revision by design. Receipt recovery classification is a separate integration dependency; minimal barriers are retained and disclosed in My Data.",
+      "Real PostgreSQL concurrency remains unqualified. Explicit trusted maintenance writers can still omit expected revision by design. Receipt recovery classification is integrated; minimal barriers remain retained and disclosed in My Data.",
       "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
     ],
     "evidence_slice": "slices/memory-knowledge-final-qualification.json",
@@ -1810,17 +1811,19 @@
     "id": "LW-122",
     "title": "Knowledge reindex lacks bounded job supervision",
     "category": "Memory knowledge and search",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "knowledge_reindex_jobs provides durable bounded jobs, exact collection/model/limit preview, a zero-provider-cost local ceiling, 64-passage cancellation checkpoints, private shadow vectors and source-CAS atomic publication. Interrupted jobs recover status and explicitly resume saved work; native admin controls and shared Copilot use the same service. Settings/installer gates and caps are implemented."
+      "knowledge_reindex_jobs provides durable bounded jobs, exact collection/model/limit preview, a zero-provider-cost local ceiling, 64-passage cancellation checkpoints, private shadow vectors and source-CAS atomic publication. Interrupted jobs recover status and explicitly resume saved work; native admin controls and shared Copilot use the same service. Settings/installer gates and caps are implemented.",
+      "3dd047f integrates hosted checkpoint 2d1f72d: supported standard Voyage and OpenAI rebuilds review captured price/input limits, expiry and configuration/source identity; use cumulative native Budget, organization and provider admission; record real returned usage; retain uncertain receipts without resending; bind encrypted shadow batches and atomic publication proof. Current account/settings/credentials/source changes stop further dispatch.",
+      "Administrator reindex_max_dollars is exposed in Settings and installer. Native library and typed Copilot show the same rate-based reservation and observed/unresolved costs. Deployment model, endpoint and credentials are unchanged."
     ],
     "validation": [
-      "All six core reindex job tests passed in the 441-case batch: atomic publication, duplicate start, cancellation preserving live index, current authority/source rechecks, paid-adapter refusal before dispatch and checkpoint resume without repeating saved batches.",
-      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+      "Hosted-reindex-qualification-2026-10-01.md records 137 native synthetic cases passed in ordinary mode and the same 137 with both secure switches. Covers actual local cost authorities, incomplete usage, changed model/config/source/principal, partial accounting and pre/post-publication crash recovery. The earlier secure catalog cohort passed 1579 checks; counts overlap and must not be summed.",
+      "Changed-file Ruff, full repository Vulture, Python 3.10 syntax, JavaScript syntax and whitespace passed in the isolated source. Integrated full suites and installed-browser qualification remain separate."
     ],
     "remaining": [
-      "Reopened during final acceptance review: the existing hosted embedding path still lacks supervised per-request cost/usage admission. Local-only rebuild supervision does not complete this item for the existing hosted default. Implement and qualify the supported hosted adapters without deployment credential changes or live provider calls.",
-      "The local deterministic/local adapter job, shadow publication, cancellation and recovery remain implemented. Unsupported custom adapters must remain fail-closed; no pricing or paid-outcome guarantees may be invented."
+      "Fresh consolidated runtime/browser qualification is pending. No live provider billing or vendor-invoice guarantee is claimed. The captured list-rate contracts exclude taxes and negotiated terms and expire after 2026-11-01.",
+      "Cohere v4 and custom/unpriced routes refuse dispatch until current first-party pricing or a separately verified agreement exists. No deployment change, guessed rate, silent fallback or paid automatic retry substitutes for that evidence. Distributed PostgreSQL publication and installed-model performance remain environment qualification."
     ],
     "evidence_slice": "slices/memory-knowledge-final-qualification.json",
     "source_evidence_status": "code-supported",

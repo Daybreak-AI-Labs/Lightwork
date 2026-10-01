@@ -154,10 +154,11 @@
     ],
     "validation": [
       "Native facts/core/CAS checks passed in the 319-pass batch; all 12 new shared fact tests passed in the final 27-case batch, including stale edit/delete/tag, actual revision, lost response, audit failure, post-delete replay, selection/role/context changes and shared token recovery. All 19 form JS cases passed.",
-      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls.",
+      "Receipt recovery integration is complete: fact-receipt-recovery.json records 15 passing inventory/authority cases for authenticated byte preservation and held startup reconciliation. An old receipt absence does not authorize replay."
     ],
     "remaining": [
-      "Real PostgreSQL concurrency remains unqualified. Explicit trusted maintenance writers can still omit expected revision by design. Receipt recovery classification is a separate integration dependency; minimal barriers are retained and disclosed in My Data.",
+      "Real PostgreSQL concurrency remains unqualified. Explicit trusted maintenance writers can still omit expected revision by design. Receipt recovery classification is integrated; minimal barriers remain retained and disclosed in My Data.",
       "Final integrated all-repository qualification is owned by the parent; this row does not claim every platform or scenario validated."
     ]
   },
@@ -235,20 +236,22 @@
   },
   {
     "id": "LW-122",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "source_evidence_status": "code-supported",
     "source_acceptance_criteria": "1. Provide a durable bounded job with previewed collection size and cost ceiling, progress, safe-boundary cancellation and recoverable status after disconnect.\n2. A synthetic interruption recovers the existing job status without blindly reindexing again.\n3. Cancellation cannot corrupt the live index; preserve existing administrator confirmation and AI cost warning.",
     "reviewed_base": "5d7093066ff74f8049c561e01a7d7d5f17b2b32d",
     "implementation_evidence": [
-      "knowledge_reindex_jobs provides durable bounded jobs, exact collection/model/limit preview, a zero-provider-cost local ceiling, 64-passage cancellation checkpoints, private shadow vectors and source-CAS atomic publication. Interrupted jobs recover status and explicitly resume saved work; native admin controls and shared Copilot use the same service. Settings/installer gates and caps are implemented."
+      "knowledge_reindex_jobs provides durable bounded jobs, exact collection/model/limit preview, a zero-provider-cost local ceiling, 64-passage cancellation checkpoints, private shadow vectors and source-CAS atomic publication. Interrupted jobs recover status and explicitly resume saved work; native admin controls and shared Copilot use the same service. Settings/installer gates and caps are implemented.",
+      "3dd047f integrates hosted checkpoint 2d1f72d: supported standard Voyage and OpenAI rebuilds review captured price/input limits, expiry and configuration/source identity; use cumulative native Budget, organization and provider admission; record real returned usage; retain uncertain receipts without resending; bind encrypted shadow batches and atomic publication proof. Current account/settings/credentials/source changes stop further dispatch.",
+      "Administrator reindex_max_dollars is exposed in Settings and installer. Native library and typed Copilot show the same rate-based reservation and observed/unresolved costs. Deployment model, endpoint and credentials are unchanged."
     ],
     "validation": [
-      "All six core reindex job tests passed in the 441-case batch: atomic publication, duplicate start, cancellation preserving live index, current authority/source rechecks, paid-adapter refusal before dispatch and checkpoint resume without repeating saved batches.",
-      "Focused changed-file Ruff, JavaScript syntax and whitespace checks passed. No live provider or production calls."
+      "Hosted-reindex-qualification-2026-10-01.md records 137 native synthetic cases passed in ordinary mode and the same 137 with both secure switches. Covers actual local cost authorities, incomplete usage, changed model/config/source/principal, partial accounting and pre/post-publication crash recovery. The earlier secure catalog cohort passed 1579 checks; counts overlap and must not be summed.",
+      "Changed-file Ruff, full repository Vulture, Python 3.10 syntax, JavaScript syntax and whitespace passed in the isolated source. Integrated full suites and installed-browser qualification remain separate."
     ],
     "remaining": [
-      "Reopened during final acceptance review: the existing hosted embedding path still lacks supervised per-request cost/usage admission. Local-only rebuild supervision does not complete this item for the existing hosted default. Implement and qualify the supported hosted adapters without deployment credential changes or live provider calls.",
-      "The local deterministic/local adapter job, shadow publication, cancellation and recovery remain implemented. Unsupported custom adapters must remain fail-closed; no pricing or paid-outcome guarantees may be invented."
+      "Fresh consolidated runtime/browser qualification is pending. No live provider billing or vendor-invoice guarantee is claimed. The captured list-rate contracts exclude taxes and negotiated terms and expire after 2026-11-01.",
+      "Cohere v4 and custom/unpriced routes refuse dispatch until current first-party pricing or a separately verified agreement exists. No deployment change, guessed rate, silent fallback or paid automatic retry substitutes for that evidence. Distributed PostgreSQL publication and installed-model performance remain environment qualification."
     ]
   }
 ]

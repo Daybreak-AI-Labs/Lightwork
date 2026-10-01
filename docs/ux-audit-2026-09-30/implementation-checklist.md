@@ -5,7 +5,7 @@ it does not mean all acceptance checks or release qualification have passed.
 
 [Full evidence and remaining criteria](implementation-tracker.json) · [Original 24-field backlog](source-backlog.json) · [Local qualification](local-qualification.md)
 
-Current dispositions: 189 implemented-test-needed, 1 planned, 5 test-needed.
+Current dispositions: 190 implemented-test-needed, 5 test-needed.
 
 | ID | Disposition | Audit item |
 | --- | --- | --- |
@@ -130,7 +130,7 @@ Current dispositions: 189 implemented-test-needed, 1 planned, 5 test-needed.
 | LW-119 | Built; acceptance pending | Facts page does not scale to a large business memory |
 | LW-120 | Built; acceptance pending | Knowledge purpose picker only inspects 250 registered datasets |
 | LW-121 | Built; acceptance pending | Knowledge picker backend failure masquerades as no approved uses |
-| LW-122 | Active implementation | Knowledge reindex lacks bounded job supervision |
+| LW-122 | Built; acceptance pending | Knowledge reindex lacks bounded job supervision |
 | LW-123 | Built; acceptance pending | Tell the truth about feedback and learning |
 | LW-124 | Built; acceptance pending | Make projects useful workspaces, not only task groupings |
 | LW-125 | Built; acceptance pending | Turn team review into a complete revise-and-resubmit loop |
