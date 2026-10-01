@@ -1,5 +1,7 @@
 # Native PostgreSQL and erasure qualification
 
+A later [native MariaDB and SQL follow-up](remaining-database-qualification.md) resolves the three MySQL/MariaDB skips below and repairs a SQLite admission-timeout boundary. The twelve pgvector cases remain unrun with the exact build-tool blocker recorded there. This document retains its original cohort and timings.
+
 Recorded 2026-10-01 00:31 UTC. Product source: `de699529b01a87f371ebcfe96c57bd3c022d91f9`.
 The isolated `slice-postgres-final` checkout adds only test corrections in
 `7ae68f57a8ec4f79709223b058508d6bb0124c18`,

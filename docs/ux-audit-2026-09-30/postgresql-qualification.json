@@ -201,5 +201,16 @@
     "No live provider/remote database/production calls.",
     "Qualification does not cover later untested product changes."
   ],
-  "secure_posture_scope": "Only core tests selected. Launcher set MAVERICK_TEST_SECURE_DEFAULT=1; core autouse fixture set MAVERICK_SECURE_DEFAULT=1 before each test. Pre-collection secure imports and dashboard-only secure coverage are not claimed. Future launchers should set both flags."
+  "secure_posture_scope": "Only core tests selected. Launcher set MAVERICK_TEST_SECURE_DEFAULT=1; core autouse fixture set MAVERICK_SECURE_DEFAULT=1 before each test. Pre-collection secure imports and dashboard-only secure coverage are not claimed. Future launchers should set both flags.",
+  "followup_qualification": {
+    "document": "remaining-database-qualification.md",
+    "machine_readable": "remaining-database-qualification.json",
+    "resolved_previous_skips": {
+      "mysql_mariadb_cancellation": 3
+    },
+    "still_unrun": {
+      "pgvector_extension": 12
+    },
+    "note": "Original cohort results above are preserved. The later source-matched native SQL cohort and its product repair are separate."
+  }
 }
