@@ -31,7 +31,7 @@ import os
 import re
 
 from ._envparse import coerce_bool, is_truthy
-from .client_erasure import ClientErasureError
+from .client_erasure import ClientErasureError, hold_windows_erase_parents
 
 log = logging.getLogger(__name__)
 
@@ -346,19 +346,20 @@ def _erase_client_locked(root, home, cid, keep_audit, actor, receipt_type, audit
             log.warning("erase: stopped because the client data folder changed: %s", exc)
             break
         try:
-            # Reject an ancestor redirected outside the inspected client tree.
-            p.parent.resolve().relative_to(canonical_root)
-            junction = getattr(p, "is_junction", None)
-            if callable(junction) and junction():
-                p.rmdir()  # remove the junction itself, never its target
-                removed += 1
-            elif p.is_file() or p.is_symlink():
-                p.unlink()
-                removed += 1
-            elif p.is_dir():
-                p.rmdir()
-            else:
-                raise FileNotFoundError("a prepared deletion target disappeared")
+            with hold_windows_erase_parents(root, p.parent, root_identity):
+                # Reject an ancestor redirected outside the inspected client tree.
+                p.parent.resolve().relative_to(canonical_root)
+                junction = getattr(p, "is_junction", None)
+                if callable(junction) and junction():
+                    p.rmdir()  # remove the junction itself, never its target
+                    removed += 1
+                elif p.is_file() or p.is_symlink():
+                    p.unlink()
+                    removed += 1
+                elif p.is_dir():
+                    p.rmdir()
+                else:
+                    raise FileNotFoundError("a prepared deletion target disappeared")
         except (OSError, ValueError) as exc:
             failed_paths.add(p)
             log.warning("erase: could not remove %s: %s", p, exc)

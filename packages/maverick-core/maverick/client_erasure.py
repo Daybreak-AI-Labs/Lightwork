@@ -12,8 +12,11 @@ request without a terminal event proves intent, never successful erasure.
 from __future__ import annotations
 
 import json
+import os
+import stat
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +38,68 @@ class ClientErasureError(RuntimeError):
         self.removed = removed
         suffix = f" Activity receipt: {receipt_id}." if receipt_id else ""
         super().__init__(message + suffix)
+
+
+@contextmanager
+def hold_windows_erase_parents(root: Path, parent: Path, root_identity: tuple[int, int]):
+    """Keep each deletion ancestor from becoming a junction while it is used.
+
+    A pathname check followed by ``unlink`` is not enough on Windows: another
+    local process can rename the checked directory and put a junction in its
+    place. A read handle that denies write/delete sharing pins each ordinary
+    directory through the mutation. Failure to pin any ancestor refuses that
+    target; the caller records an incomplete erase.
+    """
+    if os.name != "nt":
+        yield
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    from .file_lock import _windows_extended_path
+
+    def identity(path: Path) -> tuple[int, int]:
+        info = path.lstat()
+        junction = getattr(path, "is_junction", None)
+        if (path.is_symlink() or (callable(junction) and junction())
+                or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                or not stat.S_ISDIR(info.st_mode) or not info.st_ino):
+            raise ValueError("an erase parent is not a stable ordinary directory")
+        return info.st_dev, info.st_ino
+
+    relative = parent.relative_to(root)
+    ancestors = [root]
+    for part in relative.parts:
+        ancestors.append(ancestors[-1] / part)
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_dir = kernel.CreateFileW
+    open_dir.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                         wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    open_dir.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+    handles = []
+    try:
+        for path in ancestors:
+            before = identity(path)
+            if path == root and before != root_identity:
+                raise ValueError("the client data folder identity changed")
+            # GENERIC_READ is required here: FILE_READ_ATTRIBUTES alone does
+            # not prevent directory rename on Windows. No share-write/delete.
+            handle = open_dir(_windows_extended_path(path), 0x80000000, 0x00000001,
+                              None, 3, 0x00200000 | 0x02000000, None)
+            if handle == ctypes.c_void_p(-1).value:
+                raise OSError(ctypes.get_last_error(), "an erase parent could not be held safely")
+            handles.append(handle)
+            if identity(path) != before:
+                raise ValueError("an erase parent changed while it was being held")
+        yield
+    finally:
+        for handle in reversed(handles):
+            close(handle)
 
 
 class ErasureReceipt:
@@ -111,4 +176,4 @@ class ErasureReceipt:
             ) from exc
 
 
-__all__ = ["ClientErasureError", "ErasureReceipt"]
+__all__ = ["ClientErasureError", "ErasureReceipt", "hold_windows_erase_parents"]

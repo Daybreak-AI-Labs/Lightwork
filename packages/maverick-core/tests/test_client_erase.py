@@ -4,6 +4,7 @@ shared root."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -288,6 +289,39 @@ def test_root_replaced_during_receipt_creation_refuses_before_deletion(monkeypat
     assert (root / "replacement.txt").read_text() == "replacement data must survive"
     _, events = _receipt(caught.value.receipt_id)
     assert [event["status"] for event in events] == ["requested"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory sharing prevents the junction swap")
+def test_windows_parent_pin_blocks_cross_tenant_junction_swap(monkeypatch, tmp_path):
+    import inspect
+
+    root = _seed()
+    other = tmp_path / "tenants" / "other-client"
+    other.mkdir()
+    (other / "agent_trust.json").write_text("other client's data")
+    parked = tmp_path / "parked-original-client"
+    original_resolve = Path.resolve
+    attempted = []
+
+    def swap_after_parent_check(path, *args, **kwargs):
+        resolved = original_resolve(path, *args, **kwargs)
+        caller = inspect.currentframe().f_back
+        if (path == root and caller.f_code.co_name == "_erase_client_locked"
+                and caller.f_locals.get("p") == root / "agent_trust.json" and not attempted):
+            attempted.append(True)
+            try:
+                root.rename(parked)
+            except OSError as exc:
+                assert exc.winerror in {5, 32}  # sharing violation / access denied
+            else:
+                _symlink_or_skip(root, other)
+        return resolved
+
+    monkeypatch.setattr(Path, "resolve", swap_after_parent_check)
+    result = client.erase_client()
+    assert attempted and result["client_id"] == "acme"
+    assert (other / "agent_trust.json").read_text() == "other client's data"
+    assert not parked.exists()
 
 
 def test_target_moved_out_of_client_root_after_preparation_is_not_claimed_erased(monkeypatch, tmp_path):
