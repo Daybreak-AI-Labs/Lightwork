@@ -793,7 +793,7 @@ class FormSource:
             raise EventSourceError("form source needs a 'token'")
         from . import form_store
         raw = _decode_cursor(cursor, "form", config.get("_lightwork_cursor_format")) if cursor else ""
-        events, new_cursor = form_store.since(token, raw)
+        events, new_cursor = form_store.since(token, raw, limit=_MAX_EVENTS)
         return PollResult(events=[_flatten(e) for e in events], cursor=_encode_cursor("form", new_cursor),
                           event_ids=[str(e["_seq"]) for e in events])
 

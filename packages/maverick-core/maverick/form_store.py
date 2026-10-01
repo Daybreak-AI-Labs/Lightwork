@@ -101,10 +101,13 @@ def _state(p) -> tuple[int, int]:
     return count, highest
 
 
-def since(token: str, cursor: str) -> tuple[list[dict], str]:
+def since(token: str, cursor: str, *, limit: int | None = None) -> tuple[list[dict], str]:
     """Submissions with ``seq`` greater than ``cursor`` (empty cursor = baseline:
     fire nothing, just record the high-water mark). Returns ``(events, cursor)``
-    where each event is the flat ``fields`` dict plus ``_seq``/``_ts``."""
+    where each event is the flat ``fields`` dict plus ``_seq``/``_ts``.
+    A bounded poll advances only through the returned rows, never the backlog."""
+    if limit is not None and limit <= 0:
+        raise ValueError("form poll limit must be positive")
     p = _path(token)
     rows: list[dict] = []
     if not p.exists():
@@ -137,6 +140,8 @@ def since(token: str, cursor: str) -> tuple[list[dict], str]:
     if after is None:
         return [], highest                       # baseline only
     fresh = [r for r in rows if int(r.get("seq") or 0) > after]
+    if limit is not None:
+        fresh = fresh[:limit]
     if not fresh:
         return [], highest
     events = []

@@ -73,6 +73,68 @@ def test_form_submission_fires_after_baseline(monkeypatch, tmp_path):
     assert [e["name"] for e in out.events] == ["second"]
 
 
+def test_new_form_delivers_first_submission_before_first_poll(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store as flow_store
+    from maverick.flow.ir import Flow, FlowNode
+
+    saved = flow_store.save_flow(Flow(
+        id="first-form-flow", name="First form", start="a",
+        nodes={"a": FlowNode(id="a", kind="agent", brief="Review {{name}}")},
+    ))
+    flow_store.publish_flow(
+        saved.id, expected_version=saved.version, expected_revision=saved.revision,
+    )
+    client = _client()
+    created = client.post("/api/v1/event-triggers", json={
+        "name": "first-form", "source": "form", "flow": saved.id,
+        "config": {"token": "first-form-token"},
+    })
+    assert created.status_code == 201
+    from maverick_dashboard import event_triggers_store
+
+    assert event_triggers_store.get_trigger("first-form", tenant="")["cursor"] == "0"
+    assert client.post("/form/first-form-token", json={"name": "first"}).status_code == 201
+    result = client.post("/api/v1/event-triggers/poll?name=first-form")
+    assert result.status_code == 200
+    fired = result.json()["triggers"][0]["fired_flows"]
+    assert len(fired) == 1
+    assert flow_store.load_run(fired[0]).data["name"] == "first"
+
+
+def test_form_backlog_drains_in_bounded_polls(monkeypatch, tmp_path):
+    from collections import deque
+
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "100")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "1000")
+    _register_form("batch")
+    from maverick_dashboard import app as dashboard_app
+    from maverick_dashboard import automation_queue
+
+    monkeypatch.setattr(dashboard_app, "_goal_times", {})
+    monkeypatch.setattr(dashboard_app, "_goal_times_global", deque())
+    dispatched = []
+
+    def record_run(*args, **kwargs):
+        dispatched.append(args)
+        return f"run-{len(dispatched)}"
+
+    monkeypatch.setattr(automation_queue, "enqueue_published_flow_run", record_run)
+    client = _client()
+    for n in range(26):
+        response = client.post("/form/batch", json={"name": str(n)})
+        assert response.status_code == 201
+    first = client.post("/api/v1/event-triggers/poll?name=accept-batch")
+    second = client.post("/api/v1/event-triggers/poll?name=accept-batch")
+    assert first.status_code == second.status_code == 200
+    first_batch = first.json()["triggers"][0]
+    second_batch = second.json()["triggers"][0]
+    assert first_batch["poll_error"] is second_batch["poll_error"] is False
+    assert (first_batch["new_events"], second_batch["new_events"]) == (25, 1)
+    assert [args[1]["name"] for args in dispatched] == [str(n) for n in range(26)]
+
+
 def test_urlencoded_submission(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _register_form("contact")

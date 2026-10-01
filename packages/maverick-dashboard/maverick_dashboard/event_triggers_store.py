@@ -233,6 +233,18 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             ),
             None,
         )
+        bound_cursor = cursor
+        if source == "form" and not bound_cursor and (
+            prior is None
+            or prior.get("source") != "form"
+            or (prior.get("config") or {}).get("token") != (config or {}).get("token")
+        ):
+            # Form POSTs are admitted only after the trigger exists. Arm at the
+            # current high-water mark now, so a submission before the first
+            # scheduled poll is new work rather than a discarded baseline.
+            from maverick import form_store
+
+            bound_cursor = form_store.since(str((config or {}).get("token") or ""), "")[1]
         rec = {
             "name": slug,
             "template": str(template),
@@ -244,8 +256,8 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             "source": str(source),
             "config": dict(config or {}),
             "params": {str(k): str(v) for k, v in (params or {}).items()},
-            "cursor": cursor or (prior["cursor"] if prior else ""),
-            "cursor_format": 0 if cursor or prior is None else int(prior.get("cursor_format") or 0),
+            "cursor": bound_cursor or (prior["cursor"] if prior else ""),
+            "cursor_format": 0 if bound_cursor or prior is None else int(prior.get("cursor_format") or 0),
             # Preserve the prior owner on a re-save that doesn't pass one, like
             # cursor/created, so an update can't silently orphan the trigger.
             "owner": str(owner) if owner else (prior["owner"] if prior else ""),
