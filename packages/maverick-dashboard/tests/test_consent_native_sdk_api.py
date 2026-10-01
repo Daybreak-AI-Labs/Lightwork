@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 from dataclasses import asdict
 from types import SimpleNamespace
 
+import pytest
+import uvicorn
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import FastAPI
@@ -310,3 +313,102 @@ def test_disabled_native_boundary_is_not_discoverable(tmp_path) -> None:
         },
     )
     assert response.status_code == 404
+
+
+_NATIVE = "/api/v1/public/consent/native"
+
+
+def _preflight_only_app(*, gate, rate_limit=lambda *_args: None) -> FastAPI:
+    """The native router with only the request checks wired (no registry work)."""
+
+    app = FastAPI()
+    app.include_router(
+        create_consent_native_sdk_router(
+            NativeConsentSDKAPIDependencies(
+                gate=gate,
+                registry=SimpleNamespace(),
+                attestation_verifier=SimpleNamespace(),
+                gateway=SimpleNamespace(),
+                rate_limit=rate_limit,
+            )
+        )
+    )
+    return app
+
+
+@pytest.mark.parametrize("endpoint", ["enroll", "dispatch", "refresh"])
+def test_gate_runs_off_the_event_loop(endpoint: str) -> None:
+    """The gate reads the application directory from disk for every anonymous
+    request; running it on the event-loop thread stalled every other request."""
+
+    where: list[str] = []
+
+    def gate() -> bool:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            where.append("worker thread")
+        else:
+            where.append("event loop")
+        return False
+
+    client = TestClient(_preflight_only_app(gate=gate))
+    assert client.post(f"{_NATIVE}/{endpoint}", json={}).status_code == 404
+    assert where == ["worker thread"]
+
+
+def _address_keys(monkeypatch, *, forwarded_allow_ips: str | None, peer: str, forwarded: list[str]):
+    """The per-address throttle keys the endpoint used when ``peer`` relayed
+    requests that carry the given X-Forwarded-For values, with uvicorn
+    configured exactly as the dashboard's launcher does (its own defaults, or
+    the FORWARDED_ALLOW_IPS setting operators are told to use)."""
+
+    keys: list[str] = []
+    app = _preflight_only_app(
+        gate=lambda: True,
+        rate_limit=lambda subject, _operation: keys.append(subject),
+    )
+    if forwarded_allow_ips is None:
+        monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
+    else:
+        monkeypatch.setenv("FORWARDED_ALLOW_IPS", forwarded_allow_ips)
+    config = uvicorn.Config(app)
+    config.load()
+    client = TestClient(config.loaded_app, client=(peer, 4000))
+    for address in forwarded:
+        # An empty body is refused after the throttle has been charged.
+        client.post(f"{_NATIVE}/dispatch", json={}, headers={"X-Forwarded-For": address})
+    return keys
+
+
+def test_balancer_in_forwarded_allow_ips_gives_each_device_its_own_throttle_key(monkeypatch) -> None:
+    keys = _address_keys(
+        monkeypatch,
+        forwarded_allow_ips="10.0.0.5",
+        peer="10.0.0.5",
+        forwarded=["203.0.113.9", "198.51.100.7"],
+    )
+    assert keys == ["203.0.113.9", "198.51.100.7"]
+
+
+def test_untrusted_balancer_makes_every_device_share_one_throttle_key(monkeypatch) -> None:
+    # uvicorn's default trusts only loopback, so a balancer elsewhere on the
+    # network is just one address: the situation docs/deployment.md tells
+    # operators to fix with FORWARDED_ALLOW_IPS.
+    keys = _address_keys(
+        monkeypatch,
+        forwarded_allow_ips=None,
+        peer="10.0.0.5",
+        forwarded=["203.0.113.9", "198.51.100.7"],
+    )
+    assert keys == ["10.0.0.5", "10.0.0.5"]
+
+
+def test_a_direct_caller_cannot_choose_its_own_throttle_key(monkeypatch) -> None:
+    keys = _address_keys(
+        monkeypatch,
+        forwarded_allow_ips="10.0.0.5",
+        peer="192.0.2.50",
+        forwarded=["203.0.113.9"],
+    )
+    assert keys == ["192.0.2.50"]
