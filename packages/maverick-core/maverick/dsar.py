@@ -2,9 +2,9 @@
 
 The erase side of GDPR (``maverick.audit.erase`` + ``maverick erase``) already
 covers Art. 17 right-to-erasure. This module is its read-only mirror: the
-right of access / portability. :func:`export_subject_data` gathers everything
-Lightwork holds for one subject (a channel ``user_id``) into a single
-JSON-serializable bundle a controller can hand back to the data subject.
+right of access / portability. :func:`export_subject_data` gathers the covered
+world and audit records for one subject (a channel ``user_id``) into a
+JSON-serializable bundle for controller review.
 
 It only ever *reads*. Every store is consulted defensively: a missing or empty
 world DB / audit dir yields an empty section, never an exception — an export
@@ -12,14 +12,12 @@ must not be the thing that crashes on a half-provisioned install.
 
 Two stores are covered:
 
-  - the **world model** (conversations + turns, and the goals/episodes those
-    turns reference), read via the existing :class:`maverick.world_model.WorldModel`
+  - the **world model** (conversations + turns, their goals and descendant
+    goals/episodes), read via :class:`maverick.world_model.WorldModel`
     read APIs and tenant-resolved through
     :func:`maverick.world_model.world_for_tenant`;
-  - the **audit log** NDJSON, scoped to rows whose structured ``channel`` /
-    ``user_id`` fields identify the subject — the same exact-field rule the
-    erase path (:func:`maverick.audit.erase._event_matches`) uses, so export
-    and erase agree on what "this subject's data" means.
+  - the **audit log** NDJSON, scoped to rows whose structured raw or HMAC-
+    anonymized ``channel`` / ``user_id`` identify the subject.
 
 Isolation is the load-bearing property: this is subject data, so the bundle
 must contain the requested subject's rows and *only* those. Matching is on
@@ -152,6 +150,23 @@ def _export_facts(
     return out
 
 
+def _subject_goal_ids(world: Any, convs: list[Any], roots: list[int], *, strict: bool) -> list[int]:
+    """Include the descendant goals in the subject's read-only erasure scope."""
+    seen = set(roots)
+    if convs:
+        try:
+            plan = world.plan_conversation_erasure([c.id for c in convs])
+            for gid in plan["goal_ids"]:
+                if gid not in seen:
+                    seen.add(gid)
+                    roots.append(gid)
+        except Exception as e:  # pragma: no cover - defensive
+            if strict:
+                raise RuntimeError("could not read subject goal closure") from e
+            log.warning("dsar: subject goal closure unavailable: %s", e)
+    return roots
+
+
 def _export_world(
     world: Any,
     user_id: str,
@@ -161,11 +176,9 @@ def _export_world(
 ) -> dict[str, Any]:
     """Collect the subject's conversations + turns and the goals they touch.
 
-    Uses only existing read APIs: ``list_conversations`` to find the subject's
-    threads, ``recent_turns`` for their content, and — because goals carry no
-    per-user attribution of their own — the ``goal_id`` set referenced by those
-    turns to pull each ``get_goal`` + its ``list_episodes``. A goal reachable
-    only through a sibling subject's turn is therefore never included.
+    Uses the world model's read-only erasure plan for the selected conversations
+    so the export includes descendant goals that erasure would remove. A goal
+    reachable only through a sibling subject's conversation is not included.
 
     Explicitly user-scoped global facts (``user:<channel>:<user_id>:*``) are
     included too, mirroring the erase path so export and erasure stay symmetric.
@@ -232,7 +245,10 @@ def _export_world(
             }
         )
 
-    # --- goals + episodes (only those the subject's turns reference) ------
+    # The turn-derived roots remain a fail-soft fallback for older world stores.
+    goal_ids = _subject_goal_ids(world, convs, goal_ids, strict=strict)
+
+    # --- goals + episodes -------------------------------------------------
     goals: list[dict[str, Any]] = []
     for gid in goal_ids:
         try:
@@ -398,7 +414,7 @@ def _export_audit(
     """Collect audit rows for the subject.
 
     Audit events are plain dicts (``AuditEvent.to_dict`` spreads the payload),
-    and GDPR erasure keys off top-level ``channel`` + ``user_id``. That is exactly
+    and erasure keys off structured ``channel`` + ``user_id``. That is exactly
     the rule :func:`maverick.audit.erase._event_matches` erases on, so a row
     that *would* be erased is a row that *is* exported. Each kept row is
     JSON-safe by construction (it was parsed from JSON); we round-trip with
@@ -410,20 +426,18 @@ def _export_audit(
         # the erase path's exact-field rule, so do not export audit rows.
         return []
 
+    from .paths import tenant_scope
+    from .privacy import audit_subject_matches
+
     out: list[dict[str, Any]] = []
-    for event in _iter_audit_events(tenant, strict=strict):
-        if event.get("user_id") != user_id:
-            continue
-        if event.get("channel") != channel:
-            continue
-        # Render ts to ISO for consistency with the world section; keep the
-        # rest of the event verbatim so nothing the subject is owed is lost.
-        if "ts" in event:
-            event = {**event, "ts": _iso(event["ts"])}
-        # Round-trip through json with default=str so any stray non-serializable
-        # value (shouldn't happen for parsed JSON) is stringified rather than
-        # poisoning the whole bundle.
-        out.append(json.loads(json.dumps(event, default=str)))
+    with tenant_scope(tenant=tenant):
+        for event in _iter_audit_events(tenant, strict=strict):
+            if not audit_subject_matches(event, channel, user_id):
+                continue
+            # Render ts to ISO; preserve the remaining stored evidence.
+            if "ts" in event:
+                event = {**event, "ts": _iso(event["ts"])}
+            out.append(json.loads(json.dumps(event, default=str)))
     return out
 
 
@@ -435,7 +449,7 @@ def export_subject_data(
     strict: bool = False,
     world: Any = None,
 ) -> dict[str, Any]:
-    """Gather everything Lightwork holds for ``user_id`` into one JSON bundle.
+    """Gather covered world and audit records for ``user_id`` into one bundle.
 
     GDPR Art. 15 (right of access) / Art. 20 (portability), and a SOC 2 Privacy
     expectation. Read-only and fail-soft by default: a missing world DB or

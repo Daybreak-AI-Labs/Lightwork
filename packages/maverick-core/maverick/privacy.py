@@ -207,6 +207,17 @@ def anonymize_dict(d: dict) -> dict:
     return {k: anonymize_field(k, v) for k, v in d.items()}
 
 
+def audit_subject_matches(event: dict, channel: str, user_id: str) -> bool:
+    """Match raw or HMAC-anonymized structured audit subject fields."""
+    observed = (event.get("channel"), event.get("user_id"))
+    if observed == (channel, user_id):
+        return True
+    if not (isinstance(observed[0], str) and observed[0].startswith("channel#")
+            and isinstance(observed[1], str) and observed[1].startswith("user_id#")):
+        return False
+    return observed == (anonymize_field("channel", channel), anonymize_field("user_id", user_id))
+
+
 def anonymize_iter(items: Iterable[dict]) -> list[dict]:
     return [anonymize_dict(d) for d in items]
 
@@ -216,5 +227,6 @@ __all__ = [
     "anonymize_text",
     "anonymize_field",
     "anonymize_dict",
+    "audit_subject_matches",
     "anonymize_iter",
 ]

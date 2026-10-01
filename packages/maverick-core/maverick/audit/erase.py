@@ -73,7 +73,9 @@ def _event_matches(event: dict, channel: str, user_id: str) -> bool:
     # both over- and under-matches (see module docstring), so we never fall
     # back to one -- an event with no structured channel/user_id simply does
     # not match.
-    return event.get("channel") == channel and event.get("user_id") == user_id
+    from ..privacy import audit_subject_matches
+
+    return audit_subject_matches(event, channel, user_id)
 
 
 def _tombstone(event: dict, channel: str, user_id: str) -> dict:

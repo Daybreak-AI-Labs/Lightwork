@@ -137,6 +137,38 @@ def test_export_excludes_other_users():
     assert alice_goal_titles == {"alice's goal"}
 
 
+def test_export_includes_descendant_goals_that_erasure_would_remove():
+    wm = _seed_world()
+    alice_root = next(g.id for g in wm.list_goals(limit=100) if g.title == "alice's goal")
+    child = wm.create_goal("alice child task", parent_id=alice_root)
+    wm.create_goal("alice grandchild task", parent_id=child)
+    wm.close()
+
+    bundle = export_subject_data("alice", channel="telegram")
+    titles = {goal["title"] for goal in bundle["world"]["goals"]}
+    assert titles == {"alice's goal", "alice child task", "alice grandchild task"}
+    assert bundle["counts"]["goals"] == 3
+    assert "bob's goal" not in json.dumps(bundle)
+
+
+def test_anonymous_audit_rows_remain_in_subject_export_and_erasure_scope(monkeypatch):
+    from maverick.audit.erase import scrub_user
+
+    monkeypatch.setenv("MAVERICK_ANON", "1")
+    wm = _seed_world()
+    wm.close()
+    log = AuditLog(audit_dir=_audit_dir())
+    assert log.record(_audit_event("telegram", "alice", "alice audited"))
+    assert log.record(_audit_event("telegram", "bob", "bob audited"))
+
+    bundle = export_subject_data("alice", channel="telegram")
+    assert bundle["counts"]["audit_events"] == 1
+    assert bundle["audit"][0]["user_id"].startswith("user_id#")
+    assert "bob" not in json.dumps(bundle["audit"])
+    assert scrub_user("telegram", "alice", audit_dir=_audit_dir())[0] == 1
+    assert export_subject_data("alice", channel="telegram")["counts"]["audit_events"] == 0
+
+
 def test_export_with_channel_excludes_same_user_id_on_other_channels():
     """Channel is part of the subject identity, so ids may collide safely."""
     wm = WorldModel(_world_db())
