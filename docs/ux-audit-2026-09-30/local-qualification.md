@@ -10,8 +10,11 @@ No deployment configuration or credentials were changed.
 The register has **190 implemented entries awaiting final acceptance and five
 qualification entries**. All five separately approved security repairs are
 implemented. Fresh static/build qualification passes all 26 gates at `2decc28`,
-including all 4,827 exact-source wheel payload checks. Final integrated Python
-qualification remains pending.
+including all 4,827 exact-source wheel payload checks. The complete ordinary
+Python 3.12 run passes **40,099 tests with 597 skips and 25 warnings**, zero
+failures/errors, at unchanged `2decc28`. The serial heavy phase also passes
+all seven selected tests, with eight collection skips and one warning.
+Secure-default and supported-interpreter phases remain in progress or pending.
 
 The first final08 ordinary attempt stopped after 1,255.54 seconds with ten
 recorded failures and no final JUnit result. Read-only Windows probes established
@@ -24,8 +27,8 @@ traced to a corruption test replacing a randomized artifact's final byte with
 the same byte. The [deterministic test repair](flow-payload-fault-injection-57a027a.md)
 changes that byte with XOR and retains the original denial assertion; production
 code is unchanged. All 18 cases in the complete payload module pass in each
-posture at frozen `2decc28`. Fresh full qualification on that corrected source
-is running. Both Python 3.10/3.11
+posture at frozen `2decc28`. The fresh full ordinary phase on that corrected
+source now passes; remaining phases are running. Both Python 3.10/3.11
 environments now pass [exact final09 installation checks](compatibility-final09-installation-2decc28.md),
 with full compatibility runtime still pending.
 
@@ -66,6 +69,7 @@ or rewrite its failed outcome. Content-free timeout diagnostics remain in place.
 
 | Evidence | Exact execution source | Current result and limit |
 | --- | --- | --- |
+| [Corrected-source integrated Python](python-integrated-final09-2decc28.md) | `2decc28d5a2709ec1d362bdfb8499aaa13aacfce` | Ordinary: 40,099 passed, 597 skipped and 25 warnings, zero failures/errors. Serial heavy: seven passed, eight repeated collection skips and one warning. Both source checks are clean. Secure and supported-interpreter phases remain pending. |
 | [Complete final08 ordinary run](python-ordinary-final08-57a027a.md) | `57a027adfdd8df955d33aaea88ec7089aafc6c60` | 40,098 passed, one proven corruption-test failure, 597 skipped, 23 warnings and zero errors; source unchanged. Seven added skips are PostgreSQL cursor cases with separate passing evidence in both postures. The deterministic test repair and fresh final09 runtime are tracked separately. |
 | [Corrected-source static gates and package builds](static-build-qualification-2decc28.md) | `2decc28d5a2709ec1d362bdfb8499aaa13aacfce` | All 26 checks pass, including eight wheels and 4,827 exact-source payload files. Both full payload-module probes pass 18 cases. Full runtime phases remain pending. |
 | [Final08 static gates and package builds](static-build-qualification-57a027a.md) | `57a027adfdd8df955d33aaea88ec7089aafc6c60` | All 26 checks pass: Ruff, Vulture, 16 offline contracts and eight wheels. All 4,827 payload files match the exact Git archive. Frozen checkout unchanged. Runtime qualification remains separate. |
