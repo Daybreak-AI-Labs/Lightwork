@@ -104,7 +104,9 @@ PROVIDERS: list[dict] = [
     {"name": "deepseek", "label": "DeepSeek", "env": ["DEEPSEEK_API_KEY"], "base_url": False},
     {"name": "xai", "label": "xAI (Grok)", "env": ["XAI_API_KEY", "GROK_API_KEY"], "base_url": False},
     {"name": "ollama", "label": "Ollama (self-hosted)", "env": [], "base_url": True},
-    {"name": "vllm", "label": "vLLM / OpenAI-compatible", "env": ["VLLM_BASE_URL", "OPENAI_COMPATIBLE_BASE_URL"], "base_url": True},
+    {"name": "vllm", "label": "vLLM (self-hosted)", "env": ["VLLM_BASE_URL"], "base_url": True},
+    {"name": "tgi", "label": "Hugging Face TGI (self-hosted)", "env": ["TGI_BASE_URL"], "base_url": True},
+    {"name": "openai_compatible", "label": "OpenAI-compatible server", "env": ["OPENAI_COMPATIBLE_BASE_URL"], "base_url": True},
 ]
 _PROVIDER_NAMES = {p["name"] for p in PROVIDERS}
 

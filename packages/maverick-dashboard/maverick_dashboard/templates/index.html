@@ -194,19 +194,39 @@
             return i % Math.ceil(n / 8) === 0 ? r.d.slice(5) : '';
           } });
 
+        // Each slice counts exactly the status its click filters on. Queued is
+        // only 'pending'; failed and cancelled goals get their own slices and
+        // anything else (drafts, say) is shown as Other rather than as queued.
+        var BS = D.by_status || null;
+        var mix = [
+          { label: 'Done', value: D.totals.done, cls: 'ok', status: 'done' },
+          { label: 'Active', value: D.totals.active, cls: 'brand', status: 'active' },
+          { label: 'Blocked', value: D.totals.blocked, cls: 'danger', status: 'blocked' }];
+        var rest = D.totals.total - D.totals.done - D.totals.active - D.totals.blocked;
+        var mixAria = D.totals.done + ' done, ' + D.totals.active + ' active, ' +
+                      D.totals.blocked + ' blocked';
+        if (BS) {
+          var queued = BS.pending || 0, failed = BS.failed || 0, cancelled = BS.cancelled || 0;
+          mix.push({ label: 'Queued', value: queued, cls: 'idle', status: 'pending' },
+                   { label: 'Failed', value: failed, cls: 'warn', status: 'failed' },
+                   { label: 'Cancelled', value: cancelled, cls: 'info', status: 'cancelled' });
+          rest -= queued + failed + cancelled;
+          mixAria += ', ' + queued + ' queued, ' + failed + ' failed, ' + cancelled + ' cancelled';
+          if (rest > 0) {
+            mix.push({ label: 'Other', value: rest, cls: 'idle', status: '' });
+            mixAria += ', ' + rest + ' other';
+          }
+        } else {
+          // A server that does not report per-status counts: the old remainder.
+          mix.push({ label: 'Queued', value: rest, cls: 'idle', status: 'pending' });
+          mixAria += ', ' + rest + ' queued';
+        }
         B.donut(document.getElementById('bd-mix'), {
-          segments: [
-            { label: 'Done', value: D.totals.done, cls: 'ok', status: 'done' },
-            { label: 'Active', value: D.totals.active, cls: 'brand', status: 'active' },
-            { label: 'Blocked', value: D.totals.blocked, cls: 'danger', status: 'blocked' },
-            { label: 'Queued',
-              value: D.totals.total - D.totals.done - D.totals.active - D.totals.blocked,
-              cls: 'idle', status: 'pending' }],
+          segments: mix,
           center: D.totals.total, centerSub: 'goals',
-          aria: 'Goal mix: ' + D.totals.done + ' done, ' + D.totals.active +
-                ' active, ' + D.totals.blocked + ' blocked of ' +
-                D.totals.total + ' total.',
+          aria: 'Goal mix: ' + mixAria + ' of ' + D.totals.total + ' total.',
           onSlice: function (seg) {
+            if (!seg.status) return;  // "Other" has no single status to filter on
             statusFilter = statusFilter === seg.status ? '' : seg.status;
             renderRecent();
           } });

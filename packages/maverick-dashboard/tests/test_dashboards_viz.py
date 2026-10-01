@@ -46,6 +46,23 @@ def test_overview_board_payload(monkeypatch, tmp_path):
     assert d["recent"][0]["title"] in ("Vendor DPA review", "Access recert")
 
 
+def test_overview_board_reports_every_status_not_just_the_headline_four(monkeypatch, tmp_path):
+    """UX-208: "Queued" used to be total - done - active - blocked, so failed,
+    cancelled and draft goals were counted as queued. The payload now carries
+    the real count per status so the page can show each one on its own."""
+    _isolate(monkeypatch, tmp_path)
+    w = _seed_world()
+    for title, status in (("Waiting", "pending"), ("Broke", "failed"),
+                          ("Stopped", "cancelled"), ("Half-written", "draft")):
+        w.set_goal_status(w.create_goal(title, domain="legal_privacy"), status)
+    d = _client().get("/api/v1/dashboards/overview?days=30").json()
+    assert d["by_status"] == {
+        "done": 1, "blocked": 1, "pending": 1, "failed": 1, "cancelled": 1, "draft": 1,
+    }
+    # The headline totals keep their meaning.
+    assert d["totals"] == {"total": 6, "active": 0, "done": 1, "blocked": 1}
+
+
 def test_spend_board_payload(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _seed_world()
