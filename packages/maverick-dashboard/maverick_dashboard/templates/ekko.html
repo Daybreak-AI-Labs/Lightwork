@@ -154,6 +154,9 @@
       </div>
       <p class="ekko-note">Ranked by how often the same steps repeat—not employee productivity,
         speed, attendance or performance. Time savings are estimates until you check them.</p>
+      <p class="ekko-note" id="ekko-workflows-off" role="note" hidden>
+        Workflows are off. {% if ekko.can_control %}<a href="/learning#lrn-flows-on">Turn them on in Learning</a> to draft a workflow from a suggestion.{% else %}Ask your workspace administrator to turn them on. You can still draft an assistant.{% endif %}
+      </p>
       <div id="ekko-opportunities" class="ekko-stack" style="margin-top: var(--space-3);" aria-live="polite">
         <div class="mv-empty">
           <div class="mv-empty__title">No suggestions yet</div>
@@ -346,6 +349,7 @@
   function renderStatus(status) {
     current = status;
     fillDevices();
+    document.getElementById('ekko-workflows-off').hidden = !!status.workflows_enabled;
     var session = status.session;
     var collectorState = status.collector_state || 'waiting';
     var state = (!status.enabled) ? 'idle'
@@ -447,6 +451,8 @@
       var actions = mvEl('div', 'mv-row__actions');
       var flow = mvEl('button', 'btn btn--primary', 'Draft a workflow');
       flow.type = 'button'; flow.dataset.id = item.opportunity_id; flow.dataset.kind = 'flow';
+      flow.disabled = !current.workflows_enabled;
+      if (flow.disabled) flow.setAttribute('aria-describedby', 'ekko-workflows-off');
       var agent = mvEl('button', 'btn', 'Draft an assistant');
       agent.type = 'button'; agent.dataset.id = item.opportunity_id; agent.dataset.kind = 'agent';
       actions.appendChild(flow); actions.appendChild(agent);
@@ -575,6 +581,9 @@
   }
 
   async function handoff(id, kind) {
+    if (kind === 'flow' && !current.workflows_enabled) {
+      mvToast('Workflows are off. See the note above these suggestions.', {error: true}); return;
+    }
     try {
       var result = await request('/api/v1/ekko/candidates/' + encodeURIComponent(id) + '/handoff', {
         method: 'POST', headers: {'Content-Type': 'application/json'},

@@ -266,6 +266,26 @@ def test_mining_and_handoff_are_evidence_backed_preview_only(tmp_path, monkeypat
     ).json()["candidates"] == []
 
 
+def test_workflow_handoff_refuses_off_engine_before_unusable_editor(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLOWS", "0")
+    _isolate(tmp_path, monkeypatch)
+    store = _enroll(device="desk")
+    _seed_recurring_evidence(store)
+    assert client.get("/api/v1/ekko/status?device_id=desk").json()["workflows_enabled"] is False
+    opportunity_id = client.get("/api/v1/ekko/candidates?device_id=desk").json()["candidates"][0]["opportunity_id"]
+
+    refused = client.post(
+        f"/api/v1/ekko/candidates/{opportunity_id}/handoff",
+        json={"device_id": "desk", "kind": "flow"},
+    )
+    assert refused.status_code == 409
+    assert "Learning" in refused.json()["detail"]
+    assert client.post(
+        f"/api/v1/ekko/candidates/{opportunity_id}/handoff",
+        json={"device_id": "desk", "kind": "agent"},
+    ).status_code == 200
+
+
 def test_forget_device_revokes_enrollment_and_erases_data(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     store = _enroll(device="desk")

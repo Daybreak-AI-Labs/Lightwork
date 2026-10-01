@@ -161,6 +161,7 @@ def _public_collector(value) -> dict:
 
 def _status_data(request: Request, device_id: str) -> dict:
     from maverick.config import get_ekko
+    from maverick.flow import enabled as flows_enabled
 
     device = _device_id(device_id)
     policy = get_ekko()
@@ -199,6 +200,7 @@ def _status_data(request: Request, device_id: str) -> dict:
     blocked = set(policy.get("blocked_apps") or [])
     return {
         "enabled": bool(policy.get("enable", False)),
+        "workflows_enabled": flows_enabled(),
         "control_managed": "MAVERICK_EKKO" in os.environ,
         # What a person may choose from when enrolling: the admin ceiling,
         # minus anything the blocklist always wins over.
@@ -626,10 +628,16 @@ def ekko_candidate_handoff(
     auth.require_permission(request, "operate")
     from maverick.audit import EventKind
     from maverick.config import get_ekko
+    from maverick.flow import enabled as flows_enabled
     from maverick.work_discovery import build_draft_bundle
 
     from .in_app_routes import _draft_context
 
+    if payload.kind == "flow" and not flows_enabled():
+        raise HTTPException(
+            status_code=409,
+            detail="Workflows are off. An administrator can turn them on in Learning; then try again.",
+        )
     store = _store(request, payload.device_id)
     candidate = _candidate(store, get_ekko(), opportunity_id)
     # Give the workflow editor the exact provider-free, validated graph. Agent
