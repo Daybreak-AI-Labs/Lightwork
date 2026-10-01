@@ -26,7 +26,11 @@
         if (window.LightworkI18n) window.LightworkI18n.set(reopen, 'Reopen in current workspace');
         else reopen.textContent = 'Reopen in current workspace';
         notice.appendChild(reopen);
-        document.body.insertBefore(notice, document.body.firstChild);
+        // Keep recovery inside the content layout so the fixed sidebar cannot
+        // cover the link. The alert announces the change without moving focus
+        // away from a draft the person may still need to copy.
+        var content = document.querySelector('main') || document.body;
+        content.insertBefore(notice, content.firstChild);
         window.dispatchEvent(new CustomEvent('lightwork:context-changed'));
       }
       window.addEventListener('storage', function (event) {

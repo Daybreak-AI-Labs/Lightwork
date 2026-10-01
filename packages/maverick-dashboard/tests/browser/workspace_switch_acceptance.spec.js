@@ -20,6 +20,13 @@ test('a real switch in one tab pauses another tab draft and approval without cro
     await picker.locator('.tsel-pick[data-tenant="workspace-b"]').click();
     await expect.poll(async()=>(await app.state()).selected).toBe('workspace-b');
     for(const page of [draft,approval])await expect(page.locator('section[role=alert]').filter({hasText:'Your workspace changed in another tab.'})).toBeVisible();
+    await expect(draft.locator('#wf-steps')).toBeFocused();
+    await draft.setViewportSize({width:320,height:740});
+    const narrowNotice=draft.locator('main section[role=alert]').filter({hasText:'Your workspace changed in another tab.'});
+    await expect(narrowNotice).toBeVisible();
+    const noticeBounds=await narrowNotice.boundingBox();
+    expect(noticeBounds.x).toBeGreaterThanOrEqual(0);
+    expect(noticeBounds.x+noticeBounds.width).toBeLessThanOrEqual(320);
     await expect(draft.locator('#wf-steps')).toHaveValue('Unsaved workspace A draft');
     await draft.locator('#wf-save-btn').click();
     await reject.click();
