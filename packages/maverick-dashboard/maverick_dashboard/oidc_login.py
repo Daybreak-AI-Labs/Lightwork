@@ -337,9 +337,70 @@ def _principal_from_request_session(request: Request):
     from .session_revocation import is_revoked
     if is_revoked(sub, payload.get("iat")):
         return None
-    return VerifiedPrincipal(
-        sub=sub, issuer="oidc-session", audience="", claims={"via": "session"},
+    claims = session_claims(payload, request, via="session")
+    if claims is None:
+        return None
+    return VerifiedPrincipal(sub=sub, issuer="oidc-session", audience="", claims=claims)
+
+
+def session_claims(payload: dict, request: Request, *, via: str) -> dict | None:
+    """Claims for a verified session cookie, or ``None`` when the session was
+    ended on the Sessions page (or its record cannot be read: fail closed).
+
+    A cookie carrying a ``sid`` must be an active row in
+    :mod:`session_registry`; its ``mfa``/``mfa_at`` come from that record's
+    minting, not from the cookie alone. A cookie without a ``sid`` predates
+    session tracking and is accepted, unverified for a second factor, until
+    it expires."""
+    sid = payload.get("sid")
+    claims: dict = {"via": via, "mfa": False, "mfa_at": None, "sid": ""}
+    if not isinstance(sid, str) or not sid:
+        return claims
+    from . import session_registry
+
+    try:
+        if session_registry.status(sid) is not True:
+            return None
+    except session_registry.SessionStoreError:
+        return None
+    client = getattr(request, "client", None)
+    session_registry.touch(
+        sid, ip=str(getattr(client, "host", "") or ""),
+        user_agent=request.headers.get("user-agent", ""),
     )
+    claims["sid"] = sid
+    if payload.get("mfa") is True:
+        claims["mfa"] = True
+        claims["mfa_at"] = payload.get("mfa_at", payload.get("iat"))
+    return claims
+
+
+def mint_browser_session(request: Request, *, sub: str, secret: str, via: str, mfa: bool,
+                         ttl: int, extra: dict | None = None) -> str:
+    """Sign a session cookie and record it in :mod:`session_registry`.
+
+    One place for every sign-in flow (OIDC, SAML, invitation, owner), so each
+    session carries the same ``sid``/``mfa``/``mfa_at`` fields and appears on
+    the Sessions page. A record that cannot be written refuses the sign-in
+    (:class:`session_registry.SessionStoreError`): a session nobody can list
+    or end is not one Lightwork should issue."""
+    from . import session_registry
+
+    now = _now()
+    sid = session_registry.new_sid()
+    payload = {"sub": sub, "iat": now, "exp": now + ttl, "sid": sid, "mfa": bool(mfa)}
+    if mfa:
+        payload["mfa_at"] = now
+    if extra:
+        payload.update(extra)
+    client = getattr(request, "client", None)
+    session_registry.register(
+        sid=sid, principal=f"user:{sub}", via=via, mfa=bool(mfa),
+        mfa_at=float(now) if mfa else None, issued_at=now, expires_at=now + ttl,
+        ip=str(getattr(client, "host", "") or ""),
+        user_agent=request.headers.get("user-agent", ""),
+    )
+    return sign_session(payload, secret)
 
 
 @router.get("/auth/login")
@@ -387,6 +448,23 @@ async def auth_login(request: Request):
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
+    # Ask the provider for the configured authentication context (a second
+    # factor) when the administrator listed one; the callback still checks the
+    # ID token, because a request parameter is a hint, not proof.
+    try:
+        from .mfa_policy import policy as _mfa_policy
+
+        acr_values = _mfa_policy()["acr_values"]
+    except Exception:
+        acr_values = []
+    if acr_values:
+        params["acr_values"] = " ".join(acr_values)
+    # ``?fresh=1`` (the step-up link): the provider must ask the person to
+    # sign in again rather than reuse its own session, so ``auth_time`` and
+    # the session's second factor are new.
+    if request.query_params.get("fresh"):
+        params["prompt"] = "login"
+        params["max_age"] = "0"
     auth_url = endpoints["authorization_endpoint"] + "?" + urlencode(params)
 
     response = RedirectResponse(auth_url, status_code=302)
@@ -397,19 +475,23 @@ async def auth_login(request: Request):
     return response
 
 
-def _fail(return_to: str | None = None):
+def _fail(return_to: str | None = None, *, reason: str = ""):
     """Build a failure response that also clears both auth cookies.
 
     Used on every callback error path so a half-finished/forged login leaves no
     stale transaction or session cookie behind. We surface the failure as a
     redirect to ``/auth/error`` rather than a raw 4xx so the user lands on a
     page, not a JSON blob (the CSRF/state-mismatch case is the documented
-    exception — it returns a 400 inline).
+    exception — it returns a 400 inline). ``reason`` selects one of the fixed
+    plain explanations that page may show (``mfa``, ``store``); anything else
+    stays generic so a failure mode never leaks to an attacker.
     """
     from urllib.parse import urlencode
 
-    response = RedirectResponse(
-        "/auth/error?" + urlencode({"return_to": _safe_return_to(return_to)}), status_code=303)
+    params = {"return_to": _safe_return_to(return_to)}
+    if reason in _ERROR_REASONS:
+        params["reason"] = reason
+    response = RedirectResponse("/auth/error?" + urlencode(params), status_code=303)
     _clear_cookie(response, TX_COOKIE)
     _clear_cookie(response, SESSION_COOKIE)
     return response
@@ -516,10 +598,32 @@ async def auth_callback(request: Request):
         )
         return _fail(tx.get("return_to"))
 
+    # (4c) second factor: with "Require a second factor" on, the ID token must
+    # prove one (RFC 8176 ``amr`` or a configured ``acr``). Refused sign-ins
+    # get a page with one plain sentence, not a session.
+    from .mfa_policy import claims_prove_mfa, require_mfa
+
+    mfa = claims_prove_mfa(principal.claims)
+    if require_mfa() and not mfa:
+        log.warning("OIDC callback: sign-in refused, no second factor in the ID token")
+        await asyncio.get_running_loop().run_in_executor(
+            None, _shared_release_tx, tx_id
+        )
+        return _fail(reason="mfa")
+
     # (5) success: set the signed session cookie, clear the tx cookie, redirect.
     return_to = _safe_return_to(tx.get("return_to"))
-    session_payload = {"sub": principal.sub, "iat": _now(), "exp": _now() + _SESSION_TTL}
-    session_cookie = sign_session(session_payload, cfg.session_secret)
+    try:
+        session_cookie = mint_browser_session(
+            request, sub=principal.sub, secret=cfg.session_secret, via="session",
+            mfa=mfa, ttl=_SESSION_TTL,
+        )
+    except Exception:
+        log.warning("OIDC callback: session record unavailable; refusing sign-in")
+        await asyncio.get_running_loop().run_in_executor(
+            None, _shared_release_tx, tx_id
+        )
+        return _fail(reason="store")
 
     # Record this sub against the user's stable IdP identifiers so a later SCIM
     # deprovision can revoke this session even if the IdP's sub is pairwise and
@@ -700,11 +804,35 @@ def _session_sub_unchecked(request: Request) -> str | None:
     return None
 
 
+_ERROR_REASONS = {
+    "mfa": ("Sign in again with your authenticator", None),
+    "store": ("Sign-in could not be recorded",
+              "Lightwork could not record this sign-in, so it was not completed. "
+              "Try again; if it keeps happening, ask an administrator to check the server."),
+}
+
+
 @router.get("/auth/error")
 async def auth_error(request: Request):
-    """Generic login-failure landing page (no detail that aids an attacker)."""
+    """Login-failure landing page.
+
+    Generic by default (no detail that aids an attacker). The two documented
+    reasons are the person's own to act on: a sign-in without a second factor
+    while one is required, and a session record that could not be written."""
     if not login_enabled():
         raise HTTPException(status_code=404)
+    reason = request.query_params.get("reason", "")
+    if reason in _ERROR_REASONS:
+        from .app import templates
+        from .mfa_policy import MFA_MISSING_MESSAGE
+
+        title, message = _ERROR_REASONS[reason]
+        return templates.TemplateResponse(
+            request, "error.html",
+            {"status": 403, "title": title, "message": message or MFA_MISSING_MESSAGE,
+             "path": "/auth/login?fresh=1", "gate": "step_up"},
+            status_code=403, headers={"Cache-Control": "no-store"},
+        )
     return _login_error_response(request.query_params.get("return_to"))
 
 
@@ -723,6 +851,8 @@ __all__ = [
     "router",
     "TX_COOKIE",
     "SESSION_COOKIE",
+    "mint_browser_session",
+    "session_claims",
     "_principal_from_request_session",
     "_consume_tx_once",
     "_exchange_code_for_tokens",

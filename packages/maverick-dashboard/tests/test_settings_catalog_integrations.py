@@ -106,6 +106,20 @@ VALUES: dict[str, tuple[object, object]] = {
     "voice.whisper_cpp_model": ("ggml-custom.bin", "ggml-custom.bin"),
     "notifications.user_key": (_PUSHOVER_USER, _PUSHOVER_USER),
     "notifications.app_token": (_PUSHOVER_APP, _PUSHOVER_APP),
+    "notifications.email.host": ("smtp.example.com", "smtp.example.com"),
+    "notifications.email.port": (2525, 2525),
+    "notifications.email.user": ("alerts@example.com", "alerts@example.com"),
+    "notifications.email.password": ("sample-mail-password", "sample-mail-password"),  # pragma: allowlist secret
+    "notifications.email.from_address": ("alerts@example.com", "alerts@example.com"),
+    "notifications.email.tls": ("ssl", "ssl"),
+    "notifications.email.to": ("ops@example.com", "ops@example.com"),
+    "channels.slack.signing_secret": ("sample-slack-signing-secret", "sample-slack-signing-secret"),  # pragma: allowlist secret
+    "channels.slack.approvals_channel": ("C0123ABCD", "C0123ABCD"),
+    "my_work.digest_enable": (True, True),
+    "my_work.digest_hour": (7, 7),
+    "my_work.digest_poll_seconds": (120, 120),
+    "my_work.send_when_empty": (True, True),
+    "my_work.monthly_spend_limit_dollars": (250, 250),
     "channels.routing.rules": ([_RULE], [_RULE]),
     # finance operating profile
     "finance.framework": ("ifrs", "ifrs"),
@@ -177,6 +191,20 @@ INVALID: dict[str, object] = {
     "voice.whisper_cpp_model": "ggml-escape.bin",
     "notifications.user_key": "too-short",
     "notifications.app_token": "a" * 31,
+    "notifications.email.host": "not a host!",
+    "notifications.email.port": 0,
+    "notifications.email.user": "has space",
+    "notifications.email.password": "",
+    "notifications.email.from_address": "nope",
+    "notifications.email.tls": "plain",
+    "notifications.email.to": "nope",
+    "channels.slack.signing_secret": "",
+    "channels.slack.approvals_channel": "lowercase",
+    "my_work.digest_enable": "yes",
+    "my_work.digest_hour": 24,
+    "my_work.digest_poll_seconds": 10,
+    "my_work.send_when_empty": "on",
+    "my_work.monthly_spend_limit_dollars": -1,
     "channels.routing.rules": [{**_RULE, "specialist": "no_such_pack"}],
     # finance operating profile (a payment below approve is a hard floor)
     "finance.framework": "local_gaap",
@@ -207,6 +235,7 @@ LOOSENING: dict[str, tuple[object, object]] = {
     "webhooks.max_inflight": (100, 300),
     "webhooks.max_age_seconds": (None, 900),
     "webhooks.body_limit": (None, 4096),
+    "notifications.email.tls": (None, "none"),
     "automation_import.max_steps": (None, 1000),
     "tax.trusted_constants_pubkeys": (None, [_KEY]),
     "voice.stt_backend": (None, "openai"),
@@ -385,7 +414,8 @@ def test_secrets_are_sealed_never_shown_and_audited_as_set(audit_rows):
                             "github.token", "github.share_token", "billing.stripe.secret_key",
                             "billing.stripe.webhook_secret", "github.app_webhook_secret",
                             "webhooks.gitlab_token", "data_map.graph_token",
-                            "notifications.user_key", "notifications.app_token"}
+                            "notifications.user_key", "notifications.app_token",
+                            "notifications.email.password", "channels.slack.signing_secret"}
     r = _save([{"id": key, "value": value} for key, value in secrets.items()])
     assert r.status_code == 200, r.text
     stored = config.dashboard_overrides_path().read_text(encoding="utf-8")

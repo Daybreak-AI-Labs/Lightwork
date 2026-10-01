@@ -217,7 +217,10 @@ def _vote(approval_id, who, verb="approve"):
     from maverick_dashboard._shared import _world
 
     card = decode_approval_detail(_world().get_approval(approval_id).detail)
-    return client.post(f"/api/v1/approvals/{approval_id}/{verb}", headers={
+    # A settings change is a high-risk request: approving needs the same
+    # acknowledgement the Approvals page collects.
+    body = {"acknowledged": True, "confirmation": "approve"} if verb == "approve" else {}
+    return client.post(f"/api/v1/approvals/{approval_id}/{verb}", json=body, headers={
         "X-Test-User": who, "X-Lightwork-Approval-Binding": card["binding_sha256"]})
 
 

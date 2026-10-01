@@ -91,6 +91,38 @@ def test_snapshots_rollback_and_hindsight(client, monkeypatch):
     assert client.post("/api/v1/learning/rollback", json={"snapshot": "20260101T000000Z"}).json() == {"restored": 2}
 
 
+@pytest.mark.parametrize("has_report", [True, False])
+def test_failed_rollback_warns_that_learning_may_have_changed(client, monkeypatch,
+                                                               tmp_path, has_report):
+    from maverick import dreaming
+
+    snapshot = "20260101T000000Z"
+    live = tmp_path / "learned-guidance.txt"
+    live.write_text("current guidance", encoding="utf-8")
+    monkeypatch.setattr(dreaming, "list_snapshots", lambda: [snapshot])
+
+    def fail_after_restoring_guidance(name):
+        assert name == snapshot
+        live.write_text("saved guidance", encoding="utf-8")
+        if has_report:
+            report = dreaming.LearningRollbackReport(
+                snapshot=snapshot, required=("guidance", "skills"),
+                restored=("guidance",), failures={"skills": "simulated write failure"},
+            )
+            raise dreaming.LearningRollbackError(report)
+        raise OSError("simulated failure after writing")
+
+    monkeypatch.setattr(dreaming, "rollback_learning_state", fail_after_restoring_guidance)
+    response = client.post("/api/v1/learning/rollback", json={"snapshot": snapshot})
+
+    assert live.read_text(encoding="utf-8") == "saved guidance"
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "may have changed" in detail
+    assert "Review the Learned and Learning pages" in detail
+    assert "unchanged" not in detail
+
+
 def test_dream_preview_and_run_respect_the_switch(client, monkeypatch):
     from maverick import dreaming
     report = dreaming.DreamReport(goals_replayed=4, insights_written=1, skills_distilled=2)

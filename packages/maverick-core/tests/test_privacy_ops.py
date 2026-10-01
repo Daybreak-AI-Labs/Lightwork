@@ -1506,3 +1506,106 @@ class TestPdfExtraction(TestPdfExtraction):  # noqa: F811
         assert record["status"] == "pending_review"
         assert record["review_required"] is True
         assert record["document_evidence"]["review_required"] is True
+
+
+class TestDsarClocks:
+    """Regime-aware deadlines, verification and extensions on the tracker."""
+
+    def test_jurisdiction_sets_regime_clock_and_acknowledgement(self):
+        r = privacy_ops.open_dsar(
+            "casey@example.com", "access", jurisdiction="us_ca_ccpa",
+            source="public_form", status="unverified",
+            requester={"name": "Casey", "relationship": "customer",
+                       "message": "x" * 5000, "authorised_agent": False},
+        )
+        assert r["status"] == "unverified"
+        assert r["verification"] == {"status": "unverified"}
+        assert r["due_basis"] == "statutory"
+        assert r["due_at"] == pytest.approx(r["received_at"] + 45 * 86400)
+        assert r["acknowledge_by"] is not None
+        assert r["extended_until"] is None and r["extension_reason"] == ""
+        assert r["source"] == "public_form"
+        assert len(r["requester"]["message"]) == 4000
+        listed = privacy_ops.list_dsars()[0]
+        assert listed["effective_due_at"] == r["due_at"]
+        assert listed["overdue"] is False and listed["due_soon"] is False
+
+    def test_legacy_open_keeps_fallback_clock(self):
+        r = privacy_ops.open_dsar("jordan@example.com", "erasure")
+        assert r["jurisdiction"] == "" and r["due_basis"] == "fallback_30_days"
+        assert r["verification"] == {"status": "not_required"}
+        assert r["source"] == "dashboard"
+
+    def test_verify_moves_unverified_to_open(self):
+        r = privacy_ops.open_dsar(
+            "casey@example.com", "correction", jurisdiction="eu_gdpr",
+            source="public_form", status="unverified",
+        )
+        with pytest.raises(ValueError):
+            privacy_ops.verify_dsar(r["id"], method="magic", reference="x")
+        done = privacy_ops.verify_dsar(
+            r["id"], method="email_challenge", reference="link opened",
+            verified_by="public-rights-form",
+        )
+        assert done["status"] == "open"
+        assert done["verification"]["method"] == "email_challenge"
+        assert done["verification"]["verified_at"] > 0
+        assert privacy_ops.verify_dsar("DSAR-nope", method="other", reference="x") is None
+
+    def test_extension_is_validated_against_the_regime(self):
+        r = privacy_ops.open_dsar("casey@example.com", "access", jurisdiction="us_va")
+        with pytest.raises(ValueError):
+            privacy_ops.extend_dsar(r["id"], reason="", days=10)
+        with pytest.raises(ValueError):
+            privacy_ops.extend_dsar(r["id"], reason="complex", days=46)
+        ext = privacy_ops.extend_dsar(r["id"], reason="complex request", days=30)
+        assert ext["extended_until"] == pytest.approx(r["due_at"] + 30 * 86400)
+        assert ext["extension_reason"] == "complex request"
+        assert privacy_ops.list_dsars()[0]["effective_due_at"] == ext["extended_until"]
+        with pytest.raises(ValueError):
+            privacy_ops.extend_dsar(r["id"], reason="again", days=5)
+        no_ext = privacy_ops.open_dsar("b@example.com", "access", jurisdiction="br_lgpd")
+        with pytest.raises(ValueError):
+            privacy_ops.extend_dsar(no_ext["id"], reason="late", days=5)
+
+    def test_acknowledge_and_clock_states(self):
+        r = privacy_ops.open_dsar("casey@example.com", "access", jurisdiction="us_ca_ccpa")
+        later = r["received_at"] + 20 * 86400
+        clock = privacy_ops.dsar_clock(r, now=later)
+        assert clock["acknowledge_overdue"] is True
+        acked = privacy_ops.acknowledge_dsar(r["id"], acknowledged_by="privacy-lead")
+        assert acked["acknowledged_at"] > 0
+        assert privacy_ops.dsar_clock(acked, now=later)["acknowledge_overdue"] is False
+        near = privacy_ops.dsar_clock(acked, now=r["due_at"] - 3 * 86400)
+        assert near["due_soon"] is True and near["overdue"] is False
+        past = privacy_ops.dsar_clock(acked, now=r["due_at"] + 86400)
+        assert past["overdue"] is True
+
+    def test_verify_acknowledge_and_extend_tell_webhook_subscribers(self, monkeypatch):
+        from maverick import webhook_events
+
+        sent: list[tuple[str, str, str]] = []
+        monkeypatch.setattr(
+            webhook_events, "emit",
+            lambda event, **kw: sent.append((event, kw["record_type"], kw["record_id"])) or 1,
+        )
+        r = privacy_ops.open_dsar(
+            "casey@example.com", "access", jurisdiction="us_ca_ccpa",
+            source="public_form", status="unverified",
+        )
+        privacy_ops.verify_dsar(r["id"], method="email_challenge", reference="link opened")
+        privacy_ops.acknowledge_dsar(r["id"], acknowledged_by="privacy-lead")
+        privacy_ops.extend_dsar(r["id"], reason="complex request", days=30)
+        # A repeat that changes nothing sends nothing.
+        privacy_ops.acknowledge_dsar(r["id"], acknowledged_by="privacy-lead")
+        assert [e for e, _rt, _rid in sent] == [
+            "dsar.opened", "dsar.verified", "dsar.acknowledged", "dsar.extended",
+        ]
+        assert all(rt == "dsar" and rid == r["id"] for _e, rt, rid in sent)
+        assert {"dsar.verified", "dsar.acknowledged", "dsar.extended"} <= webhook_events.EVENT_TYPES
+
+    def test_manual_kinds_are_marked_answered(self):
+        r = privacy_ops.open_dsar("casey@example.com", "opt_out", jurisdiction="us_ca_ccpa")
+        done = privacy_ops.fulfill_dsar(r["id"], fulfilled_by="ops")
+        assert done["status"] == "fulfilled"
+        assert done["fulfillment"] == {"handled": "manually"}

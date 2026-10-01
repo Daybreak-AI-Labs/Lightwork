@@ -1,6 +1,10 @@
 {# Actionable pending-approval queue. Shared by /approvals and /oversight.
    Context: `approvals` (pending records) and `sources` ({id: label|None}).
-   POSTs decisions to /api/v1/approvals/{id}/approve|deny and removes the row. #}
+   Each request is one stacked card with its decision buttons pinned at the
+   bottom (no table: a phone must not scroll sideways). POSTs decisions to
+   /api/v1/approvals/{id}/approve|deny|revise; high and critical risk approvals
+   go through an in-page confirmation first; a decided card moves to "Decided
+   just now" where it can be undone while the agent is still waiting. #}
 {% macro _plain_value(value) -%}
   {%- if value is mapping -%}{% for k, v in value.items() %}{{ k | humanize }}: {{ _plain_value(v) }}{% if not loop.last %}; {% endif %}{% endfor %}
   {%- elif value is string -%}{{ value | humanize if ('_' in value and ' ' not in value) else value }}
@@ -14,84 +18,137 @@
   {%- else -%}{% for key, value in budget.items() %}{{ key | humanize }}: {{ _plain_value(value) }}{% if not loop.last %} · {% endif %}{% endfor %}
   {%- endif -%}
 {%- endmacro %}
+<div id="approval-queue" class="approval-list" aria-label="Requests waiting for your decision">
 {% if approvals %}
-  <table class="approval-table">
-    <thead><tr>
-      <th scope="col">Request</th><th scope="col">Risk</th>
-      <th scope="col">From</th>
-      <th scope="col">Applies to</th><th scope="col">Details</th>
-      <th scope="col">Your decision</th>
-    </tr></thead>
-    <tbody>
-    {% for a in approvals %}
-      {% set assessment_id = assessment_ids.get(a.id) if assessment_ids else None %}
-      {% set _raw_action = (approval_actions.get(a.id, '') if approval_actions else '') | trim %}
-      {% set action_label = (_raw_action if ' ' in _raw_action else (_raw_action | replace('.', ' ') | humanize)) or 'Reviewed action' %}
-      <tr data-id="{{ a.id }}" data-label="{{ action_label }}"{% if assessment_id %} data-assessment-id="{{ assessment_id }}"{% endif %} id="approval-{{ a.id }}">
-        <td><strong>{{ action_label }}</strong></td>
-        <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk | humanize }}</span></td>
-        <td>
+  {% for a in approvals %}
+    {% set assessment_id = assessment_ids.get(a.id) if assessment_ids else None %}
+    {% set _raw_action = (approval_actions.get(a.id, '') if approval_actions else '') | trim %}
+    {% set action_label = (_raw_action if ' ' in _raw_action else (_raw_action | replace('.', ' ') | humanize)) or 'Reviewed action' %}
+    {% set card = cards.get(a.id) if cards else None %}
+    {% set card_status = card_statuses.get(a.id, 'legacy') if card_statuses else 'legacy' %}
+    {% set scope_text = approval_scopes.get(a.id, '') if approval_scopes and approval_scopes.get(a.id) else 'The item described' %}
+    <article class="approval-item" data-id="{{ a.id }}" data-label="{{ action_label }}" data-risk="{{ a.risk }}"
+             data-scope="{{ scope_text }}"
+             {% if card %}data-target="{{ card.target.label }}" data-spending="{{ _budget_text(card.budget) | trim }}" data-irreversible="{{ 'yes' if card.consequences.irreversible else 'no' }}"{% endif %}
+             {% if assessment_id %} data-assessment-id="{{ assessment_id }}"{% endif %} id="approval-{{ a.id }}"
+             aria-labelledby="approval-title-{{ a.id }}">
+      <div class="approval-item__head">
+        <h2 class="approval-item__title" id="approval-title-{{ a.id }}">{{ action_label }}</h2>
+        <span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }} approval-risk">{{ a.risk | humanize }} risk</span>
+        <span class="badge approval-outcome" hidden></span>
+      </div>
+      <dl class="approval-item__meta">
+        <div><dt>From</dt><dd>
           {% set _src = sources.get(a.id) if sources else None %}
           {% if _src %}<span class="badge blocked">{{ _src }}</span>{% else %}<span class="muted">An agent asked for permission</span>{% endif %}
-        </td>
-        <td>{{ approval_scopes.get(a.id, '') if approval_scopes and approval_scopes.get(a.id) else 'The item described' }}</td>
-        <td class="muted approval-detail">
-          {% set card = cards.get(a.id) if cards else None %}
-          {% set card_status = card_statuses.get(a.id, 'legacy') if card_statuses else 'legacy' %}
-          <p>{{ approval_details.get(a.id, a.detail or '') if approval_details else (a.detail or '') }}</p>
-          {% if card %}
-          <section class="approval-card" aria-label="What you are approving">
-            <p class="approval-authority-note"><strong>This is Lightwork's suggestion — the decision is yours.</strong>
-              Your decision applies only to exactly what is described here.</p>
-            <dl class="approval-card-grid">
-              <div><dt>What it changes</dt><dd>{{ card.target.label }}</dd></div>
-              <div><dt>Requested by</dt><dd>{{ card.authority.actor | identity }} · {{ card.authority.role | role_label }}</dd></div>
-              <div><dt>Decide by</dt><dd>{{ card.expires_at | datetime }}{% if card_status == 'expired' %} <span class="badge blocked">Expired</span>{% endif %}</dd></div>
-              <div><dt>Spending</dt><dd>{{ _budget_text(card.budget) }}</dd></div>
+        </dd></div>
+        <div><dt>Applies to</dt><dd>{{ scope_text }}</dd></div>
+        {% if card %}<div><dt>Requested by</dt><dd>{{ card.authority.actor | identity }} · {{ card.authority.role | role_label }}</dd></div>
+        <div><dt>Decide by</dt><dd>{{ card.expires_at | datetime }}{% if card_status == 'expired' %} <span class="badge blocked">Expired</span>{% endif %}</dd></div>{% endif %}
+      </dl>
+      <div class="muted approval-detail">
+        <p>{{ approval_details.get(a.id, a.detail or '') if approval_details else (a.detail or '') }}</p>
+        {% if card %}
+        <section class="approval-card" aria-label="What you are approving">
+          <p class="approval-authority-note"><strong>This is Lightwork's suggestion — the decision is yours.</strong>
+            Your decision applies only to exactly what is described here.</p>
+          <dl class="approval-card-grid">
+            <div><dt>What it changes</dt><dd>{{ card.target.label }}</dd></div>
+            <div><dt>Spending</dt><dd>{{ _budget_text(card.budget) }}</dd></div>
+          </dl>
+          {% if card.parameters.summary %}<div class="approval-parameters"><strong>What it will do</strong><ul>{% for item in card.parameters.summary %}<li>{{ item }}</li>{% endfor %}</ul></div>{% endif %}
+          <div class="approval-preview"><div><strong>Before</strong><p>{{ card.preview.before }}</p></div><div><strong>After</strong><p>{{ card.preview.after }}</p></div></div>
+          <div class="approval-consequences">
+            <div><strong>What happens next{% if card.consequences.irreversible %} <span class="badge blocked">Can't be undone</span>{% endif %}</strong><ul>{% for item in card.consequences.known_effects %}<li>{{ item }}</li>{% endfor %}</ul></div>
+            <div><strong>Open questions</strong>{% if card.consequences.unresolved_assumptions %}<ul>{% for item in card.consequences.unresolved_assumptions %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p>None.</p>{% endif %}</div>
+          </div>
+          <details class="approval-tech">
+            <summary>Technical details (for auditors)</summary>
+            <dl>
+              <div><dt>Workspace</dt><dd>{{ card.authority.workspace }}</dd></div>
+              <div><dt>Item fingerprint</dt><dd><code>{{ card.target.sha256 }}</code></dd></div>
+              <div><dt>Input fingerprint</dt><dd><code>{{ card.parameters.sha256 }}</code></dd></div>
+              {% for key, value in card.credentials.items() %}<div><dt>{{ key | humanize }}</dt><dd><code>{{ _plain_value(value) }}</code></dd></div>{% endfor %}
             </dl>
-            {% if card.parameters.summary %}<div class="approval-parameters"><strong>What it will do</strong><ul>{% for item in card.parameters.summary %}<li>{{ item }}</li>{% endfor %}</ul></div>{% endif %}
-            <div class="approval-preview"><div><strong>Before</strong><p>{{ card.preview.before }}</p></div><div><strong>After</strong><p>{{ card.preview.after }}</p></div></div>
-            <div class="approval-consequences">
-              <div><strong>What happens next{% if card.consequences.irreversible %} <span class="badge blocked">Can't be undone</span>{% endif %}</strong><ul>{% for item in card.consequences.known_effects %}<li>{{ item }}</li>{% endfor %}</ul></div>
-              <div><strong>Open questions</strong>{% if card.consequences.unresolved_assumptions %}<ul>{% for item in card.consequences.unresolved_assumptions %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p>None.</p>{% endif %}</div>
-            </div>
-            <details class="approval-tech">
-              <summary>Technical details (for auditors)</summary>
-              <dl>
-                <div><dt>Workspace</dt><dd>{{ card.authority.workspace }}</dd></div>
-                <div><dt>Item fingerprint</dt><dd><code>{{ card.target.sha256 }}</code></dd></div>
-                <div><dt>Input fingerprint</dt><dd><code>{{ card.parameters.sha256 }}</code></dd></div>
-                {% for key, value in card.credentials.items() %}<div><dt>{{ key | humanize }}</dt><dd><code>{{ _plain_value(value) }}</code></dd></div>{% endfor %}
-              </dl>
-            </details>
-          </section>
-          {% elif card_status == 'invalid' %}
-            <p class="approval-card-error" role="alert">This request can't be approved because its details could not be checked. Reject it and ask for a new request.</p>
-          {% elif card_status == 'legacy' %}
-            <p class="approval-card-error" role="alert">This older request is missing the details needed to approve it safely. Reject it and ask for a new request.</p>
-          {% endif %}
-        </td>
-        <td class="approval-actions">
-          <button type="button" class="btn btn--primary approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% endif %}>Approve</button>
-          <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
-          <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
-        </td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+          </details>
+        </section>
+        {% elif card_status == 'invalid' %}
+          <p class="approval-card-error" role="alert">This request can't be approved because its details could not be checked. Reject it and ask for a new request.</p>
+        {% elif card_status == 'legacy' %}
+          <p class="approval-card-error" role="alert">This older request is missing the details needed to approve it safely. Reject it and ask for a new request.</p>
+        {% endif %}
+      </div>
+      <p class="approval-item__decided muted" hidden></p>
+      <div class="approval-actions">
+        <button type="button" class="btn btn--primary approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% endif %}>Approve</button>
+        <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
+        <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
+      </div>
+      <div class="approval-actions approval-actions--decided" hidden>
+        <button type="button" class="btn btn--primary approval-undo" data-id="{{ a.id }}">Undo</button>
+        <button type="button" class="btn btn--ghost approval-dismiss" data-id="{{ a.id }}">Dismiss</button>
+      </div>
+    </article>
+  {% endfor %}
 {% else %}
   <div class="approval-empty">
     <p class="muted">Nothing needs your decision right now.</p>
     <p><a class="btn btn--ghost" href="#request-decision-history">See decisions on your requests</a></p>
   </div>
 {% endif %}
+</div>
 
 <p id="approval-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em;"></p>
 
+<section id="approval-decided" class="approval-decided" aria-labelledby="approval-decided-title" hidden>
+  <h2 id="approval-decided-title" class="approval-decided__title">Decided just now</h2>
+  <p class="muted approval-decided__lede">These stay here until you reload the page or dismiss them. Undo is available while the agent is still waiting.</p>
+  <div id="approval-decided-list" class="approval-list"></div>
+</section>
+
+<dialog id="approval-confirm" class="mv-confirm approval-confirm" aria-labelledby="approval-confirm-title">
+  <form id="approval-confirm-form" class="mv-confirm__body" method="dialog">
+    <h2 id="approval-confirm-title" class="mv-form__title">Approve this action?</h2>
+    <p id="approval-confirm-risk" class="approval-confirm__risk"></p>
+    <dl class="approval-confirm__facts">
+      <div><dt>What it will do</dt><dd><ul id="approval-confirm-does"></ul></dd></div>
+      <div><dt>Systems and data affected</dt><dd id="approval-confirm-affects"></dd></div>
+      <div><dt>Spending</dt><dd id="approval-confirm-spending"></dd></div>
+      <div><dt>Can it be undone?</dt><dd id="approval-confirm-undo"></dd></div>
+    </dl>
+    <div class="mv-form__field mv-form__check">
+      <input type="checkbox" id="approval-confirm-ack">
+      <label for="approval-confirm-ack">I have read what this action will do and I approve it.</label>
+    </div>
+    <div class="mv-form__field" id="approval-confirm-typed-wrap" hidden>
+      <label for="approval-confirm-typed">This is a critical action. Type APPROVE to confirm.</label>
+      <input type="text" id="approval-confirm-typed" class="input" autocomplete="off" placeholder="APPROVE">
+    </div>
+    <p id="approval-confirm-err" class="mv-form__err" role="alert"></p>
+    <div class="mv-confirm__row">
+      <button type="button" class="btn btn--ghost" id="approval-confirm-cancel">Cancel</button>
+      <button type="submit" class="btn btn--primary" id="approval-confirm-ok">Yes, approve</button>
+    </div>
+  </form>
+</dialog>
+
 <style>
-  .approval-actions { display: flex; flex-direction: column; gap: var(--space-2); align-items: stretch; min-width: 10rem; }
+  .approval-list { display: grid; gap: var(--space-4); min-width: 0; }
+  .approval-item { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding: var(--space-4); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+  .approval-item__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+  .approval-item__title { margin: 0; font-size: var(--text-base); flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+  .approval-item__meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--space-2) var(--space-3); margin: 0; font-size: var(--text-sm); }
+  .approval-item__meta div { min-width: 0; }
+  .approval-item__meta dt { font-weight: var(--font-semibold); }
+  .approval-item__meta dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+  .approval-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--border); }
+  .approval-actions .btn { flex: 1 1 8rem; }
   .approval-actions .btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+  .approval-item--decided { border-color: var(--accent); }
+  .approval-item--decided .approval-item__decided { margin: 0; }
+  .approval-decided { margin-top: var(--space-5); }
+  .approval-decided__title { margin: 0 0 var(--space-1); font-size: var(--text-base); }
+  .approval-decided__lede { margin: 0 0 var(--space-3); font-size: var(--text-sm); }
   .approval-tech { margin-top: var(--space-3); font-size: var(--text-xs); }
   .approval-tech dl { display: grid; gap: var(--space-2); margin: var(--space-2) 0 0; }
   /* Assessment rows: the wall-of-text detail collapses to one clean line;
@@ -100,25 +157,33 @@
   .approval-detail details { margin-top: var(--space-2); }
   .approval-detail summary { cursor: pointer; color: var(--brand); font-size: var(--text-xs); }
   .approval-detail details > div { margin-top: var(--space-2); font-size: var(--text-sm); white-space: pre-wrap; }
-  .approval-card { margin-top: var(--space-3); padding: var(--space-3); color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); min-width: min(54rem, 70vw); }
+  .approval-detail > p { margin-top: 0; overflow-wrap: anywhere; }
+  .approval-card { margin-top: var(--space-3); padding: var(--space-3); color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); min-width: 0; }
   .approval-authority-note { margin-top: 0; }
-  .approval-card-grid, .approval-preview, .approval-consequences { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+  .approval-card-grid, .approval-preview, .approval-consequences { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--space-3); margin: 0; }
   .approval-card-grid div, .approval-preview div, .approval-consequences div { min-width: 0; }
   .approval-card dt { font-weight: var(--font-semibold); }
   .approval-card dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
   .approval-card code { white-space: normal; overflow-wrap: anywhere; }
   .approval-card ul { margin: var(--space-1) 0 var(--space-2); padding-left: 1.25rem; }
+  .approval-card p { overflow-wrap: anywhere; }
   .approval-preview, .approval-consequences { margin-top: var(--space-3); }
   .approval-card-error { color: var(--danger); font-weight: var(--font-semibold); }
-  @media (max-width: 760px) { .approval-card { min-width: 0; } .approval-card-grid, .approval-preview, .approval-consequences { grid-template-columns: 1fr; } }
+  .approval-confirm__risk { font-weight: var(--font-semibold); }
+  .approval-confirm__facts { display: grid; gap: var(--space-2); margin: 0 0 var(--space-3); }
+  .approval-confirm__facts div { min-width: 0; }
+  .approval-confirm__facts dt { font-weight: var(--font-semibold); }
+  .approval-confirm__facts dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+  .approval-confirm__facts ul { margin: 0; padding-left: 1.25rem; }
+  .approval-confirm .mv-form__err { color: var(--danger); min-height: 1em; }
 </style>
 
 {% include "_assessment_review.html" %}
 
 <script>
-  // Assessment-backed approvals: the detail column collapses to one readable
-  // line (complete text behind a toggle — the real review home is the shared
-  // pop-out), and Review leads the decision cell.
+  // Assessment-backed approvals: the detail collapses to one readable line
+  // (complete text behind a toggle — the real review home is the shared
+  // pop-out), and Review leads the decision row.
   (function() {
     if (!window.mvAssessmentReview) return;
     function el(tag, cls, text) {
@@ -127,10 +192,10 @@
       if (text !== undefined) n.textContent = text;
       return n;
     }
-    document.querySelectorAll('tr[data-id]').forEach(function (tr) {
-      const assessmentId = tr.dataset.assessmentId || '';
+    document.querySelectorAll('article.approval-item[data-id]').forEach(function (item) {
+      const assessmentId = item.dataset.assessmentId || '';
       if (!assessmentId) return;
-      const detail = tr.querySelector('.approval-detail');
+      const detail = item.querySelector('.approval-detail');
       const summary = detail && detail.querySelector(':scope > p');
       if (!summary) return;
       const full = (summary.textContent || '')
@@ -146,147 +211,356 @@
         dts.append(sum, el('div', 'muted', full));
         summary.insertAdjacentElement('afterend', dts);
       }
-      const cell = tr.querySelector('td:last-child');
+      const cell = item.querySelector('.approval-actions');
       const btn = el('button', 'btn btn--primary approval-review', 'Review assessment');
       btn.type = 'button';
       btn.addEventListener('click', function () { window.mvAssessmentReview.open(assessmentId); });
       cell.insertBefore(btn, cell.firstChild);
-      tr.dataset.assessment = assessmentId;
+      item.dataset.assessment = assessmentId;
     });
 
     // One decision, not two clicks: approving/rejecting the assessment in
-    // the pop-out decides the linked approval-gate row through the queue's
-    // own (audited) approve/deny path.
+    // the pop-out decides the linked approval-gate card through the queue's
+    // own (audited) approve/deny path. The pop-out was the confirmation, so
+    // the card's own confirmation step is skipped.
     document.addEventListener('mv-assessment-decided', function (ev) {
       const d = ev.detail || {};
-      const row = document.querySelector('tr[data-assessment="' + d.id + '"]');
-      if (!row) return;
+      const item = document.querySelector('article.approval-item[data-assessment="' + d.id + '"]');
+      if (!item) return;
       const action = d.decision === 'approved' ? 'approve' : 'deny';
-      const btn = row.querySelector('button.approval-btn[data-action="' + action + '"]');
-      if (btn && !btn.disabled) btn.click();
+      const btn = item.querySelector('button.approval-btn[data-action="' + action + '"]');
+      if (btn && !btn.disabled && window.mvDecideApproval) window.mvDecideApproval(btn, { confirmed: true });
     });
   })();
 
   (function() {
     const msg = document.getElementById('approval-msg');
+    const queue = document.getElementById('approval-queue');
+    const decidedSection = document.getElementById('approval-decided');
+    const decidedList = document.getElementById('approval-decided-list');
+    function toast(text, opts) {
+      if (typeof window.mvToast === 'function') window.mvToast(text, opts);
+    }
+    function say(text, color) {
+      msg.style.color = color || 'var(--muted)';
+      msg.textContent = text;
+    }
     function plainError(failure, what) {
       return window.mvErrorText ? window.mvErrorText(failure, what)
         : 'Could not ' + what + '. Please try again.';
     }
-    function showEmpty(tbody) {
-      const table = tbody.closest('table');
+    function itemFor(id) {
+      return document.querySelector('article.approval-item[data-id="' + id + '"]');
+    }
+    function showEmptyIfNeeded() {
+      if (queue.querySelector('article.approval-item')) return;
       const empty = document.createElement('p');
       empty.className = 'muted';
       empty.textContent = 'Nothing needs your decision right now.';
-      if (table) table.replaceWith(empty);
+      queue.replaceChildren(empty);
     }
-    document.querySelectorAll('button.approval-btn').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        const id = btn.dataset.id;
-        const action = btn.dataset.action;  // "approve" | "deny" | "revise"
-        const row0 = document.querySelector('tr[data-id="' + id + '"]');
-        const label = (row0 && row0.dataset.label) || 'this request';
-        const rowButtons = Array.from(document.querySelectorAll(
-          'tr[data-id="' + id + '"] button.approval-btn'));
-        const originalDisabled = rowButtons.map(function(b) { return b.disabled; });
-        function restoreDisabledStates() {
-          rowButtons.forEach(function(b, index) {
-            b.disabled = originalDisabled[index];
-          });
+    function isHighRisk(item) {
+      const risk = (item.dataset.risk || '').toLowerCase();
+      return risk === 'high' || risk === 'critical';
+    }
+
+    // In-page confirmation for high and critical risk approvals: restates
+    // what the action does, what it touches, what it spends and whether it
+    // can be undone. High risk needs the box ticked; critical also needs
+    // the word APPROVE typed. Never the browser's confirm().
+    const dlg = document.getElementById('approval-confirm');
+    function confirmApproval(item) {
+      if (!dlg || typeof dlg.showModal !== 'function' || dlg.open) return Promise.resolve(null);
+      const risk = (item.dataset.risk || '').toLowerCase();
+      const critical = risk === 'critical';
+      const opener = document.activeElement;
+      document.getElementById('approval-confirm-title').textContent =
+        'Approve "' + (item.dataset.label || 'this request') + '"?';
+      document.getElementById('approval-confirm-risk').textContent = critical
+        ? 'This is a critical risk action.' : 'This is a high risk action.';
+      const does = document.getElementById('approval-confirm-does');
+      does.replaceChildren();
+      const bullets = item.querySelectorAll('.approval-parameters li');
+      if (bullets.length) {
+        bullets.forEach(function (li) {
+          const n = document.createElement('li'); n.textContent = li.textContent; does.appendChild(n);
+        });
+      } else {
+        const n = document.createElement('li');
+        const detail = item.querySelector('.approval-detail > p');
+        n.textContent = (detail && detail.textContent.trim()) || (item.dataset.label || 'The action described on the card.');
+        does.appendChild(n);
+      }
+      const affects = [item.dataset.target, item.dataset.scope].filter(function (v, i, arr) {
+        return v && arr.indexOf(v) === i;
+      });
+      document.getElementById('approval-confirm-affects').textContent =
+        affects.length ? affects.join(' · ') : 'The item described on the card.';
+      document.getElementById('approval-confirm-spending').textContent =
+        item.dataset.spending || 'No spending was declared.';
+      document.getElementById('approval-confirm-undo').textContent =
+        item.dataset.irreversible === 'yes'
+          ? "No. Once it runs, this action can't be undone."
+          : item.dataset.irreversible === 'no'
+            ? 'Yes, the requester says this action can be reversed afterwards.'
+            : 'Not stated by the requester. Assume it cannot be undone.';
+      const ack = document.getElementById('approval-confirm-ack');
+      const typedWrap = document.getElementById('approval-confirm-typed-wrap');
+      const typed = document.getElementById('approval-confirm-typed');
+      const err = document.getElementById('approval-confirm-err');
+      const form = document.getElementById('approval-confirm-form');
+      const cancel = document.getElementById('approval-confirm-cancel');
+      ack.checked = false; typed.value = ''; err.textContent = '';
+      typedWrap.hidden = !critical;
+      return new Promise(function (resolve) {
+        function done(val) {
+          form.removeEventListener('submit', onSubmit);
+          cancel.removeEventListener('click', onCancel);
+          dlg.removeEventListener('cancel', onCancel);
+          if (dlg.open) dlg.close();
+          if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+          resolve(val);
         }
-        let revisionRationale = '';
-        if (action === 'revise') {
-          const answers = window.mvForm ? await window.mvForm('Send back for changes', [
-            { key: 'rationale', label: 'What should the requester change?', type: 'text', required: true,
-              help: 'The requester sees this note and prepares a new request.' },
-          ], { okText: 'Send back' }) : null;
-          revisionRationale = ((answers && answers.rationale) || '').trim();
-          if (!revisionRationale) {
-            msg.style.color = 'var(--muted)';
-            msg.textContent = answers ? 'Add a note saying what should change.' : '';
+        function onSubmit(e) {
+          e.preventDefault();
+          if (!ack.checked) { err.textContent = 'Tick the box to confirm you have read what this action will do.'; ack.focus(); return; }
+          if (critical && typed.value.trim().toUpperCase() !== 'APPROVE') {
+            err.textContent = 'Type APPROVE to confirm this critical action.'; typed.focus(); return;
+          }
+          done({ acknowledged: true, confirmation: critical ? 'approve' : '' });
+        }
+        function onCancel(e) { if (e) e.preventDefault(); done(null); }
+        form.addEventListener('submit', onSubmit);
+        cancel.addEventListener('click', onCancel);
+        dlg.addEventListener('cancel', onCancel);
+        dlg.showModal();
+        ack.focus();
+      });
+    }
+
+    // The decided card moves to "Decided just now" with its outcome, who
+    // decided, and Undo while the agent is still waiting (the server says
+    // for how long; 0 means it acted at once).
+    function markDecided(item, outcome, decidedBy, undoSeconds) {
+      item.classList.add('approval-item--decided');
+      const badge = item.querySelector('.approval-outcome');
+      badge.hidden = false;
+      badge.className = 'badge approval-outcome ' + (outcome === 'approved' ? 'approved' : outcome === 'denied' ? 'denied' : 'pending');
+      badge.textContent = outcome === 'approved' ? 'Approved' : outcome === 'denied' ? 'Rejected' : 'Sent back';
+      const line = item.querySelector('.approval-item__decided');
+      line.hidden = false;
+      line.textContent = (outcome === 'approved' ? 'Approved' : outcome === 'denied' ? 'Rejected' : 'Sent back')
+        + ' just now by ' + (decidedBy || 'you') + '.';
+      item.querySelector('.approval-actions:not(.approval-actions--decided)').hidden = true;
+      const decidedActions = item.querySelector('.approval-actions--decided');
+      decidedActions.hidden = false;
+      const undo = decidedActions.querySelector('.approval-undo');
+      const canUndo = outcome !== 'revised' && undoSeconds > 0;
+      undo.hidden = !canUndo;
+      if (canUndo) {
+        undo.textContent = 'Undo (' + undoSeconds + 's)';
+        let left = undoSeconds;
+        const timer = setInterval(function () {
+          left -= 1;
+          if (!undo.isConnected || undo.hidden) { clearInterval(timer); return; }
+          if (left <= 0) {
+            clearInterval(timer);
+            undo.hidden = true;
+            line.textContent += ' The undo window has ended.';
+          } else {
+            undo.textContent = 'Undo (' + left + 's)';
+          }
+        }, 1000);
+        undo.dataset.timer = String(timer);
+      }
+      decidedSection.hidden = false;
+      decidedList.insertBefore(item, decidedList.firstChild);
+      showEmptyIfNeeded();
+    }
+
+    function restoreToQueue(item) {
+      const undo = item.querySelector('.approval-undo');
+      if (undo && undo.dataset.timer) { clearInterval(Number(undo.dataset.timer)); delete undo.dataset.timer; }
+      item.classList.remove('approval-item--decided');
+      const badge = item.querySelector('.approval-outcome');
+      badge.hidden = true; badge.textContent = '';
+      const line = item.querySelector('.approval-item__decided');
+      line.hidden = true; line.textContent = '';
+      item.querySelector('.approval-actions:not(.approval-actions--decided)').hidden = false;
+      item.querySelector('.approval-actions--decided').hidden = true;
+      const empty = queue.querySelector(':scope > p.muted, :scope > .approval-empty');
+      if (empty) empty.remove();
+      queue.appendChild(item);
+      if (!decidedList.querySelector('article.approval-item')) decidedSection.hidden = true;
+    }
+
+    async function decide(btn, opts) {
+      opts = opts || {};
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;  // "approve" | "deny" | "revise"
+      const item0 = itemFor(id);
+      const label = (item0 && item0.dataset.label) || 'this request';
+      const rowButtons = Array.from(document.querySelectorAll(
+        'article.approval-item[data-id="' + id + '"] button.approval-btn'));
+      const originalDisabled = rowButtons.map(function(b) { return b.disabled; });
+      function restoreDisabledStates() {
+        rowButtons.forEach(function(b, index) {
+          b.disabled = originalDisabled[index];
+        });
+      }
+      const body = {};
+      if (action === 'approve' && item0 && isHighRisk(item0)) {
+        if (opts.confirmed) {
+          body.acknowledged = true;
+          body.confirmation = (item0.dataset.risk || '').toLowerCase() === 'critical' ? 'approve' : '';
+        } else {
+          const answer = await confirmApproval(item0);
+          if (!answer) { say('Nothing was changed.'); return; }
+          Object.assign(body, answer);
+        }
+      }
+      if (action === 'deny' && !opts.confirmed) {
+        const answers = window.mvForm ? await window.mvForm('Reject "' + label + '"', [
+          { key: 'reason', label: 'Why are you rejecting it? (optional)', type: 'text', required: false,
+            help: 'Written to the audit log next to your decision.' },
+        ], { okText: 'Reject' }) : {};
+        if (answers === null) { say('Nothing was changed.'); return; }
+        const reason = ((answers && answers.reason) || '').trim();
+        if (reason) body.reason = reason;
+      }
+      let revisionRationale = '';
+      if (action === 'revise') {
+        const answers = window.mvForm ? await window.mvForm('Send back for changes', [
+          { key: 'rationale', label: 'What should the requester change?', type: 'text', required: true,
+            help: 'The requester sees this note and prepares a new request.' },
+        ], { okText: 'Send back' }) : null;
+        revisionRationale = ((answers && answers.rationale) || '').trim();
+        if (!revisionRationale) {
+          say(answers ? 'Add a note saying what should change.' : '');
+          return;
+        }
+        body.rationale = revisionRationale;
+      }
+      rowButtons.forEach(function(b) { b.disabled = true; });
+      say((action === 'approve' ? 'Approving ' :
+        action === 'deny' ? 'Rejecting ' : 'Sending back ') + label + '…');
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (btn.dataset.binding) headers['X-Lightwork-Approval-Binding'] = btn.dataset.binding;
+        const r = await fetch('/api/v1/approvals/' + encodeURIComponent(id) + '/' + action, {
+          method: 'POST', headers, body: JSON.stringify(body),
+        });
+        if (r.status === 202) {
+          restoreDisabledStates();
+          say('Your decision on ' + label + ' is saved but not in effect yet ' +
+            'while Lightwork finishes the record. It is safe to try again.', 'var(--warn)');
+          toast('Decision saved, not in effect yet. It is safe to try again.', { error: true });
+        } else if (r.status === 204) {
+          const approvalState = r.headers.get('X-Lightwork-Approval-State') || '';
+          if (approvalState === 'pending') {
+            // This vote is signed, but an N-of-M approval still needs quorum.
+            // Keep the card in the queue rather than implying that the
+            // underlying high-risk action is already effective.
+            restoreDisabledStates();
+            btn.disabled = true;
+            const count = r.headers.get('X-Lightwork-Approval-Count') || '?';
+            const required = r.headers.get('X-Lightwork-Approval-Required') || '?';
+            const cell = item0 && item0.querySelector('.approval-actions');
+            if (cell) {
+              let progress = cell.querySelector('[data-approval-quorum-status]');
+              if (!progress) {
+                progress = document.createElement('p'); progress.setAttribute('role', 'status');
+                progress.dataset.approvalQuorumStatus = '1'; cell.append(progress);
+              }
+              progress.textContent = 'Your approval is recorded. ' + count + ' of ' + required +
+                ' required approvals received. The action is not authorized yet.';
+            }
+            say('Your approval of ' + label + ' is recorded. More approvers are needed before it goes ahead.', 'var(--accent)');
+            toast('Your approval is recorded. More approvers are needed.');
             return;
           }
-        }
-        rowButtons.forEach(function(b) { b.disabled = true; });
-        msg.style.color = 'var(--muted)';
-        msg.textContent = (action === 'approve' ? 'Approving ' :
-          action === 'deny' ? 'Rejecting ' : 'Sending back ') + label + '…';
-        try {
-          const headers = {};
-          if (btn.dataset.binding) headers['X-Lightwork-Approval-Binding'] = btn.dataset.binding;
-          if (action === 'revise') headers['Content-Type'] = 'application/json';
-          const r = await fetch('/api/v1/approvals/' + encodeURIComponent(id) + '/' + action, {
-            method: 'POST', headers,
-            body: action === 'revise' ? JSON.stringify({rationale: revisionRationale}) : undefined,
-          });
-          if (r.status === 202) {
-            restoreDisabledStates();
-            msg.style.color = 'var(--warn)';
-            msg.textContent = 'Your decision on ' + label + ' is saved but not in effect yet ' +
-              'while Lightwork finishes the record. It is safe to try again.';
-          } else if (r.status === 204) {
-            const approvalState = r.headers.get('X-Lightwork-Approval-State') || '';
-            if (approvalState === 'pending') {
-              // This vote is signed, but an N-of-M approval still needs quorum.
-              // Keep the shared queue row visible rather than implying that the
-              // underlying high-risk action is already effective.
-              restoreDisabledStates();
-              btn.disabled = true;
-              const count = r.headers.get('X-Lightwork-Approval-Count') || '?';
-              const required = r.headers.get('X-Lightwork-Approval-Required') || '?';
-              const progress = document.createElement('p'); progress.setAttribute('role', 'status');
-              progress.textContent = 'Your approval is recorded. ' + count + ' of ' + required + ' required approvals received. The action is not authorized yet.';
-              row0.querySelector('.approval-actions').append(progress);
-              msg.style.color = 'var(--accent)';
-              msg.textContent = 'Your approval of ' + label + ' is recorded. More approvers are needed before it goes ahead.';
-              return;
-            }
-            msg.style.color = 'var(--accent)';
-            msg.textContent = label + (action === 'approve' ? ' authorized. Execution is a separate step; this decision does not confirm it happened.' : ' rejected.');
-            // Mutate in place rather than full-reload (keeps scroll
-            // position): the decided item leaves the queue.
-            const row = document.querySelector('tr[data-id="' + id + '"]');
-            if (row && row.parentElement) {
-              const tbody = row.parentElement;
-              row.remove();
-              if (!tbody.querySelector('tr')) showEmpty(tbody);
-            }
-          } else if (r.status === 200 && action === 'revise') {
-            await r.json().catch(function() { return {}; });
-            msg.style.color = 'var(--accent)';
-            msg.textContent = label + ' was sent back. The requester will prepare a new request.';
-            const row = document.querySelector('tr[data-id="' + id + '"]');
-            if (row && row.parentElement) {
-              const tbody = row.parentElement;
-              row.remove();
-              if (!tbody.querySelector('tr')) showEmpty(tbody);
-            }
-          } else {
-            restoreDisabledStates();
-            msg.style.color = 'var(--danger)';
-            msg.textContent = plainError(r, 'record your decision');
-          }
-        } catch (e) {
+          const decidedBy = r.headers.get('X-Lightwork-Decided-By') || '';
+          const undoSeconds = parseInt(r.headers.get('X-Lightwork-Undo-Seconds') || '0', 10) || 0;
+          const outcome = action === 'approve' ? 'approved' : 'denied';
+          const decisionText = label + (action === 'approve'
+            ? ' authorized. Execution is a separate step; this decision does not confirm it happened.' : ' rejected.');
+          say(decisionText, 'var(--accent)');
+          toast(decisionText +
+            (undoSeconds > 0 ? ' You can undo for ' + undoSeconds + ' seconds.' : ''));
+          const item = itemFor(id);
+          if (item) { restoreDisabledStates(); markDecided(item, outcome, decidedBy, undoSeconds); }
+        } else if (r.status === 200 && action === 'revise') {
+          await r.json().catch(function() { return {}; });
+          say(label + ' was sent back. The requester will prepare a new request.', 'var(--accent)');
+          toast(label + ' was sent back for changes.');
+          const item = itemFor(id);
+          if (item) { restoreDisabledStates(); markDecided(item, 'revised', '', 0); }
+        } else {
           restoreDisabledStates();
-          msg.style.color = 'var(--danger)';
-          msg.textContent = plainError(e, 'record your decision');
+          say(plainError(r, 'record your decision'), 'var(--danger)');
+          toast(plainError(r, 'record your decision'), { error: true });
         }
-      });
+      } catch (e) {
+        restoreDisabledStates();
+        say(plainError(e, 'record your decision'), 'var(--danger)');
+        toast(plainError(e, 'record your decision'), { error: true });
+      }
+    }
+    window.mvDecideApproval = decide;
+
+    async function undo(btn) {
+      const id = btn.dataset.id;
+      const item = itemFor(id);
+      const label = (item && item.dataset.label) || 'this request';
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/v1/approvals/' + encodeURIComponent(id) + '/undo', { method: 'POST' });
+        if (r.ok) {
+          if (item) restoreToQueue(item);
+          say('Your decision on ' + label + ' was undone. It is waiting for a decision again.', 'var(--accent)');
+          toast('Decision on ' + label + ' undone.');
+        } else {
+          btn.disabled = false;
+          const text = plainError(r, 'undo your decision');
+          say(text, 'var(--danger)');
+          toast(text, { error: true });
+          if (r.status === 409) { btn.hidden = true; }
+        }
+      } catch (e) {
+        btn.disabled = false;
+        say(plainError(e, 'undo your decision'), 'var(--danger)');
+        toast(plainError(e, 'undo your decision'), { error: true });
+      }
+    }
+
+    document.addEventListener('click', function (ev) {
+      const target = ev.target instanceof Element ? ev.target : null;
+      if (!target) return;
+      const decideBtn = target.closest('button.approval-btn');
+      if (decideBtn) { decide(decideBtn); return; }
+      const undoBtn = target.closest('button.approval-undo');
+      if (undoBtn) { undo(undoBtn); return; }
+      const dismiss = target.closest('button.approval-dismiss');
+      if (dismiss) {
+        const item = itemFor(dismiss.dataset.id);
+        if (item) item.remove();
+        if (!decidedList.querySelector('article.approval-item')) decidedSection.hidden = true;
+      }
     });
   })();
 </script>
 
 <script>
 (function () {
-  document.querySelectorAll('tr[data-id]').forEach(async function (row) {
+  document.querySelectorAll('article.approval-item[data-id]').forEach(async function (row) {
     try {
       var response = await fetch('/api/v1/approvals/' + row.dataset.id + '/state', {credentials: 'same-origin', cache: 'no-store'});
       if (!response.ok) return;
       var state = await response.json(), cell = row.querySelector('.approval-actions');
       if (!cell || state.status !== 'pending') return;
-      var text = document.createElement('p'); text.setAttribute('role', 'status');
+      var text = cell.querySelector('[data-approval-quorum-status]');
+      if (!text) { text = document.createElement('p'); text.setAttribute('role', 'status'); text.dataset.approvalQuorumStatus = '1'; cell.append(text); }
       text.textContent = state.approved_count + ' of ' + state.approvals_required + ' required approvals received.' + (state.your_approval_recorded ? ' Your approval is recorded.' : ' An independent decision is needed.');
-      cell.append(text);
       if (state.your_approval_recorded) { var approve = row.querySelector('[data-action="approve"]'); if (approve) approve.disabled = true; }
     } catch (_) { /* Existing decision controls retain their server-side checks. */ }
   });

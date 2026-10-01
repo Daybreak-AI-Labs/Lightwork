@@ -41,6 +41,9 @@ KNOWN_SECTIONS = frozenset({
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.
     "alerts",
+    # [first_outcome] department / sample_workspace_created: the department
+    # first task picked at setup (maverick.sample_outcomes).
+    "first_outcome",
     # [third_party_portal] routing_keyring: the vendor portal link keyring
     # rotated on the Third-Party Collaboration page (sealed).
     "third_party_portal",
@@ -58,7 +61,7 @@ KNOWN_SECTIONS = frozenset({
     "compliance", "computer_use", "connections", "consent_preferences",
     "consequence", "containment", "control_plane",
     "context", "credit", "customer_sandbox_lifecycle", "data_engine", "data_use_governance",
-    "dashboard", "director", "durable", "ebpf_monitor", "effort", "egress", "ekko",
+    "dashboard", "deadline_alerts", "director", "durable", "ebpf_monitor", "effort", "egress", "ekko",
     "emergent_codec", "emergent_protocol",
     "email", "embedded", "encryption", "energy", "enterprise", "entity_graph",
     "erp", "event_triggers",
@@ -70,7 +73,9 @@ KNOWN_SECTIONS = frozenset({
     # [mcp]: the tool server's limits and switches (maverick_mcp.settings),
     # [replay]: recording run traces (replay/trace.py); both on All settings.
     "mcp", "replay",
-    "model_cost_tiers", "model_proxy", "models", "notifications", "oauth", "observability",
+    "model_cost_tiers", "model_proxy", "models",
+    # [my_work] the personal "My work" page and daily summary (maverick.daily_digest).
+    "my_work", "notifications", "oauth", "observability",
     "paper_review",
     "obsidian", "operations_scientist",
     "perf", "persona", "planning", "plugins", "privacy",

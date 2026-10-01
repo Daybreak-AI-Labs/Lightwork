@@ -147,6 +147,7 @@ class Worker:
         *,
         db_path: Path | None = None,
         idle_sleep: float = 2.0,
+        idle_backoff_start: float = 0.2,
         max_attempts: int = 5,
         retry_after: float = 60.0,
         reclaim_lease: float = 3600.0,
@@ -154,6 +155,11 @@ class Worker:
         self._runtime_configuration_native = queue is None and db_path is None
         self.queue = queue or JobQueue(db_path=db_path)
         self.idle_sleep = float(idle_sleep)
+        # After an empty claim the loop waits idle_backoff_start, doubling up
+        # to idle_sleep while the queue stays empty, and starts over after a
+        # job runs: a queued goal is picked up within ~0.2 s of an idle
+        # worker rather than up to 2 s, without busy-polling an empty queue.
+        self.idle_backoff_start = min(float(idle_backoff_start), self.idle_sleep)
         self.max_attempts = int(max_attempts)
         self.retry_after = float(retry_after)
         # Jobs stuck 'running' longer than this with no lease heartbeat (a
@@ -487,6 +493,7 @@ class Worker:
         last_reclaim = time.monotonic()
         from .runtime_configuration import start as start_runtime_receipt
         runtime_receipt = start_runtime_receipt("worker") if self._runtime_configuration_native else None
+        idle_wait = self.idle_backoff_start
         try:
             while not self._stop.is_set():
                 now = time.monotonic()
@@ -502,8 +509,12 @@ class Worker:
                 except Exception:
                     log.exception("worker: unexpected error in loop")
                 if not ran:
-                    # Idle: wait, but wake up cleanly on stop().
-                    self._stop.wait(self.idle_sleep)
+                    # Idle: wait, but wake up cleanly on stop(); back off while
+                    # the queue stays empty.
+                    self._stop.wait(idle_wait)
+                    idle_wait = min(idle_wait * 2.0, self.idle_sleep)
+                else:
+                    idle_wait = self.idle_backoff_start
         finally:
             if runtime_receipt is not None:
                 runtime_receipt.close()

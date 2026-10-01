@@ -3,9 +3,12 @@
 The register in :mod:`maverick.privacy_ops` tracks a request; this module
 EXECUTES it, as a governed pipeline with an audit answer for every stage:
 
-* **Identity** — no response ships until a named human records HOW the
-  requester was verified. The method vocabulary is fixed; "we just
-  emailed it" is not in it.
+* **Identity** — no response ships until HOW the requester was verified is
+  recorded. The method vocabulary is fixed. A named human records every
+  method except ``email_challenge``, which the public rights-request form
+  performs itself (single-use link to the address given) and records
+  under the actor ``public-rights-form`` -- see
+  :data:`IDENTITY_METHODS_PERFORMED`.
 * **Collection** — the platform's own holdings are collected via
   :func:`maverick.dsar.export_subject_data`; external sources (vendor
   exports, mailbox pulls) are logged with references so the response's
@@ -37,6 +40,12 @@ IDENTITY_METHODS = (
     "account_login", "document_check", "email_challenge",
     "in_person", "verified_by_processor", "other",
 )
+#: Which of those methods this platform PERFORMS rather than merely records.
+#: ``email_challenge`` is performed by the public rights-request form
+#: (:mod:`maverick.public_rights_form`): the requester must open a
+#: single-use link sent to the address they gave. Every other method is a
+#: label a named human records after doing the check elsewhere.
+IDENTITY_METHODS_PERFORMED = frozenset({"email_challenge"})
 #: Categories scrubbed from a response so third parties don't ride along.
 RESPONSE_REDACTION_CATEGORIES = [
     "email", "phone", "national_id", "financial", "ip_address", "location",

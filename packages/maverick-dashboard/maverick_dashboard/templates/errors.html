@@ -15,8 +15,9 @@
   }
   .err-empty { color: var(--muted); padding: 1rem 0; }
 </style>
+{% from "_task_tabs.html" import task_tabs %}
+{{ task_tabs(goal, 'problems') }}
 <h1 class="page-title">Problems in: {{ goal.title }}</h1>
-<p class="err-meta"><a href="/goals/{{ goal.id }}/trajectory">← Everything that happened</a> · <a href="/chat/goal/{{ goal.id }}">Open the task</a></p>
 {% if errors %}
 <p>Something went wrong {{ errors|length }} time{{ '' if errors|length == 1 else 's' }} while this task ran.
   Open a problem to see the full message you can share with support.</p>

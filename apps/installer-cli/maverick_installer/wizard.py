@@ -98,6 +98,8 @@ CHANNELS: list[tuple[str, str, list[str]]] = [
     ("telegram", "Telegram bot (free, easiest)", ["TELEGRAM_BOT_TOKEN"]),
     ("discord", "Discord bot (Gateway WS)", ["DISCORD_BOT_TOKEN"]),
     ("slack", "Slack (Socket Mode)", ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]),
+    ("teams", "Microsoft Teams (Azure Bot, needs a public HTTPS address)",
+     ["TEAMS_APP_ID", "TEAMS_APP_PASSWORD"]),
     ("signal", "Signal (via signal-cli)", []),
     ("email", "Email (IMAP/SMTP, stdlib only)", ["EMAIL_USER", "EMAIL_APP_PASSWORD"]),
     ("matrix", "Matrix (federated)", ["MATRIX_ACCESS_TOKEN"]),
@@ -155,6 +157,7 @@ STEPS: list[tuple[str, str]] = [
     ("safety", "Safety"),
     ("signed_skills", "Signed skills"),
     ("budget", "Budget"),
+    ("approvals", "Approvals"),
     ("sandbox", "Sandbox"),
     ("research_execution", "Research lab"),
     ("candidate_promotion", "Candidate promotion"),
@@ -175,6 +178,7 @@ STEPS: list[tuple[str, str]] = [
     ("assessments", "Assessment assists"),
     ("security_suite", "Security & GRC"),
     ("advanced", "Advanced reasoning"),
+    ("api_keys", "API access"),
     ("web_search", "Web search"),
     ("mcp_servers", "MCP servers"),
     ("plugins", "Plugins"),
@@ -184,6 +188,8 @@ STEPS: list[tuple[str, str]] = [
     ("analytics", "Analytics"),
     ("persona", "Persona"),
     ("notifications", "Notifications"),
+    ("deadline_alerts", "Deadline alerts"),
+    ("daily_summary", "Daily summary and chat approvals"),
     ("webhooks", "Webhooks"),
     ("a2a", "A2A"),
 ]
@@ -799,6 +805,7 @@ _ALLOWLIST_CHANNELS = {
     "telegram",
     "discord",
     "slack",
+    "teams",
     "signal",
     "email",
     "matrix",
@@ -816,6 +823,7 @@ _ALLOWLIST_HINT = {
     "telegram": "numeric Telegram user IDs",
     "discord": "numeric Discord user IDs",
     "slack": "Slack user IDs, e.g. U01ABC",
+    "teams": "Microsoft Entra object IDs of the people allowed, e.g. 12345678-abcd-abcd-abcd-1234567890ab",
     "signal": "phone numbers, e.g. +12345550199",
     "email": "email addresses",
     "matrix": "MXIDs, e.g. @you:matrix.org",
@@ -845,6 +853,22 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
     elif ch_id == "slack":
         cfg["app_token"] = "${SLACK_APP_TOKEN}"
         cfg["bot_token"] = "${SLACK_BOT_TOKEN}"
+    elif ch_id == "teams":
+        cfg["app_id"] = "${TEAMS_APP_ID}"
+        cfg["app_password"] = "${TEAMS_APP_PASSWORD}"
+        cfg["tenant_id"] = _q_text(
+            "  Microsoft Entra tenant ID (blank only for a multi-tenant app registration)",
+            default="",
+        ).strip()
+        cfg["port"] = _safe_int(_q_text("  Webhook port (forward /webhook/teams here)", default="8771"),
+                                default=8771)
+        cfg["approvals_enabled"] = _q_confirm(
+            "  Let linked approvers decide approval requests from Teams cards?", default=False,
+        )
+        console.print(
+            "  [dim]Register the bot in Azure and point its messaging endpoint at "
+            "https://<your address>/webhook/teams. Steps: docs/channels/teams.md[/dim]"
+        )
     elif ch_id == "signal":
         cfg["phone_number"] = _q_text("  Signal phone number (e.g., +12345550199)", default="")
     elif ch_id == "email":
@@ -1078,6 +1102,34 @@ def pick_signed_skills() -> dict[str, Any]:
     }
 
 
+def pick_approvals() -> dict[str, Any]:
+    """``[approval]``: the undo window and the high-risk confirmation.
+
+    The Approvals page is the human-in-command loop: a decision can be undone
+    for ``undo_grace_seconds`` (the agent waits that long before acting) and
+    approving a high or critical risk request needs an explicit confirmation.
+    """
+    console.print()
+    console.print(
+        "[dim]Risky actions wait on the Approvals page for a person. A decision "
+        "can be undone for a short while; the agent only acts once that window "
+        "has passed.[/dim]"
+    )
+    undo_seconds = _safe_int(
+        _q_text("  Seconds a decision can be undone (0 = act at once)", default="30"),
+        default=30,
+    )
+    require_ack = _q_confirm(
+        "  Ask for an explicit confirmation before approving high or critical risk "
+        "requests? (a ticked box for high, typing APPROVE for critical)",
+        default=True,
+    )
+    return {
+        "undo_grace_seconds": max(0, min(undo_seconds, 3600)),
+        "require_acknowledgement": bool(require_ack),
+    }
+
+
 def pick_budget() -> dict[str, Any]:
     console.print()
     console.print("[dim]Task limits are optional. Organization spending controls still apply.[/dim]")
@@ -1123,7 +1175,7 @@ def pick_budget() -> dict[str, Any]:
     return budget
 
 
-def pick_capabilities() -> dict[str, bool]:
+def pick_capabilities() -> dict[str, Any]:
     """Opt-in to high-impact tools that ship disabled.
 
     Computer-use, browser, ROS robotics, and code-exec tools have real safety
@@ -1167,6 +1219,16 @@ def pick_capabilities() -> dict[str, bool]:
         "connector schema offered on every turn.",
         default=True,
     )
+    # [tools] exposure: what each request describes up front. The short list
+    # is role-aware (about 30-40 tools; a specialist pack sees its own allow
+    # list) and the rest is one find_tools call away; every tool means the
+    # previous ~240-tool catalog (~47k tokens) on every turn.
+    _exposure_short = "Show agents a short tool list and let them look up the rest (recommended)"
+    _exposure_full = "Show every tool on every request (costs far more per task)"
+    tool_exposure = "core" if _q_select(
+        "How much of the tool list should each request to the AI describe?",
+        [_exposure_short, _exposure_full], default=_exposure_short,
+    ) == _exposure_short else "full"
     jd_hiring = _q_confirm(
         "Enable JD hiring in the Agent Factory? HR can upload a job "
         "description to match it against the specialist roster or draft a "
@@ -1181,6 +1243,7 @@ def pick_capabilities() -> dict[str, bool]:
         "code_exec": use_code_exec,
         "embedded_flash": embedded_flash,
         "deferred_tools": deferred_tools,
+        "tool_exposure": tool_exposure,
         "jd_hiring": jd_hiring,
     }
 
@@ -2444,6 +2507,13 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "registered-broker interoperability remain separately operated.",
             default=False,
         )
+    privacy_public_rights_form = _q_confirm(
+        "Let people submit privacy requests from your website? Publishes a "
+        "public request form per site or app; requesters confirm their email "
+        "address before a request opens, and deadlines follow the law they "
+        "choose (needs the platform email account for the confirmation link).",
+        default=False,
+    )
     privacy_notice_governance = _q_confirm(
         "Enable governed Privacy Automation notice approvals and publication "
         "intents? Notice content stays external and publication remains local "
@@ -2640,6 +2710,7 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         or privacy_ott_ctv_rights
         or privacy_drop_management
         or privacy_notice_governance
+        or privacy_public_rights_form
     ):
         data_discovery_config: dict[str, Any] = {"enable": privacy_data_discovery}
         if privacy_discovery_adapter_providers:
@@ -2715,6 +2786,21 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
                 "scheduler_jitter_seconds": 60,
                 "scheduler_retry_max_seconds": 900,
             },
+            **(
+                {
+                    "public_rights_form": {
+                        "enable": True,
+                        "verification_ttl_hours": 24,
+                        "status_ttl_days": 90,
+                        "requests_per_ip_per_hour": 5,
+                        "requests_per_email_per_day": 3,
+                        "internal_target_days": 30,
+                        "max_message_chars": 4000,
+                    }
+                }
+                if privacy_public_rights_form
+                else {}
+            ),
             "notice_governance": {
                 "enable": privacy_notice_governance,
                 **(
@@ -4098,6 +4184,109 @@ def pick_oidc() -> dict[str, Any]:
                 "session_secret": session_secret,
             }
         )
+    return result
+
+
+def pick_sign_in_security(sso_enabled: bool) -> dict[str, Any]:
+    """The "Sign-in security" step: require a second factor, how recent it
+    must be for sensitive actions, and the network addresses allowed in.
+
+    Returns a dict the writer emits as ``[auth.mfa]`` and
+    ``[auth.ip_allowlist]``; ``{}`` when nothing was chosen (so the writer
+    emits nothing and the kernel defaults -- off, 15 minutes, everyone --
+    apply). Off by default for compatibility.
+    """
+    console.print(
+        "[dim]Sign-in security. With company sign-in, Lightwork can insist that "
+        "the provider confirmed a second factor (authenticator app, security key "
+        "or code) and ask for a recent one before sensitive actions such as "
+        "changing roles or turning off the emergency stop. You can also limit "
+        "which network addresses may reach Lightwork at all. All OFF by "
+        "default.[/dim]"
+    )
+    result: dict[str, Any] = {}
+    if sso_enabled and _q_confirm(
+        "Require sign-in with a second factor?", default=False
+    ):
+        result["require"] = True
+        minutes = _safe_int(
+            _q_text(
+                "  Sensitive actions need a second factor no older than (minutes)",
+                default="15",
+            ),
+            default=15,
+        )
+        result["step_up_minutes"] = max(1, min(minutes, 1440))
+    cidrs = _csv_list(
+        _q_text(
+            "Network addresses or ranges allowed to reach Lightwork "
+            "(comma-separated, empty = everyone; include the address you use)",
+            default="",
+        )
+    )
+    if cidrs:
+        import ipaddress
+
+        bad = [c for c in cidrs if _bad_network(c, ipaddress)]
+        while bad:
+            console.print(
+                f"[yellow]Not a network address or range: {', '.join(bad)}[/yellow]"
+            )
+            cidrs = _csv_list(_q_text("  Allowed addresses or ranges", default=""))
+            bad = [c for c in cidrs if _bad_network(c, ipaddress)]
+        if cidrs:
+            result["cidrs"] = cidrs
+    return result
+
+
+def _bad_network(text: str, ipaddress) -> bool:
+    try:
+        ipaddress.ip_network(text, strict=False)
+    except ValueError:
+        return True
+    return False
+
+
+def pick_api_keys() -> dict[str, Any]:
+    """API access for scripts and integrations: personal and service-account
+    keys with scopes, an expiry date and rotation.
+
+    On by default (a key only exists once a signed-in person creates one).
+    Returns the ``[dashboard]`` keys ``api_keys`` and, when changed from the
+    defaults, ``api_key_default_days`` / ``api_key_max_days`` /
+    ``api_key_rotation_grace_hours``; read by ``maverick.config.api_key_settings``.
+    """
+    console.print(
+        "[dim]API access for scripts and integrations: people create their own "
+        "keys on their account page, and administrators create service accounts "
+        "for programs. A key does only what its scopes allow and never more than "
+        "its owner's role, stops on its expiry date, and can be rotated or "
+        "revoked at any time. The shared server token stays as break-glass "
+        "access only.[/dim]"
+    )
+    result: dict[str, Any] = {
+        "api_keys": _q_confirm("Allow API keys for scripts and integrations?", default=True),
+    }
+    if not result["api_keys"]:
+        return result
+    default_days = _safe_int(
+        _q_text("  How many days should a new key last unless the person picks fewer?", default="90"),
+        default=90,
+    )
+    max_days = _safe_int(
+        _q_text("  The longest a key may last, in days", default="365"),
+        default=365,
+    )
+    grace_hours = _safe_int(
+        _q_text("  After rotating a key, how many hours should the old one keep working?", default="24"),
+        default=24,
+    )
+    if default_days != 90:
+        result["api_key_default_days"] = max(1, min(default_days, 3650))
+    if max_days != 365:
+        result["api_key_max_days"] = max(1, min(max_days, 3650))
+    if grace_hours != 24:
+        result["api_key_rotation_grace_hours"] = max(0, min(grace_hours, 720))
     return result
 
 
@@ -5560,6 +5749,8 @@ def pick_advanced() -> dict[str, Any]:
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
     advanced["oidc"] = pick_oidc()
+    advanced["sign_in_security"] = pick_sign_in_security(
+        bool(advanced["oidc"].get("enabled")))
     advanced["local_owner_setup"] = _q_confirm(
         "Allow first-owner setup in the app on this computer? "
         "A named owner creates a local passphrase and can invite colleagues. "
@@ -6360,6 +6551,122 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     return {}, []
 
 
+def pick_deadline_alerts(notifications: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Alerts when a privacy or governance record is due (``[deadline_alerts]``).
+
+    Reads ``maverick.deadline_alerts``: on by default while the privacy register
+    is on, so declining writes ``enabled = false`` explicitly. Lead times are
+    stored under ``[deadline_alerts.lead_days]`` / ``[deadline_alerts.lead_hours]``.
+    """
+    if not notifications:
+        console.print(
+            "  [dim]Deadline alerts use the notification backend above; without one "
+            "they are recorded on the record page but reach nobody.[/dim]"
+        )
+    if not _q_confirm(
+        "Alert people when a data request, incident clock, assessment renewal, "
+        "vendor contract or approval is due?",
+        default=True,
+    ):
+        return {"enabled": False}
+    mode = _q_select(
+        "  How should alerts be sent?",
+        ["immediate - one message per deadline", "digest - one message per person per check"],
+        default="immediate - one message per deadline",
+    ).split()[0]
+    owner = _q_text(
+        "  Who is named when a record has no assignee?", default="the privacy owner"
+    ).strip() or "the privacy owner"
+    quiet = _q_text(
+        "  Quiet hours for non-urgent alerts (HH:MM-HH:MM, server time; empty = none)",
+        default="",
+    ).strip()
+    cfg: dict[str, Any] = {"enabled": True, "mode": mode, "owner": owner}
+    if quiet:
+        cfg["quiet_hours"] = quiet
+    lead_days = _q_text("  Days before a data request is due to warn (comma-separated)", default="7, 2")
+    cfg["lead_days"] = {"dsar": [_safe_int(x, default=0) for x in _csv_list(lead_days)] or [7, 2],
+                        "assessment": [30, 7], "vendor": [30, 7]}
+    cfg["lead_days"]["dsar"] = [d for d in cfg["lead_days"]["dsar"] if d > 0] or [7, 2]
+    cfg["lead_hours"] = {"incident": [24, 4], "approval": [24, 4]}
+    return cfg
+
+
+def _deadline_alerts_step(state: dict[str, Any], notifications: dict[str, Any] | None) -> dict[str, Any]:
+    """Resume-aware wrapper: reuse a saved answer, else ask and save it."""
+    picked = state.get("deadline_alerts")
+    if picked is None:
+        picked = pick_deadline_alerts(notifications)
+        state["deadline_alerts"] = picked
+        _save_partial(state)
+    return picked
+
+
+def pick_daily_summary(
+    channels: dict[str, dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
+    """Daily summary and chat approvals. Returns ``(my_work, notifications_email,
+    slack_extras, env_vars_needed)``.
+
+    The daily summary ([my_work]) sends each person what is waiting for them
+    (approvals, questions, results, spending) at their own hour through their
+    linked chat apps and email; off unless asked for. Slack approvals need the
+    channel to post cards in and, for the web (non-Socket) receiver, the
+    signing secret.
+    """
+    my_work: dict[str, Any] = {}
+    mail: dict[str, Any] = {}
+    slack: dict[str, Any] = {}
+    envs: list[str] = []
+    if _q_confirm(
+        "Send each person a daily summary of what is waiting for them "
+        "(approvals, questions, results, spending)?",
+        default=False,
+    ):
+        hour = _safe_int(_q_text("  Usual local hour to send it (0-23)", default="8"), default=8)
+        my_work = {"digest_enable": True, "digest_hour": max(0, min(23, hour))}
+        if _q_confirm("  Send summaries by email too? (needs a mail server)", default=False):
+            host = _q_text("  Outgoing mail server (e.g. smtp.example.com)", default="").strip()
+            if host:
+                mail = {
+                    "host": host,
+                    "port": _safe_int(_q_text("  Mail server port", default="587"), default=587),
+                    "user": "${MAVERICK_SMTP_USER}",
+                    "password": "${MAVERICK_SMTP_PASSWORD}",
+                    "from_address": _q_text("  Send as (address)", default="").strip(),
+                    "tls": "starttls",
+                }
+                envs += ["MAVERICK_SMTP_USER", "MAVERICK_SMTP_PASSWORD"]
+    if channels and "slack" in channels and _q_confirm(
+        "Post new approval requests in a Slack channel with Approve / Reject buttons?",
+        default=False,
+    ):
+        room = _q_text("  Slack channel id (starts with C)", default="").strip()
+        if room:
+            slack["approvals_channel"] = room
+        if _q_confirm(
+            "  Will buttons and /lightwork commands reach this server over the web "
+            "(Interactivity URL) rather than Socket Mode?",
+            default=False,
+        ):
+            slack["signing_secret"] = "${SLACK_SIGNING_SECRET}"
+            envs.append("SLACK_SIGNING_SECRET")
+    return my_work, mail, slack, envs
+
+
+def _daily_summary_step(
+    state: dict[str, Any], channels: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Run (or resume) the daily-summary step and fold Slack extras into the
+    Slack channel table. Returns ``(my_work, notifications_email, envs)``."""
+    parts = state.get("_daily_summary") or list(pick_daily_summary(channels))
+    state["_daily_summary"] = parts
+    my_work, mail, slack_extras, envs = parts
+    if slack_extras and isinstance(channels.get("slack"), dict):
+        channels["slack"].update(slack_extras)
+    return my_work, mail, list(envs)
+
+
 def pick_webhooks() -> tuple[dict[str, Any], list[str]]:
     """Outbound run-lifecycle webhooks. Returns (config, env_vars_needed).
 
@@ -6856,6 +7163,16 @@ def _cfg_core(
     lines.append("")
     lines.append("[sandbox]")
     for k, v in sandbox.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
+def _cfg_approval(approval: dict[str, Any] | None) -> list[str]:
+    if not approval:
+        return []
+    # Approvals page: undo window (the agent waits it out) + high-risk confirmation.
+    lines = ["", "[approval]"]
+    for k, v in approval.items():
         _emit_kv(lines, k, v)
     return lines
 
@@ -8787,6 +9104,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     tool_lines: list[str] = []
     if advanced.get("deferred_tools"):
         tool_lines.append("deferred_loading = true")
+    if advanced.get("tool_exposure") == "full":
+        tool_lines.append('exposure = "full"')
     if advanced.get("output_cache"):
         tool_lines.append("output_cache = true")
     if advanced.get("hardware_sensors"):
@@ -8845,9 +9164,19 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                 _emit_kv(lines, key, val)
     dept = advanced.get("department_access") or {}
     compress_off = advanced.get("dashboard_compress") is False
+    api_keys = advanced.get("api_keys") if isinstance(advanced.get("api_keys"), dict) else {}
+    # Only a deliberate change is written: the app's defaults (on, 90 / 365
+    # days, 24 hours) apply when the table says nothing.
+    api_key_lines = {k: v for k, v in api_keys.items()
+                     if k in ("api_key_default_days", "api_key_max_days",
+                              "api_key_rotation_grace_hours")}
+    if api_keys.get("api_keys") is False:
+        api_key_lines = {"api_keys": False}
     if isinstance(dept, dict) and (
         "default_suites" in dept or "default_role" in dept or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced or compress_off or "employee_activation_jobs" in advanced or "extension_form_values" in advanced or "extension_page_structure" in advanced
+        or "local_owner_setup" in advanced or compress_off or api_key_lines
+        or "employee_activation_jobs" in advanced or "extension_form_values" in advanced
+        or "extension_page_structure" in advanced
     ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
@@ -8865,6 +9194,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             # Default-on in the app; only a deliberate "no" is written.
             lines.append("# Response compression off: a proxy in front already compresses.")
             _emit_kv(lines, "compress", False)
+        if api_key_lines:
+            lines.append("# API keys for scripts and integrations (maverick.config.api_key_settings).")
+            for key in ("api_keys", "api_key_default_days", "api_key_max_days",
+                        "api_key_rotation_grace_hours"):
+                if key in api_key_lines:
+                    _emit_kv(lines, key, api_key_lines[key])
         if "default_role" in dept:
             _emit_kv(lines, "default_role", dept["default_role"])
         if "default_suites" in dept:
@@ -8895,6 +9230,20 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# want_assertions_signed = true")
         lines.append('# sp_cert_file = ""   # to sign AuthnRequests / decrypt')
         lines.append('# sp_key_file = ""')
+    security = advanced.get("sign_in_security") or {}
+    if isinstance(security, dict) and security.get("require"):
+        # Second factor at sign-in + step-up for sensitive actions. Read by
+        # maverick.config.get_auth_mfa (the dashboard's mfa_policy).
+        lines.append("")
+        lines.append("[auth.mfa]")
+        lines.append("require = true")
+        _emit_kv(lines, "step_up_minutes", int(security.get("step_up_minutes") or 15))
+    if isinstance(security, dict) and security.get("cidrs"):
+        # Network addresses allowed to reach the dashboard. Read by
+        # maverick.config.get_ip_allowlist (the dashboard's ip_allowlist).
+        lines.append("")
+        lines.append("[auth.ip_allowlist]")
+        _emit_kv(lines, "cidrs", [str(c) for c in security["cidrs"]])
     return lines
 
 
@@ -8982,6 +9331,24 @@ def _cfg_rate_limits(rate_limits: dict[str, str] | None) -> list[str]:
         # spec is free-text ("N/seconds"); escape via _toml_str so a stray
         # quote/backslash can't corrupt the config the wizard writes.
         lines.append(f"{key} = {_toml_str(spec)}")
+    return lines
+
+
+def _cfg_deadline_alerts(cfg: dict[str, Any] | None) -> list[str]:
+    """``[deadline_alerts]`` plus its lead-time sub-tables (nested dicts are
+    not something _emit_kv renders)."""
+    if not cfg:
+        return []
+    flat = {k: v for k, v in cfg.items() if not isinstance(v, dict)}
+    lines = _cfg_table("deadline_alerts", flat)
+    for sub in ("lead_days", "lead_hours"):
+        table = cfg.get(sub)
+        if isinstance(table, dict) and table:
+            # Lead times are whole numbers, not strings (what _emit_kv would write).
+            lines += ["", f"[deadline_alerts.{sub}]"]
+            for key, values in table.items():
+                rendered = ", ".join(str(int(v)) for v in (values or []))
+                lines.append(f"{key} = [{rendered}]")
     return lines
 
 
@@ -9146,10 +9513,13 @@ def write_config(
     analytics: dict[str, Any] | None = None,
     persona: dict[str, str] | None = None,
     notifications: dict[str, Any] | None = None,
+    deadline_alerts: dict[str, Any] | None = None,
     webhooks: dict[str, Any] | None = None,
     deliverables: dict[str, Any] | None = None,
     personas: dict[str, Any] | None = None,
     a2a: dict[str, Any] | None = None,
+    my_work: dict[str, Any] | None = None,
+    notifications_email: dict[str, Any] | None = None,
     web_search_enabled: bool = False,
     skills: dict[str, Any] | None = None,
     self_learning: dict[str, Any] | None = None,
@@ -9171,6 +9541,8 @@ def write_config(
     license_cfg: dict[str, Any] | None = None,
     governance_profile: str | None = None,
     per_tenant_keys: bool = False,
+    first_outcome: dict[str, Any] | None = None,
+    approval: dict[str, Any] | None = None,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     sandbox = _prepare_wizard_workspace(sandbox)
@@ -9263,6 +9635,7 @@ def write_config(
     )
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)
+    lines += _cfg_approval(approval)
     lines += _cfg_skills(skills)
     lines += _cfg_research_execution(research_execution)
     lines += _cfg_candidate_promotion(candidate_promotion)
@@ -9314,6 +9687,11 @@ def write_config(
     embedded_flash = bool(capability_config.pop("embedded_flash", False))
     # JD hiring lives under [agent_factory] (kernel: maverick.jd_hiring).
     jd_hiring = bool(capability_config.pop("jd_hiring", True))
+    # Tool exposure lives under [tools] (kernel: maverick.agent via
+    # config.get_tool_exposure); "core" is the default, so only "full" is
+    # written (write-only-on-divergence, like the other [tools] keys).
+    if str(capability_config.pop("tool_exposure", "core")).lower() == "full":
+        advanced["tool_exposure"] = "full"
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
     lines += _cfg_agent_factory(jd_hiring)
@@ -9336,10 +9714,14 @@ def write_config(
     lines += _cfg_table("notifications", notifications)
     lines += _cfg_table("mobile_offline", (advanced or {}).get("mobile_offline"))
     lines += _cfg_table("device_pairing", (advanced or {}).get("device_pairing"))
+    lines += _cfg_deadline_alerts(deadline_alerts)
+    lines += _cfg_table("notifications.email", notifications_email)
+    lines += _cfg_table("my_work", my_work)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)
     lines += _cfg_table("a2a", a2a)
+    lines += _cfg_table("first_outcome", first_outcome)
 
     # SECURITY: config.toml is NOT secret-free. Unlike API keys (which live in
     # ~/.maverick/.env and are referenced via ${VAR}), the OIDC browser-login
@@ -9515,8 +9897,51 @@ def run_fast() -> int:
     return 0
 
 
-CONSUMER_DEMO_GOAL = "Write me a haiku about Tuesday."
-CONSUMER_DEMO_MODEL = "anthropic:claude-haiku-4-5"
+def first_outcome_choices() -> list[str]:
+    """Menu labels for the department picker, from the kernel's list."""
+    from maverick.sample_outcomes import departments
+
+    return [row["label"] for row in departments()]
+
+
+def pick_first_outcome() -> str:
+    """Final consumer question: which team tries Lightwork first?
+
+    Returns the department slug for :mod:`maverick.sample_outcomes`. Falls
+    back to the default department on anything it doesn't recognise, so an
+    <Enter> or a stubbed answer never lands outside the eight choices.
+    """
+    from maverick.sample_outcomes import DEFAULT_DEPARTMENT, get, resolve_department
+
+    console.print()
+    console.print(
+        "[dim]Your first task runs a real specialist on bundled sample data "
+        "(a made-up company). Everything it produces is marked as sample "
+        "data and never counts as real evidence.[/dim]"
+    )
+    pick = _q_select(
+        "Which team will try Lightwork first?",
+        first_outcome_choices(),
+        default=get(DEFAULT_DEPARTMENT).label,
+    )
+    return resolve_department(pick) or DEFAULT_DEPARTMENT
+
+
+def prepare_first_outcome(department: str, workdir: str) -> dict[str, Any]:
+    """Create the department's sample workspace under ``workdir``.
+
+    Returns the ``[first_outcome]`` table to record: the chosen department
+    and whether the sample workspace was actually created (a copy failure
+    is recorded as ``false``, never hidden).
+    """
+    from maverick.sample_outcomes import create_sample_workspace
+
+    created = True
+    try:
+        create_sample_workspace(department, workdir)
+    except OSError:
+        created = False
+    return {"department": department, "sample_workspace_created": created}
 
 
 def pick_mode() -> str:
@@ -9609,6 +10034,7 @@ def write_consumer_config(
     workdir: str,
     budget: dict[str, float],
     profile: str | None = None,
+    first_outcome: str | None = None,
 ) -> None:
     """Write a consumer-mode config with the safety-seat safe defaults.
 
@@ -9618,8 +10044,10 @@ def write_consumer_config(
     ``profile`` is the governance level from :data:`GOVERNANCE_PROFILES`
     (unknown values fall back to the default) -- it layers the learning
     lifecycle + governance posture on top of the safety-seat base, which
-    is identical at every level. Creates the workspace dir. Raises on
-    write failure (caller renders the branded error).
+    is identical at every level. Creates the workspace dir, and the sample
+    workspace for ``first_outcome`` (a department slug from
+    :mod:`maverick.sample_outcomes`) when one was picked. Raises on write
+    failure (caller renders the branded error).
     """
     preset = GOVERNANCE_PROFILES.get(profile or "")
     if preset is None:
@@ -9628,6 +10056,10 @@ def write_consumer_config(
             GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE],
         )
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
+    first_outcome_table = (
+        prepare_first_outcome(first_outcome, str(Path(workdir).expanduser()))
+        if first_outcome else None
+    )
     backend = "docker" if _docker_available() else "local"
     # Computer + browser always require explicit opt-in (consumer is
     # never asked). When there's no Docker sandbox to contain it, also
@@ -9669,6 +10101,7 @@ def write_consumer_config(
         persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
         web_search_enabled=True,
         governance_profile=profile,
+        first_outcome=first_outcome_table,
     )
 
 
@@ -9708,6 +10141,8 @@ def run_consumer() -> int:
 
     budget = _consumer_budget()
 
+    department = pick_first_outcome()
+
     try:
         write_consumer_config(
             user_name=user_name,
@@ -9715,23 +10150,27 @@ def run_consumer() -> int:
             workdir=workdir,
             budget=budget,
             profile=profile,
+            first_outcome=department,
         )
     except Exception as e:
         show_install_failure(e)
         return 1
 
-    # First-goal nudge. Don't run the goal here (the kernel doesn't
+    # First-outcome nudge. Don't run the task here (the kernel doesn't
     # stream into a wizard window today, and shelling out from inside
-    # the installer is ugly); print the one-liner instead. The Haiku
-    # model keeps the demo under $0.01 and finishes in a couple of
-    # seconds even on cold connections.
+    # the installer is ugly); print the one-liner instead. No model flag:
+    # the pack and the configured role models pick the model.
+    from maverick.sample_outcomes import cli_command
+    from maverick.sample_outcomes import get as first_outcome_for
+
+    outcome = first_outcome_for(department)
     console.print()
     if keys:
         console.print(
             Panel.fit(
                 f"[bold green]Setup complete, {user_name}.[/bold green]\n\n"
-                "Try your first goal:\n"
-                f'  [bold]maverick start "{CONSUMER_DEMO_GOAL}" --model {CONSUMER_DEMO_MODEL}[/bold]\n\n'
+                f"Your first task ({outcome.label}, on sample data, waits in {outcome.lands_in}):\n"
+                f"  [bold]{cli_command(department)}[/bold]\n\n"
                 "Then:\n"
                 "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
                 "[dim]The maverick command is also available as lightwork.[/dim]",
@@ -10147,6 +10586,11 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     _save_partial(state)
 
     _announce()
+    approval = state.get("approval") or pick_approvals()
+    state["approval"] = approval
+    _save_partial(state)
+
+    _announce()
     sandbox = state.get("sandbox") or pick_sandbox()
     state["sandbox"] = sandbox
     _save_partial(state)
@@ -10263,10 +10707,19 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     state["advanced"] = advanced
     _save_partial(state)
 
+    _announce()
+    if "api_keys" not in advanced:
+        # Carried inside ``advanced`` so write_config's signature stays put;
+        # the writer emits the keys under [dashboard].
+        advanced["api_keys"] = pick_api_keys()
+        state["advanced"] = advanced
+        _save_partial(state)
+
     return {
         "safety": safety,
         "signed_skills": signed_skills,
         "budget": budget,
+        "approval": approval,
         "sandbox": sandbox,
         "research_execution": research_execution,
         "candidate_promotion": candidate_promotion,
@@ -10479,6 +10932,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     safety = _simple["safety"]
     signed_skills = _simple["signed_skills"]
     budget = _simple["budget"]
+    approval = _simple["approval"]
     sandbox = _simple["sandbox"]
     research_execution = _simple["research_execution"]
     candidate_promotion = _simple["candidate_promotion"]
@@ -10529,6 +10983,13 @@ def run(fast: bool = False, resume: bool = False) -> int:
     _save_partial(state)
 
     _announce()
+    deadline_alerts = _deadline_alerts_step(state, notifications)
+
+    _announce()
+    my_work_cfg, notifications_email, summary_envs = _daily_summary_step(state, channels)
+    _save_partial(state)
+
+    _announce()
     webhooks, webhook_envs = state.get("_webhooks_pair") or pick_webhooks()
     state["_webhooks_pair"] = [webhooks, webhook_envs]
     _save_partial(state)
@@ -10551,6 +11012,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     extra_envs = (
         set(web_search_envs)
         | set(notify_envs)
+        | set(summary_envs)
         | set(webhook_envs)
         | set(a2a_envs)
         | set(deliverable_envs)
@@ -10603,10 +11065,13 @@ def run(fast: bool = False, resume: bool = False) -> int:
         analytics=analytics,
         persona=persona,
         notifications=notifications,
+        deadline_alerts=deadline_alerts,
         webhooks=webhooks,
         deliverables=deliverables,
         personas=personas,
         a2a=a2a_cfg,
+        my_work=my_work_cfg,
+        notifications_email=notifications_email,
         web_search_enabled=web_search_enabled,
         skills=signed_skills
         if (
@@ -10631,6 +11096,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         value=value or None,
         assessments=assessments or None,
         security_suite=security_suite,
+        approval=approval,
         suites=suites,
         license_cfg=license_cfg or None,
         # The advanced flow applies no preset -- the operator hand-picked

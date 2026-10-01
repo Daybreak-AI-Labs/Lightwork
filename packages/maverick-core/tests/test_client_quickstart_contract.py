@@ -313,7 +313,8 @@ def test_typescript_client_dependency_and_ci_security_gates():
         # Medium) that failed the audit job on 2026-09-02; both are transitive
         # through the MCP SDK's ajv/express, so the pins live in overrides.
         # fast-uri 3.1.7 fixes GHSA-58mr-gqgx-xq4g and GHSA-qw65-cvwx-89v3;
-        # 3.1.8 fixes GHSA-hrr3-gc8f-f4qj (failed the audit job on 2026-09-30).
+        # 3.1.8 fixes GHSA-hrr3-gc8f-f4qj (percent-encoded host case;
+        # failed the audit job on 2026-09-30).
         "fast-uri": "3.1.8",
         "qs": "6.16.0",
     }

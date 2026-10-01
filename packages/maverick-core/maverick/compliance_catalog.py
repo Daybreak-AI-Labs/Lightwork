@@ -130,6 +130,9 @@ _SUITES: tuple[Suite, ...] = (
             Module("Notice Governance", "/privacy/notice-governance", STATUS_SHIPPED),
             # PA-21 Implemented: California DROP control plane.
             Module("DROP Requests", "/privacy/drop", STATUS_SHIPPED),
+            # Public rights-request form with email verification and
+            # verified per-jurisdiction clocks.
+            Module("Rights Request Form", "/privacy/rights-form", STATUS_SHIPPED),
         ),
     ),
     Suite(

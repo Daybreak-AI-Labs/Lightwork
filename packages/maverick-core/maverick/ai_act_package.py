@@ -14,7 +14,8 @@ measures. This generator assembles that package from what the deployment
   retention configuration, world-model event recording.
 * **Accuracy & robustness (Art. 15)** — the red-team gate result, shield
   calibration, the reliability certificate when present.
-* **Transparency (Art. 50)** — the first-turn AI disclosure wiring.
+* **Transparency (Art. 50)** — the effective first-turn AI disclosure setting,
+  including an operator's explicit opt-out.
 
 Sections without evidence say "no evidence recorded" — nothing fabricated;
 each section names its source so an auditor can verify. Output is markdown
@@ -123,6 +124,24 @@ def _evidence() -> dict:
     return out
 
 
+def _transparency() -> dict:
+    """Report the same effective disclosure setting as the channel server."""
+    from .compliance import _UNSET, _custom_disclosure
+
+    disclosure = _custom_disclosure()
+    enabled = disclosure is _UNSET or bool(disclosure and str(disclosure).strip())
+    if disclosure is _UNSET:
+        detail = "enabled by default; the channel server applies first-turn AI disclosure"
+    elif enabled:
+        detail = "enabled with operator text; the channel server applies first-turn AI disclosure"
+    else:
+        detail = "disabled by operator; no first-turn AI disclosure is configured"
+    return {
+        "first_turn_disclosure_enabled": enabled,
+        "first_turn_disclosure": detail,
+    }
+
+
 def build_package() -> dict:
     return {
         "kind": "ai-act-technical-documentation",
@@ -131,11 +150,7 @@ def build_package() -> dict:
         "human_oversight": _oversight(),
         "logging": _logging_posture(),
         "evidence": _evidence(),
-        "transparency": {
-            "first_turn_disclosure": "wired (compliance.first_turn_disclosure: "
-                                     "Art. 50 AI disclosure on a channel user's "
-                                     "first turn)",
-        },
+        "transparency": _transparency(),
     }
 
 
@@ -190,7 +205,7 @@ def render_markdown(pkg: dict) -> str:
     lines += [
         "",
         "## 5. Transparency (Art. 50)",
-        f"- {pkg['transparency']['first_turn_disclosure']}",
+        f"- first-turn AI disclosure: {pkg['transparency']['first_turn_disclosure']}",
         "",
         "## 6. Completed by the provider",
         "- [ ] Intended purpose & deployment context",

@@ -234,6 +234,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "active_tenant",
     },
     "analytics": {"mcp_client_language", "task_questions"},
+    "first_outcome": {"department", "sample_workspace_created"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
     # section fixed-key so misspelled retention/privacy knobs do not silently
     # fall back to defaults.
@@ -522,6 +523,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "ott_ctv_rights",
         "drop_management",
         "notice_governance",
+        "public_rights_form",
     },
     "tech_risk_compliance": {
         "enable",
@@ -689,6 +691,7 @@ _INTEGER_KEYS: dict[str, set[str]] = {
 # Keys that, when present, must be a bool. Section -> key. Plus the universal
 # ``enabled``/``enable`` toggle, handled separately for every known section.
 _BOOL_KEYS: dict[str, set[str]] = {
+    "first_outcome": {"sample_workspace_created"},
     "safety": {"scan_input", "scan_tool_calls", "scan_output", "compartments"},
     "features": {"skills", "world_model", "streaming"},
     "capabilities": {
@@ -1132,6 +1135,15 @@ _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
     },
     ("privacy_automation", "regulatory_intelligence"): {
         "enable",
+    },
+    ("privacy_automation", "public_rights_form"): {
+        "enable",
+        "verification_ttl_hours",
+        "status_ttl_days",
+        "requests_per_ip_per_hour",
+        "requests_per_email_per_day",
+        "internal_target_days",
+        "max_message_chars",
     },
     ("privacy_automation", "rights_orchestration"): {
         "enable",

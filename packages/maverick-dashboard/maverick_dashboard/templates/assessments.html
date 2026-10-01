@@ -114,7 +114,7 @@
         {% endif %}
         <label class="as-field">
           <span>Agent</span>
-          <select id="as-agent" aria-label="Agent to assess">
+          <select id="as-agent" aria-label="Agent to assess" data-typeahead data-typeahead-placeholder="Type an agent or department name…">
             <option value="">{{ 'Choose an agent…' if agents else 'No agents yet' }}</option>
             {% for group in agents|groupby('group') %}<optgroup label="{{ group.grouper }}">
               {% for a in group.list %}<option value="{{ a.name }}">{{ a.label }}</option>{% endfor %}
@@ -506,4 +506,5 @@
   reload();
 })();
 </script>
+<script src="/static/lightwork-typeahead.js" defer></script>
 {% endblock %}

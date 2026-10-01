@@ -52,8 +52,10 @@ def test_mobile_topbar_cannot_widen_the_document(monkeypatch, tmp_path):
     assert "@media (max-width: 560px)" in css
     assert ".brand__name { display: none; }" in css
     assert "flex-wrap: nowrap;" in css
-    assert ".halt-pill { min-width: 0; padding-inline: 0.55rem; white-space: normal; }" in css
-    assert "#halt-label { overflow-wrap: anywhere; }" in css
+    # The pill never wraps to "Emerg / ency / stop" on a narrow screen: the
+    # label is clipped with an ellipsis instead, and the banner repeats it.
+    assert ".halt-pill { min-width: 0; padding-inline: 0.55rem; white-space: nowrap; }" in css
+    assert ".halt-pill #halt-label { max-width: 6.5rem; overflow: hidden; text-overflow: ellipsis; }" in css
     assert "@media (max-width: 360px)" in css
     assert ".topbar__controls { flex-basis: 100%; }" in css
     assert "max-height: calc(100dvh - var(--shell-topbar-h) - var(--space-5))" in css

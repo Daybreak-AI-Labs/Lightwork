@@ -109,7 +109,7 @@ def test_provider_unknown_then_fingerprint_bound_live_verified(monkeypatch):
     assert "bounded provider probe passed" in settings_page.text
     providers_page = client.get("/providers")
     assert providers_page.status_code == 200
-    assert "1 tested and working" in providers_page.text
+    assert "1 connected" in providers_page.text and ">Connected<" in providers_page.text
 
 
 def test_provider_probe_truth_for_loopback_runtime_and_unsupported(monkeypatch):

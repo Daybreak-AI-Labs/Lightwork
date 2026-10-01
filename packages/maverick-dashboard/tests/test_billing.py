@@ -47,7 +47,7 @@ def test_billing_shows_accrued_charges(client, world):
     _seed(world, cost=0.42)
     r = client.get("/billing")
     assert r.status_code == 200
-    assert "Charges so far" in r.text
+    assert "Recorded cost subtotal" in r.text
     assert "0.42" in r.text
     assert "Download this month" in r.text
 

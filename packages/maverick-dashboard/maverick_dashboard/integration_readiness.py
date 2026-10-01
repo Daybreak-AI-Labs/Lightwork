@@ -2,13 +2,21 @@
 
 Configuration and readiness are deliberately separate states.  Saving a key,
 server, or channel proves only that Lightwork retained the operator's input; it
-does not prove that the remote system accepted it.  This module keeps short,
-process-local receipts tied to an exact configuration fingerprint.  A restart,
-worker hop, or configuration change therefore falls back to ``untested`` rather
-than carrying a stale green badge forward.
+does not prove that the remote system accepted it.  This module keeps short
+receipts tied to an exact configuration fingerprint.  A configuration change
+therefore falls back to ``untested`` rather than carrying a stale green badge
+forward.
 
-The fingerprint never leaves the process and receipts contain no response
-bodies, headers, credentials, or URLs.
+Receipts contain no response bodies, headers, credentials, or URLs.  Channel
+and MCP receipts are process-local.  Provider receipts are also written to
+``<MAVERICK_HOME>/provider_test_receipts.json`` (mode 0600, atomic write) so
+a working service stays "Connected" across a dashboard restart: the file holds
+only the provider name, the outcome, the timestamp, the plain reason and the
+SHA-256 fingerprint of the credential material -- a hash that stays on this
+machine, never the key.  A stored receipt is used only while its fingerprint
+still matches the current credential and it is younger than
+``[providers] test_receipt_max_age_days`` (default 30); after that the
+provider reads "not tested yet" again with the age of the last test.
 """
 from __future__ import annotations
 
@@ -27,6 +35,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 _LOCK = threading.RLock()
 _RECEIPTS: dict[tuple[str, str], dict[str, Any]] = {}
+_RECEIPTS_BASENAME = "provider_test_receipts.json"
+_PERSISTED_KINDS = frozenset({"provider"})
 
 
 class IntegrationConfigurationUnavailable(RuntimeError):
@@ -88,7 +98,106 @@ def record(
     }
     with _LOCK:
         _RECEIPTS[(str(kind), str(name))] = receipt
+        if str(kind) in _PERSISTED_KINDS:
+            _persist(str(name), receipt)
     return public_receipt(receipt)
+
+
+def _receipts_path() -> Path:
+    from maverick.paths import maverick_home
+
+    return maverick_home() / _RECEIPTS_BASENAME
+
+
+def _load_persisted() -> dict[str, dict[str, Any]]:
+    """Stored provider receipts; an unreadable or malformed file is simply
+    "never tested" (readiness must not crash on a bad file)."""
+    try:
+        from maverick.file_lock import atomic_read_bytes
+
+        raw = json.loads(atomic_read_bytes(_receipts_path()).decode("utf-8"))
+    except Exception:  # noqa: BLE001 -- missing, unreadable or corrupt: no receipts
+        return {}
+    rows = raw.get("providers") if isinstance(raw, dict) else None
+    return {
+        str(name): row for name, row in (rows or {}).items()
+        if isinstance(row, dict) and isinstance(row.get("fingerprint"), str)
+    }
+
+
+def _persist(name: str, receipt: dict[str, Any]) -> None:
+    """Write one provider receipt (fingerprint hash + outcome only) to disk."""
+    try:
+        from maverick.file_lock import atomic_write_text
+
+        from .provider_readiness import plain_reason
+
+        rows = _load_persisted()
+        rows[name] = {
+            "status": receipt["status"],
+            "verified": receipt["verified"],
+            "detail": receipt["detail"],
+            "reason": plain_reason(receipt["detail"]) if receipt["verified"] is False else "",
+            "tested_at": receipt["tested_at"],
+            "evidence": receipt.get("evidence") or {},
+            "fingerprint": receipt["fingerprint"],
+        }
+        atomic_write_text(
+            _receipts_path(),
+            json.dumps({"schema": 1, "providers": rows}, sort_keys=True, indent=1),
+            mode=0o600,
+        )
+    except Exception:  # noqa: BLE001 -- a receipt that cannot be saved is still valid in-process
+        return
+
+
+def _stored_receipt(name: str, expected: str) -> dict[str, Any] | None:
+    """A persisted provider receipt for the current credential, or None.
+
+    Expired receipts come back with ``status`` ``unknown`` and a plain
+    ``detail`` naming the age of the last test."""
+    row = _load_persisted().get(name)
+    if row is None or row.get("fingerprint") != expected:
+        return None
+    try:
+        tested_at = float(row.get("tested_at") or 0)
+    except (TypeError, ValueError):
+        return None
+    if tested_at <= 0:
+        return None
+    from maverick.config import provider_test_receipt_max_age_days
+
+    age_days = int((time.time() - tested_at) // 86400)
+    if age_days >= provider_test_receipt_max_age_days():
+        passed = row.get("verified") is True
+        return {
+            "status": "unknown",
+            "checked": False,
+            "verified": None,
+            "detail": (f"Last successful test was {age_days} days ago." if passed
+                       else f"Last test was {age_days} days ago and did not pass."),
+            "tested_at": tested_at,
+            "evidence": {"stale": True, "last_verified": row.get("verified")},
+            "stale": True,
+        }
+    return {
+        "status": "verified" if row.get("verified") is True else "failed" if row.get("verified") is False else "unknown",
+        "checked": True,
+        "verified": row.get("verified"),
+        "detail": str(row.get("detail") or "")[:240],
+        "tested_at": tested_at,
+        "evidence": dict(row.get("evidence") or {}),
+    }
+
+
+_UNTESTED: dict[str, Any] = {
+    "status": "unknown",
+    "checked": False,
+    "verified": None,
+    "detail": "saved configuration has not passed a readiness check",
+    "tested_at": None,
+    "evidence": {},
+}
 
 
 def get(kind: str, name: str, material: object) -> dict[str, Any]:
@@ -96,16 +205,13 @@ def get(kind: str, name: str, material: object) -> dict[str, Any]:
     expected = fingerprint(material)
     with _LOCK:
         receipt = _RECEIPTS.get((str(kind), str(name)))
-        if receipt is None or receipt.get("fingerprint") != expected:
-            return {
-                "status": "unknown",
-                "checked": False,
-                "verified": None,
-                "detail": "saved configuration has not passed a readiness check",
-                "tested_at": None,
-                "evidence": {},
-            }
-        return public_receipt(receipt)
+        if receipt is not None and receipt.get("fingerprint") == expected:
+            return public_receipt(receipt)
+    if str(kind) in _PERSISTED_KINDS:
+        stored = _stored_receipt(str(name), expected)
+        if stored is not None:
+            return stored
+    return dict(_UNTESTED)
 
 
 def public_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
@@ -478,6 +584,7 @@ _CHANNEL_REQUIRED_FIELDS = {
         "smtp_password",
     ),
     "mattermost": ("url",),
+    "teams": ("app_id", "app_password", "tenant_id"),
 }
 
 _CHANNEL_MODULES = {
@@ -488,6 +595,7 @@ _CHANNEL_MODULES = {
     "sms": "maverick_channels.sms",
     "email": "maverick_channels.email",
     "mattermost": "maverick_channels.mattermost",
+    "teams": "maverick_channels.teams",
 }
 
 

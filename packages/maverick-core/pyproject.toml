@@ -219,6 +219,8 @@ include = ["maverick*"]
     "evaluator_anchors.lock.json",
     "evaluator_anchors/*.ndjson",
     "skills_builtin/*.md",
+    "sample_outcomes/*/*.csv",
+    "sample_outcomes/*/*.md",
 ]
 "maverick.env_hunt" = ["rules/*.yml"]
 "maverick.training" = ["environment_packs/*.ndjson", "environment_packs/*.json", "specialist_models.v1.json"]

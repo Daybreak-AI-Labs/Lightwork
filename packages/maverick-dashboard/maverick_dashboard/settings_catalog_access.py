@@ -24,6 +24,13 @@ for each workspace) are in settings_catalog_structured.
 """
 from __future__ import annotations
 
+from maverick.config import (
+    DEFAULT_MFA_AMR_VALUES as _MFA_AMR,
+)
+from maverick.config import (
+    DEFAULT_MFA_SAML_CONTEXTS as _MFA_SAML,
+)
+
 # Plain patterns (full match) for text and list entries.
 _HTTPS = r"https://[^\s\"'<>?#]{1,300}"
 _HTTPS_OR_LOCAL = r"(https://[^\s\"'<>?#]{1,300}|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?(/[^\s\"'<>?#]{0,200})?)"
@@ -213,6 +220,87 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Any program on this computer will be able to tell Lightwork who is signed "
                   "in.",
           aliases="loopback localhost"),
+    ) + _sign_in_security(S)
+
+
+def _sign_in_security(S) -> tuple:  # noqa: N803 -- the catalog's row type
+    grp, sec = "People & access", "Sign-in security"
+    return (
+        S("auth.mfa", "require", "Require sign-in with a second factor",
+          "A company sign-in counts only when the provider confirms a second factor (an "
+          "authenticator app, a security key or a code). People whose sign-in has none are "
+          "asked to sign in again. Your own sign-in must include one before you can turn "
+          "this on.",
+          "toggle", grp, False, "maverick_dashboard.mfa_policy", subgroup=sec,
+          env=("MAVERICK_MFA_REQUIRE",), weaker=False,
+          warning="People will be able to use Lightwork with a password alone.",
+          aliases="mfa two-factor 2fa authenticator otp"),
+        S("auth.mfa", "step_up_minutes", "Sensitive actions need a sign-in this recent",
+          "While a second factor is required: changing roles, removing a spending limit, "
+          "turning off the emergency stop, rotating keys, changing sign-in settings, "
+          "deleting a workspace or signing others out needs a second factor no older than "
+          "this many minutes. Otherwise the person is asked to sign in again.",
+          "number", grp, 15, "maverick_dashboard.mfa_policy", subgroup=sec,
+          minimum=1, maximum=1440, integer=True, unit="minutes",
+          env=("MAVERICK_MFA_STEP_UP_MINUTES",), weaker="higher",
+          warning="An older sign-in will be enough for sensitive actions.",
+          aliases="step-up reauthenticate fresh"),
+        S("auth.mfa", "amr_values", "Sign-in methods that count as a second factor",
+          "The authentication-method values (the ID token's amr claim) that prove a second "
+          "factor. The standard values are filled in; add your provider's own if it uses "
+          "different ones.",
+          "list", grp, list(_MFA_AMR), "maverick_dashboard.mfa_policy", subgroup=sec,
+          pattern=r"[A-Za-z0-9:._-]{1,64}", item_label="Method", item_hint="otp",
+          item_error="a short method name", max_items=40, weaker="grow",
+          warning="More sign-in methods will count as a second factor.",
+          aliases="amr methods"),
+        S("auth.mfa", "acr_values", "Authentication contexts that count as a second factor",
+          "Values of the ID token's acr claim that prove a second factor. They are also "
+          "requested from the provider at sign-in. Leave empty when your provider uses the "
+          "methods above instead.",
+          "list", grp, [], "maverick_dashboard.mfa_policy", subgroup=sec,
+          pattern=r"[A-Za-z0-9:._/-]{1,200}", item_label="Context",
+          item_hint="urn:example:mfa", item_error="a context value with no spaces",
+          max_items=20, weaker="grow",
+          warning="More authentication contexts will count as a second factor.",
+          aliases="acr context"),
+        S("auth.mfa", "saml_authn_contexts", "SAML authentication contexts that count as a "
+          "second factor",
+          "The assertion's authentication context values that prove a second factor for "
+          "single sign-on. The common values are filled in.",
+          "list", grp, list(_MFA_SAML), "maverick_dashboard.mfa_policy", subgroup=sec,
+          pattern=r"[A-Za-z0-9:._/-]{1,200}", item_label="Context",
+          item_hint="urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken",
+          item_error="a context value with no spaces", max_items=40, weaker="grow",
+          warning="More SAML authentication contexts will count as a second factor.",
+          aliases="saml authncontext"),
+        S("auth.ip_allowlist", "cidrs", "Network addresses allowed to use Lightwork",
+          "Only these addresses or ranges may reach Lightwork; everyone else sees a plain "
+          "refusal. Empty allows every address. The address you are saving from must be on "
+          "the list. Behind a company proxy, list the proxy under Proxy addresses to trust "
+          "first so the real address is used.",
+          "list", grp, [], "maverick_dashboard.ip_allowlist", subgroup=sec, pattern=_NETWORK,
+          item_label="Address", item_hint="203.0.113.0/24",
+          item_error="a network address or range", max_items=64,
+          env=("MAVERICK_IP_ALLOWLIST",), weaker="widen",
+          warning="More network addresses will be able to reach Lightwork.",
+          aliases="ip allowlist allow list cidr network"),
+        S("auth.ip_allowlist", "workspace_cidrs", "Network addresses allowed for this "
+          "workspace",
+          "After a person chooses a workspace, only these addresses or ranges may use it. "
+          "Empty allows every address. A workspace's own settings file can narrow this for "
+          "its members.",
+          "list", grp, [], "maverick_dashboard.ip_allowlist", subgroup=sec, pattern=_NETWORK,
+          item_label="Address", item_hint="203.0.113.0/24",
+          item_error="a network address or range", max_items=64, weaker="widen",
+          warning="More network addresses will be able to use this workspace.",
+          aliases="workspace ip allowlist"),
+        S("auth.sessions", "retention_days", "Keep ended sessions listed for",
+          "How long a sign-in session stays in the record after it ends, so the Sessions "
+          "page can still show it.",
+          "number", grp, 30, "maverick_dashboard.session_registry", subgroup=sec,
+          minimum=1, maximum=3650, integer=True, unit="days",
+          aliases="sessions retention"),
     )
 
 
@@ -239,6 +327,40 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Programs using the old token will be refused, and anyone holding the new "
                   "one can do everything an administrator can.",
           aliases="bearer token api access remote"),
+        S("dashboard", "api_keys", "Access keys for scripts and integrations",
+          "Let people create their own keys on their account page, and administrators "
+          "create service accounts for programs. A key does only what its scopes allow and "
+          "never more than its owner's role, and it stops on its expiry date.",
+          "toggle", grp, True, "maverick.config", subgroup=access,
+          env=("MAVERICK_DASHBOARD_API_KEYS",), weaker=True,
+          warning="Programs holding a key will be able to act as the key's owner, within "
+                  "the key's scopes.",
+          aliases="api keys access keys tokens scripts integrations service accounts"),
+        S("dashboard", "api_key_default_days", "How long a new key lasts",
+          "The number of days a key works unless the person creating it picks fewer.",
+          "number", grp, 90, "maverick.config", subgroup=access,
+          minimum=1, maximum=3650, integer=True, unit="days", weaker="higher",
+          warning="New keys will keep working for longer before they must be renewed.",
+          aliases="api key expiry default"),
+        S("dashboard", "api_key_max_days", "Longest a key may last",
+          "Nobody can create a key that works for more days than this.",
+          "number", grp, 365, "maverick.config", subgroup=access,
+          minimum=1, maximum=3650, integer=True, unit="days", weaker="higher",
+          warning="People will be able to create keys that keep working for longer.",
+          aliases="api key expiry maximum"),
+        S("dashboard", "api_key_rotation_grace_hours", "Grace period after rotating a key",
+          "How long the old key keeps working after someone rotates it, so a program can "
+          "be switched over without downtime.",
+          "number", grp, 24, "maverick.config", subgroup=access,
+          minimum=0, maximum=720, integer=True, unit="hours", weaker="higher",
+          warning="A rotated key will keep working for longer before it stops.",
+          aliases="api key rotation grace"),
+        S("dashboard", "api_key_prefix", "First characters of every key",
+          "Every key starts with this, so logs and secret scanners can recognise one. Two to "
+          "eight lowercase letters or digits followed by an underscore.",
+          "text", grp, "lwk_", "maverick.config", subgroup=access,
+          pattern=r"[a-z][a-z0-9]{1,7}_", max_length=9,
+          aliases="api key prefix"),
         S("dashboard", "default_role", "Role for people without one",
           "The fallback for accounts without an explicit role or verified group mapping. Existing unassigned accounts also inherit changes. Users offers a reviewed viewer/no-department migration.",
           "select", grp, "operator", "maverick_dashboard.rbac", subgroup=access,
@@ -788,6 +910,11 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "How long to wait for a free database connection before giving up.",
           "number", grp, 5, "maverick.governed_records", subgroup=store, minimum=0.1,
           maximum=60, unit="seconds", restart=True),
+        S("governed_records", "pool_min_size", "Connections kept open while idle",
+          "How many pooled connections stay open when nothing is happening, so the first "
+          "request after a quiet spell does not wait to connect. Never more than the pool.",
+          "number", grp, 1, "maverick.governed_records", subgroup=store, minimum=0,
+          maximum=32, integer=True, unit="connections", restart=True),
         S("world_model", "backend", "Where Lightwork's records are kept",
           "Lightwork's main records (tasks, results and memory) live in a file on this server "
           "or in a shared PostgreSQL database for several servers.",

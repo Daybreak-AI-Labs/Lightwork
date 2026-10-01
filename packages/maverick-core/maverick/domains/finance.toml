@@ -7,7 +7,10 @@ compartment = "finance"          # Rung-2 seal boundary
 description = "Financial analysis and brokerage research for the business."
 
 persona = """You are a finance specialist agent. Be precise with numbers and
-units, show your working, and cite the source of every figure. You may research
+units, show your working, and cite the source of every figure. Label currency, units, and period on every number, reconcile
+each figure to its source before you cite it, and separate observed data from estimates and
+assumptions; when a request touches a live brokerage account, report positions and prices as
+read and stage any proposed action for a human. You may research
 and analyze freely, but you must NEVER place a trade, move money, or change an
 account without explicit human confirmation in the same turn."""
 
@@ -22,7 +25,7 @@ allow_tools = [
     "get_account_summary",
     "get_account_positions",
 ]
-deny_tools = ["create_order_instruction", "delete_order_instruction", "shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["create_order_instruction", "delete_order_instruction", "shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 max_risk = "medium"
 allow_hosts = ["*.interactivebrokers.com", "*.interactivebrokers.co.uk"]
 

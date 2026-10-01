@@ -780,6 +780,27 @@ def providers_per_tenant_keys() -> bool:
     return _strict_config_bool(providers, "per_tenant_keys", False)
 
 
+def provider_test_receipt_max_age_days() -> int:
+    """How many days a passing provider connection test stays valid
+    (``[providers] test_receipt_max_age_days``; env
+    ``MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS`` wins). Default 30, at
+    least 1. After that the provider reads "not tested yet" again with the
+    age of the last test, so a green badge can never be older than this.
+    Never raises."""
+    raw = os.environ.get("MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS", "").strip()
+    if not raw:
+        try:
+            providers = load_global_config().get("providers") or {}
+        except Exception:  # pragma: no cover -- config never blocks a run
+            providers = {}
+        raw = providers.get("test_receipt_max_age_days", 30) if isinstance(providers, dict) else 30
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return 30
+    return max(1, days)
+
+
 def tenant_provider_key_env(tenant_id: str, provider: str) -> str:
     """The secret-provider name that holds ``tenant_id``'s own API key for
     ``provider``.
@@ -994,6 +1015,31 @@ def get_capabilities() -> dict:
     }
 
 
+TOOL_EXPOSURE_MODES = ("core", "full")
+
+
+def get_tool_exposure() -> dict:
+    """Return ``[tools] exposure`` and ``core_extra``.
+
+    ``exposure`` is how much of the tool catalog every model turn describes up
+    front: ``"core"`` (default) shows a short role-aware set (plus a selected
+    pack's ``allow_tools``) and lets the model look the rest up with
+    ``find_tools``; ``"full"`` shows every tool except the SaaS-connector long
+    tail (the previous behaviour). ``core_extra`` pins extra tool names into
+    the visible set. ``MAVERICK_TOOL_EXPOSURE`` overrides ``exposure``. An
+    unknown mode or a malformed list falls back to the lean default.
+    """
+    cfg = load_config().get("tools", {}) or {}
+    mode = os.environ.get("MAVERICK_TOOL_EXPOSURE", "").strip().lower() or str(
+        cfg.get("exposure", "core") or "core").strip().lower()
+    if mode not in TOOL_EXPOSURE_MODES:
+        mode = "core"
+    raw = cfg.get("core_extra", [])
+    extra = [str(t).strip() for t in raw if isinstance(t, str) and str(t).strip()] \
+        if isinstance(raw, list) else []
+    return {"exposure": mode, "core_extra": extra}
+
+
 def signing_identity_transition_enabled() -> bool:
     """Whole-installation trust admission requires a healthy global opt-in."""
     try:
@@ -1093,6 +1139,18 @@ def get_features() -> dict:
     }
 
 
+def get_first_outcome() -> dict:
+    """Return the ``[first_outcome]`` section written by setup: which
+    department's sample first task the user picked and whether its sample
+    workspace was created. Absent = nothing picked yet."""
+    cfg = load_config().get("first_outcome", {}) or {}
+    department = cfg.get("department")
+    return {
+        "department": str(department) if department else None,
+        "sample_workspace_created": cfg.get("sample_workspace_created", False) is True,
+    }
+
+
 def get_safety() -> dict:
     """Return safety section with sensible defaults filled in."""
     cfg = load_config().get("safety", {})
@@ -1113,6 +1171,105 @@ def get_safety() -> dict:
         # | "both". Default human-only (safest for a security boundary).
         "compartment_unseal": cfg.get("compartment_unseal", "human"),
     }
+
+
+# RFC 8176 authentication-method values that mean a second factor was used,
+# plus "fido" (Okta/Auth0 emit it for WebAuthn). "pwd", "pin", "kba", "user"
+# and the plain biometric hints are single factors and deliberately absent;
+# an administrator extends this list in [auth.mfa] amr_values.
+DEFAULT_MFA_AMR_VALUES: tuple[str, ...] = (
+    "mfa", "mca", "otp", "hwk", "swk", "fido", "pop", "sms", "tel", "sc",
+)
+# SAML AuthnContextClassRef values that mean a second factor was used.
+DEFAULT_MFA_SAML_CONTEXTS: tuple[str, ...] = (
+    "http://schemas.microsoft.com/claims/multipleauthn",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorContract",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorUnregistered",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:SmartcardPKI",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:Smartcard",
+    "urn:okta:loa:2fa:any",
+)
+DEFAULT_STEP_UP_MINUTES = 15
+
+
+def _str_list(value: object, default: tuple[str, ...]) -> list[str]:
+    if isinstance(value, str):
+        value = [part for part in value.split(",")]
+    if not isinstance(value, (list, tuple)):
+        return list(default)
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+def get_auth_mfa() -> dict:
+    """``[auth.mfa]``: require a second factor at sign-in, and step-up.
+
+    Off by default. ``require`` (``MAVERICK_MFA_REQUIRE``) accepts an OIDC
+    session only when the ID token's ``amr`` names one of ``amr_values`` or
+    its ``acr`` is in ``acr_values``, and a SAML session only when the
+    assertion's authentication context is in ``saml_authn_contexts``.
+    ``acr_values`` is also sent on the authorization request.
+    ``step_up_minutes`` (``MAVERICK_MFA_STEP_UP_MINUTES``) is how recent that
+    second factor must be for a sensitive action while ``require`` is on.
+    A workspace's own config.toml overlays these keys for its members.
+    """
+    cfg = (load_config().get("auth") or {}).get("mfa") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    require = env_flag("MAVERICK_MFA_REQUIRE")
+    if require is None:
+        # A present non-bool is uncertainty about a security policy: on.
+        require = _strict_config_bool(cfg, "require", False, invalid=True)
+    minutes_raw: object = os.environ.get("MAVERICK_MFA_STEP_UP_MINUTES") or cfg.get(
+        "step_up_minutes", DEFAULT_STEP_UP_MINUTES)
+    try:
+        minutes = int(float(str(minutes_raw)))
+    except (TypeError, ValueError):
+        minutes = DEFAULT_STEP_UP_MINUTES
+    if isinstance(minutes_raw, bool) or minutes < 1:
+        minutes = DEFAULT_STEP_UP_MINUTES
+    return {
+        "require": bool(require),
+        "step_up_minutes": minutes,
+        "amr_values": _str_list(cfg.get("amr_values"), DEFAULT_MFA_AMR_VALUES),
+        "acr_values": _str_list(cfg.get("acr_values"), ()),
+        "saml_authn_contexts": _str_list(
+            cfg.get("saml_authn_contexts"), DEFAULT_MFA_SAML_CONTEXTS),
+    }
+
+
+def get_ip_allowlist() -> dict:
+    """``[auth.ip_allowlist]``: network addresses allowed to use the dashboard.
+
+    ``cidrs`` (``MAVERICK_IP_ALLOWLIST``, comma-separated) is the installation
+    list, checked before sign-in; ``workspace_cidrs`` is read after a
+    workspace is chosen, so a workspace's own config.toml can narrow it for
+    its members. An empty list allows every address. Unparsable entries are
+    kept here as text; the dashboard's checker rejects them, never skips them.
+    """
+    cfg = (load_config().get("auth") or {}).get("ip_allowlist") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    env = os.environ.get("MAVERICK_IP_ALLOWLIST")
+    cidrs = _str_list(env, ()) if env is not None and env.strip() else _str_list(
+        cfg.get("cidrs"), ())
+    return {
+        "cidrs": cidrs,
+        "workspace_cidrs": _str_list(cfg.get("workspace_cidrs"), ()),
+    }
+
+
+def get_auth_sessions() -> dict:
+    """``[auth.sessions]``: how long ended sign-in sessions stay listed."""
+    cfg = (load_config().get("auth") or {}).get("sessions") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    raw = cfg.get("retention_days", 30)
+    try:
+        days = int(raw) if not isinstance(raw, bool) else 30
+    except (TypeError, ValueError):
+        days = 30
+    return {"retention_days": max(1, min(days, 3650))}
 
 
 def get_skills() -> dict:
@@ -2041,6 +2198,40 @@ def get_skill_synthesis() -> dict:
     cfg = load_config().get("skill_synthesis", {})
     return {"enable": _strict_config_bool(
         cfg, "enable", governed_learning_default())}
+
+
+def get_my_work() -> dict:
+    """Return the ``[my_work]`` section with defaults filled in.
+
+    The personal "My work" page (``/me``) is always on. The daily summary it
+    feeds is OFF by default (``digest_enable``): it sends messages to people
+    on a timer, so the operator opts in. ``digest_hour`` is the default local
+    hour (each person can change it on /me), ``digest_poll_seconds`` how often
+    the scheduler looks for people whose summary is due, and
+    ``monthly_spend_limit_dollars`` the per-person monthly spending figure the
+    page compares against (0 = no limit shown). Env override:
+    ``MAVERICK_DAILY_DIGEST``.
+    """
+    cfg = load_config().get("my_work", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    env = env_flag("MAVERICK_DAILY_DIGEST")
+    enable = env if env is not None else _strict_config_bool(cfg, "digest_enable", False)
+
+    def _number(key: str, default: float, *, low: float, high: float) -> float:
+        raw = cfg.get(key, default)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ValueError(f"[my_work] {key} must be a number")
+        return float(min(high, max(low, raw)))
+
+    return {
+        "digest_enable": enable,
+        "digest_hour": int(_number("digest_hour", 8, low=0, high=23)),
+        "digest_poll_seconds": _number("digest_poll_seconds", 300, low=30, high=3600),
+        "monthly_spend_limit_dollars": _number(
+            "monthly_spend_limit_dollars", 0, low=0, high=1_000_000),
+        "send_when_empty": _strict_config_bool(cfg, "send_when_empty", False),
+    }
 
 
 def get_fleet_memory() -> dict:
@@ -3139,6 +3330,64 @@ def knowledge_access_enabled(cfg: dict | None = None) -> bool:
     except Exception:  # pragma: no cover - authority reads fail closed
         return False
     return isinstance(section, dict) and section.get("enable", True) is True
+
+
+API_KEY_DEFAULTS: dict = {
+    "enabled": True,
+    "default_days": 90,
+    "max_days": 365,
+    "rotation_grace_hours": 24,
+    "prefix": "lwk_",
+}
+
+_API_KEY_PREFIX_RE = re.compile(r"^[a-z][a-z0-9]{1,7}_$")
+
+
+def api_key_settings(cfg: dict | None = None) -> dict:
+    """Personal and service-account API keys for scripts and integrations.
+
+    Read from ``[dashboard]``: ``api_keys`` (on by default; a key only exists
+    once a signed-in person creates one), ``api_key_default_days`` (how long a
+    new key lasts unless the person picks a shorter time), ``api_key_max_days``
+    (the longest a key may last), ``api_key_rotation_grace_hours`` (how long
+    the old secret keeps working after a rotation) and ``api_key_prefix`` (the
+    first characters of every key, so logs and scanners recognise one).
+    ``MAVERICK_DASHBOARD_API_KEYS`` overrides the on/off switch. Malformed or
+    unreadable configuration fails closed: keys are off and every limit is
+    the default.
+    """
+    out = dict(API_KEY_DEFAULTS)
+    try:
+        loaded = cfg if cfg is not None else load_config()
+        if cfg is None and config_source_errors():
+            out["enabled"] = False
+            return out
+        table = loaded.get("dashboard") if isinstance(loaded, dict) else None
+        table = table if isinstance(table, dict) else {}
+        enabled = table.get("api_keys", True)
+        out["enabled"] = enabled is True
+        for key, name, low, high in (
+            ("api_key_default_days", "default_days", 1, 3650),
+            ("api_key_max_days", "max_days", 1, 3650),
+            ("api_key_rotation_grace_hours", "rotation_grace_hours", 0, 24 * 30),
+        ):
+            raw = table.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                continue
+            if low <= raw <= high:
+                out[name] = int(raw)
+        prefix = table.get("api_key_prefix")
+        if isinstance(prefix, str) and _API_KEY_PREFIX_RE.match(prefix):
+            out["prefix"] = prefix
+        if out["default_days"] > out["max_days"]:
+            out["default_days"] = out["max_days"]
+        override = env_flag("MAVERICK_DASHBOARD_API_KEYS")
+        if override is not None:
+            out["enabled"] = override
+    except Exception:  # pragma: no cover - authority reads fail closed
+        out = dict(API_KEY_DEFAULTS)
+        out["enabled"] = False
+    return out
 
 
 def candidate_promotion_enabled(cfg: dict | None = None) -> bool:

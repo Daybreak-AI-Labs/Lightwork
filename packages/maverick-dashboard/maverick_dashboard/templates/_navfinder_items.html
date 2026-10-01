@@ -1,0 +1,21 @@
+{# The page finder's destinations: every page the caller may open, from the
+   same role-filtered registry as the sidebar (plus pages folded out of the
+   rail). Served by GET /nav/finder and inserted into the finder's listbox
+   the first time it opens, so the ~80 KB list is not part of every page.
+   JavaScript only filters these existing links; it never manufactures a
+   destination. #}
+{% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
+{% for _group in finder_pages %}
+  {% set _navfinder_group_index = loop.index0 %}
+  {% for _link in _group.links %}
+    <li role="none">
+      <a id="navfinder-option-{{ _navfinder_group_index }}-{{ loop.index0 }}"
+         href="{{ _link.href }}" role="option" tabindex="-1"
+         aria-selected="false" data-navfinder-target
+         data-search="{{ _link.label }} {{ ut(_link.label) }} {{ _group_labels.get(_group.label, _group.label) }} {{ ut(_group_labels.get(_group.label, _group.label)) }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }}">
+        <span class="navfinder__label">{{ ui(_link.label) }}</span>
+        <span class="navfinder__group">{{ ui(_group_labels.get(_group.label, _group.label)) }}</span>
+      </a>
+    </li>
+  {% endfor %}
+{% endfor %}

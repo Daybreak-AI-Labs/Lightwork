@@ -22,6 +22,20 @@ _ROLE_AND_READINESS_BOUNDARY = (
 )
 _MAX_BUILT_IN_REPLY_WORDS = 120
 _MAX_BUILT_IN_REPLY_CHARS = 1_000
+_WORDS = compile_regex(r"\b\w+\b")
+_ACTION_VERBS = frozenset({
+    "add", "approve", "assign", "cancel", "change", "connect", "create",
+    "delete", "deny", "disable", "download", "edit", "enable", "export",
+    "find", "invite", "list", "pause", "print", "publish", "remove",
+    "restart", "resume", "revoke", "run", "search", "send", "share",
+    "show", "stop", "submit", "update", "upload", "withdraw",
+})
+_ACTION_LEADS = (
+    ("can", "you"), ("could", "you"), ("would", "you"), ("will", "you"),
+    ("can", "i"), ("could", "i"), ("how", "do", "i"), ("how", "can", "i"),
+    ("i", "want", "to"), ("i", "need", "to"), ("i", "would", "like", "to"),
+    ("let", "s"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1643,21 +1657,44 @@ def built_in_reply(
 ) -> str:
     """Answer common page-help questions without an external model call."""
 
-    normalized = message.casefold()
-    if any(word in normalized for word in ("limit", "boundary", "prove", "safe", "authority")):
+    words = tuple(_WORDS.findall(message.casefold()))
+    terms = frozenset(words)
+    if _is_action_request(words):
+        lead = "This guide can't do that for you. "
+        body = (
+            f"Open {context.title} and use its controls if the action is available. "
+            "If you don't see the control, check the item's current status and your access."
+        )
+    elif terms & {"limit", "limits", "boundary", "boundaries", "prove", "proof", "safe", "safety", "authority"}:
         lead = "Key boundary: "
         body = " ".join(context.boundaries[:2])
-    elif any(word in normalized for word in ("start", "next", "how", "ready", "status")):
+    elif terms & {"start", "started", "next", "how", "ready", "readiness", "status"}:
         lead = "Start here: "
         body = " ".join(context.next_steps)
-    elif any(word in normalized for word in ("can", "capabil", "do", "feature")):
+    elif terms & {"can", "capability", "capabilities", "do", "feature", "features"}:
         lead = f"When role and server composition permit, {context.title} can: "
         body = " ".join(context.capabilities)
     else:
         lead = f"{context.title}: "
-        body = f"{context.summary} Next: {context.next_steps[0]}"
+        questions = " Or ask: ".join(context.suggested_questions[:2])
+        body = f"{context.summary} You can ask: {questions}"
     authority = f" {_authority_notice(permissions)}" if permissions is not None else ""
     return _bounded_reply(f"{lead}{body}{authority}")
+
+
+def _is_action_request(words: tuple[str, ...]) -> bool:
+    """Distinguish a request to act from a question about what a page can do."""
+
+    if not words:
+        return False
+    if words[0] == "please":
+        words = words[1:]
+    if words and words[0] in _ACTION_VERBS:
+        return True
+    for lead in _ACTION_LEADS:
+        if words[:len(lead)] == lead:
+            return bool(_ACTION_VERBS.intersection(words[len(lead):len(lead) + 5]))
+    return False
 
 
 def _authority_notice(permissions: frozenset[str]) -> str:

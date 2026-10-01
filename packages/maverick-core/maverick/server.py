@@ -604,6 +604,10 @@ def _wire_slack(server, cfg):
         # [channels.slack] thread_replies: answers post under the asking
         # message's thread instead of interleaving into the channel.
         thread_replies=cfg.get("thread_replies"),
+        # Approval buttons and slash commands decide against the server's world;
+        # [channels.slack] approvals_channel is where new cards are posted.
+        world=server.world,
+        approvals_channel=cfg.get("approvals_channel"),
     ))
 
 
@@ -796,6 +800,25 @@ def _wire_mattermost(server, cfg):
     ))
 
 
+def _wire_teams(server, cfg):
+    from maverick_channels.teams import TeamsChannel, channel_config
+    settings = channel_config(cfg)
+    server.add_channel(TeamsChannel(
+        handler=server._handle_message,
+        app_id=settings["app_id"],
+        app_password=settings["app_password"],
+        tenant_id=settings["tenant_id"] or None,
+        allowed_tenants=settings["allowed_tenants"] or None,
+        allowed_user_ids=settings["allowed_users"] or None,
+        # [channels.teams] approvals_enabled: approval cards in Teams, decided
+        # through the dashboard's own decision path.
+        approvals_enabled=settings["approvals_enabled"],
+        port=settings["port"],
+        bot_name=settings["bot_name"],
+        service_url=settings["service_url"],
+    ))
+
+
 _WIRES = {
     "telegram": _wire_telegram,
     "discord":  _wire_discord,
@@ -814,6 +837,7 @@ _WIRES = {
     "voice":    _wire_voice,
     "irc":      _wire_irc,
     "mattermost": _wire_mattermost,
+    "teams": _wire_teams,
 }
 
 # Tables under [channels] that configure every channel rather than naming one.

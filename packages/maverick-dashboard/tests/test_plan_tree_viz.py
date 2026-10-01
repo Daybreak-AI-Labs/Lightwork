@@ -60,7 +60,8 @@ def test_plan_page_keeps_always_available_accessible_list(client, world_with_tre
     _, g1, *_ = world_with_tree
     body = client.get(f"/goals/{g1}/plan").text
     assert '<section aria-label="Task steps and relationships">' in body
-    assert 'id="plan-tree-list"' in body
+    assert 'id="plan-tree-list"' in body and "<noscript>" not in body
+    assert 'id="plan-tree" role="img" hidden' in body
     # The root task links from the fallback markup (by address, not a "#id").
     assert f'href="/chat/goal/{g1}"' in body
     fallback = body.split('id="plan-tree-list"')[1].split("</section>")[0]

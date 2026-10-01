@@ -19,7 +19,8 @@ def version_for(goal, contract, signoff, artifacts):
 def _snapshot(world, goal):
     from .app import _goal_artifacts, _goal_deliverable
 
-    contract, rendered = _goal_deliverable(goal, strict=True)
+    contract, rendered = ((None, None) if goal.status in ("blocked", "failed")
+                          else _goal_deliverable(goal, strict=True))
     signoff = world.signoff_for(goal.id) if contract and contract.get("gate") else None
     artifacts = _goal_artifacts(world, goal.id, strict=True)
     from maverick.task_handoffs import closure
@@ -50,10 +51,14 @@ def projection(request, world, goal_id: int) -> dict:
     except (LookupError, ValueError, TypeError) as exc:
         raise product_error(503, "result_unavailable", "The saved result and its release requirements could not be loaded. Retry to confirm the current version.", retryable=True) from exc
     can_download, download_note = _chat_answer_download_state(world, fresh)
+    from maverick.stop_reasons import stop_payload
+
+    stop = stop_payload(fresh.status, fresh.result)
     # Exceptional content grants never become permission to mutate the task.
     context.update(can_operate=not context["handoff_closed"] and has_permission(request, "operate") and
                    (caller_principal(request) or "") == (fresh.owner or ""),
                    conversation_context=context_for(request), voice_only=_voice_only_mode(),
+                   stop=stop,
                    can_download_chat_answer=can_download, chat_answer_download_note=download_note,
                    chat_answer_text=_chat_answer_text(fresh))
     return context

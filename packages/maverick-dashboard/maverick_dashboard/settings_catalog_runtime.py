@@ -301,6 +301,13 @@ def _providers(S) -> tuple:
           subgroup="AI service addresses", env=("MAVERICK_PER_TENANT_KEYS",), weaker=True,
           warning="Workspaces with their own key will send their work to the AI service "
                   "under that key instead of the shared one."),
+        S("providers", "test_receipt_max_age_days", "Trust a passing connection test for",
+          "How long a passing AI service connection test counts as \"Connected\". After this, "
+          "the service reads \"not tested yet\" again until you test it.", "number",
+          "Integrations", 30, "maverick.config", subgroup="AI service addresses", minimum=1,
+          maximum=365, integer=True, unit="days", env=("MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS",),
+          weaker="higher",
+          warning="A longer period means a key that stopped working can show as connected for longer."),
         S("provider_failover.policy", "failover_on", "Move to a backup model after",
           "The kinds of failure that send a request on to the backup models. With none "
           "ticked, every failure except a wrong key or a bad request does.", "multiselect",
@@ -778,6 +785,20 @@ def _tools(S, C) -> tuple:
           "finishes.", "number", "Performance", None, "maverick.latency_budget",
           subgroup="Reusing tool results", minimum=100, maximum=600000, integer=True,
           unit="milliseconds", none_text="Off", env=("MAVERICK_TOOL_LATENCY_BUDGET_MS",)),
+        S("tools", "exposure", "Tools described on each request",
+          "How much of the tool list each request to the AI describes up front. The short "
+          "list fits the agent's role, and a specialist pack sees its own tools; agents can "
+          "look up any other tool when they need it.", "select", "Performance", "core",
+          "maverick.config", subgroup="Reusing tool results",
+          choices=(("core", "A short list, and agents look up the rest (recommended)"),
+                   ("full", "Every tool on every request (costs far more per task)")),
+          env=("MAVERICK_TOOL_EXPOSURE",), aliases="tool catalog exposure context tokens"),
+        S("tools", "core_extra", "Tools always described",
+          "Tools to describe on every request as well as the short list, by tool name.",
+          "list", "Performance", [], "maverick.config", subgroup="Reusing tool results",
+          item_label="Tool name", item_hint="scan_finance_anomalies",
+          pattern=r"[a-z0-9_]{1,80}", item_error="a tool name such as read_file",
+          max_items=50),
         S("capabilities", "deferred_tools", "Hide rarely used connectors until needed",
           "Keep the long list of business-system connectors out of each request until an "
           "agent searches for one.", "toggle", "Performance", True, "maverick.agent",

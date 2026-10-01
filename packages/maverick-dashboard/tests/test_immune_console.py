@@ -153,7 +153,7 @@ def test_canaries_are_valid_cards_a_reviewer_can_approve(client, monkeypatch, tm
     for cid in (generated, manual):
         row = rows[cid]
         assert row["approval_card_status"] == "current", row
-        response = client.post(f"/api/v1/approvals/{cid}/approve", headers={
+        response = client.post(f"/api/v1/approvals/{cid}/approve", json={"acknowledged": True, "confirmation": "approve"}, headers={
             "X-Lightwork-Approval-Binding": row["approval_card"]["binding_sha256"]})
         assert response.status_code in (200, 204), response.text[:300]
     assert sum(s.missed for s in oversight.score(world).values()) == 2
@@ -188,6 +188,6 @@ def test_a_codebase_merge_approval_can_be_approved_in_the_dashboard(client):
         reset_goal_context(context)
     row = {r["id"]: r for r in client.get("/api/v1/approvals").json()["approvals"]}[aid]
     assert row["approval_card_status"] == "current"
-    response = client.post(f"/api/v1/approvals/{aid}/approve", headers={
+    response = client.post(f"/api/v1/approvals/{aid}/approve", json={"acknowledged": True, "confirmation": "approve"}, headers={
         "X-Lightwork-Approval-Binding": row["approval_card"]["binding_sha256"]})
     assert response.status_code in (200, 204), response.text[:300]

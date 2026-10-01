@@ -63,6 +63,10 @@ def audit_rows(monkeypatch):
     rows: list[dict] = []
 
     def capture(kind, **payload):
+        # The settings-change rows only: using the server token (as_token)
+        # also writes one rate-limited break-glass row per process.
+        if getattr(kind, "value", kind) == "break_glass_token_used":
+            return True
         rows.append({"kind": kind, **payload})
         return True
 
@@ -124,6 +128,7 @@ _TEXT = {
     "auth.saml.default_relay_state": "/goals",
     "auth.proxy.header": "X-Auth-User",
     "dashboard.public_url": "https://lightwork.example.com",
+    "dashboard.api_key_prefix": "acme_",  # pragma: allowlist secret - a sample prefix
     "kms.key_id": "arn:aws:kms:us-east-1:123:key/abc",
     "kms.region": "eu-west-1",
     "kms.address": "https://vault.example.com",
@@ -149,13 +154,20 @@ _LIST = {
     "a2a.tools": ["web_search"],
     "a2a.deny_tools": ["shell"],
     "residency.allowed_regions": ["EU"],
+    "auth.mfa.amr_values": ["mfa", "corp-push"],
+    "auth.mfa.acr_values": ["urn:example:mfa"],
+    "auth.mfa.saml_authn_contexts": ["urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken"],
+    # The saving request comes from loopback: the list must contain it.
+    "auth.ip_allowlist.cidrs": ["127.0.0.1/32", "10.0.0.0/8"],
+    "auth.ip_allowlist.workspace_cidrs": ["127.0.0.1/32", "10.0.0.0/8"],
 }
 _SECRETS = {
     "queue.redis_dsn": "rediss://:pw@queue.example.com:6380/0",  # pragma: allowlist secret
     "world_model.dsn": "postgres://lw:pw@db.example.com:5432/lightwork",  # pragma: allowlist secret
 }
 _THEME = {"bg": "#101020", "panel": "#181830", "text": "#e0e0f0", "accent": "#7aa2f7"}
-_NUMBERS = {"audit.unified.custody.max_retry_backoff_seconds": 7200}
+_NUMBERS = {"audit.unified.custody.max_retry_backoff_seconds": 7200,
+            "governed_records.pool_min_size": 2}  # minimum + 1 is its default
 # Rows whose kernel reader refuses them alone: saved together with these.
 _WITH = {
     "dashboard.require_auth": [{"id": "dashboard.invites", "value": True}],

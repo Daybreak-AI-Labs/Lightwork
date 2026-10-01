@@ -142,6 +142,7 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- rows only
         *_automation_rows(S),
         *_rights_rows(S),
         *_other_rows(S),
+        *_deadline_alert_rows(S),
         *_consent_limit_rows(S),
         *_data_use_limit_rows(S),
         *_publication_trust_rows(S),
@@ -770,6 +771,42 @@ def _automation_rows(S) -> tuple:
           "How long one worker keeps a job before another may take it over.", "number", _P,
           60, rr, subgroup=sched, minimum=1, maximum=3600, integer=True, unit="seconds"),
         *_drop_and_notice_rows(S),
+        *_public_rights_form_rows(S),
+    )
+
+
+def _public_rights_form_rows(S) -> tuple:
+    group = _sub("Privacy automation", "rights request form")
+    reader = "maverick.public_rights_form"
+    section = f"{_PA}.public_rights_form"
+    return (
+        S(section, "verification_ttl_hours", "Confirmation link works for",
+          "How long the email link that confirms a requester's address stays valid.",
+          "number", _P, 24, reader, subgroup=group, minimum=1, maximum=168, integer=True,
+          unit="hours", weaker="higher",
+          warning="A link that stays valid longer can be used by someone who finds it later."),
+        S(section, "status_ttl_days", "Progress link works for",
+          "How long the link a requester uses to follow their request stays valid.",
+          "number", _P, 90, reader, subgroup=group, minimum=1, maximum=730, integer=True,
+          unit="days", weaker="higher",
+          warning="A progress link that stays valid longer can be used by someone who finds it later."),
+        S(section, "requests_per_ip_per_hour", "Requests per connection per hour",
+          "How many submissions one internet address may make in an hour before it is asked "
+          "to wait.", "number", _P, 5, reader, subgroup=group, minimum=1, maximum=1000,
+          integer=True, weaker="higher",
+          warning="A higher limit lets one connection submit more, including automated abuse."),
+        S(section, "requests_per_email_per_day", "Requests per email address per day",
+          "How many submissions one email address may make in a day.", "number", _P, 3,
+          reader, subgroup=group, minimum=1, maximum=100, integer=True, weaker="higher",
+          warning="A higher limit lets one address be flooded with confirmation emails."),
+        S(section, "internal_target_days", "Target when the law sets no deadline",
+          "Used for laws that require an answer 'without delay' but fix no number of days "
+          "(for example Japan). Shown to the team as an internal target, never as a legal "
+          "deadline.", "number", _P, 30, reader, subgroup=group, minimum=1, maximum=365,
+          integer=True, unit="days"),
+        S(section, "max_message_chars", "Longest message a requester may write",
+          "The size of the free-text box on the public form.", "number", _P, 4000, reader,
+          subgroup=group, minimum=200, maximum=20000, integer=True, unit="characters"),
     )
 
 
@@ -1000,6 +1037,78 @@ def _other_rows(S) -> tuple:
           5 * _MINUTE, "maverick.safety.consent", subgroup="Approvals", minimum=1, maximum=60,
           integer=True, scale=_MINUTE, unit="minutes",
           env=("MAVERICK_CONSENT_DASHBOARD_TIMEOUT",)),
+        S("approval", "undo_grace_seconds", "Allow undo after a decision for",
+          "How long a person can undo an approve or reject on the Approvals page. "
+          "The agent waits this long before acting on the decision. 0 turns undo off "
+          "and lets the agent act at once.", "number", "Safety",
+          30, "maverick.safety.consent", subgroup="Approvals", minimum=0, maximum=3600,
+          integer=True, unit="seconds", weaker="higher",
+          warning="Approved actions will wait longer before they start.",
+          env=("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS",)),
+        S("approval", "require_acknowledgement", "Confirm high-risk approvals",
+          "Approving a high or critical risk request needs an explicit confirmation: a "
+          "ticked box for high risk, and typing APPROVE for critical risk. Turning this "
+          "off makes those approvals one click.", "toggle", "Safety",
+          True, "maverick.safety.consent", subgroup="Approvals", weaker=False,
+          warning="High-risk actions can be approved with a single click, without "
+                  "restating what they will do.",
+          env=("MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT",)),
+    )
+
+
+# --------------------------------------------------------- deadline alerts
+_DA = "deadline_alerts"
+_DA_SUB = "Deadline alerts"
+_DA_READER = "maverick.deadline_alerts"
+_LEAD_ITEM = r"[1-9][0-9]{0,2}"
+
+
+def _lead_row(S, table, key, label, help_text, default, unit):
+    return S(f"{_DA}.{table}", key, label, help_text, "list", _P, default, _DA_READER,
+             subgroup=_DA_SUB, item_label=f"{unit} before", item_hint="7",
+             item_error="a whole number of " + unit, pattern=_LEAD_ITEM, max_items=6,
+             empty_unset=True)
+
+
+def _deadline_alert_rows(S) -> tuple:
+    return (
+        S(_DA, "enabled", "Alert people about deadlines",
+          "Send a notification when a data request, incident notification clock, assessment "
+          "renewal, vendor contract renewal or approval is close to its deadline, due today or "
+          "missed. Uses the notification backends set up under Notifications. On by default "
+          "while the privacy register is on.",
+          "toggle", _P, True, _DA_READER, subgroup=_DA_SUB, weaker=False,
+          warning="Nobody will be told when a request, incident or renewal is due or missed."),
+        S(_DA, "mode", "How alerts are sent",
+          "One message per deadline is sent as soon as it is reached, or one summary per person "
+          "per check listing everything that needs attention.",
+          "select", _P, "immediate", _DA_READER, subgroup=_DA_SUB,
+          choices=(("immediate", "One message per deadline"), ("digest", "One summary per person"))),
+        S(_DA, "poll_seconds", "Check deadlines every",
+          "How often the workspace's deadlines are checked.",
+          "number", _P, 15, _DA_READER, subgroup=_DA_SUB, minimum=1, maximum=1440,
+          integer=True, scale=_MINUTE, unit="minutes"),
+        S(_DA, "quiet_hours", "Quiet hours",
+          "A daily window, in the server's local time, during which non-urgent alerts wait "
+          "(for example 22:00-07:00). Incident clock alerts always go through. Leave empty for none.",
+          "text", _P, "", _DA_READER, subgroup=_DA_SUB, max_length=11,
+          pattern=r"(?:[01][0-9]|2[0-3]):[0-5][0-9]-(?:[01][0-9]|2[0-3]):[0-5][0-9]"),
+        S(_DA, "owner", "Who is alerted when a record has no assignee",
+          "The name of the privacy or governance owner named in alerts for records nobody is "
+          "assigned to.",
+          "text", _P, "the privacy owner", _DA_READER, subgroup=_DA_SUB, max_length=200,
+          pattern=r"[A-Za-z0-9][A-Za-z0-9 .,'@()_/-]{0,199}"),
+        _lead_row(S, "lead_days", "dsar", "Data requests: warn this many days before",
+                  "Each number sends one warning that many days before a data request is due.",
+                  ["7", "2"], "days"),
+        _lead_row(S, "lead_days", "assessment", "Assessments: warn this many days before",
+                  "Warnings before an assessment renewal or review date.", ["30", "7"], "days"),
+        _lead_row(S, "lead_days", "vendor", "Vendor contracts: warn this many days before",
+                  "Warnings before a vendor contract renewal date.", ["30", "7"], "days"),
+        _lead_row(S, "lead_hours", "incident", "Incidents: warn this many hours before",
+                  "Warnings before the 72-hour breach notification clock runs out.", ["24", "4"], "hours"),
+        _lead_row(S, "lead_hours", "approval", "Approvals: warn this many hours before",
+                  "Warnings before an approval card expires unanswered.", ["24", "4"], "hours"),
     )
 
 

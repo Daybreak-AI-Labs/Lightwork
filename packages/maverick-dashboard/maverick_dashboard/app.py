@@ -171,19 +171,78 @@ if not any(getattr(item, "_lightwork_callback_redaction", False) for item in _ac
     _access_logger.addFilter(_CallbackAccessLogFilter())
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+def _templates_auto_reload() -> bool:
+    """Whether Jinja re-checks template files on every render.
+
+    Off outside development: with 120+ templates the per-render stat calls
+    and recompiles are pure overhead, and a deployment changes templates only
+    by upgrading the package (a restart). ``MAVERICK_DEBUG=1``, the
+    ``MAVERICK_TEMPLATE_AUTO_RELOAD`` environment variable or
+    ``[dashboard] template_auto_reload = true`` turn it on for template work.
+    """
+    if os.environ.get("MAVERICK_DEBUG", "").strip():
+        return True
+    from maverick.env_setting import env_or_config
+
+    raw = env_or_config("MAVERICK_TEMPLATE_AUTO_RELOAD", "dashboard",
+                        "template_auto_reload", "0") or "0"
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _template_bytecode_cache():
+    """Compiled-template cache under ``MAVERICK_HOME`` (fail-open: ``None``).
+
+    Jinja compiles each template on first use; the first page after a start
+    paid ~1.2 s compiling the shell, the page finder and the page itself. The
+    on-disk cache is keyed on the template source checksum, so an upgraded
+    template is recompiled, never served stale.
+    """
+    try:
+        from jinja2 import FileSystemBytecodeCache
+        from maverick.paths import maverick_home
+
+        cache_dir = maverick_home() / "cache" / "templates"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return FileSystemBytecodeCache(str(cache_dir))
+    except Exception:  # pragma: no cover - an unwritable home just compiles per process
+        log.debug("template bytecode cache unavailable", exc_info=True)
+        return None
+
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+# Starlette builds the Environment itself; both are plain Environment
+# attributes read at get_template time.
+templates.env.auto_reload = _templates_auto_reload()
+templates.env.bytecode_cache = _template_bytecode_cache()
 
 
-def _format_datetime(ts) -> str:
-    """Jinja filter: float epoch -> 'HH:MM:SS'."""
+def _format_datetime(ts, mode: str = "relative"):
+    """Jinja filter: epoch seconds -> a ``<time>`` the viewer reads in their zone.
+
+    The server text is the full date, time and zone (UTC), so a page without
+    JavaScript still says when; ``lightwork-ui.js`` (``mvFormatTimes``) then
+    rewrites it in the viewer's time zone -- relative with the absolute time on
+    hover (default), or absolute with ``mode="absolute"``. Never a bare
+    ``HH:MM:SS`` and never a raw epoch.
+    """
     import datetime as _dt
 
-    if ts is None:
+    from markupsafe import Markup, escape
+
+    if ts is None or ts == "":
         return "-"
     try:
-        return _dt.datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
+        stamp = float(ts)
+        when = _dt.datetime.fromtimestamp(stamp, tz=_dt.timezone.utc)
     except (TypeError, ValueError, OverflowError, OSError):
         return str(ts)
+    text = when.strftime("%d %b %Y, %H:%M UTC")
+    return Markup(
+        f'<time datetime="{when.isoformat()}" data-mv-time="{stamp:.3f}"'
+        f' data-mv-time-mode="{escape(mode)}">{text}</time>'
+    )
 
 
 templates.env.filters["datetime"] = _format_datetime
@@ -524,6 +583,22 @@ def _workspace_context(request: Request) -> dict:
 
 
 templates.context_processors.append(_workspace_context)
+
+
+def _docs_context(request: Request) -> dict:
+    """The Docs link in the top bar and the per-page Learn more link."""
+    from .docs_links import DOCS_HOME, learn_more_for
+
+    try:
+        path = request.url.path
+    except Exception:  # pragma: no cover -- shell rendering stays fail-soft
+        path = ""
+    return {"docs_home": DOCS_HOME, "docs_learn_more": learn_more_for(path)}
+
+
+templates.context_processors.append(_docs_context)
+templates.env.globals.setdefault("docs_home", "https://daybreak-ai-labs.github.io/Lightwork/")
+templates.env.globals.setdefault("docs_learn_more", None)
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
@@ -671,10 +746,62 @@ async def _start_privacy_notice_publication_scheduler() -> None:
         log.exception("privacy-notice publication scheduler not started")
 
 
+#: Templates every session renders early: the shell, the page finder and the
+#: landing pages. Compiling them (and their includes) here moves the Jinja
+#: compile cost off the first request.
+_WARM_TEMPLATES = ("base.html", "_navfinder.html", "index.html", "goals.html",
+                   "chat.html", "approvals.html")
+
+
+def _warm_dashboard_caches() -> dict[str, float]:
+    """Pay the dashboard's once-per-process first-hit costs now.
+
+    Measured cold on a 4 vCPU box: first ``GET /`` 1.25 s (Jinja compile),
+    first ``/openapi.json`` 4.2 s (schema build, which also materialises
+    every lazily included route), ``builtin_domains()`` 0.78 s (2,031 pack
+    files), ``_build_shield()`` 37 ms. Each step is independent and
+    fail-open; the returned timings are for logs and tests.
+    """
+    timings: dict[str, float] = {}
+
+    def _step(name: str, fn) -> None:
+        started = time.perf_counter()
+        try:
+            fn()
+        except Exception:  # pragma: no cover - warm-up is best-effort
+            log.debug("dashboard warm-up step %s skipped", name, exc_info=True)
+        timings[name] = time.perf_counter() - started
+
+    def _templates() -> None:
+        for name in _WARM_TEMPLATES:
+            try:
+                templates.env.get_template(name)
+            except Exception:  # pragma: no cover - a renamed page is not fatal
+                log.debug("template warm-up skipped %s", name, exc_info=True)
+
+    def _domains() -> None:
+        from maverick.domain import builtin_domains
+
+        builtin_domains()
+
+    def _shield() -> None:
+        from maverick.orchestrator import _build_shield
+
+        _build_shield()
+
+    _step("templates", _templates)
+    _step("openapi", app.openapi)
+    _step("domains", _domains)
+    _step("shield", _shield)
+    return timings
+
+
 def _warm_goal_runtime() -> None:
     """Pay the kernel's once-per-process start-up cost (hook discovery across
-    installed distributions, about 1.5 s cold) now, in the background, instead
-    of on the first chat turn after start. Fail-open: never blocks startup."""
+    installed distributions, about 1.5 s cold) and the dashboard's first-hit
+    costs (:func:`_warm_dashboard_caches`) now, in the background, instead of
+    on the first request or chat turn after start. Fail-open: never blocks
+    startup."""
 
     def _warm() -> None:
         try:
@@ -685,8 +812,27 @@ def _warm_goal_runtime() -> None:
             _asyncio.run(hooks.ensure_loaded())
         except Exception:  # pragma: no cover - warm-up is best-effort
             log.debug("goal runtime warm-up skipped", exc_info=True)
+        timings = _warm_dashboard_caches()
+        log.info("dashboard warm-up done: %s",
+                 ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
+
+
+def repair_default_workspace() -> None:
+    """Keep the deployment's default workspace admitted once named ones exist.
+
+    An install that created its first workspace before the default-tenant rule
+    has a roster without its own bound tenant, so every task was refused as an
+    unknown tenant. Registering it (active, audited) is a no-op otherwise and
+    never blocks startup.
+    """
+    try:
+        from maverick.tenant.registry import ensure_default_tenant_registered
+
+        ensure_default_tenant_registered(actor="dashboard-startup")
+    except Exception:  # pragma: no cover -- a repair must never block startup
+        log.exception("default workspace repair skipped")
 
 
 @asynccontextmanager
@@ -761,6 +907,7 @@ async def _lifespan(app: FastAPI):
             warn_if_untrusted_proxy_config()
         except Exception:  # pragma: no cover -- a warning must never block startup
             pass
+        await run_in_threadpool(repair_default_workspace)
         await _reclaim_orphans()
         await _install_queue_dispatcher()
         await _install_automation_scheduler()
@@ -813,6 +960,14 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("AI cost scheduler not started")
         try:
+            from maverick_dashboard.daily_digest_scheduler import (
+                start_daily_digest_scheduler,
+            )
+
+            await run_in_threadpool(start_daily_digest_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("daily summary scheduler not started")
+        try:
             from maverick_dashboard.identity_governance_scheduler import (
                 start_identity_governance_scheduler,
             )
@@ -826,6 +981,16 @@ async def _lifespan(app: FastAPI):
             await run_in_threadpool(start_data_use_scheduler)
         except Exception:  # pragma: no cover - never block startup
             log.exception("data-use checks not started")
+        try:
+            # Deadline alerts (requests, incidents, assessments, vendor contracts,
+            # approvals) and the webhook retry pump; stopped at shutdown.
+            from maverick_dashboard.deadline_alerts_scheduler import (
+                start_deadline_alerts_scheduler,
+            )
+
+            await run_in_threadpool(start_deadline_alerts_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("deadline alerts scheduler not started")
         try:
             # Profiling, the kernel activity monitor and the model proxy, each
             # only when its setting is on (All settings); stopped at shutdown.
@@ -1147,9 +1312,11 @@ app.include_router(task_handoffs_router)
 
 app.include_router(my_work_router)
 app.include_router(conversation_organization_router)
+from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
+app.include_router(first_outcome_router)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
 from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
@@ -1163,6 +1330,7 @@ from .store_catalogs import router as store_catalogs_router  # noqa: E402
 from .support_api import router as support_router  # noqa: E402
 from .system_checks_api import router as system_checks_router  # noqa: E402
 from .tax_actions_api import router as tax_actions_router  # noqa: E402
+from .teams_links_api import router as teams_links_router  # noqa: E402
 from .tools_ops_api import build_router as build_tools_ops_router  # noqa: E402
 from .voice_setup_api import VoiceSetup  # noqa: E402
 from .voice_setup_api import router as voice_setup_router  # noqa: E402
@@ -1176,6 +1344,7 @@ app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)
 app.include_router(tax_actions_router)
 app.include_router(channel_check_router)
+app.include_router(teams_links_router)
 app.include_router(page_assets_router)
 app.include_router(mcp_presets_router)
 app.include_router(store_catalogs_router)
@@ -1345,10 +1514,14 @@ from .governance_ops_api import router as _governance_ops_router  # noqa: E402
 from .immune_ops_api import router as _immune_ops_router  # noqa: E402
 from .privacy_ops_api import router as _privacy_ops_router  # noqa: E402
 from .security_ops_api import router as _security_ops_router  # noqa: E402
+from .webhooks_api import create_webhooks_page_router  # noqa: E402
+from .webhooks_api import router as _webhooks_router  # noqa: E402
 
 for _ops_router in (_audit_ops_router, _governance_ops_router, _immune_ops_router,
                     _privacy_ops_router, _security_ops_router):
     app.include_router(_ops_router)
+app.include_router(_webhooks_router)
+app.include_router(create_webhooks_page_router(templates))
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
@@ -1434,6 +1607,13 @@ app.state.public_consent_error_origin_resolver = lambda request: public_consent_
     request, _public_consent_dependencies
 )
 app.include_router(create_consent_public_router(_public_consent_dependencies))
+# The public rights-request form: JSON API under /api/v1/public/rights and
+# the hosted pages under /rights/. Fail-closed on its module gate.
+from .public_rights_api import pages as _public_rights_pages  # noqa: E402
+from .public_rights_api import router as _public_rights_router  # noqa: E402
+
+app.include_router(_public_rights_router)
+app.include_router(_public_rights_pages)
 from .consent_native_admin_api import (  # noqa: E402
     create_consent_native_public_metadata_router,
 )
@@ -1469,8 +1649,14 @@ app.include_router(create_ott_ctv_privacy_rights_router())
 # Admin pages (/settings + /users): their own router module -- the first
 # slice of decomposing this file by nav group. See maverick_dashboard.admin_pages.
 from .admin_pages import router as admin_pages_router  # noqa: E402
+from .me_api import api as me_api_router  # noqa: E402
+from .me_api import router as me_router  # noqa: E402
+from .sessions_page import router as sessions_router  # noqa: E402
 
 app.include_router(admin_pages_router)
+app.include_router(sessions_router)
+app.include_router(me_router)
+app.include_router(me_api_router)
 # Settings > All settings (/settings/all + its catalog save/reset API).
 from .privacy_notice_publication_targets_api import (  # noqa: E402
     router as privacy_notice_targets_router,
@@ -1518,7 +1704,12 @@ app.include_router(oidc_login_router)
 # Email invite links (/auth/invite/{token}): single-use onboarding links an
 # admin mints on /users. Self-gates on [dashboard] invites (default off), so
 # including it unconditionally is inert. See maverick_dashboard.invite_routes.
+from .api_keys_api import router as api_keys_router  # noqa: E402
 from .invite_routes import router as invite_router  # noqa: E402
+
+# Personal / service-account API keys: page + JSON routes. Self-gates on
+# [dashboard] api_keys (404 when off).
+app.include_router(api_keys_router)
 from .local_owner_routes import router as local_owner_router  # noqa: E402
 
 app.include_router(local_owner_router)
@@ -1819,6 +2010,11 @@ async def bound_public_governance_body(request: Request, call_next):
 
         maximum = configured_request_byte_limit() or _MAX_PUBLIC_CONSENT_BODY_BYTES
         detail = "public consent request body too large"
+    elif path.startswith("/api/v1/public/rights/"):
+        from .public_rights_api import MAX_BODY_BYTES as _rights_max
+
+        maximum = _rights_max
+        detail = "rights request body too large"
     elif path.startswith("/api/v1/external/third-party-collaboration/"):
         if request.method == "POST" and path.endswith("/evidence"):
             # Evidence files are not buffered here: the route authenticates the
@@ -2171,6 +2367,22 @@ def _configured_oidc_bearer_present(request: Request) -> bool:
         return False
 
 
+def _api_key_bearer_present(request: Request) -> bool:
+    """Whether this request presents a personal / service-account API key.
+
+    Like an OIDC bearer it is explicit, non-ambient authority: no Origin check
+    applies, and the global auth dependency verifies it (and 401s a bad,
+    expired, revoked or out-of-scope one) before any cookie identity could be
+    selected. Cheap shape check only -- no store read here.
+    """
+    try:
+        from . import auth as auth_boundary
+
+        return bool(auth_boundary._api_key_bearer(request))
+    except Exception:
+        return False
+
+
 @app.middleware("http")
 async def http_metrics(request: Request, call_next):
     """Count every request into the always-on runtime metrics registry.
@@ -2225,6 +2437,10 @@ async def bearer_auth(request: Request, call_next):
         # Pairing bootstrap authenticates its own opaque, expiring device proof.
         # Browser approval and device administration remain under normal auth.
         or request.url.path.startswith("/api/v1/devices/pairing/")
+        # The public rights-request form (pages + JSON). Anonymous by
+        # design; gated, origin-checked and token-addressed in its router.
+        or request.url.path.startswith("/rights/")
+        or request.url.path.startswith("/api/v1/public/rights/")
     ):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
@@ -2245,7 +2461,8 @@ async def bearer_auth(request: Request, call_next):
         from . import auth as auth_boundary
 
         if not auth_boundary.auth_genuinely_off():
-            explicit_oidc_bearer = _configured_oidc_bearer_present(request)
+            explicit_oidc_bearer = (_configured_oidc_bearer_present(request)
+                                    or _api_key_bearer_present(request))
             if (
                 not explicit_oidc_bearer
                 and not _is_same_origin(request)
@@ -2282,6 +2499,12 @@ async def bearer_auth(request: Request, call_next):
                 )
         except Exception:  # pragma: no cover - never break auth on a read error
             pass
+        # A personal / service-account API key is an explicit credential the
+        # local operator minted on this computer: let the global dependency
+        # verify it (it fails closed), so a script can reach Lightwork from
+        # another computer without a shared static token.
+        if _api_key_bearer_present(request):
+            return await call_next(request)
         # No token configured: serve loopback only. An operator who binds
         # --host 0.0.0.0 without setting a token must NOT silently expose
         # run history, spend, and the control surface unauthenticated to
@@ -2356,7 +2579,8 @@ async def bearer_auth(request: Request, call_next):
         # A non-static bearer may be an OIDC token in a mixed deployment. Let
         # the global dependency verify it; malformed/invalid credentials never
         # fall back to proxy or cookie identity there.
-        if header_token.startswith("lwdev1_") or _configured_oidc_bearer_present(request):
+        if (header_token.startswith("lwdev1_") or _configured_oidc_bearer_present(request)
+                or _api_key_bearer_present(request)):
             return await call_next(request)
         _auth_metrics.record_auth_failure("bad_token")
         return JSONResponse({"detail": "unauthorized"}, status_code=401)
@@ -2378,6 +2602,36 @@ async def bearer_auth(request: Request, call_next):
     # rule watches (a flood here means someone is probing the token).
     _auth_metrics.record_auth_failure("bad_token")
     return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
+
+_IP_ALLOWLIST_EXEMPT = frozenset({"/healthz", "/livez", "/readyz"})
+
+
+@app.middleware("http")
+async def ip_allowlist_gate(request: Request, call_next):
+    """Refuse every request from an address outside ``[auth.ip_allowlist]``.
+
+    Registered after ``bearer_auth`` so it wraps it and runs first: an address
+    that is not allowed never reaches sign-in. Only the liveness/readiness
+    probes pass (a load balancer's address is not a person's). The workspace
+    list is checked later, in the authentication dependency, once the
+    caller's workspace is known. Empty list: nothing changes."""
+    if request.url.path in _IP_ALLOWLIST_EXEMPT:
+        return await call_next(request)
+    from . import ip_allowlist
+
+    if await run_in_threadpool(ip_allowlist.installation_allows, request):
+        return await call_next(request)
+    _auth_metrics.record_auth_failure("ip_allowlist")
+    if _wants_html(request):
+        return templates.TemplateResponse(
+            request, "error.html",
+            {"status": 403, "title": "This address isn't allowed",
+             "message": ip_allowlist.BLOCKED_MESSAGE, "path": request.url.path,
+             "gate": "ip"},
+            status_code=403,
+        )
+    return JSONResponse({"detail": ip_allowlist.BLOCKED_MESSAGE}, status_code=403)
 
 
 def _wants_html(request: Request) -> bool:
@@ -2479,11 +2733,32 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         if status == 400 and str(exc.detail or "").startswith("Invalid audit day"):
             message = "That date isn’t valid. Pick a day from the calendar, then try again."
         gate = ""
+        reauthenticate = ""
         if status == 403 and isinstance(exc.detail, str):
             # Feature switches and named sign-in gates raise 403 with these
             # fixed server phrases; show the real reason instead of the
             # generic role message. The check itself is unchanged.
-            if "disabled in Settings" in exc.detail:
+            from .ip_allowlist import BLOCKED_MESSAGE as _ip_blocked
+            from .mfa_policy import MFA_MISSING_MESSAGE as _mfa_missing
+            from .step_up import StepUpRequired as _StepUpRequired
+
+            if isinstance(exc, _StepUpRequired):
+                gate = "step_up"
+                title = "Sign in again to continue"
+                message = exc.detail
+                reauthenticate = exc.reauthenticate
+            elif exc.detail == _mfa_missing:
+                gate = "step_up"
+                title = "Sign in again with your authenticator"
+                message = exc.detail
+                from .step_up import reauthenticate_url
+
+                reauthenticate = reauthenticate_url(request)
+            elif exc.detail == _ip_blocked:
+                gate = "ip"
+                title = "This address isn't allowed"
+                message = exc.detail
+            elif "disabled in Settings" in exc.detail:
                 gate = "off"
                 title = "This page is turned off"
                 message = (
@@ -2506,12 +2781,19 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 "message": message,
                 "path": request.url.path,
                 "gate": gate,
+                "reauthenticate": reauthenticate,
             },
             status_code=status,
             headers=exc.headers,
         )
+    body: dict = {"detail": exc.detail}
+    reauthenticate = getattr(exc, "reauthenticate", "")
+    if reauthenticate:
+        # Step-up: the API caller (a page script or a program) gets the plain
+        # sentence and the link that signs the person in again.
+        body["reauthenticate"] = reauthenticate
     return JSONResponse(
-        {"detail": exc.detail},
+        body,
         status_code=exc.status_code,
         headers=exc.headers,
     )
@@ -3284,18 +3566,55 @@ async def perf_page(request: Request) -> HTMLResponse:
 @app.get("/static/lightwork-task-views.js")
 def task_views_script():
     return FileResponse(Path(__file__).parent / "static" / "lightwork-task-views.js", media_type="application/javascript")
+@app.get("/nav/finder", response_class=HTMLResponse, include_in_schema=False)
+def nav_finder_items(request: Request) -> HTMLResponse:
+    """The page finder's destinations for the caller, as the ``<li>`` items of
+    its listbox (``_navfinder_items.html``), fetched on the finder's first open.
+
+    Every page embedded this list (81 KB, 125 groups) in its HTML; now it is
+    one small request per session, privately cacheable and revalidated by
+    ETag. It renders through the same context processor as the shell, so the
+    role, overrides and lockout policy are exactly the sidebar's.
+    """
+    rendered = templates.TemplateResponse(request, "_navfinder_items.html", {})
+    body = bytes(rendered.body)
+    etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+    headers = {
+        "Cache-Control": "private, max-age=60",
+        "ETag": etag,
+        "Vary": "Cookie, Authorization",
+    }
+    candidates = {t.strip().removeprefix("W/") for t in request.headers.get("if-none-match", "").split(",")}
+    if etag in candidates:
+        return HTMLResponse(status_code=304, headers=headers)
+    return HTMLResponse(body, headers=headers)
+
+
+#: Rows the Tasks page renders before "Show more" (the API's default page).
+GOALS_PAGE_SIZE = 50
 
 
 @app.get("/goals", response_class=HTMLResponse)
 def goals_page(request: Request) -> HTMLResponse:
-    goals = _world().list_goals(owner=goal_owner_filter(request), limit=200, order="desc")
+    """The Tasks page: the newest page of goals; the rest load on demand from
+    ``/api/v1/goals`` (rendering all 200 was 104 KB of rows per visit)."""
+    goals = _world().list_goals(
+        owner=goal_owner_filter(request), limit=GOALS_PAGE_SIZE + 1, order="desc",
+    )
+    has_more = len(goals) > GOALS_PAGE_SIZE
     from .preferences_api import _principal
     try:
         _principal(request)
         task_views_available = True
     except HTTPException:
         task_views_available = False
-    return templates.TemplateResponse(request, "goals.html", {"goals": goals, "task_views_available": task_views_available})
+    return templates.TemplateResponse(request, "goals.html", {
+        "goals": goals[:GOALS_PAGE_SIZE],
+        "task_views_available": task_views_available,
+        "page_size": GOALS_PAGE_SIZE,
+        "has_more": has_more,
+        "next_offset": GOALS_PAGE_SIZE if has_more else 0,
+    })
 
 
 @app.get("/projects", response_class=HTMLResponse)
@@ -3462,6 +3781,9 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     mine = set(persona_roles_for(caller_principal(request)))
     default_mine = mine if (not selected and role != "all") else None
     model = build_inbox(specs, runs_by_domain, selected, signoffs, mine=default_mine)
+    # ?role=all is the explicit request to browse the whole catalogue even
+    # before any result exists; the plain page shows a real empty state.
+    model["showing_all"] = role == "all"
     return templates.TemplateResponse(request, "deliverables.html", model)
 
 
@@ -3496,6 +3818,12 @@ async def workflow_readiness_page(request: Request) -> HTMLResponse:
                                       headers={"Cache-Control": "private, no-store"})
 
 
+@app.get("/workspaces", include_in_schema=False)
+def workspaces_alias() -> RedirectResponse:
+    """The product calls the tenant roster "Workspaces"; links use that name."""
+    return RedirectResponse("/tenants", status_code=303)
+
+
 @app.get("/tenants", response_class=HTMLResponse)
 async def tenants_page(request: Request) -> HTMLResponse:
     """Operator console: the provisioned-tenant roster (status / plan / quota).
@@ -3513,10 +3841,18 @@ async def tenants_page(request: Request) -> HTMLResponse:
         tenants = list_tenants()
     except Exception:  # pragma: no cover -- never 500 the console
         tenants = []
+    # Plans (Free / Pro / Enterprise) only mean something when platform billing
+    # collects for them; a self-hosted administrator never sees them otherwise.
+    try:
+        from maverick import billing_stripe
+
+        billing_on = bool(billing_stripe.enabled())
+    except Exception:  # pragma: no cover -- billing is optional
+        billing_on = False
     return templates.TemplateResponse(
         request,
         "tenants.html",
-        {"tenants": tenants, "is_admin": True},
+        {"tenants": tenants, "is_admin": True, "billing_on": billing_on},
     )
 
 
@@ -4030,9 +4366,16 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     labels = {a["value"]: a["label"] for a in assessments}
     for link in record.get("links") or []:
         link["label"] = labels.get(link.get("reference")) or link.get("reference")
+    from .webhooks_api import record_alerts
+
+    alerts: list[dict] = []
+    for c in record.get("contracts") or []:
+        alerts.extend(record_alerts("vendor_contract", f"{record.get('id')}:{c.get('kind')}"))
+    alerts.sort(key=lambda a: float(a.get("sent_at") or 0), reverse=True)
     return templates.TemplateResponse(
         request, "vendor_detail.html",
-        {"vendor": record, "questionnaire_types": questionnaire_types, "assessments": assessments})
+        {"vendor": record, "questionnaire_types": questionnaire_types, "assessments": assessments,
+         "record_alerts": alerts})
 
 
 @app.get("/privacy/dsar/{request_id}", response_class=HTMLResponse)
@@ -4051,11 +4394,16 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="no such DSAR")
     record = dict(record)
     now = _time.time()
-    record["days_left"] = int((float(record.get("due_at", now)) - now) // 86400)
-    record["overdue"] = (record["days_left"] < 0
-                         and record.get("status") in ("open", "awaiting_erasure"))
+    record.update(privacy_ops.dsar_clock(record, now=now))
     record["created_date"] = _date(record.get("created_at"))
-    record["due_date"] = _date(record.get("due_at"))
+    record["due_date"] = _date(record.get("effective_due_at"))
+    record["acknowledge_date"] = _date(record.get("acknowledge_by"))
+    record["extended_date"] = _date(record.get("extended_until"))
+    from maverick import rights_deadlines
+
+    regime = rights_deadlines.REGIMES.get(str(record.get("jurisdiction") or ""))
+    record["jurisdiction_name"] = regime["name"] if regime else ""
+    record["citation"] = regime["citation"] if regime else ""
     fulfillment = None
     fulfillment_enabled = dsar_fulfillment.enabled()
     if fulfillment_enabled:
@@ -4063,11 +4411,15 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
         if fulfillment and fulfillment.get("response"):
             fulfillment["response"]["expires_date"] = _date(
                 fulfillment["response"].get("expires_at"))
+    from .webhooks_api import record_alerts
+
     return templates.TemplateResponse(
         request, "dsar_detail.html",
         {"dsar": record, "fulfillment": fulfillment,
          "fulfillment_enabled": fulfillment_enabled,
-         "can_admin": has_permission(request, "admin")})
+         "record_alerts": record_alerts("dsar", record["id"]),
+         "can_admin": has_permission(request, "admin"),
+         "email_log": (record.get("public_form") or {}).get("emails") or []})
 
 
 @app.get("/consent", response_class=HTMLResponse)
@@ -4438,6 +4790,20 @@ async def privacy_rights_consumer_delivery_page(request: Request) -> HTMLRespons
             "can_admin": has_global_permission(request, "admin"),
             "can_audit": has_global_permission(request, "audit"),
         },
+    )
+
+
+@app.get("/privacy/rights-form", response_class=HTMLResponse)
+async def privacy_rights_form_page(request: Request) -> HTMLResponse:
+    """Administration of the public rights-request form: properties, the
+    public link and embed snippet, and the email templates."""
+    require_permission(request, "operate")
+    from maverick import public_rights_form
+
+    return templates.TemplateResponse(
+        request, "privacy_rights_form.html",
+        {"enabled": public_rights_form.enabled(),
+         "can_admin": has_global_permission(request, "admin")},
     )
 
 
@@ -5846,7 +6212,11 @@ def _provider_integration_inventory() -> list[dict]:
         row["readiness"] = provider_readiness(
             row["name"], configured=row["configured"]
         )
-    return rows
+    # The one truth (configured, last test, status words) overrides the raw
+    # store view so this page can never disagree with Settings, Chat or /start.
+    from maverick_dashboard.provider_readiness import apply_to_rows, workspace_readiness
+
+    return apply_to_rows(rows, workspace_readiness())
 
 
 @app.get("/providers", response_class=HTMLResponse)
@@ -5861,10 +6231,12 @@ async def providers_page(request: Request) -> HTMLResponse:
             detail="provider inventory is unavailable",
         ) from exc
     from .auth import has_global_permission
+    from .provider_readiness import workspace_readiness
     return templates.TemplateResponse(
         request,
         "providers.html",
         {"inventory": inventory, "rows": _health().snapshot(),
+         "workspace": workspace_readiness(),
          "is_admin": has_global_permission(request, "admin"),
          "tested": request.query_params.get("tested") == "1"},
     )
@@ -5895,6 +6267,24 @@ def safe_audit_day(day: str | None) -> str | None:
 
 # How many events one date-range view of the activity log reads at most.
 _AUDIT_RANGE_SCAN_LIMIT = 2_000_000
+
+
+def _global_audit_tail(request: Request, audit_log, n: int, day: str | None) -> list[dict]:
+    """The deployment-wide chain's tail for a global administrator, tagged
+    ``scope=deployment``; empty when the caller may not see it or when the
+    workspace chain is already the global one."""
+    try:
+        if not has_global_permission(request, "admin"):
+            return []
+        from maverick.audit import global_audit_log
+
+        global_log = global_audit_log()
+        if global_log is audit_log or getattr(global_log, "audit_dir", None) == getattr(audit_log, "audit_dir", None):
+            return []
+        rows = global_log.tail(n, day=day)
+    except Exception:  # pragma: no cover -- the workspace chain still renders
+        return []
+    return [{**e, "scope": "deployment"} for e in rows if isinstance(e, dict)]
 
 
 @app.get("/audit", response_class=HTMLResponse)
@@ -5979,6 +6369,15 @@ async def audit_page(request: Request) -> HTMLResponse:
                 params["day"] = scan_since
             params["before_event"] = result["next_cursor"]
             next_href = "/audit?" + urlencode(params)
+    # Deployment-wide records have a separate chain and are shown as a
+    # clearly bounded recent view, never silently mixed into this cursor.
+    deployment_events = []
+    if not (filter_error or since or until or before_event or kind or person or q):
+        deployment_events = await run_in_threadpool(
+            _global_audit_tail, request, audit_log, min(n, 200), day)
+    order = "oldest" if request.query_params.get("order") == "oldest" else "newest"
+    events = sorted(events, key=lambda event: float(event.get("ts") or 0),
+                    reverse=(order == "newest"))
     # Distinct kinds and people in the window (for the filter dropdowns),
     # gathered before filtering so every choice stays selectable.
     kinds = sorted(kind_set, key=_audit_plain.kind_label)
@@ -5997,6 +6396,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             "person": person,
             "people": [{"value": p, "label": _idfmt.humanize_principal(p).name} for p in people],
             "q": q,
+            "order": order,
             "can_admin": has_permission(request, "admin"),
             "can_global_admin": has_global_permission(request, "admin"),
             "audit_signing_enabled": bool(audit_log.signing_enabled),
@@ -6004,6 +6404,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             "audit_window_note": window_note,
             "audit_filter_error": filter_error,
             "audit_next_href": next_href,
+            "deployment_events": deployment_events,
             **_audit_plain.page_helpers(),
         },
     )
@@ -8044,14 +8445,18 @@ async def cache_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/store", response_class=HTMLResponse)
-async def store_page(request: Request, saved: str = "") -> HTMLResponse:
-    """Skill Store: browse + install catalog skills without a terminal."""
-    from maverick.catalog import load_catalog
+def store_page(request: Request, saved: str = "") -> HTMLResponse:
+    """Skill Store: browse + install catalog skills without a terminal.
+
+    A plain ``def`` (thread-pooled): the catalog index is fetched over the
+    network, which must never run on the event loop.
+    """
+    from maverick.catalog import PAGE_FETCH_TIMEOUT, load_catalog
 
     from .store_catalogs import current_catalogs
 
     try:
-        entries = [e.to_dict() for e in load_catalog("skills")]
+        entries = [e.to_dict() for e in load_catalog("skills", timeout=PAGE_FETCH_TIMEOUT)]
     except Exception:
         entries = []
     installed = {s.name for s in _load_skills()}
@@ -8130,7 +8535,7 @@ async def templates_market_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/channels", response_class=HTMLResponse)
-def channels_page(request: Request, saved: str = "") -> HTMLResponse:
+def channels_page(request: Request, saved: str = "", code: str = "") -> HTMLResponse:
     """Channels: manage the common ones (enable + credentials) from the form
     sections, plus a read-only, secret-redacted view of everything configured.
     Saved to the dashboard overlay, never config.toml; effective on the next
@@ -8208,8 +8613,15 @@ def channels_page(request: Request, saved: str = "") -> HTMLResponse:
         "test_failed": "The connection test failed. Check the details and try again.",
         "sent": "Test message sent. Check that it arrived.",
         "send_failed": "The test message could not be sent. Check the details and try again.",
+        "linked": "Teams account linked.",
+        "unlinked": "Teams link removed.",
+        "link_code": "One-time link code created. Give it to the person; it works once and "
+                     "expires in 15 minutes.",
+        "email_sent": "Test email sent. Check that it arrived.",
+        "email_failed": "The test email could not be sent. Check the mail settings "
+                        "(Settings > All settings > Integrations > Email alerts).",
     }.get(saved, "")
-    from . import plain_labels
+    from . import plain_labels, teams_links_api
     for channel in managed:
         for field in channel["fields"]:
             label, help_text, advanced = plain_labels.CHANNEL_FIELDS.get(
@@ -8225,10 +8637,22 @@ def channels_page(request: Request, saved: str = "") -> HTMLResponse:
             "channel_inventory": [row for row in channel_inventory if row["name"] not in managed_names],
             "managed": managed,
             "saved": saved_msg,
-            "saved_failed": saved in {"test_failed", "send_failed"},
+            "saved_failed": saved in {"test_failed", "send_failed", "email_failed"},
             "sendable": ["email", "sms", "slack"],
+            **teams_links_api.page_context(code),
+            "mail_configured": _mail_configured(),
         },
     )
+
+
+def _mail_configured() -> bool:
+    """Whether [notifications.email] can send (the Channels page "Test email")."""
+    try:
+        from maverick.notifications import email_configured
+
+        return email_configured()
+    except Exception:  # noqa: BLE001 -- the page must render either way
+        return False
 
 
 @app.post("/channels/save")
@@ -8248,6 +8672,11 @@ async def channels_save(request: Request) -> RedirectResponse:
         settings_store.set_channel(name, enabled, values)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from .audit_actions_api import _audit_event
+
+    # Only which fields changed is recorded, never their values.
+    _audit_event(request, "channel_saved", channel=name, enabled=enabled,
+                 fields=sorted(k for k, v in values.items() if str(v).strip()))
     return RedirectResponse("/channels?saved=save", status_code=303)
 
 
@@ -8262,6 +8691,9 @@ def channels_clear(request: Request, channel: str = Form(...)) -> RedirectRespon
         settings_store.clear_channel((channel or "").strip())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from .audit_actions_api import _audit_event
+
+    _audit_event(request, "channel_settings_removed", channel=(channel or "").strip())
     return RedirectResponse("/channels?saved=clear", status_code=303)
 
 
@@ -8280,10 +8712,13 @@ async def providers_api(request: Request) -> JSONResponse:
             status_code=503,
             detail="provider inventory is unavailable",
         ) from exc
+    from .provider_readiness import public_verdict, workspace_readiness
+
     return JSONResponse(
         {
             "providers": inventory,
             "health": _health().snapshot(),
+            "workspace": public_verdict(workspace_readiness()),
         }
     )
 
@@ -8908,8 +9343,9 @@ async def shield_calibration_api() -> JSONResponse:
 
 @app.get("/chat", response_class=HTMLResponse)
 def chat_page(request: Request) -> HTMLResponse:
-    from .onboarding_state import selected_model_routes_ready
+    from .onboarding_state import workspace_readiness
 
+    workspace = workspace_readiness()
     w = _world()
     recent = w.list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
     # "Use template" on /templates links here with ?title=&description= to
@@ -8925,7 +9361,10 @@ def chat_page(request: Request) -> HTMLResponse:
             "prefill_title": prefill_title,
             "prefill_description": prefill_description,
             "submission_key": secrets.token_urlsafe(24),
-            "model_route_ready": selected_model_routes_ready(),
+            # One truth: a missing, blocked or failed AI service disables the
+            # composer; a saved-but-untested key still lets work start.
+            "model_route_ready": workspace["verdict"] != "not_ready",
+            "workspace": workspace,
             "director_profiles": _director_choices(),
         },
     )
@@ -9066,10 +9505,25 @@ def _submission_conversation(w, receipt) -> int | None:
 # bare root renders it too; the overview/stats view lives at /overview. This is
 # a distinct handler rather than a second decorator on chat_page so the route
 # name stays unique (duplicate names collide as OpenAPI operationIds).
+def _owner_setup_first(request: Request) -> bool:
+    """A fresh install opens on owner creation before anything else, unless the
+    person chose Skip for now (a cookie the /start page sets)."""
+    if request.query_params.get("owner") == "later" or request.cookies.get("mvk_owner_later"):
+        return False
+    try:
+        from .local_owner import available as local_owner_available
+
+        return bool(local_owner_available(request))
+    except Exception:  # pragma: no cover -- never block the home page on this
+        return False
+
+
 @app.get("/", response_class=HTMLResponse, response_model=None)
 async def home(request: Request) -> HTMLResponse | RedirectResponse:
     from .onboarding_state import selected_model_routes_ready
 
+    if _owner_setup_first(request):
+        return RedirectResponse("/auth/local-owner", status_code=303)
     if not await run_in_threadpool(selected_model_routes_ready):
         return RedirectResponse("/start", status_code=303)
     if caller_principal(request):
@@ -10364,6 +10818,8 @@ def _require_chat_answer_download(w, goal) -> None:
     """Apply the persisted deliverable release policy to a saved-answer export."""
     from .api import _goal_gate
 
+    if goal.status in ("blocked", "failed"):
+        raise HTTPException(status_code=409, detail="this task stopped before producing an answer to download")
     if not goal.result:
         raise HTTPException(status_code=409, detail="this task has no answer to download yet")
     gate = _goal_gate(goal.domain)
@@ -10378,6 +10834,11 @@ def _require_chat_answer_download(w, goal) -> None:
 
 def _chat_answer_text(goal) -> str:
     """Export the same structured cells the person actually reviewed."""
+    if goal.status in ("blocked", "failed"):
+        from maverick.stop_reasons import stop_payload
+
+        stop = stop_payload(goal.status, goal.result)
+        return f"{stop['message']}\n\n{stop['action']}" if stop else ""
     _, rendered = _goal_deliverable(goal)
     if rendered is None or rendered.table is None:
         return goal.result or ""
@@ -10396,6 +10857,8 @@ def _chat_answer_text(goal) -> str:
 def _historical_chat_answer_text(w, goal, turn) -> str:
     from .api import _goal_gate
 
+    if goal.status in ("blocked", "failed"):
+        raise HTTPException(status_code=409, detail="this task stopped before producing an answer to download")
     if not turn.content:
         raise HTTPException(status_code=409, detail="this message has no answer to download")
     if _goal_gate(goal.domain) is None:
@@ -10415,6 +10878,8 @@ def _chat_answer_download_state(w, goal) -> tuple[bool, str]:
     except HTTPException as exc:
         if exc.status_code == 403:
             return False, "A reviewer must approve this answer before it can be downloaded."
+        if goal.status in ("blocked", "failed"):
+            return False, "This task stopped before producing an answer to download."
         if not goal.result:
             return False, "An answer will be available to download after Lightwork produces it."
         return False, "Download is unavailable until this answer's review requirements can be checked."
@@ -10462,7 +10927,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     can_download_answer, download_note = _chat_answer_download_state(w, g)
-    contract, rendered = _goal_deliverable(g)
+    contract, rendered = (None, None) if g.status in ("blocked", "failed") else _goal_deliverable(g)
     # The current sign-off, only for a gated deliverable (the panel that lets a
     # human certify it and hand it off). None elsewhere -> no panel.
     signoff = None
@@ -10494,8 +10959,17 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         spend_ceiling = configured_max_dollars()
     except Exception:  # pragma: no cover -- never 500 the goal page
         spend_ceiling = None
+    # Why the run stopped, in plain words. The raw kernel text is shown only
+    # to administrators, under a disclosure, never in the card itself.
+    from maverick.stop_reasons import stop_payload
+
+    show_technical = has_global_permission(request, "admin")
+    stop = stop_payload(g.status, g.result, include_technical=show_technical)
 
     thread_turns = _thread_turns(w, g) if can_access_goal_principal(caller_principal(request), g) else []
+    from .chat_stop_visibility import stop_notes
+
+    thread_stop_notes = stop_notes(w, thread_turns)
     thread_questions = {}
     for earlier_id in {turn.goal_id for turn in thread_turns}:
         earlier = w.get_goal(earlier_id)
@@ -10522,6 +10996,8 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "answered_questions": [q for q in w.all_questions(goal_id) if q.answer is not None],
             "can_operate": not handed_off and has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
             "handoff_closed": handed_off,
+            "stop": stop,
+            "show_technical_details": show_technical,
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),
             "spend_ceiling": spend_ceiling,
@@ -10532,6 +11008,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "conversation_context": _conversation_context(request),
             "latest_chat_goal_id": ChatThreads(w).latest(g.id),
             "thread_turns": thread_turns,
+            "thread_stop_notes": thread_stop_notes,
             "thread_downloads": _chat_history_download_states(request, w, thread_turns),
             "thread_questions": thread_questions,
             "threads": _chat_threads(request, w, active_root=root_id),
@@ -10925,6 +11402,18 @@ def _render_tree_html(node: dict) -> str:
     return f"<ul>{_render(node)}</ul>"
 
 
+@app.get("/goals/{goal_id}", response_class=HTMLResponse, response_model=None)
+def goal_page(request: Request, goal_id: int) -> RedirectResponse:
+    """The task's own address: the Result tab (the readable chat view). The
+    other tabs live at /goals/{id}/trajectory, /plan and /errors."""
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    return RedirectResponse(f"/chat/goal/{goal_id}", status_code=302)
+
+
 @app.get("/goals/{goal_id}/plan", response_class=HTMLResponse)
 def plan_tree_page(request: Request, goal_id: int) -> HTMLResponse:
     """HTML plan-tree visualization."""
@@ -11084,11 +11573,14 @@ def api_goal_events_legacy(
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
+    from maverick.stop_reasons import stop_payload
+
     since = replay_cursor(since)
     events, has_more = event_page(w, goal_id, since, limit)
     return {
         "status": g.status,
         "result": g.result or "",
+        "stop": stop_payload(g.status, g.result),
         "next_id": events[-1].id if events else since,
         "has_more": has_more,
         "terminal": g.status in TERMINAL_RUN_STATUSES and not has_more,
@@ -11847,12 +12339,15 @@ async def workflow_builder_page(
     )
 
 
-@app.get("/start", response_class=HTMLResponse)
-def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLResponse:
+@app.get("/start", response_class=HTMLResponse, response_model=None)
+def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLResponse | RedirectResponse:
     """First-run guide: a live checklist from zero to a running AI workforce.
     Each step reflects real workspace state (provider configured? a workflow or
     agent built? anything run or automated?) so it self-completes as you go."""
     from maverick.config import get_features
+
+    if _owner_setup_first(request):
+        return RedirectResponse("/auth/local-owner", status_code=303)
 
     from .guided_outcome import for_request
     from .onboarding_state import build
@@ -11868,13 +12363,18 @@ def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLRes
     )
     state["guided"] = guided
     state["employee_activation_enabled"] = get_features().get("employee_activation") is True
+    from .guided_outcome import first_outcomes_for
+    state["first_outcomes"] = first_outcomes_for(request)
     from .local_owner import available as local_owner_available
     state["local_owner_setup_available"] = local_owner_available(request)
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "get_started.html",
         state,
     )
+    if request.query_params.get("owner") == "later":
+        response.set_cookie("mvk_owner_later", "1", max_age=7 * 24 * 3600, httponly=True, samesite="lax")
+    return response
 
 
 @app.get("/workflows", response_class=HTMLResponse)
@@ -12406,9 +12906,12 @@ def _health_should_redact() -> bool:
 @app.get("/healthz")
 async def healthz() -> JSONResponse:
     """Deep health: DB writable, LLM provider key present, runner alive."""
+    from .provider_readiness import public_verdict, workspace_readiness
+
     response = await _health_response(
         world_provider=_world,
         provider_key_set=_any_provider_key_set,
+        provider_verdict=lambda: public_verdict(workspace_readiness()),
     )
     # Fixed, non-secret identity for the native bounded loopback handshake.
     # A provider-missing 503 still identifies a genuine onboarding dashboard.
@@ -12518,6 +13021,12 @@ def main() -> None:
 # This must remain after every route declaration so lazy included-router
 # contexts and request-scope route objects receive the same final identity.
 _stabilize_effective_route_names(app)
+
+# Outermost (added last): every middleware and handler below it shares one
+# per-request memo for configuration-derived authorization predicates.
+from ._request_memo import RequestMemoMiddleware  # noqa: E402
+
+app.add_middleware(RequestMemoMiddleware)
 
 
 if __name__ == "__main__":

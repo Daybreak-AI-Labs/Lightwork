@@ -21,6 +21,21 @@ def _route_state(configured: bool) -> dict:
     }
 
 
+def _verdict(verdict: str) -> dict:
+    """A workspace verdict as provider_readiness.workspace_readiness returns it."""
+    labels = {"ready": "Connected", "needs_test": "Key saved, not tested yet", "not_ready": "Not connected"}
+    action = None if verdict == "ready" else {"label": "Add an AI provider key", "href": "/settings#settings-integrations"}
+    return {
+        "providers": [], "verdict": verdict, "verdict_label": labels[verdict],
+        "badge_class": "ok" if verdict == "ready" else "warn",
+        "reason": {"ready": "OpenAI connected: the last connection test worked.",
+                   "needs_test": "OpenAI: key saved, not tested yet.",
+                   "not_ready": "Anthropic (Claude) is not set up, and your models use it."}[verdict],
+        "next_action": action, "summary": "1 set up · 1 connected" if verdict == "ready" else "0 set up · 0 connected",
+        "configured_count": 1 if verdict == "ready" else 0, "connected_count": 1 if verdict == "ready" else 0, "total": 14,
+    }
+
+
 def _client():
     from maverick_dashboard.app import app
     return TestClient(app, headers={"Origin": "http://testserver"})
@@ -42,14 +57,12 @@ def test_fresh_workspace_nothing_done(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import onboarding_state
 
-    monkeypatch.setattr(
-        onboarding_state,
-        "selected_model_route_state",
-        lambda: _route_state(False),
-    )
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", lambda: _verdict("not_ready"))
     t = _client().get("/start").text
     assert "Connect your AI service" in t and "Choose a workflow or agent" in t
     assert "0 of 4 done" in t and 'role="progressbar"' in t
+    assert "Anthropic (Claude) is not set up, and your models use it." in t
+    assert 'href="/settings#settings-integrations">Add an AI provider key</a>' in t
     assert "Installation checks" in t
     # Fixes are buttons to the page that fixes them, never terminal commands
     # (those stay inside the collapsed technical details for administrators).
@@ -63,13 +76,22 @@ def test_checklist_reflects_progress(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import onboarding_state
 
-    monkeypatch.setattr(
-        onboarding_state,
-        "selected_model_route_state",
-        lambda: _route_state(True),
-    )
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", lambda: _verdict("ready"))
     t = _client().get("/start").text
     assert "1 of 4 done" in t and "gs__step--done" in t
+
+
+def test_saved_but_untested_key_does_not_complete_step_one(monkeypatch, tmp_path):
+    """Step 1 completes only on a passing connection test; a saved key that
+    was never tested (or whose test failed) must not count as done."""
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import onboarding_state
+
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", lambda: _verdict("needs_test"))
+    t = _client().get("/start").text
+    assert "0 of 4 done" in t and 'class="gs__step gs__step--done"' not in t
+    assert "OpenAI: key saved, not tested yet." in t
+    assert "Setup complete" not in t
 
 
 def test_get_started_reachable(monkeypatch, tmp_path):
@@ -113,11 +135,7 @@ def test_runtime_completion_is_gated_separately_from_assurance(monkeypatch):
         def signoff_for(goal_id):
             return {"decision":"approved", "decided_by":"user:reviewer", "created_at":1}
 
-    monkeypatch.setattr(
-        onboarding_state,
-        "selected_model_route_state",
-        lambda: _route_state(True),
-    )
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", lambda: _verdict("ready"))
     monkeypatch.setattr(onboarding_state, "_has_user_template", lambda: True)
     monkeypatch.setattr(onboarding_state, "_has_user_agent", lambda: False)
     monkeypatch.setattr(onboarding_state, "_has_automation", lambda: False)
@@ -150,7 +168,7 @@ def test_unconfigured_root_enters_setup_and_chat_action_is_disabled(
     from maverick_dashboard import app as dashboard
     from maverick_dashboard import onboarding_state
 
-    monkeypatch.setattr(onboarding_state, "selected_model_routes_ready", lambda: False)
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", lambda: _verdict("not_ready"))
     dashboard._world_cache.clear()
     client = _client()
 
@@ -164,8 +182,12 @@ def test_unconfigured_root_enters_setup_and_chat_action_is_disabled(
     assert '<fieldset class="composer__controls" disabled>' in direct_chat.text
     from test_support.element_text import element_texts
 
-    setup_links = element_texts(direct_chat.text, "a", {"href": "/start"})
-    assert setup_links.count("Continue setup") == 1
+    # Both the setup card and the disabled composer explain the blocking route;
+    # the card offers exactly one concrete action to fix it.
+    assert direct_chat.text.count("Anthropic (Claude) is not set up, and your models use it.") == 2
+    provider_links = element_texts(direct_chat.text, "a", {"href": "/settings#settings-integrations"})
+    assert provider_links.count("Add an AI provider key") == 1
+    assert 'id="composer-readiness"' in direct_chat.text
 
 
 def test_unrelated_codex_login_does_not_complete_anthropic_route(
@@ -204,12 +226,7 @@ def test_viewer_redirected_from_root_can_read_setup_without_mutation_links(
 
     rbac.set_role("user:first-reader", "viewer")
     monkeypatch.setattr(auth, "caller_principal", lambda _request: "user:first-reader")
-    monkeypatch.setattr(onboarding_state, "selected_model_routes_ready", lambda: False)
-    monkeypatch.setattr(
-        onboarding_state,
-        "selected_model_route_state",
-        lambda: _route_state(False),
-    )
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", lambda: _verdict("not_ready"))
     dashboard._world_cache.clear()
     client = _client()
 

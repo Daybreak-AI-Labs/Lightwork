@@ -485,6 +485,45 @@ def test_rls_covers_tables_added_after_the_v10_tenant_migration():
     assert set(postgres._TENANT_TABLES).issubset(set(postgres._RLS_TABLES))
 
 
+def test_rls_covers_the_workspace_scoped_webhook_and_alert_tables():
+    # v42's webhook_subscriptions / webhook_deliveries / deadline_alerts carry
+    # the active tenant id in a column called ``workspace``; they are
+    # RLS-scoped on that column with the same fail-closed policy.
+    for table in ("webhook_subscriptions", "webhook_deliveries", "deadline_alerts"):
+        assert table in postgres._RLS_TABLES
+        assert table not in postgres._TENANT_TABLES
+        sql = PostgresWorldModel._rls_policy_sql(table).lower()
+        assert f"policy mvk_tenant_isolation on {table}" in sql
+        assert "workspace = nullif(current_setting('maverick.tenant', true), '')" in sql
+        assert "tenant_id" not in sql
+        assert sql.count("nullif(current_setting('maverick.tenant', true), '')") == 2
+    # Every other RLS table still keys on tenant_id.
+    assert "tenant_id = nullif" in PostgresWorldModel._rls_policy_sql("approvals")
+
+
+def test_rls_policy_verification_reads_the_table_specific_column(monkeypatch):
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    rows = iter([
+        (True, True),
+        ("(workspace = NULLIF(current_setting('maverick.tenant', true), ''))",
+         "(workspace = NULLIF(current_setting('maverick.tenant', true), ''))"),
+    ])
+
+    class _Cur:
+        def execute(self, *_a, **_k):
+            pass
+
+        def fetchone(self):
+            return next(rows)
+
+    @contextmanager
+    def tx():
+        yield _Cur()
+
+    monkeypatch.setattr(world, "_tx", tx)
+    assert world._rls_policy_is_active("webhook_deliveries") is True
+
+
 # --- #51/#57: enterprise auto-on for strict isolation + RLS ----------------
 
 @pytest.fixture
@@ -768,3 +807,40 @@ class TestReconnectOnBrokenConnection:
             ("SELECT set_config('maverick.tenant', %s, true)", ("acme",)),
             ("SELECT 1", None),
         ]
+
+
+def test_create_approval_notifies_with_the_committing_world(monkeypatch):
+    # The kernel notifier takes the world that committed the row first
+    # (``_notify_approval_created(world, approval_id, provenance)``); the
+    # Postgres backend must call it with the same shape, or every live
+    # create_approval dies with a TypeError after the row is durable.
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    rows = iter([None, (42,)])  # no context goal, then RETURNING id
+
+    class _Cur(RecordingCursor):
+        def fetchone(self):
+            return next(rows)
+
+    cur = _Cur()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    seen: list[tuple[int, str | None, object]] = []
+
+    def fake_created(approval_id, *, provenance=None, world=None):
+        seen.append((approval_id, provenance, world))
+
+    import maverick.approval_notify as approval_notify
+
+    monkeypatch.setattr(approval_notify, "approval_created", fake_created)
+
+    assert world.create_approval("payment", detail="support", provenance="slack") == 42
+    assert seen == [(42, "slack", world)]
+    insert_sql, insert_params = cur.calls[-1]
+    assert insert_sql.startswith("INSERT INTO approvals(")
+    assert insert_params[4] == "slack"

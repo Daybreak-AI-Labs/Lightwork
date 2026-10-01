@@ -104,11 +104,39 @@ def check_credentials(name: str, cfg: dict[str, Any]) -> tuple[bool, str]:
             smtp = _smtp(cfg)
             smtp.quit()
             ok = True
+        elif name == "teams":
+            return _teams_token_check(cfg)
         else:
             return False, "this chat app has no connection test"
     except Exception as exc:  # noqa: BLE001 -- summarized, never echoed
         return False, f"the connection test could not reach the service ({type(exc).__name__})"
     return ok, ("the service accepted the saved details" if ok else "the service did not accept the saved details")
+
+
+def _teams_token_check(cfg: dict[str, Any]) -> tuple[bool, str]:
+    """Ask Microsoft's sign-in service for a Bot Framework token with the saved
+    app id and secret (the same call the channel makes before every reply)."""
+    from maverick_channels.teams import (
+        TOKEN_SCOPE,
+        channel_config,
+        explain_token_failure,
+        token_endpoint,
+    )
+
+    settings = channel_config(cfg)
+    if not settings["app_id"] or not settings["app_password"]:
+        return False, "enter the app ID and client secret first"
+    response = _post(token_endpoint(settings["tenant_id"] or None),
+                     headers={"Content-Type": "application/x-www-form-urlencoded"},
+                     data={"grant_type": "client_credentials", "client_id": settings["app_id"],
+                           "client_secret": settings["app_password"], "scope": TOKEN_SCOPE})
+    try:
+        body = response.json() or {}
+    except ValueError:
+        body = {}
+    if response.status_code == 200 and body.get("access_token"):
+        return True, "Microsoft issued a Bot Framework token for the saved app id and secret"
+    return False, explain_token_failure(response.status_code, body)
 
 
 def send_test(name: str, cfg: dict[str, Any], to: str) -> tuple[bool, str]:
@@ -160,19 +188,40 @@ def _back(name: str, result: str) -> RedirectResponse:
                             status_code=303)
 
 
-@router.post("/channels/test")
-async def channels_test(request: Request, channel: str = Form(...)) -> RedirectResponse:
+def _wants_json(request: Request) -> bool:
+    return "application/json" in (request.headers.get("accept") or "")
+
+
+def _answer(request: Request, name: str, cfg: dict[str, Any], *, ok: bool, detail: str,
+            result: str, sentence: str):
+    """Redirect for a plain form post; a JSON answer (with the re-rendered
+    status block) when the page asked for one, so the result shows inline."""
+    if not _wants_json(request):
+        return _back(name, result)
+    from .app import templates
+    from .integration_readiness import channel_readiness
+
+    readiness = channel_readiness(name, cfg)
+    module = templates.get_template("_integration_readiness.html").module
+    return {"ok": ok, "detail": detail, "status": "Working" if ok else "Test failed",
+            "message": sentence, "readiness_html": str(module.integration_readiness(readiness))}
+
+
+@router.post("/channels/test", response_model=None)
+async def channels_test(request: Request, channel: str = Form(...)):
     _admin(request)
     from .integration_readiness import record
     name = channel.strip()
     cfg = await run_in_threadpool(_channel_config, name)
     ok, detail = await run_in_threadpool(check_credentials, name, cfg)
     record("channel", name, cfg, verified=ok, detail=detail, evidence={"kind": "credential_check"})
-    return _back(name, "tested" if ok else "test_failed")
+    return _answer(request, name, cfg, ok=ok, detail=detail, result="tested" if ok else "test_failed",
+                   sentence="Connection test passed: the service accepted the saved details." if ok
+                   else "The connection test failed. Check the details, save, and test again.")
 
 
-@router.post("/channels/send-test")
-async def channels_send_test(request: Request, channel: str = Form(...), to: str = Form("")) -> RedirectResponse:
+@router.post("/channels/send-test", response_model=None)
+async def channels_send_test(request: Request, channel: str = Form(...), to: str = Form("")):
     _admin(request)
     from .integration_readiness import record
     name = channel.strip()
@@ -183,4 +232,6 @@ async def channels_send_test(request: Request, channel: str = Form(...), to: str
     ok, detail = await run_in_threadpool(send_test, name, cfg, destination)
     record("channel", name, cfg, verified=ok, detail=detail,
            evidence={"kind": "test_message", "external_delivery_verified": False})
-    return _back(name, "sent" if ok else "send_failed")
+    return _answer(request, name, cfg, ok=ok, detail=detail, result="sent" if ok else "send_failed",
+                   sentence="Test message sent. Check that it arrived." if ok
+                   else "The test message could not be sent. Check the details and try again.")

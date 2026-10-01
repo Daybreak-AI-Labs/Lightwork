@@ -178,5 +178,5 @@ def test_main_dashboard_mounts_page_api_visibility_tips_and_parent_links(
     client = TestClient(app, headers={"Origin": "http://testserver"})
     response = client.get("/consent/scan-notice-proposals")
     assert response.status_code == 200, response.text
-    assert "Scan Disclosure Proposals" in response.text
+    assert "Disclosure Suggestions" in response.text
     assert 'data-module-gate="consent_preferences.scanner.notice_proposals"' in response.text

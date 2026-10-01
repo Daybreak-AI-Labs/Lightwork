@@ -126,6 +126,7 @@ class _ShellLinks(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.in_sidebar = 0
+        self.in_quick = 0  # the "Most used" shortcuts repeat links from the groups
         self.in_finder = 0
         self.sidebar_hrefs: list[str] = []
         self.finder_hrefs: list[str] = []
@@ -136,10 +137,12 @@ class _ShellLinks(HTMLParser):
             self.in_sidebar += 1
         if tag == "dialog" and values.get("id") == "navfinder-dialog":
             self.in_finder += 1
+        if tag == "ul" and "navquick-list" in (values.get("class") or "").split():
+            self.in_quick += 1
         if tag != "a" or not values.get("href"):
             return
         classes = set((values.get("class") or "").split())
-        if self.in_sidebar and "navquick" not in classes:
+        if self.in_sidebar and not self.in_quick and "navquick" not in classes:
             self.sidebar_hrefs.append(values["href"])
         if self.in_finder and "data-navfinder-target" in values:
             self.finder_hrefs.append(values["href"])
@@ -147,6 +150,8 @@ class _ShellLinks(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag == "aside" and self.in_sidebar:
             self.in_sidebar -= 1
+        if tag == "ul" and self.in_quick:
+            self.in_quick -= 1
         if tag == "dialog" and self.in_finder:
             self.in_finder -= 1
 
@@ -170,10 +175,15 @@ def test_rendered_finder_indexes_folded_pages_and_sidebar_does_not(monkeypatch, 
     monkeypatch.setattr(employee_companion_api, "navigation_available", lambda request, *, admin: False)
     unavailable = {"/companion", "/companion/admin"}
 
-    response = _client(monkeypatch, tmp_path).get("/overview")
+    client = _client(monkeypatch, tmp_path)
+    response = client.get("/overview")
     assert response.status_code == 200
     markup = _ShellLinks()
     markup.feed(response.text)
+    assert markup.finder_hrefs == []  # fetched on first open, not embedded
+    items = client.get("/nav/finder")
+    assert items.status_code == 200
+    markup.feed('<dialog id="navfinder-dialog">' + items.text + "</dialog>")
 
     registered = set(FOLDED) | set(NEWLY_GOVERNED)
     offered = {p for p in registered if ui_visibility.customer_ready(ui_visibility.page_for(p))}

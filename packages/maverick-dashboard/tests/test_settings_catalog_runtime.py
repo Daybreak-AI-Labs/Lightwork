@@ -126,6 +126,7 @@ _LISTS = {
     "egress.allow": ["api.example.com"],
     "plugins.ca_revoked": ["0123456789abcdef"],
     "attachments.extra_mime_prefixes": ["application/vnd.visio"],
+    "tools.core_extra": ["scan_finance_anomalies"],
     "containment.deny_tools": ["github_issues"],
     "search.ladder": ["anthropic:claude-opus-4-8:0.3"],
     "mcp.allowed_origins": ["https://gateway.example.com"],

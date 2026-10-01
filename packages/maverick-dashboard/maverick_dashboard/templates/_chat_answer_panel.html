@@ -4,7 +4,8 @@
          data-status="{{ goal.status }}" data-structured="{{ '1' if rendered and rendered.structured else '0' }}"
          data-operate="{{ '1' if can_operate else '0' }}">
     {% if handoff_closed %}<p id="handoff-closed-notice" role="status">{{ ui('Responsibility was accepted by {actor}. This original conversation is closed to further execution and its history remains private.', actor=handoff_closed.actor) }} <a href="/task-handoffs">{{ ui("View the handoff receipt") }}</a>.</p>{% endif %}
-    <div id="result-section" class="answer" style="display: {% if goal.result %}block{% else %}none{% endif %};">
+    <div id="result-section" class="answer" style="display: {% if goal.result and not stop %}block{% else %}none{% endif %};">
+      {% if not stop %}
       {% if rendered and rendered.structured %}
         {% include "_deliverable.html" %}
         <p id="deliverable-stale" class="muted" style="display: none; margin-top: var(--space-3);">
@@ -77,6 +78,7 @@
           <p class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">{{ ui("Your revision is saved as the current result. Any learning use is separate and governed by your organization's policy; saving does not mean training completed.") }}</p>
         </div>
         {% endif %}
+      {% endif %}
       {% endif %}
     </div>
     {% if artifacts %}

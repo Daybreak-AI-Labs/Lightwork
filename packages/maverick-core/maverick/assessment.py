@@ -4697,6 +4697,24 @@ def answer_followup(
 DECISIONS = ("approved", "rejected")
 
 
+def _emit_assessment_event(event: str, record: dict | None, payload: dict) -> None:
+    """Tell webhook subscribers; never raises, nothing sent without subscribers."""
+    if not isinstance(record, dict) or not record.get("id"):
+        return
+    try:
+        from .webhook_events import emit, record_link
+
+        rid = str(record.get("id"))
+        emit(event, record_type="assessment", record_id=rid,
+             title=f"{record.get('subject') or 'assessment'} ({record.get('type') or 'assessment'})",
+             summary={"status": record.get("status"), "assignee": record.get("assignee", ""),
+                      "next_review_at": record.get("next_review_at"),
+                      "renewal_at": record.get("renewal_at")},
+             link=record_link(f"/assessments#{rid}"), payload=payload)
+    except Exception:  # pragma: no cover - webhooks never block a record change
+        pass
+
+
 def assign_assessment(
     assessment_id: str,
     assignee: str,
@@ -4731,12 +4749,14 @@ def assign_assessment(
         assessment=assessment_id,
         assignee=who,
     )
-    return _rewrite_saved(
+    saved = _rewrite_saved(
         assessment_id,
         _mutate,
         expected_revision=expected_revision,
         audit_receipt=receipt,
     )
+    _emit_assessment_event("assessment.assigned", saved, {"assignee": who})
+    return saved
 
 
 def set_assessment_answer_ai_metadata(
@@ -4879,12 +4899,14 @@ def decide_assessment(
         decision=decision,
         cadence_days=int(cadence_days or 0),
     )
-    return _rewrite_saved(
+    saved = _rewrite_saved(
         assessment_id,
         _mutate,
         expected_revision=expected_revision,
         audit_receipt=receipt,
     )
+    _emit_assessment_event("assessment.decided", saved, {"decision": decision})
+    return saved
 
 
 def accept_risk(

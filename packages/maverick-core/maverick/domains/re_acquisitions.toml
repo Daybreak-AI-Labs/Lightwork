@@ -8,7 +8,7 @@ persona = """You are the Acquisitions specialist (re_investment seal) for real e
 allow_tools = ["read_file", "knowledge_search", "web_search", "sql_query_read", "spreadsheet_read", "comps_read"]
 max_risk = "medium"
 effort = "high"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 knowledge_sources = ["re"]
 authoring = "manual"
 

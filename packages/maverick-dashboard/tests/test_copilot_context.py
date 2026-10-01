@@ -309,6 +309,49 @@ def test_built_in_reply_is_deterministic_read_only_and_bounded(
         assert "executes an action" in first
 
 
+@pytest.mark.parametrize(
+    ("page", "message"),
+    [
+        ("/goals", "Cancel my running goal"),
+        ("/goals", "Can you please cancel my running goal?"),
+        ("/privacy", "Show me the documents about vendors"),
+        ("/help", "Download a support bundle"),
+        ("/security/assurance", "How do I delete this record?"),
+    ],
+)
+def test_built_in_guide_does_not_claim_to_perform_requested_actions(
+    page: str,
+    message: str,
+) -> None:
+    context = copilot_context.context_for_page(page)
+    reply = copilot_context.built_in_reply(context, message)
+
+    assert reply.startswith("This guide can't do that for you.")
+    assert f"Open {context.title}" in reply
+    assert "if the action is available" in reply
+    assert "current status and your access" in reply
+    assert "can:" not in reply
+    assert len(reply.split()) <= copilot_context._MAX_BUILT_IN_REPLY_WORDS
+
+
+def test_built_in_guide_matches_whole_words_and_offers_relevant_questions() -> None:
+    context = copilot_context.context_for_page("/goals")
+    reply = copilot_context.built_in_reply(context, "I already did that, what now?")
+
+    assert reply.startswith(f"{context.title}: ")
+    assert context.suggested_questions[0] in reply
+    assert "Start here:" not in reply
+    assert " can:" not in reply
+
+
+def test_capability_question_does_not_become_an_action_request() -> None:
+    context = copilot_context.context_for_page("/goals")
+
+    reply = copilot_context.built_in_reply(context, "Can this page create goals?")
+
+    assert reply.startswith("When role and server composition permit, ")
+
+
 @pytest.mark.parametrize("path", CANONICAL_CONTEXTS)
 @pytest.mark.parametrize(
     "message",

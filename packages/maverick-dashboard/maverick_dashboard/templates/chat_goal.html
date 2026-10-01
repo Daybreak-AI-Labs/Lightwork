@@ -272,6 +272,8 @@
   <p>Printed from your Lightwork workspace</p>
 </header>
 <div class="convo">
+  {% from "_task_tabs.html" import task_tabs %}
+  {{ task_tabs(goal, 'result') }}
   <div id="earlier-history" data-goal="{{ goal.id }}" data-before="{{ thread_turns[0].id if thread_turns else '' }}">
     <button type="button" class="btn btn--ghost" id="history-load">{{ ui('Load earlier conversation') }}</button>
     <p id="history-status" role="status" aria-live="polite">{{ ui('Earlier conversation is loaded in pages.') }}</p>
@@ -307,13 +309,21 @@
   </div>
   {% for exchange in (thread_questions or {}).get(t.goal_id, []) %}
   <div class="qa">
-    <p class="qa__q">{{ exchange.question }}</p>
-    <div class="msg msg--user"><div class="bubble">{{ exchange.answer }}</div></div>
+    <p class="qa__q" lang="und" dir="auto" data-user-content>{{ exchange.question }}</p>
+    <div class="msg msg--user"><div class="bubble" lang="und" dir="auto" data-user-content>{{ exchange.answer }}</div></div>
   </div>
   {% endfor %}
     {% else %}
   <div class="msg msg--agent">
     <div class="agent__label">{{ agent_mark() }} Lightwork</div>
+    {% set historical_stop = (thread_stop_notes or {}).get(t.id) %}
+    {% if historical_stop %}
+    <section class="halt-card" role="status">
+      <p>{{ historical_stop.message }}</p>
+      {% if historical_stop.action %}<p>{{ historical_stop.action }}</p>{% endif %}
+      {% if t.goal_id %}<a class="btn btn--ghost" href="/chat/goal/{{ t.goal_id }}">{{ ui('Open task') }}</a>{% endif %}
+    </section>
+    {% else %}
     <div class="prose" lang="und" dir="auto" data-user-content data-markdown>{{ t.content }}</div>
     <div class="answer-actions" role="group" aria-label="Earlier answer actions">
       <button type="button" class="btn btn--ghost turn-copy">Copy answer</button>
@@ -326,7 +336,8 @@
       {% endif %}
       <span class="muted turn-copy-status" role="status" aria-live="polite"></span>
     </div>
-    <textarea class="turn-copy-source" hidden>{{ t.content }}</textarea>
+    <textarea class="turn-copy-source" hidden aria-label="Earlier answer text to copy">{{ t.content }}</textarea>
+    {% endif %}
   </div>
     {% endif %}
   {% endfor %}
@@ -470,10 +481,22 @@
       <p id="code-sandbox-status" class="muted" role="status" aria-live="polite"></p>
       <div id="code-sandbox-body"></div>
     </details>{% endif %}
-    <div id="halt-card" class="halt-card" style="display: none;">
+    <div id="halt-card" class="halt-card" style="display: none;" data-stop-kind="{{ stop.kind if stop else '' }}">
       {% set pilot_prepared = goal.result == 'Prepared for a workflow pilot. Start this task after the pilot plan is frozen.' %}
       <div class="halt-card__title">{{ ui('Ready to start' if pilot_prepared else 'Lightwork stopped') }}</div>
-      <p id="halt-reason" class="muted" style="margin: var(--space-1) 0 0;"></p>
+      {# The reason is the mapped plain-language stop (maverick.stop_reasons),
+         never the kernel's raw text; the raw text is admin-only, below. #}
+      <p id="halt-reason" class="muted" style="margin: var(--space-1) 0 0;">{{ stop.message if stop else '' }}</p>
+      <p id="halt-action" class="muted" style="margin: var(--space-1) 0 0;">
+        <span id="halt-action-text">{{ stop.action if stop else '' }}</span>
+        <a id="halt-action-link" href="{{ stop.link if stop and stop.link else '#' }}"{% if not (stop and stop.link) %} hidden{% endif %}>{{ stop.link_label if stop and stop.link_label else '' }}</a>
+      </p>
+      {% if show_technical_details %}
+      <details class="halt-card__technical" id="halt-technical"{% if not (stop and stop.technical) %} hidden{% endif %}>
+        <summary class="muted">{{ ui("Technical details") }}</summary>
+        <pre lang="und" dir="auto" data-user-content id="halt-technical-text" class="muted" style="white-space: pre-wrap; font-size: var(--text-sm);">{{ stop.technical if stop else '' }}</pre>
+      </details>
+      {% endif %}
       {% if pilot_prepared %}
       <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">
         {{ ui('This task was prepared without running it. Review and freeze its workflow pilot plan and spending limit before starting.') }} <a href="/outcome-pilots">{{ ui('Workflow pilot plan') }}</a>
@@ -486,7 +509,7 @@
       <script src="/static/lightwork-budget-guidance.js" defer></script>
       {% if can_operate %}<form id="halt-resume-form" class="halt-card__row" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}">
         <button id="halt-resume" class="btn btn--primary" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Start this task' if pilot_prepared else 'Try again') }}</button>
-        <details class="halt-card__budget">
+        <details class="halt-card__budget" id="halt-budget"{% if stop and stop.kind != 'spending_limit' %} hidden{% endif %}>
           <summary>{{ ui('Set a spending limit for this attempt') }}</summary>
           <div class="field">
             <label for="halt-resume-budget">{{ ui('Spending limit (USD, optional)') }}</label>
@@ -616,13 +639,17 @@
       let currentQuestionId = null, currentQuestionVersion = null, pendingClarification = null;
       let currentStatus = {{ goal.status|tojson }};
       let canOperate = {{ can_operate|tojson }};
-      let lastResult = {{ (goal.result or '')|tojson }};
+      let lastResult = {{ ('' if stop else (goal.result or ''))|tojson }};
       document.addEventListener('lightwork:task-access-lost', function () {
         canOperate = false;
         const readOnly = document.getElementById('chat-read-only');
         if (readOnly) readOnly.hidden = false;
         syncComposer();
       });
+      // The plain-language stop for a stopped run (kind, message, action,
+      // link). Payloads refresh it; the raw result is never put on the page.
+      let lastStop = {{ stop|tojson }};
+      const SHOW_TECHNICAL = {{ (show_technical_details|default(false))|tojson }};
 
       // Plain-words labels for the work log: one line per step, in the
       // language of a person reading along, never the kernel's event names.
@@ -699,9 +726,30 @@
         hidePlaceholder();
         done = true;
         cancelBtn.disabled = true;
-        // Keep any earlier result visible separately from the stop reason.
-        if(lastResult){haltReasonEl.textContent=lastResult;haltReasonEl.lang='und';haltReasonEl.dir='auto';haltReasonEl.dataset.userContent='';}else{delete haltReasonEl.dataset.userContent;cgCopy(haltReasonEl,'The run stopped before producing a result.');}
+        if (resultSection) resultSection.style.display = 'none';
+        renderStop(lastStop);
         haltCard.style.display = 'block';
+      }
+
+      function renderStop(stop) {
+        const s = stop && typeof stop === 'object' ? stop : {};
+        haltCard.dataset.stopKind = s.kind || '';
+        haltReasonEl.textContent = s.message || 'The run stopped before producing a result.';
+        const actionText = document.getElementById('halt-action-text');
+        const actionLink = document.getElementById('halt-action-link');
+        if (actionText) actionText.textContent = s.action || '';
+        if (actionLink) {
+          if (s.link) { actionLink.href = s.link; actionLink.textContent = s.link_label || s.link; actionLink.hidden = false; }
+          else { actionLink.hidden = true; }
+        }
+        const budget = document.getElementById('halt-budget');
+        if (budget) budget.hidden = Boolean(s.kind) && s.kind !== 'spending_limit';
+        const technical = document.getElementById('halt-technical');
+        if (technical) {
+          const text = SHOW_TECHNICAL ? (s.technical != null ? s.technical : lastResult) : '';
+          document.getElementById('halt-technical-text').textContent = text || '';
+          technical.hidden = !text;
+        }
       }
 
       let withheldRow = null;  // the one folded line standing in for withheld steps
@@ -1122,14 +1170,15 @@
           setStatus(d.status);
           if (!['blocked', 'failed', 'cancelled'].includes(d.status) && haltCard) haltCard.style.display = 'none';
         }
+        if (Object.prototype.hasOwnProperty.call(d, 'stop')) lastStop = d.stop && typeof d.stop === 'object' ? d.stop : null;
         if (d.result) {
           const changed = d.result !== lastResult;
           lastResult = d.result;
-          // A clean finish shows its result; a 'blocked' result is a terse
-          // stop-reason that the halt card renders instead. While the run is
-          // still open the result is the answer being written, streamed by
-          // the server as the model produces it.
-          if (d.status !== 'blocked') {
+          // A clean finish shows its result; a stopped run's result is the
+          // kernel's stop text, which the halt card explains instead (d.stop).
+          // While the run is still open the result is the answer being
+          // written, streamed by the server as the model produces it.
+          if (d.status !== 'blocked' && !d.stop) {
             resultSection.style.display = 'block';
             if (STRUCTURED) {
               // Server-rendered grid is authoritative; prompt a reload if the

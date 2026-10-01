@@ -479,6 +479,10 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         "finance_screening_lists": "finance_screening_list_authority",
         "finance_screening_list_metadata": "finance_screening_metadata_authority",
         "dsar_fulfillment": "dsar_delivery_authority",
+        # Public rights-request form: per-property intake settings and the
+        # correspondence templates sent back to requesters.
+        "rights_form_properties": "dsar_request_authority",
+        "rights_templates": "dsar_delivery_authority",
         "discovery_containment_bindings": "containment_binding",
         "discovery_containment_actions": "containment_action",
         "provider_accounting_reviews": "provider_accounting_review",
@@ -764,6 +768,8 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
         "finance_screening_metadata_authority"
     ),
     "dsar_fulfillment/DSF-a.json": "dsar_delivery_authority",
+    "rights_form_properties/RFP-a.json": "dsar_request_authority",
+    "rights_templates/RTPL-a.json": "dsar_delivery_authority",
     "ai_discovery_sensor_identities/SEN-a.json": "sensor_identity_authority",
     "ai_evidence_packet_replays/AIP-a.json": "evidence_packet_replay_authority",
     "ai_evidence_policies/AIP-a.json": "evidence_policy_authority",

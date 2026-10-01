@@ -151,7 +151,7 @@
       </div>
       <div class="sh-field">
         <label for="sh-department">Work area to measure</label>
-        <select class="select" id="sh-department" name="department" aria-describedby="sh-department-help">
+        <select class="select" id="sh-department" name="department" aria-describedby="sh-department-help" data-typeahead data-typeahead-placeholder="Type a work area, for example: finance">
           <option value="">Not chosen yet</option>
           {% if departments.recent %}
           <optgroup label="Used by recent work">
@@ -425,4 +425,5 @@
 </script>
 {% endif %}
 {% endif %}
+<script src="/static/lightwork-typeahead.js" defer></script>
 {% endblock %}

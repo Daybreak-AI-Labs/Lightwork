@@ -377,6 +377,9 @@ CHANNELS: list[dict] = [
     {"name": "slack", "label": "Slack", "fields": [
         {"key": "app_token", "label": "App-level token", "secret": True},
         {"key": "bot_token", "label": "Bot token", "secret": True},
+        {"key": "signing_secret", "label": "Signing secret", "secret": True,
+         "env": "SLACK_SIGNING_SECRET"},
+        {"key": "approvals_channel", "label": "Approvals channel", "secret": False},
     ]},
     {"name": "whatsapp_cloud", "label": "WhatsApp (Cloud API)", "fields": [
         {"key": "access_token", "label": "Access token", "secret": True},
@@ -404,6 +407,13 @@ CHANNELS: list[dict] = [
         {"key": "url", "label": "Server address", "secret": False, "type": "url"},
         {"key": "bot_token", "label": "Bot access token", "secret": True,
          "env": "MATTERMOST_BOT_TOKEN"},
+    ]},
+    {"name": "teams", "label": "Microsoft Teams", "fields": [
+        {"key": "app_id", "label": "App ID", "secret": False},
+        {"key": "app_password", "label": "Client secret", "secret": True,
+         "env": "TEAMS_APP_PASSWORD"},
+        {"key": "tenant_id", "label": "Tenant ID", "secret": False},
+        {"key": "port", "label": "Webhook port", "secret": False, "type": "int"},
     ]},
 ]
 _CHANNELS_BY_NAME = {c["name"]: c for c in CHANNELS}
@@ -1398,6 +1408,7 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "privacy_automation",
     "privacy_automation.data_discovery",
     "privacy_automation.notice_governance",
+    "privacy_automation.public_rights_form",
     "privacy_automation.regulatory_intelligence",
     "privacy_automation.rights_consumer_delivery",
     "privacy_automation.rights_orchestration",

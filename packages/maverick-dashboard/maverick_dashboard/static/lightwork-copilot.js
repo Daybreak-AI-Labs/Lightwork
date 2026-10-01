@@ -13,6 +13,7 @@
   var input = document.getElementById("mv-copilot-input");
   var note = document.getElementById("mv-copilot-note");
   var providerSetup = document.getElementById("mv-copilot-provider-setup");
+  var hello = document.getElementById("mv-copilot-hello");
   var sendButton = document.getElementById("mv-copilot-send");
   if (!fab || !panel || !closeButton || !tips || !prompts || !log ||
       !form || !input || !note || !sendButton || !providerSetup) return;
@@ -78,11 +79,25 @@
       });
   }
 
+  var setupLinks = ["/start", "/settings#settings-integrations", "/settings#settings-models",
+    "/settings#settings-maintenance", "/providers"];
+
   function renderProviderSetup(payload) {
     var setup = payload && payload.provider_setup;
+    var readiness = payload && payload.workspace_readiness;
+    var next = readiness && readiness.next_action;
+    // Not ready: say so plainly, with one button to the place that fixes it,
+    // instead of an empty panel. The built-in page guide still answers.
+    if (readiness && readiness.verdict !== "ready" && hello) {
+      hello.textContent = "Connect an AI service to use Copilot. " + String(readiness.reason || "") +
+        " Until then, the built-in page guide answers questions about this page.";
+    }
+    if (next && typeof next.href === "string" && setupLinks.indexOf(next.href) !== -1) {
+      setup = {href: next.href, label: next.label};
+    }
     var href = setup && typeof setup.href === "string" ? setup.href : "";
     var label = setup && typeof setup.label === "string" ? setup.label : "";
-    var allowed = href === "/start" || href === "/settings#settings-integrations";
+    var allowed = setupLinks.indexOf(href) !== -1;
     providerSetup.hidden = !allowed;
     if (!allowed) return;
     providerSetup.setAttribute("href", href);

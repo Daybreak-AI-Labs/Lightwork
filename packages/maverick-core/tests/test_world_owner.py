@@ -14,7 +14,7 @@ from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 
 def test_schema_version_is_current(tmp_path):
-    assert SCHEMA_VERSION == 46  # bump when adding a migration
+    assert SCHEMA_VERSION == 47  # bump when adding a migration
     assert WorldModel(tmp_path / "w.db").schema_version == SCHEMA_VERSION
 
 

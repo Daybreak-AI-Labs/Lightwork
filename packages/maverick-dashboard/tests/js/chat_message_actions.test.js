@@ -1,339 +1,293 @@
-"use strict";
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const { JSDOM } = require("jsdom");
-
-const template = fs.readFileSync(
-  path.resolve(__dirname, "../../maverick_dashboard/templates/chat_goal.html"), "utf8"
-);
+'use strict';
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const {JSDOM} = require('jsdom');
+const root = path.resolve(__dirname, '../../maverick_dashboard');
+const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n?/g, '\n');
+const template = read('templates/chat_goal.html');
+const projectionScript = read('static/lightwork-answer-panel.js');
+const shareScript = read('static/lightwork-deliverable-sharing.js');
+const voiceScript = read('static/lightwork-read-aloud.js');
+const settle = async () => { for (let i = 0; i < 15; i++) await new Promise(resolve => setImmediate(resolve)); };
 
 function inlineScript(marker) {
-  const start = template.indexOf(marker);
-  assert.ok(start > 0, `missing script marker ${marker}`);
-  const end = template.indexOf("</script>", start);
-  assert.ok(end > start);
-  return template.slice(start, end).replaceAll("{{ goal.id }}", "7");
+  const start = template.indexOf(marker), end = template.indexOf('</script>', start);
+  assert.ok(start > 0 && end > start, `missing script marker ${marker}`);
+  return template.slice(start, end).replaceAll('{{ goal.id }}', '7');
+}
+function fragment(version, content, status = 'done', operate = '1', context = 'scope') {
+  return `<section id="answer-panel" data-goal="7" data-context="${context}" data-version="${version}" data-status="${status}" data-operate="${operate}" data-updated-at="1">${content}</section>`;
+}
+function response(html, context = 'scope') {
+  return {ok: true, status: 200, headers: {get: () => context}, text: async () => html};
+}
+function actionMarkup(answer = '## Saved answer\n\n- First step') {
+  return `<div id="result-section"><div id="result">Rendered answer</div></div>
+    <div id="feedback"><button id="feedback-up"></button><button id="feedback-down"></button><span id="feedback-msg"></span></div>
+    <textarea id="saved-answer-source" readonly hidden>${answer}</textarea><textarea id="edit-text">Unsaved changes</textarea>
+    <button id="copy-result">Copy answer</button><button id="print-result">Print conversation</button>
+    <button id="share-open" aria-expanded="false">Share</button><span id="answer-action-msg"></span>`;
+}
+async function projectionHarness(content = '<div id="result">Live answer</div>', status = 'done', operate = '1') {
+  const initial = fragment('one', content, status, operate);
+  const dom = new JSDOM(`<body><div id="cs-scroll">${initial}</div>
+    <textarea id="answer-input">Keep my next message</textarea><div id="qa-thread">An existing clarification</div>
+    <p id="answer-refresh-status"></p><button id="answer-refresh" hidden>Refresh</button>
+    <details id="share-panel"><summary>Share</summary><button id="share-create">Review share link</button></details>
+    <div class="answer-actions"><button class="turn-copy">Copy older answer</button><button class="turn-print">Print</button><span class="turn-copy-status"></span></div>
+    <textarea class="turn-copy-source">An earlier answer</textarea></body>`,
+  {url: 'https://lightwork.invalid/chat/goal/7', runScripts: 'outside-only', pretendToBeVisual: true});
+  const {window} = dom, copied = [], calls = [];
+  let prints = 0, projection = response(initial);
+  Object.defineProperty(window.navigator, 'clipboard', {value: {writeText: async value => copied.push(value)}, configurable: true});
+  window.print = () => {prints++;};
+  window.document.getElementById('share-panel').scrollIntoView = () => {};
+  window.mvErrorText = () => 'Could not refresh the saved result.';
+  window.mvErrorResponse = async value => value;
+  window.mvRenderError = node => {node.textContent = 'Could not refresh the saved result.';};
+  window.mvConfirm = async () => true;
+  window.mvWhen = () => '';
+  window.lwMarkdown = {upgrade: () => {}};
+  window.fetch = async (url, options = {}) => {
+    calls.push({url, options});
+    if (url.endsWith('/feedback')) return {ok: true, json: async () => ({})};
+    assert.equal(url, '/chat/goal/7/answer-panel', 'refresh fetches the authorized result projection');
+    return typeof projection === 'function' ? projection(url, options) : projection;
+  };
+  window.eval(projectionScript);
+  await settle();
+  return {dom, window, doc: window.document, copied, calls, get prints() {return prints;},
+    setProjection(value) {projection = value;}, refresh() {return window.mvRefreshAnswerPanel();}};
 }
 
-test("answer actions copy only the saved answer, print, and open sharing", async () => {
-  const dom = new JSDOM(`<body>
-    <div id="feedback"><button id="feedback-up"></button><button id="feedback-down"></button></div>
-    <span id="feedback-msg"></span><span id="answer-action-msg"></span>
-    <textarea id="saved-answer-source" hidden>## Saved answer\n\n- First step</textarea>
-    <textarea id="edit-text">Unsaved changes</textarea>
-    <button id="copy-result"></button><button id="print-result"></button>
-    <button id="share-open" aria-expanded="false"></button>
-    <details id="share-panel"><summary tabindex="0">Share</summary><button id="share-create">Create link</button></details>
-    <div class="answer-actions"><button class="turn-copy">Copy older answer</button><span class="turn-copy-status"></span></div>
-    <textarea class="turn-copy-source">An earlier answer</textarea>
-  </body>`, { runScripts: "outside-only" });
-  const { window } = dom;
-  const copied = [];
-  let prints = 0;
-  Object.defineProperty(window.navigator, "clipboard", {
-    value: { writeText: async (value) => { copied.push(value); } }, configurable: true
+test('answer actions copy only the saved answer once, print, and focus sharing', async t => {
+  const p = await projectionHarness(actionMarkup()); t.after(() => p.window.close());
+  p.window.eval(inlineScript('// Earlier answers retain'));
+  p.doc.getElementById('copy-result').click(); await settle();
+  assert.deepEqual(p.copied, ['## Saved answer\n\n- First step']);
+  p.doc.querySelector('.turn-copy').click(); await settle();
+  assert.deepEqual(p.copied, ['## Saved answer\n\n- First step', 'An earlier answer']);
+  p.doc.getElementById('print-result').click(); assert.equal(p.prints, 1);
+  p.doc.getElementById('share-open').click();
+  assert.equal(p.doc.getElementById('share-panel').open, true);
+  assert.equal(p.doc.getElementById('share-open').getAttribute('aria-expanded'), 'true');
+  assert.equal(p.doc.activeElement.id, 'share-create');
+});
+
+test('earlier Copy and Print work while a newer message is still running', async t => {
+  const p = await projectionHarness('', 'running'); t.after(() => p.window.close());
+  p.window.eval(inlineScript('// Earlier answers retain'));
+  p.doc.querySelector('.turn-copy').click(); await settle();
+  assert.deepEqual(p.copied, ['An earlier answer']);
+  p.doc.querySelector('.turn-print').click(); assert.equal(p.prints, 1);
+});
+
+test('newly finished answer actions initialize once after the authorized projection refresh', async t => {
+  const p = await projectionHarness('', 'running'); t.after(() => p.window.close());
+  const html = fragment('two', actionMarkup('Finished answer'));
+  p.setProjection(response(html));
+  p.doc.dispatchEvent(new p.window.CustomEvent('lightwork:task-projection', {detail: {status: 'done', terminal: true, result: 'Finished answer'}}));
+  await settle(); await p.refresh(); await settle();
+  p.doc.getElementById('copy-result').click(); await settle();
+  assert.deepEqual(p.copied, ['Finished answer']);
+  assert.equal(p.doc.querySelectorAll('#copy-result').length, 1);
+});
+
+test('terminal refresh preserves drafted input and clarification, and offers retry on failure', async t => {
+  const p = await projectionHarness(); t.after(() => p.window.close());
+  let attempts = 0, initialized = 0;
+  p.doc.addEventListener('lightwork:answer-panel-updated', () => {initialized++;});
+  p.setProjection((_url, options) => {
+    assert.equal(options.credentials, 'same-origin'); assert.equal(options.cache, 'no-store');
+    attempts++;
+    return attempts === 1 ? {ok: false, status: 503} : response(fragment('two', actionMarkup('Saved answer'), 'done', '0'));
   });
-  window.print = () => { prints += 1; };
-  window.fetch = async () => ({ ok: true, json: async () => ({}) });
-  window.document.getElementById("share-panel").scrollIntoView = () => {};
-  window.eval(inlineScript("// Thumbs up/down feedback:"));
-  window.eval(inlineScript("// Saved answer actions"));
-  window.eval(inlineScript("// Earlier answers retain"));
-
-  window.document.getElementById("copy-result").click();
-  await Promise.resolve();
-  assert.deepEqual(copied, ["## Saved answer\n\n- First step"]);
-  window.document.querySelector(".turn-copy").click();
-  await Promise.resolve();
-  assert.deepEqual(copied, ["## Saved answer\n\n- First step", "An earlier answer"]);
-  window.document.getElementById("print-result").click();
-  assert.equal(prints, 1);
-  window.document.getElementById("share-open").click();
-  assert.equal(window.document.getElementById("share-panel").open, true);
-  assert.equal(window.document.getElementById("share-open").getAttribute("aria-expanded"), "true");
-  assert.equal(window.document.activeElement.id, "share-create");
-  dom.window.close();
-});
-
-test("earlier Copy and Print work while a newer message is still running", async () => {
-  const dom = new JSDOM(`<body><div class="answer-actions">
-    <button class="turn-copy">Copy</button><button class="turn-print">Print</button><a href="/chat/goal/6/download.md?turn_id=3">Download</a>
-    <span class="turn-copy-status"></span></div><textarea hidden>Earlier saved snapshot</textarea></body>`, { runScripts: "outside-only" });
-  const { window } = dom;
-  const copied = [];
-  let prints = 0;
-  Object.defineProperty(window.navigator, "clipboard", { value: { writeText: async (value) => copied.push(value) } });
-  window.print = () => { prints += 1; };
-  window.eval(inlineScript("// Earlier answers retain"));
-  window.document.querySelector(".turn-copy").click();
-  await Promise.resolve();
-  assert.deepEqual(copied, ["Earlier saved snapshot"]);
-  window.document.querySelector(".turn-print").click();
-  assert.equal(prints, 1);
-  dom.window.close();
-});
-
-test("newly finished answer actions initialize once after authoritative refresh", async () => {
-  const dom = new JSDOM("<body></body>", { runScripts: "outside-only" });
-  const { window } = dom;
-  const copied = [];
-  Object.defineProperty(window.navigator, "clipboard", { value: { writeText: async (value) => copied.push(value) } });
-  window.eval(inlineScript("// Saved answer actions"));
-  window.document.body.innerHTML = `<button id="copy-result">Copy</button><span id="answer-action-msg"></span>
-    <textarea id="saved-answer-source" hidden>Finished answer</textarea><textarea id="edit-text">Unsaved edit</textarea>`;
-  window.document.dispatchEvent(new window.CustomEvent("lightwork:answer-ready"));
-  window.document.dispatchEvent(new window.CustomEvent("lightwork:answer-ready"));
-  window.document.getElementById("copy-result").click();
-  await Promise.resolve();
-  assert.deepEqual(copied, ["Finished answer"]);
-  dom.window.close();
-});
-
-function refreshHarness(response) {
-  const dom = new JSDOM(`<body><textarea id="answer-input">Keep my next message</textarea>
-    <div id="qa-thread">An existing clarification</div>
-    <div id="answer-panel" data-goal-id="7"><div id="result-section"><div id="result">Live answer</div></div></div>
-    <p id="answer-refresh-notice" hidden><span id="answer-refresh-text"></span>
-      <button id="answer-refresh-retry" hidden></button><a id="answer-refresh-open" hidden></a></p></body>`, { runScripts: "outside-only" });
-  dom.window.fetch = response;
-  dom.window.lwMarkdown = { upgrade: () => {} };
-  const start = template.indexOf("      function applyOperatePermission(");
-  const end = template.indexOf("      refreshRetry.addEventListener", start);
-  assert.ok(start > 0 && end > start);
-  dom.window.eval(`let goalId = 7, done = true, currentStatus = 'done', answerNeedsRefresh = true;
-    let answerRefreshInFlight = false, resultEl, resultSection, deliverableStaleEl, STRUCTURED, lastResult, canOperate = true;
-    function syncComposer() { window.freshCanOperate = canOperate; }
-    const refreshNotice = document.getElementById('answer-refresh-notice');
-    const refreshText = document.getElementById('answer-refresh-text');
-    const refreshRetry = document.getElementById('answer-refresh-retry');
-    const refreshOpen = document.getElementById('answer-refresh-open');
-    ${template.slice(start, end)}
-    window.refreshAnswerPanel = refreshAnswerPanel;
-    window.markRestarted = () => { done = false; currentStatus = 'pending'; };`);
-  return dom;
-}
-
-const freshPanel = `<div id="answer-panel" data-goal-id="7" data-status="done" data-structured="false">
-  <div id="result-section"><div id="result" data-markdown>Saved answer</div></div>
-  <textarea id="saved-answer-source">Saved answer</textarea><button id="copy-result">Copy</button></div>`;
-
-test("terminal refresh replaces only the answer, preserves drafted input, and offers retry on failure", async () => {
-  let attempt = 0;
-  const dom = refreshHarness(async (_url, options) => {
-    assert.equal(options.credentials, "same-origin");
-    assert.equal(options.cache, "no-store");
-    attempt += 1;
-    return { ok: attempt > 1, status: attempt > 1 ? 200 : 503, text: async () => freshPanel };
-  });
-  const { window } = dom;
-  let initialized = 0;
-  window.document.addEventListener("lightwork:answer-ready", () => { initialized += 1; });
-  await window.refreshAnswerPanel();
-  assert.equal(window.document.getElementById("answer-refresh-retry").hidden, false);
-  assert.equal(window.document.getElementById("result").textContent, "Live answer");
-  await window.refreshAnswerPanel();
-  assert.equal(window.document.getElementById("result").textContent, "Saved answer");
-  assert.equal(window.document.getElementById("answer-input").value, "Keep my next message");
-  assert.equal(window.document.getElementById("qa-thread").textContent, "An existing clarification");
+  await p.refresh();
+  assert.equal(p.doc.getElementById('answer-refresh').hidden, false);
+  assert.equal(p.doc.getElementById('result').textContent, 'Live answer');
+  await p.refresh();
+  assert.equal(p.doc.getElementById('saved-answer-source').value, 'Saved answer');
+  assert.equal(p.doc.getElementById('answer-input').value, 'Keep my next message');
+  assert.equal(p.doc.getElementById('qa-thread').textContent, 'An existing clarification');
   assert.equal(initialized, 1);
-  assert.equal(window.freshCanOperate, false);
-  assert.equal(window.document.getElementById("answer-refresh-notice").hidden, true);
-  dom.window.close();
+  assert.equal(p.doc.getElementById('answer-panel').dataset.operate, '0');
+  assert.equal(p.doc.getElementById('answer-refresh').hidden, true);
 });
 
-test("an access denial clears the saved answer and a raced restart cannot replace it", async () => {
-  const denied = refreshHarness(async () => ({ ok: false, status: 403 }));
-  await denied.window.refreshAnswerPanel();
-  assert.equal(denied.window.document.getElementById("answer-panel").textContent, "");
-  assert.equal(denied.window.document.getElementById("answer-panel").hidden, true);
-  assert.equal(denied.window.document.getElementById("answer-refresh-open").hidden, false);
-  assert.equal(denied.window.freshCanOperate, false);
-  denied.window.close();
+test('access denial, login redirects, and changed workspace context clear private answer content', async t => {
+  for (const denied of [{ok: false, status: 401}, {ok: false, status: 403}, {ok: false, status: 404},
+    {ok: true, status: 200, redirected: true}, response(fragment('two', 'Other account'), 'other-scope')]) {
+    const p = await projectionHarness(); t.after(() => p.window.close());
+    p.setProjection(denied); await p.refresh();
+    assert.equal(p.doc.getElementById('answer-panel').textContent, '');
+    assert.match(p.doc.getElementById('answer-refresh-status').textContent, /Access.*changed/);
+    assert.equal(p.doc.getElementById('answer-input').value, 'Keep my next message');
+    assert.equal(p.doc.getElementById('answer-refresh').hidden, true);
+  }
+});
 
-  const login = refreshHarness(async () => ({ ok: true, status: 200, redirected: true,
-    text: async () => '<form action="/login">Sign in</form>' }));
-  await login.window.refreshAnswerPanel();
-  assert.equal(login.window.document.getElementById("answer-panel").textContent, "");
-  assert.equal(login.window.document.getElementById("answer-panel").hidden, true);
-  assert.equal(login.window.document.getElementById("answer-refresh-open").hidden, false);
-  assert.equal(login.window.freshCanOperate, false);
-  login.window.close();
-
-  let dom;
-  dom = refreshHarness(async () => {
-    dom.window.markRestarted();
-    return { ok: true, status: 200, text: async () => freshPanel };
+test('a raced restart cannot mount an older terminal answer projection', async t => {
+  const p = await projectionHarness(); t.after(() => p.window.close());
+  let releaseOld, oldSignal, requests = 0;
+  p.setProjection((_url, options) => {
+    requests++;
+    if (requests === 1) {
+      oldSignal = options.signal;
+      return new Promise(resolve => {releaseOld = resolve;});
+    }
+    return response(fragment('running', '<div id="result">Current running answer</div>', 'pending'));
   });
-  await dom.window.refreshAnswerPanel();
-  assert.equal(dom.window.document.getElementById("result").textContent, "Live answer");
-  dom.window.close();
+  const first = p.refresh();
+  p.doc.dispatchEvent(new p.window.CustomEvent('lightwork:task-projection', {detail: {status: 'pending', terminal: false, result: ''}}));
+  await settle();
+  releaseOld(response(fragment('stale-done', actionMarkup('Stale completed answer'))));
+  await first; await settle();
+  assert.equal(oldSignal.aborted, true);
+  assert.equal(p.doc.getElementById('answer-panel').dataset.status, 'pending');
+  assert.equal(p.doc.getElementById('result').textContent, 'Current running answer');
+  assert.equal(p.doc.getElementById('copy-result'), null);
 });
 
-test("a new share link has a working Copy link action", async () => {
-  const dom = new JSDOM(`<body><div class="goal-share" data-goal="7">
-    <button id="share-create"></button><input id="share-url" hidden><button id="share-copy" hidden></button>
-    <span id="share-msg"></span><ul id="share-list"></ul>
-  </div></body>`, { runScripts: "outside-only" });
-  const { window } = dom;
-  const copied = [];
-  let requests = 0;
-  Object.defineProperty(window.navigator, "clipboard", {
-    value: { writeText: async (value) => { copied.push(value); } }, configurable: true
-  });
-  window.fetch = async () => { requests += 1; return { ok: true, json: async () => ({ id: 3, url: "http://testserver/share/token" }) }; };
+test('unavailable clipboard exposes a readable selected answer for manual copying', async t => {
+  const p = await projectionHarness(actionMarkup()); t.after(() => p.window.close());
+  Object.defineProperty(p.window.navigator, 'clipboard', {value: undefined});
+  p.doc.getElementById('copy-result').click();
+  const source = p.doc.getElementById('saved-answer-source');
+  assert.equal(source.hidden, false); assert.equal(source.readOnly, true);
+  assert.equal(p.doc.activeElement, source);
+  assert.equal(source.selectionStart, 0); assert.equal(source.selectionEnd, source.value.length);
+  assert.match(p.doc.getElementById('answer-action-msg').textContent, /Ctrl\+C or Command\+C/);
+});
+
+function shareHarness({localOnly = false, canCreate = true, existing = false} = {}) {
+  const dom = new JSDOM(`<body><div class="goal-share" data-goal="7" data-can-operate="1">
+    ${canCreate ? '<button id="share-create">Review share link</button>' : ''}
+    <input id="share-url" readonly style="display:none"><button id="share-copy" hidden>Copy link</button>
+    <span id="share-msg"></span><ul id="share-list"></ul></div></body>`,
+  {url: 'https://lightwork.invalid/chat/goal/7', runScripts: 'outside-only', pretendToBeVisual: true});
+  const {window} = dom, copied = [], calls = [];
+  let minted = existing, revoked = false;
+  Object.defineProperty(window.navigator, 'clipboard', {value: {writeText: async value => copied.push(value)}});
   window.mvConfirm = async () => true;
-  window.eval(inlineScript("// Share links: create"));
-  window.document.dispatchEvent(new window.CustomEvent("lightwork:answer-ready"));
-  window.document.dispatchEvent(new window.CustomEvent("lightwork:answer-ready"));
+  window.mvErrorText = () => 'Could not manage this link.';
+  window.mvRenderError = (node, error) => {node.textContent = error.message || 'Could not manage this link.';};
+  window.fetch = async (url, options = {}) => {
+    calls.push({url, options});
+    let body;
+    if (url.endsWith('/preview')) body = {audience: 'Anyone who has this link.', scope: 'Selected result only', allowed_lifetimes: [3600, 86400, 604800],
+      source: {title: 'Reviewed task', result: 'Reviewed saved answer', artifacts: [], sha256: 'a'.repeat(64)}};
+    else if (url.endsWith('/3/revoke')) {revoked = true; body = {};}
+    else if (options.method === 'POST') {
+      minted = true; body = {id: 3, url: localOnly ? 'http://localhost/share/token' : 'https://lightwork.invalid/share/token',
+        expires_at: Math.floor(Date.now() / 1000) + 86400, local_only: localOnly};
+    } else body = {links: minted && !revoked ? [{id: 3, label: 'Reviewed result', state: 'active', revoked: false}] : []};
+    return {ok: true, status: 200, json: async () => body};
+  };
+  window.eval(shareScript);
+  return {dom, window, doc: window.document, copied, calls};
+}
+async function createShare(p) {
+  await settle(); p.doc.getElementById('share-create').click(); await settle();
+  assert.equal(p.calls.filter(call => call.options.method === 'POST' && !call.url.endsWith('/preview')).length, 0, 'preview never creates a link');
+  assert.match(p.doc.querySelector('.goal-share pre').textContent, /Reviewed saved answer/);
+  p.doc.getElementById('share-confirm').click(); await settle();
+}
 
-  window.document.getElementById("share-create").click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const field = window.document.getElementById("share-url");
-  assert.equal(field.hidden, false);
-  assert.equal(window.document.getElementById("share-copy").hidden, false);
-  assert.equal(field.value, "http://testserver/share/token");
-  window.document.getElementById("share-copy").click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(copied, ["http://testserver/share/token"]);
-  assert.match(window.document.getElementById("share-msg").textContent, /Link copied/);
-  assert.equal(requests, 1);
-  window.document.querySelector(".share-revoke").click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(requests, 2);
-  assert.equal(field.value, "");
-  assert.equal(field.hidden, true);
-  assert.equal(window.document.getElementById("share-copy").hidden, true);
-  assert.match(window.document.getElementById("share-msg").textContent, /Link revoked/);
-  dom.window.close();
+test('a reviewed new share link has working Copy link and Revoke actions', async t => {
+  const p = shareHarness(); t.after(() => p.window.close()); await createShare(p);
+  const write = p.calls.find(call => call.options.method === 'POST' && call.url === '/api/v1/goals/7/share');
+  assert.deepEqual(JSON.parse(write.options.body), {confirm: true, source_sha256: 'a'.repeat(64), lifetime_seconds: 86400, label: 'Read-only deliverable'});
+  const field = p.doc.getElementById('share-url');
+  assert.equal(field.style.display, ''); assert.equal(p.doc.getElementById('share-copy').hidden, false);
+  p.doc.getElementById('share-copy').click(); await settle();
+  assert.deepEqual(p.copied, ['https://lightwork.invalid/share/token']);
+  assert.match(p.doc.getElementById('share-msg').textContent, /Link copied/);
+  p.doc.querySelector('.share-revoke').click(); await settle();
+  assert.equal(p.calls.filter(call => call.url.endsWith('/3/revoke')).length, 1);
+  assert.equal(field.value, ''); assert.equal(p.doc.getElementById('share-copy').hidden, true);
+  assert.match(p.doc.getElementById('share-msg').textContent, /Link revoked/);
 });
 
-test("a local-only share link explains its reach before and after copying", async () => {
-  const dom = new JSDOM(`<body><div class="goal-share" data-goal="7">
-    <button id="share-create"></button><input id="share-url" hidden><button id="share-copy" hidden></button>
-    <span id="share-msg"></span><ul id="share-list"></ul></div></body>`, { runScripts: "outside-only" });
-  const { window } = dom;
-  Object.defineProperty(window.navigator, "clipboard", { value: { writeText: async () => {} } });
-  window.fetch = async () => ({ ok: true, json: async () => ({ id: 3, url: "http://localhost/share/token", local_only: true }) });
-  window.eval(inlineScript("// Share links: create"));
-  window.document.getElementById("share-create").click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.match(window.document.getElementById("share-msg").textContent, /limited to this computer or its private network/);
-  window.document.getElementById("share-copy").click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.match(window.document.getElementById("share-msg").textContent, /limited to this computer or its private network/);
-  dom.window.close();
+test('a local-only share link explains its reach before and after copying', async t => {
+  const p = shareHarness({localOnly: true}); t.after(() => p.window.close()); await createShare(p);
+  assert.match(p.doc.getElementById('share-msg').textContent, /limited to this computer or its private network/);
+  p.doc.getElementById('share-copy').click(); await settle();
+  assert.match(p.doc.getElementById('share-msg').textContent, /limited to this computer or its private network/);
 });
 
-test("existing share links can still be revoked without a Create link control", async () => {
-  const dom = new JSDOM(`<body><div class="goal-share" data-goal="7">
-    <input id="share-url" hidden><button id="share-copy" hidden></button><span id="share-msg"></span>
-    <ul id="share-list"><li data-id="3">Link <button class="share-revoke" data-id="3">Revoke</button></li></ul></div></body>`, { runScripts: "outside-only" });
-  const { window } = dom;
-  window.mvConfirm = async () => true;
-  const requests = [];
-  window.fetch = async (url) => { requests.push(url); return { ok: true }; };
-  window.eval(inlineScript("// Share links: create"));
-  window.document.querySelector(".share-revoke").click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(requests, ["/api/v1/goals/7/share/3/revoke"]);
-  assert.equal(window.document.querySelector("#share-list li"), null);
-  dom.window.close();
+test('existing share links can be revoked without a Create link control', async t => {
+  const p = shareHarness({canCreate: false, existing: true}); t.after(() => p.window.close()); await settle();
+  p.doc.querySelector('.share-revoke').click(); await settle();
+  assert.equal(p.calls.filter(call => call.url.endsWith('/3/revoke')).length, 1);
+  assert.equal(p.doc.querySelector('#share-list li'), null);
 });
 
 function voiceHarness(text, allowed = true) {
-  const dom = new JSDOM(`<body><div id="answer-panel" data-can-operate="${allowed}">
-    <div id="result"></div><button id="read-aloud" data-voice-only="0">Read aloud</button>
-    <span id="answer-action-msg"></span></div></body>`, { runScripts: "outside-only" });
-  dom.window.document.getElementById("result").textContent = text;
-  dom.window.eval(inlineScript("// Read-aloud controls"));
-  return dom;
+  const dom = new JSDOM(`<body><section id="answer-panel" data-operate="${allowed ? '1' : '0'}"><div id="result" lang="und"></div>
+    <div id="voice-actions"><button id="read-aloud" data-voice-only="0">Read aloud</button></div></section></body>`, {runScripts: 'outside-only'});
+  const {window} = dom;
+  window.document.getElementById('result').textContent = text;
+  window.eval(voiceScript); window.lwReadAloud(window.document.getElementById('read-aloud'));
+  return {dom, window, doc: window.document, status: () => window.document.querySelector('#voice-actions [role="status"]')};
+}
+function deviceVoice(window) {
+  const spoken = []; let stops = 0;
+  window.SpeechSynthesisUtterance = function (text) {this.text = text;};
+  window.speechSynthesis = {speak: utterance => spoken.push(utterance), cancel: () => {stops++;}, pause: () => {}, resume: () => {}};
+  return {spoken, get stops() {return stops;}};
 }
 
-test("read aloud can stop a pending request without starting late audio", async () => {
-  const dom = voiceHarness("An answer");
-  const { window } = dom;
-  let resolveResponse;
-  let signal;
-  let audioCreated = 0;
-  window.fetch = async (_url, options) => {
-    signal = options.signal;
-    return new Promise((resolve) => { resolveResponse = resolve; });
-  };
-  window.Audio = function () { audioCreated += 1; };
-  const button = window.document.getElementById("read-aloud");
-  button.click();
-  assert.equal(button.textContent, "Stop reading");
-  button.click();
-  assert.equal(signal.aborted, true);
-  resolveResponse({ ok: true, blob: async () => new window.Blob(["audio"]) });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(audioCreated, 0);
-  assert.equal(button.getAttribute("aria-pressed"), "false");
-  assert.match(window.document.getElementById("answer-action-msg").textContent, /Reading stopped/);
-  dom.window.close();
+test('read aloud can stop a pending request without starting late audio', async t => {
+  const p = voiceHarness('An answer'); t.after(() => p.window.close());
+  let resolveResponse, signal, audioCreated = 0;
+  p.window.fetch = async (_url, options) => {signal = options.signal; return new Promise(resolve => {resolveResponse = resolve;});};
+  p.window.Audio = function () {audioCreated++;};
+  const button = p.doc.getElementById('read-aloud'); button.click();
+  assert.equal(button.textContent, 'Stop reading'); button.click(); assert.equal(signal.aborted, true);
+  resolveResponse({ok: true, blob: async () => new p.window.Blob(['audio'])}); await settle();
+  assert.equal(audioCreated, 0); assert.equal(button.getAttribute('aria-pressed'), 'false');
+  assert.match(p.status().textContent, /Reading stopped/);
 });
 
-test("long-answer reading states its limit and releases audio after finishing", async () => {
-  const dom = voiceHarness("a".repeat(4500));
-  const { window } = dom;
-  let posted;
-  const revoked = [];
-  window.fetch = async (_url, options) => {
-    posted = JSON.parse(options.body);
-    return { ok: true, blob: async () => new window.Blob(["audio"]) };
-  };
-  window.URL.createObjectURL = () => "blob:voice";
-  window.URL.revokeObjectURL = (url) => revoked.push(url);
-  window.Audio = function () {
-    window.currentAudio = this;
-    this.play = async () => {};
-    this.pause = () => {};
-  };
-  window.document.getElementById("read-aloud").click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(posted.text.length, 4096);
-  assert.match(window.document.getElementById("answer-action-msg").textContent, /first part/);
-  window.currentAudio.onended();
-  assert.deepEqual(revoked, ["blob:voice"]);
-  assert.match(window.document.getElementById("answer-action-msg").textContent, /Finished reading the first part/);
-  dom.window.close();
+test('long-answer reading covers every part and releases audio after each part', async t => {
+  const text = 'a'.repeat(4500), p = voiceHarness(text); t.after(() => p.window.close());
+  const posted = [], revoked = [], players = [];
+  p.window.fetch = async (_url, options) => {posted.push(JSON.parse(options.body).text); return {ok: true, blob: async () => new p.window.Blob(['audio'])};};
+  p.window.URL.createObjectURL = () => `blob:voice-${players.length}`;
+  p.window.URL.revokeObjectURL = url => revoked.push(url);
+  p.window.Audio = function () {players.push(this); this.play = async () => {}; this.pause = () => {};};
+  p.doc.getElementById('read-aloud').click(); await settle();
+  assert.equal(posted[0].length, 3000); assert.match(p.status().textContent, /part 1 of 2/);
+  players[0].onended(); await settle();
+  assert.equal(posted.join(''), text); assert.match(p.status().textContent, /part 2 of 2/);
+  players[1].onended();
+  assert.deepEqual(revoked, ['blob:voice-0', 'blob:voice-1']);
+  assert.match(p.status().textContent, /Reading finished/);
 });
 
-test("read aloud reports network failure and a read-only account avoids a paid voice request", async () => {
-  const dom = voiceHarness("An answer");
-  dom.window.fetch = async () => { throw new Error("offline"); };
-  dom.window.document.getElementById("read-aloud").click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.match(dom.window.document.getElementById("answer-action-msg").textContent, /Could not read/);
-  assert.equal(dom.window.document.getElementById("read-aloud").getAttribute("aria-pressed"), "false");
-  dom.window.close();
-
-  const readonly = voiceHarness("An answer", false);
-  let requests = 0;
-  readonly.window.fetch = async () => { requests += 1; };
-  readonly.window.document.getElementById("read-aloud").click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(requests, 0);
-  assert.match(readonly.window.document.getElementById("answer-action-msg").textContent, /unavailable here/);
-  readonly.window.close();
+test('read aloud reports unavailable voices and never sends a paid voice request from a read-only account', async t => {
+  const failed = voiceHarness('An answer'); t.after(() => failed.window.close());
+  failed.window.fetch = async () => {throw new Error('offline');};
+  failed.doc.getElementById('read-aloud').click(); await settle();
+  assert.match(failed.status().textContent, /Audio is unavailable/);
+  assert.equal(failed.doc.getElementById('read-aloud').getAttribute('aria-pressed'), 'false');
+  const readonly = voiceHarness('An answer', false); t.after(() => readonly.window.close());
+  let requests = 0; readonly.window.fetch = async () => {requests++;};
+  const device = deviceVoice(readonly.window);
+  readonly.doc.getElementById('read-aloud').click(); await settle();
+  assert.equal(requests, 0); assert.equal(device.spoken.length, 1); assert.equal(device.spoken[0].text, 'An answer');
+  readonly.doc.getElementById('read-aloud').click();
+  assert.equal(readonly.doc.getElementById('read-aloud').getAttribute('aria-pressed'), 'false');
+  assert.match(readonly.status().textContent, /Reading stopped/);
 });
 
-test("browser speech fallback has a working Stop reading action", async () => {
-  const dom = voiceHarness("An answer");
-  const { window } = dom;
-  let stopped = 0;
-  window.fetch = async () => ({ ok: false });
-  window.lwVoice = { speak: () => true, stop: () => { stopped += 1; } };
-  window.speechSynthesis = { speaking: true, pending: false };
-  const button = window.document.getElementById("read-aloud");
-  button.click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(button.textContent, "Stop reading");
-  button.click();
-  assert.equal(stopped, 1);
-  assert.equal(button.getAttribute("aria-pressed"), "false");
-  assert.match(window.document.getElementById("answer-action-msg").textContent, /Reading stopped/);
-  dom.window.close();
+test('browser speech fallback has a working Stop reading action', async t => {
+  const p = voiceHarness('An answer'); t.after(() => p.window.close());
+  p.window.fetch = async () => ({ok: false}); const device = deviceVoice(p.window);
+  const button = p.doc.getElementById('read-aloud'); button.click(); await settle();
+  assert.equal(button.textContent, 'Stop reading'); assert.equal(device.spoken.length, 1);
+  const before = device.stops; button.click(); assert.equal(device.stops, before + 1);
+  assert.equal(button.getAttribute('aria-pressed'), 'false'); assert.match(p.status().textContent, /Reading stopped/);
 });

@@ -36,9 +36,18 @@ log = logging.getLogger(__name__)
 # still revoke coordination for a specific principal by listing a tool in
 # ``deny_tools`` -- deny always wins. The fan-out stays bounded by max_depth, the
 # budget, and each spawned child's own (attenuated) envelope.
+#
+# ``find_tools`` is on the floor too: it is catalog lookup, not an effect. It
+# only ranks and reveals tools the registry still exposes to discovery -- and
+# Agent._build_tools hides every name this grant's ``permits`` refuses from
+# that search space -- and activation changes what the model SEES, never what
+# it may execute: every call still passes through the same permits / ACL /
+# governance checks. Without it a specialist pack with an allowlist could not
+# reach the deferred connectors its own grant allows.
 COORDINATION_TOOLS: frozenset[str] = frozenset({
     "spawn_specialist", "spawn_swarm", "spawn_subagent", "list_specialists",
     "send_to_agent", "recv_from_agent", "delegate_to_agent", "ask_user",
+    "find_tools",
 })
 
 

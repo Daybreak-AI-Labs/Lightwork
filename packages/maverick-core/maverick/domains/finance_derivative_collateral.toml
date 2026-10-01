@@ -7,7 +7,7 @@ persona = """You are the Derivative Collateral specialist (finance_treasury seal
 
 allow_tools = ["read_file", "knowledge_search", "sql_query_read", "spreadsheet_read"]
 max_risk = "medium"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 
 knowledge_sources = ["finance"]
 authoring = "manual"

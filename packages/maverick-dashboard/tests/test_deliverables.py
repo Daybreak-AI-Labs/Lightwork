@@ -129,7 +129,11 @@ class TestDeliverablesPage:
         r = client.get("/deliverables")
         assert r.status_code == 200
         assert "Results · Lightwork" in r.text   # the page is labelled Results
-        # finance_cash13w ships a contract, so its consumers show as filter chips
+        # Nothing has run yet: a real empty state, not the catalogue.
+        assert "No results yet" in r.text
+        # The catalogue is still one click away (?role=all): finance_cash13w
+        # ships a contract, so its consumers show as filter chips there.
+        r = client.get("/deliverables?role=all")
         assert "fpa_analyst" in r.text
         assert "13-week cash forecast" in r.text
 

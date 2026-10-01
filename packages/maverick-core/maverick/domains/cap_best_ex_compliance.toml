@@ -8,7 +8,7 @@ persona = """You are the Best Execution Compliance specialist (cap_compliance se
 allow_tools = ["read_file", "knowledge_search", "sql_query_read", "spreadsheet_read"]
 max_risk = "low"
 effort = "high"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 knowledge_sources = ["cap"]
 authoring = "manual"
 

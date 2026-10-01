@@ -921,7 +921,7 @@ SETTINGS: tuple[Setting, ...] = (
       "select", "Integrations", "ntfy", "maverick.notifications",
       choices=(("none", "Do not send alerts"), ("ntfy", "ntfy phone alerts"),
                ("slack", "Slack"), ("discord", "Discord"),
-               ("pushover", "Pushover"))),
+               ("pushover", "Pushover"), ("email", "Email"))),
     S("notifications", "ntfy_topic", "ntfy topic",
       "Your private ntfy topic name. Treat it like a password.",
       "secret", "Integrations", "", "maverick.notifications"),
@@ -1080,6 +1080,9 @@ CHANNEL_ALLOWLISTS: dict[str, tuple[str, bool, str, str, str, str, str]] = {
               _PHONE, "a phone number starting with + and the country code"),
     "mattermost": ("Mattermost", True, "allowed_user_ids", "Person", "alice",
                    r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", "a Mattermost username or user id"),
+    "teams": ("Microsoft Teams", True, "allowed_users", "Person",
+              "12345678-abcd-abcd-abcd-1234567890ab", r"[0-9a-fA-F-]{36}",
+              "a Microsoft Entra object ID (36 characters, from the person's Entra profile)"),
 }
 
 
@@ -1105,6 +1108,24 @@ def _channel_settings() -> tuple[Setting, ...]:
                      max_length=300,
                      warning=f"More people will be able to give agents work through {label}.",
                      aliases=f"{name} allow list allowed senders", **common))
+        if name == "teams":
+            out.append(S(section, "approvals_enabled", "Decide approvals in Microsoft Teams",
+                         "Send approval requests to linked approvers as cards in Teams, where "
+                         "they can approve, reject or send them back. Decisions use the same "
+                         "record as the Approvals page.",
+                         "toggle", default=False, weaker=True,
+                         warning="People linked as approvers will be able to approve agent "
+                                 "actions from Teams.",
+                         aliases="teams approvals adaptive card", **common))
+            out.append(S(section, "allowed_tenants", "Microsoft 365 organisations that may use Lightwork",
+                         "Only messages from these organisation directory IDs reach the agent. "
+                         "When empty, the directory ID on the Channels page is the only one allowed.",
+                         "list", default=[], weaker="grow", item_label="Organisation",
+                         item_hint="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", pattern=r"[0-9a-fA-F-]{36}",
+                         item_error="a Microsoft Entra directory ID (36 characters)", empty_unset=True,
+                         max_items=50,
+                         warning="More organisations will be able to give agents work through Teams.",
+                         **common))
         if name == "telegram":
             out.append(S(section, "allowed_chat_ids", "Telegram chats that may use Lightwork",
                          "Private chats listed here may also give agents work.",

@@ -309,6 +309,8 @@ def build_app(directory):
     install_knowledge_access_fixture(dashboard.app, tenant, principal)
     from fixture_task_files import install as install_task_file_fixture
     install_task_file_fixture(dashboard.app, world, tenant, principal)
+    from fixture_approvals import install as install_approvals_fixture
+    install_approvals_fixture(dashboard.app, world, tenant, principal)
     return dashboard.app
 
 

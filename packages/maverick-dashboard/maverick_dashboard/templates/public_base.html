@@ -43,13 +43,13 @@
       </span>
       <span class="brand__name">Lightwork</span>
     </span>
-    <span class="public-label">Secure questionnaire</span>
+    <span class="public-label">{% block public_label %}Secure questionnaire{% endblock %}</span>
   </header>
   <main id="content" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
   <footer>
-    <span class="muted">Lightwork by Daybreak Labs · Secure vendor response</span>
+    <span class="muted">Lightwork by Daybreak Labs · {% block public_footer %}Secure vendor response{% endblock %}</span>
   </footer>
   {% block scripts_extra %}{% endblock %}
 </body>

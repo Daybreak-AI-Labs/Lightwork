@@ -164,3 +164,99 @@ def test_flow_designer_create_and_edit_routes_have_distinct_names() -> None:
 
     assert names_by_path["/flows/designer"] == "flow_designer_create_page"
     assert names_by_path["/flows/designer/{flow_id}"] == "flow_designer_edit_page"
+
+
+def _contexts(test_app: FastAPI) -> list[Any]:
+    out: list[Any] = []
+    for route in test_app.routes:
+        effective_route_contexts = getattr(route, "effective_route_contexts", None)
+        contexts = effective_route_contexts() if callable(effective_route_contexts) else (route,)
+        out.extend(contexts)
+    return out
+
+
+def _nested_collision_app() -> FastAPI:
+    inner = APIRouter(prefix="/inner")
+    outer = APIRouter()
+    top = APIRouter()
+
+    @inner.get("/one", name="status")
+    async def inner_status() -> dict[str, str]:
+        return {"where": "inner"}
+
+    @outer.get("/two", name="status")
+    async def outer_status() -> dict[str, str]:
+        return {"where": "outer"}
+
+    @top.get("/three", name="status")
+    async def top_status() -> dict[str, str]:
+        return {"where": "top"}
+
+    @top.get("/unique", name="only_here")
+    async def only_here() -> dict[str, str]:
+        return {"where": "top"}
+
+    outer.include_router(inner, prefix="/deep")
+    test_app = FastAPI()
+    test_app.include_router(outer, prefix="/api")
+    test_app.include_router(top)
+    return test_app
+
+
+def test_stabilizer_does_not_materialize_lazy_include_contexts() -> None:
+    test_app = _nested_collision_app()
+    wrappers = [r for r in test_app.routes if hasattr(r, "effective_route_contexts")]
+
+    stabilize_effective_route_names(test_app)
+
+    # FastAPI >= 0.141 keeps includes lazy; renaming must not have forced the
+    # per-route dependant/pydantic rebuild that traversing the contexts costs.
+    for wrapper in wrappers:
+        assert getattr(wrapper, "_effective_candidates_version", None) is None
+
+
+def test_stabilizer_names_are_unique_and_agree_with_effective_contexts() -> None:
+    test_app = _nested_collision_app()
+    stabilize_effective_route_names(test_app)
+
+    names_by_path = {
+        _effective_value(c, "path"): _effective_value(c, "name") for c in _contexts(test_app)
+    }
+    names = list(names_by_path.values())
+    assert len(set(names)) == len(names)
+    assert names_by_path["/unique"] == "only_here"  # unique names are untouched
+    # Three handlers named ``status`` in one module: the qualified module name
+    # still collides, so each gets the signature form keyed on its full
+    # effective (prefixed) path.
+    for path in ("/api/deep/inner/one", "/api/two", "/three"):
+        name = names_by_path[path]
+        assert name.endswith("test_route_identities.status__get__" + name.rsplit("__", 1)[1]), name
+        assert __name__ + ".status__get__" in name
+        assert str(test_app.url_path_for(name)) == path
+    client = TestClient(test_app)
+    assert client.get("/api/deep/inner/one").json() == {"where": "inner"}
+
+
+def test_stabilizer_is_idempotent() -> None:
+    test_app = _nested_collision_app()
+    stabilize_effective_route_names(test_app)
+    first = {_effective_value(c, "path"): _effective_value(c, "name") for c in _contexts(test_app)}
+    stabilize_effective_route_names(test_app)
+    second = {_effective_value(c, "path"): _effective_value(c, "name") for c in _contexts(test_app)}
+    assert first == second
+
+
+def test_stabilizer_rejects_a_router_included_twice() -> None:
+    import pytest
+
+    shared = APIRouter()
+
+    @shared.get("/x", name="status")
+    async def shared_status() -> dict[str, bool]:
+        return {"ok": True}
+
+    test_app = FastAPI()
+    test_app.include_router(shared, prefix="/a")
+    test_app.include_router(shared, prefix="/b")
+    with pytest.raises(RuntimeError):
+        stabilize_effective_route_names(test_app)

@@ -142,7 +142,11 @@ def test_markdown_export_enforces_current_review_and_visible_table(page_env):
     assert download.text == "| Week | Net |\n| --- | --- |\n| W1 | 300 |"
     assert "UNREVIEWED" not in download.text
     page = client.get(f"/chat/goal/{gid}")
-    source = re.search(r'<textarea id="saved-answer-source" hidden>(.*?)</textarea>', page.text, re.DOTALL)
+    source = re.search(
+        r'<textarea\b(?=[^>]*\bid="saved-answer-source")[^>]*>(.*?)</textarea>',
+        page.text,
+        re.DOTALL,
+    )
     assert source and unescape(source.group(1)) == download.text
     world.set_goal_status(gid, "done", result="changed answer")
     assert client.get(f"/chat/goal/{gid}/download.md").status_code == 403

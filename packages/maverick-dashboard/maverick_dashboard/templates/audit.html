@@ -18,6 +18,7 @@
     .aud-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-3); }
     .aud-links { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
     .aud-nowrap { white-space: nowrap; }
+    .aud-order { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin: 0 0 var(--space-3); font-size: var(--text-sm); }
   </style>
 
   {% from "_hero.html" import hero, state %}
@@ -93,28 +94,44 @@
   <div class="panel">
     {% if audit_filter_error %}<p>Correct the filters above to search activity.</p>
     {% elif events %}
+      <p class="aud-order muted">
+        <span id="aud-order-label">Showing {{ 'newest first' if order == 'newest' else 'oldest first' }}.</span>
+        {% set _qs = request.query_params.multi_items() | rejectattr(0, 'equalto', 'order') | list %}
+        <a class="btn btn--ghost" href="/audit?{{ (_qs + [('order', 'oldest' if order == 'newest' else 'newest')]) | urlencode }}"
+           aria-describedby="aud-order-label">Show {{ 'oldest first' if order == 'newest' else 'newest first' }}</a>
+        Times are shown in your time zone.
+      </p>
       <table id="audit-table">
-        <caption class="sr-only">Activity, newest last</caption>
+        <caption class="sr-only">Activity, {{ 'newest first' if order == 'newest' else 'oldest first' }}</caption>
         <thead>
           <tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">Who</th><th scope="col">Task</th><th scope="col">Details</th></tr>
         </thead>
         <tbody>
         {% for ev in events %}
           <tr>
-            <td class="muted aud-nowrap">{{ ev.get('ts') | datetime }}</td>
-            <td>{{ kind_label(ev.kind) }}</td>
+            <td class="muted aud-nowrap">{{ ev.get('ts') | datetime('absolute') }}</td>
+            <td>{{ kind_label(ev.kind) }}{% if ev.get('scope') == 'deployment' %} <span class="badge idle" title="Recorded in the deployment-wide log, which covers every workspace">Deployment</span>{% endif %}</td>
             <td>{{ event_who(ev) }}</td>
             <td>{% if ev.goal_id is not none %}<a href="/chat/goal/{{ ev.goal_id }}">Task {{ ev.goal_id }}</a>{% else %}—{% endif %}</td>
             <td>
-              {% set rows = event_details(ev) %}
-              {% if rows or ev.get('hash') %}
+              {% set rows = event_details(ev) | rejectattr(0, 'equalto', 'scope') | list %}
+              {% set tech = event_technical(ev) %}
+              {% if rows or tech or ev.get('hash') %}
                 <div class="aud-detail">
                   {% for key, label, text in rows %}
                   <div class="aud-kv{% if key in ['obligation_id', 'regulation', 'article', 'obligations_checked'] %} aud-obligation{% endif %}">
                     <span class="aud-k">{{ label }}</span>
-                    <span class="aud-v">{% if key == 'obligation_id' %}<a href="/compliance/obligations">{{ text }}</a>{% else %}{{ text }}{% endif %}</span>
+                    <span class="aud-v">{% if key == 'obligation_id' %}<a href="/compliance/obligations">{{ text }}</a>{% elif is_time_key(key) and ev.get(key) is number %}{{ ev.get(key) | datetime('absolute') }}{% else %}{{ text }}{% endif %}</span>
                   </div>
                   {% endfor %}
+                  {% if tech %}
+                  <details class="aud-sig">
+                    <summary>Technical details</summary>
+                    {% for key, label, text in tech %}
+                    <div class="aud-kv"><span class="aud-k">{{ label }}</span><span class="aud-v aud-hash">{{ text }}</span></div>
+                    {% endfor %}
+                  </details>
+                  {% endif %}
                   {% if ev.get('hash') or ev.get('sig') %}
                   <details class="aud-sig">
                     <summary>How this entry is protected{% if not ev.get('prev_hash') %} (first entry){% endif %}</summary>
@@ -151,6 +168,26 @@
         <a class="btn btn--ghost" href="/audit/binder">Open the audit binder</a></p>
     {% endif %}
   </div>
+
+  {% if can_global_admin and deployment_events is defined and not (audit_filter_error or since or until or kind or person or q or request.query_params.get('before_event')) %}
+  <section class="panel" aria-labelledby="aud-deployment-title">
+    <h2 id="aud-deployment-title">Recent deployment activity</h2>
+    <p class="muted">This limited recent view covers the deployment-wide log. It is separate from the workspace search, pagination, check and download controls above.</p>
+    {% if deployment_events %}
+    <table>
+      <caption class="sr-only">Recent deployment-wide activity</caption>
+      <thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">Who</th></tr></thead>
+      <tbody>
+      {% for ev in deployment_events %}
+        <tr><td class="muted aud-nowrap">{{ ev.get('ts') | datetime('absolute') }}</td><td>{{ kind_label(ev.kind) }}</td><td>{{ event_who(ev) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No readable recent deployment events are shown. This does not establish that none were recorded.</p>
+    {% endif %}
+  </section>
+  {% endif %}
 
   <section class="panel" aria-labelledby="aud-protect-title">
     <h2 id="aud-protect-title">Protect and share the log</h2>

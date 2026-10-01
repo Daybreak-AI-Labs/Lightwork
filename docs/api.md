@@ -14,6 +14,41 @@ an `Authorization: Bearer <token>` header. (The legacy `?token=` query
 parameter was removed: it leaked the bearer via Referer, proxy logs and
 browser history.)
 
+### API keys (recommended for scripts and integrations)
+
+Every signed-in person can create their own keys on **Account › API keys**
+(`/account/api-keys`); administrators see every key there and can create
+**service accounts** -- named identities for programs that hold keys and a
+role but cannot sign in. A key is sent exactly like the token:
+
+    Authorization: Bearer lwk_...
+
+- **Shown once.** The secret appears only in the response that creates or
+  rotates it; the server stores its SHA-256, never the secret.
+- **Scopes.** A key does only what its scopes allow, mapped onto the RBAC
+  permissions routes already check: `tasks:read` (view), `tasks:write` and
+  `approvals:decide` (operate), `audit:read` (audit), `settings:write` and
+  `admin` (admin). A key can never do more than its owner's *current* role:
+  scopes outside the role are refused at creation, and a demoted owner's
+  keys shrink with them. A read-only key calling a write route gets a
+  `403` that says the key lacks a scope.
+- **Expiry.** Every key has an expiry date (default 90 days, at most 365 by
+  default; both are settings). An expired key gets a plain `401`. The keys
+  page warns about keys that stop within seven days.
+- **Rotation.** *Rotate* mints a replacement with the same name and scopes;
+  the old secret keeps working for a grace period (24 hours by default) and
+  then stops. *Revoke* stops a key at once. Disabling a service account
+  revokes all of its keys.
+- **Workspace binding.** A key may be bound to one workspace; it then acts
+  only inside it.
+- Endpoints: `GET/POST /api/v1/api-keys`, `POST /api/v1/api-keys/{id}/rotate`,
+  `POST /api/v1/api-keys/{id}/revoke`, `GET/POST /api/v1/service-accounts`,
+  `POST /api/v1/service-accounts/{name}/disable`. Every change is audited.
+
+The static `MAVERICK_DASHBOARD_TOKEN` keeps working as **break-glass**
+access: it has no scopes and no person behind it, its use is recorded in
+the activity record, and Settings shows a warning while it is set.
+
 Exempt from auth (so external tooling and probes work without creds):
 `/healthz`, `/livez`, `/readyz`, `/openapi.json`, `/docs`, `/redoc`, and the
 `/.well-known/agent-card.json` discovery endpoints.

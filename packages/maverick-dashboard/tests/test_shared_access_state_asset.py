@@ -14,6 +14,8 @@ def test_connection_setup_serves_shared_access_state_dependency(tmp_path, monkey
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     config.reset_config_cache()
+    from maverick import connections
+    monkeypatch.setattr(connections, "enabled", lambda: True)  # the form is hidden while off
     try:
         with TestClient(app, headers={"Origin": "http://testserver"}) as client:
             page = client.get("/connections")

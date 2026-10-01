@@ -189,9 +189,10 @@ async def rollback(request: Request, body: RollbackIn) -> dict:
         restored = await run_in_threadpool(dreaming.rollback_learning_state, body.snapshot)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="That saved point no longer exists.") from exc
-    except Exception as exc:  # noqa: BLE001 -- partial restore reports itself in the kernel
+    except Exception as exc:  # noqa: BLE001 -- earlier stores may already have been restored
         raise HTTPException(status_code=503, detail=(
-            "Lightwork could not restore that saved point. What was learned is unchanged.")) from exc
+            "Lightwork could not fully restore that saved point. Some learned information "
+            "may have changed. Review the Learned and Learning pages before trying again.")) from exc
     if not restored:
         raise HTTPException(status_code=404, detail="There is no saved point to go back to yet.")
     await run_in_threadpool(lambda: _record(request, "rollback", snapshot=body.snapshot,

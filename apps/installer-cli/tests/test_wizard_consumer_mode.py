@@ -235,14 +235,15 @@ def test_run_consumer_docker_mode_keeps_host_mutation_tools_enabled(monkeypatch,
     assert "write_file" not in denied
 
 
-def test_run_consumer_demo_command_uses_haiku(monkeypatch, tmp_path: Path, capsys):
-    """Council perf seat: first-goal demo must route to Haiku for sub-2s TTFT."""
+def test_run_consumer_demo_command_runs_a_real_first_outcome(monkeypatch, tmp_path: Path, capsys):
+    """The closing panel prints a real first task on sample data for the
+    picked department, and never a hard-coded model (see
+    test_wizard_first_outcome.py for the full step)."""
     wizard = _stub_wizard_io(monkeypatch, tmp_path)
     wizard.run_consumer()
-    out = capsys.readouterr().out
-    # The closing panel prints the demo command.
-    assert "claude-haiku-4-5" in out
-    assert "haiku about Tuesday" in out  # the curated demo prompt
+    out = " ".join(capsys.readouterr().out.replace("│", " ").split())  # Rich wraps the panel
+    assert "--domain finance_ap" in out
+    assert "--model" not in out
 
 
 def test_run_consumer_creates_workdir(monkeypatch, tmp_path: Path):

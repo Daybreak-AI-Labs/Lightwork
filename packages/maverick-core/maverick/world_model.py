@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from .deadline_alerts import SQLITE_SCHEMA as _DEADLINE_ALERT_SCHEMA
 from .event_admission import SQLITE_SCHEMA as _EVENT_ADMISSION_SCHEMA
 from .file_lock import (
     atomic_create_bytes,
@@ -41,6 +42,7 @@ from .goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
 from .metadata_history import SQLITE_INDEXES as _HISTORY_INDEXES
 from .paths import bind_tenant_namespace, current_tenant_id, data_dir
 from .personal_alert_revisions import SQLITE_MIGRATION as _PERSONAL_ALERT_MIGRATION
+from .webhook_subscriptions import SQLITE_SCHEMA as _WEBHOOK_SUBSCRIPTION_SCHEMA
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +54,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 46
+SCHEMA_VERSION = 47
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -425,6 +427,14 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    # Reconcile both draft histories without changing their earlier fingerprints.
+    # The teardown draft used v42 for these tables, so its databases may have
+    # skipped the companion draft's v42 receipt table. Ensure both sets at v47.
+    47: [
+        _GOAL_MUTATION_SCHEMA,
+        *_WEBHOOK_SUBSCRIPTION_SCHEMA,
+        *_DEADLINE_ALERT_SCHEMA,
+    ],
     46: ["ALTER TABLE goals ADD COLUMN connection_selection TEXT NOT NULL DEFAULT ''"],
     45: _HISTORY_INDEXES,
     44: _PERSONAL_ALERT_MIGRATION,
@@ -748,16 +758,33 @@ def _approval_audit_event_id(
     approval_id: int,
     status: str,
     decided_by: str,
+    undo_round: int = 0,
 ) -> str:
-    """Stable, unambiguous id for retrying one supervisor's exact vote."""
-    parts = (
+    """Stable, unambiguous id for retrying one supervisor's exact vote.
+
+    ``undo_round`` counts how many times the approval was undone: a vote
+    cast after an undo is a new decision and gets a new identity, so the
+    signed audit chain records it instead of treating it as a replay of the
+    retracted vote. Round 0 keeps the historical id.
+    """
+    parts = [
         (tenant_id or "").encode("utf-8"),
         str(int(approval_id)).encode("ascii"),
         status.encode("ascii"),
         decided_by.encode("utf-8"),
-    )
+    ]
+    if int(undo_round) > 0:
+        parts.append(f"undo-round:{int(undo_round)}".encode("ascii"))
     framed = b"".join(len(part).to_bytes(4, "big") + part for part in parts)
     return "approval-v1-" + hashlib.sha256(framed).hexdigest()
+
+
+APPROVAL_UNDO_STATUS = "undone"
+
+
+def _approval_undo_marker_id(tenant_id: str | None, approval_id: int, undo_round: int) -> str:
+    """Outbox row id for one undo of an approval (never delivered; a counter)."""
+    return _approval_audit_event_id(tenant_id, approval_id, APPROVAL_UNDO_STATUS, "", undo_round)
 
 
 @dataclass
@@ -865,8 +892,13 @@ def _enc_field(text: str | None) -> str | None:
 _UNSEALED_WITHHELD = "‹withheld: unsealed value in an encrypted store›"
 
 
-def _dec_field(text: str | None) -> str | None:
+def _dec_field(text: str | None, *, at_rest: bool | None = None) -> str | None:
     """Unseal a stored field from a sealed column when at-rest encryption is on.
+
+    ``at_rest`` lets a caller that already resolved :func:`at_rest_enabled`
+    for a whole result set pass it down: the policy check walks the compliance
+    profile configuration each time (~90 us), and a 200-row page read it 400
+    times.
 
     When encryption is disabled, fields are raw plaintext (which may legitimately
     begin with the public seal marker), so they pass through untouched.
@@ -885,7 +917,9 @@ def _dec_field(text: str | None) -> str | None:
         strict_at_rest,
         unseal_from_str,
     )
-    if not at_rest_enabled():
+    if at_rest is None:
+        at_rest = at_rest_enabled()
+    if not at_rest:
         return text
     if is_sealed_str(text):
         return unseal_from_str(text)
@@ -961,14 +995,26 @@ def _question_from_row(row) -> Question:
     return Question(**_row_for(Question, d))
 
 
-def _goal_from_row(row) -> Goal:
+def _goal_from_row(row, *, at_rest: bool | None = None) -> Goal:
     """Build a Goal from a row, decrypting the sealed content fields."""
+    from .crypto_at_rest import at_rest_enabled
+
+    if at_rest is None:
+        at_rest = at_rest_enabled()
     d = dict(row)
-    d["title"] = _dec_field(d.get("title"))
-    d["description"] = _dec_field(d.get("description"))
+    d["title"] = _dec_field(d.get("title"), at_rest=at_rest)
+    d["description"] = _dec_field(d.get("description"), at_rest=at_rest)
     if "result" in d:
-        d["result"] = _dec_field(d.get("result"))
+        d["result"] = _dec_field(d.get("result"), at_rest=at_rest)
     return Goal(**_row_for(Goal, d))
+
+
+def _goals_from_rows(rows) -> list[Goal]:
+    """Build Goals from a result set with one at-rest policy check per query."""
+    from .crypto_at_rest import at_rest_enabled
+
+    at_rest = at_rest_enabled()
+    return [_goal_from_row(r, at_rest=at_rest) for r in rows]
 
 
 def _goal_event_from_row(row) -> GoalEvent:
@@ -995,6 +1041,17 @@ def _episode_spend_from_row(row) -> EpisodeSpend:
     if "outcome" in d:
         d["outcome"] = _dec_field(d.get("outcome"))
     return EpisodeSpend(**_row_for(EpisodeSpend, d))
+
+
+def _notify_approval_created(world, approval_id: int, provenance: str | None) -> None:
+    """Best-effort chat notification (Slack and Teams approval cards); never
+    raises. Called once, after the approval row is committed."""
+    try:
+        from .approval_notify import approval_created
+
+        approval_created(int(approval_id), provenance=provenance, world=world)
+    except Exception:  # noqa: BLE001 -- the queue row is already durable
+        logging.getLogger(__name__).warning("approval notification failed", exc_info=True)
 
 
 def _approval_from_row(row) -> Approval:
@@ -1688,7 +1745,7 @@ class WorldModel:
             "WHERE o.kind = ? AND o.ref = ? ORDER BY g.id DESC LIMIT ?",
             (str(kind), str(ref), max(1, int(limit))),
         )
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     def origin_status_counts(self, kind: str, ref: str) -> dict[str, int]:
         """An automation's spawned-goal counts keyed by status (run summary)."""
@@ -2262,7 +2319,7 @@ class WorldModel:
             sql += " LIMIT ? OFFSET ?"
             params = params + (max(1, int(limit)), max(0, int(offset)))
         rows = self._read_all(sql, params)
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     def personal_alert_goals(self, owner: str, *, since: float, after_id: int = 0,
                              limit: int = 250) -> list[tuple]:
@@ -2392,7 +2449,7 @@ class WorldModel:
             "ORDER BY updated_at DESC LIMIT ?",
             (owner, limit),
         )
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     def subgoals(self, parent_id: int, limit: int = 50) -> list[Goal]:
         """Immediate children of a goal, oldest first. Locked read."""
@@ -2403,7 +2460,7 @@ class WorldModel:
             "ORDER BY created_at ASC LIMIT ?",
             (parent_id, limit),
         )
-        return [_goal_from_row(r) for r in rows]
+        return _goals_from_rows(rows)
 
     # ----- episodes -----
     def start_episode(self, goal_id: int) -> int:
@@ -2563,9 +2620,12 @@ class WorldModel:
             )
             return int(cur.rowcount or 0)
 
-    def total_spend(self, owner: str | None = None) -> dict[str, float]:
+    def total_spend(self, owner: str | None = None, *,
+                    since: float | None = None) -> dict[str, float]:
         """Aggregate spend. ``owner`` scopes to one principal's runs (join to
         the owning goal); ``None`` is the deployment-wide admin / auth-off view.
+        ``since`` keeps only runs that started at or after that time (the
+        "this month" figure on the My work page and in the daily summary).
         """
         join = ("FROM episodes e JOIN goals g ON e.goal_id = g.id "
                 if owner is not None else "FROM episodes e ")
@@ -2574,6 +2634,9 @@ class WorldModel:
         if owner is not None:
             where += " AND g.owner = ?"
             params = (owner,)
+        if since is not None:
+            where += " AND e.started_at >= ?"
+            params = (*params, float(since))
         row = self._read_one(
             "SELECT COALESCE(SUM(e.cost_dollars), 0) AS dollars, "
             "COALESCE(SUM(e.input_tokens), 0) AS in_tok, "
@@ -3124,7 +3187,23 @@ class WorldModel:
                  (requested_by or None), goal["id"] if goal else None,
                  goal["domain"] if goal else ""),
             )
-            return cur.lastrowid
+            approval_id = cur.lastrowid
+        _notify_approval_created(self, approval_id, provenance)
+        self._emit_approval_event("approval.created", approval_id, {"risk": risk, "action": action})
+        return approval_id
+
+    def _emit_approval_event(self, event: str, approval_id: int, payload: dict) -> None:
+        """Webhook subscribers hear about approvals; never raises, and costs one
+        read of the subscription table when nobody is subscribed."""
+        try:
+            from .webhook_events import emit, record_link
+
+            emit(event, record_type="approval", record_id=str(approval_id),
+                 title=str(payload.get("action") or "approval")[:200],
+                 summary={k: v for k, v in payload.items() if k != "action"},
+                 link=record_link("/approvals"), payload=dict(payload), world=self)
+        except Exception:  # pragma: no cover - webhooks never block an approval
+            pass
 
     def get_approval(self, approval_id: int) -> Approval | None:
         row = self._read_one(
@@ -3159,7 +3238,78 @@ class WorldModel:
             approval_id,
             status,
             (decided_by or "").strip(),
+            self._approval_undo_round(approval_id),
         )
+
+    def _approval_undo_round(self, approval_id: int, conn=None) -> int:
+        """How many times this approval was undone (see ``undo_approval_decision``)."""
+        sql = (
+            "SELECT COUNT(*) FROM approval_audit_outbox "
+            "WHERE approval_id = ? AND status = ?"
+        )
+        params = (int(approval_id), APPROVAL_UNDO_STATUS)
+        row = conn.execute(sql, params).fetchone() if conn is not None else self._read_one(sql, params)
+        return int(row[0]) if row else 0
+
+    def undo_approval_decision(
+        self,
+        approval_id: int,
+        *,
+        undone_by: str,
+        within_seconds: float,
+    ) -> str:
+        """Return a just-decided approval to pending while it can still be undone.
+
+        Outcomes: ``"undone"``, ``"not_found"``, ``"not_decided"`` (still
+        pending, or its final vote is awaiting audit delivery), ``"too_late"``
+        (the window of ``within_seconds`` after ``decided_at`` has passed, so
+        the consumer may already have acted). On success the sign-offs are
+        cleared, the delivered vote rows keep their place in the outbox but no
+        longer carry a final status, and an undo marker row bumps the vote
+        identity round so the next decision is a new signed audit event.
+        """
+        with self._writing() as conn:
+            row = conn.execute(
+                "SELECT status, decided_at FROM approvals WHERE id = ?",
+                (int(approval_id),),
+            ).fetchone()
+            if row is None:
+                return "not_found"
+            if row["status"] == "pending":
+                return "not_decided"
+            decided_at = row["decided_at"]
+            if decided_at is None or time.time() - float(decided_at) > float(within_seconds):
+                return "too_late"
+            conn.execute(
+                "UPDATE approvals SET status = 'pending', decided_at = NULL, "
+                "decided_by = NULL WHERE id = ? AND status = ?",
+                (int(approval_id), row["status"]),
+            )
+            conn.execute(
+                "DELETE FROM approval_signoffs WHERE approval_id = ?",
+                (int(approval_id),),
+            )
+            conn.execute(
+                "UPDATE approval_audit_outbox SET final_status = NULL "
+                "WHERE approval_id = ? AND status IN ('approved', 'denied')",
+                (int(approval_id),),
+            )
+            undo_round = self._approval_undo_round(approval_id, conn) + 1
+            now = time.time()
+            conn.execute(
+                "INSERT INTO approval_audit_outbox("
+                "event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at) VALUES(?, ?, ?, ?, NULL, ?, ?)",
+                (
+                    _approval_undo_marker_id(current_tenant_id(), approval_id, undo_round),
+                    int(approval_id),
+                    APPROVAL_UNDO_STATUS,
+                    (undone_by or "").strip(),
+                    now,
+                    now,
+                ),
+            )
+            return "undone"
 
     def get_approval_audit_event(
         self,
@@ -3230,11 +3380,6 @@ class WorldModel:
         approver = (decided_by or "").strip()
         if not approver:
             return None
-        event_id = self.approval_audit_event_id(
-            approval_id,
-            status,
-            approver,
-        )
         with self._writing() as conn:
             # The no-op write acquires SQLite's cross-process write reservation
             # before any decision read.  A SELECT-first deferred transaction can
@@ -3244,6 +3389,10 @@ class WorldModel:
                 "WHERE id = ? AND status = 'pending'",
                 (int(approval_id),),
             ).rowcount > 0
+            undo_round = self._approval_undo_round(approval_id, conn)
+            event_id = _approval_audit_event_id(
+                current_tenant_id(), approval_id, status, approver, undo_round,
+            )
 
             prior = conn.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -3309,10 +3458,12 @@ class WorldModel:
                     "ORDER BY decided_at, approver",
                     (int(approval_id),),
                 ).fetchall():
-                    legacy_event_id = self.approval_audit_event_id(
+                    legacy_event_id = _approval_audit_event_id(
+                        current_tenant_id(),
                         approval_id,
                         legacy["decision"],
                         legacy["approver"],
+                        undo_round,
                     )
                     conn.execute(
                         "INSERT OR IGNORE INTO approval_audit_outbox("
@@ -3408,6 +3559,7 @@ class WorldModel:
         commit acknowledgement is lost, the caller can safely append the same
         stable ``event_id`` again and retry this method.
         """
+        finalized: tuple[str, str] | None = None
         with self._writing() as conn:
             event = conn.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -3444,7 +3596,7 @@ class WorldModel:
                     (approval_id,),
                 ).fetchone()
                 if final is not None:
-                    conn.execute(
+                    applied = conn.execute(
                         "UPDATE approvals SET status = ?, decided_at = ?, "
                         "decided_by = ? WHERE id = ? AND status = 'pending'",
                         (
@@ -3453,7 +3605,12 @@ class WorldModel:
                             final["decided_by"],
                             approval_id,
                         ),
-                    )
+                    ).rowcount
+                    if applied:
+                        finalized = (final["final_status"], final["decided_by"])
+            if finalized is not None:
+                self._emit_approval_event("approval.decided", approval_id,
+                                          {"status": finalized[0], "decided_by": finalized[1] or ""})
             return True
 
     def decide_approval(self, approval_id: int, status: str,
@@ -3498,7 +3655,12 @@ class WorldModel:
                         approval_id,
                     ),
                 )
-                return cur.rowcount > 0
+                decided = cur.rowcount > 0
+            if decided:
+                self._emit_approval_event("approval.decided", approval_id,
+                                          {"status": status, "decided_by": decided_by or "",
+                                           "action": appr.action})
+            return decided
 
         approver = (decided_by or "").strip()
         if not approver:

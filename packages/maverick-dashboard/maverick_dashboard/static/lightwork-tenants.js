@@ -51,15 +51,35 @@
       var name = String(data.get('display_name') || '').trim();
       if (!name) { addMsg.textContent = 'Give the workspace a name.'; return; }
       if (limit === null) { addMsg.textContent = 'Enter a daily limit above $0, or tick "No daily limit".'; return; }
+      var adminEmail = String(data.get('admin_email') || '').trim();
+      var out = document.getElementById('tenant-onboard-out');
+      if (out) out.hidden = true;
       addMsg.textContent = 'Creating…';
       try {
+        if (adminEmail) {
+          // Workspace + its first administrator's invitation in one step. The
+          // page does not reload: the invitation link is shown only once.
+          var result = await send('/api/v1/admin/workspace-ops/onboard', 'POST', {
+            display_name: name, plan: String(data.get('plan') || 'free'), max_daily_dollars: limit,
+            admin_email: adminEmail, role: String(data.get('role') || 'admin')});
+          addMsg.textContent = result.summary || ('Workspace "' + name + '" created and ' + adminEmail + ' invited.');
+          if (window.mvToast) window.mvToast(addMsg.textContent);
+          var link = document.getElementById('tenant-onboard-link');
+          if (link && out) { link.value = result.invite_link || ''; out.hidden = !link.value; }
+          add.reset();
+          return;
+        }
         await send('/api/v1/admin/tenants', 'POST', {display_name: name, plan: String(data.get('plan') || 'free'), max_daily_dollars: limit});
         addMsg.textContent = 'Workspace "' + name + '" created.';
+        if (window.mvToastAfterReload) window.mvToastAfterReload('Workspace "' + name + '" created.');
         reloadSoon();
       } catch (failure) {
+        var plain = '';
+        try { if (failure && typeof failure.clone === 'function') { var body = await failure.clone().json(); plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : ''; } } catch (ignored) {}
         addMsg.textContent = failure && failure.status === 409
           ? 'A workspace with that name already exists. Choose another name.'
-          : errorText(failure, 'create the workspace');
+          : (plain || errorText(failure, 'create the workspace'));
+        if (window.mvToast) window.mvToast(addMsg.textContent, {error: true});
       }
     });
   }
@@ -74,6 +94,7 @@
       try {
         await send(base(id) + '/quota', 'POST', {max_daily_dollars: limit});
         rowMsg.textContent = 'Daily limit for ' + nameOf(id) + ' is now ' + (limit ? '$' + limit + ' a day' : 'no limit') + '.';
+        if (window.mvToastAfterReload) window.mvToastAfterReload(rowMsg.textContent);
         reloadSoon();
       } catch (failure) { rowMsg.textContent = errorText(failure, 'save the daily limit'); }
     });
@@ -90,6 +111,7 @@
         await send(base(id) + '/plan', 'POST', {plan: plan});
         select.dataset.current = plan;
         rowMsg.textContent = nameOf(id) + ' is now on the ' + select.options[select.selectedIndex].textContent + ' plan.';
+        if (window.mvToast) window.mvToast(rowMsg.textContent);
       } catch (failure) {
         select.value = select.dataset.current;
         rowMsg.textContent = errorText(failure, 'change the plan');
@@ -98,9 +120,9 @@
   });
 
   var questions = {
-    suspend: ['Pause {name}? No new work can start in it until you resume it. Nothing is deleted.', 'Pause', 'pause the workspace', 'POST', '/suspend'],
-    resume: ['Resume {name}? Work can start in it again.', 'Resume', 'resume the workspace', 'POST', '/resume'],
-    delete: ['Remove {name} from the list? No one will be able to open it any more. Its stored records stay on this computer.', 'Remove workspace', 'remove the workspace', 'DELETE', '']
+    suspend: ['Pause {name}? No new work can start in it until you resume it. Nothing is deleted.', 'Pause', 'pause the workspace', 'POST', '/suspend', '{name} is paused.'],
+    resume: ['Resume {name}? Work can start in it again.', 'Resume', 'resume the workspace', 'POST', '/resume', '{name} is active again.'],
+    delete: ['Remove {name} from the list? No one will be able to open it any more. Its stored records stay on this computer.', 'Remove workspace', 'remove the workspace', 'DELETE', '', '{name} was removed.']
   };
   document.querySelectorAll('[data-tenant-action]').forEach(function (button) {
     button.addEventListener('click', async function () {
@@ -113,7 +135,8 @@
       rowMsg.textContent = 'Saving…';
       try {
         await send(base(id) + q[4], q[3]);
-        rowMsg.textContent = 'Done.';
+        rowMsg.textContent = q[5].replace('{name}', row.dataset.tenantName);
+        if (window.mvToastAfterReload) window.mvToastAfterReload(rowMsg.textContent);
         reloadSoon();
       } catch (failure) {
         rowMsg.textContent = errorText(failure, q[2]);

@@ -1,7 +1,7 @@
 """The full setup guide (``maverick init``) inside the app.
 
 The terminal setup assistant (``apps/installer-cli/maverick_installer/wizard.py``)
-is the source of truth for what setup covers. Its advanced flow walks 38 steps
+is the source of truth for what setup covers. Its advanced flow walks 42 steps
 (``wizard.STEPS``); :data:`STEPS` below names, for each one, where the same
 settings are changed in this app. Most live in All settings (the catalog of
 product settings, which writes the same keys the assistant writes); the rest
@@ -50,6 +50,8 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("safety", "Safety", "How carefully requests and actions are screened.", ("safety",), ""),
     ("signed_skills", "Signed skills", "Whether only signed skills may be added.", ("skills",), ""),
     ("budget", "Spending", "The most one task may spend.", ("budget",), ""),
+    ("approvals", "Approvals", "How long a decision can be undone, and the confirmation for risky requests.",
+     ("approval",), "/approvals"),
     ("sandbox", "Protected work area", "Where agent commands run and what they may reach.", ("sandbox",), ""),
     ("research_execution", "Research lab", "Whether research experiments may run, and their limits.",
      ("research_execution",), "/research"),
@@ -80,6 +82,8 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
      ("governance_agents", "threat_hunt", "env_hunt"), ""),
     ("advanced", "Advanced reasoning", "Planning, checking and other advanced options.",
      ("reflexion", "planning", "verification"), ""),
+    ("api_keys", "API access", "Personal and service-account keys for scripts and integrations.",
+     ("dashboard",), "/settings#api-keys"),
     ("web_search", "Web search", "Whether agents may search the web.", ("search",), ""),
     ("mcp_servers", "Tool servers", "Outside tool servers agents may use.", ("mcp_servers",), "/mcp"),
     ("plugins", "Add-ons", "Installed add-ons and what they may do.", ("plugins",), "/plugins"),
@@ -89,6 +93,10 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("analytics", "Usage analytics", "Whether usage is measured.", ("analytics",), ""),
     ("persona", "Assistant persona", "The assistant's name and style.", ("persona",), ""),
     ("notifications", "Notifications", "Where alerts are sent.", ("notifications",), ""),
+    ("deadline_alerts", "Deadline alerts", "Warnings before a data request, incident clock, renewal or approval is due.",
+     ("deadline_alerts",), ""),
+    ("daily_summary", "Daily summary and chat approvals",
+     "Each person's daily summary, and approval cards in Slack.", ("my_work", "notifications"), "/me"),
     ("webhooks", "Webhooks", "Sending events to other apps.", ("webhooks",), "/settings#settings-integrations"),
     ("a2a", "Outside agents", "Letting agents from other systems send work.", ("a2a",), ""),
 )

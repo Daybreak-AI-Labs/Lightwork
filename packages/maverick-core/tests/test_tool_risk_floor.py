@@ -6,6 +6,8 @@ max_risk ceilings and the governance risk gate.
 """
 from __future__ import annotations
 
+import importlib
+
 from maverick.safety.tool_risk import tool_risk
 
 
@@ -59,3 +61,47 @@ def test_an_exact_override_still_beats_inherited_risk():
 def test_a_dotless_or_empty_namespace_changes_nothing():
     assert tool_risk("totally_unknown_tool", {}) == "medium"
     assert tool_risk(".leading_dot", {}) == "medium"
+
+
+def test_pinned_overrides_reads_config_once_per_block(monkeypatch):
+    risk = importlib.import_module("maverick.safety.tool_risk")
+
+    calls = {"n": 0}
+
+    def _loader():
+        calls["n"] += 1
+        return {"shell": "low"}
+
+    monkeypatch.setattr(risk, "_load_overrides", _loader)
+    with risk.pinned_overrides():
+        for _ in range(100):
+            assert tool_risk("shell") == "low"
+        with risk.pinned_overrides():  # nested: reuses the outer snapshot
+            assert tool_risk("shell") == "low"
+    assert calls["n"] == 1
+    # Outside the block every call reads the live config again.
+    tool_risk("shell")
+    tool_risk("shell")
+    assert calls["n"] == 3
+
+
+def test_pinned_overrides_is_released_after_an_error(monkeypatch):
+    risk = importlib.import_module("maverick.safety.tool_risk")
+
+    monkeypatch.setattr(risk, "_load_overrides", lambda: {"shell": "low"})
+    try:
+        with risk.pinned_overrides():
+            raise RuntimeError("build failed")
+    except RuntimeError:
+        pass
+    assert risk._PINNED_OVERRIDES.get() is None
+    monkeypatch.setattr(risk, "_load_overrides", dict)
+    assert tool_risk("shell") == "high"
+
+
+def test_explicit_overrides_argument_beats_the_pin(monkeypatch):
+    risk = importlib.import_module("maverick.safety.tool_risk")
+
+    monkeypatch.setattr(risk, "_load_overrides", lambda: {"shell": "low"})
+    with risk.pinned_overrides():
+        assert tool_risk("shell", {"shell": "critical"}) == "critical"

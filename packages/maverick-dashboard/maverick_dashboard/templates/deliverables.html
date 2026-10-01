@@ -2,6 +2,8 @@
 {% block title %}Results · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {% set produced = items | selectattr('latest') | list %}
+  {% set has_results = produced or awaiting %}
   {% call hero('Your AI workforce', 'Results',
                subtitle='Work, organized by who it\'s for',
                lede='The work your AI teams produce, organized by deliverable
@@ -9,11 +11,12 @@
                      awaiting your sign-off (the full
                      <a href="/goals">run history</a> is separate).' | safe) %}
     {{ state('Current state',
-             items | length ~ ' deliverable' ~ ('' if items | length == 1 else 's') ~ ' in view',
-             badge=(awaiting | length ~ ' awaiting sign-off') if awaiting else 'clear',
-             badge_class='warn' if awaiting else 'ok',
-             copy='Each deliverable names what it is, who it\'s for, and
-                   whether it needs a sign-off before it is acted on.') }}
+             (produced | length ~ ' result' ~ ('' if produced | length == 1 else 's') ~ ' produced') if has_results else 'No results yet',
+             badge=(awaiting | length ~ ' awaiting sign-off') if awaiting else ('clear' if has_results else 'Nothing run yet'),
+             badge_class='warn' if awaiting else ('ok' if has_results else 'idle'),
+             copy=('Each deliverable names what it is, who it\'s for, and
+                   whether it needs a sign-off before it is acted on.') if has_results
+                  else 'Results appear here as your AI teams finish work. The specialists themselves are listed in Agent Factory.') }}
   {% endcall %}
 
   {% if showing_mine %}
@@ -22,6 +25,14 @@
     </p>
   {% endif %}
 
+  {% if not has_results and not role and not showing_all and not showing_mine %}
+    <div class="mv-empty">
+      <p class="mv-empty__title">No results yet — start a task</p>
+      <p class="mv-empty__body">When a task finishes, its result shows up here, filed by what it is and who it is for.
+        To see which specialists are available, open <a href="/agents">Agent Factory</a>.</p>
+      {% if can_create_goal %}<p><a class="btn btn--primary" href="/chat">Start a task</a></p>{% endif %}
+    </div>
+  {% else %}
   {% if items or role or showing_mine or active_roles %}
     <div class="dlv-filter" role="group" aria-label="Filter by role">
       {% if mine %}
@@ -41,7 +52,7 @@
     {% if roles|length > active_roles|length %}
       <form class="dlv-jump" method="get" action="/deliverables" role="search">
         <label for="dlv-role-pick" class="sr-only">Show results for another role</label>
-        <select id="dlv-role-pick" name="role" class="input dlv-jump__in">
+        <select id="dlv-role-pick" name="role" class="input dlv-jump__in" data-typeahead data-typeahead-placeholder="Type a role, for example: controller">
           <option value="">Pick one of {{ roles|length }} roles…</option>
           {% for r in roles %}<option value="{{ r }}"{% if r == role and role not in active_roles %} selected{% endif %}>{{ r|humanize }}</option>{% endfor %}
         </select>
@@ -101,7 +112,7 @@
         </div>
       {% endfor %}
     </div>
-  {% else %}
+  {% elif has_results or role or showing_mine %}
     <div class="mv-empty">
       <p class="mv-empty__title">
         {%- if role %}No results for {{ role|humanize }}
@@ -120,6 +131,7 @@
         {% endif %}
       </p>
     </div>
+  {% endif %}
   {% endif %}
 
   <style>
@@ -150,6 +162,7 @@
   </style>
 {% endblock %}
 {% block scripts_extra %}
+  <script src="/static/lightwork-typeahead.js" defer></script>
   <script>
     // Format every server-rendered timestamp via the shared relative-time helper.
     (function () {

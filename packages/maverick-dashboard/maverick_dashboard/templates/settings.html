@@ -2,21 +2,20 @@
 {% block title %}Settings · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
-  {% from "_integration_readiness.html" import integration_readiness %}
-  {% set configured_providers = providers | selectattr('configured') | list %}
+  {% from "_integration_readiness.html" import provider_status %}
   {% call hero('Administration', 'Settings',
                subtitle='Set up Lightwork',
                lede='Appearance, AI models, spending, connections and features.
                      Each section saves on its own and applies to the next task.') %}
     {{ state('Current state',
-             configured_providers | length ~ ' of ' ~ providers | length ~ ' AI providers connected',
-             badge='Connected' if configured_providers else 'Add a provider key',
-             badge_class='ok' if configured_providers else 'warn',
-             copy='Test each connection after saving a key. Keys are stored securely and never shown again.') }}
+             'AI services: ' ~ workspace.summary,
+             badge=workspace.verdict_label,
+             badge_class=workspace.badge_class,
+             copy=(workspace.reason | e) ~ ((' <a href="' ~ workspace.next_action.href ~ '">' ~ workspace.next_action.label ~ '</a>') | safe if workspace.next_action else '') ~ ' Keys are stored securely and never shown again.') }}
   {% endcall %}
 
   {% if saved %}
-  <div class="panel settings-saved" role="status">
+  <div class="panel settings-saved" role="status" data-mv-toast="Saved. {{ saved }}">
     <strong>Saved.</strong> {{ saved }}
   </div>
   {% endif %}
@@ -50,7 +49,7 @@
   </section>
 
   <div id="settings-sections">
-  <div class="section-head" data-settings-group="general"><h2>Appearance</h2></div>
+  <div class="section-head" data-settings-group="general" id="settings-general"><h2>Appearance</h2></div>
   <div class="panel" data-settings-group="general">
     <p class="muted settings-lead">Theme, density and font follow your signed-in account. Use Display preferences for an explicit device-only override. Applies without leaving your draft.</p>
     <form method="get" action="/settings" class="settings-row-form">
@@ -88,7 +87,7 @@
 
   <div class="panel" data-settings-group="integrations"><h3>Notification delivery</h3><p>Check whether organization alerts reached the notification service.</p><a class="btn btn--ghost" href="/settings/notifications">Delivery history and test</a></div>
 
-  <div class="section-head" data-settings-group="models"><h2>Models</h2></div>
+  <div class="section-head" data-settings-group="models" id="settings-models"><h2>Models</h2></div>
   <div class="panel" data-settings-group="models">
     <p class="muted settings-lead">
       Lightwork offers every model your saved provider keys can reach, plus its
@@ -354,7 +353,7 @@
       {% else %}each task follows your installation's standard limits.{% endif %}</p>
   </div>
 
-  <div class="section-head" data-settings-group="integrations"><h2>Provider keys</h2></div>
+  <div class="section-head" data-settings-group="integrations" id="settings-integrations"><h2>Provider keys</h2></div>
   <div class="panel" data-settings-group="integrations">
     <p class="muted settings-lead">
       Add a key from your AI provider's account page. You need at least one to
@@ -366,14 +365,14 @@
       <div class="provider-row__about">
         <div class="provider-row__name">{{ p.label }}</div>
         <div class="muted provider-row__meta">
-          {% if p.configured %}<span class="badge active">Key saved</span> {{ p.via|source_label }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
+          {% if p.configured %}Saved, {{ p.via|source_label }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
           {% else %}No key yet. Paste one to use this provider.{% endif %}
           {% if p.source_errors %}<div><span class="badge blocked">Settings could not be read</span></div>{% endif %}
           {% if not p.dashboard_can_set_api_key %}<div>This key is {{ p.api_key_source|source_label }}, so it can't be changed here.</div>{% endif %}
           {% if p.base_url_field and not p.dashboard_can_set_base_url %}<div>The server address is {{ p.base_url_source|source_label }}, so it can't be changed here.</div>{% endif %}
           {% if p.key_help %}<div><a href="{{ p.key_help }}" target="_blank" rel="noopener noreferrer">Where do I get a key?</a></div>{% endif %}
         </div>
-        <div class="provider-row__readiness">{{ integration_readiness(p.readiness) }}</div>
+        <div class="provider-row__readiness">{{ provider_status(p) }}</div>
         {% if p.discovery and p.configured %}
         <div class="muted provider-row__meta">
           Models:
@@ -446,11 +445,12 @@
       <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-3)"><button type="submit" class="btn btn--primary" id="wh-save" disabled>Apply change</button><button type="button" class="btn" id="wh-cancel">Cancel</button></div>
     </form>
     <noscript>Enable browser scripting to check the active secret and review a change safely.</noscript>
+    <p style="margin-top:var(--space-3)"><a class="btn" href="/settings/webhooks/manage">Manage webhook subscriptions and deliveries</a></p>
   </section>
   <style>#webhook-settings .input{box-sizing:border-box;width:100%;max-width:100%;min-width:0}#webhook-settings label{margin-block:var(--space-2)}#webhook-settings p,#webhook-settings button{overflow-wrap:anywhere}#webhook-settings form{margin-top:var(--space-3)}</style>
   <script src="{{ asset('lightwork-webhook-settings.js') }}" defer></script>
 
-  <div class="section-head" data-settings-group="controls"><h2>What agents can do</h2></div>
+  <div class="section-head" data-settings-group="controls" id="settings-controls"><h2>What agents can do</h2></div>
   <div class="panel" data-settings-group="controls">
     <p class="muted settings-lead">Powerful abilities, off until you turn them on. Changes apply to the next task.</p>
     <form method="post" action="/settings/capabilities">
@@ -478,6 +478,28 @@
       {% endfor %}
       <p class="settings-foot"><button type="submit" class="btn btn--primary">Save features</button></p>
     </form>
+  </div>
+
+  <div class="section-head" data-settings-group="access" id="settings-access"><h2 id="api-keys">Access keys for scripts and integrations</h2></div>
+  <div class="panel" data-settings-group="access">
+    <p class="muted settings-lead">
+      {% if api_keys_enabled %}
+      People create their own keys on <a href="/account/api-keys">Account &rsaquo; Access keys</a>.
+      A key only does what its scopes allow and never more than its owner's role, it stops
+      on its expiry date, and it can be rotated or revoked at any time. Administrators see
+      every key there and can create service accounts: named identities for programs that
+      hold keys and a role but cannot sign in.
+      {% else %}
+      Access keys are turned off on this installation. Turn on "Access keys for scripts and
+      integrations" under All settings to let people create them.
+      {% endif %}
+    </p>
+    {% if static_token_set %}
+    <p class="settings-lead" role="note"><strong>The shared server access token is set.</strong>
+      Anyone holding it can do everything an administrator can, it never expires and it is
+      not tied to a person. Its use is recorded in the activity record as break-glass access.
+      Prefer personal keys or service accounts for scripts, and keep the token for emergencies.</p>
+    {% endif %}
   </div>
 
   <div class="section-head" data-settings-group="access"><h2 id="ui-visibility">Pages each role can see</h2></div>
@@ -536,7 +558,7 @@
     </p>
   </div>
 
-  <div class="section-head" data-settings-group="maintenance"><h2>Ready to go live?</h2></div>
+  <div class="section-head" data-settings-group="maintenance" id="settings-maintenance"><h2>Ready to go live?</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="readiness">
     <p class="muted settings-lead">Checks the switches that should be on before your whole team relies on Lightwork.</p>
     <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="readiness">Check readiness</button></p>
@@ -826,6 +848,13 @@
         focusTarget.focus(); focusTarget.scrollIntoView({block:'center'});
       }
     }
+    // A link to /settings#settings-<group> from another page, or from this
+    // page while it is already open, lands on that section.
+    window.addEventListener('hashchange', function () {
+      var next = String(window.location.hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
+      if (aliases[next]) next = aliases[next];
+      if (groups.indexOf(next) !== -1 && next !== active) selectGroup(next, true);
+    });
 
     var forms = Array.prototype.slice.call(document.querySelectorAll('form[action^="/settings"]'));
     var dirty = new Set();

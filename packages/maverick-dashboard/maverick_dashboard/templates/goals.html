@@ -78,8 +78,9 @@
         {% if g.description %}<div class="g-row__desc" title="{{ g.description }}">{{ (g.description or '')[:160] }}</div>{% endif %}
       </span>
       <span class="g-row__actions">
+        <a href="/chat/goal/{{ g.id }}">Result</a>
+        <a href="/goals/{{ g.id }}/trajectory">Steps</a>
         <a href="/goals/{{ g.id }}/plan">Plan</a>
-        <a href="/goals/{{ g.id }}/trajectory">Step by step</a>
         {% if g.status in ('failed', 'blocked') %}<a href="/goals/{{ g.id }}/errors">Problems</a>{% endif %}
       </span>
     </div>
@@ -87,6 +88,10 @@
   </div>
   <p id="run-search-status" role="status" aria-live="polite"></p>
   <button id="run-search-retry" type="button" class="btn" hidden>Retry search</button>
+  {% if has_more %}
+  <button id="run-more" type="button" class="btn" data-next-offset="{{ next_offset }}"
+          data-page-size="{{ page_size }}" aria-controls="run-list">Show more tasks</button>
+  {% endif %}
   {% else %}
     <div class="g-empty">
       <p style="font-weight: var(--font-semibold); margin: 0 0 var(--space-2);">No tasks yet</p>
@@ -117,7 +122,9 @@
         listEl.innerHTML = '<div class="g-empty" style="padding:var(--space-5);">No matching tasks.</div>';
         return;
       }
-      listEl.innerHTML = goals.map(function (g) {
+      listEl.innerHTML = goals.map(rowHtml).join('');
+    }
+    function rowHtml(g) {
         var d = (g.description || '').slice(0, 160);
         var when = g.created_at && window.mvWhen ? mvWhen(g.created_at) : '';
         var label = window.mvHuman ? mvHuman(g.status) : String(g.status).replace(/_/g, ' ');
@@ -129,10 +136,38 @@
           '<span class="g-row__main"><div class="g-row__title"><a href="/chat/goal/' + gid + '">' + esc(g.title) + '</a></div>' +
           (d ? '<div class="g-row__desc">' + esc(d) + '</div>' : '') + '</span>' +
           '<span class="g-row__actions">' +
+          '<a href="/chat/goal/' + gid + '">Result</a>' +
+          '<a href="/goals/' + gid + '/trajectory">Steps</a>' +
           '<a href="/goals/' + gid + '/plan">Plan</a>' +
-          '<a href="/goals/' + gid + '/trajectory">Step by step</a>' +
           (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + gid + '/errors">Problems</a>' : '') + '</span></div>';
-      }).join('');
+    }
+    // "Show more": the next page from the API, appended to the rows on
+    // screen (the server rendered only the first page).
+    var more = document.getElementById('run-more');
+    if (more) {
+      more.addEventListener('click', function () {
+        var offset = parseInt(more.getAttribute('data-next-offset'), 10) || 0;
+        var size = parseInt(more.getAttribute('data-page-size'), 10) || 50;
+        more.disabled = true; more.setAttribute('aria-busy', 'true');
+        fetch('/api/v1/goals?limit=' + size + '&offset=' + offset,
+              {headers: {'Accept': 'application/json'}, cache: 'no-store'})
+          .then(function (r) {
+            if (!r.ok) throw new Error('More tasks could not be loaded. Try again.');
+            var next = r.headers.get('Pagination-Next-Offset');
+            var hasMore = r.headers.get('Pagination-Has-More') === 'true' && next;
+            return r.json().then(function (rows) { return {rows: rows, hasMore: hasMore, next: next}; });
+          })
+          .then(function (page) {
+            if (!Array.isArray(page.rows)) throw new Error('More tasks could not be loaded. Try again.');
+            if (input.value.trim()) { original += page.rows.map(rowHtml).join(''); }
+            else { listEl.insertAdjacentHTML('beforeend', page.rows.map(rowHtml).join('')); original = listEl.innerHTML; applyFilter(); }
+            status.textContent = page.rows.length ? page.rows.length + ' more task' + (page.rows.length === 1 ? '' : 's') + ' shown.' : 'No more tasks.';
+            if (page.hasMore) { more.setAttribute('data-next-offset', page.next); more.disabled = false; }
+            else { more.hidden = true; }
+          })
+          .catch(function (error) { status.textContent = error.message; more.disabled = false; })
+          .finally(function () { more.removeAttribute('aria-busy'); });
+      });
     }
     function search(immediate) {
       if (expired) return;

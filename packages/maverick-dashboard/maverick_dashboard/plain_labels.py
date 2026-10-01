@@ -189,6 +189,8 @@ CHANNEL_FIELDS = {
     ("discord", "bot_token"): ("Bot token", "From the Discord Developer Portal, under your app's Bot page.", False),
     ("slack", "app_token"): ("App token (starts with xapp-)", "From your Slack app's Basic Information page, under App-Level Tokens.", False),
     ("slack", "bot_token"): ("Bot token (starts with xoxb-)", "From your Slack app's OAuth & Permissions page.", False),
+    ("slack", "signing_secret"): ("Signing secret", "From your Slack app's Basic Information page. Needed only when buttons and slash commands reach this server over the web (Interactivity URL) rather than Socket Mode.", True),
+    ("slack", "approvals_channel"): ("Approvals channel", "The Slack channel id (starts with C) where new approval cards with Approve and Reject buttons are posted. Leave empty to post none.", True),
     ("whatsapp_cloud", "access_token"): ("Access token", "From Meta for Developers, WhatsApp > API Setup.", False),
     ("whatsapp_cloud", "phone_number_id"): ("Phone number ID", "Shown next to your WhatsApp business number on the same API Setup page.", False),
     ("whatsapp_cloud", "verify_token"): ("Verification word", "Any word you choose. Enter the same word in Meta's webhook settings.", False),
@@ -207,6 +209,10 @@ CHANNEL_FIELDS = {
     ("email", "smtp_port"): ("Outgoing mail port", "Usually 465. Some providers, such as Outlook, use 587.", True),
     ("mattermost", "url"): ("Server address", "The web address people use to open Mattermost, such as https://chat.example.com.", False),
     ("mattermost", "bot_token"): ("Bot access token", "From Mattermost's System Console, under Integrations > Bot Accounts, after you create a bot.", False),
+    ("teams", "app_id"): ("App ID", "The Microsoft App ID of your Azure Bot, shown on the bot's Configuration page in the Azure portal.", False),
+    ("teams", "app_password"): ("Client secret", "From the app registration in Microsoft Entra, under Certificates & secrets. Paste the secret value, not its id.", False),
+    ("teams", "tenant_id"): ("Tenant ID", "Your Microsoft Entra tenant id (Directory ID). Leave blank only for a multi-tenant app registration.", False),
+    ("teams", "port"): ("Listening port", "Only change this if your IT team asks you to. Your public HTTPS address must forward /webhook/teams to it.", True),
 }
 
 CHANNEL_HELP_LINKS = {
@@ -216,6 +222,7 @@ CHANNEL_HELP_LINKS = {
     "whatsapp_cloud": "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started",
     "sms": "https://console.twilio.com",
     "mattermost": "https://developers.mattermost.com/integrate/reference/bot-accounts/",
+    "teams": "https://learn.microsoft.com/azure/bot-service/bot-service-quickstart-registration",
 }
 
 

@@ -25,14 +25,14 @@
   <h1 class="cs-greet">{{ ui('What should Lightwork take on?') }}</h1>
   {% if not model_route_ready %}
   <section class="panel" id="model-route-setup" role="status">
-    <h2 style="margin-top:0">{{ ui('Finish connecting AI') }}</h2>
-    <p class="muted">{{ ui('This workspace is not ready to start AI work yet. Finish the connection setup and readiness checks before starting a task.') }}</p>
-    <a class="btn btn--primary" href="/start">{{ ui('Continue setup') }}</a>
+    <h2 style="margin-top:0">{{ ui('Connect an AI service to start') }}</h2>
+    <p class="muted">{{ ui(workspace.reason) }}</p>
+    {% if workspace.next_action %}<a class="btn btn--primary" href="{{ workspace.next_action.href }}">{{ ui(workspace.next_action.label) }}</a>{% endif %}
   </section>
   {% endif %}
   {% if not can_create_goal %}
-  <section class="panel" role="status"><h2>Chat is read-only for your account</h2>
-    <p class="muted">You can review work you have access to. Ask a workspace administrator for permission to start or continue a chat.</p>
+  <section class="panel" role="status"><h2>{{ ui('Chat is read-only for your account') }}</h2>
+    <p class="muted">{{ ui('You can review work you have access to. Ask a workspace administrator for permission to start or continue a chat.') }}</p>
   </section>
   {% endif %}
   <p id="template-draft-notice" class="muted" role="status" hidden></p>
@@ -135,7 +135,13 @@
 </form>
 <p id="goal-error" role="alert" aria-live="assertive"
    style="display: none; margin: var(--space-3) 0 0; color: var(--danger); font-size: var(--text-sm); text-align: center;"></p>
-<p class="cs-dock__note">{{ ui('Lightwork runs your request within your budget and pauses for your approval where it matters.') }}</p>
+{% if not model_route_ready %}
+<p class="cs-dock__note" id="composer-readiness" role="status">{{ ui(workspace.reason) }}</p>
+{% elif workspace.verdict == 'needs_test' %}
+<p class="cs-dock__note" id="composer-readiness" role="status">{{ ui(workspace.reason) }}{% if workspace.next_action %} <a href="{{ workspace.next_action.href }}">{{ ui(workspace.next_action.label) }}</a>{% endif %} {{ ui('You can still start a task.') }}</p>
+{% else %}
+<p class="cs-dock__note">{{ ui('Check spending limits and approval settings before starting. Some actions may need your approval.') }}</p>
+{% endif %}
 {% endblock %}
 
 {% block scripts_extra %}

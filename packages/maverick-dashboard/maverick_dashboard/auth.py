@@ -35,6 +35,7 @@ from starlette.concurrency import run_in_threadpool
 # maverick.suite_grants) so the HTTP gates and the kernel deploy/dispatch
 # gates both see group-derived department grants from the first request.
 from . import scim_groups  # noqa: F401
+from ._request_memo import memoized
 
 # Probe/discovery endpoints that must answer without a bearer even when OIDC is
 # on (load balancers and k8s liveness/readiness probes, plus the OpenAPI docs,
@@ -109,7 +110,8 @@ def _self_authenticated_path(path: str) -> bool:
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
         ("/share/", "/scim/", "/form/", "/dsar/response/", "/saml/",
          "/auth/invite/", "/api/v1/external/",
-         "/api/v1/public/consent/", "/api/v1/public/policies/", "/api/v1/devices/pairing/")
+         "/api/v1/public/consent/", "/api/v1/public/policies/",
+         "/api/v1/devices/pairing/", "/rights/", "/api/v1/public/rights/")
     )
 
 
@@ -191,7 +193,12 @@ def non_static_auth_configured() -> bool:
     alternatives, not mutually exclusive deployment modes. Configuration
     uncertainty reports identity policy as configured so the request reaches
     the global dependency and fails closed unless an identity verifies.
+    Answered once per request (see :mod:`._request_memo`).
     """
+    return memoized("non_static_auth_configured", _non_static_auth_configured)
+
+
+def _non_static_auth_configured() -> bool:
     try:
         from .invites import invites_enabled
         from .local_owner import claimed
@@ -335,6 +342,10 @@ def auth_genuinely_off() -> bool:
     unauthenticated local deployment. Any unreadable auth configuration denies
     that legacy exception.
     """
+    return memoized("auth_genuinely_off", _auth_genuinely_off)
+
+
+def _auth_genuinely_off() -> bool:
     from ._shared import dashboard_token
 
     if dashboard_token() or _dashboard_require_auth_enabled():
@@ -365,11 +376,19 @@ def _authorization_principal(request: Request) -> str | None:
     ``None`` is an authorization grant only in genuine auth-off local mode or
     after the static dashboard bearer has authenticated the request. A missing
     proxy/OIDC/session identity must never inherit the legacy local-admin path.
+
+    A grant is remembered on ``request.state`` (a page render asks ten times);
+    a refusal is re-evaluated every time.
     """
     principal = caller_principal(request)
     if principal is not None:
         return principal
+    state = getattr(request, "state", None)
+    if state is not None and getattr(state, "_anonymous_grant_verified", False):
+        return None
     if anonymous_local_access_allowed() or _dashboard_token_authenticated(request):
+        if state is not None:
+            state._anonymous_grant_verified = True
         return None
     raise HTTPException(status_code=401, detail="authenticated identity required")
 
@@ -420,7 +439,11 @@ def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -
 
         from . import workspace_tenants
 
-        selected = workspace_tenants.get_selection(name)
+        claims = getattr(principal, "claims", None) or {}
+        bound = claims.get("workspace") if claims.get("via") == "api_key" else ""
+        # A key bound to a workspace acts only inside it; its owner's browser
+        # selection is irrelevant to the key. Membership is still re-checked.
+        selected = str(bound or "") or workspace_tenants.get_selection(name)
         if not selected:
             return
         if not is_active(selected) or not workspace_tenants.principal_can_select(
@@ -527,24 +550,54 @@ def caller_role(request: Request) -> str | None:
     return role_for_principal(_authorization_principal(request))
 
 
+def api_key_permissions(request) -> frozenset[str] | None:
+    """The permission atoms an API-key bearer may use on this request, or
+    ``None`` when the request was not authenticated with an API key.
+
+    Set by :func:`_authenticate_api_key`: the key's scopes capped by its
+    owner's current role. Every RBAC gate intersects with it, so a key with
+    ``tasks:read`` fails a route that requires ``operate`` even though its
+    owner could call it in a browser."""
+    value = getattr(getattr(request, "state", None), "api_key_permissions", None)
+    return value if isinstance(value, frozenset) else None
+
+
+def _api_key_allows(request, permission: str) -> bool:
+    scoped = api_key_permissions(request)
+    return scoped is None or permission in scoped
+
+
 def has_permission(request: Request, permission: str) -> bool:
     """Whether the caller may perform ``permission`` ("admin"/"operate"/"view").
 
     Auth off -> True (legacy single-user; the local operator owns everything).
-    Otherwise gated by the caller's role.
+    Otherwise gated by the caller's role, and for an API-key bearer also by
+    the key's scopes.
     """
     principal = _authorization_principal(request)
     if principal is None:
         return True
+    if not _api_key_allows(request, permission):
+        return False
     from . import rbac
     return permission in rbac.permissions_for(role_for_principal(principal))
+
+
+def _permission_denied(request: Request, permission: str, *, installation: bool = False) -> HTTPException:
+    if not _api_key_allows(request, permission):
+        return HTTPException(
+            status_code=403,
+            detail="This API key does not have a scope that allows this. "
+                   "Create a key with the scope you need on your account page.",
+        )
+    from .access_explanations import denial
+    return HTTPException(status_code=403, detail=denial(request, permission, installation=installation))
 
 
 def require_permission(request: Request, permission: str) -> None:
     """Raise ``HTTPException(403)`` unless the caller's role grants ``permission``."""
     if not has_permission(request, permission):
-        from .access_explanations import denial
-        raise HTTPException(status_code=403, detail=denial(request, permission))
+        raise _permission_denied(request, permission)
 
 
 def has_global_permission(request: Request, permission: str) -> bool:
@@ -556,6 +609,8 @@ def has_global_permission(request: Request, permission: str) -> bool:
     principal = _authorization_principal(request)
     if principal is None:
         return True
+    if not _api_key_allows(request, permission):
+        return False
     from . import rbac
 
     return permission in rbac.permissions_for(global_role_for_principal(principal))
@@ -564,8 +619,7 @@ def has_global_permission(request: Request, permission: str) -> bool:
 def require_global_permission(request: Request, permission: str) -> None:
     """Raise ``HTTPException(403)`` unless the global role grants permission."""
     if not has_global_permission(request, permission):
-        from .access_explanations import denial
-        raise HTTPException(status_code=403, detail=denial(request, permission, installation=True))
+        raise _permission_denied(request, permission, installation=True)
 
 
 def caller_suites(request: Request) -> frozenset[str] | None:
@@ -730,6 +784,14 @@ def _enforce_scim_active(principal: VerifiedPrincipal) -> None:
     the inactive user the dashboard's global default role. The live SCIM roster
     is therefore an authentication gate as well as a group-grant source.
     """
+    from .api_keys import is_service_account_subject
+
+    if is_service_account_subject(principal.sub) and (
+        (principal.claims or {}).get("via") != "api_key"
+    ):
+        # A service account holds keys and a role but can never sign in
+        # interactively; an IdP subject that merely looks like one is refused.
+        raise HTTPException(status_code=401, detail="invalid identity")
     try:
         from .scim_groups import active_for_principal
 
@@ -741,6 +803,84 @@ def _enforce_scim_active(principal: VerifiedPrincipal) -> None:
         ) from exc
     if active is False:
         raise HTTPException(status_code=401, detail="invalid identity")
+
+
+_BREAK_GLASS_AUDIT_INTERVAL = 3600.0
+_break_glass_last_audit: list[float | None] = [None]
+
+
+def _audit_break_glass(connection) -> None:
+    """Record that the static dashboard token authenticated a request.
+
+    The token is the break-glass credential: it has no person behind it and
+    no scopes, so its use is audited. One row per process per hour keeps the
+    record useful (a script using the token would otherwise write a row per
+    call); the row names the path and client of the first use in the window.
+    An audit refusal propagates: a request that cannot be recorded fails.
+    """
+    import time as _time
+
+    now = _time.monotonic()
+    last = _break_glass_last_audit[0]
+    if last is not None and now - last < _BREAK_GLASS_AUDIT_INTERVAL:
+        return
+    _break_glass_last_audit[0] = now
+    from maverick.audit import EventKind, audit_event
+
+    client = connection.client.host if getattr(connection, "client", None) else ""
+    path = str(getattr(getattr(connection, "url", None), "path", "") or "")
+    audit_event(EventKind.BREAK_GLASS_TOKEN_USED, agent="static-dashboard-operator",
+                path=path, client=client or "")
+
+
+def _authenticate_api_key(connection, token: str) -> VerifiedPrincipal:
+    """Verify a personal / service-account API key and bind its scopes.
+
+    Fails closed with a plain-language 401: unknown, expired, revoked and
+    rotated-out keys are refused, as are keys whose owner was deprovisioned
+    (SCIM), signed out everywhere (revocation epoch) or whose service account
+    is disabled. On success the request carries ``api_key_permissions`` --
+    the key's scopes capped by the owner's current role -- which every RBAC
+    gate intersects with.
+    """
+    from . import api_keys
+
+    client = connection.client.host if getattr(connection, "client", None) else ""
+    verified, reason = api_keys.verify(token, client_ip=client or "")
+    if verified is None:
+        raise HTTPException(status_code=401, detail=reason,
+                            headers={"WWW-Authenticate": "Bearer"})
+    key = verified.key
+    sub = key.owner[len("user:"):]
+    principal = VerifiedPrincipal(
+        sub=sub, issuer="api-key", audience="",
+        claims={"via": "api_key", "api_key_id": key.id, "scopes": list(key.scopes),
+                "workspace": key.workspace, "iat": key.created_at},
+    )
+    if not key.is_service_account:
+        from .session_revocation import is_revoked
+
+        if is_revoked(sub, key.created_at):
+            raise HTTPException(status_code=401, detail="This API key's owner was signed out everywhere after it was created. Create a new key.",
+                                headers={"WWW-Authenticate": "Bearer"})
+        _enforce_scim_active(principal)
+    if connection is not None:
+        connection.state.api_key_permissions = verified.permissions
+        connection.state.api_key_id = key.id
+    return principal
+
+
+def _api_key_bearer(connection) -> str:
+    """The presented bearer when it has the API-key shape, else ``""``."""
+    token = _bearer_token(connection)
+    if not token:
+        return ""
+    try:
+        from .api_keys import looks_like_key
+
+        return token if looks_like_key(token) else ""
+    except Exception:
+        return ""
 
 
 def _resolve_websocket_principal(websocket) -> VerifiedPrincipal | None:
@@ -756,7 +896,10 @@ def _resolve_websocket_principal(websocket) -> VerifiedPrincipal | None:
     authorization = websocket.headers.get("authorization", "")
     if authorization:
         if _dashboard_token_authenticated(websocket):
+            _audit_break_glass(websocket)
             return None
+        if _api_key_bearer(websocket):
+            return _authenticate_api_key(websocket, _api_key_bearer(websocket))
         ws_token = _bearer_token(websocket)
         if not ws_token or not oidc_enabled():
             raise HTTPException(status_code=401, detail="invalid bearer credential")
@@ -842,6 +985,7 @@ def _resolve_principal(
     authorization = request.headers.get("authorization", "")
     if not self_authenticated and authorization:
         if _dashboard_token_authenticated(request):
+            _audit_break_glass(request)
             return None
         explicit_token = _bearer_token(request)
         if explicit_token.startswith("lwdev1_"):
@@ -849,6 +993,8 @@ def _resolve_principal(
             principal = authenticate(explicit_token, request.method, request.url.path)
             request.state.paired_device_verified = True
             return principal
+        if explicit_token and _api_key_bearer(request):
+            return _authenticate_api_key(request, explicit_token)
         if explicit_token and oidc_enabled():
             return _authenticate_oidc_bearer(request, explicit_token)
         raise HTTPException(
@@ -900,6 +1046,22 @@ def _resolve_principal(
     return _authenticate_oidc_bearer(request, token)
 
 
+def _enforce_workspace_policies(connection, principal) -> None:
+    """Policies that need the caller's workspace: its allowed addresses and
+    its second-factor requirement (the workspace's config overlay is active
+    once the tenant is pinned). Sign-in bootstrap and sign-out paths are
+    skipped so a refused session can still end itself."""
+    path = getattr(getattr(connection, "url", None), "path", "") or ""
+    if _self_authenticated_path(path):
+        return
+    from .ip_allowlist import BLOCKED_MESSAGE, workspace_allows
+    from .mfa_policy import enforce_session_policy
+
+    if not workspace_allows(connection):
+        raise HTTPException(status_code=403, detail=BLOCKED_MESSAGE)
+    enforce_session_policy(principal)
+
+
 def _bind_principal(connection, principal):
     """The only phase that mutates request identity or the task's tenant pin."""
     if connection is not None and principal is not None:
@@ -907,6 +1069,7 @@ def _bind_principal(connection, principal):
         from .device_pairing import bind as bind_device
         if not bind_device(connection, principal):
             _pin_tenant_from_principal(connection, principal)
+        _enforce_workspace_policies(connection, principal)
     return principal
 
 

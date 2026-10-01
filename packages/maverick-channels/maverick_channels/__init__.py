@@ -6,12 +6,13 @@ response back. This is the surface Lightwork uses to power phone-companion
 mode — the agent itself runs on Desktop or VPS, and channels give a
 phone (or any other client) a way to talk to it.
 
-Server-wired adapters (16; registered in ``maverick.server._WIRES`` and
+Server-wired adapters (17; registered in ``maverick.server._WIRES`` and
 enableable from the installer, each requiring its provider's credentials and a
 per-sender allowlist, default-deny):
   - telegram, discord, slack, signal, email, matrix
   - bluesky, mastodon, irc, threads, rcs, voice
   - whatsapp + sms (Twilio + public webhook), whatsapp_cloud (Meta Graph API)
+  - teams (Azure Bot Framework webhook; approvals as Adaptive Cards)
   - imessage (macOS only)
 ``cli`` is the interactive terminal channel (used directly, not hosted by
 ``maverick serve``); ``glasses`` is fronted by the external webhook relay.

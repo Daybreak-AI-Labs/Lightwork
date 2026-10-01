@@ -39,11 +39,13 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from ..deadline_alerts import POSTGRES_SCHEMA as _DEADLINE_ALERT_SCHEMA_PG
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
 from ..goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
 from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
 from ..metadata_history import POSTGRES_INDEXES as _HISTORY_INDEXES
 from ..personal_alert_revisions import POSTGRES_MIGRATION as _PERSONAL_ALERT_MIGRATION
+from ..webhook_subscriptions import POSTGRES_SCHEMA as _WEBHOOK_SUBSCRIPTION_SCHEMA_PG
 
 log = logging.getLogger(__name__)
 
@@ -245,7 +247,19 @@ _RLS_TABLES = (
     "attachment_submissions",
     "event_goal_admissions",
     "event_trigger_batches",
+    "webhook_subscriptions",
+    "webhook_deliveries",
+    "deadline_alerts",
 )
+# Tables whose tenant column is not called ``tenant_id``. The webhook and
+# deadline-alert tables (v42) scope rows by ``workspace`` (the same active
+# tenant id, written by ``paths.current_tenant_id``), so their RLS policy keys
+# on that column; the policy itself is identical.
+_RLS_TENANT_COLUMN: dict[str, str] = {
+    "webhook_subscriptions": "workspace",
+    "webhook_deliveries": "workspace",
+    "deadline_alerts": "workspace",
+}
 _TENANT_MIGRATION: list[str] = [
     f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS tenant_id TEXT;" for t in _TENANT_TABLES
 ] + [
@@ -718,6 +732,14 @@ MIGRATIONS.append((43, ["ALTER TABLE facts ADD COLUMN IF NOT EXISTS tags_json TE
 MIGRATIONS.append((44, _PERSONAL_ALERT_MIGRATION))
 MIGRATIONS.append((45, _HISTORY_INDEXES))
 MIGRATIONS.append((46, ["ALTER TABLE goals ADD COLUMN IF NOT EXISTS connection_selection TEXT NOT NULL DEFAULT ''"]))
+MIGRATIONS.append((47, [
+    # The teardown draft assigned v42 to webhook/alert tables. Its existing
+    # databases can therefore lack the companion draft's v42 receipt table.
+    # Idempotently ensure both draft additions without rewriting v42..v46.
+    _GOAL_MUTATION_SCHEMA,
+    *_WEBHOOK_SUBSCRIPTION_SCHEMA_PG,
+    *_DEADLINE_ALERT_SCHEMA_PG,
+]))
 
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -1427,12 +1449,13 @@ class PostgresWorldModel:
 
     @staticmethod
     def _rls_policy_sql(table: str) -> str:
+        column = _RLS_TENANT_COLUMN.get(table, "tenant_id")
         return (
             f"CREATE POLICY mvk_tenant_isolation ON {table} "
             "USING ("
-            "  tenant_id = nullif(current_setting('maverick.tenant', true), '')"
+            f"  {column} = nullif(current_setting('maverick.tenant', true), '')"
             ") WITH CHECK ("
-            "  tenant_id = nullif(current_setting('maverick.tenant', true), '')"
+            f"  {column} = nullif(current_setting('maverick.tenant', true), '')"
             ")"
         )
 
@@ -1459,10 +1482,12 @@ class PostgresWorldModel:
             return False
         if not policy:
             return False
+        column = _RLS_TENANT_COLUMN.get(table, "tenant_id")
+
         def fail_closed(expr: object) -> bool:
             text = " ".join(str(expr).lower().split())
             return (
-                "tenant_id" in text
+                column in text
                 and "current_setting" in text
                 and "maverick.tenant" in text
                 and "nullif" in text
@@ -3720,6 +3745,9 @@ class PostgresWorldModel:
                  (requested_by or None), goal[0] if goal else None, goal[1] if goal else ""),
             )
             row = cur.fetchone()
+        from ..world_model import _notify_approval_created
+
+        _notify_approval_created(self, int(row[0]), provenance)
         return int(row[0])
 
     def get_approval(self, approval_id: int):
@@ -3763,12 +3791,92 @@ class PostgresWorldModel:
     ) -> str:
         from ..world_model import _approval_audit_event_id
 
+        with self._tx() as cur:
+            undo_round = self._approval_undo_round(cur, approval_id)
         return _approval_audit_event_id(
             _active_tenant(),
             approval_id,
             status,
             (decided_by or "").strip(),
+            undo_round,
         )
+
+    def _approval_undo_round(self, cur, approval_id: int) -> int:
+        """How many times this approval was undone (mirrors SQLite)."""
+        from ..world_model import APPROVAL_UNDO_STATUS
+
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        cur.execute(
+            "SELECT COUNT(*) FROM approval_audit_outbox "
+            f"WHERE approval_id = %s AND status = %s AND {outbox_scope}",
+            tuple([int(approval_id), APPROVAL_UNDO_STATUS, *outbox_params]),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def undo_approval_decision(
+        self,
+        approval_id: int,
+        *,
+        undone_by: str,
+        within_seconds: float,
+    ) -> str:
+        """Return a just-decided approval to pending (mirrors SQLite; see there)."""
+        from ..world_model import (
+            APPROVAL_UNDO_STATUS,
+            _approval_undo_marker_id,
+        )
+
+        tenant = _active_tenant()
+        approval_scope, approval_params = _tenant_scope()
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        sql = "SELECT status, decided_at FROM approvals WHERE id = %s"
+        values: list = [int(approval_id)]
+        if approval_scope:
+            sql += " AND " + approval_scope
+            values += approval_params
+        sql += " FOR UPDATE"
+        with self._tx() as cur:
+            cur.execute(sql, tuple(values))
+            row = cur.fetchone()
+            if row is None:
+                return "not_found"
+            if row[0] == "pending":
+                return "not_decided"
+            if row[1] is None or time.time() - float(row[1]) > float(within_seconds):
+                return "too_late"
+            cur.execute(
+                "UPDATE approvals SET status = 'pending', decided_at = NULL, "
+                "decided_by = NULL WHERE id = %s AND status = %s",
+                (int(approval_id), row[0]),
+            )
+            cur.execute(
+                "DELETE FROM approval_signoffs WHERE approval_id = %s",
+                (int(approval_id),),
+            )
+            cur.execute(
+                "UPDATE approval_audit_outbox SET final_status = NULL "
+                f"WHERE approval_id = %s AND status IN ('approved', 'denied') AND {outbox_scope}",
+                tuple([int(approval_id), *outbox_params]),
+            )
+            undo_round = self._approval_undo_round(cur, approval_id) + 1
+            now = time.time()
+            cur.execute(
+                "INSERT INTO approval_audit_outbox("
+                "event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at, tenant_id) "
+                "VALUES(%s, %s, %s, %s, NULL, %s, %s, %s)",
+                (
+                    _approval_undo_marker_id(tenant, approval_id, undo_round),
+                    int(approval_id),
+                    APPROVAL_UNDO_STATUS,
+                    (undone_by or "").strip(),
+                    now,
+                    now,
+                    tenant,
+                ),
+            )
+            return "undone"
 
     def get_approval_audit_event(self, event_id: str):
         scope, params = _approval_outbox_scope()
@@ -3831,13 +3939,8 @@ class PostgresWorldModel:
         if not approver:
             return None
 
-        from ..world_model import ApprovalAuditEvent
+        from ..world_model import ApprovalAuditEvent, _approval_audit_event_id
 
-        event_id = self.approval_audit_event_id(
-            approval_id,
-            status,
-            approver,
-        )
         tenant = _active_tenant()
         approval_scope, approval_params = _tenant_scope()
         outbox_scope, outbox_params = _approval_outbox_scope()
@@ -3855,6 +3958,10 @@ class PostgresWorldModel:
             # Row lock serializes duplicate and competing votes across replicas.
             cur.execute(approval_sql, tuple(approval_values))
             approval = cur.fetchone()
+            undo_round = self._approval_undo_round(cur, approval_id)
+            event_id = _approval_audit_event_id(
+                tenant, approval_id, status, approver, undo_round,
+            )
 
             cur.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -3910,10 +4017,8 @@ class PostgresWorldModel:
                     (int(approval_id),),
                 )
                 for legacy in cur.fetchall():
-                    legacy_event_id = self.approval_audit_event_id(
-                        approval_id,
-                        legacy[1],
-                        legacy[0],
+                    legacy_event_id = _approval_audit_event_id(
+                        tenant, approval_id, legacy[1], legacy[0], undo_round,
                     )
                     cur.execute(
                         "INSERT INTO approval_audit_outbox("

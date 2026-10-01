@@ -258,6 +258,7 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | --- | --- | --- |
 | `MAVERICK_SUPPRESS_SANDBOX_WARNING` | unset | `1` silences the "running without an isolated sandbox" warning. |
 | `MAVERICK_DEFERRED_TOOLS` | unset (on) | `0` disables deferred tool loading, putting every SaaS-connector schema back in the model's per-turn catalog (~600 tools). On by default: the model sees the core toolset + `find_tools` and activates connectors on demand. Also settable via `[capabilities] deferred_tools`. |
+| `MAVERICK_TOOL_EXPOSURE` | unset (`core`) | `core` describes a short, role-aware tool list on each request (about 30-40 tools; a specialist pack sees exactly its `allow_tools`) and the model looks the rest up with `find_tools`; `full` describes every tool except the SaaS long tail (~240 tools, ~47k tokens on every turn). Also settable via `[tools] exposure`; `[tools] core_extra` pins extra tools into the short list. |
 | `MAVERICK_CODE_EXEC` | unset (off) | `1` enables the `code_exec` tool (programmatic tool calling: a sandboxed Python script that orchestrates declared tool calls, keeping raw outputs out of context). Also settable via `[capabilities] code_exec`. |
 | `MAVERICK_FIRECRACKER_STRICT` | `1` (on) | Set `0` to allow Firecracker to fall back to a Docker/hardened sandbox instead of failing. |
 | `MAVERICK_LONG_CMD_TIMEOUT` | `600` | Timeout (seconds) for long-running shell commands. |
@@ -293,6 +294,8 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | --- | --- | --- |
 | `MAVERICK_CONSENT_MODE` | `auto-approve` | Gating for destructive actions: `auto-approve`, `auto-deny`, `ask`, or `dashboard`. |
 | `MAVERICK_CONSENT_DASHBOARD_TIMEOUT` | `300` | Seconds to wait for a dashboard approval before treating as denied. |
+| `MAVERICK_APPROVAL_UNDO_GRACE_SECONDS` | `30` | Seconds a decision on the Approvals page can be undone. The agent waits this long before acting on an approval; `0` acts at once and removes Undo. Also `[approval] undo_grace_seconds` (Settings > All settings; this variable wins). |
+| `MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT` | `1` | Approving a high or critical risk request needs an explicit confirmation (a ticked box; typing APPROVE for critical). `0` makes those approvals one click. Also `[approval] require_acknowledgement`. |
 | `MAVERICK_MCP_ELICITATION` | `decline` | How the MCP client answers an external server's `elicitation/create`: `decline` (continue without the value), `cancel` (abort the server's op), or `prompt` (collect typed input from an interactive operator, gated through consent). The prompt is shield-scanned either way. |
 | `MAVERICK_MCP_ELICITATION_TIMEOUT` | `300` | Seconds the MCP *server* waits for an elicitation response from a stdio client before giving up and leaving the question parked for the async `maverick_answer` flow. Also `[mcp] elicitation_timeout` (Settings > All settings; this variable wins). |
 | `MAVERICK_MCP_MAX_ELICIT_ROUNDS` | `8` | Max elicit→answer→resume rounds the MCP server runs per `maverick_start`/`maverick_resume` call before returning (bounds runaway question loops). Also `[mcp] max_elicit_rounds` (Settings > All settings; this variable wins). |

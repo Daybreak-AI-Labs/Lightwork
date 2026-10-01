@@ -43,13 +43,13 @@
   {% endcall %}
 
   {% if saved %}
-  <div class="panel" role="status"
+  <div class="panel" role="status" data-mv-toast="Saved. {{ saved }}"
        style="border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4);">
     <strong>Saved.</strong> {{ saved }}
   </div>
   {% endif %}
   {% if error or load_error %}
-  <div class="panel" role="alert"
+  <div class="panel" role="alert" data-mv-toast="That didn't work. {{ error or load_error }}" data-mv-toast-error="true"
        style="border-color: color-mix(in srgb, var(--warn) 40%, transparent); margin-bottom: var(--space-4);">
     <strong>That didn't work.</strong> {{ error or load_error }}
   </div>
@@ -65,7 +65,8 @@
     <p class="muted">This workspace also has a daily limit of <strong>{{ money(organization_cap) }}</strong>,
       set on the <a href="/tenants">Workspaces</a> page. Whichever limit is reached first applies.</p>
     {% endif %}
-    <form method="post" action="/spending-limits/workspace"
+    <form method="post" action="/spending-limits/workspace" data-limit-form="the workspace"
+          data-limit-amount="{{ view.workspace.amount if view.workspace else '' }}"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
       {{ limit_fields('Workspace limit', view.workspace, workspace_periods) }}
       <button type="submit" class="btn btn--primary">Save workspace limit</button>
@@ -80,7 +81,8 @@
       "Per task" limits a single piece of work; "per day" and "per month" add up
       everything the person runs.
     </p>
-    <form method="post" action="/spending-limits/default"
+    <form method="post" action="/spending-limits/default" data-limit-form="everyone"
+          data-limit-amount="{{ view.default.amount if view.default else '' }}"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
       {{ limit_fields('Limit for everyone', view.default, periods) }}
       <button type="submit" class="btn btn--primary">Save limit for everyone</button>
@@ -105,7 +107,8 @@
           <td>{{ money(row.month) }}</td>
           <td>
             {% if row.limit %}
-            <form method="post" action="/spending-limits/person" style="display: inline;">
+            <form method="post" action="/spending-limits/person" style="display: inline;"
+                  data-limit-remove="Remove the personal limit for {{ (row.principal | identity).name }}? They then follow the limit for everyone{{ '' if view.default else ', which is currently no limit' }}.">
               <input type="hidden" name="principal" value="{{ row.principal }}" />
               <input type="hidden" name="action" value="remove" />
               <button type="submit" class="btn btn--ghost"
@@ -156,7 +159,46 @@
 
   <p class="muted" style="font-size: var(--text-sm);">
     Spending is counted in US dollars from what each AI provider charges. Days and months
-    reset at midnight UTC. Work already running when a limit is reached stops before its
+    reset at midnight UTC<span data-mv-utc-midnight></span>. Work already running when a limit is reached stops before its
     next paid step.
   </p>
+  <script>
+  (function () {
+    'use strict';
+    function money(v) { return '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+    function guard(form, question) {
+      form.addEventListener('submit', function (event) {
+        if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
+        var q = question();
+        if (!q) return;
+        event.preventDefault();
+        window.mvConfirm(q, {okText: 'Yes, change it'}).then(function (ok) {
+          if (!ok) return;
+          form.dataset.confirmed = 'true';
+          if (form.requestSubmit) form.requestSubmit(); else form.submit();
+        });
+      });
+    }
+    // Removing or loosening a limit lets more money be spent: ask first.
+    document.querySelectorAll('form[data-limit-form]').forEach(function (form) {
+      guard(form, function () {
+        var current = parseFloat(form.dataset.limitAmount);
+        if (!isFinite(current)) return '';
+        var who = form.dataset.limitForm;
+        var choice = form.querySelector('input[name="choice"]:checked');
+        if (choice && choice.value === 'none') {
+          return 'Remove the spending limit for ' + who + '? There will be no limit on what can be spent until you set one again.';
+        }
+        var amount = parseFloat((form.querySelector('input[name="amount"]') || {}).value);
+        if (isFinite(amount) && amount > current) {
+          return 'Raise the spending limit for ' + who + ' from ' + money(current) + ' to ' + money(amount) + '?';
+        }
+        return '';
+      });
+    });
+    document.querySelectorAll('form[data-limit-remove]').forEach(function (form) {
+      guard(form, function () { return form.dataset.limitRemove; });
+    });
+  })();
+  </script>
 {% endblock %}

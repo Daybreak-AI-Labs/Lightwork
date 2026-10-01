@@ -45,6 +45,7 @@ from starlette.responses import (
     StreamingResponse,
 )
 
+from . import step_up
 from ._event_stream import TERMINAL_RUN_STATUSES, event_page, replay_cursor
 from ._shared import (
     _any_provider_key_set,
@@ -182,6 +183,15 @@ from .api_schemas import (
     WorkflowDraftIn,
     WorkflowRefineIn,
     WorkflowSaveIn,
+)
+from .approval_decisions import (  # noqa: F401 -- re-exported for tests
+    _audit_approval_decision,
+    _deliver_approval_audit_event,
+    _record_vote_or_raise,
+    _require_acknowledgement,
+    _safe_action_label,
+    require_current_decision_card,
+    undo_from_dashboard,
 )
 from .auth import (
     assert_goal_access,
@@ -1107,13 +1117,29 @@ async def get_tenant(request: Request, tenant_id: str) -> TenantOut:
     return _to_tenant_out(_get_tenant_or_404(tenant_id))
 
 
+async def _audit_tenant_change(request: Request, kind: str, tenant_id: str, **payload) -> None:
+    """Record a workspace lifecycle change in the deployment-wide chain (the
+    same chain as tenant creation), so the activity log shows it."""
+    from maverick.audit import AuditRefused, audit_event
+
+    actor = caller_principal(request) or "local"
+    try:
+        await run_in_threadpool(
+            audit_event, kind, agent=actor, _global=True, actor=actor, tenant=tenant_id, **payload
+        )
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail="The activity log refused this change.") from exc
+
+
 @router.post("/admin/tenants/{tenant_id}/suspend", response_model=TenantOut)
 async def suspend_tenant(request: Request, tenant_id: str) -> TenantOut:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
 
     _get_tenant_or_404(tenant_id)
-    return _to_tenant_out(tenant_registry.suspend_tenant(tenant_id))
+    rec = tenant_registry.suspend_tenant(tenant_id)
+    await _audit_tenant_change(request, "tenant_suspended", tenant_id)
+    return _to_tenant_out(rec)
 
 
 @router.post("/admin/tenants/{tenant_id}/resume", response_model=TenantOut)
@@ -1122,7 +1148,9 @@ async def resume_tenant(request: Request, tenant_id: str) -> TenantOut:
     from maverick.tenant import registry as tenant_registry
 
     _get_tenant_or_404(tenant_id)
-    return _to_tenant_out(tenant_registry.resume_tenant(tenant_id))
+    rec = tenant_registry.resume_tenant(tenant_id)
+    await _audit_tenant_change(request, "tenant_resumed", tenant_id)
+    return _to_tenant_out(rec)
 
 
 @router.post("/admin/tenants/{tenant_id}/plan", response_model=TenantOut)
@@ -1210,10 +1238,12 @@ async def delete_tenant(
     purge: bool = False,
 ) -> Response:
     require_global_permission(request, "admin")
+    step_up.require_recent_mfa(request, "delete_workspace")
     from maverick.tenant import registry as tenant_registry
 
     _get_tenant_or_404(tenant_id)
     tenant_registry.delete_tenant(tenant_id, purge=purge)
+    await _audit_tenant_change(request, "tenant_deleted", tenant_id, purge=purge)
     return Response(status_code=204)
 
 
@@ -1263,6 +1293,7 @@ async def set_tenant_role(
     body: TenantRoleIn,
 ) -> Response:
     require_global_permission(request, "admin")
+    step_up.require_recent_mfa(request, "change_role")
     _reject_tenant_role_assignment_under_per_user_tenancy()
     from maverick_dashboard import rbac
 
@@ -1285,6 +1316,7 @@ async def remove_tenant_role(
     principal: str,
 ) -> Response:
     require_global_permission(request, "admin")
+    step_up.require_recent_mfa(request, "change_role")
     from maverick_dashboard import rbac
 
     _get_tenant_or_404(tenant_id)
@@ -1684,11 +1716,14 @@ def goal_events(
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
+    from maverick.stop_reasons import stop_payload
+
     since = replay_cursor(since)
     events, has_more = event_page(w, goal_id, since, limit)
     return GoalEventsResponse(
         status=g.status,
         result=g.result,
+        stop=stop_payload(g.status, g.result),
         next_id=events[-1].id if events else since,
         events=[
             GoalEventOut(id=e.id, agent=e.agent, kind=e.kind, content=e.content, ts=e.ts)
@@ -1770,9 +1805,9 @@ async def goal_events_stream(
 
 @router.get("/goals/{goal_id}/thread-history")
 def goal_thread_history(request: Request, goal_id: int, before_id: int | None = None) -> dict:
-    from dataclasses import asdict
-
     from maverick.chat_threads import ChatThreads
+
+    from .chat_stop_visibility import public_turns
 
     require_permission(request, "view")
     world = _world()
@@ -1786,7 +1821,7 @@ def goal_thread_history(request: Request, goal_id: int, before_id: int | None = 
     if (principal or "") != (goal.owner or ""):
         raise HTTPException(403, "Access to one task does not grant access to the employee conversation.")
     turns, more = ChatThreads(world).history(goal_id, before_id=before_id)
-    return {"turns": [asdict(turn) for turn in turns], "has_more": more,
+    return {"turns": public_turns(world, turns), "has_more": more,
             "before_id": turns[0].id if turns else before_id}
 
 
@@ -4336,13 +4371,17 @@ async def assessment_question_roi(request: Request, type: str) -> dict:
 async def open_dsar_request(request: Request, body: DsarIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    return await run_in_threadpool(
-        ops.open_dsar,
-        body.subject_id,
-        body.kind,
-        channel=body.channel,
-        opened_by=_request_actor(request),
-    )
+    try:
+        return await run_in_threadpool(
+            ops.open_dsar,
+            body.subject_id,
+            body.kind,
+            channel=body.channel,
+            jurisdiction=body.jurisdiction,
+            opened_by=_request_actor(request),
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/privacy/dsar/from-message", status_code=201)
@@ -8352,7 +8391,7 @@ async def voice_captions(
 
 
 @router.get("/catalog/{kind}")
-async def catalog_list(kind: str) -> dict:
+def catalog_list(kind: str) -> dict:
     """List federated catalog entries for a kind (skills/plugins/mcp/personas).
 
     Tolerates an unreachable index by returning an empty list, so a
@@ -9385,6 +9424,7 @@ def halt_clear(  # noqa: C901 - explicit fail-safe cross-authority transaction
 ) -> None:
     """Clear the verified local HALT authority and any configured shared one."""
     shared = _require_halt_permission(request)
+    step_up.require_recent_mfa(request, "clear_emergency_stop")
     from maverick import killswitch
     from maverick.file_lock import cross_process_lock, require_private_directory
     from maverick.killswitch import (
@@ -11674,6 +11714,10 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Privacy-rights orchestration",
         "requires": ("privacy_automation",),
     },
+    "privacy_automation.public_rights_form": {
+        "label": "Rights request form",
+        "requires": ("privacy_automation",),
+    },
     "privacy_automation.rights_consumer_delivery": {
         "label": "Privacy-rights consumer delivery",
         "requires": (
@@ -12347,6 +12391,11 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
     result["operations_enabled"] = get_features().get("copilot_operations") is True
     if not configured:
         result["provider_setup"] = _copilot_provider_setup(permissions)
+    from .provider_readiness import public_verdict, workspace_readiness
+
+    # The same verdict every page shows, so the panel can say plainly why AI
+    # answers are unavailable and where to fix it instead of sitting empty.
+    result["workspace_readiness"] = public_verdict(workspace_readiness())
     return result
 
 
@@ -13446,34 +13495,9 @@ def _require_settings_decider(request: Request, world, approval_id: int, who: st
 
 def _require_current_decision_card(world, approval_id: int, request: Request) -> None:
     """Reject a stale page, expired card, or corrupted structured approval."""
-    from maverick.approval_cards import (
-        ApprovalCardError,
-        decode_approval_detail,
-        require_current_approval_card,
+    require_current_decision_card(
+        world, approval_id, request.headers.get("X-Lightwork-Approval-Binding", ""),
     )
-
-    approval = world.get_approval(approval_id)
-    if approval is None or approval.status != "pending":
-        return
-    try:
-        card = decode_approval_detail(approval.detail)
-        if card is None:
-            raise ApprovalCardError(
-                "this approval predates exact-operation review; reject it and "
-                "ask the requester to prepare a fresh review"
-            )
-        if not hmac.compare_digest(card["action"], approval.action):
-            raise ApprovalCardError(
-                "the approval card does not match the queued action; request a fresh review"
-            )
-        supplied = request.headers.get("X-Lightwork-Approval-Binding", "")
-        if not supplied:
-            raise ApprovalCardError(
-                "review the current approval card before submitting this decision"
-            )
-        require_current_approval_card(card, expected_binding=supplied)
-    except ApprovalCardError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _supervisor(request: Request) -> str:
@@ -13487,163 +13511,15 @@ def _supervisor(request: Request) -> str:
     return caller_principal(request) or "operator"
 
 
-def _deliver_approval_audit_event(world, event) -> bool:
-    """Deliver exactly one queued vote and persist its delivery marker."""
-    if event.delivered_at is not None:
-        return True
-
-    from maverick.audit import AuditRefused, EventKind, audit_event
-
+async def _decision_payload(request: Request) -> dict:
+    """The optional JSON body of a decision (acknowledgement, reason)."""
+    if not (request.headers.get("content-type") or "").lower().startswith("application/json"):
+        return {}
     try:
-        written = audit_event(
-            EventKind.APPROVAL_DECISION,
-            approval_event_id=event.event_id,
-            approval_id=int(event.approval_id),
-            status=event.status,
-            decided_by=event.decided_by,
-            occurred_at=float(event.created_at),
-        )
-    except AuditRefused as exc:
-        # This is not refusal swallowing: no approval becomes effective. The
-        # exact event remains in the durable outbox for a policy/key repair and
-        # idempotent retry.
-        log.error(
-            "approval audit refused; decision remains non-effective (event_id=%s): %s",
-            event.event_id,
-            exc,
-        )
-        return False
-    if not written:
-        log.error(
-            "approval audit write failed; decision remains non-effective (event_id=%s)",
-            event.event_id,
-        )
-        return False
-
-    try:
-        return bool(world.mark_approval_audit_delivered(event.event_id))
-    # The signed append may have succeeded while the delivery-marker commit
-    # acknowledgement failed. Reconcile instead of returning an error that
-    # invites an unsafe, differently-keyed retry.
-    # failure-policy: fail_soft_with_audit
-    except Exception:
-        log.exception(
-            "approval audit was written but delivery finalization failed (event_id=%s)",
-            event.event_id,
-        )
-        try:
-            reconciled = world.get_approval_audit_event(event.event_id)
-        except Exception:
-            return False
-        return bool(reconciled and reconciled.delivered_at is not None)
-
-
-def _audit_approval_decision(world, event) -> bool:
-    """Deliver an approval's queued votes in durable occurrence order.
-
-    The world-model outbox is the authority seam: an audit refusal leaves every
-    later vote durable but non-effective. A retry uses stable event ids and
-    resumes at the oldest undelivered row, so a quorum-reaching vote cannot
-    overtake an earlier sign-off in the signed chain.
-    """
-    try:
-        pending = world.pending_approval_audit_events(
-            approval_id=event.approval_id,
-            limit=1000,
-        )
-    # The vote/outbox commit already succeeded. A read failure here is an
-    # explicit audit-pending response, not a 500 that falsely invites a new
-    # decision.
-    # failure-policy: fail_soft_with_audit
-    except Exception:
-        log.exception(
-            "approval audit outbox could not be read (event_id=%s)",
-            event.event_id,
-        )
-        return False
-    for queued in pending:
-        if not _deliver_approval_audit_event(world, queued):
-            return False
-    try:
-        current = world.get_approval_audit_event(event.event_id)
-    except Exception:
-        return False
-    return bool(current and current.delivered_at is not None)
-
-
-def _record_vote_or_raise(world, approval_id: int, status: str, who: str):
-    """Apply one approver's vote, mapping rejection to the right HTTP error.
-
-    Under N-of-M dual control a vote can be refused for segregation-of-duties
-    reasons (the requester can't self-approve, or an approver identity is needed)
-    -- distinguish that (403) from an unknown/already-decided approval (404)."""
-    event_id = world.approval_audit_event_id(approval_id, status, who)
-    try:
-        event = world.decide_approval_audited(
-            approval_id,
-            status,
-            decided_by=who,
-        )
-    except Exception as decision_error:
-        # A commit acknowledgement can be lost after both the vote and outbox
-        # row are durable. The stable id lets us prove that outcome before
-        # deciding whether this request failed.
-        try:
-            event = world.get_approval_audit_event(event_id)
-        except Exception as reconcile_error:
-            log.exception(
-                "approval decision outcome is uncertain (event_id=%s)",
-                event_id,
-            )
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "decision": "outcome_uncertain",
-                    "decision_id": event_id,
-                    "retry_safe": True,
-                },
-                headers={
-                    "Retry-After": "1",
-                    "X-Lightwork-Decision-Id": event_id,
-                    "X-Lightwork-Approval-State": "uncertain",
-                },
-            ) from reconcile_error
-        if event is not None and not event.matches(approval_id, status, who):
-            log.critical(
-                "approval outbox identity mismatch during commit reconciliation (event_id=%s)",
-                event_id,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "decision": "outbox_integrity_error",
-                    "decision_id": event_id,
-                    "retry_safe": False,
-                },
-                headers={
-                    "X-Lightwork-Decision-Id": event_id,
-                    "X-Lightwork-Approval-State": "integrity_error",
-                },
-            ) from decision_error
-        if event is None:
-            raise decision_error
-    if event is not None:
-        return event
-
-    st = world.approval_state(approval_id)
-    if st is None or st.get("status") != "pending":
-        raise HTTPException(status_code=404, detail="no such pending approval")
-    if world.approval_has_pending_finalization(approval_id):
-        raise HTTPException(
-            status_code=409,
-            detail="a final decision is accepted and awaiting signed audit delivery",
-        )
-    raise HTTPException(
-        status_code=403,
-        detail="vote not accepted: the requester can't approve their own request "
-        "(segregation of duties), or an approver identity is required for "
-        "multi-party approval",
-    )
+        payload = await request.json()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="the decision details could not be read") from None
+    return payload if isinstance(payload, dict) else {}
 
 
 def _approval_decision_response(world, event, audit_delivered: bool) -> Response:
@@ -13670,7 +13546,15 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
         "X-Lightwork-Approval-State": approval_status,
         "X-Lightwork-Approval-Count": str(state.get("approved_count", 0)),
         "X-Lightwork-Approval-Required": str(state.get("approvals_required", 1)),
+        "X-Lightwork-Decided-By": (
+            str(event.decided_by).encode("ascii", "backslashreplace").decode("ascii")
+        ),
     }
+    if audit_delivered and approval_status != "pending":
+        from maverick.safety.consent import approval_undo_grace_seconds
+
+        # The page offers Undo for this long; the consumer waits the same window.
+        common_headers["X-Lightwork-Undo-Seconds"] = str(int(approval_undo_grace_seconds()))
     if audit_delivered:
         return Response(status_code=204, headers=common_headers)
     return JSONResponse(
@@ -13706,18 +13590,23 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
         },
     },
 )
-def approve_approval(request: Request, approval_id: int) -> Response:
+async def approve_approval(request: Request, approval_id: int) -> Response:
     """Record an approval vote; once the required quorum of distinct approvers is
-    met the polling consent path proceeds (N-of-M dual control)."""
+    met the polling consent path proceeds (N-of-M dual control).
+
+    High and critical risk requests also need the person's acknowledgement in
+    the JSON body (see ``_require_acknowledgement``)."""
     from .approval_authority import require_approval_authority
 
     require_approval_authority(
         request, action="approval.approve", resource=str(approval_id),
     )
+    payload = await _decision_payload(request)
     who = _supervisor(request)
     world = _world()
     _require_settings_decider(request, world, approval_id, who, approving=True)
     _require_current_decision_card(world, approval_id, request)
+    _require_acknowledgement(world, approval_id, payload, who, channel="dashboard")
     event = _record_vote_or_raise(world, approval_id, "approved", who)
     return _approval_decision_response(
         world,
@@ -13745,23 +13634,61 @@ def approve_approval(request: Request, approval_id: int) -> Response:
         },
     },
 )
-def deny_approval(request: Request, approval_id: int) -> Response:
+async def deny_approval(request: Request, approval_id: int) -> Response:
     """Deny a parked action (a single deny rejects it); the polling consent path
-    then refuses it."""
+    then refuses it. An optional JSON ``reason`` is written to the audit log."""
     from .approval_authority import require_approval_authority
 
     require_approval_authority(
         request, action="approval.deny", resource=str(approval_id),
     )
+    payload = await _decision_payload(request)
     who = _supervisor(request)
     world = _world()
     _require_settings_decider(request, world, approval_id, who, approving=False)
+    reason = " ".join(str(payload.get("reason") or "").split())[:2000]
+    before = world.get_approval(approval_id) if reason else None
     event = _record_vote_or_raise(world, approval_id, "denied", who)
-    return _approval_decision_response(
-        world,
-        event,
-        _audit_approval_decision(world, event),
+    delivered = _audit_approval_decision(world, event)
+    if reason and delivered and before is not None:
+        from maverick import audit
+        from maverick.safety.secret_detector import redact
+
+        try:
+            reason, _matches = redact(reason)
+        except Exception:
+            reason = "Reason removed because redaction failed."
+        label = _safe_action_label(before)
+        if not audit.audit_event(
+            audit.EventKind.CONSENT_RESULT,
+            agent=who,
+            action="approval_rejection_reason",
+            approval_id=int(approval_id),
+            reason=reason,
+            summary=f"{who} rejected '{label}' and gave a reason: {reason}",
+        ):
+            log.warning("approval rejection reason audit write failed (approval_id=%s)", approval_id)
+    return _approval_decision_response(world, event, delivered)
+
+
+@router.post("/approvals/{approval_id}/undo")
+def undo_approval(request: Request, approval_id: int) -> Response:
+    """Undo a decision made moments ago, returning the request to pending.
+
+    Allowed only while the decision can still be undone (``[approval]
+    undo_grace_seconds``, default 30): the agent-side consumer waits that long
+    before acting, so nothing has run yet. After that the answer is a plain
+    409. The undo is written to the audit log; the original decision stays in
+    the signed chain. The rule itself is shared with the chat channels
+    (``maverick.channel_approvals.undo_decision``)."""
+    from .approval_authority import require_approval_authority
+
+    require_approval_authority(
+        request, action="approval.undo", resource=str(approval_id),
     )
+    who = _supervisor(request)
+    world = _world()
+    return JSONResponse(status_code=200, content=undo_from_dashboard(world, approval_id, who=who))
 
 
 @router.post("/approvals/{approval_id}/revise")
@@ -15996,6 +15923,7 @@ from .privacy_rights_consumer_delivery_api import (  # noqa: E402
 from .privacy_rights_orchestration_api import (  # noqa: E402
     router as privacy_rights_orchestration_router,
 )
+from .public_rights_admin_api import router as public_rights_admin_router  # noqa: E402
 from .security_api import router as security_router  # noqa: E402
 from .third_party_collaboration_api import (  # noqa: E402
     router as third_party_collaboration_router,
@@ -16058,6 +15986,7 @@ router.include_router(consent_custom_index_router)
 router.include_router(consent_bulk_jobs_router)
 router.include_router(consent_global_opt_out_router)
 router.include_router(consent_public_admin_router)
+router.include_router(public_rights_admin_router)
 router.include_router(consent_delivery_router)
 router.include_router(consent_delivery_destinations_router)
 router.include_router(consent_experiments_router)

@@ -23,8 +23,9 @@
   .tree .title { color: var(--text); }
   .tree .cost { color: var(--muted); font-size: 0.85em; margin-left: 0.5rem; }
 </style>
-<p class="muted"><a href="/goals">← All tasks</a> · <a href="/goals/{{ goal.id }}/trajectory">What happened</a></p>
-<div class="section-head"><h2>Steps for: {{ goal.title }}</h2></div>
+{% from "_task_tabs.html" import task_tabs %}
+{{ task_tabs(goal, 'plan') }}
+<div class="section-head"><h2>Plan for: {{ goal.title }}</h2></div>
 <div class="panel">
   <div class="legend">
     <span><span class="badge active">In progress</span></span>
@@ -34,7 +35,7 @@
     <span><span class="badge pending">Waiting</span></span>
     <span class="live" id="plan-tree-status" aria-live="polite">Plan captured when this page loaded.</span>
   </div>
-  <div id="plan-tree" role="img"
+  <div id="plan-tree" role="img" hidden
        aria-label="Map of the steps for {{ goal.title }}"></div>
   <section aria-label="Task steps and relationships">
     <div class="tree" id="plan-tree-list">
@@ -43,6 +44,9 @@
          dict args (unhashable). #}
       {{ tree_html | safe }}
     </div>
+    {% if not (root and root.children) %}
+    <p class="muted" style="margin: 0;">This task has one step, so there is no map of smaller steps. Open the task link above to review its result.</p>
+    {% endif %}
   </section>
 </div>
 
@@ -165,6 +169,8 @@
         renderList(tree);
         if (cy) {
           try {
+            container.hidden = !(tree.children || []).length;
+            if (!container.hidden && typeof cy.resize === 'function') cy.resize();
             cy.elements().remove(); cy.add(toElements(tree));
             cy.layout({name: 'breadthfirst', directed: true, padding: 20}).run();
           } catch (_) { cy.destroy(); cy = null; container.hidden = true; }

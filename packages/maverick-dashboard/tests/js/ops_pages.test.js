@@ -31,18 +31,23 @@ async function fixture(markup, script, route, {confirm = true, url = 'https://li
 function submit(ui, form) { form.dispatchEvent(new ui.window.Event('submit', {cancelable: true})); }
 
 test('one-step client setup sends the form and shows the link once', async (t) => {
-  const markup = body('templates/tenants.html', '<div class="panel" id="tenant-onboard-panel">', '<div class="section-head"><h2 id="keys-title">');
+  // The create form carries the optional administrator invitation; the roles
+  // list and the copy button come from tenant-ops, the submit from tenants.
+  const markup = body('templates/tenants.html', '<form id="tenant-add"', '<details class="tenants-why">');
   const ui = await fixture(markup, 'lightwork-tenant-ops.js', (url) => {
     if (url.endsWith('/roles')) return response({roles: [{value: 'admin', label: 'Admin'}, {value: 'viewer', label: 'Viewer'}], invitations_on: true});
-    return response({summary: 'Created Acme and invited owner@acme.example as its admin.', invite_link: 'https://x/auth/invite/inv_1'});
+    if (url.endsWith('/onboard')) return response({summary: 'Created Acme and invited owner@acme.example as its admin.', invite_link: 'https://x/auth/invite/inv_1'});
+    throw new Error('unexpected request ' + url);
   });
   t.after(() => ui.window.close());
-  const form = ui.document.getElementById('tenant-onboard');
+  ui.window.eval(read('static/lightwork-tenants.js'));
+  const form = ui.document.getElementById('tenant-add');
   assert.equal(form.querySelector('[data-onboard-roles]').options.length, 2);
   form.elements.display_name.value = 'Acme';
   form.elements.admin_email.value = 'owner@acme.example';
   submit(ui, form);
   await ui.settle();
+  assert.equal(ui.calls.filter((c) => c.url.endsWith('/admin/tenants')).length, 0);
   const sent = JSON.parse(ui.calls.find((c) => c.url.endsWith('/onboard')).options.body);
   assert.deepEqual(sent, {display_name: 'Acme', plan: 'free', max_daily_dollars: 0, admin_email: 'owner@acme.example', role: 'admin'});
   assert.equal(ui.document.getElementById('tenant-onboard-link').value, 'https://x/auth/invite/inv_1');
@@ -50,7 +55,7 @@ test('one-step client setup sends the form and shows the link once', async (t) =
 });
 
 test('key re-protection previews, confirms and never shows the key', async (t) => {
-  const markup = body('templates/tenants.html', '<div class="panel" id="tenant-keys-panel">', '<div class="panel">');
+  const markup = body('templates/tenants.html', '<details class="panel tenants-advanced" id="tenant-keys-panel">', '<style>');
   const ui = await fixture(markup, 'lightwork-tenant-ops.js', (url) => {
     if (url.endsWith('/roles')) return response({roles: [], invitations_on: true});
     if (url.endsWith('/keys/preview')) return response({summary: '1 workspace would be re-protected with the new key; 0 already use it.', total: 1, rows: [{workspace: 'Acme', result: 'Would be re-protected'}], technical: []});

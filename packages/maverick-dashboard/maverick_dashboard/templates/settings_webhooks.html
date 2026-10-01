@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Webhooks · Lightwork{% endblock %}
+{% block content %}
+<style>
+  #wh-page .input { box-sizing: border-box; width: 100%; max-width: 100%; }
+  #wh-page label { display: block; margin-block: var(--space-2); }
+  #wh-page .row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+  #wh-page table td, #wh-page table th { vertical-align: top; overflow-wrap: anywhere; }
+  #wh-page .status-dead { color: var(--danger, #c33); font-weight: 600; }
+  #wh-page .status-delivered { color: var(--ok, #2a7); }
+</style>
+<div id="wh-page">
+  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/settings">← Back to Settings</a></p>
+  <h1 class="page-title">Webhooks</h1>
+  <p class="page-subtitle">Send a signed message to another system when something happens to a request, incident, assessment, vendor contract, approval or policy. Each delivery is logged and retried up to five times over about an hour; after that it is marked dead until you retry it.</p>
+  <p id="wh-msg" role="status" aria-live="polite" class="muted"></p>
+
+  <div class="section-head"><h2>Subscriptions</h2></div>
+  <div class="panel" id="wh-subs-panel">
+    <p class="muted" id="wh-legacy" hidden></p>
+    <table class="table" id="wh-subs" hidden>
+      <thead><tr><th scope="col">Address</th><th scope="col">Events</th><th scope="col">Description</th><th scope="col">Signed</th><th scope="col">On</th><th scope="col">Actions</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="muted" id="wh-subs-empty">No subscriptions yet.</p>
+  </div>
+
+  <div class="section-head"><h2 id="wh-form-title">Add a subscription</h2></div>
+  <div class="panel">
+    <form id="wh-form" autocomplete="off" data-settings-local="true" data-draft-recovery="off">
+      <input type="hidden" id="wh-id" value="">
+      <label for="wh-url">Address (https://…)</label>
+      <input class="input" id="wh-url" type="url" required maxlength="2048" placeholder="https://example.com/lightwork-hook">
+      <label for="wh-desc">Description</label>
+      <input class="input" id="wh-desc" type="text" maxlength="500" placeholder="What this connection is for">
+      <label for="wh-events">Events (comma-separated; * for all, dsar.* for a family)</label>
+      <input class="input" id="wh-events" type="text" maxlength="2000" value="*" aria-describedby="wh-events-help">
+      <p id="wh-events-help" class="muted">Choose from the list below.</p>
+      <label for="wh-secret">Signing secret (leave empty to keep the current one)</label>
+      <input class="input" id="wh-secret" type="password" autocomplete="new-password" maxlength="4096">
+      <label><input type="checkbox" id="wh-enabled" checked> Turned on</label>
+      <div class="row" style="margin-top: var(--space-3)">
+        <button type="submit" class="btn btn--primary" id="wh-save">Save subscription</button>
+        <button type="button" class="btn" id="wh-cancel" hidden>Cancel editing</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="section-head"><h2>Deliveries</h2></div>
+  <div class="panel">
+    <div class="row">
+      <label for="wh-filter-status" style="margin:0">Show</label>
+      <select class="input" id="wh-filter-status" style="width:auto">
+        <option value="">All</option><option value="pending">Waiting or retrying</option><option value="delivered">Delivered</option><option value="dead">Dead</option>
+      </select>
+      <button type="button" class="btn" id="wh-refresh">Refresh</button>
+    </div>
+    <table class="table" id="wh-deliveries" hidden>
+      <thead><tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Address</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col">Last result</th><th scope="col">Next try</th><th scope="col">Actions</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="muted" id="wh-deliveries-empty">No deliveries yet.</p>
+  </div>
+
+  <div class="section-head"><h2>Events you can subscribe to</h2></div>
+  <div class="panel">
+    <table class="table">
+      <thead><tr><th scope="col">Event</th><th scope="col">Record</th><th scope="col">Meaning</th></tr></thead>
+      <tbody>
+      {% for e in events %}<tr><td><code>{{ e.type }}</code></td><td>{{ e.record }}</td><td>{{ e.description }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="muted">Every message is signed with the subscription's secret (or the installation's signing secret for the configured address list). The message format and how to check the signature are in docs/webhooks.md.</p>
+  </div>
+  <noscript>Enable browser scripting to manage subscriptions and see deliveries.</noscript>
+</div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var say = function (text) { $('wh-msg').textContent = text; };
+  var esc = function (s) { return String(s == null ? '' : s); };
+  var when = function (t) { return t ? new Date(t * 1000).toLocaleString() : '—'; };
+  function req(method, url, body) {
+    return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) { throw new Error((j && j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || ('Request failed (' + r.status + ')')); }
+        return j; }); });
+  }
+  function cell(tr, text, cls) { var td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); return td; }
+  function button(label, onClick) { var b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.textContent = label; b.addEventListener('click', onClick); return b; }
+  function loadSubs() {
+    return req('GET', '/api/v1/webhooks/subscriptions').then(function (d) {
+      var tbody = $('wh-subs').querySelector('tbody'); tbody.innerHTML = '';
+      var rows = d.subscriptions || [];
+      $('wh-subs').hidden = rows.length === 0; $('wh-subs-empty').hidden = rows.length !== 0;
+      var legacy = d.legacy || {};
+      if (legacy.urls && legacy.urls.length) {
+        $('wh-legacy').hidden = false;
+        $('wh-legacy').textContent = 'The installation’s configured address list (' + legacy.urls.length + ') also receives every event' + (legacy.signed ? ', signed with the installation secret.' : ', unsigned.') + ' It appears in deliveries as "' + legacy.subscription_id + '".';
+      }
+      rows.forEach(function (s) {
+        var tr = document.createElement('tr');
+        cell(tr, s.url); cell(tr, (s.events || []).join(', ')); cell(tr, s.description || '');
+        cell(tr, s.secret_set ? 'Yes' : 'No'); cell(tr, s.enabled ? 'On' : 'Off');
+        var actions = document.createElement('td');
+        actions.appendChild(button('Edit', function () { edit(s); }));
+        actions.appendChild(button(s.enabled ? 'Turn off' : 'Turn on', function () {
+          req('PATCH', '/api/v1/webhooks/subscriptions/' + encodeURIComponent(s.id), { enabled: !s.enabled })
+            .then(function () { say('Subscription updated.'); loadSubs(); }).catch(function (e) { say(e.message); });
+        }));
+        actions.appendChild(button('Send test event', function () {
+          req('POST', '/api/v1/webhooks/subscriptions/' + encodeURIComponent(s.id) + '/test')
+            .then(function (r) { var dl = r.delivery || {}; say('Test event ' + dl.status + (dl.last_status_code ? ' (HTTP ' + dl.last_status_code + ')' : '') + (dl.last_error ? ': ' + dl.last_error : '.')); loadDeliveries(); })
+            .catch(function (e) { say(e.message); });
+        }));
+        tr.appendChild(actions); tbody.appendChild(tr);
+      });
+    }).catch(function (e) { say(e.message); });
+  }
+  function edit(s) {
+    $('wh-id').value = s.id; $('wh-url').value = s.url; $('wh-desc').value = s.description || '';
+    $('wh-events').value = (s.events || ['*']).join(', '); $('wh-secret').value = ''; $('wh-enabled').checked = !!s.enabled;
+    $('wh-form-title').textContent = 'Edit subscription'; $('wh-cancel').hidden = false; $('wh-url').focus();
+  }
+  function reset() {
+    $('wh-id').value = ''; $('wh-form').reset(); $('wh-events').value = '*'; $('wh-enabled').checked = true;
+    $('wh-form-title').textContent = 'Add a subscription'; $('wh-cancel').hidden = true;
+  }
+  $('wh-cancel').addEventListener('click', reset);
+  $('wh-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var id = $('wh-id').value;
+    var body = { url: $('wh-url').value.trim(), description: $('wh-desc').value.trim(),
+      events: $('wh-events').value.trim() || '*', enabled: $('wh-enabled').checked };
+    if ($('wh-secret').value || !id) { body.secret = $('wh-secret').value; }
+    var p = id ? req('PATCH', '/api/v1/webhooks/subscriptions/' + encodeURIComponent(id), body)
+               : req('POST', '/api/v1/webhooks/subscriptions', body);
+    p.then(function () { say(id ? 'Subscription updated.' : 'Subscription added.'); reset(); loadSubs(); })
+     .catch(function (e) { say(e.message); });
+  });
+  function loadDeliveries() {
+    var status = $('wh-filter-status').value;
+    return req('GET', '/api/v1/webhooks/deliveries?limit=100' + (status ? '&status=' + encodeURIComponent(status) : '')).then(function (d) {
+      var tbody = $('wh-deliveries').querySelector('tbody'); tbody.innerHTML = '';
+      var rows = d.deliveries || [];
+      $('wh-deliveries').hidden = rows.length === 0; $('wh-deliveries-empty').hidden = rows.length !== 0;
+      rows.forEach(function (r) {
+        var tr = document.createElement('tr');
+        cell(tr, when(r.created_at)); cell(tr, r.event_type); cell(tr, r.url);
+        cell(tr, r.status === 'pending' ? (r.attempts ? 'retrying' : 'waiting') : r.status, 'status-' + r.status);
+        cell(tr, esc(r.attempts));
+        cell(tr, (r.last_status_code ? 'HTTP ' + r.last_status_code : (r.last_error || '—')) + (r.last_latency_ms ? ' · ' + r.last_latency_ms + ' ms' : '') + (r.last_response ? ' · ' + r.last_response.slice(0, 80) : ''));
+        cell(tr, r.status === 'pending' ? when(r.next_attempt_at) : '—');
+        var actions = document.createElement('td');
+        if (r.status !== 'delivered') {
+          actions.appendChild(button('Retry now', function () {
+            req('POST', '/api/v1/webhooks/deliveries/' + encodeURIComponent(r.id) + '/retry')
+              .then(function () { say('Retried.'); loadDeliveries(); }).catch(function (e) { say(e.message); });
+          }));
+        }
+        tr.appendChild(actions); tbody.appendChild(tr);
+      });
+    }).catch(function (e) { say(e.message); });
+  }
+  $('wh-refresh').addEventListener('click', loadDeliveries);
+  $('wh-filter-status').addEventListener('change', loadDeliveries);
+  loadSubs(); loadDeliveries();
+})();
+</script>
+{% endblock %}

@@ -15,11 +15,21 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from . import auth
+from . import _shared, auth, step_up
 from .notification_health import router as notification_health_router
 
 router = APIRouter()
 router.include_router(notification_health_router)
+
+
+def _admin_audit(request: Request, action: str, **payload) -> None:
+    """One activity-log row per administrator change made from these pages
+    (invites, department access, settings saves). A configured custody refusal
+    stops the change from looking recorded; ordinary writer trouble is logged
+    by the audit subsystem and never blocks the page."""
+    from .audit_actions_api import _audit_event
+
+    _audit_event(request, action, **payload)
 
 
 def _app():
@@ -40,6 +50,15 @@ def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     persist_theme middleware (the form GETs back here with the params); the
     model choice is saved to the dashboard-owned runtime overlay."""
     return _settings_response(request, saved)
+
+
+def _api_keys_enabled() -> bool:
+    try:
+        from . import api_keys
+
+        return api_keys.enabled()
+    except Exception:
+        return False
 
 
 def _settings_response(request: Request, saved: str = "", *, notice: str = "",
@@ -114,6 +133,12 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         provider["readiness"] = provider_readiness(
             provider["name"], configured=provider["configured"]
         )
+    # The one truth about whether an AI service is connected: the header,
+    # each provider row and every other page read the same verdict.
+    from maverick_dashboard.provider_readiness import apply_to_rows, workspace_readiness
+
+    workspace = workspace_readiness()
+    apply_to_rows(cfg_state["providers"], workspace)
     # Grouped pickers: every model the configured keys can reach (cached live
     # discovery) plus the shipped catalog, capped by the allow-list.
     from maverick_dashboard import model_pickers
@@ -181,6 +206,7 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         "pinned_model": default_model_override(),
         **pickers,
         "providers": cfg_state["providers"],
+        "workspace": workspace,
         "capabilities": cfg_state["capabilities"],
         "features": cfg_state["features"],
         "budget": budget_override(),
@@ -189,6 +215,10 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
                                 else (load_config().get("budget") or {}).get("task_limits_enabled", True)),
         "discovery_locked": bool(__import__("os").environ.get("MAVERICK_MODEL_DISCOVERY", "").strip()),
         "webhook_configured": webhook_configured,
+        # The static server token is the break-glass credential: it has no
+        # person behind it and no scopes, so Settings says so while it is set.
+        "static_token_set": bool(_shared.dashboard_token()),
+        "api_keys_enabled": _api_keys_enabled(),
         "saved": saved_msg,
         "saved_section": saved_section,
         "notice": notice,
@@ -223,6 +253,7 @@ async def settings_set_model(request: Request) -> RedirectResponse:
             await run_in_threadpool(clear_default_model)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
+    _admin_audit(request, "settings_models")
     return RedirectResponse("/settings?saved=models", status_code=303)
 
 
@@ -273,6 +304,7 @@ def settings_set_budget(request: Request, max_dollars: str = Form(""),
         from . import settings_quorum
 
         settings_quorum.settle(approved)
+    _admin_audit(request, "settings_budget")
     return RedirectResponse("/settings?saved=budget", status_code=303)
 
 
@@ -343,6 +375,7 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
         await run_in_threadpool(set_role_models, updates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
+    _admin_audit(request, "settings_roles")
     return RedirectResponse("/settings?saved=roles", status_code=303)
 
 @router.post("/settings/models/allowed")
@@ -359,6 +392,7 @@ async def settings_set_allowed_models(request: Request) -> RedirectResponse:
         await run_in_threadpool(set_allowed_models, form.getlist("models"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
+    _admin_audit(request, "settings_allowed")
     return RedirectResponse("/settings?saved=allowed", status_code=303)
 
 
@@ -374,6 +408,7 @@ async def settings_discover_models(request: Request, provider: str = Form("")) -
     if name and name not in KNOWN_PROVIDERS:
         raise HTTPException(status_code=400, detail="unknown provider")
     await run_in_threadpool(model_discovery.refresh, [name] if name else None)
+    _admin_audit(request, "settings_discover")
     return RedirectResponse("/settings?saved=discover", status_code=303)
 
 
@@ -451,6 +486,7 @@ def settings_set_model_discovery(request: Request, enabled: str = Form("on")) ->
         _config.reset_config_cache()
     except Exception:  # pragma: no cover -- cache reset is best effort
         pass
+    _admin_audit(request, "settings_discovery")
     return RedirectResponse("/settings?saved=discovery", status_code=303)
 
 
@@ -489,6 +525,7 @@ async def settings_set_provider(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await run_in_threadpool(_refresh_models_quietly, provider_name)
+    _admin_audit(request, "settings_providers")
     return RedirectResponse("/settings?saved=providers", status_code=303)
 
 
@@ -502,6 +539,7 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
         settings_store.clear_provider(provider.strip())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="unknown provider") from exc
+    _admin_audit(request, "settings_providers")
     return RedirectResponse("/settings?saved=providers", status_code=303)
 
 
@@ -527,6 +565,7 @@ async def settings_test_provider(
     await run_in_threadpool(_refresh_models_quietly, name)
     if next == "providers":  # the Providers page's own Test connection button
         return RedirectResponse("/providers?tested=1", status_code=303)
+    _admin_audit(request, "settings_provider_test")
     return RedirectResponse("/settings?saved=provider_test", status_code=303)
 
 
@@ -546,6 +585,7 @@ async def settings_set_capabilities(request: Request) -> RedirectResponse:
             status_code=503,
             detail="Settings are unavailable. Retry after storage is restored.",
         ) from exc
+    _admin_audit(request, "settings_capabilities")
     return RedirectResponse("/settings?saved=capabilities", status_code=303)
 
 
@@ -574,6 +614,7 @@ async def settings_set_features(request: Request) -> RedirectResponse:
             status_code=503,
             detail="Settings are unavailable. Retry after storage is restored.",
         ) from exc
+    _admin_audit(request, "settings_features")
     return RedirectResponse("/settings?saved=features", status_code=303)
 
 
@@ -589,6 +630,7 @@ async def settings_set_ui_visibility(request: Request) -> RedirectResponse:
     from maverick_dashboard import ui_visibility
     form = await request.form()
     await run_in_threadpool(ui_visibility.apply_selection, set(form.getlist("cell")))
+    _admin_audit(request, "settings_visibility")
     return RedirectResponse("/settings?saved=visibility#ui-visibility", status_code=303)
 
 
@@ -599,6 +641,7 @@ def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
     ui_visibility.clear_overrides()
+    _admin_audit(request, "settings_visibility_reset")
     return RedirectResponse("/settings?saved=visibility_reset#ui-visibility", status_code=303)
 
 
@@ -734,7 +777,9 @@ def _users_context(request: Request) -> dict:
              "suites_removed": "Department access removed.",
              "invite_revoked": "Invitation revoked.",
              "role_saved": "Custom role saved.",
-             "role_deleted": "Custom role deleted."}.get(
+             "role_deleted": "Custom role deleted.",
+             "channel_linked": "Chat account linked.",
+             "channel_unlinked": "Chat account unlinked."}.get(
         request.query_params.get("saved", ""), "")
     if request.query_params.get("saved") == "removed" and request.query_params.get("reset_person"):
         from .access_explanations import standard_role
@@ -763,10 +808,16 @@ def _users_context(request: Request) -> dict:
     from .first_login_defaults import preview as first_login_preview
     from .identity_format import role_label
     defaults = set(default_suites) if default_suites is not None else None
+    try:
+        from maverick import channel_identities
+        channel_links = sorted(channel_identities.all_links().items())
+    except Exception:  # noqa: BLE001 -- an unreadable store must not hide the roster
+        channel_links = []
     return {
         "global_admin": True,
         "first_login": first_login_preview(),
         "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
+        "channel_links": channel_links,
         "people": people,
         "people_labels": {p["principal"]: p["label"] for p in people},
         "role_labels": {r: role_label(r) for r in rbac.known_roles()},
@@ -814,6 +865,7 @@ def users_set_role(
     """Assign a dashboard role to a user principal (admin only)."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    step_up.require_recent_mfa(request, "change_role")
     from . import rbac
     try:
         rbac.set_role(principal.strip(), role.strip(),
@@ -833,6 +885,7 @@ def users_remove(request: Request, principal: str = Form(...), expected_standard
     _app()._require_same_origin(request)
     from maverick.authority_effects import authority_effect_fence
 
+    step_up.require_recent_mfa(request, "change_role")
     from . import rbac
     from .access_explanations import standard_role
     try:
@@ -930,6 +983,7 @@ def users_invite(request: Request, email: str = Form(...),
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
+    _admin_audit(request, "invite_created", email=inv.email, role=getattr(inv, "role", role))
     # Best-effort email (fail-soft): the copyable link below is always the
     # fallback, so a broken SMTP account can never strand an invite.
     sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)
@@ -947,6 +1001,7 @@ def users_invite_revoke(request: Request,
     _app()._require_same_origin(request)
     from . import invites
     invites.revoke_invite(invite_id.strip())
+    _admin_audit(request, "invite_revoked", invite_id=invite_id.strip())
     return RedirectResponse("/users?saved=invite_revoked", status_code=303)
 
 
@@ -972,6 +1027,7 @@ async def users_set_suites(request: Request) -> RedirectResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid principal or department") from exc
+    _admin_audit(request, "department_access_set", principal=principal, suites=sorted(suites))
     return RedirectResponse("/users?saved=suites", status_code=303)
 
 
@@ -989,6 +1045,7 @@ def users_remove_suites(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _admin_audit(request, "department_access_removed", principal=principal.strip())
     return RedirectResponse("/users?saved=suites_removed", status_code=303)
 
 
@@ -1070,6 +1127,7 @@ def spending_limits_workspace(request: Request, choice: str = Form("none"),
     actor = auth.caller_principal(request) or "local"
     try:
         if choice == "none":
+            step_up.require_recent_mfa(request, "remove_spending_limit")
             spending_limits.clear_workspace_limit(actor=actor)
             return _limit_redirect("workspace_cleared")
         spending_limits.set_workspace_limit(amount, period, actor=actor)
@@ -1087,6 +1145,7 @@ def spending_limits_default(request: Request, choice: str = Form("none"),
     actor = auth.caller_principal(request) or "local"
     try:
         if choice == "none":
+            step_up.require_recent_mfa(request, "remove_spending_limit")
             spending_limits.clear_default_limit(actor=actor)
             return _limit_redirect("default_cleared")
         spending_limits.set_default_limit(amount, period, actor=actor)
@@ -1105,6 +1164,7 @@ def spending_limits_person(request: Request, principal: str = Form(""),
     actor = auth.caller_principal(request) or "local"
     try:
         if action == "remove":
+            step_up.require_recent_mfa(request, "remove_spending_limit")
             spending_limits.clear_user_limit(principal, actor=actor)
             return _limit_redirect("person_cleared")
         spending_limits.set_user_limit(principal, amount, period, actor=actor)

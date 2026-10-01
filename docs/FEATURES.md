@@ -163,7 +163,9 @@ here.
   supervisor) that doesn't join the control flow; `blackboard.post` tees into
   it, a slow observer drops its oldest events rather than stalling the swarm,
   and it's a no-op (lock-free subscriber check) when nobody is watching.
-- **Context lifecycle** — deferred tool loading + `find_tools`, cross-session
+- **Context lifecycle** — deferred tool loading + `find_tools` with a
+  role- and pack-aware short catalog (`[tools] exposure`, default `core`:
+  ~30-40 tools per turn instead of ~240), cross-session
   `memory` tool (`tools/memory.py`), programmatic tool calling
   (`tools/code_exec.py`), structural/retrieval-augmented compaction
   (`compaction/__init__.py`, `context_compactor.py`), and a **long-context retrieval
@@ -534,6 +536,15 @@ here.
   `output.gate` lighter than the playbook's final sign-off). All 2,031 built-in
   packs lint clean (0 errors, 0 warnings); every pack carries at least a
   suite-level `knowledge_sources` grounding fallback.
+- **Pack prose lint** — `python -m maverick.domain_prose_lint [--ci --fix]`
+  (`domain_prose_lint`), run inside `domains-lint` so the CI catalog gate
+  covers the words as well as the envelope. Errors: quote corruption
+  (`company"s`), smart-quote/mojibake damage, the wrong article before a
+  curated term list (`a IT/GRC`, `a HR`, `an SaaS`), two packs sharing one
+  persona, a persona under 300 or a description under 30 characters, an
+  empty TOML field, and a tool name absent from the registry, the risk
+  catalog, and the audited abstract-adapter list. `--fix` rewrites the
+  mechanical classes in place without re-serialising the TOML.
 - **Pack deployment prerequisites** — tool-risk checks preserve the declared
   risk ceilings and denylists. Read-only workflows use `sql_query_read` and
   `spreadsheet_read`; these tools do not expose their mutable siblings' write
@@ -2722,8 +2733,9 @@ here.
   the Annex III risk self-assessment, Art. 14 oversight measures (consent
   mode, capability enforcement, delegation, killswitch), Art. 12 logging
   (audit signing, retention, day-files present), Art. 15 evidence (red-team
-  gate, shield calibration, reliability cert when present), Art. 50
-  transparency wiring — sections without evidence say so, and the items only a
+  gate, shield calibration, reliability cert when present), and the effective
+  Art. 50 first-turn disclosure setting (including an explicit opt-out) —
+  sections without evidence say so, and the items only a
   provider can complete (intended purpose, conformity route) are an explicit
   checklist, not fabricated prose.
   **Adversarial-prompt corpus release** (`maverick_shield/corpus_release.py`,
@@ -2854,7 +2866,17 @@ here.
 
 ## Channels
 
-17 wired channels (`packages/maverick-channels/`): Telegram, Discord, Slack,
+18 wired channels (`packages/maverick-channels/`): Telegram, Discord, Slack,
+**Microsoft Teams** (`teams.py`: Azure Bot Framework webhook — Bot Connector JWT
+verified fail-closed against Microsoft's OpenID keys, tenant + Entra object-id
+allowlists, mention stripping in channels/group chats, replies through the
+activity's service URL with a tenant-aware client-credentials token, and
+**approvals in Teams**: Adaptive Cards with the dashboard card's content,
+Approve/Reject/Ask-a-question, a second confirm card for high/critical risk,
+decided through the dashboard's own `approval_decisions` path with `channel =
+teams` in the audit, cards updated in place; Teams accounts are linked to
+Lightwork users on the Channels page or by a one-time `link <code>` in chat —
+see [docs/channels/teams.md](channels/teams.md)),
 Signal, Email, Matrix, Bluesky, Mastodon, Voice (Twilio), WhatsApp (Twilio),
 **WhatsApp Cloud API** (`whatsapp_cloud.py`: Meta's first-party Graph API —
 GET verification handshake, constant-time `X-Hub-Signature-256` HMAC,
@@ -2896,7 +2918,7 @@ messages pass through byte-identical. **Channel SDK v2** (RFC 0001 C2,
 `base.py`): handlers may return a structured `Reply` (text + attachments +
 thread_ref) instead of bare `str` — `as_reply` is the v1 shim (bare `str`
 accepted through the deprecation window), `Channel.dispatch`/`dispatch_text`
-normalize either contract, and all 18 in-tree adapters route through the
+normalize either contract, and all 19 in-tree adapters route through the
 dispatch path so a v2 handler works everywhere unchanged.
 
 ## Sandboxes
@@ -4306,6 +4328,34 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   delivered over the SSRF-safe webhook path. Best-effort and never blocks the
   sign-off; the payload carries the parsed deliverable (table rows) and
   attribution. Fires only on `approved` (`webhooks.fire_deliverable_handoff`).
+- **Deadline alerts** — nothing used to tell anyone that a data-subject
+  request, an incident's 72-hour notification clock, an assessment renewal or
+  review, a vendor contract renewal or an approval card was about to run out.
+  `maverick.deadline_alerts` evaluates every such record per workspace and
+  sends plain-language alerts (`due_soon_<lead>`, `due_today`, `overdue`;
+  lead times per type under `[deadline_alerts.lead_days]` /
+  `[deadline_alerts.lead_hours]`, quiet hours, immediate or one summary per
+  person) through `notifications.notify`, so every configured backend — and
+  any backend added later — carries them. Each (record, state, deadline)
+  alerts once, recorded in the `deadline_alerts` ledger table (world-model
+  migration v42) so restarts never re-send; the record pages show an "Alerts"
+  section and `GET /api/v1/deadline-alerts` lists them. Routing prefers the
+  record's assignee, else the workspace owner named in `[deadline_alerts]
+  owner`. Run by `maverick_dashboard.deadline_alerts_scheduler` (a wizard step,
+  rows on All settings). On by default while the privacy register is on.
+- **Webhook subscriptions, delivery log and retries** — outbound webhooks are
+  now records (`maverick.webhook_subscriptions`: address, event filter, sealed
+  secret, on/off, description) managed on Settings → Webhooks
+  (`/settings/webhooks/manage`, `/api/v1/webhooks/subscriptions`,
+  `/api/v1/webhooks/deliveries`) with "Send test event" and "Retry now"; the
+  `[webhooks] outbound` list keeps working as a legacy default subscription.
+  Every delivery is logged (attempts, status, latency, response snippet, next
+  retry) and retried five times over about an hour with jitter before it is
+  parked as dead. Record events (`dsar.*`, `incident.*`, `assessment.*`,
+  `vendor.*`, `approval.*`, `policy.published`; `maverick.webhook_events`)
+  share one envelope (event id, type, occurred_at, workspace, record summary,
+  link) documented in `docs/webhooks.md`; the HMAC signature scheme is
+  unchanged. Addresses go through the same SSRF guard as the dispatcher.
 - **In-dashboard skill authoring** — the `/skills` page can now *create* a skill,
   not just install one: a form (name, trigger phrases, tools, instructions)
   composes a `SKILL.md` and writes it via the same validate + secret/shield-scan
@@ -4429,7 +4479,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   model, unchanged).
 - **Bounded governed-record Postgres connections** — the governed backend shares
   the world-model libpq timeout policy and offers separate opt-in
-  `[governed_records] pool_size` / `pool_timeout_seconds` settings. Transactions
+  `[governed_records] pool_size` / `pool_timeout_seconds` / `pool_min_size`
+  (connections kept open while idle, default 1) settings. Transactions
   retain current RLS, schema, role and encryption-key checks; pooled tenant state
   is cleared before reuse and unknown writes are never replayed automatically.
   The installer offers a one-connection starting point. See

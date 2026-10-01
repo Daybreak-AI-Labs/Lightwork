@@ -50,12 +50,16 @@
   {% set activation_draft = request.query_params.get('activation_draft', '') %}
   {% if activation_draft.startswith('EAP-') and activation_draft|length == 52 %}<p class="panel"><a href="/get-started/employee?draft={{ activation_draft|urlencode }}">Return to your saved activation draft</a>. Connection setup does not restart a task; review the same draft after repair.</p>{% endif %}
   {% if not connections_enabled %}
+  {# Connections off: one switch, one explanation. The key form and the
+     account sign-in section appear once it is on. #}
   {% from "_module_gate.html" import module_gate %}
-  {{ module_gate('connections', 'Connections', detail='Save sign-ins and keys for the services your workflows use.') }}
-  {% endif %}
+  {{ module_gate('connections', 'Connections',
+                 detail='A connection is how a workflow uses another service: either paste a key the service gave you (key-based), or sign in to the account so access renews itself (sign-in-based: Google Drive, Google Cloud Storage and Jira Cloud).') }}
+  {% else %}
+  <p class="cx__sub">Two kinds of connection: <strong>key-based</strong>, where you paste a key the service gave you, and <strong>sign-in-based</strong>, where you sign in to the account so access renews itself (Google Drive, Google Cloud Storage and Jira Cloud).</p>
   {% include "_connection_setup.html" %}
   {% include "_account_inventory.html" %}
-  <div class="section-head"><h2>{{ 'Add a connection with a key' if can_manage_keys else 'Your saved connections' }}</h2></div>
+  {% if can_manage_keys %}<div class="section-head"><h2>Add a connection with a key</h2></div>{% endif %}
   <form class="cx__form" id="cx-form" data-can-manage="{{ 'true' if can_manage_keys else 'false' }}"{% if not can_manage_keys %} hidden{% endif %} autocomplete="off" data-draft-recovery="off">
     <div class="cx__fld">
       <label for="cx-catalog-search">Find a service</label><input class="input" id="cx-catalog-search" type="search" placeholder="Search supported service names">
@@ -181,10 +185,13 @@
     <div id="to-change-out" aria-live="polite"></div>
   </div>
   </section>
+  {% endif %}
 </div>
 
+{% if connections_enabled %}
 <script src="/static/lightwork-connection-impact.js" defer></script>
 <script src="/static/lightwork-connections.js" defer></script>
+{% endif %}
 <style>
   .to-change { display: flex; flex-direction: column; gap: var(--space-2); max-width: 40rem; margin-top: var(--space-4); }
   .to-change__fields { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }

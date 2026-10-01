@@ -49,6 +49,26 @@ def test_provider_free_copilot_returns_bounded_page_guide(
     assert len(payload["reply"].split()) <= 120
 
 
+def test_provider_free_copilot_does_not_claim_to_cancel_a_task(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: False)
+    response = client.post(
+        "/api/v1/copilot",
+        json={"message": "Cancel my running goal", "page": "/goals", "history": []},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "built_in"
+    assert payload["page_context"]["path"] == "/goals"
+    assert payload["reply"].startswith("This guide can't do that for you.")
+    assert "When role and server composition permit" not in payload["reply"]
+
+
 def test_model_outage_falls_back_without_claiming_model_success(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
