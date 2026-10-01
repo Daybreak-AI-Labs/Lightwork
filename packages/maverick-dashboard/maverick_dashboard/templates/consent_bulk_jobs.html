@@ -52,7 +52,7 @@
           <div class="cw-checks" id="cbj-operation-choices">
             <label><input type="radio" name="operation" value="export_receipts" checked> Export people’s consent records</label>
             <label><input type="radio" name="operation" value="edit_preferences"> Change their choices</label>
-            <label><input type="radio" name="operation" value="delete_subject"> Delete their consent records</label>
+            <label><input type="radio" name="operation" value="delete_subject"> Erase their stored identifier</label>
             <label><input type="radio" name="operation" value="change_identifier_type"> Change how they are identified</label>
             <label><input type="radio" name="operation" value="reactivate"> Bring back an earlier choice</label>
             <label><input type="radio" name="operation" value="clear_expiration"> Remove an end date from a choice</label>
@@ -74,6 +74,7 @@
         <fieldset class="cw-wide" data-for="identifiers" hidden><legend>2. Upload the people and their new identifiers</legend>
           <label>List file<input class="input" type="file" id="cbj-identifier-file" accept=".csv,.txt,text/csv,text/plain"></label>
           <p class="muted">One line per person: their reference, a comma, then their new identifier (for example an email address). The identifier is turned into a fingerprint in your browser and is never sent as typed.</p>
+          <p class="muted">If you identify someone again after erasure, their past choices stay in the audit history but no longer give permission. Ask them for consent again.</p>
           <label>They will be<select class="select" name="identity_kind"><option value="known">Known people (signed in or identified)</option><option value="anonymous">Anonymous visitors</option></select></label>
           <p class="muted" id="cbj-identifier-count" role="status" aria-live="polite">No file chosen.</p>
         </fieldset>
@@ -96,6 +97,7 @@
         </div>
 
         <div class="cw-wide" data-for="delete_subject" hidden>
+          <p class="muted">This stops use of their choices and replaces their stored identifier. Past consent records stay available for audit.</p>
           <label>Why
             <select class="select" name="reason_code">
               <option value="subject-request">The person asked for deletion</option>

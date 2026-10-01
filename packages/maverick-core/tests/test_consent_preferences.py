@@ -587,12 +587,12 @@ def test_clear_expiration_overlay_restores_receipt_without_rewriting_it(
     ] == NOW + 10
 
 
-def test_delete_subject_fails_closed_and_identifier_change_can_restore_authority(
+def test_restored_subject_requires_fresh_consent_after_erasure(
     store: ConsentPreferenceStore,
 ) -> None:
     _policy(store)
     _profile(store)
-    _record(store)
+    old_receipt = _record(store)
     deleted = store.delete_subject(
         "tenant-a",
         "profile-001",
@@ -625,9 +625,47 @@ def test_delete_subject_fails_closed_and_identifier_change_can_restore_authority
     )
     assert restored["status"] == "active"
     assert restored["revision"] == 3
+    after_restore = store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert after_restore.allowed is False
+    assert after_restore.reason == "no_current_explicit_grant"
+    assert store.get_receipt("tenant-a", old_receipt["receipt_id"])["receipt_sha256"] == (
+        old_receipt["receipt_sha256"]
+    )
+    with pytest.raises(ConsentConflict, match="collect new consent"):
+        store.set_receipt_reactivation(
+            "tenant-a", "profile-001", old_receipt["receipt_id"], NOW + 100,
+            expected_revision=3, idempotency_key="old-receipt-reactivation",
+            actor_sha256=DIGEST_D,
+        )
+    with pytest.raises(ConsentConflict, match="collect new consent"):
+        store.clear_receipt_expiration(
+            "tenant-a", "profile-001", old_receipt["receipt_id"],
+            expected_revision=3, idempotency_key="old-receipt-clear-expiration",
+            actor_sha256=DIGEST_D,
+        )
+
+    new_receipt = _record(store, expected_revision=3, idem="fresh-consent-after-erasure")
+    fresh = store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert fresh.allowed is True
+    assert fresh.receipt_id == new_receipt["receipt_id"]
+
+    store.delete_subject(
+        "tenant-a", "profile-001", expected_revision=4,
+        reason_code="verified-erasure", idempotency_key="second-erasure",
+        actor_sha256=DIGEST_D,
+    )
+    store.change_identifier_type(
+        "tenant-a", "profile-001", "known", DIGEST_A,
+        expected_revision=5, idempotency_key="second-restoration",
+        actor_sha256=DIGEST_D,
+    )
     assert store.decide(
         "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
-    ).allowed
+    ).allowed is False
 
     with sqlite3.connect(store.path) as connection:
         live_digest = connection.execute(
@@ -636,6 +674,226 @@ def test_delete_subject_fails_closed_and_identifier_change_can_restore_authority
             ("tenant-a", "profile-001"),
         ).fetchone()[0]
     assert live_digest == DIGEST_A
+
+
+def test_restoration_excludes_old_linked_grants_and_survives_reopen(
+    store: ConsentPreferenceStore,
+    clock: MutableClock,
+) -> None:
+    _policy(store)
+    _profile(store)
+    _profile(
+        store, profile_id="anonymous", identity_kind="anonymous",
+        subject_sha256=DIGEST_C, idem="anonymous-profile-create",
+    )
+    store.link_profiles(
+        "tenant-a", "profile-001", "anonymous",
+        expected_known_revision=0, expected_anonymous_revision=0,
+        idempotency_key="link-before-erasure",
+    )
+    old_receipt = _record(
+        store, profile_id="anonymous", expected_revision=1, idem="linked-old-grant",
+    )
+    assert store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    ).allowed
+
+    store.delete_subject(
+        "tenant-a", "profile-001", expected_revision=1,
+        reason_code="verified-erasure", idempotency_key="linked-erasure",
+        actor_sha256=DIGEST_D,
+    )
+    store.change_identifier_type(
+        "tenant-a", "profile-001", "known", DIGEST_A,
+        expected_revision=2, idempotency_key="linked-restoration",
+        actor_sha256=DIGEST_D,
+    )
+    reopened = ConsentPreferenceStore(store.path, clock=clock)
+    for profile in ("profile-001", "anonymous"):
+        decision = reopened.decide(
+            "tenant-a", profile, "analytics", policy_id="privacy-notice"
+        )
+        assert decision.allowed is False
+        assert decision.reason == "no_current_explicit_grant"
+    assert reopened.get_receipt("tenant-a", old_receipt["receipt_id"])
+
+    new_receipt = _record(
+        reopened, profile_id="anonymous", expected_revision=2,
+        idem="linked-fresh-grant",
+    )
+    decision = reopened.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert decision.allowed is True
+    assert decision.receipt_id == new_receipt["receipt_id"]
+
+
+def test_active_identifier_change_keeps_existing_consent(store: ConsentPreferenceStore) -> None:
+    _policy(store)
+    _profile(store)
+    receipt = _record(store)
+    store.change_identifier_type(
+        "tenant-a", "profile-001", "known", DIGEST_A,
+        expected_revision=1, idempotency_key="active-identifier-change",
+        actor_sha256=DIGEST_D,
+    )
+    decision = store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert decision.allowed is True
+    assert decision.receipt_id == receipt["receipt_id"]
+
+
+def test_restoration_floor_is_immutable_and_corruption_denies(
+    store: ConsentPreferenceStore,
+) -> None:
+    _policy(store)
+    _profile(store)
+    _record(store)
+    store.delete_subject(
+        "tenant-a", "profile-001", expected_revision=1,
+        reason_code="verified-erasure", idempotency_key="corruption-erasure",
+        actor_sha256=DIGEST_D,
+    )
+    store.change_identifier_type(
+        "tenant-a", "profile-001", "known", DIGEST_A,
+        expected_revision=2, idempotency_key="corruption-restore",
+        actor_sha256=DIGEST_D,
+    )
+    with sqlite3.connect(store.path) as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            connection.execute(
+                "UPDATE consent_profile_restoration_floors SET receipt_sequence = 0"
+            )
+        connection.execute("DROP TRIGGER consent_restoration_floors_no_update")
+        connection.execute(
+            "UPDATE consent_profile_restoration_floors SET receipt_sequence = 0"
+        )
+    decision = store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert decision.allowed is False
+    assert decision.reason == "authority_unavailable"
+
+
+def test_legacy_restored_profile_backfill_requires_new_grant(
+    store: ConsentPreferenceStore,
+    clock: MutableClock,
+) -> None:
+    _policy(store)
+    _profile(store)
+    old_receipt = _record(store)
+    store.delete_subject(
+        "tenant-a", "profile-001", expected_revision=1,
+        reason_code="verified-erasure", idempotency_key="legacy-erasure",
+        actor_sha256=DIGEST_D,
+    )
+    store.change_identifier_type(
+        "tenant-a", "profile-001", "known", DIGEST_A,
+        expected_revision=2, idempotency_key="legacy-restoration",
+        actor_sha256=DIGEST_D,
+    )
+    later_receipt = _record(
+        store, expected_revision=3, idem="legacy-post-restoration-grant",
+    )
+    assert store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    ).allowed
+
+    # Recreate the persisted state of a pre-fix store: deletion and restored
+    # lifecycle are durable, but no receipt floor or migration marker exists.
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP TRIGGER consent_restoration_floors_no_delete")
+        connection.execute("DELETE FROM consent_profile_restoration_floors")
+        connection.execute(
+            "DELETE FROM consent_meta WHERE key = 'restoration_floor_backfill_v1'"
+        )
+
+    reopened = ConsentPreferenceStore(store.path, clock=clock)
+    decision = reopened.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert decision.allowed is False
+    assert decision.reason == "no_current_explicit_grant"
+    for receipt in (old_receipt, later_receipt):
+        assert reopened.get_receipt("tenant-a", receipt["receipt_id"])
+    with sqlite3.connect(store.path) as connection:
+        floor = connection.execute(
+            "SELECT source, COUNT(*) FROM consent_profile_restoration_floors "
+            "WHERE tenant = ? AND profile_id = ?", ("tenant-a", "profile-001"),
+        ).fetchone()
+    assert floor == ("legacy_backfill", 1)
+    ConsentPreferenceStore(store.path, clock=clock)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM consent_profile_restoration_floors"
+        ).fetchone()[0] == 1
+    fresh_receipt = _record(
+        reopened, expected_revision=4, idem="post-migration-fresh-grant",
+    )
+    allowed = reopened.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert allowed.allowed is True
+    assert allowed.receipt_id == fresh_receipt["receipt_id"]
+
+
+def test_deleted_profile_at_upgrade_receives_floor_when_restored(
+    store: ConsentPreferenceStore,
+    clock: MutableClock,
+) -> None:
+    _policy(store)
+    _profile(store)
+    _record(store)
+    store.delete_subject(
+        "tenant-a", "profile-001", expected_revision=1,
+        reason_code="verified-erasure", idempotency_key="upgrade-while-deleted",
+        actor_sha256=DIGEST_D,
+    )
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "DELETE FROM consent_meta WHERE key = 'restoration_floor_backfill_v1'"
+        )
+    reopened = ConsentPreferenceStore(store.path, clock=clock)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM consent_profile_restoration_floors"
+        ).fetchone()[0] == 0
+    reopened.change_identifier_type(
+        "tenant-a", "profile-001", "known", DIGEST_A,
+        expected_revision=2, idempotency_key="restore-after-upgrade",
+        actor_sha256=DIGEST_D,
+    )
+    assert reopened.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    ).allowed is False
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT source FROM consent_profile_restoration_floors"
+        ).fetchone()[0] == "restoration"
+
+
+def test_legacy_backfill_rejects_corrupt_erasure_evidence(
+    store: ConsentPreferenceStore,
+    clock: MutableClock,
+) -> None:
+    _profile(store)
+    store.delete_subject(
+        "tenant-a", "profile-001", expected_revision=0,
+        reason_code="verified-erasure", idempotency_key="corrupt-erasure",
+        actor_sha256=DIGEST_D,
+    )
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP TRIGGER consent_outbox_no_update")
+        connection.execute(
+            "UPDATE consent_outbox SET payload_json = '{}' "
+            "WHERE event_type = 'profile.subject_deleted'"
+        )
+        connection.execute(
+            "DELETE FROM consent_meta WHERE key = 'restoration_floor_backfill_v1'"
+        )
+    with pytest.raises(ConsentPreferencesError, match="deletion event integrity"):
+        ConsentPreferenceStore(store.path, clock=clock)
 
 
 def test_linked_profile_identity_kind_change_is_rejected(

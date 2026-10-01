@@ -637,6 +637,16 @@ class ConsentPreferenceStore:
                 );
                 CREATE INDEX IF NOT EXISTS consent_receipts_profile
                     ON consent_receipts(tenant, profile_id, sequence DESC);
+                CREATE TABLE IF NOT EXISTS consent_profile_restoration_floors (
+                    tenant TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    profile_revision INTEGER NOT NULL,
+                    receipt_sequence INTEGER NOT NULL CHECK (receipt_sequence >= 0),
+                    source TEXT NOT NULL CHECK (source IN ('restoration', 'legacy_backfill')),
+                    created_at REAL NOT NULL,
+                    record_sha256 TEXT NOT NULL,
+                    PRIMARY KEY (tenant, profile_id, profile_revision)
+                );
                 CREATE TABLE IF NOT EXISTS consent_receipt_lifecycle (
                     tenant TEXT NOT NULL,
                     receipt_id TEXT NOT NULL,
@@ -726,6 +736,12 @@ class ConsentPreferenceStore:
                 CREATE TRIGGER IF NOT EXISTS consent_receipts_no_delete
                     BEFORE DELETE ON consent_receipts
                     BEGIN SELECT RAISE(ABORT, 'consent receipts are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS consent_restoration_floors_no_update
+                    BEFORE UPDATE ON consent_profile_restoration_floors
+                    BEGIN SELECT RAISE(ABORT, 'consent restoration floors are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS consent_restoration_floors_no_delete
+                    BEFORE DELETE ON consent_profile_restoration_floors
+                    BEGIN SELECT RAISE(ABORT, 'consent restoration floors are immutable'); END;
                 CREATE TRIGGER IF NOT EXISTS consent_links_no_update
                     BEFORE UPDATE ON consent_profile_links
                     BEGIN SELECT RAISE(ABORT, 'identity links are immutable'); END;
@@ -769,6 +785,7 @@ class ConsentPreferenceStore:
             if existing is None or existing["value"] != str(SCHEMA_VERSION):
                 raise ConsentPreferencesError("unsupported consent store schema")
             self._backfill_profile_link_authority(conn)
+            self._backfill_restoration_floors(conn)
 
     @staticmethod
     def _link_current_body(
@@ -1159,6 +1176,118 @@ class ConsentPreferenceStore:
                     updated_at=created_at,
                     retention_until=None,
                 )
+            conn.execute("COMMIT")
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+
+    @staticmethod
+    def _insert_restoration_floor(
+        conn: sqlite3.Connection,
+        *,
+        tenant: str,
+        profile_id: str,
+        profile_revision: int,
+        receipt_sequence: int,
+        source: str,
+        created_at: float,
+    ) -> None:
+        body = {
+            "tenant": tenant,
+            "profile_id": profile_id,
+            "profile_revision": profile_revision,
+            "receipt_sequence": receipt_sequence,
+            "source": source,
+            "created_at": created_at,
+        }
+        conn.execute(
+            "INSERT INTO consent_profile_restoration_floors(tenant, profile_id, "
+            "profile_revision, receipt_sequence, source, created_at, record_sha256) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tenant, profile_id, profile_revision, receipt_sequence, source,
+             created_at, _sha256(body)),
+        )
+
+    def _backfill_restoration_floors(self, conn: sqlite3.Connection) -> None:
+        """Conservatively revoke legacy restored grants using durable erasure events.
+
+        Pre-upgrade stores did not record the receipt boundary when restoring a
+        subject. The exact restore-time boundary cannot be reconstructed, so
+        every receipt present at migration is excluded for affected identities.
+        """
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            completed = conn.execute(
+                "SELECT value FROM consent_meta WHERE key = 'restoration_floor_backfill_v1'"
+            ).fetchone()
+            if completed is not None:
+                if completed["value"] != "1":
+                    raise ConsentPreferencesError("invalid consent restoration migration state")
+                conn.execute("COMMIT")
+                return
+            events = conn.execute(
+                "SELECT tenant, event_id, event_type, payload_json, payload_sha256, "
+                "created_at FROM consent_outbox WHERE event_type = 'profile.subject_deleted' "
+                "ORDER BY sequence"
+            )
+            deleted_revisions: dict[tuple[str, str], int] = {}
+            for event in events:
+                body = _loads(event["payload_json"], "subject deletion event")
+                if (
+                    not isinstance(body, dict)
+                    or body.get("schema") != OUTBOX_SCHEMA
+                    or body.get("event_id") != event["event_id"]
+                    or body.get("event_type") != event["event_type"]
+                    or body.get("created_at") != event["created_at"]
+                    or _canonical(body).decode("ascii") != event["payload_json"]
+                    or not hmac.compare_digest(_sha256(body), str(event["payload_sha256"]))
+                ):
+                    raise ConsentPreferencesError("stored subject deletion event integrity failed")
+                payload = body.get("payload")
+                if not isinstance(payload, dict):
+                    raise ConsentPreferencesError("stored subject deletion event is invalid")
+                profile_id = _text(payload.get("profile_id"), "profile_id")
+                revision = _positive_version(payload.get("revision"), "revision")
+                _digest(payload.get("tombstone_sha256"), "tombstone_sha256")
+                tenant = str(event["tenant"])
+                key = (tenant, profile_id)
+                deleted_revisions[key] = max(deleted_revisions.get(key, 0), revision)
+            if deleted_revisions:
+                last_receipt = conn.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) AS value FROM consent_receipts"
+                ).fetchone()
+                receipt_sequence = int(last_receipt["value"])
+                now = _timestamp(self._clock(), "clock")
+                assert now is not None
+                for (tenant, profile_id), deleted_revision in deleted_revisions.items():
+                    profile = conn.execute(
+                        "SELECT revision FROM consent_profiles WHERE tenant = ? "
+                        "AND profile_id = ?", (tenant, profile_id),
+                    ).fetchone()
+                    if profile is None:
+                        raise ConsentPreferencesError("subject deletion profile is missing")
+                    lifecycle = self._profile_lifecycle(conn, tenant, profile_id)
+                    if lifecycle["status"] != "active":
+                        continue
+                    profile_revision = int(profile["revision"])
+                    if profile_revision <= deleted_revision:
+                        raise ConsentPreferencesError("restored profile revision is invalid")
+                    existing_floor = conn.execute(
+                        "SELECT 1 FROM consent_profile_restoration_floors WHERE "
+                        "tenant = ? AND profile_id = ? LIMIT 1", (tenant, profile_id),
+                    ).fetchone()
+                    if existing_floor is None:
+                        self._insert_restoration_floor(
+                            conn, tenant=tenant, profile_id=profile_id,
+                            profile_revision=profile_revision,
+                            receipt_sequence=receipt_sequence,
+                            source="legacy_backfill", created_at=now,
+                        )
+            conn.execute(
+                "INSERT INTO consent_meta(key, value) VALUES "
+                "('restoration_floor_backfill_v1', '1')"
+            )
             conn.execute("COMMIT")
         except BaseException:
             if conn.in_transaction:
@@ -2019,7 +2148,8 @@ class ConsentPreferenceStore:
         Immutable receipts keep the stable ``profile_id``.  Only the current
         digest and its declared known/anonymous type change.  Supplying a new
         digest for a deleted profile also restores its active lifecycle; the
-        former digest is never returned or written to an event.
+        former digest is never returned or written to an event. Restoration
+        requires a new consent receipt; retained receipts remain audit history.
         """
 
         tenant = self._tenant(tenant_id)
@@ -2056,6 +2186,7 @@ class ConsentPreferenceStore:
                 row = self._profile_row(conn, tenant, profile)
                 if int(row["revision"]) != revision:
                     raise ConsentConflict("profile revision changed")
+                restoring = self._profile_lifecycle(conn, tenant, profile)["status"] == "deleted"
                 if str(row["identity_kind"]) != identity_kind:
                     linked = conn.execute(
                         "SELECT 1 FROM consent_profile_link_current WHERE tenant = ? "
@@ -2080,6 +2211,19 @@ class ConsentPreferenceStore:
                     ) from exc
                 if updated.rowcount != 1:
                     raise ConsentConflict("profile revision changed")
+                if restoring:
+                    # Receipt sequence is global and never reused. Record the
+                    # boundary in the same transaction that makes the profile
+                    # active so no pre-restoration grant can regain authority.
+                    last_receipt = conn.execute(
+                        "SELECT COALESCE(MAX(sequence), 0) AS value FROM consent_receipts"
+                    ).fetchone()
+                    self._insert_restoration_floor(
+                        conn, tenant=tenant, profile_id=profile,
+                        profile_revision=revision + 1,
+                        receipt_sequence=int(last_receipt["value"]),
+                        source="restoration", created_at=now,
+                    )
                 lifecycle_body = {
                     "profile_id": profile,
                     "status": "active",
@@ -2313,13 +2457,20 @@ class ConsentPreferenceStore:
                 if lifecycle["status"] != "active":
                     raise ConsentConflict("deleted profile receipt cannot be changed")
                 receipt_row = conn.execute(
-                    "SELECT receipt_id FROM consent_receipts WHERE tenant = ? "
+                    "SELECT receipt_id, sequence FROM consent_receipts WHERE tenant = ? "
                     "AND profile_id = ? AND receipt_id = ?",
                     (tenant, profile, receipt),
                 ).fetchone()
                 if receipt_row is None:
                     raise ConsentNotFound(
                         "receipt does not exist for this profile in this tenant"
+                    )
+                group = self._profile_group(conn, tenant, profile)
+                if int(receipt_row["sequence"]) <= self._restoration_receipt_floor(
+                    conn, tenant, group
+                ):
+                    raise ConsentConflict(
+                        "receipt predates subject restoration; collect new consent"
                     )
                 prior = conn.execute(
                     "SELECT reactivation_at, clear_expiration, revision "
@@ -3066,6 +3217,36 @@ class ConsentPreferenceStore:
             raise ConsentPreferencesError("linked profile bound exceeded")
         return sorted(profiles)
 
+    @staticmethod
+    def _restoration_receipt_floor(
+        conn: sqlite3.Connection, tenant: str, group: Sequence[str]
+    ) -> int:
+        """Exclude receipts predating any restored identity in this linked group."""
+        placeholders = ",".join("?" for _ in group)
+        rows = conn.execute(
+            "SELECT tenant, profile_id, profile_revision, receipt_sequence, "
+            "source, created_at, record_sha256 FROM consent_profile_restoration_floors AS floor "
+            f"WHERE tenant = ? AND profile_id IN ({placeholders}) "
+            "AND profile_revision = (SELECT MAX(newer.profile_revision) "
+            "FROM consent_profile_restoration_floors AS newer WHERE "
+            "newer.tenant = floor.tenant AND newer.profile_id = floor.profile_id)",
+            (tenant, *group),
+        ).fetchall()
+        highest = 0
+        for row in rows:
+            body = {
+                "tenant": str(row["tenant"]),
+                "profile_id": str(row["profile_id"]),
+                "profile_revision": int(row["profile_revision"]),
+                "receipt_sequence": int(row["receipt_sequence"]),
+                "source": str(row["source"]),
+                "created_at": float(row["created_at"]),
+            }
+            if not hmac.compare_digest(_sha256(body), str(row["record_sha256"])):
+                raise ConsentPreferencesError("stored consent restoration floor integrity failed")
+            highest = max(highest, body["receipt_sequence"])
+        return highest
+
     def _decide(
         self,
         tenant_id: str,
@@ -3221,12 +3402,14 @@ class ConsentPreferenceStore:
                     evaluated_at=evaluated,
                 )
             placeholders = ",".join("?" for _ in group)
+            receipt_floor = self._restoration_receipt_floor(conn, tenant, group)
             rows = conn.execute(
                 "SELECT receipt_id, receipt_sha256, choices_json FROM consent_receipts "
                 f"WHERE tenant = ? AND profile_id IN ({placeholders}) "
-                "AND policy_id = ? AND policy_version = ? "
+                "AND policy_id = ? AND policy_version = ? AND sequence > ? "
                 "ORDER BY sequence DESC LIMIT ?",
-                (tenant, *group, policy, version, _MAX_DECISION_RECEIPTS + 1),
+                (tenant, *group, policy, version, receipt_floor,
+                 _MAX_DECISION_RECEIPTS + 1),
             ).fetchall()
             if len(rows) > _MAX_DECISION_RECEIPTS:
                 return EnforcementDecision(

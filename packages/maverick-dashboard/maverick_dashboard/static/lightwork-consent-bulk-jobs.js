@@ -335,7 +335,7 @@
     var form = $("cbj-create");
     var state = { status: null, jobs: [], credit: null, profiles: [], chosen: new Set(), policies: [], identifiers: [], receipts: [] };
     var WHAT = {
-      export_receipts: "Export consent records", edit_preferences: "Change choices", delete_subject: "Delete consent records",
+      export_receipts: "Export consent records", edit_preferences: "Change choices", delete_subject: "Erase stored identifiers",
       change_identifier_type: "Change how people are identified", reactivate: "Bring back earlier choices", clear_expiration: "Remove end dates"
     };
     var STATE_LABELS = { queued: ["Waiting", "warn"], running: ["Running", "info"], succeeded: ["Finished", "ok"], failed: ["Failed", "danger"], cancelled: ["Cancelled", "idle"] };
