@@ -10505,7 +10505,10 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
     except _FormTargetUnavailable as exc:
         raise HTTPException(status_code=404, detail="no such form") from exc
     except form_store.FormStoreFull as exc:
-        raise HTTPException(status_code=507, detail="This form is temporarily full.") from exc
+        raise HTTPException(
+            status_code=507,
+            detail="This form has reached its submission limit. Please contact the form owner.",
+        ) from exc
     if not seq:
         raise HTTPException(status_code=503, detail="This form could not accept a submission.")
     return JSONResponse({"ok": True, "seq": seq}, status_code=201)

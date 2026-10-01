@@ -233,6 +233,9 @@ def test_form_capacity_error_is_not_reported_as_success(monkeypatch, tmp_path):
     assert client.post("/form/signup", json={"name": "first"}).status_code == 201
     response = client.post("/form/signup", json={"name": "second"})
     assert response.status_code == 507
+    assert response.json()["detail"] == (
+        "This form has reached its submission limit. Please contact the form owner."
+    )
     events, _ = form_store.since("signup", "0")
     assert [event["name"] for event in events] == ["first"]
 
