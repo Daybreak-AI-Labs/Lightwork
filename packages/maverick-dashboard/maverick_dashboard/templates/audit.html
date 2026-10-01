@@ -366,7 +366,13 @@
       status.textContent = 'Checking…';
       try {
         var response = await fetch('/api/v1/audit/unified/status', { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' });
-        if (!response.ok) throw response;
+        if (!response.ok) {
+          // Keep the server's own sentence: it says why (for example, that no
+          // workspace is selected), which "refresh the page" never would.
+          var failure = { status: response.status, detail: '' };
+          try { failure.detail = (await response.json()).detail; } catch (ignored) { /* no body */ }
+          throw failure;
+        }
         var body = await response.json();
         var c = body && typeof body.custody === 'object' ? body.custody : {};
         $('audit-custody-enabled').textContent = c.ready === true ? 'Ready' : (c.enabled === true ? 'Being set up' : 'Off');
@@ -376,8 +382,18 @@
         status.textContent = c.ready === true ? 'Extra protection is set up for this workspace.' :
           'Extra protection is not set up for this workspace. Your administrator can set it up during installation.';
       } catch (error) {
-        status.textContent = window.mvErrorText(error, 'load the protection status');
         ['audit-custody-enabled', 'audit-custody-checkpoint', 'audit-custody-worm', 'audit-custody-siem'].forEach(function (id) { $(id).textContent = '—'; });
+        if (error && error.status === 409 && /^select an active tenant/.test(String(error.detail || ''))) {
+          // Protection is set up per workspace, and none is selected yet.
+          var chooser = document.createElement('a');
+          chooser.href = '/workspace/tenant?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+          chooser.textContent = 'Choose a workspace to see its protection status.';
+          status.textContent = '';
+          status.appendChild(chooser);
+        } else {
+          var plain = error && [403, 409, 422, 502, 503].indexOf(error.status) >= 0 ? window.mvPlainDetail(error.detail) : '';
+          status.textContent = plain || window.mvErrorText(error, 'load the protection status');
+        }
       } finally { refresh.disabled = false; }
     }
     refresh.addEventListener('click', loadCustody);

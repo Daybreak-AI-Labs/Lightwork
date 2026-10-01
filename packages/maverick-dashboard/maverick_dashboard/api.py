@@ -636,6 +636,9 @@ def _board_overview(w, owner, days: int) -> dict:
             "done": by_status.get("done", 0),
             "blocked": by_status.get("blocked", 0),
         },
+        # Every status with its own count, so the page can show queued, failed,
+        # cancelled and draft goals separately instead of lumping the rest.
+        "by_status": by_status,
         "window": window,
         "daily": list(daily.values()),
         "domains": sorted(domains.values(), key=lambda r: r["total"], reverse=True)[:8],

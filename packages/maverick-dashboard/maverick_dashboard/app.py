@@ -1925,6 +1925,10 @@ _AUTH_EXEMPT = {
     "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
     "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
     "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
+    # The public share page formats its answer with this renderer, and its
+    # recipient has no dashboard sign-in. The file is a public, dependency-free
+    # script that builds DOM from text and carries no data.
+    "/static/lightwork-markdown.js",
     # The LLM gateway authenticates every call with its OWN bearer inside
     # maverick.llm_gateway (same rationale as /a2a/v1): callers are foreign
     # agents that hold the gateway credential, never the dashboard bearer.
