@@ -819,6 +819,15 @@
         else if (prefix) s = s.slice(prefix.length);
         return s.replace(/_/g, ' ');
       }
+      function showDeployed(msg) {
+        if (!msg) return;
+        var link = document.createElement('a');
+        link.href = '/fleets';
+        link.textContent = 'Open Fleets';
+        msg.style.color = 'var(--accent)';
+        msg.replaceChildren(document.createTextNode('Team set up. '), link,
+          document.createTextNode(' to give it work.'));
+      }
       function render(list) {
         if (!list.length) { host.innerHTML = '<p class="muted">No departments yet. Your specialist packs appear here as deployable teams.</p>'; return; }
         host.innerHTML = list.map(function (d) {
@@ -907,7 +916,7 @@
               { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
           .then(function (res) {
-            if (res.ok) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team set up. Give it work from the Teams page.'; }
+            if (res.ok) showDeployed(msg);
             else { msg.style.color = 'var(--danger)'; msg.textContent = plainError(res, 'set up the team'); }
           })
           .catch(function (error) {
@@ -941,7 +950,7 @@
               { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
           .then(function (res) {
-            if (res.ok) { if (msg) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team set up. Give it work from the Teams page.'; } }
+            if (res.ok) showDeployed(msg);
             else if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = plainError(res, 'set up the team'); }
           })
           .catch(function (error) {

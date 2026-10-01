@@ -22,7 +22,7 @@ test("request failures read as plain sentences, never codes or exception names",
   const cases = [
     [{ status: 400 }, /details need fixing/], [{ status: 422 }, /details need fixing/],
     [{ status: 401 }, /sign-in has expired/], [{ status: 403 }, /do not have permission/],
-    [{ status: 404 }, /no longer exists/], [{ status: 409 }, /changed since you opened it/],
+    [{ status: 404 }, /no longer exists/], [{ status: 409 }, /cannot be done right now/],
     [{ status: 429 }, /Too many requests/], [{ status: 503 }, /temporarily unavailable\. Please try again in a few minutes/],
     [{ status: 500 }, /went wrong on our side/], [new TypeError("Failed to fetch"), /could not be reached/],
     [{ name: "AbortError" }, /took too long/], [new Error("SyntaxError: Unexpected token"), /went wrong/],
@@ -37,6 +37,19 @@ test("request failures read as plain sentences, never codes or exception names",
   const shown = w.mvFail({ status: 403 }, "delete it");
   assert.match(w.document.getElementById("mv-toasts-alert").textContent, /Could not delete it/);
   assert.match(shown, /permission/);
+});
+
+test("conflicts show safe server guidance instead of assuming a stale edit", async () => {
+  const w = load();
+  const response = {status: 409, clone: () => ({json: async () => ({
+    detail: "This workspace already exists. Choose a different name."
+  })})};
+  const failure = await w.mvErrorResponse(response);
+  assert.match(w.mvErrorText(failure, "create the workspace"), /Choose a different name/);
+  assert.doesNotMatch(w.mvErrorText(failure, "create the workspace"), /Refresh the page/);
+  assert.match(w.mvErrorText({status: 409, detail: "Your changes are out of date. Reload before saving."}, "save"), /Reload before saving/);
+  assert.match(w.mvErrorText({status: 409, detail: "expected_revision=8; config.toml failed"}, "save"), /cannot be done right now/);
+  w.close();
 });
 
 test("a 503 says turned off only when the server said so", () => {

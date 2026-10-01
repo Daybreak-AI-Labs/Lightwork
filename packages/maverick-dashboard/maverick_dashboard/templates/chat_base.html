@@ -66,10 +66,14 @@
     .cs-label { margin: var(--space-4) var(--space-3) var(--space-1); color: var(--muted); font-size: var(--text-xs); font-weight: var(--font-medium); }
     .cs-recents { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
     .cs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+    .cs-list li { display: flex; align-items: center; gap: var(--space-1); }
     .cs-list a {
-      display: block; padding: 0.42rem var(--space-3); border-radius: var(--radius-md);
+      display: block; flex: 1; min-width: 0; padding: 0.42rem var(--space-3); border-radius: var(--radius-md);
       color: var(--text); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    .cs-list__status { flex: none; padding-inline-end: var(--space-2); color: var(--muted); font-size: var(--text-xs); white-space: nowrap; }
+    .cs-list__status--blocked, .cs-list__status--failed { color: var(--danger); }
+    .cs-list__status--running, .cs-list__status--active { color: var(--accent); }
     .cs-list a:hover { background: var(--row-hover); text-decoration: none; }
     .cs-list a.active { background: var(--surface-2); font-weight: var(--font-medium); }
     .cs-list li[hidden] { display: none; }

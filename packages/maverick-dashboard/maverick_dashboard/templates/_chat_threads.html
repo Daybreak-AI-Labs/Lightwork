@@ -3,7 +3,14 @@
 {% macro chat_threads(threads) %}
 <ul class="cs-list" id="cs-list">
   {% for t in threads %}
-  <li><a data-conversation-root="{{ t.id }}" href="/chat/goal/{{ t.target_id }}"{% if t.active %} class="active" aria-current="true"{% endif %} title="{{ t.title }}" lang="und" dir="auto">{% if t.pinned %}{{ ui('Pinned:') }} {% endif %}<bdi lang="und" dir="auto" data-user-content>{{ t.title }}</bdi>{% if t.archived %} {{ ui('(archived)') }}{% endif %}</a></li>
+  {% if t.status in ['pending', 'draft'] %}{% set state_label = ui('Queued') %}
+  {% elif t.status in ['running', 'active'] %}{% set state_label = ui('Working') %}
+  {% elif t.status == 'blocked' %}{% set state_label = ui('Paused') %}
+  {% elif t.status == 'failed' %}{% set state_label = ui('Failed') %}
+  {% elif t.status == 'cancelled' %}{% set state_label = ui('Stopped') %}
+  {% elif t.status == 'done' %}{% set state_label = ui('Done') %}
+  {% else %}{% set state_label = '' %}{% endif %}
+  <li><a data-conversation-root="{{ t.id }}" href="/chat/goal/{{ t.target_id }}"{% if t.active %} class="active" aria-current="true"{% endif %}{% if state_label %} aria-describedby="chat-status-{{ t.id }}"{% endif %} title="{{ t.title }}" lang="und" dir="auto">{% if t.pinned %}{{ ui('Pinned:') }} {% endif %}<bdi lang="und" dir="auto" data-user-content>{{ t.title }}</bdi>{% if t.archived %} {{ ui('(archived)') }}{% endif %}</a>{% if state_label %}<span class="cs-list__status cs-list__status--{{ t.status }}" id="chat-status-{{ t.id }}">{{ state_label }}</span>{% endif %}</li>
   {% else %}
   <li class="cs-empty">{{ ui('No chats yet.') }} <a href="/chat" style="display:inline; padding:0;">{{ ui('Start a chat') }}</a></li>
   {% endfor %}

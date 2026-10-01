@@ -48,6 +48,30 @@ def _finish(world, goal_id, text):
     world.set_goal_status(goal_id, "done", result=text)
 
 
+def test_recents_exposes_current_state_without_guessing_why_a_chat_is_paused(chat):
+    client, world, _ = chat
+    ids = {}
+    for status in ("pending", "running", "blocked", "failed", "cancelled", "done"):
+        goal_id = _send(client)
+        world.set_goal_status(goal_id, status)
+        ids[status] = goal_id
+
+    assert not world.open_questions(ids["blocked"])
+    sidebar = client.get("/chat").text.split('id="content"')[0]
+    rows = dict(re.findall(
+        r'<li><a\b[^>]*data-conversation-root="(\d+)"[^>]*>.*?</a>(.*?)</li>',
+        sidebar, re.DOTALL,
+    ))
+    for status, label in (("pending", "Queued"), ("running", "Working"),
+                          ("blocked", "Paused"), ("failed", "Failed"),
+                          ("cancelled", "Stopped"), ("done", "Done")):
+        row = rows[str(ids[status])]
+        assert f'id="chat-status-{ids[status]}"' in row
+        assert f'>{label}</span>' in row
+        assert f'aria-describedby="chat-status-{ids[status]}"' in sidebar
+    assert "Needs your answer" not in rows[str(ids["blocked"])]
+
+
 def test_recents_reopens_latest_actual_turn_and_keeps_old_work_link(chat):
     client, world, _ = chat
     root = _send(client)

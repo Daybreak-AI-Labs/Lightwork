@@ -379,7 +379,13 @@
         if (status === 401) return what + 'Your sign-in has expired. Sign in again to continue.';
         if (status === 403) return what + 'You do not have permission to do this. Ask an administrator.';
         if (status === 404) return what + 'That item no longer exists. Refresh the page to see the latest.';
-        if (status === 409) return what + 'This was changed since you opened it. Refresh the page and try again.';
+        if (status === 409) {
+          // A conflict can mean an existing item, missing setup, or a changed
+          // version. Keep a safe server explanation when one was supplied.
+          var explanation = typeof window.mvPlainDetail === 'function' &&
+            window.mvPlainDetail(failure && failure.detail);
+          return what + (explanation || 'This cannot be done right now. Review the item or its settings before trying again.');
+        }
         if (status === 413) return what + 'That is too large. Try a smaller file or fewer items.';
         if (status === 429) return what + 'Too many requests right now. Wait a moment and try again.';
         if (status === 503) {
