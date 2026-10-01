@@ -5,6 +5,34 @@ they do not certify an installed release or live provider integration. All
 provider, identity-provider and billing boundaries use synthetic data or mocks.
 No deployment configuration or credentials were changed.
 
+## Current evidence snapshot, 2026-10-01
+
+This snapshot was recorded while the final07 Python ordinary phase was running.
+The register has **189 implemented entries awaiting acceptance, one active
+implementation follow-up (LW-052), and five qualification entries**. LW-052's
+125-task mobile mock acceptance remains open: read-only review identified a
+possible missing page-boundary task after a first-page refresh. Its isolated
+regression and repair are in progress; native SDK availability is not the blocker
+for that local mock scenario. The five separately approved security repairs
+remain implemented with final integrated qualification pending.
+
+| Evidence | Exact execution source | Current result and limit |
+| --- | --- | --- |
+| Full Python 3.12 ordinary / secure / serial heavy | `2a765aa3e93cc7775090f574f027bd855b33aef5` (`qualification-final-07`) | Ordinary is active; secure and both serial-heavy phases are pending. No complete pass is claimed. Source/process receipts are retained under `audit/qualification-final-07-*`. |
+| [Static gates and package builds](static-build-qualification-3640fcf.md) | `3640fcf7906d3f7129df1b34bc1718492a164bcf` | All 26 checks passed: Ruff, Vulture, 16 offline contracts and eight wheels. All 4,827 payload files match the exact Git archive. Later test/documentation changes are not relabelled as another build execution. |
+| [Complete browser and JavaScript](browser-quiet-qualification-2026-10-01.md) | `11c30996c98a0ad0c9583005223019ad0d75b8b4` | All 90 distinct Chrome journeys across default/setup profiles and all 1,695 JavaScript tests passed. [Exact source comparison](browser-source-relationship-2a765aa.md) proves the unchanged dashboard/frontend relationship to `2a765aa`; it does not claim a browser rerun there or cover the active mobile change. |
+| [Current-client Qdrant repair](qdrant-current-client-qualification-e22ffbc.md) | `e22ffbcca2af43887ed4c142b2633fd86a51471c` | 75 distinct passing IDs across native adapter and real loopback-server checks; both postures include actual offline ONNX inference. One intentional parameter skip remains. Repeated executions are not additional unique tests. |
+| [Secure PostgreSQL follow-up](postgresql-secure-gap-qualification.md) | `aa37a5a58d81940af4ab87434f6c33e6af96c75e` | All 363 cases in 29 complete files passed with both secure flags, zero skips/errors/failures. This covers all 270 identities previously lacking secure PostgreSQL evidence. The private server stopped; twelve pgvector extension cases still require the absent native compiler prerequisites. |
+| [Python 3.10 / 3.11 compatibility](supported-python-qualification-3640fcf.md) | Full collection at `3640fcf`; critical test source `f1f41a3e13a8d3f574546e8a577a48555e3ec8bc`, unchanged `3640fcf` product wheels | Each interpreter collected the same 40,660 executable IDs before the two later admission tests. All four ordinary/secure critical cohorts passed the same 405 cases, with seven explicit database-service skips each. Full Python 3.10 ordinary/heavy runtime remains scheduled after Python 3.12; no full Python 3.11 runtime is claimed. |
+
+The dated sections below preserve earlier failed, incomplete and focused runs,
+including their then-pending work. Their historical present-tense wording does
+not supersede this snapshot. Final acceptance still requires the fresh integrated
+results and any repair follow-ups; counts from overlapping cohorts must not be
+summed. Signed releases, unavailable native platforms, real provider/IdP journeys,
+distributed deployment failures and human language/accessibility review retain
+their explicit qualification boundaries.
+
 ## Full-suite checkpoints
 
 | Checkout | Result | Meaning |

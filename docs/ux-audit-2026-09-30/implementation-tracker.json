@@ -2274,7 +2274,7 @@
     "category": "Installation and desktop maintenance",
     "status": "test-needed",
     "implementation_evidence": [
-      "Full source backlog and existing desktop/installer/recovery implementation reviewed; work continues in this slice."
+      "Existing Windows desktop/installer source and the integrated exact-release maintenance handoff, coordinated recovery and verified offline repair paths were reviewed. LW-153 and LW-156 through LW-159 record their implementation and local synthetic evidence. This row requires qualification of an exact signed Windows release on clean supported hosts; source review and mocked maintenance fixtures do not establish publisher trust, clean-machine installation or upgrade acceptance."
     ],
     "validation": "Source and implementation reviewed. Local mocked maintenance/recovery fixtures pass; real signed installation qualification has not run.",
     "remaining": "Exact signed release hashes, recognized publisher trust, clean Windows standard/admin/elevation/offline/interruption/repair/rollback matrix and actual adjacent release migration require release artifacts and dedicated qualification hosts; no release acceptance is claimed.",
