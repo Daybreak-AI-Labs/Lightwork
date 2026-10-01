@@ -230,19 +230,21 @@ def test_cli_export_all_spans_two_days(monkeypatch, tmp_path):
 
 
 def test_cli_export_active_tenant_denied_without_entitlement(monkeypatch, tmp_path):
+    from maverick.cli import main
+    from maverick.tenant.registry import create_tenant
+
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    # Provision the namespace before writing retained data, as a real tenant does.
+    create_tenant("freeco", plan="free")
     monkeypatch.setenv("MAVERICK_TENANT", "freeco")
     tenant_dir = tmp_path / ".maverick" / "tenants" / "freeco" / "audit"
     _write_today(tenant_dir, name="tenant_tool")
 
-    from maverick.cli import main
-    from maverick.tenant.registry import create_tenant
-    create_tenant("freeco", plan="free")
-
     res = CliRunner().invoke(main, ["audit", "export"])
     assert res.exit_code == 2
     assert "tenant 'freeco' plan does not include SIEM audit export" in res.output
+    assert "tenant_tool" not in res.output
 
 
 def test_cli_export_tenant(monkeypatch, tmp_path):
