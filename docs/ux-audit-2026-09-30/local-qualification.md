@@ -16,7 +16,7 @@ No deployment configuration or credentials were changed.
 | `f036cef90a6d6fd1ddaa3f76bd857b9ca9bd4c3e` | All1,680 dashboard JavaScript tests passed across176 files | Zero failures/skips/cancellations. Exact manifests and source boundaries: dashboard-javascript-qualification.md. |
 | `12ff6b8ad9e42f73a13467c3514f9687ba57465f` | Incomplete: 5,669 passed, 10 skipped, two worker crashes | Run ended after 837.37 seconds with both settings catalog cases losing their workers. Remaining cases were not executed. Streamed reports and JUnit retain the partial result; this is not a full-suite pass. |
 | `29aee7e75b6d31012f087ec725456eec20e206af` | 39,763 passed, 219 failed, 555 skipped | Complete failed ordinary run; no worker losses or collection errors. Both former crash cases passed unchanged. Later repairs require fresh qualification. |
-| `2c1e8a888eee011a2851836079b57c9929b8d745` | Ordinary and secure Python runs in progress | Fixed source includes all reviewed failure repairs. Both secure switches are explicit. Serial heavy checks follow after parallel phases finish; no final pass claimed yet. |
+| `2c1e8a888eee011a2851836079b57c9929b8d745` | Ordinary Python run in progress; secure run incomplete | Secure run ended after 7,581 passes, 108 skips and one worker crash during the timed stack dump in the 1,000-round self-harness model test. Both secure switches were explicit. The native crash is under investigation; no full secure pass is claimed. |
 
 The initial failures are not dismissed as a single fixture problem. Production
 repairs include exact ownership for local schedules, employee content reads in
@@ -130,3 +130,11 @@ consumed by the core test fixture and alone does not establish dashboard-only
 production posture. The harness now sets both. Earlier dashboard-only labels
 without this evidence are ordinary/posture-unspecified checks; corrected
 cohorts and the final full secure run are tracked separately.
+
+Final per-criterion review reopened LW-122: the local-only bounded reindex
+implementation does not complete the existing hosted-embedding path. Supported
+hosted cost admission and ambiguous paid-outcome recovery are active work.
+The same review reproduced omitted custom-theme semantic colours and hidden
+mobile Close-button focus after desktop resize; their repairs are in `5bc069b`,
+after the `2c1e8a8` runtime checkpoint. New local and browser regressions qualify
+those changes separately before another consolidated freeze.
