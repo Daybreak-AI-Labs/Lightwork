@@ -144,8 +144,26 @@ def _applications(actor, can_manage):
     return managed + [row for row in available if row["provider"] not in providers]
 
 
+NAMED_SIGN_IN_NEEDED = (
+    "Connecting an account by signing in to it needs a named Lightwork sign-in, so each connected "
+    "account belongs to a person. Connections that use a key work without it."
+)
+
+
 @router.get("")
 def overview(request: Request, response: Response):
+    require_permission(request, "admin")
+    if not str(caller_principal(request) or "").startswith("user:"):
+        # Single-user and shared-token installations have no named person to own a
+        # renewable account sign-in. Nothing was lost, so answer plainly instead of
+        # a 403 the page would read as revoked access. Changing routes still refuse.
+        from .local_owner import available as local_owner_available
+
+        can_set_up = local_owner_available(request)
+        response.headers["Cache-Control"] = "private, no-store"
+        return {"account_sign_in_available": False, "can_set_up_sign_in": can_set_up,
+                "message": NAMED_SIGN_IN_NEEDED + (" You can set up named sign-in now." if can_set_up
+                                                  else " Ask whoever manages Lightwork sign-in to set it up.")}
     actor, context = _authority(request, response)
     enabled = connection_oauth.enabled()
     can_manage = has_global_permission(request, "admin")

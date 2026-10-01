@@ -532,6 +532,20 @@
         var description = original ? summarize(original, learned) : n.summary;
         var desc = document.createElement('div'); desc.className = 'fd-scard__d'; desc.textContent = description;
         main.appendChild(kind); main.appendChild(title); if (description && description !== n.title) main.appendChild(desc);
+        // Where a Decision's paths lead, and a plain warning for a step nothing leads to.
+        if (n.paths && n.paths.length) {
+          var where = n.paths.map(function (p) {
+            var at = steps.findIndex(function (s) { return s.id === p.to; });
+            return 'If ' + p.label.toLowerCase() + ': ' + (at >= 0 ? 'step ' + (at + 1) + ' “' + steps[at].title + '”' : 'ends the flow');
+          }).join(' · ');
+          var paths = document.createElement('div'); paths.className = 'fd-scard__d'; paths.textContent = where; main.appendChild(paths);
+        }
+        if (n.reachable === false) {
+          var lost = document.createElement('div'); lost.className = 'fd-scard__d'; lost.setAttribute('role', 'note');
+          lost.style.color = 'var(--danger)';
+          lost.textContent = 'Not connected, so this step never runs. Make it the next step of an earlier step, or remove it.';
+          main.appendChild(lost);
+        }
         main.addEventListener('click', function () { showProps(); engine().select(n.id); render(); });
         var tools = document.createElement('span'); tools.className = 'fd-scard__tools';
         if (i > 0) tools.appendChild(btn('Move up', 'btn--ghost', 'Move “' + n.title + '” up', function () { if (engine().move(n.id, -1)) render(); }));
@@ -551,8 +565,21 @@
       addSel.setAttribute('aria-label', 'Kind of step to add');
       ADDABLE.forEach(function (k) { var o = document.createElement('option'); o.value = k[0]; o.textContent = k[1]; addSel.appendChild(o); });
       addWrap.appendChild(addSel);
+      // After a Decision (or any step with several open ends) the person says which one,
+      // so the new step is connected to it rather than left floating.
+      var ends = eng && eng.ends ? eng.ends() : [];
+      var whereSel = null;
+      if (ends.length > 1 || (ends.length === 1 && ends[0].port !== 'next')) {
+        whereSel = document.createElement('select'); whereSel.className = 'input'; whereSel.id = 'fd-steps-add-where';
+        whereSel.setAttribute('aria-label', 'Where the new step goes');
+        ends.forEach(function (e, i) { var o = document.createElement('option'); o.value = String(i); o.textContent = e.label; whereSel.appendChild(o); });
+        // Start on the open end of the step being worked on, so repeated adds keep extending one path.
+        var working = ends.findIndex(function (e) { return e.id === current; });
+        if (working >= 0) whereSel.value = String(working);
+        addWrap.appendChild(whereSel);
+      }
       addWrap.appendChild(btn('Add step', 'btn--primary', 'Add a step at the end', function () {
-        showProps(); engine().add(addSel.value); render();
+        showProps(); engine().add(addSel.value, whereSel ? ends[Number(whereSel.value)] : undefined); render();
       }));
       foot.appendChild(addWrap);
       foot.appendChild(btn('Open the Advanced canvas', 'btn--ghost', '', function () { setView('canvas'); }));

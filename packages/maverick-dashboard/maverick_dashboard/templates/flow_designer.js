@@ -2549,16 +2549,70 @@
     autoLayoutForce(); render(); return true;
   }
   function autoLayoutForce() { flow.nodes.forEach(function (n) { n.x = 0; n.y = 0; }); autoLayout(); }
-  function addStepAtEnd(kind) {
+  // The steps a run can reach from the first step, over every way out of a step.
+  function reachableIds() {
+    var seen = {}, queue = rootFlow.start ? [rootFlow.start] : [];
+    var byId = {}; rootFlow.nodes.forEach(function (n) { byId[n.id] = n; });
+    while (queue.length) {
+      var n = byId[queue.shift()];
+      if (!n || seen[n.id]) continue;
+      seen[n.id] = true;
+      ['next', 'if_true', 'if_false', 'on_error', 'on_expire'].forEach(function (k) { if (n[k]) queue.push(n[k]); });
+      (n.cases || []).forEach(function (c) { if (c.to) queue.push(c.to); });
+    }
+    return seen;
+  }
+  // Where a new step can still be attached: the end of each path that leads nowhere.
+  // A Decision whose Yes/No paths are unset continues to its `next`, so it is open
+  // only while both are unset.
+  function openEnds() {
+    var reach = reachableIds(), ends = [];
+    linearOrder().forEach(function (n) {
+      if (!reach[n.id]) return;
+      if (n.kind === 'branch') {
+        if (n.next) return;
+        if (!n.if_true) ends.push({ id: n.id, port: 'if_true', label: 'If yes, after “' + stepName(n) + '”' });
+        if (!n.if_false) ends.push({ id: n.id, port: 'if_false', label: 'If no, after “' + stepName(n) + '”' });
+      } else if (!n.next) ends.push({ id: n.id, port: 'next', label: 'After “' + stepName(n) + '”' });
+    });
+    return ends;
+  }
+  function addStepAtEnd(kind, end) {
     if (flow !== rootFlow) exitToDepth(0);
-    var order = linearOrder(), last = null;
-    for (var k = order.length - 1; k >= 0; k--) { if (ports(order[k]).length === 1 && !order[k].next) { last = order[k]; break; } }
-    selected = last ? last.id : null; selectedEdge = null;
+    var ends = openEnds(), at = null;
+    if (end) ends.forEach(function (e) { if (!at && e.id === end.id && e.port === end.port) at = e; });
+    if (!at) at = ends[0] || null;
+    if (!at && rootFlow.start && rootFlow.nodes.length) {
+      say('Every step already leads somewhere. Use the Advanced canvas to connect a new step.', true);
+      return null;
+    }
+    var target = at && nodeById(at.id);
+    selected = target ? target.id : null; selectedEdge = null;
     addNode(kind);
+    // addNode only chains a plain step; a Decision's Yes/No path is wired here so the
+    // new step is never left disconnected.
+    if (target && at.port !== 'next') {
+      var added = nodeById(selected);
+      target[at.port] = added.id;
+      added.x = target.x + (at.port === 'if_true' ? -1 : 1) * Math.round(W * 0.6);
+      render();
+    }
     return selected;
   }
+  // Which way each Decision path leads, by step id (a path left unset continues to `next`).
+  function pathsOf(n) {
+    return n.kind === 'branch'
+      ? [{ label: 'Yes', to: n.if_true || n.next || null }, { label: 'No', to: n.if_false || n.next || null }] : [];
+  }
   window.__fdEngine = {
-    order: function () { return linearOrder().map(function (n) { return { id: n.id, kind: n.kind, title: stepName(n), summary: summary(n), start: n.id === rootFlow.start }; }); },
+    order: function () {
+      var reach = reachableIds();
+      return linearOrder().map(function (n) {
+        return { id: n.id, kind: n.kind, title: stepName(n), summary: summary(n), start: n.id === rootFlow.start,
+          reachable: !!reach[n.id], paths: pathsOf(n) };
+      });
+    },
+    ends: openEnds,
     select: function (id) { if (flow !== rootFlow) exitToDepth(0); multiSel = {}; selectNode(id); },
     remove: function (id) { if (flow !== rootFlow) exitToDepth(0); deleteNode(id); },
     move: moveStep,
