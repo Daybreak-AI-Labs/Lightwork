@@ -7,6 +7,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const templates = path.resolve(__dirname, "../../maverick_dashboard/templates");
 const readTemplate = name => fs.readFileSync(path.join(templates, name), "utf8").replace(/\r\n/g, "\n");
+const FDCore = require(path.join(templates, "flow_designer_core.js"));
 
 async function receiveTemplateFixture(draft, existing = {}, serverContext = "ctx") {
   const details = { open: false }, title = { value: existing.title || "" };
@@ -100,8 +101,10 @@ function authoringFixture(kind, handoff, fetchImpl = async () => ({ ok: true, js
   const brief = { value: "" }, listeners = new Map(), messages = [], calls = [];
   const storage = new Map([["lightwork.authoring-handoff", typeof handoff === "string" ? handoff : JSON.stringify(handoff)]]);
   let drafts = 0;
+  const loadedFlows = [];
   const context = {
     Date, brief, rootFlow: { id: "", name: "", nodes: [] }, dirty: false,
+    FDCore, fromApiFlow(value) { loadedFlows.push(value); context.rootFlow = value; },
     templateWorkspaceStarted: false, playbookWorkspaceStarted: false, fileInput: { files: [] },
     draftIsDirty: () => context.dirty,
     draft() { drafts++; },
@@ -122,8 +125,34 @@ function authoringFixture(kind, handoff, fetchImpl = async () => ({ ok: true, js
   const end = source.indexOf(kind === "flow" ? "  buildExamples();" : "    renderExamples();", begin);
   assert.ok(begin >= 0 && end > begin);
   vm.runInNewContext(source.slice(begin, end), context);
-  return { context, brief, listeners, messages, calls, storage, draftCalls: () => drafts };
+  return { context, brief, listeners, messages, calls, storage, loadedFlows, draftCalls: () => drafts };
 }
+
+test("Ekko hands an approval-first, unsaved workflow into the designer for review", async () => {
+  const flow = { id: "ekko-draft-abc", name: "Recurring report", start: "human-review", version: 0,
+    revision: "", nodes: [
+      { id: "human-review", kind: "approval", prompt: "Review before work", next: "observed-1" },
+      { id: "observed-1", kind: "agent", brief: "Draft the report" },
+    ] };
+  const ui = authoringFixture("flow", { kind: "flow", brief: "Review this work", context: "ctx",
+    created_at: Date.now(), flow });
+  await ui.context.receiveAuthoringHandoff(false);
+  assert.equal(ui.loadedFlows.length, 1);
+  assert.equal(ui.loadedFlows[0].start, "human-review");
+  assert.equal(ui.brief.value, "Review this work");
+  assert.equal(ui.draftCalls(), 0);
+  assert.match(ui.messages.at(-1).message, /Review.*save/);
+});
+
+test("Ekko handoff keeps the canvas empty when the suggested review gate is missing", async () => {
+  const ui = authoringFixture("flow", { kind: "flow", brief: "Review this work", context: "ctx",
+    created_at: Date.now(), flow: { id: "proposal", name: "Proposal", start: "work",
+      nodes: [{ id: "work", kind: "agent", brief: "Work before review" }] } });
+  await ui.context.receiveAuthoringHandoff(false);
+  assert.equal(ui.loadedFlows.length, 0);
+  assert.equal(ui.brief.value, "");
+  assert.equal(ui.messages.at(-1).error, true);
+});
 
 for (const kind of ["agent", "flow"]) {
   const handoff = () => ({ kind, brief: "Draft a review workflow", created_at: Date.now(), context: "ctx" });

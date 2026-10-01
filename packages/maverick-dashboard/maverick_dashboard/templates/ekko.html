@@ -580,9 +580,15 @@
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({device_id: device(), kind: kind})
       }, 'start a draft');
-      sessionStorage.setItem('lightwork.authoring-handoff', JSON.stringify({
-        kind: result.kind, brief: result.brief, created_at: Date.now()
-      }));
+      if (typeof result.context !== 'string' || !result.context) throw new Error('Could not verify this workspace. Try again.');
+      var prepared = {
+        kind: result.kind, brief: result.brief, context: result.context, created_at: Date.now()
+      };
+      if (result.kind === 'flow') {
+        if (!result.flow || !Array.isArray(result.flow.nodes)) throw new Error('Could not prepare the suggested workflow. Try again.');
+        prepared.flow = result.flow;
+      }
+      sessionStorage.setItem('lightwork.authoring-handoff', JSON.stringify(prepared));
       window.location.href = result.redirect;
     } catch (e) { mvToast(e.message, {error: true}); }
   }

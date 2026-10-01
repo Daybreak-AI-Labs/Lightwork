@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -627,13 +628,20 @@ def ekko_candidate_handoff(
     from maverick.config import get_ekko
     from maverick.work_discovery import build_draft_bundle
 
+    from .in_app_routes import _draft_context
+
     store = _store(request, payload.device_id)
     candidate = _candidate(store, get_ekko(), opportunity_id)
-    # Build the provider-free core preview to prove the candidate can become a
-    # valid governed artifact, but return only a bounded brief to the browser's
-    # existing canonical authoring handoff. Nothing is saved or activated here.
+    # Give the workflow editor the exact provider-free, validated graph. Agent
+    # handoffs still use a bounded brief. Neither path saves or activates work.
     bundle = build_draft_bundle(candidate, owner=_owner(request))
     brief = _handoff_brief(candidate, payload.kind)
+    prepared_flow = bundle.flow.to_dict() if payload.kind == "flow" else None
+    if prepared_flow is not None:
+        prepared_flow.pop("owner", None)
+        prepared_flow["id"] = f"{prepared_flow['id']}-{secrets.token_hex(4)}"
+        prepared_flow["version"] = 0  # the editor still needs an explicit save
+    context = _draft_context(request)
     _audit(
         EventKind.EKKO_EXPORT,
         opportunity_id=candidate.opportunity_id,
@@ -643,10 +651,12 @@ def ekko_candidate_handoff(
     return {
         "kind": payload.kind,
         "brief": brief,
+        "context": context,
         "opportunity_id": candidate.opportunity_id,
         "redirect": "/flows/designer" if payload.kind == "flow" else "/workflow-builder",
         "unsaved": bool(bundle.unsaved),
         "requires_human_approval": bool(bundle.requires_human_approval),
+        **({"flow": prepared_flow} if prepared_flow is not None else {}),
     }
 
 

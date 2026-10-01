@@ -2499,15 +2499,15 @@
       sessionStorage.removeItem('lightwork.authoring-handoff');
       if (!raw) return;
       handoff = JSON.parse(raw);
-    } catch (e) { say('The saved draft could not be read. Return to Chat and prepare it again.', true); return; }
+    } catch (e) { say('The prepared draft could not be read. Go back and prepare it again.', true); return; }
     if (!handoff || handoff.kind !== 'flow' || typeof handoff.brief !== 'string' || !handoff.brief.trim() ||
         Array.from(handoff.brief).length > 8000 || typeof handoff.context !== 'string' || !handoff.context ||
         !Number.isFinite(handoff.created_at) || Date.now() - handoff.created_at < 0 || Date.now() - handoff.created_at > 600000) {
-      say('This saved draft is invalid or expired. Return to Chat and prepare a brief of 8,000 characters or fewer.', true); return;
+      say('This prepared draft is invalid or expired. Go back and prepare a brief of 8,000 characters or fewer.', true); return;
     }
     var brief = document.getElementById('fd-nl');
     function hasDraft() { return brief.value.trim() || draftIsDirty() || rootFlow.id || rootFlow.name || rootFlow.nodes.length; }
-    if (blocked || hasDraft()) { say('Your existing draft was kept. The draft from Chat was not loaded.'); return; }
+    if (blocked || hasDraft()) { say('Your existing draft was kept. The suggestion was not loaded.'); return; }
     var touched = false;
     function markTouched() { touched = true; }
     ['input', 'change', 'click'].forEach(function (event) { document.addEventListener(event, markTouched, true); });
@@ -2515,11 +2515,27 @@
       var response = await fetch('/api/v1/templates/draft-context');
       var current = await response.json();
       if (!response.ok || !current || current.context !== handoff.context) throw new Error('workspace mismatch');
-      if (touched || hasDraft()) { say('Your current work was kept. The draft from Chat was not loaded.'); return; }
+      if (touched || hasDraft()) { say('Your current work was kept. The suggestion was not loaded.'); return; }
+      if (handoff.flow !== undefined) {
+        var suggested = handoff.flow;
+        var nodes = suggested && suggested.nodes;
+        var first = Array.isArray(nodes) && nodes.find(function (node) { return node && node.id === suggested.start; });
+        if (!suggested || typeof suggested !== 'object' || Array.isArray(suggested) ||
+            !Array.isArray(nodes) || !nodes.length ||
+            nodes.some(function (node) { return !node || typeof node !== 'object' || Array.isArray(node); }) ||
+            !first || first.kind !== 'approval' || !first.next ||
+            FDCore.validateFlow(suggested).length) {
+          say('The suggested workflow could not be loaded. Return to Ekko and prepare it again.', true); return;
+        }
+        fromApiFlow(suggested);
+        brief.value = handoff.brief;
+        say('Suggested steps ready. Review them, then save when ready.');
+        return;
+      }
       brief.value = handoff.brief;
       say('Brief ready. Review it, then choose Draft when you are ready.');
     } catch (e) {
-      say('The saved draft could not be verified in this workspace. Return to Chat and prepare it again.', true);
+      say('The prepared draft could not be verified in this workspace. Go back and prepare it again.', true);
     } finally {
       ['input', 'change', 'click'].forEach(function (event) { document.removeEventListener(event, markTouched, true); });
     }

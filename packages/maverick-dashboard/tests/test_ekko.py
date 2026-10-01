@@ -210,6 +210,7 @@ def test_owner_bound_session_start_pause_resume_stop(tmp_path, monkeypatch):
 
 
 def test_mining_and_handoff_are_evidence_backed_preview_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
     _isolate(tmp_path, monkeypatch)
     store = _enroll(device="desk")
     _seed_recurring_evidence(store)
@@ -234,8 +235,27 @@ def test_mining_and_handoff_are_evidence_backed_preview_only(tmp_path, monkeypat
     assert body["unsaved"] is True
     assert body["requires_human_approval"] is True
     assert body["redirect"] == "/flows/designer"
+    assert body["context"] == client.get("/api/v1/templates/draft-context").json()["context"]
+    assert body["flow"]["start"] == "human-review"
+    assert body["flow"]["version"] == 0
+    assert body["flow"]["revision"] == ""
+    nodes = {node["id"]: node for node in body["flow"]["nodes"]}
+    assert nodes["human-review"]["kind"] == "approval"
+    assert nodes["human-review"]["next"] == "observed-1"
+    assert nodes["observed-1"]["next"] == "observed-2"
+    assert nodes["observed-2"].get("next") is None
     assert "approved, content-free application metadata" in body["brief"]
     assert "do not" in body["brief"].lower()
+
+    saved = client.post("/api/v1/flows", json={"flow": body["flow"]})
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["published"] is False
+    again = client.post(
+        f"/api/v1/ekko/candidates/{candidate['opportunity_id']}/handoff",
+        json={"device_id": "desk", "kind": "flow"},
+    )
+    assert again.status_code == 200
+    assert again.json()["flow"]["id"] != body["flow"]["id"]
 
     erased = client.delete("/api/v1/ekko/data?device_id=desk")
     assert erased.status_code == 200
