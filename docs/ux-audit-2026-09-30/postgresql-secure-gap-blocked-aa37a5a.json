@@ -1,8 +1,7 @@
 {
-  "recorded_status": "Launcher blocker recovered by direct foreground startup; complete secure qualification still in progress.",
+  "recorded_status": "Recovered: full 363-case secure rerun passed; all 270 targeted original identities qualified; server stopped.",
   "source_head": "aa37a5a58d81940af4ab87434f6c33e6af96c75e",
   "selected_complete_files": 29,
-  "target_original_identities_without_completed_secure_rerun": 270,
   "first_attempt": {
     "collected_cases": 363,
     "last_displayed_progress": "33%",
@@ -263,7 +262,7 @@
   ],
   "historical_blocked_status": "qualification blocked; incomplete original attempt; no passing secure rerun",
   "launcher_recovery_update": {
-    "recorded_stage": "attempt02 running; no completion or passing total claimed",
+    "recorded_stage": "attempt02 completed successfully; 363 passed, no failures/errors/skips",
     "source_head": "aa37a5a58d81940af4ab87434f6c33e6af96c75e",
     "startup_method": "direct_foreground_postgres_default_sandbox",
     "sandbox": "default",
@@ -275,5 +274,17 @@
     },
     "credential_or_acl_changes": false,
     "preservation": "Earlier timeouts, token error87 and original artifacts remain historical evidence. Direct foreground server startup succeeded under the same sandbox identity; pg_ctl wrapper failure is no longer the current blocker."
+  },
+  "historical_target_original_identities_without_completed_secure_rerun": 270,
+  "current_remaining_target_identities": 0,
+  "completion": {
+    "source_head": "aa37a5a58d81940af4ab87434f6c33e6af96c75e",
+    "passed": 363,
+    "recovered_original_identities": 270,
+    "server_stopped": true,
+    "no_listener": true,
+    "pytest_seconds": 683.2,
+    "helper_seconds": 692.06,
+    "evidence": "postgresql-secure-gap-qualification.json"
   }
 }

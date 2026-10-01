@@ -1,10 +1,12 @@
 # PostgreSQL secure-mode rerun: recovered startup blocker
 
 The launcher blocker is **resolved by direct foreground startup under the default
-sandbox identity**, without authentication or ACL changes. The complete 363-case
-secure attempt02 is now running; qualification remains pending its completion
-receipt. No passing total is claimed yet. The earlier failures below are retained
-as historical evidence, not a current inability to start the private fixture.
+sandbox identity**, without authentication or ACL changes. The complete secure
+attempt02 finished with **363 passed and no failures, errors, or skips**. All 270
+targeted original identities now have passing secure-mode evidence. The owned
+server is stopped with no listener remaining. See the
+[final qualification](postgresql-secure-gap-qualification.md).
+The earlier failures below remain historical evidence.
 
 Its 29 complete test files at `aa37a5a58d81940af4ab87434f6c33e6af96c75e` still
 match the recorded Git blobs and working-file hashes. The selection covers the
@@ -30,8 +32,9 @@ that `pg_ctl` launch path. A later direct `postgres.exe -D <task-owned-data>`
 launch passed readiness on the same loopback port and started the complete run.
 
 The data directory and stale PID file were retained. No ACLs, credentials,
-product/test code, assertions, or deadlines changed. The 270 identities remain
-unqualified by this planned secure rerun until its result is available. The separate
+product/test code, assertions, or deadlines changed. The rerun completed all 29
+files and qualified the 270 identities without resuming past the interruption
+or excluding the interrupted case. The separate
 12 pgvector cases retain their compiler/extension prerequisites.
 
 The [sanitized evidence record](postgresql-secure-gap-blocked-aa37a5a.json)
