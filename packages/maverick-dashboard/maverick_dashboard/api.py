@@ -14093,8 +14093,20 @@ def run_fleet_agent(
     # the role + caller grants. domain_capability only narrows (never broadens),
     # and an unknown/disabled pack leaves the grant unchanged.
     if agent.domain:
-        from maverick.domain import available_domains, domain_capability
+        from maverick.domain import available_domains, domain_capability, enabled_domains
 
+        # Same rule as POST /goals: a specialist whose pack is gone, or whose
+        # department is switched off, cannot run. Refuse it rather than quietly
+        # running an unbriefed generic agent under the specialist's name.
+        if agent.domain not in enabled_domains():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "This specialist isn't available right now: its department "
+                    "may be switched off, or it was removed. Switch the "
+                    "department back on or deploy it again, then try again."
+                ),
+            )
         prof = available_domains().get(agent.domain)
         if prof is not None:
             cap = domain_capability(prof, cap, agent_principal)
@@ -14108,6 +14120,11 @@ def run_fleet_agent(
         owner=fleet.owner,
         execution_principal=agent_principal,
     )
+    if agent.domain:
+        # Run AS the specialist: the orchestrator builds the root from the
+        # pack (persona, refusals, workflow, deliverable contract) when the
+        # goal carries its domain, exactly like POST /goals with a domain.
+        w.set_goal_domain(goal_id, agent.domain)
     record_run(fleet_name, agent.name, goal_id)
     # Schedule against the authenticated caller (or the shared anonymous lane
     # when auth is off), not the fleet-agent audit principal.  Agent names are

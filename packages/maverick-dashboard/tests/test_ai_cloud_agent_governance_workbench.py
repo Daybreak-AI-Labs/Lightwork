@@ -99,7 +99,8 @@ def test_workbench_fails_closed_and_dom_does_not_create_html_sinks(environment) 
     finally:
         workbench._tenant_id = monkeypatch_target
     assert unavailable.status_code == 200
-    assert "This page isn't ready yet" in unavailable.text
+    assert "Choose a workspace first" in unavailable.text
+    assert 'id="cag-root"' not in unavailable.text  # fails closed: no working controls
     template = (template_dir / "ai_cloud_agent_governance.html").read_text(encoding="utf-8")
     for unsafe in (".innerHTML", ".outerHTML", "insertAdjacentHTML", "eval("):
         assert unsafe not in template
@@ -111,6 +112,70 @@ def test_workbench_fails_closed_and_dom_does_not_create_html_sinks(environment) 
         'name="native_resource_id"',
     ):
         assert forbidden not in template
+
+
+def _page(monkeypatch, *, tenant, probe=None, app_probe=None):
+    """Render the page for one availability situation and return its visible text."""
+    template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
+    templates = Jinja2Templates(directory=str(template_dir))
+    templates.env.globals.update(
+        {
+            "theme": "dark", "font": "default", "lang": "en", "density": "comfortable",
+            "custom_theme_css": "", "custom_theme_names": [], "dir": "ltr",
+            "nav_groups": [], "t": lambda key: key,
+        }
+    )
+    monkeypatch.setattr(workbench, "_tenant_id", lambda: tenant)
+    monkeypatch.setattr(workbench, "require_permission", lambda _request, _permission: None)
+    app = FastAPI()
+    if app_probe is not None:
+        app.state.ai_cloud_agent_governance_enabled_probe = app_probe
+    app.include_router(
+        workbench.create_ai_cloud_agent_governance_workbench_router(templates, enabled_probe=probe)
+    )
+    response = TestClient(app, headers={"Origin": "http://testserver"}).get(
+        "/assurance/cloud-agents"
+    )
+    assert response.status_code == 200
+    assert 'id="cag-root"' not in response.text  # never a working page in these states
+    return _visible_text(response.text), response.text
+
+
+def test_workbench_asks_for_a_workspace_only_when_none_is_selected(monkeypatch) -> None:
+    text, html = _page(monkeypatch, tenant="", probe=lambda _tenant: True)
+    assert "Choose a workspace first" in text
+    assert 'href="/workspace/tenant?next=/assurance/cloud-agents"' in html
+    assert "hasn't been connected" not in text
+
+
+def test_workbench_does_not_blame_the_workspace_when_the_service_is_not_connected(
+    monkeypatch,
+) -> None:
+    """A workspace IS selected; nothing on this installation supplies the cloud
+    agent service. Telling the user to choose a workspace (and offering only
+    Reload) sent them round a loop that can never end."""
+    text, html = _page(monkeypatch, tenant="local", probe=None)
+    assert "Choose a workspace" not in text
+    assert "hasn't been connected" in text
+    assert 'href="/help"' in html  # a real next step
+    assert "Reload" not in text  # reloading cannot fix it
+    assert _BANNED.search(text) is None, _BANNED.search(text)
+
+
+def test_workbench_offers_reload_only_when_the_service_could_not_be_reached(
+    monkeypatch,
+) -> None:
+    def _broken(_tenant):
+        raise RuntimeError("probe failed")
+
+    text, html = _page(monkeypatch, tenant="local", probe=_broken)
+    assert "couldn't reach" in text
+    assert "Reload" in text
+    assert "Choose a workspace" not in text
+    assert _BANNED.search(text) is None, _BANNED.search(text)
+
+    not_a_bool, _html = _page(monkeypatch, tenant="local", probe=lambda _tenant: "yes")
+    assert "couldn't reach" in not_a_bool
 
 
 def test_workbench_factory_rejects_invalid_dependencies() -> None:
