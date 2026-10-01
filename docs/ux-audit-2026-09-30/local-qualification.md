@@ -13,6 +13,15 @@ implemented. Fresh static/build qualification passes all 26 gates at `57a027a`,
 including all 4,827 exact-source wheel payload checks. Final integrated Python
 qualification remains pending.
 
+The first final08 ordinary attempt stopped after 1,255.54 seconds with ten
+recorded failures and no final JUnit result. Read-only Windows probes established
+an execution-account access limitation. All 156 cases in the four affected
+modules then passed unchanged with fresh native-owned directories. The
+[account diagnosis](final08-windows-account-diagnosis.md) retains both results;
+the corrected full ordinary run remains in progress. Both Python 3.10/3.11
+environments now pass [exact final08 installation and native-access checks](compatibility-final08-installation-57a027a.md),
+with full compatibility runtime still pending.
+
 The complete browser cohort passes **108 distinct cases** across default/setup
 profiles at `1719f2fc0e01216e8daea5f77228da9835409657`, and all **1,711 JavaScript
 tests in 181 files** pass at that source. The earlier failures led to actual
