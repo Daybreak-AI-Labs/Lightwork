@@ -15,6 +15,8 @@ PACKAGE = Path(__file__).resolve().parents[1] / "maverick_dashboard"
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     monkeypatch.setattr(page, "_tenant_selected", lambda: None)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
@@ -23,15 +25,11 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "has_global_permission",
         lambda _request, _permission: True,
     )
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
+    )
     templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
         nav_groups=[
             SimpleNamespace(
                 id="privacy",
@@ -47,7 +45,6 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
                 ],
             )
         ],
-        t=lambda key: key,
     )
     app = FastAPI()
     app.include_router(page.create_privacy_drop_management_page_router(templates))

@@ -25,20 +25,17 @@ class _Markup(HTMLParser):
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     monkeypatch.setattr(page, "current_tenant_id_strict", lambda: "tenant-a")
     monkeypatch.setattr(page, "require_permission", lambda *_args: None)
     monkeypatch.setattr(page, "has_permission", lambda *_args: True)
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
+    )
     templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
         nav_groups=[],
-        t=lambda key: key,
     )
     app = FastAPI()
     app.include_router(page.create_consent_application_scanner_page_router(templates))
@@ -175,20 +172,23 @@ def test_bounded_script_has_no_browser_persistence_or_html_injection() -> None:
 
 
 def test_custom_theme_style_is_bound_to_the_page_csp_nonce(monkeypatch) -> None:
+    import maverick.config as config
+    from maverick_dashboard.app import _theme_context
+
+    monkeypatch.setattr(config, "load_config", lambda: {
+        "dashboard": {"theme": "custom", "themes": {"custom": {
+            "bg": "#101010", "panel": "#111", "text": "#fff", "accent": "#0f0",
+        }}},
+    })
     monkeypatch.setattr(page, "current_tenant_id_strict", lambda: "tenant-a")
     monkeypatch.setattr(page, "require_permission", lambda *_args: None)
     monkeypatch.setattr(page, "has_permission", lambda *_args: True)
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
+    )
     templates.env.globals.update(
-        theme="custom",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css=":root { --bg: #101010; }",
-        custom_theme_names=["custom"],
-        dir="ltr",
         nav_groups=[],
-        t=lambda key: key,
     )
     app = FastAPI()
     app.include_router(page.create_consent_application_scanner_page_router(templates))
@@ -196,6 +196,7 @@ def test_custom_theme_style_is_bound_to_the_page_csp_nonce(monkeypatch) -> None:
     assert response.status_code == 200
     nonce_match = re.search(r'<style nonce="([A-Za-z0-9_-]+)">', response.text)
     assert nonce_match is not None
+    assert "body.theme-custom { --bg: #101010;" in response.text
     assert (
         f"style-src 'self' 'nonce-{nonce_match.group(1)}'"
         in response.headers["content-security-policy"]

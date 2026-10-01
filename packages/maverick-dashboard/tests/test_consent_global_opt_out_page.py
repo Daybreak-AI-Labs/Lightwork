@@ -24,6 +24,8 @@ class _Markup(HTMLParser):
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     monkeypatch.setattr(page, "current_tenant_id_strict", lambda: "alpha")
     monkeypatch.setattr(
         page,
@@ -35,17 +37,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "has_global_permission",
         lambda _request, _permission: True,
     )
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
+    )
     templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
         nav_groups=[],
-        t=lambda key: key,
     )
     app = FastAPI()
     app.include_router(page.create_consent_global_opt_out_page_router(templates))

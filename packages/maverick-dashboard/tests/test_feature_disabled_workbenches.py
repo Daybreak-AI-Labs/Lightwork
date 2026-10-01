@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
 PACKAGE = Path(__file__).resolve().parents[1] / "maverick_dashboard"
@@ -48,22 +48,26 @@ class _FeatureFieldset(HTMLParser):
             self.depth -= 1
 
 
-def _render(template_name: str, enabled_name: str, enabled: bool) -> _FeatureFieldset:
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
-    templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
-        nav_groups=[],
-        t=lambda key: key,
+def _render_body(template_name: str, **context) -> str:
+    from maverick_dashboard.app import _theme_context
+
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
     )
-    body = templates.env.get_template(template_name).render(
-        request=SimpleNamespace(url=SimpleNamespace(path="/feature")),
-        **{enabled_name: enabled},
+    templates.env.globals.update(nav_groups=[])
+    request = Request({
+        "type": "http", "method": "GET", "scheme": "http", "path": "/feature",
+        "query_string": b"", "headers": [], "server": ("testserver", 80),
+        "client": ("127.0.0.1", 50000),
+    })
+    response = templates.TemplateResponse(request, template_name, context)
+    return response.body.decode("utf-8")
+
+
+def _render(template_name: str, enabled_name: str, enabled: bool) -> _FeatureFieldset:
+    body = _render_body(
+        template_name, **{enabled_name: enabled},
     )
     parsed = _FeatureFieldset()
     parsed.feed(body)
@@ -109,16 +113,8 @@ def test_module_gated_workbenches_render_no_controls_when_disabled(
     enabled_name: str,
     marker: str,
 ) -> None:
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
-    templates.env.globals.update(
-        theme="dark", font="default", lang="en", density="comfortable",
-        custom_theme_css="", custom_theme_names=[], dir="ltr", nav_groups=[],
-        t=lambda key: key,
-    )
-    template = templates.env.get_template(template_name)
-    request = SimpleNamespace(url=SimpleNamespace(path="/feature"))
-    disabled = template.render(request=request, **{enabled_name: False})
-    enabled = template.render(request=request, **{enabled_name: True})
+    disabled = _render_body(template_name, **{enabled_name: False})
+    enabled = _render_body(template_name, **{enabled_name: True})
     assert "data-module-gate=" in disabled
     assert f'id="{marker}"' not in disabled
     assert f'id="{marker}"' in enabled
