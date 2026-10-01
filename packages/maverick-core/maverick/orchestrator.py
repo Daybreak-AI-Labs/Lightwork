@@ -2526,7 +2526,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         # live wherever an operator has set MAVERICK_AUTO_DISTILL=1.
         if auto_distill and getattr(goal, "owner", None) != "":
             auto_distill = False
-            skill_note = "\n\n[skill distill skipped: this task is private]"
+            skill_note = ""
             try:
                 from .audit import EventKind, audit_event
                 if not audit_event(EventKind.SKILL_DISTILL_SKIPPED,

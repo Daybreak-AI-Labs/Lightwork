@@ -174,7 +174,7 @@ async def test_private_goal_skips_opted_in_shared_skill_distillation(run_state, 
     monkeypatch.setattr("maverick.orchestrator.distill", forbidden_distill)
     monkeypatch.setattr(audit, "audit_event", capture_audit)
     result = await run_goal(ctx.llm, ctx.world, ctx.budget, ctx.goal_id, sandbox=ctx.sandbox)
-    assert "skill distill skipped: this task is private" in result
+    assert "skill distill" not in result
     assert ctx.world.get_goal(ctx.goal_id).status == "done"
     assert skipped == [{"agent": "skill_distillation", "goal_id": ctx.goal_id,
                         "reason": "private_source"}]
