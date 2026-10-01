@@ -1962,13 +1962,24 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         domain_profile = None
         if domain:
             try:
-                from .domain import agent_from_profile, enabled_domains
+                from .domain import (
+                    agent_from_profile,
+                    enabled_domains,
+                    rejected_workspace_domains,
+                )
                 # enabled_domains() honors the operator's [suites] toggles, so a
                 # domain whose suite is switched off is treated as unavailable.
                 _profile = enabled_domains().get(domain)
                 if _profile is None:
-                    msg = (f"no such domain: {domain!r} (unknown or its suite is "
-                           "disabled). See `maverick compartments` for available domains.")
+                    if domain in rejected_workspace_domains():
+                        msg = (
+                            f"domain {domain!r} cannot run: its workspace pack failed "
+                            "validation. Ask an admin to review its allowed actions "
+                            "and risk limit. No work was started."
+                        )
+                    else:
+                        msg = (f"no such domain: {domain!r} (unknown or its suite is "
+                               "disabled). See `maverick compartments` for available domains.")
                     world.set_goal_status(goal_id, "blocked", result=msg)
                     _lifecycle.end_episode(msg, "blocked")
                     _fire_webhook("goal_finished", {

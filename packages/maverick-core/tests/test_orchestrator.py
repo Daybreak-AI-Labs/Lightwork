@@ -144,12 +144,12 @@ async def test_domain_build_failure_blocks_instead_of_falling_back(
         domain="broken",
     )
 
-    assert "agent build failed" in out
-    assert "Refusing to run without the requested domain capability envelope" in out
+    assert "workspace pack failed validation" in out
+    assert "No work was started" in out
     assert fake_llm.calls == []
     goal = world.get_goal(gid)
     assert goal.status == "blocked"
-    assert "agent build failed" in (goal.result or "")
+    assert "workspace pack failed validation" in (goal.result or "")
 
 
 @pytest.mark.asyncio

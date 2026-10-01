@@ -16,6 +16,7 @@ from maverick.domain import (
     load_domains,
     overlay_profile,
     overridden_fields,
+    rejected_workspace_domains,
     render_workflow_prompt,
 )
 
@@ -281,6 +282,41 @@ class TestOverlay:
 
 
 class TestAvailableDomainsOverlay:
+    @pytest.mark.parametrize("body", [
+        'name = "unsafe"\npersona = "A specialist."\n',
+        'name = "unsafe"\nallow_tools = ["read_file"]\n',
+        'name = "unsafe"\nallow_tools = []\nmax_risk = "low"\n',
+        'name = "unsafe"\nallow_tools = ["read_file"]\nmax_risk = "unlimited"\n',
+    ])
+    def test_incomplete_workspace_pack_is_not_activated(self, tmp_path, monkeypatch, body):
+        monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+        (tmp_path / "unsafe.toml").write_text(body, encoding="utf-8")
+
+        assert "unsafe" not in available_domains()
+        assert rejected_workspace_domains()["unsafe"]
+
+    def test_incomplete_override_cannot_replace_builtin(self, tmp_path, monkeypatch):
+        name, base = _clean_builtin()
+        monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+        (tmp_path / f"{name}.toml").write_text(
+            f'name = "{name}"\nallow_tools = []\n', encoding="utf-8",
+        )
+
+        assert available_domains()[name] == base
+
+    def test_domains_lint_reports_rejected_workspace_pack(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+        from maverick.cli import main
+
+        monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+        (tmp_path / "unsafe.toml").write_text('name = "unsafe"\n', encoding="utf-8")
+
+        result = CliRunner().invoke(main, ["domains-lint", "--ci"])
+
+        assert result.exit_code != 0
+        assert "ERROR  unsafe: allow_tools is empty" in result.output
+        assert "ERROR  unsafe: max_risk is unset" in result.output
+
     def test_same_name_override_inherits_base(self, tmp_path, monkeypatch):
         name, base = _clean_builtin()
         monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))

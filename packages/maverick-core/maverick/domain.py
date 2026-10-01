@@ -404,20 +404,42 @@ def render_workflow_prompt(workflow: list[WorkflowStep]) -> str:
     return "\n".join(lines)
 
 
-def available_domains() -> dict[str, DomainProfile]:
-    """All discoverable packs: built-in bases, with user/tenant overrides applied
-    as field-level overlays.
-
-    A user pack whose name matches a built-in (or that declares ``extends``)
-    *patches* that base, inheriting every field it doesn't set. A user pack with
-    a brand-new name is added as a standalone pack. This is what lets a client
-    customize an agent without re-stating the whole pack."""
+def _resolved_catalog() -> tuple[dict[str, DomainProfile], dict[str, list[str]]]:
+    """Resolve workspace packs, retaining rejected names for lint diagnostics."""
     builtin = builtin_domains()
     resolved = dict(builtin)
+    rejected: dict[str, list[str]] = {}
     for name, patch in _load_raw_domains(user_dir()).items():
-        base = resolved.get(str(patch.get("extends") or name))
-        resolved[name] = overlay_profile(base, patch) if base else _coerce(name, patch)
-    return resolved
+        try:
+            base = resolved.get(str(patch.get("extends") or name))
+            profile = overlay_profile(base, patch) if base else _coerce(name, patch)
+            errors, _ = lint_profile(profile)
+        except Exception:
+            # A hand-edited pack with malformed field types must not interrupt
+            # discovery or become active through the workspace catalog.
+            rejected[name] = ["malformed domain pack fields"]
+            continue
+        if errors:
+            # Editor saves already apply this lint gate. Apply it to files
+            # placed or synced into the workspace directory as well.
+            rejected[name] = errors
+            continue
+        resolved[name] = profile
+    return resolved, rejected
+
+
+def available_domains() -> dict[str, DomainProfile]:
+    """Built-in packs plus lint-clean workspace packs and field-level overlays.
+
+    A user pack matching a built-in (or declaring ``extends``) inherits fields
+    it does not set. Unsafe files remain inactive until corrected.
+    """
+    return _resolved_catalog()[0]
+
+
+def rejected_workspace_domains() -> dict[str, list[str]]:
+    """Why parseable workspace packs were excluded from the active catalog."""
+    return _resolved_catalog()[1]
 
 
 # A pack's name prefix maps it to a business *suite* (finance, operations, legal,
@@ -912,6 +934,14 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
     from .agent_autonomy import default_profile_for, render_autonomy_prompt
     from .domain_discipline import augment_persona
     from .domain_refusals import render_refusals
+    # Parsing helpers may hand a profile directly to the factory without
+    # passing through available_domains(). An absent allowlist means ALL tools
+    # and an absent ceiling means no cap, so neither is safe to spawn.
+    if (not isinstance(profile.allow_tools, list) or not profile.allow_tools
+            or any(not isinstance(tool, str) or not tool for tool in profile.allow_tools)):
+        raise ValueError(f"Domain {profile.name!r} requires non-empty allow_tools")
+    if not isinstance(profile.max_risk, str) or profile.max_risk not in _VALID_RISKS:
+        raise ValueError(f"Domain {profile.name!r} requires valid max_risk")
     compatibility = tool_compatibility_errors(profile)
     if compatibility:
         raise ValueError(f"Domain {profile.name!r} has incompatible tool requirements: "
