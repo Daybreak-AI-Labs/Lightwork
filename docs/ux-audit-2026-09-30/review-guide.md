@@ -20,13 +20,13 @@ failed/incomplete runs, later repairs and exact-source results.
   Exceptional access is disabled by default; when enabled through Settings or
   the installer, Account/Users links to exact-resource requests with independent
   approval, expiry and acknowledged audit receipts. It grants reads, not
-  mutation or publication. See [employee content access](../../employee-content-access.md).
+  mutation or publication. See [employee content access](../employee-content-access.md).
 - **Legacy records:** ambiguous deployment-global feedback and UX records remain
   retained outside ordinary workspace reads. Unknown ownership is not guessed
   and legacy content is not silently reassigned.
 - **Workflows:** deployment-secret expressions now refuse before effects.
   Existing definitions remain readable and explain their migration to
-  authorized scoped Connections. Follow [credential migration](../../flow-credential-migration.md);
+  authorized scoped Connections. Follow [credential migration](../flow-credential-migration.md);
   deployment model credentials and provider configuration are unchanged.
 - **Workspace retirement:** deleted identities stay reserved, including through
   restore, rollback and interrupted recovery. A replacement workspace needs a
@@ -43,7 +43,7 @@ Connections, Knowledge/Facts, workflow review, projects and reporting. Each
 register row points to its native UI, service, current-authority checks and
 recovery behavior. [The operation matrix](conversation-operation-matrix.md)
 shows which typed Copilot actions use those same services. Companion chat has
-its own [bounded capabilities](../../employee-companions.md); it does not
+its own [bounded capabilities](../employee-companions.md); it does not
 inherit every ordinary-task action.
 
 Language catalogs remain visibly draft/partial until human review; English is
