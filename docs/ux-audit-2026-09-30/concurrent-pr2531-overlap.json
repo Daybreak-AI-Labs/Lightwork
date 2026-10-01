@@ -1,12 +1,12 @@
 {
   "scope": "Read-only overlap review; no imported changes or executed PR2531 tests",
   "baseline": "6daa3165ff5a844320ec970553d5ecdec7e396c4",
-  "pr2528_head": "35b715d3455109b39c29f18bbdae8273c596ad0d",
-  "pr2531_head": "e2014c94d71a3e21f226e6fc461351ae9a022008",
+  "pr2528_head": "11438635213c90350aca4d8e9090c47ffb4756b7",
+  "pr2531_head": "d24de994c5f1feab822b998f2571136ebaadbd9d",
   "changed_path_counts": {
-    "pr2528": 1306,
-    "pr2531": 2129,
-    "shared": 85
+    "pr2528": 1334,
+    "pr2531": 2134,
+    "shared": 88
   },
   "shared_paths": [
     "apps/installer-cli/maverick_installer/wizard.py",
@@ -75,7 +75,10 @@
     "packages/maverick-dashboard/maverick_dashboard/templates/trajectory.html",
     "packages/maverick-dashboard/maverick_dashboard/templates/users.html",
     "packages/maverick-dashboard/maverick_dashboard/ui_visibility.py",
+    "packages/maverick-dashboard/tests/browser/fresh_customer_navigation.spec.js",
+    "packages/maverick-dashboard/tests/browser/owner_form.spec.js",
     "packages/maverick-dashboard/tests/browser/server.py",
+    "packages/maverick-dashboard/tests/js/ops_pages.test.js",
     "packages/maverick-dashboard/tests/test_approvals.py",
     "packages/maverick-dashboard/tests/test_approvals_dual_control.py",
     "packages/maverick-dashboard/tests/test_code_immune_actions.py",
@@ -382,6 +385,151 @@
   "boundaries": [
     "File overlap is not an assertion that every shared file has a textual conflict.",
     "PR2531 author-reported tests have not been executed or adopted as our evidence.",
-    "No merge, cherry-pick, branch mutation, production migration or default-policy change was performed."
-  ]
+    "Only owned local documentation edits were made; no merge, cherry-pick, remote branch/PR mutation, production migration, or default-policy change was performed."
+  ],
+  "previous_review": {
+    "pr2528_head": "35b715d3455109b39c29f18bbdae8273c596ad0d",
+    "pr2531_head": "e2014c94d71a3e21f226e6fc461351ae9a022008",
+    "changed_path_counts": {
+      "pr2528": 1306,
+      "pr2531": 2129,
+      "shared": 85
+    }
+  },
+  "latest_delta": {
+    "base": "e2014c94d71a3e21f226e6fc461351ae9a022008",
+    "head": "d24de994c5f1feab822b998f2571136ebaadbd9d",
+    "commits_ahead": 2,
+    "files": [
+      {
+        "path": "packages/maverick-dashboard/maverick_dashboard/static/lightwork-ui.js",
+        "changed_in_our_branch": true,
+        "present_in_our_tree": true,
+        "our_blob": "649007e8b124d6fe4a764fd64108430025235690",
+        "previous_their_blob": "a975192ab97e4e5926b65c892269e20a80aad12b",
+        "latest_their_blob": "37f8ece86f641f8b4e392e82a6269f0fb796e171",
+        "review": "Guard timestamp/toast DOM queries in minimal scripted harnesses and create the relative-time interval only when timestamp elements exist."
+      },
+      {
+        "path": "packages/maverick-dashboard/maverick_dashboard/templates/api_keys.html",
+        "changed_in_our_branch": false,
+        "present_in_our_tree": false,
+        "our_blob": null,
+        "previous_their_blob": "3df52634defebd4ca203648b3bc652da30e51593",
+        "latest_their_blob": "584f9d7bfc16a872237a14ce442a760a59ea92e0",
+        "review": "Escape the literal hyphen in the service-account HTML input pattern; this template is absent from PR2528."
+      },
+      {
+        "path": "packages/maverick-dashboard/maverick_dashboard/templates/privacy_rights_form.html",
+        "changed_in_our_branch": false,
+        "present_in_our_tree": false,
+        "our_blob": null,
+        "previous_their_blob": "619823abd12e9388a8ce8a5f09c35efcfdd7dffa",
+        "latest_their_blob": "e942a3491cdc740eefa443d7bb0122f645d29f49",
+        "review": "Escape the literal hyphen in the public-rights property slug HTML input pattern; this template is absent from PR2528."
+      },
+      {
+        "path": "packages/maverick-dashboard/tests/browser/customer_navigation.spec.js",
+        "changed_in_our_branch": false,
+        "present_in_our_tree": true,
+        "our_blob": "c5daa29649b92b719be2ee9bc2a0e0b4e86d8252",
+        "previous_their_blob": "c5daa29649b92b719be2ee9bc2a0e0b4e86d8252",
+        "latest_their_blob": "ad55da3fc58df1c54394a9106f6b04bcd1adcbd7",
+        "review": "Distinguish Most used links from grouped navigation links in their sidebar behavior."
+      },
+      {
+        "path": "packages/maverick-dashboard/tests/browser/fresh_customer_navigation.spec.js",
+        "changed_in_our_branch": true,
+        "present_in_our_tree": true,
+        "our_blob": "32f0e62546adefa4c2fb3b2a449a563f428ca149",
+        "previous_their_blob": "1c6e49897eeeea450b5a2098400cca3e69e9ce9e",
+        "latest_their_blob": "fad7c6cb3fb9368dbcdcd4788c140c092dd5537f",
+        "review": "Exercise their owner-first redirect, Skip for now route, and passphrase confirmation field."
+      },
+      {
+        "path": "packages/maverick-dashboard/tests/browser/owner_form.spec.js",
+        "changed_in_our_branch": true,
+        "present_in_our_tree": true,
+        "our_blob": "a9e6f3e72cc0a1dec73158df97c9f5c7bfd7e610",
+        "previous_their_blob": "c44091c8a8f5753a50086c4ed1dfd35217b22102",
+        "latest_their_blob": "915041bca3b1ab05890974dc9656054cd2d81486",
+        "review": "Expect their owner-first redirect and test mismatched then matching passphrase confirmation."
+      },
+      {
+        "path": "packages/maverick-dashboard/tests/js/goals_search.test.js",
+        "changed_in_our_branch": false,
+        "present_in_our_tree": true,
+        "our_blob": "3096d90dbc93eae9009df1ed26b1ac047c520e9f",
+        "previous_their_blob": "3096d90dbc93eae9009df1ed26b1ac047c520e9f",
+        "latest_their_blob": "7610a0667fbca7c70fdcfdb9c9b46188e237f3ec",
+        "review": "Update expected search-result links for their unified task navigation."
+      },
+      {
+        "path": "packages/maverick-dashboard/tests/js/ops_pages.test.js",
+        "changed_in_our_branch": true,
+        "present_in_our_tree": true,
+        "our_blob": "950e85b1fa6ff8659a19e8fe9e67ff949f6176fc",
+        "previous_their_blob": "2dc2ec0df115a4c1a0e4288b14a88bbf9b49dd9e",
+        "latest_their_blob": "c86f9a2a2f5e211b1aeb9a598a574d9875778266",
+        "review": "Use their combined tenant creation/invitation form and re-protection disclosure; assert no second tenant creation request."
+      }
+    ],
+    "additions": 55,
+    "deletions": 20,
+    "shared_delta_paths": [
+      "packages/maverick-dashboard/maverick_dashboard/static/lightwork-ui.js",
+      "packages/maverick-dashboard/tests/browser/fresh_customer_navigation.spec.js",
+      "packages/maverick-dashboard/tests/browser/owner_form.spec.js",
+      "packages/maverick-dashboard/tests/js/ops_pages.test.js"
+    ],
+    "patch_sha256": "b8949d514059dc70eb79bd356fb8af9023cf5a3b9a3e6cecf3b111786dc4d152",
+    "patch_bytes": 17745,
+    "migration_lock_unchanged": true
+  },
+  "github_metadata_observation": {
+    "head": "d24de994c5f1feab822b998f2571136ebaadbd9d",
+    "state": "open",
+    "draft": true,
+    "merged": false,
+    "source": "Authorized GitHub get_pr_info and compare_commits read-only actions; exact commit fetched only into isolated review clone."
+  },
+  "role_grant_relationship": {
+    "finding": "No direct fix or causal association established by this delta.",
+    "source_evidence": [
+      {
+        "path": "packages/maverick-dashboard/maverick_dashboard/templates/users.html",
+        "lines": [
+          106,
+          116,
+          340,
+          343
+        ],
+        "detail": "Role grant uses a required select; custom role name input has no pattern attribute."
+      },
+      {
+        "path": "packages/maverick-dashboard/maverick_dashboard/admin_pages.py",
+        "lines": [
+          810,
+          811
+        ],
+        "detail": "The /users/set handler is outside the eight-file delta."
+      },
+      {
+        "path": "packages/maverick-dashboard/tests/browser/role_grant_acceptance.spec.js",
+        "lines": [
+          29
+        ],
+        "detail": "Our observed failure concerns a role still null after explicit keyboard submission; this spec is outside their delta."
+      },
+      {
+        "path": "packages/maverick-dashboard/maverick_dashboard/static/lightwork-ui.js",
+        "lines": [
+          56,
+          70
+        ],
+        "detail": "Our existing workspace-binding submit listener is outside their changed timestamp/toast block; mvFormatTimes does not exist in our pinned file."
+      }
+    ],
+    "limits": "The exact cause of our browser failure is tracked by its owning worker; no PR2531 code or tests were imported or executed."
+  }
 }
