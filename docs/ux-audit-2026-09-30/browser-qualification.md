@@ -1,4 +1,10 @@
-# Local installed-browser qualification — LW-149
+# Local installed-browser qualification - LW-149
+
+The later [2026-10-01 checkpoint](browser-and-javascript-checkpoint-2026-10-01.md)
+records all 78 distinct journeys passing on one immutable source across the
+complete default and setup-enabled profiles. The earlier evidence below remains
+as repair history; its request for a final consolidated rerun was fulfilled at
+that checkpoint, without extending the result to later changes.
 
 This is local qualification evidence, not a claim of live-provider, IdP, packaged
 desktop or customer acceptance. The audit entry remains `test-needed` for those

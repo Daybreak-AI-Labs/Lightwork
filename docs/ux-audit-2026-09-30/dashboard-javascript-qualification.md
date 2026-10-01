@@ -1,4 +1,9 @@
-# Dashboard JavaScript qualification — 2026-09-30
+# Dashboard JavaScript qualification - 2026-09-30
+
+The later [2026-10-01 checkpoint](browser-and-javascript-checkpoint-2026-10-01.md)
+records the complete 177-file suite at `d4b71e3`: **1,686 tests passed**, zero
+failures, skips or cancellations, concurrency one, 408.667 seconds. The historical
+1,680-test run below is retained with its original source and repair provenance.
 
 **1,680 tests passed across all 176 dashboard `*.test.js` files**, with zero failures, skips or cancellations, at the immutable source commit `f036cef90a6d6fd1ddaa3f76bd857b9ca9bd4c3e`. The complete run finished in 116.9 seconds and returned exit code 0.
 
