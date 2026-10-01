@@ -21,6 +21,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _make_git_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -155,7 +157,12 @@ class TestGitDirDiscovery:
         from maverick.git_safety import git_metadata_may_execute_filters
         repo = self._repo(tmp_path)
         shutil.move(str(repo / ".git"), str(tmp_path / "real-gitdir"))
-        (repo / ".git").symlink_to(tmp_path / "real-gitdir")
+        try:
+            (repo / ".git").symlink_to(tmp_path / "real-gitdir")
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                pytest.skip("Windows account cannot create symlinks")
+            raise
         assert git_metadata_may_execute_filters(repo) is False
         _git_ok(repo, "config", "filter.pwn.smudge", _FILTER_PWN)
         assert git_metadata_may_execute_filters(repo) is True

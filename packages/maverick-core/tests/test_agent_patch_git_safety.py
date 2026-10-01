@@ -86,13 +86,13 @@ def _repo_with_planted_filter(root: Path, kind: str, layout: str = "config") -> 
     repo.mkdir()
     marker = root / "filter-ran"
     _git(repo, "init", "-q")
-    (repo / "f.txt").write_text("base\n")
+    (repo / "f.txt").write_bytes(b"base\n")
     if layout == "config":
         (repo / ".gitattributes").write_text("* filter=pwn\n")
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
     # Planted AFTER the commit, as the compromised sandbox would.
-    command = f"sh -c 'id > {marker}; cat'"
+    command = f"sh -c 'id > {marker.as_posix()}; cat'"
     if layout == "config":
         _git(repo, "config", f"filter.pwn.{kind}", command)
     elif layout == "pointer":
@@ -113,7 +113,7 @@ def _repo_with_planted_filter(root: Path, kind: str, layout: str = "config") -> 
         attrs = repo / ".git" / "evil-attributes"
         attrs.write_text("* filter=pwn\n")
         (repo / ".git" / "config.worktree").write_text(
-            f'[core]\n\tattributesFile = {attrs}\n[filter "pwn"]\n\t{kind} = "{command}"\n')
+            f'[core]\n\tattributesFile = {attrs.as_posix()}\n[filter "pwn"]\n\t{kind} = "{command}"\n')
     else:  # pragma: no cover - a typo in a test
         raise AssertionError(layout)
     return repo, marker
@@ -144,7 +144,7 @@ def test_search_replace_does_not_run_a_planted_smudge_filter_on_the_host(tmp_pat
 @pytest.mark.parametrize("layout", LAYOUTS)
 def test_reset_without_exec_does_not_run_a_planted_filter_on_the_host(tmp_path, fake_llm, layout):
     repo, marker = _repo_with_planted_filter(tmp_path, "smudge", layout)
-    (repo / "f.txt").write_text("edited\n")  # so `reset --hard` rewrites the file
+    (repo / "f.txt").write_bytes(b"edited\n")  # so `reset --hard` rewrites the file
     agent = _agent(tmp_path, _NoExecSandbox(repo), fake_llm)
 
     agent._reset_workdir()
@@ -161,14 +161,14 @@ def test_reset_without_exec_does_not_run_a_planted_hook_on_the_host(tmp_path, fa
     repo.mkdir()
     marker = tmp_path / "hook-ran"
     _git(repo, "init", "-q")
-    (repo / "f.txt").write_text("base\n")
+    (repo / "f.txt").write_bytes(b"base\n")
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
     for name in ("reference-transaction", "post-index-change"):
         hook = repo / ".git" / "hooks" / name
         hook.write_text(f"#!/bin/sh\necho {name} >> {marker}\nexit 0\n")
         hook.chmod(0o755)
-    (repo / "f.txt").write_text("edited\n")
+    (repo / "f.txt").write_bytes(b"edited\n")
     agent = _agent(tmp_path, _NoExecSandbox(repo), fake_llm)
 
     agent._reset_workdir()
@@ -220,7 +220,7 @@ def test_patch_check_still_accepts_a_good_patch_on_a_clean_repo(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
-    (repo / "f.txt").write_text("base\n")
+    (repo / "f.txt").write_bytes(b"base\n")
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
     patch = (
@@ -236,7 +236,7 @@ def test_host_git_fallbacks_still_work_on_a_clean_repo(tmp_path, fake_llm):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
-    (repo / "f.txt").write_text("base\n")
+    (repo / "f.txt").write_bytes(b"base\n")
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
     agent = _agent(tmp_path, _NoExecSandbox(repo), fake_llm)
@@ -255,7 +255,7 @@ def test_search_replace_still_applies_in_a_disposable_worktree_on_a_clean_repo(t
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
-    (repo / "f.txt").write_text("base\n")
+    (repo / "f.txt").write_bytes(b"base\n")
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
     agent = _agent(tmp_path, _ExecSandbox(repo), fake_llm)

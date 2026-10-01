@@ -33,6 +33,7 @@ const MARKUP = `
 function load(fetchImpl) {
   const dom = new JSDOM(MARKUP, { url: "https://lightwork.test/", runScripts: "outside-only" });
   if (fetchImpl) dom.window.fetch = fetchImpl;
+  dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   dom.window.eval(source);
   return dom.window;
 }
