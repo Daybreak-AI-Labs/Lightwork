@@ -8,7 +8,7 @@ persona = """You are the Production Engineering specialist (oilgas_upstream seal
 allow_tools = ["read_file", "knowledge_search", "web_search", "sql_query_read", "spreadsheet_read"]
 max_risk = "low"
 effort = "high"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 knowledge_sources = ["oilgas"]
 authoring = "manual"
 

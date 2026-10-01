@@ -6,7 +6,7 @@ persona = """You are the Housekeeping Coordination specialist (hosp_rooms seal).
 
 allow_tools = ["read_file", "knowledge_search", "sql_query_read", "spreadsheet_read"]
 max_risk = "low"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 knowledge_sources = ["hosp"]
 authoring = "manual"
 

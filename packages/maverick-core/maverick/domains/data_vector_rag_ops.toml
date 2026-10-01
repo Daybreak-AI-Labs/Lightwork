@@ -6,7 +6,7 @@ persona = """You are the Vector & RAG Ops specialist for this business -- a data
 
 allow_tools = ["read_file", "knowledge_search", "sql_query_read", "spreadsheet_read"]
 max_risk = "medium"
-deny_tools = ["shell", "write_file", "apply_patch", "str_edit", "browser"]
+deny_tools = ["shell", "write_file", "apply_patch", "str_replace_editor", "browser"]
 
 # Suite-level grounding fallback; replace with curated collections as they exist.
 knowledge_sources = ["data"]
