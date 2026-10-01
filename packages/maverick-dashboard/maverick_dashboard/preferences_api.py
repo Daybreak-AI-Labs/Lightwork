@@ -258,6 +258,18 @@ def import_personal_profile(request: Request, body: PersonalProfileImport):
                         headers={'Cache-Control': 'private, no-store'})
 
 
+def _display_context_for(request: Request) -> str:
+    """Display chrome must not turn an unverified error request into a 500.
+
+    No binding means account-scoped cookies cannot be reused. Authorization
+    checks on actual preference reads/writes still use ``context_for`` directly.
+    """
+    try:
+        return context_for(request)
+    except HTTPException:
+        return ""
+
+
 def display_context(request: Request) -> dict:
     principal = auth.caller_principal(request)
     state = None
@@ -266,7 +278,7 @@ def display_context(request: Request) -> dict:
             state = preferences.state(principal)
         except Exception:
             state = None
-    return {"display_preference_context": context_for(request),
+    return {"display_preference_context": _display_context_for(request),
             "display_preference_revision": state["revision"] if state else "",
             "display_text_size": resolved_display(request, "text_size", "standard"),
             "display_interface_language": resolved_display(request, "interface_language", ""),
@@ -287,7 +299,8 @@ def resolved_display(request: Request, key: str, fallback: str | None = None):
                 return cached["values"].get(key, fallback)
         except Exception:
             return fallback
-    if request.cookies.get('mvk_pref_context') == context_for(request) and request.cookies.get(cookie):
+    cookie_context = request.cookies.get('mvk_pref_context')
+    if cookie_context and cookie_context == _display_context_for(request) and request.cookies.get(cookie):
         return request.cookies[cookie]
     if cached is not None:
         return cached["values"].get(key, fallback)

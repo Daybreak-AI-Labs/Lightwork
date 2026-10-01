@@ -103,6 +103,23 @@ def test_browser_override_stays_bound_to_account_and_policy(monkeypatch):
     assert preferences_api.resolved_display(request(cookies={"mvk_lang": "fr", "mvk_pref_context": "alice-workspace"}), "interface_language") == "ja"
 
 
+def test_unverified_error_display_never_reuses_account_cookies(monkeypatch):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: None)
+
+    def unverified(request):
+        raise HTTPException(401, "authenticated identity required")
+
+    monkeypatch.setattr(preferences_api, "context_for", unverified)
+    req = request(cookies={"mvk_pref_context": "another-account", "mvk_lang": "fr", "mvk_text_size": "larger"})
+    assert preferences_api.resolved_display(req, "interface_language", "en") == "en"
+    context = preferences_api.display_context(req)
+    assert context["display_preference_context"] == ""
+    assert context["display_text_size"] == "standard"
+    assert context["display_signed_in"] is False
+
+
 def test_display_options_are_text_and_custom_theme_names_stay_verbatim(monkeypatch):
     from html.parser import HTMLParser
 

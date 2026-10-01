@@ -16,7 +16,7 @@ test('a real switch in one tab pauses another tab draft and approval without cro
     await expect(reject).toBeEnabled();
     const writes=[];
     for(const page of [draft,approval])page.on('request',request=>{if(!['GET','HEAD','OPTIONS'].includes(request.method()))writes.push(request.url());});
-    await picker.goto('/tenant/select');
+    expect((await picker.goto('/workspace/tenant')).status()).toBe(200);
     await picker.locator('.tsel-pick[data-tenant="workspace-b"]').click();
     await expect.poll(async()=>(await app.state()).selected).toBe('workspace-b');
     for(const page of [draft,approval])await expect(page.locator('section[role=alert]').filter({hasText:'Your workspace changed in another tab.'})).toBeVisible();
@@ -41,12 +41,15 @@ test('a fixed-workspace installation exposes no ineffective selector and refuses
   test.setTimeout(150000);
   const app=await start(browser,info,{fixed:true});
   try{
-    await app.page.goto('/tenant/select');
+    expect((await app.page.goto('/workspace/tenant')).status()).toBe(200);
     await expect(app.page.getByText('Your installation always uses one workspace.',{exact:true})).toBeVisible();
     await expect(app.page.locator('.tsel-pick,.tsel-clear,#tsel-create,#tsel-quick')).toHaveCount(0);
     const changed=await app.context.request.put('/api/v1/workspace/active-tenant',{headers:{'X-Lightwork-Expected-Tenant':'workspace-a'},data:{tenant_id:'workspace-b'}});
     expect(changed.status(),await changed.text()).toBe(409);
     expect(await changed.text()).toContain('uses a fixed workspace');
     expect((await app.state()).selected).toBe('workspace-a');
+    const missing=await app.page.goto('/missing-acceptance-page');
+    expect(missing.status()).toBe(404);
+    await expect(app.page.getByRole('heading',{name:'Page not found',exact:true})).toBeVisible();
   }finally{await app.close();}
 });

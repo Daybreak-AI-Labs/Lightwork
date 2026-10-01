@@ -37,7 +37,8 @@ def build(directory: Path, *, fixed: bool = False):
             world.set_goal_status(goal, "done", result=label + " captured result")
             tasks[tenant] = goal
             approvals[tenant] = world.create_approval("synthetic-review", risk="high", scope=label,
-                                                      detail="Deny-only legacy fixture; never dispatches an effect.")
+                                                      detail="Deny-only fixture; never dispatches an effect.",
+                                                      requested_by=admin)
     workspace_tenants.set_selection(admin, "workspace-a")
     _, invite = invites.create_invite("acceptance-admin@example.test", "admin", created_by=admin, tenant="workspace-a")
     unassigned = "unassigned@example.test"
