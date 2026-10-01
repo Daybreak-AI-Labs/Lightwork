@@ -281,10 +281,12 @@
       var openBtn = document.getElementById('cs-menu'), closeBtn = document.getElementById('cs-menu-close');
       var backdrop = document.getElementById('cs-backdrop');
       if (!side || !openBtn) return;
-      var covered = [];
+      var covered = [], lastDrawerFocus = null;
+      side.addEventListener('focusin', function (event) { lastDrawerFocus = event.target; });
       function isOpen() { return body.classList.contains('cs-drawer-open'); }
       function open() {
         if (window.matchMedia && !window.matchMedia('(max-width: 860px)').matches) return;
+        lastDrawerFocus = null;
         covered = Array.prototype.filter.call(body.children, function (node) {
           return node !== side && node !== backdrop && node.tagName !== 'SCRIPT'
             && node.tagName !== 'DIALOG' && !node.contains(side);
@@ -323,7 +325,10 @@
           close(false);
           // The mobile Close/Menu controls disappear on desktop. Preserve a
           // visible navigation/dialog target, but never strand focus on Close.
-          if (wasOpen && active === closeBtn) {
+          // Chromium can blur a now-display:none Close control to body before
+          // the media-query callback runs. Keep its last actual focus target.
+          var focusWasLost = (active === body || active === document.documentElement) && lastDrawerFocus === closeBtn;
+          if (wasOpen && (active === closeBtn || focusWasLost)) {
             var target = Array.prototype.find.call(side.querySelectorAll('a[href], button, input, [tabindex="0"]'), function (node) {
               return node !== closeBtn && !node.disabled && !node.hidden && node.getClientRects().length;
             });

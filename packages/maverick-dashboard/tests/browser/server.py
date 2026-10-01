@@ -72,6 +72,11 @@ enable = false
 auto_fetch_model = false
 [budget.provider_caps]
 browser-spend = 20.0
+[dashboard.themes.browser-white]
+bg = "#ffffff"
+panel = "#ffffff"
+text = "#111111"
+accent = "#111111"
 '''
 
 

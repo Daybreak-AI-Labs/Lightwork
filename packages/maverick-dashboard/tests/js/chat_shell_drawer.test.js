@@ -72,3 +72,15 @@ test("desktop resize preserves a navigation or handed-off dialog focus target", 
   doc.getElementById('cs-menu').click(); link.focus(); dom.resizeDesktop();
   assert.equal(doc.activeElement, link);
 });
+
+test("desktop resize restores visible focus when layout blurs Close before the media event", () => {
+  const dom = open(), doc = dom.window.document;
+  const link = doc.querySelector('#cs-side a');
+  link.getClientRects = () => [{}];
+  doc.getElementById('cs-menu').click();
+  doc.getElementById('cs-menu-close').blur();
+  assert.equal(doc.activeElement, doc.body);
+  dom.resizeDesktop();
+  assert.equal(doc.activeElement, link);
+  assert.equal(doc.body.classList.contains('cs-drawer-open'), false);
+});
