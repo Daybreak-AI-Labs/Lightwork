@@ -658,12 +658,12 @@
     "id": "LW-052",
     "title": "Older tasks unreachable",
     "category": "Accessibility language and mobile",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "RunsListScreen uses scoped server search/status and load-older offset pages with unique-ID merge, generation invalidation, scrollable search/status header, distinct empty-search copy and explicit 200-search-result bound; api.ts uses existing scoped endpoints."
+      "RunsListScreen rebuilds the currently visible task ID window through scoped before_id pages and replaces it atomically. Refresh preserves the oldest visible boundary, removes deleted/inaccessible rows, and Load older extends by up to 50 rows; identity/status/search generations and per-request cancellation prevent stale publication. Strict descending cursor validation refuses incompatible servers. Backend extension 737ba452 preserves owner/tenant filters. FlatList stable IDs and maintainVisibleContentPosition support scroll preservation. Search/status controls and the explicit 200-match search bound remain."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
-    "remaining": "Reopened during final acceptance review: the locally feasible 125-task pagination scenario remains untested, and static tracing found a possible dropped boundary row when a new task shifts the first page during refresh. A focused synthetic regression and repair are in progress, including owner/permission invalidation. Native installed-device scroll/accessibility qualification remains separate.",
+    "validation": "2026-10-01, mobile source 4d8dedb: the initial 125-task synthetic journey reproduced two defects at d17f7fa (boundary loss and stale removed older content); the repaired complete mobile Node suite passed 108/108, including 16 pagination cases and one API wire case. Task 125 is loaded and opened; duplicate-free insertion/deletion, per-page 401/403/unsupported, current owner/filter/search changes, superseded refresh, duplicate taps, deadline retry, unmount/effect replay are covered. Strict tsc --noEmit, CJS syntax, and whitespace passed. See mobile-pagination-qualification-4d8dedb.md/json; backend runtime proof is separate.",
+    "remaining": "Seven real-PostgreSQL cursor cases and consolidated final-source qualification remain queued. The earlier frozen 2a765aa Python run does not contain this later repair. Installed Android/iOS scroll-anchor behavior and screen-reader focus remain native-device/human qualification; synthetic local pagination acceptance is now covered.",
     "evidence_slice": "slices/mobile.json"
   },
   {

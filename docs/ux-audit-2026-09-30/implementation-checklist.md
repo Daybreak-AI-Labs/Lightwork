@@ -5,7 +5,7 @@ it does not mean all acceptance checks or release qualification have passed.
 
 [Full evidence and remaining criteria](implementation-tracker.json) · [Original 24-field backlog](source-backlog.json) · [Local qualification](local-qualification.md)
 
-Current dispositions: 189 implemented-test-needed, 1 planned, 5 test-needed.
+Current dispositions: 190 implemented-test-needed, 5 test-needed.
 
 | ID | Disposition | Audit item |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ Current dispositions: 189 implemented-test-needed, 1 planned, 5 test-needed.
 | LW-049 | Built; acceptance pending | Evolve mobile from read-only oversight to a least-privilege decision companion |
 | LW-050 | Built; acceptance pending | Every question poll steals keyboard focus |
 | LW-051 | Built; acceptance pending | Corrupt saved connection has no UI reset |
-| LW-052 | Active implementation | Older tasks unreachable |
+| LW-052 | Built; acceptance pending | Older tasks unreachable |
 | LW-053 | Built; acceptance pending | Event explanation clipped without expand |
 | LW-054 | Built; acceptance pending | Online overview omits offline attention counts |
 | LW-055 | Built; acceptance pending | Offline readiness depends on Overview; detail ignores cache |
