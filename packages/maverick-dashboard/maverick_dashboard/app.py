@@ -10392,13 +10392,31 @@ def _vendor_questionnaire_for(token: str) -> dict | None:
 
 @app.get("/form/{token}", response_class=HTMLResponse)
 async def form_page(request: Request, token: str) -> HTMLResponse:
-    """The public questionnaire page a vendor lands on from their link.
+    """Public submission page for a live automation or vendor questionnaire.
 
-    Renders the questionnaire's template questions as a plain yes/no form
-    that posts back to the same token — no account, no auth; the
-    unguessable token is the addressing secret, exactly as for POST.
-    Only vendor-questionnaire tokens render a page; automation-form
-    tokens stay POST-only and 404 here."""
+    The token is the addressing secret. Match POST's automation-first order so
+    one URL never displays a different form from the one receiving its answers.
+    """
+    from maverick import automation_events
+
+    if automation_events.enabled():
+        try:
+            trigger = await run_in_threadpool(_registered_form_trigger, token)
+            if trigger is not None:
+                definition = await run_in_threadpool(_automation_form_definition, trigger, token)
+                return templates.TemplateResponse(
+                    request, "form_automation.html", {"form": definition},
+                    headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                             "X-Robots-Tag": "noindex, nofollow"},
+                )
+        except _FormTargetUnavailable as exc:
+            raise HTTPException(status_code=404, detail="no such form") from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="This form is temporarily unavailable.",
+            ) from exc
     questionnaire = await run_in_threadpool(_vendor_questionnaire_for, token)
     if questionnaire is None:
         raise HTTPException(status_code=404, detail="no such form")
@@ -10446,9 +10464,10 @@ class _FormTargetUnavailable(RuntimeError):
     """The form's saved automation no longer names an executable release."""
 
 
-def _append_registered_form(trigger: dict, token: str, fields: dict) -> int:
-    """Check and append under the same registry lock as edits and deletion."""
-    from maverick import form_store
+@contextmanager
+def _live_registered_form_target(trigger: dict, token: str):
+    """Hold one verified target stable for a page read or submission append."""
+    from maverick import flow
     from maverick.flow import store as flow_store
 
     from . import event_triggers_store
@@ -10479,6 +10498,8 @@ def _append_registered_form(trigger: dict, token: str, fields: dict) -> int:
                     status_code=503, detail="This form is not accepting submissions."
                 ) from exc
             if flow_id:
+                if not flow.enabled():
+                    raise _FormTargetUnavailable("form flow engine is off")
                 release_id = str(current.get("flow_revision") or "")
                 if not release_id:
                     raise _FormTargetUnavailable("form trigger has no bound release")
@@ -10487,17 +10508,78 @@ def _append_registered_form(trigger: dict, token: str, fields: dict) -> int:
                     # reservation. An unpublish/re-publish cannot race the append.
                     with flow_store.published_flow_guard(
                         flow_id, expected_release_id=release_id,
-                    ) as (flow, _release):
-                        if flow.owner != str(current.get("flow_owner") or ""):
+                    ) as (bound_flow, _release):
+                        if bound_flow.owner != str(current.get("flow_owner") or ""):
                             raise _FormTargetUnavailable("form trigger owner changed")
-                        return form_store.append(token, fields)
+                        yield current, bound_flow
                 except flow_store.FlowSnapshotError as exc:
                     raise _FormTargetUnavailable("form release is unavailable") from exc
-            try:
-                bound_template(current)
-            except ValueError as exc:
-                raise _FormTargetUnavailable("form template is unavailable") from exc
-            return form_store.append(token, fields)
+            else:
+                try:
+                    template = bound_template(current)
+                except ValueError as exc:
+                    raise _FormTargetUnavailable("form template is unavailable") from exc
+                yield current, template
+
+
+def _automation_form_definition(trigger: dict, token: str) -> dict:
+    """Only display fields from the verified immutable target, never a draft."""
+    from maverick import form_store
+
+    with _live_registered_form_target(trigger, token) as (current, target):
+        defaults = current.get("params") or {}
+        if current.get("flow"):
+            raw_fields = [
+                {"key": spec.get("key"), "label": spec.get("label"),
+                 "type": spec.get("type") or "text",
+                 "required": bool(spec.get("required")) and "default" not in spec
+                 and spec.get("key") not in defaults}
+                for spec in target.inputs
+            ]
+            title = target.name
+        else:
+            raw_fields = [
+                {"key": key, "label": key.replace("_", " "), "type": "text",
+                 "required": key not in defaults}
+                for key in target.params
+            ]
+            title = target.title
+        if not raw_fields:
+            raw_fields = [{"key": "message", "label": "What would you like to share?",
+                           "type": "text", "required": True, "long": True}]
+        if len(raw_fields) > form_store._MAX_FIELDS:
+            raise _FormTargetUnavailable("form has too many fields")
+        fields = []
+        seen = set()
+        for spec in raw_fields:
+            key = str(spec.get("key") or "").strip()
+            kind = str(spec.get("type") or "text")
+            if not key or len(key) > 200 or key in seen or kind not in {"text", "number", "bool", "date"}:
+                raise _FormTargetUnavailable("form fields are unavailable")
+            seen.add(key)
+            fields.append({
+                "key": key, "label": str(spec.get("label") or key).strip()[:200] or key,
+                "type": kind, "required": bool(spec.get("required")),
+                "long": bool(spec.get("long")),
+            })
+        title = str(title or current.get("name") or "Submission form")
+        if "{{" in title:
+            title = str(current.get("name") or "Submission form").replace("-", " ").title()
+        return {"title": title[:160], "fields": fields}
+
+
+def _append_registered_form(trigger: dict, token: str, fields: dict) -> int:
+    """Check and append under the same registry lock as edits and deletion."""
+    from maverick import form_store
+
+    from .form_inputs import coerce_flow_form, validate_template_form
+
+    with _live_registered_form_target(trigger, token) as (current, target):
+        if current.get("flow"):
+            coerce_flow_form(target, {**(current.get("params") or {}), **fields})
+        else:
+            validate_template_form(target, current.get("params") or {}, fields)
+        return form_store.append(token, fields)
 
 
 @app.post("/form/{token}")
@@ -10509,6 +10591,8 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
     rate-limited before parsing. Only a registered form trigger or a live vendor
     questionnaire can accept a submission."""
     from maverick import automation_events, form_store
+
+    from .form_inputs import FormInputError
 
     # Unknown tokens must never allocate a per-token file. Check the shared
     # admission limit before parsing even a multipart request.
@@ -10559,6 +10643,8 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
             seq = await run_in_threadpool(form_store.append, token, fields)
     except _FormTargetUnavailable as exc:
         raise HTTPException(status_code=404, detail="no such form") from exc
+    except FormInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except form_store.FormStoreFull as exc:
         raise HTTPException(
             status_code=507,

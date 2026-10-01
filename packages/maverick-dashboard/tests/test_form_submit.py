@@ -25,7 +25,8 @@ def _isolate(monkeypatch, tmp_path, triggers="1"):
     dashboard_app._goal_times_global.clear()
 
 
-def _register_form(token: str, *, tenant: str = "", name: str = "", owner: str = "") -> None:
+def _register_form(token: str, *, tenant: str = "", name: str = "", owner: str = "",
+                   inputs: list[dict] | None = None) -> None:
     from maverick.flow import store as flow_store
     from maverick.flow.ir import Flow, FlowNode
     from maverick.paths import reset_tenant, set_tenant
@@ -38,6 +39,7 @@ def _register_form(token: str, *, tenant: str = "", name: str = "", owner: str =
             saved = flow_store.save_flow(Flow(
                 id="published-form-flow", name="Published form", start="a",
                 nodes={"a": FlowNode(id="a", kind="agent", brief="Review the submission")},
+                inputs=inputs or [],
             ))
             release = flow_store.publish_flow(
                 saved.id, expected_version=saved.version, expected_revision=saved.revision,
@@ -51,6 +53,168 @@ def _register_form(token: str, *, tenant: str = "", name: str = "", owner: str =
         flow=saved.id, flow_owner=saved.owner,
         flow_revision=release["release_id"], tenant=tenant, owner=owner,
     )
+
+
+def test_live_automation_form_page_uses_published_inputs(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("private-link", inputs=[
+        {"key": "contact", "type": "text", "label": "Your name", "required": True},
+        {"key": "amount", "type": "number", "label": "Order amount", "required": True},
+        {"key": "date", "type": "date", "label": "Requested date", "required": False},
+        {"key": "urgent", "type": "bool", "label": "Is this urgent?", "required": False},
+        {"key": "private_default", "type": "text", "default": "hidden-value"},
+    ])
+    client = _client()
+    page = client.get("/form/private-link")
+    assert page.status_code == 200
+    assert page.headers["cache-control"] == "no-store"
+    assert page.headers["referrer-policy"] == "no-referrer"
+    assert "noindex" in page.headers["x-robots-tag"]
+    assert "Published form" in page.text
+    for name in ("contact", "amount", "date", "urgent", "private_default"):
+        assert f'name="{name}"' in page.text
+    assert 'type="number"' in page.text and 'type="date"' in page.text
+    assert '<option value="false">No</option>' in page.text
+    assert "hidden-value" not in page.text
+    assert "Submitting does not mean the work is finished." in page.text
+    assert client.post("/form/private-link", json={"contact": "Ada", "amount": "12.5"}).status_code == 201
+
+
+def test_automation_form_without_declared_inputs_still_has_a_useful_field(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("intake")
+    page = _client().get("/form/intake")
+    assert page.status_code == 200
+    assert '<textarea class="textarea" id="af-field-1" name="message"' in page.text
+    assert "What would you like to share?" in page.text
+
+
+def test_bound_template_form_page_uses_immutable_params_without_exposing_defaults(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.templates import Template
+    from maverick_dashboard import event_triggers_store
+    from maverick_dashboard.triggers_store import snapshot_from_template
+
+    template = Template(name="contact", title="Contact", body="Review {{name}}", params=["name", "reference"])
+    event_triggers_store.set_trigger(
+        "contact", "contact", "form", config={"token": "contact-link"},
+        params={"reference": "private-default"},
+        template_snapshot=snapshot_from_template(template),
+    )
+    page = _client().get("/form/contact-link")
+    assert page.status_code == 200
+    assert "Contact" in page.text
+    assert 'name="name"' in page.text and 'name="reference"' in page.text
+    assert "private-default" not in page.text
+    assert _client().post("/form/contact-link", json={"name": "Ada"}).status_code == 201
+
+
+def test_public_form_get_rejects_unknown_and_non_form_links(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import event_triggers_store
+
+    event_triggers_store.set_trigger(
+        "other-source", "", "rss", config={"token": "rss-token"}, flow="published-form-flow",
+    )
+    assert _client().get("/form/unknown").status_code == 404
+    assert _client().get("/form/rss-token").status_code == 404
+
+
+def test_public_form_get_rejects_stale_release_and_revoked_owner(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("stale")
+    from maverick.flow import store as flow_store
+
+    flow, _release = flow_store.load_published_bundle("published-form-flow")
+    assert flow_store.unpublish_flow(
+        flow.id, expected_version=flow.version, expected_revision=flow.revision,
+    )
+    assert _client().get("/form/stale").status_code == 404
+    flow_store.publish_flow(flow.id, expected_version=flow.version, expected_revision=flow.revision)
+    assert _client().get("/form/stale").status_code == 404
+
+
+def test_public_form_get_withholds_revoked_owner_and_unavailable_registry(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("owner-link", owner="user:departed")
+    from maverick_dashboard import event_triggers_store, scim_groups
+
+    monkeypatch.setattr(scim_groups, "active_for_principal", lambda _owner: False)
+    page = _client().get("/form/owner-link")
+    assert page.status_code == 503
+    assert "Published form" not in page.text
+    monkeypatch.setattr(event_triggers_store, "list_triggers", lambda: (_ for _ in ()).throw(OSError("private path")))
+    unavailable = _client().get("/form/owner-link")
+    assert unavailable.status_code == 503
+    assert "private path" not in unavailable.text
+
+
+def test_typed_form_refuses_invalid_answers_before_append_and_dispatches_typed_data(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("typed", inputs=[
+        {"key": "contact", "type": "text", "required": True},
+        {"key": "amount", "type": "number", "required": True},
+        {"key": "due", "type": "date", "required": True},
+        {"key": "urgent", "type": "bool", "required": True},
+    ])
+    client = _client()
+    for answer in (
+        {"amount": "12", "due": "2026-10-01", "urgent": "true"},
+        {"contact": "Ada", "amount": "NaN", "due": "2026-10-01", "urgent": "true"},
+        {"contact": "Ada", "amount": "12", "due": "2026-02-30", "urgent": "true"},
+        {"contact": "Ada", "amount": "12", "due": "2026-10-01", "urgent": "maybe"},
+    ):
+        assert client.post("/form/typed", json=answer).status_code == 422
+    assert not list(tmp_path.rglob("*.ndjson"))
+    valid = client.post("/form/typed", json={
+        "contact": "Ada", "amount": "12.5", "due": "2026-10-01", "urgent": "true",
+    })
+    assert valid.status_code == 201
+    poll = client.post("/api/v1/event-triggers/poll?name=accept-typed")
+    assert poll.status_code == 200
+    fired = poll.json()["triggers"][0]["fired_flows"]
+    assert len(fired) == 1
+    from maverick.flow import store as flow_store
+
+    run = flow_store.load_run(fired[0])
+    assert run.input_data["amount"] == 12.5
+    assert run.input_data["urgent"] is True
+    assert run.input_data["due"] == "2026-10-01"
+
+
+def test_preexisting_invalid_form_row_stays_pending_for_repair(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("typed", inputs=[{"key": "amount", "type": "number", "required": True}])
+    from maverick import form_store
+    from maverick_dashboard import event_triggers_store
+
+    assert form_store.append("typed", {"amount": "not a number"}) == 1
+    poll = _client().post("/api/v1/event-triggers/poll?name=accept-typed")
+    assert poll.status_code == 200
+    result = poll.json()["triggers"][0]
+    assert result["poll_error"] is True
+    assert result["fired_flows"] == []
+    assert any("form submission needs attention" in note for note in result["notes"])
+    trigger = event_triggers_store.get_trigger("accept-typed", tenant="")
+    assert trigger["cursor"] == "0"
+    assert event_triggers_store.pending_form_submissions(trigger) == 1
+
+
+def test_missing_bound_template_param_is_rejected_before_append(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.templates import Template
+    from maverick_dashboard import event_triggers_store
+    from maverick_dashboard.triggers_store import snapshot_from_template
+
+    template = Template(name="contact", title="Contact", body="Review {{name}}", params=["name"])
+    event_triggers_store.set_trigger(
+        "contact", "contact", "form", config={"token": "contact-link"},
+        template_snapshot=snapshot_from_template(template),
+    )
+    client = _client()
+    assert client.post("/form/contact-link", json={"other": "Ada"}).status_code == 422
+    assert not list(tmp_path.rglob("*.ndjson"))
+    assert client.post("/form/contact-link", json={"name": "Ada"}).status_code == 201
 
 
 def test_json_submission_is_recorded_and_pollable(monkeypatch, tmp_path):

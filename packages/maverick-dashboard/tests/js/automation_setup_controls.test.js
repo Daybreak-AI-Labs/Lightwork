@@ -90,7 +90,7 @@ test("extra settings are name and value rows, never a code box", async () => {
   assert.equal(source.includes("Exported definitions (JSON)"), false);
 });
 
-test("a form source gets its link name from the automation name", async () => {
+test("a form source gets a private random link, not a guessable name", async () => {
   const ui = eventFixture(); await settle();
   ui.get("auto-event-source").value = "form"; ui.context.changeSource();
   ui.get("auto-event-name").value = "Vendor Intake Form";
@@ -98,7 +98,30 @@ test("a form source gets its link name from the automation name", async () => {
   let body;
   ui.context.fetch = async (_, options) => { body = JSON.parse(options.body); return ui.reply({ name: "vendor" }); };
   await ui.get("auto-event-form").listeners.submit({ preventDefault() {} });
-  assert.equal(body.config.token, "vendor-intake-form");
+  assert.match(body.config.token, /^form-[0-9a-f]{48}$/);
+  assert.notEqual(body.config.token, "vendor-intake-form");
+});
+
+test("form creation stops when secure randomness is unavailable", async () => {
+  const ui = eventFixture(); await settle();
+  ui.get("auto-event-source").value = "form"; ui.context.changeSource();
+  ui.get("auto-event-template").value = "triage";
+  ui.context.window.crypto = null;
+  let created = false;
+  ui.context.fetch = async () => { created = true; throw new Error("unexpected save"); };
+  await ui.get("auto-event-form").listeners.submit({ preventDefault() {} });
+  assert.equal(created, false);
+  assert.match(ui.get("auto-event-msg").textContent, /Could not make a private form link/);
+});
+
+test("a custom link code stays inactive until saved", async () => {
+  const ui = eventFixture(); await settle();
+  ui.get("auto-event-source").value = "form"; ui.context.changeSource();
+  ui.get("auto-source-token").value = "legacy.link";
+  ui.get("auto-source-token").listeners.input();
+  const hint = ui.get("auto-event-formurl");
+  assert.match(hint.textContent, /when you save/);
+  assert.equal(hint.children.length, 0);
 });
 
 test("form automations show pending and unavailable submission states", async () => {
@@ -121,6 +144,33 @@ test("form automations show pending and unavailable submission states", async ()
   const entries = ui.get("auto-event-list").children;
   assert.match(entries[0].textContent, /2 submissions are waiting.*Check now/);
   assert.match(entries[1].textContent, /Submission status is unavailable.*Changes are paused/);
+});
+
+test("saved form automation exposes a usable open and copy link", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.loadRuns = () => {};
+  ui.context.fetch = async url => {
+    if (url === "/api/v1/event-triggers") return ui.reply({sources: ["form"], triggers: [
+      {name: "intake", source: "form", flow: "review", cursor: "0", pending_submissions: 0,
+        config: {token: "legacy.link"}}
+    ]});
+    if (url.endsWith("/history?limit=500")) return ui.reply({history: []});
+    if (url.endsWith("/outcomes")) return ui.reply({outcomes: {}});
+    throw new Error("Unexpected request " + url);
+  };
+  let copied = "";
+  ui.context.window.navigator = {clipboard: {writeText: async value => { copied = value; }}};
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers()"),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  await ui.context.loadEventTriggers();
+  const actions = ui.get("auto-event-list").children[0].children[1];
+  const open = actions.children[0], copy = actions.children[1], status = actions.children[2];
+  assert.equal(open.href, "/form/legacy.link");
+  assert.equal(open.target, "_blank");
+  assert.equal(open.rel, "noopener noreferrer");
+  await copy.listeners.click();
+  assert.equal(copied, "https://app.example/form/legacy.link");
+  assert.equal(status.textContent, "Link copied.");
 });
 
 test("catalog picker offers only published flows and retains exact template parameter names", async () => {

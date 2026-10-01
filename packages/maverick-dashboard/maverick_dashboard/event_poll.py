@@ -242,7 +242,8 @@ def _event_key(name: str, event: dict, event_id: str | None = None) -> str:
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def _fire_flow(trig, events, owner, fire_flow, summary, event_ids=None, durable=False) -> None:
+def _fire_flow(trig, events, owner, fire_flow, summary, event_ids=None, durable=False,
+               bound_flow=None) -> None:
     """Start a flow run per event, with the event's fields as the run's data
     (the trigger's ``params`` are defaults). Each fire carries an idempotency key
     so a re-delivered event is deduplicated. Mutates ``summary``; run ids land in
@@ -252,6 +253,15 @@ def _fire_flow(trig, events, owner, fire_flow, summary, event_ids=None, durable=
         data = dict(trig.get("params") or {})
         for k, v in event.items():   # a flow takes ALL event fields as data (no declared set)
             data[str(k)] = v if isinstance(v, (int, float, bool)) else str(v)[:2000]
+        if trig.get("source") == "form":
+            from .form_inputs import FormInputError, coerce_flow_form
+
+            try:
+                data = coerce_flow_form(bound_flow, data)
+            except FormInputError as exc:
+                # Keep the accepted row behind the unchanged cursor; an
+                # operator must repair or explicitly dispose of it.
+                raise RuntimeError(f"form submission needs attention: {exc}") from exc
         # Preserve already released flow idempotency keys. Flow admission has
         # its own owner/release scope; changing its key format during this
         # template repair would make a pre-upgrade flow retry executable again.
@@ -347,7 +357,8 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary, durable=False) -
             # dispatcher is available rather than silently advancing past them.
             summary["notes"].append("flow firing unavailable in this context")
             return False
-        _fire_flow(trig, res.events, owner, fire_flow, summary, event_ids, durable)
+        _fire_flow(trig, res.events, owner, fire_flow, summary, event_ids, durable,
+                   bound_flow=flow)
         return True
     try:
         from maverick_dashboard.triggers_store import bound_template
