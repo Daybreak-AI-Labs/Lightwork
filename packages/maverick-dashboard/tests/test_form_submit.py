@@ -18,7 +18,11 @@ def _isolate(monkeypatch, tmp_path, triggers="1"):
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick import world_model
+    from maverick_dashboard import app as dashboard_app
+
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    dashboard_app._goal_times.clear()
+    dashboard_app._goal_times_global.clear()
 
 
 def _register_form(token: str, *, tenant: str = "", name: str = "", owner: str = "") -> None:
@@ -133,6 +137,241 @@ def test_form_backlog_drains_in_bounded_polls(monkeypatch, tmp_path):
     assert first_batch["poll_error"] is second_batch["poll_error"] is False
     assert (first_batch["new_events"], second_batch["new_events"]) == (25, 1)
     assert [args[1]["name"] for args in dispatched] == [str(n) for n in range(26)]
+
+
+def test_accepted_form_cannot_rebind_or_delete_before_original_flow_is_queued(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("lead", name="intake")
+    from maverick.flow import store as flow_store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import event_triggers_store
+
+    second = flow_store.save_flow(Flow(
+        id="second-flow", name="Second flow", start="a",
+        nodes={"a": FlowNode(id="a", kind="agent", brief="Review {{name}}")},
+    ))
+    flow_store.publish_flow(
+        second.id, expected_version=second.version, expected_revision=second.revision,
+    )
+    client = _client()
+    assert client.post("/form/lead", json={"name": "accepted for A"}).status_code == 201
+    listed = client.get("/api/v1/event-triggers").json()["triggers"]
+    assert next(t for t in listed if t["name"] == "intake")["pending_submissions"] == 1
+    rebind = client.post("/api/v1/event-triggers", json={
+        "name": "intake", "source": "form", "flow": second.id,
+        "config": {"token": "lead"},
+    })
+    assert rebind.status_code == 409 and "Check now" in rebind.json()["detail"]
+    deletion = client.delete("/api/v1/event-triggers/intake")
+    assert deletion.status_code == 409 and "Check now" in deletion.json()["detail"]
+    assert event_triggers_store.get_trigger("intake", tenant="")["flow"] == "published-form-flow"
+
+    polled = client.post("/api/v1/event-triggers/poll?name=intake")
+    assert polled.status_code == 200
+    run_id = polled.json()["triggers"][0]["fired_flows"][0]
+    run = flow_store.load_run(run_id)
+    assert run.flow_id == "published-form-flow" and run.data["name"] == "accepted for A"
+    assert next(t for t in client.get("/api/v1/event-triggers").json()["triggers"]
+                if t["name"] == "intake")["pending_submissions"] == 0
+    assert client.post("/api/v1/event-triggers", json={
+        "name": "intake", "source": "form", "flow": second.id,
+        "config": {"token": "lead"},
+    }).status_code == 201
+    assert client.post("/form/lead", json={"name": "accepted for B"}).status_code == 201
+    polled_b = client.post("/api/v1/event-triggers/poll?name=intake")
+    run_b = flow_store.load_run(polled_b.json()["triggers"][0]["fired_flows"][0])
+    assert run_b.flow_id == "second-flow" and run_b.data["name"] == "accepted for B"
+    assert client.delete("/api/v1/event-triggers/intake").status_code == 200
+
+
+def test_form_template_parameters_cannot_change_while_a_submission_waits(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.templates import Template
+    from maverick_dashboard import event_triggers_store
+    from maverick_dashboard.triggers_store import snapshot_from_template
+
+    template = Template(name="contact", title="Contact {{name}}", body="Review {{name}}", params=["name"])
+    snapshot = snapshot_from_template(template)
+    event_triggers_store.set_trigger(
+        "contact", "contact", "form", config={"token": "contact"},
+        params={"name": "original"}, template_snapshot=snapshot,
+    )
+    client = _client()
+    assert client.post("/form/contact", json={"name": "accepted"}).status_code == 201
+    with pytest.raises(event_triggers_store.FormTriggerPending):
+        event_triggers_store.set_trigger(
+            "contact", "contact", "form", config={"token": "contact"},
+            params={"name": "changed"}, template_snapshot=snapshot,
+        )
+    assert event_triggers_store.get_trigger("contact", tenant="")["params"]["name"] == "original"
+    import maverick.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **k: None)
+    polled = client.post("/api/v1/event-triggers/poll?name=contact")
+    assert polled.status_code == 200
+    goal_id = polled.json()["triggers"][0]["fired"][0]
+    from maverick.world_model import WorldModel
+
+    assert WorldModel(tmp_path / "world.db").get_goal(goal_id).title == "Contact accepted"
+    assert event_triggers_store.pending_form_submissions(
+        event_triggers_store.get_trigger("contact", tenant="")
+    ) == 0
+
+
+def test_unavailable_original_form_flow_keeps_accepted_submission_pending(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("stale", name="intake")
+    from maverick.flow import store as flow_store
+    from maverick_dashboard import event_triggers_store
+
+    client = _client()
+    assert client.post("/form/stale", json={"name": "accepted"}).status_code == 201
+    published = flow_store.load_published_bundle("published-form-flow")
+    assert published is not None
+    flow = published[0]
+    assert flow_store.unpublish_flow(
+        flow.id, expected_version=flow.version, expected_revision=flow.revision,
+    )
+    polled = client.post("/api/v1/event-triggers/poll?name=intake")
+    assert polled.status_code == 200
+    assert polled.json()["triggers"][0]["fired_flows"] == []
+    assert event_triggers_store.pending_form_submissions(
+        event_triggers_store.get_trigger("intake", tenant="")
+    ) == 1
+    assert client.delete("/api/v1/event-triggers/intake").status_code == 409
+
+
+def test_empty_form_can_be_changed_and_deleted_before_a_first_submission(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("empty", name="intake")
+    from maverick_dashboard import event_triggers_store
+
+    assert event_triggers_store.pending_form_submissions(
+        event_triggers_store.get_trigger("intake", tenant="")
+    ) == 0
+    changed = event_triggers_store.set_trigger(
+        "intake", "", "form", config={"token": "empty"},
+        flow="published-form-flow", params={"department": "sales"}, tenant="",
+    )
+    assert changed["params"] == {"department": "sales"}
+    assert _client().delete("/api/v1/event-triggers/intake").status_code == 200
+    assert not list(tmp_path.rglob("*.ndjson"))
+
+
+def test_missing_or_corrupt_form_history_blocks_changes(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("history", name="intake")
+    from maverick import form_store
+    from maverick_dashboard import event_triggers_store
+
+    client = _client()
+    assert client.post("/form/history", json={"name": "accepted"}).status_code == 201
+    file = form_store._path("history")
+    with file.open("a", encoding="utf-8") as fh:
+        fh.write("{damaged\n")
+    assert next(t for t in client.get("/api/v1/event-triggers").json()["triggers"]
+                if t["name"] == "intake")["pending_submissions"] is None
+    assert client.delete("/api/v1/event-triggers/intake").status_code == 503
+    with pytest.raises(form_store.FormStoreUnavailable):
+        event_triggers_store.set_trigger(
+            "intake", "", "form", config={"token": "history"},
+            flow="other-flow", tenant="",
+        )
+    file.write_text('{"seq":1,"ts":0,"fields":{"name":"accepted"}}\n', encoding="utf-8")
+    assert client.post("/api/v1/event-triggers/poll?name=intake").status_code == 200
+    file.unlink()
+    assert client.delete("/api/v1/event-triggers/intake").status_code == 503
+
+
+def test_form_rebind_is_refused_after_restart_until_original_rows_are_drained(monkeypatch, tmp_path):
+    import subprocess
+    import sys
+
+    _isolate(monkeypatch, tmp_path)
+    _register_form("restart", name="intake")
+    assert _client().post("/form/restart", json={"name": "saved"}).status_code == 201
+    script = (
+        "from maverick_dashboard import event_triggers_store as s\n"
+        "t=s.get_trigger('intake', tenant='')\n"
+        "assert s.pending_form_submissions(t)==1\n"
+        "try:\n"
+        " s.set_trigger('intake','', 'form', config={'token':'restart'}, "
+        "flow='other-flow', tenant='')\n"
+        "except s.FormTriggerPending:\n"
+        " print('protected')\n"
+        "else:\n"
+        " raise AssertionError('rebind was accepted')\n"
+    )
+    child = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True,
+        timeout=30, check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    assert "protected" in child.stdout
+
+
+def test_public_post_rechecks_binding_if_it_changes_during_body_read(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    _isolate(monkeypatch, tmp_path)
+    _register_form("race", name="intake")
+    from maverick import form_store
+    from maverick_dashboard import app as dashboard_app
+    from maverick_dashboard import event_triggers_store
+
+    entered, resume = Event(), Event()
+    original = dashboard_app._append_registered_form
+
+    def paused(trigger, token, fields):
+        entered.set()
+        assert resume.wait(10)
+        return original(trigger, token, fields)
+
+    monkeypatch.setattr(dashboard_app, "_append_registered_form", paused)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending_post = pool.submit(lambda: _client().post("/form/race", json={"name": "old"}))
+        assert entered.wait(10)
+        event_triggers_store.set_trigger(
+            "intake", "", "form", config={"token": "race"},
+            flow="different-flow", tenant="",
+        )
+        resume.set()
+        assert pending_post.result(timeout=10).status_code == 404
+    assert not list(tmp_path.rglob("*.ndjson"))
+    assert form_store.pending("race", "0") == 0
+
+
+def test_public_append_blocks_rebind_until_pending_row_is_visible(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    _isolate(monkeypatch, tmp_path)
+    _register_form("race", name="intake")
+    from maverick import form_store
+    from maverick_dashboard import event_triggers_store
+
+    entered, resume = Event(), Event()
+    original = form_store.append
+
+    def paused(*args, **kwargs):
+        entered.set()
+        assert resume.wait(10)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(form_store, "append", paused)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending_post = pool.submit(lambda: _client().post("/form/race", json={"name": "original"}))
+        assert entered.wait(10)
+        pending_rebind = pool.submit(
+            event_triggers_store.set_trigger, "intake", "", "form",
+            config={"token": "race"}, flow="different-flow", tenant="",
+        )
+        resume.set()
+        assert pending_post.result(timeout=10).status_code == 201
+        with pytest.raises(event_triggers_store.FormTriggerPending):
+            pending_rebind.result(timeout=10)
+    assert event_triggers_store.get_trigger("intake", tenant="")["flow"] == "published-form-flow"
 
 
 def test_urlencoded_submission(monkeypatch, tmp_path):
@@ -298,14 +537,17 @@ def test_existing_punctuation_token_keeps_its_legacy_form_file(monkeypatch, tmp_
     assert [event["name"] for event in events] == ["first"]
 
 
-def test_colliding_registered_form_tokens_are_both_refused(monkeypatch, tmp_path):
+def test_second_form_cannot_reuse_the_same_storage_key(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _register_form("lead.v1")
-    _register_form("lead-v1", name="second-form")
+    from maverick_dashboard import event_triggers_store
+
+    with pytest.raises(event_triggers_store.FormTriggerConflict):
+        _register_form("lead-v1", name="second-form")
     client = _client()
-    assert client.post("/form/lead.v1", json={"name": "first"}).status_code == 404
+    assert client.post("/form/lead.v1", json={"name": "first"}).status_code == 201
     assert client.post("/form/lead-v1", json={"name": "second"}).status_code == 404
-    assert not list(tmp_path.rglob("*.ndjson"))
+    assert len(list(tmp_path.rglob("*.ndjson"))) == 1
 
 
 def test_oversized_multipart_is_rejected_before_parsing(monkeypatch, tmp_path):

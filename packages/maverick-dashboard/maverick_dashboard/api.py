@@ -10736,12 +10736,24 @@ def _owned_event_triggers(request: Request) -> list[dict]:
 @router.get("/event-triggers")
 async def list_event_triggers_endpoint(request: Request) -> dict:
     """Registered polled event triggers (owner-scoped) + the available sources."""
+    from maverick import form_store
     from maverick.automation_events import available_sources
     from maverick.automation_events import enabled as _ev_enabled
 
+    from maverick_dashboard import event_triggers_store
+
     triggers = _owned_event_triggers(request)
+    rows = []
+    for trigger in triggers:
+        row = _event_trigger_out(trigger).model_dump()
+        if trigger.get("source") == "form":
+            try:
+                row["pending_submissions"] = event_triggers_store.pending_form_submissions(trigger)
+            except form_store.FormStoreUnavailable:
+                row["pending_submissions"] = None
+        rows.append(row)
     return {
-        "triggers": [_event_trigger_out(t).model_dump() for t in triggers],
+        "triggers": rows,
         "sources": available_sources(),
         "enabled": _ev_enabled(),
     }
@@ -10749,6 +10761,8 @@ async def list_event_triggers_endpoint(request: Request) -> dict:
 
 @router.post("/event-triggers", response_model=EventTriggerOut, status_code=201)
 def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
+    from maverick import form_store
+
     require_permission(request, "operate")
     _require_event_triggers()
     cfg = _govern_event_source_config(request, payload.source, payload.config)
@@ -10849,6 +10863,18 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
             interval_seconds=payload.interval_seconds,
             tenant=tenant,
         )  # bind OAuth vault reads to this tenant
+    except event_triggers_store.FormTriggerPending as e:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"This form has {e.count} submission(s) still waiting. "
+                    "Choose Check now before changing this automation."),
+        ) from e
+    except event_triggers_store.FormTriggerConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except form_store.FormStoreUnavailable as e:
+        raise HTTPException(
+            status_code=503, detail="This form's pending submissions cannot be checked right now."
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _event_trigger_out(rec)
@@ -10858,15 +10884,28 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
 def delete_event_trigger_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "operate")
     _require_event_triggers()
+    from maverick import form_store
     from maverick.paths import current_tenant_id
 
     from maverick_dashboard import event_triggers_store
 
-    if not event_triggers_store.delete_trigger(
-        name,
-        owner=goal_owner_filter(request),
-        tenant=current_tenant_id() or "",
-    ):
+    try:
+        deleted = event_triggers_store.delete_trigger(
+            name,
+            owner=goal_owner_filter(request),
+            tenant=current_tenant_id() or "",
+        )
+    except event_triggers_store.FormTriggerPending as e:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"This form has {e.count} submission(s) still waiting. "
+                    "Choose Check now before deleting this automation."),
+        ) from e
+    except form_store.FormStoreUnavailable as e:
+        raise HTTPException(
+            status_code=503, detail="This form's pending submissions cannot be checked right now."
+        ) from e
+    if not deleted:
         raise HTTPException(status_code=404, detail="no event trigger with that name")
     return {"deleted": name}
 

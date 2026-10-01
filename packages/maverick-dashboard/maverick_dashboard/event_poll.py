@@ -207,6 +207,10 @@ def _fire_template(world, trig, tpl, events, owner, fire, summary, durable=False
             title, description = tpl.render_for(owner, **params)
         except ValueError as e:         # a required param the event didn't supply
             detail = _safe_error(e, fallback="template parameters are invalid")
+            if trig.get("source") == "form":
+                # A public caller was already told this submission was accepted.
+                # Keep its row pending rather than silently retire it.
+                raise RuntimeError(f"form submission needs attention: {detail}") from e
             summary["notes"].append(f"skipped an event: {detail}")
             trigger_events_store.record(
                 name,
@@ -317,6 +321,15 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary, durable=False) -
             )
         if stale:
             summary["notes"].append("flow unavailable: binding is stale")
+            if trig.get("source") == "form":
+                # An accepted public submission must remain attached to this
+                # generation until a durable delivery or explicit disposition.
+                # Rebind/delete guard sees the unchanged cursor and blocks.
+                trigger_events_store.record(
+                    name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE,
+                    note="form submissions are waiting for their original flow",
+                )
+                return False
             # A deleted/recreated target is not the target that was approved at
             # trigger creation. Advance past this batch so an ABA replacement
             # cannot accumulate an unbounded replay backlog.
@@ -343,6 +356,12 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary, durable=False) -
     except ValueError as e:
         detail = _safe_error(e, fallback="template unavailable")
         summary["notes"].append(f"template unavailable: {detail}")
+        if trig.get("source") == "form":
+            trigger_events_store.record(
+                name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE,
+                note="form submissions are waiting for their original workflow",
+            )
+            return False
         _publish_cursor(trig, res.cursor, res.cursor_format)
         trigger_events_store.record(
             name,

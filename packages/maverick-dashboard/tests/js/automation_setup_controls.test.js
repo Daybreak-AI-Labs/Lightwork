@@ -101,6 +101,28 @@ test("a form source gets its link name from the automation name", async () => {
   assert.equal(body.config.token, "vendor-intake-form");
 });
 
+test("form automations show pending and unavailable submission states", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.loadRuns = () => {};
+  ui.context.fetch = async url => {
+    if (url === "/api/v1/event-triggers") return ui.reply({
+      sources: ["form"], triggers: [
+        { name: "pending", source: "form", flow: "intake", cursor: "0", pending_submissions: 2 },
+        { name: "unknown", source: "form", flow: "intake", cursor: "0", pending_submissions: null }
+      ]
+    });
+    if (url.endsWith("/history?limit=500")) return ui.reply({ history: [] });
+    if (url.endsWith("/outcomes")) return ui.reply({ outcomes: {} });
+    throw new Error("Unexpected request " + url);
+  };
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers()"),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  await ui.context.loadEventTriggers();
+  const entries = ui.get("auto-event-list").children;
+  assert.match(entries[0].textContent, /2 submissions are waiting.*Check now/);
+  assert.match(entries[1].textContent, /Submission status is unavailable.*Changes are paused/);
+});
+
 test("catalog picker offers only published flows and retains exact template parameter names", async () => {
   const ui = eventFixture(); await settle();
   assert.deepEqual(ui.get("auto-event-template").children.map(option => option.value), ["", "triage"]);
@@ -134,6 +156,17 @@ test("failed check never claims the source was checked and restores the action",
   ui.context.fetch = async () => ({ ok: false, json: async () => ({ detail: "Access denied" }) });
   const button = ui.get("auto-event-poll"); await button.listeners.click.call(button);
   assert.match(ui.get("auto-event-msg").textContent, /Could not check for new items/); assert.equal(button.disabled, false);
+});
+
+test("a check with accepted work still pending does not claim completion", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.fetch = async () => ui.reply({ polled: 1, triggers: [{
+    name: "intake", new_events: 1, fired: [], fired_flows: [],
+    notes: ["flow unavailable: binding is stale"], poll_error: false
+  }] });
+  const button = ui.get("auto-event-poll"); await button.listeners.click.call(button);
+  assert.match(ui.get("auto-event-msg").textContent, /Some submissions are still waiting/);
+  assert.equal(button.disabled, false);
 });
 
 function loadOAuth(ui) {

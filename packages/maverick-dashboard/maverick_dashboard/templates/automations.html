@@ -870,6 +870,14 @@
         main.appendChild(el('div', 'mv-row__sub', (SOURCE_LABELS[t.source] || mvHuman(t.source)) + ' · runs ' + mvHuman(t.template || t.flow)
           + ' · ' + everyText(t.interval_seconds)
           + (t.cursor ? '' : ' · not checked yet')));
+        if (t.source === 'form') {
+          var pending = t.pending_submissions;
+          main.appendChild(el('div', 'mv-row__sub', pending === null || pending === undefined
+            ? 'Submission status is unavailable. Changes are paused until Lightwork can check it.'
+            : pending > 0
+              ? pending + (pending === 1 ? ' submission is' : ' submissions are') + ' waiting. Choose Check now before changing or deleting this automation.'
+              : 'All received submissions have been checked.'));
+        }
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
         var hist = el('div', 'auto__runs'); main.appendChild(hist); renderEventHistory(histByName[t.name] || [], hist);
         var outc = el('div', 'auto__runs'); main.appendChild(outc); renderEventOutcomes(outByName[t.name] || {}, outc);
@@ -961,7 +969,10 @@
         var out = await response.json().catch(function () { return null; });
         if (!out || !Array.isArray(out.triggers) || typeof out.polled !== 'number') { evMsg.textContent = 'The check could not be confirmed. Try again.'; return; }
         var fired = out.triggers.reduce(function (a, t) { return a + (t.fired || []).length + (t.fired_flows || []).length; }, 0);
-        evMsg.textContent = 'Checked ' + out.polled + ' source' + (out.polled === 1 ? '' : 's') + ' — ' + fired + ' run' + (fired === 1 ? '' : 's') + ' started.';
+        var needsAttention = out.triggers.some(function (t) { return t.poll_error || ((t.notes || []).length && t.new_events > (t.fired || []).length + (t.fired_flows || []).length); });
+        evMsg.textContent = needsAttention
+          ? 'Some submissions are still waiting. Review the automation below before changing it.'
+          : 'Checked ' + out.polled + ' source' + (out.polled === 1 ? '' : 's') + ' — ' + fired + ' run' + (fired === 1 ? '' : 's') + ' started.';
         loadEventTriggers();
       } catch (e) { evMsg.textContent = plainError(e, 'check for new items'); }
       finally { this.disabled = false; }

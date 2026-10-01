@@ -35,6 +35,18 @@ _LOCK = threading.Lock()
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 
 
+class FormTriggerPending(RuntimeError):
+    """Changing this binding would redirect accepted form submissions."""
+
+    def __init__(self, count: int) -> None:
+        self.count = count
+        super().__init__(f"{count} form submissions are waiting to be checked")
+
+
+class FormTriggerConflict(RuntimeError):
+    """Another active public form already owns this link or storage key."""
+
+
 def _locked():
     from contextlib import ExitStack
 
@@ -43,6 +55,11 @@ def _locked():
         stack.enter_context(_LOCK)
         stack.enter_context(cross_process_lock(_path(), strict=True))
         return stack.pop_all()
+
+
+def registry_lock():
+    """Serialize a public form append with trigger edits across processes."""
+    return _locked()
 
 
 def _tomllib():
@@ -181,6 +198,27 @@ def _write(triggers: list[dict]) -> None:
     atomic_write_text(_path(), _dump(triggers))
 
 
+def pending_form_submissions(trigger: dict) -> int:
+    """Count unacknowledged rows for one form, refusing a damaged cursor/store."""
+    if trigger.get("source") != "form":
+        return 0
+    from maverick import form_store
+    from maverick.automation_events import EventSourceError, _decode_cursor
+    from maverick.paths import reset_tenant, set_tenant
+
+    scope = set_tenant(str(trigger.get("tenant") or "") or None)
+    try:
+        cursor = str(trigger.get("cursor") or "0")
+        raw = _decode_cursor(cursor, "form", int(trigger.get("cursor_format") or 0))
+        if not isinstance(raw, str):
+            raise form_store.FormStoreUnavailable("form cursor is unavailable")
+        return form_store.pending(str((trigger.get("config") or {}).get("token") or ""), raw)
+    except EventSourceError as exc:
+        raise form_store.FormStoreUnavailable("form cursor is unavailable") from exc
+    finally:
+        reset_tenant(scope)
+
+
 def set_trigger(name: str, template: str, source: str, *, config: dict | None = None,
                 params: dict | None = None, owner: str = "", cursor: str = "",
                 interval_seconds: int = 0, tenant: str = "", flow: str = "",
@@ -243,8 +281,13 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             # current high-water mark now, so a submission before the first
             # scheduled poll is new work rather than a discarded baseline.
             from maverick import form_store
+            from maverick.paths import reset_tenant, set_tenant
 
-            bound_cursor = form_store.since(str((config or {}).get("token") or ""), "")[1]
+            scope = set_tenant(tenant or None)
+            try:
+                bound_cursor = form_store.since(str((config or {}).get("token") or ""), "")[1]
+            finally:
+                reset_tenant(scope)
         rec = {
             "name": slug,
             "template": str(template),
@@ -268,6 +311,24 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             "interval_seconds": int(interval_seconds),
             "created": (prior["created"] if prior else time.time()),
         }
+        if str(source) == "form":
+            from maverick import form_store
+
+            new_key = form_store.storage_key((config or {}).get("token"))
+            if any(
+                t is not prior and t.get("source") == "form"
+                and str(t.get("tenant") or "") == tenant
+                and form_store.storage_key((t.get("config") or {}).get("token")) == new_key
+                for t in existing
+            ):
+                raise FormTriggerConflict("This form link is already used by another automation.")
+        if prior is not None and prior.get("source") == "form":
+            from .event_poll import _trigger_key
+
+            if _trigger_key(prior) != _trigger_key(rec):
+                waiting = pending_form_submissions(prior)
+                if waiting:
+                    raise FormTriggerPending(waiting)
         kept.append(rec)
         _write(kept)
     return rec
@@ -321,5 +382,9 @@ def delete_trigger(
         match = matches[0]
         if owner is not None and match.get("owner", "") != owner:
             return False
+        if match.get("source") == "form":
+            waiting = pending_form_submissions(match)
+            if waiting:
+                raise FormTriggerPending(waiting)
         _write([t for t in triggers if t is not match])
     return True

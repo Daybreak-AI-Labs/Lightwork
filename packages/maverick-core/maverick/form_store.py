@@ -28,6 +28,10 @@ class FormStoreFull(RuntimeError):
     """The form cannot accept another submission without losing existing data."""
 
 
+class FormStoreUnavailable(RuntimeError):
+    """Pending submissions cannot be established safely from the stored file."""
+
+
 def valid_token(token: str) -> bool:
     return isinstance(token, str) and bool(_TOKEN_RE.fullmatch(token))
 
@@ -101,6 +105,48 @@ def _state(p) -> tuple[int, int]:
     return count, highest
 
 
+def pending(token: str, cursor: str) -> int:
+    """Count accepted submissions beyond a trigger's acknowledged cursor.
+
+    Unlike the best-effort source poll, this admission guard fails closed on an
+    unreadable or malformed store. Callers must hold the event-trigger registry
+    lock while checking and changing a public form's binding.
+    """
+    if not isinstance(cursor, str) or not cursor.isdecimal():
+        raise FormStoreUnavailable("form cursor is unavailable")
+    after = int(cursor)
+    p = _path(token)
+    if not p.exists():
+        if after:
+            raise FormStoreUnavailable("form submissions are unavailable")
+        return 0
+    from .file_lock import cross_process_lock
+
+    try:
+        with cross_process_lock(p, strict=True):
+            if not p.exists():
+                if after:
+                    raise FormStoreUnavailable("form submissions are unavailable")
+                return 0
+            count = highest = 0
+            with open(p, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                        seq = row["seq"]
+                    except (ValueError, TypeError, KeyError) as exc:
+                        raise FormStoreUnavailable("form submissions are damaged") from exc
+                    if type(seq) is not int or seq <= highest:
+                        raise FormStoreUnavailable("form submission sequence is damaged")
+                    highest = seq
+                    count += seq > after
+            if after > highest:
+                raise FormStoreUnavailable("form cursor is ahead of submissions")
+            return count
+    except (OSError, UnicodeError) as exc:
+        raise FormStoreUnavailable("form submissions are unavailable") from exc
+
+
 def since(token: str, cursor: str, *, limit: int | None = None) -> tuple[list[dict], str]:
     """Submissions with ``seq`` greater than ``cursor`` (empty cursor = baseline:
     fire nothing, just record the high-water mark). Returns ``(events, cursor)``
@@ -152,4 +198,5 @@ def since(token: str, cursor: str, *, limit: int | None = None) -> tuple[list[di
     return events, str(fresh[-1].get("seq") or highest)
 
 
-__all__ = ["FormStoreFull", "append", "since", "storage_key", "valid_token"]
+__all__ = ["FormStoreFull", "FormStoreUnavailable", "append", "pending", "since",
+           "storage_key", "valid_token"]

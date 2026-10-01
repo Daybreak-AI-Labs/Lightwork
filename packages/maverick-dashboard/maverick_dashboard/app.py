@@ -10417,7 +10417,7 @@ def _registered_form_trigger(token: str) -> dict | None:
     ]
     tenants = {str(trigger.get("tenant") or "") for trigger in matches}
     floor = implicit_tenant_id()
-    if len(tenants) != 1 or (floor and tenants != {floor}):
+    if len(matches) != 1 or len(tenants) != 1 or (floor and tenants != {floor}):
         return None
     # Older releases allowed punctuation and mapped it to a filename. Keep
     # those links working, but never let two distinct registered tokens share
@@ -10438,48 +10438,57 @@ class _FormTargetUnavailable(RuntimeError):
 
 
 def _append_registered_form(trigger: dict, token: str, fields: dict) -> int:
-    """Check the current target under its tenant scope before accepting data."""
+    """Check and append under the same registry lock as edits and deletion."""
     from maverick import form_store
     from maverick.flow import store as flow_store
 
-    from .event_poll import _require_stored_event_source_authority, event_source_authority
+    from . import event_triggers_store
+    from .event_poll import (
+        _require_stored_event_source_authority,
+        _trigger_key,
+        event_source_authority,
+    )
     from .triggers_store import bound_template
 
-    flow_id = str(trigger.get("flow") or "")
-    template_id = str(trigger.get("template") or "")
-    if bool(flow_id) == bool(template_id):
-        raise _FormTargetUnavailable("form trigger has no single target")
-    with _stored_trigger_tenant(trigger):
-        owner = str(trigger.get("owner") or "").strip()
-        try:
-            stored_automation_identity(owner)
-            _require_stored_event_source_authority(
-                owner, event_source_authority("form", trigger.get("config") or {}),
-            )
-        except AutomationAuthorizationError as exc:
-            raise HTTPException(
-                status_code=503, detail="This form is not accepting submissions."
-            ) from exc
-        if flow_id:
-            release_id = str(trigger.get("flow_revision") or "")
-            if not release_id:
-                raise _FormTargetUnavailable("form trigger has no bound release")
+    with event_triggers_store.registry_lock():
+        current = _registered_form_trigger(token)
+        if current is None or _trigger_key(current) != _trigger_key(trigger):
+            raise _FormTargetUnavailable("form binding changed during submission")
+        flow_id = str(current.get("flow") or "")
+        template_id = str(current.get("template") or "")
+        if bool(flow_id) == bool(template_id):
+            raise _FormTargetUnavailable("form trigger has no single target")
+        with _stored_trigger_tenant(current):
+            owner = str(current.get("owner") or "").strip()
             try:
-                # This is the same release authority used for durable flow-run
-                # reservation. An unpublish/re-publish cannot race the append.
-                with flow_store.published_flow_guard(
-                    flow_id, expected_release_id=release_id,
-                ) as (flow, _release):
-                    if flow.owner != str(trigger.get("flow_owner") or ""):
-                        raise _FormTargetUnavailable("form trigger owner changed")
-                    return form_store.append(token, fields)
-            except flow_store.FlowSnapshotError as exc:
-                raise _FormTargetUnavailable("form release is unavailable") from exc
-        try:
-            bound_template(trigger)
-        except ValueError as exc:
-            raise _FormTargetUnavailable("form template is unavailable") from exc
-        return form_store.append(token, fields)
+                stored_automation_identity(owner)
+                _require_stored_event_source_authority(
+                    owner, event_source_authority("form", current.get("config") or {}),
+                )
+            except AutomationAuthorizationError as exc:
+                raise HTTPException(
+                    status_code=503, detail="This form is not accepting submissions."
+                ) from exc
+            if flow_id:
+                release_id = str(current.get("flow_revision") or "")
+                if not release_id:
+                    raise _FormTargetUnavailable("form trigger has no bound release")
+                try:
+                    # This is the same release authority used for durable flow-run
+                    # reservation. An unpublish/re-publish cannot race the append.
+                    with flow_store.published_flow_guard(
+                        flow_id, expected_release_id=release_id,
+                    ) as (flow, _release):
+                        if flow.owner != str(current.get("flow_owner") or ""):
+                            raise _FormTargetUnavailable("form trigger owner changed")
+                        return form_store.append(token, fields)
+                except flow_store.FlowSnapshotError as exc:
+                    raise _FormTargetUnavailable("form release is unavailable") from exc
+            try:
+                bound_template(current)
+            except ValueError as exc:
+                raise _FormTargetUnavailable("form template is unavailable") from exc
+            return form_store.append(token, fields)
 
 
 @app.post("/form/{token}")
