@@ -5,13 +5,20 @@
   var copy = document.getElementById('share-copy'), status = document.getElementById('share-msg'), list = document.getElementById('share-list');
   var review = document.createElement('section'); review.hidden = true; review.setAttribute('aria-label', 'Review public link'); wrap.append(review);
   var preview = null, denied = false, generation = 0, requests = new Set();
+  function syncCreate() {
+    if (!create) return;
+    var panel = document.getElementById('answer-panel');
+    var ready = panel && panel.dataset.status === 'done' && panel.querySelector('#saved-answer-source');
+    create.hidden = !ready;
+    create.disabled = denied || !ready;
+  }
   function accessError() {
     var error = new Error('Your access changed. Reload and sign in before managing this task.'); error.status = 403; return error;
   }
   function clearPrivate() {
     denied = true; generation++; requests.forEach(function (controller) { controller.abort(); });
     list.replaceChildren(); review.replaceChildren(); review.hidden = true; preview = null; output.value = ''; output.style.display = 'none'; copy.hidden = true;
-    if (create) create.disabled = true; status.textContent = accessError().message;
+    if (create) { create.hidden = true; create.disabled = true; } status.textContent = accessError().message;
   }
   async function request(path, options) {
     if (denied) throw accessError();
@@ -77,7 +84,7 @@
       });
       review.append(labelText, label, lifetimeText, lifetime, confirm, cancel); review.hidden = false; label.focus(); status.textContent = 'No link has been created. Review the content, audience and lifetime above.';
     } catch (error) { window.mvRenderError(status, error, 'review this public link'); }
-    finally { create.disabled = denied; }
+    finally { syncCreate(); }
   });
   copy.addEventListener('click', async function () {
     if (!output.value) return;
@@ -110,8 +117,15 @@
     refresh().catch(function () { if (!denied) status.textContent = 'Link status could not be loaded. Reload to check expiry and revocation before creating another.'; });
   }
   document.addEventListener('lightwork:task-access-lost', clearPrivate);
+  document.addEventListener('lightwork:task-projection', function (event) {
+    if (create && event.detail && event.detail.status && event.detail.status !== 'done') {
+      create.hidden = true; create.disabled = true;
+    }
+  });
+  document.addEventListener('lightwork:answer-panel-updated', syncCreate);
   document.addEventListener('visibilitychange', refreshVisible);
   window.addEventListener('focus', refreshVisible);
   window.addEventListener('pagehide', clearPrivate);
+  syncCreate();
   refreshVisible();
 }());

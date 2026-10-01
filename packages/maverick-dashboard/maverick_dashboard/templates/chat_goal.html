@@ -454,7 +454,7 @@
       {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">{{ ui('Review task files') }}</a>{% endif %}
       <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">{{ ui('Download or share full history') }}</a>
       {% if can_operate %}
-      {% if goal.status == 'done' and goal.result %}<button type="button" id="share-create" class="btn btn--ghost">{{ ui('Review share link') }}</button>{% endif %}
+      <button type="button" id="share-create" class="btn btn--ghost"{% if goal.status != 'done' or not goal.result %} hidden disabled{% endif %}>{{ ui('Review share link') }}</button>
       <input type="text" id="share-url" class="input" readonly aria-label="{{ ut('Share link') }}"
              style="display: none; max-width: 28rem;" onclick="this.select()">
       <button type="button" id="share-copy" class="btn btn--ghost" hidden>{{ ui('Copy link') }}</button>

@@ -162,7 +162,7 @@ test('unavailable clipboard exposes a readable selected answer for manual copyin
 });
 
 function shareHarness({localOnly = false, canCreate = true, existing = false} = {}) {
-  const dom = new JSDOM(`<body><div class="goal-share" data-goal="7" data-can-operate="1">
+  const dom = new JSDOM(`<body><section id="answer-panel" data-status="done"><textarea id="saved-answer-source">Reviewed saved answer</textarea></section><div class="goal-share" data-goal="7" data-can-operate="1">
     ${canCreate ? '<button id="share-create">Review share link</button>' : ''}
     <input id="share-url" readonly style="display:none"><button id="share-copy" hidden>Copy link</button>
     <span id="share-msg"></span><ul id="share-list"></ul></div></body>`,

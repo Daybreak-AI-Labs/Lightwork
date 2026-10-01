@@ -32,7 +32,10 @@ test('a saved answer exposes the product and its print, copy, download and share
 
   await page.getByRole('button', {name: 'Share', exact: true}).click();
   await expect(page.locator('#share-panel')).toHaveAttribute('open', '');
-  await page.getByRole('button', {name: 'Create share link'}).click();
+  await page.getByRole('button', {name: 'Review share link'}).click();
+  await expect(page.getByRole('region', {name: 'Review public link'})).toContainText('Review before creating a public link');
+  await expect(page.locator('#share-msg')).toContainText('No link has been created');
+  await page.getByRole('button', {name: 'Create this public link'}).click();
   const link = page.locator('#share-url');
   await expect(link).toBeVisible();
   await page.getByRole('button', {name: 'Copy link'}).click();
@@ -89,7 +92,9 @@ test('message actions arrive after live completion without losing a reply or pri
   await actions.getByRole('link', {name: 'Download answer'}).click();
   expect((await downloaded).suggestedFilename()).toBe(`lightwork-answer-${fixture.goal_id}.md`);
   await actions.getByRole('button', {name: 'Share', exact: true}).click();
-  await page.getByRole('button', {name: 'Create share link'}).click();
+  await page.getByRole('button', {name: 'Review share link'}).click();
+  await expect(page.getByRole('region', {name: 'Review public link'})).toContainText('Review before creating a public link');
+  await page.getByRole('button', {name: 'Create this public link'}).click();
   await expect(page.locator('#share-url')).toBeVisible();
   await expect(page.locator('#qa-thread')).toContainText('Use Friday.');
   await page.emulateMedia({media: 'print'});
@@ -101,36 +106,23 @@ test('a failed action refresh gives a working retry and preserves the next reply
   const fixture = await (await request.post('/__browser_fixture/chat')).json();
   await page.goto(`/chat/goal/${fixture.goal_id}`);
   await page.locator('#answer-input').fill('Preserve my next message through a connection failure.');
-  await page.route(`**/chat/goal/${fixture.goal_id}`, route => route.fulfill({status: 503, body: 'Synthetic temporary failure'}));
+  await page.route(`**/chat/goal/${fixture.goal_id}/answer-panel`, route => route.fulfill({status: 503, body: 'Synthetic temporary failure'}));
   await request.post(`/__browser_fixture/chat/${fixture.goal_id}/finish`);
-  await expect(page.locator('#answer-refresh-retry')).toBeVisible();
+  await expect(page.locator('#answer-refresh')).toBeVisible();
   await expect(page.locator('#answer-input')).toHaveValue('Preserve my next message through a connection failure.');
-  await page.unroute(`**/chat/goal/${fixture.goal_id}`);
-  await page.locator('#answer-refresh-retry').click();
+  await page.unroute(`**/chat/goal/${fixture.goal_id}/answer-panel`);
+  await page.locator('#answer-refresh').click();
   await expect(page.getByRole('group', {name: 'Answer actions', exact: true})).toBeVisible();
   await expect(page.locator('#answer-input')).toHaveValue('Preserve my next message through a connection failure.');
 });
 
 test('printing wraps wide tables and long code instead of clipping the answer', async ({page, request}, info) => {
-  const fixture = await (await request.get('/__browser_fixture')).json();
-  await page.goto(`/chat/goal/${fixture.review_goal}`);
-  await page.evaluate(() => {
-    const answer = document.getElementById('result');
-    const table = document.createElement('table');
-    table.id = 'wide-print-table';
-    const row = table.insertRow();
-    for (let i = 0; i < 8; i++) row.insertCell().textContent = 'LongUnbrokenCell'.repeat(12);
-    const code = document.createElement('pre');
-    code.id = 'wide-print-code'; code.textContent = 'LongUnbrokenCode'.repeat(120);
-    answer.append(table, code);
-    for (let i = 0; i < 80; i++) {
-      const paragraph = document.createElement('p');
-      paragraph.textContent = `Printed paragraph ${i + 1}: all content must remain available across pages.`;
-      answer.appendChild(paragraph);
-    }
-  });
+  const fixture = await (await request.post('/__browser_fixture/print')).json();
+  await page.goto(`/chat/goal/${fixture.goal_id}`);
+  await expect(page.locator('#result table')).toBeVisible();
+  await expect(page.locator('#result pre')).toBeVisible();
   await page.emulateMedia({media: 'print'});
-  for (const selector of ['#wide-print-table', '#wide-print-code']) {
+  for (const selector of ['#result table', '#result pre']) {
     const size = await page.locator(selector).evaluate(node => ({width: node.clientWidth, content: node.scrollWidth}));
     expect(size.content, selector).toBeLessThanOrEqual(size.width + 1);
   }
@@ -141,7 +133,12 @@ test('printing wraps wide tables and long code instead of clipping the answer', 
 
 test('a customer can revoke an existing share while the answer is being replaced', async ({page, request}) => {
   const fixture = await (await request.post('/__browser_fixture/chat')).json();
-  const shareResponse = await request.post(`/api/v1/goals/${fixture.root_id}/share`);
+  const previewResponse = await request.post(`/api/v1/goals/${fixture.root_id}/share/preview`, {data: {}});
+  expect(previewResponse.status()).toBe(200);
+  const preview = await previewResponse.json();
+  const shareResponse = await request.post(`/api/v1/goals/${fixture.root_id}/share`, {data: {
+    confirm: true, source_sha256: preview.source.sha256, lifetime_seconds: 86400, label: 'Browser acceptance link'
+  }});
   expect(shareResponse.status()).toBe(201);
   const share = await shareResponse.json();
   await request.post(`/__browser_fixture/chat/${fixture.root_id}/restart`);
@@ -150,7 +147,9 @@ test('a customer can revoke an existing share while the answer is being replaced
   await expect(page.getByRole('button', {name: 'Create share link'})).toHaveCount(0);
   await page.getByRole('button', {name: 'Revoke', exact: true}).click();
   await page.getByRole('button', {name: 'Revoke link', exact: true}).click();
-  await expect(page.locator('#share-list li')).toHaveCount(0);
+  await expect(page.locator('#share-list li')).toHaveCount(1);
+  await expect(page.locator('#share-list li')).toContainText('revoked');
+  await expect(page.locator('#share-list .share-revoke')).toHaveCount(0);
   await request.post(`/__browser_fixture/chat/${fixture.root_id}/finish`);
   expect((await request.get(share.url)).status()).toBe(404);
 });
