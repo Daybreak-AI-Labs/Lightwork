@@ -1188,7 +1188,7 @@ def atomic_read_text(
     retry_seconds: float = 1.0,
 ) -> str:
     """Read an atomically-published text file across Windows rename races."""
-    path = Path(path)
+    path = Path(_windows_extended_path(path) if os.name == "nt" else path)
     return _read_with_windows_retry(
         lambda: path.read_text(encoding=encoding),
         retry_seconds=retry_seconds,
@@ -1201,7 +1201,7 @@ def atomic_read_bytes(
     retry_seconds: float = 1.0,
 ) -> bytes:
     """Read an atomically-published binary file across Windows rename races."""
-    path = Path(path)
+    path = Path(_windows_extended_path(path) if os.name == "nt" else path)
     return _read_with_windows_retry(
         path.read_bytes,
         retry_seconds=retry_seconds,
