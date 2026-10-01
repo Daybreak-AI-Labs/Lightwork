@@ -25,8 +25,8 @@ the same byte. The [deterministic test repair](flow-payload-fault-injection-57a0
 changes that byte with XOR and retains the original denial assertion; production
 code is unchanged. All 18 cases in the complete payload module pass in each
 posture at frozen `2decc28`. Fresh full qualification on that corrected source
-remains pending. Both Python 3.10/3.11
-environments now pass [exact final08 installation and native-access checks](compatibility-final08-installation-57a027a.md),
+is running. Both Python 3.10/3.11
+environments now pass [exact final09 installation checks](compatibility-final09-installation-2decc28.md),
 with full compatibility runtime still pending.
 
 The complete browser cohort passes **108 distinct cases** across default/setup
