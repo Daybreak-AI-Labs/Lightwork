@@ -91,6 +91,10 @@ _SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | frozenset(
         "/gateway/v1/chat/completions",
         "/gateway/v1/messages",
         "/gateway/v1/otel",
+        # A consent platform pushes consent changes with an HMAC signature
+        # checked inside maverick.consent_registry; it never holds a dashboard
+        # credential. Keep in step with app._AUTH_EXEMPT.
+        "/consent/webhook",
     }
 ) | SELF_AUTH_WEBHOOK_PATHS
 

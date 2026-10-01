@@ -932,12 +932,17 @@
     // their server capability is disabled. Templates expose only the final
     // boolean; no client value can enable a server-side feature.
     (function () {
+      // A module-gate banner's Turn on button is the way out of a switched-off
+      // page; disabling it (or marking an ancestor aria-disabled, which reads
+      // as disabling everything inside) left an administrator no way to start.
+      function markOff(container) {
+        if (!container.querySelector('[data-module-gate]')) container.setAttribute('aria-disabled', 'true');
+      }
       document.querySelectorAll('[data-feature-enabled="false"]').forEach(function (root) {
-        root.setAttribute('aria-disabled', 'true');
-        root.querySelectorAll('form, fieldset').forEach(function (container) {
-          container.setAttribute('aria-disabled', 'true');
-        });
+        markOff(root);
+        root.querySelectorAll('form, fieldset').forEach(markOff);
         root.querySelectorAll('button, input, select, textarea').forEach(function (control) {
+          if (control.closest('[data-module-gate]')) return;
           control.disabled = true;
           if (!control.title) {
             control.title = 'This feature is turned off. Ask your administrator to enable it.';

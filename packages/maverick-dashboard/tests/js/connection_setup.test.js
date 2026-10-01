@@ -164,3 +164,20 @@ test('only installation administrators see the turn-off controls, and desktop re
   const call=h.calls.find(call=>call.url.endsWith('/desktop-return/disable'));assert.equal(call.body.confirm,true);assert.equal(h.calls.some(call=>call.url.endsWith('/connection-setup/disable')),false);
   assert.match(h.el('status').textContent,/Accounts already connected keep working/);
 });
+
+test('without a named sign-in the panel says so plainly and does not report lost access',async t=>{
+  const message='Connecting an account by signing in to it needs a named Lightwork sign-in, so each connected account belongs to a person. Connections that use a key work without it. You can set up named sign-in now.';
+  const h=await fixture(t,{data:{account_sign_in_available:false,can_set_up_sign_in:true,message}});
+  assert.equal(h.el('status').textContent,message);
+  assert.doesNotMatch(h.el('status').textContent,/Sign in again|access changed/i);
+  assert.equal(h.el('options').hidden,true);assert.equal(h.el('enable').hidden,true);assert.equal(h.el('refresh').hidden,true);
+  assert.equal(h.el('signin-link').hidden,false);assert.equal(h.el('signin-link').getAttribute('href'),'/start');
+  // The page treats lost access as a lock; this is not that: nothing cleared, no further requests.
+  assert.equal(h.w.document.getElementById('connection-setup').dataset.accessDenied,undefined);
+  assert.equal(h.calls.length,1);
+});
+test('the set-up link appears only where named sign-in can actually be set up from this app',async t=>{
+  const h=await fixture(t,{data:{account_sign_in_available:false,can_set_up_sign_in:false,message:'Connecting an account by signing in to it needs a named Lightwork sign-in. Ask whoever manages Lightwork sign-in to set it up.'}});
+  assert.equal(h.el('signin-link').hidden,true);assert.match(h.el('status').textContent,/Ask whoever manages/);
+  const normal=await fixture(t);assert.equal(normal.el('signin-link').hidden,true);
+});

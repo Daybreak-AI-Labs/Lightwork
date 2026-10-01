@@ -1046,8 +1046,13 @@ def enforce_page_visibility(
     """
     if request is None:  # WebSocket connection -- page policy doesn't apply
         return
+    from . import auth as auth_boundary
     from . import ui_visibility
 
+    # A route that carries its own credential (the signed consent webhook) has
+    # no dashboard role to compare against the page policy of its parent page.
+    if auth_boundary._self_authenticated_path(request.url.path):
+        return
     page = ui_visibility.page_for(request.url.path)
     if page is None:
         return
