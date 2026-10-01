@@ -310,14 +310,19 @@ async def webhook_slack_interactions(request: Request) -> JSONResponse:
         slack_bot_token,
     )
 
+    from .approval_decisions import _authority_for
+
     body = await _verified_slack_body(request)
     payload = parse_interaction_body(body)
+    # The linked person needs the operate role, like a dashboard or Teams voter.
+    authorize = _authority_for("slack")
     if payload.get("type") == "view_submission":
         # The typed confirmation for a Critical request: Slack reads the answer
         # from this response (response_action), the card update goes through
         # the response_url kept in the modal.
         outcome = await run_in_threadpool(
-            handle_view_submission, payload, world=_world(), principal_for=_slack_principal_for)
+            handle_view_submission, payload, world=_world(), principal_for=_slack_principal_for,
+            authorize=authorize)
         if outcome and outcome.get("message"):
             await run_in_threadpool(respond, outcome["respond_to"], outcome["message"])
         return JSONResponse((outcome or {}).get("ack") or {})
@@ -326,7 +331,8 @@ async def webhook_slack_interactions(request: Request) -> JSONResponse:
     token = slack_bot_token()
     result = await run_in_threadpool(
         handle_block_action, payload, world=_world(), principal_for=_slack_principal_for,
-        open_view=(lambda trigger, view: open_view(token, trigger, view)) if token else None)
+        open_view=(lambda trigger, view: open_view(token, trigger, view)) if token else None,
+        authorize=authorize)
     if result is None:
         return JSONResponse({})
     # Update the card in place through the payload's response_url; answering the
@@ -344,10 +350,13 @@ async def webhook_slack_commands(request: Request) -> JSONResponse:
     """
     from maverick.slack_interactive import handle_slash_command, parse_form
 
+    from .approval_decisions import _authority_for
+
     body = await _verified_slack_body(request)
     form = parse_form(body)
     result = await run_in_threadpool(
-        handle_slash_command, form, world=_world(), principal_for=_slack_principal_for, ask=None)
+        handle_slash_command, form, world=_world(), principal_for=_slack_principal_for, ask=None,
+        authorize=_authority_for("slack"))
     return JSONResponse(result)
 
 

@@ -200,7 +200,7 @@ def test_block_action_approves_and_rewrites_the_card(tmp_path):
     assert "user:alice" in json.dumps(reply["blocks"])
     again = handle_block_action(_payload(ACTION_APPROVE, value), world=world,
                                 principal_for=lambda uid: "user:alice")
-    assert again["response_type"] == "ephemeral" and "no longer waiting" in again["text"]
+    assert again["response_type"] == "ephemeral" and "already decided" in again["text"]
 
 
 def test_critical_approve_opens_the_typed_confirmation_modal(tmp_path):
@@ -253,7 +253,12 @@ def test_critical_approve_opens_the_typed_confirmation_modal(tmp_path):
 
 def test_decided_card_offers_undo_inside_the_window(tmp_path):
     from maverick.channel_approvals import card_content
-    from maverick.slack_interactive import ACTION_UNDO, decided_blocks, handle_block_action
+    from maverick.slack_interactive import (
+        ACTION_REJECT,
+        ACTION_UNDO,
+        decided_blocks,
+        handle_block_action,
+    )
 
     world = _world(tmp_path)
     aid = _park(world, card=_card())
@@ -265,9 +270,18 @@ def test_decided_card_offers_undo_inside_the_window(tmp_path):
     none = decided_blocks(content, decision="denied", decided_by="user:a", effective=True,
                           status="denied", undo_seconds=0)
     assert none[-1]["type"] == "section"
+    # Nothing was decided yet: the shared undo rule says so plainly.
     reply = handle_block_action(_payload(ACTION_UNDO, f"{aid}:"), world=world,
                                 principal_for=lambda uid: "user:a")
-    assert reply["response_type"] == "ephemeral" and "not available" in reply["text"]
+    assert reply["response_type"] == "ephemeral" and "no decision to undo" in reply["text"]
+    # A real decision can be taken back inside the window, and the card is live again.
+    handle_block_action(_payload(ACTION_REJECT, f"{aid}:"), world=world,
+                        principal_for=lambda uid: "user:a")
+    assert world.get_approval(aid).status == "denied"
+    undone = handle_block_action(_payload(ACTION_UNDO, f"{aid}:"), world=world,
+                                 principal_for=lambda uid: "user:a")
+    assert undone["replace_original"] is True and "waiting for a decision again" in undone["text"]
+    assert world.get_approval(aid).status == "pending"
 
 
 def test_block_action_unlinked_question_and_foreign_actions(tmp_path):
@@ -323,7 +337,11 @@ def test_slash_commands_end_to_end(tmp_path):
     done = run(f"approve #{aid} confirm")["text"]
     assert "approved" in done and f"/lightwork undo {aid}" in done
     assert world.get_approval(aid).status == "approved"
-    assert "not available" in run(f"undo {aid}")["text"]  # undo lands with package B
+    # Undo goes through the kernel's WorldModel.undo_approval_decision: inside
+    # the window the request is waiting again.
+    assert "taken back" in run(f"undo {aid}")["text"]
+    assert world.get_approval(aid).status == "pending"
+    assert "no decision to undo" in run(f"undo {aid}")["text"]
     critical = _park(world, risk="critical", card=_card())
     typed = run(f"approve {critical} confirm")["text"]
     assert "Type APPROVE" in typed and "confirm APPROVE" in typed

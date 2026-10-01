@@ -132,25 +132,9 @@ def test_undo_from_chat_uses_the_shared_undo_and_audits_it(monkeypatch):
     from maverick import audit
     from maverick_dashboard.approval_decisions import ApprovalDecisionRefused, undo_from_channel
     aid, binding = _approval()
-    _decide(approval_id=aid, status="approved", binding=binding)
-    # This branch has no world.undo_approval_decision yet (it lands with the
-    # confirmable-queue work); the chat path refuses plainly instead of
-    # improvising an undo of its own.
-    real_world = _world()
-    if not hasattr(real_world, "undo_approval_decision"):
-        with pytest.raises(ApprovalDecisionRefused, match="isn't available"):
-            undo_from_channel(approval_id=aid, principal="user:alice", channel="teams")
-
-    class _World:
-        """The real world plus the undo contract package B adds."""
-        calls = []
-
-        def __getattr__(self, name):
-            return getattr(real_world, name)
-
-        def undo_approval_decision(self, approval_id, *, undone_by, within_seconds):
-            self.calls.append((approval_id, undone_by, within_seconds))
-            return "undone" if within_seconds > 0 else "too_late"
+    with pytest.raises(ApprovalDecisionRefused, match="no decision to undo"):
+        undo_from_channel(approval_id=aid, principal="user:alice", channel="teams")
+    first = _decide(approval_id=aid, status="approved", binding=binding)
     seen = []
     real = audit.audit_event
 
@@ -158,16 +142,22 @@ def test_undo_from_chat_uses_the_shared_undo_and_audits_it(monkeypatch):
         seen.append(fields)
         return real(kind, **fields)
     monkeypatch.setattr("maverick.audit.audit_event", spy)
+    # The kernel's WorldModel.undo_approval_decision does the work: the request
+    # is pending again and the next decision is a new signed audit round.
     result = undo_from_channel(approval_id=aid, principal="user:alice", channel="teams",
-                               channel_user="aad-1", world=_World())
+                               channel_user="aad-1")
     assert result == {"status": "pending", "previous_status": "approved", "undone_by": "user:alice",
                       "approval_id": aid}
-    assert _World.calls == [(aid, "user:alice", 30.0)]
+    assert _world().approval_state(aid)["status"] == "pending"
     undone = [f for f in seen if f.get("action") == "approval_decision_undone"][-1]
     assert undone["channel"] == "teams" and undone["previously_decided_by"] == "user:alice"
+    assert undone["channel_user"] == "aad-1"
+    second = _decide(approval_id=aid, status="approved", binding=binding)
+    assert second["status"] == "approved" and second["decision_id"] != first["decision_id"]
     monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "0")
     with pytest.raises(ApprovalDecisionRefused, match="Too late"):
-        undo_from_channel(approval_id=aid, principal="user:alice", channel="teams", world=_World())
+        undo_from_channel(approval_id=aid, principal="user:alice", channel="teams")
+    assert _world().approval_state(aid)["status"] == "approved"
 
 
 def test_expired_stale_and_decided_cards_are_refused():

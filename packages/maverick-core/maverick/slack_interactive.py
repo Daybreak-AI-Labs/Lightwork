@@ -76,6 +76,9 @@ _HELP = (
 )
 
 PrincipalResolver = Callable[[str], "str | None"]
+# ``authorize(principal, approval_id)`` -- the host's permission check for a vote
+# (the dashboard passes its ``operate`` role rule); None skips it.
+Authorizer = Callable[[str, int], None]
 
 
 # ----------------------------------------------------------------------------
@@ -378,8 +381,8 @@ def _unlinked_note(user_id: str) -> dict[str, Any]:
 
 
 def _decide(world, *, approval_id: int, decision: str, principal: str,
-            binding: str | None, confirmed: bool,
-            typed: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
+            binding: str | None, confirmed: bool, typed: str | None = None,
+            authorize: Authorizer | None = None) -> tuple[dict[str, Any] | None, str | None]:
     """Run the shared decision; return ``(result, error_text)``."""
     from .channel_approvals import ChannelApprovalRefused, decide_from_channel
 
@@ -387,6 +390,7 @@ def _decide(world, *, approval_id: int, decision: str, principal: str,
         result = decide_from_channel(
             world, approval_id, decision, principal=principal, channel="slack",
             binding=binding, confirmed=confirmed, typed_confirmation=typed,
+            authorize=authorize,
         )
     except ChannelApprovalRefused as exc:
         return None, exc.message
@@ -411,12 +415,14 @@ def _decided_message(world, approval_id: int, *, decision: str, principal: str,
     }
 
 
-def _undo_message(world, approval_id: int, *, principal: str) -> dict[str, Any]:
+def _undo_message(world, approval_id: int, *, principal: str,
+                  authorize: Authorizer | None = None) -> dict[str, Any]:
     """After an undo the card is live again, with its buttons."""
     from .channel_approvals import ChannelApprovalRefused, card_content, undo_decision
 
     try:
-        undo_decision(world, approval_id, undone_by=principal, channel="slack")
+        undo_decision(world, approval_id, undone_by=principal, channel="slack",
+                      authorize=authorize)
     except ChannelApprovalRefused as exc:
         return _ephemeral(exc.message)
     content = card_content(world.get_approval(approval_id))
@@ -429,7 +435,7 @@ def _undo_message(world, approval_id: int, *, principal: str) -> dict[str, Any]:
 
 def handle_block_action(payload: dict[str, Any], *, world, principal_for: PrincipalResolver,
                         open_view: Callable[[str, dict[str, Any]], bool] | None = None,
-                        ) -> dict[str, Any] | None:
+                        authorize: Authorizer | None = None) -> dict[str, Any] | None:
     """Handle one ``block_actions`` payload; return the message to send back.
 
     A returned mapping with ``replace_original: True`` rewrites the card in
@@ -461,7 +467,7 @@ def handle_block_action(payload: dict[str, Any], *, world, principal_for: Princi
             "The requester and Lightwork see it; the request stays waiting until you decide."
         )
     if action["action_id"] == ACTION_UNDO:
-        return _undo_message(world, approval_id, principal=principal)
+        return _undo_message(world, approval_id, principal=principal, authorize=authorize)
     decision = "approved" if action["action_id"] == ACTION_APPROVE else "denied"
     approval = world.get_approval(approval_id)
     if decision == "approved" and approval is not None and approval.status == "pending":
@@ -478,7 +484,8 @@ def handle_block_action(payload: dict[str, Any], *, world, principal_for: Princi
     # The button's confirm dialog is the acknowledgement for High/Critical:
     # Slack only sends this action after the person pressed "Yes" in it.
     result, error = _decide(world, approval_id=approval_id, decision=decision,
-                            principal=principal, binding=binding, confirmed=True)
+                            principal=principal, binding=binding, confirmed=True,
+                            authorize=authorize)
     if error:
         return _ephemeral(error)
     return _decided_message(world, approval_id, decision=decision, principal=principal,
@@ -486,7 +493,8 @@ def handle_block_action(payload: dict[str, Any], *, world, principal_for: Princi
 
 
 def handle_view_submission(payload: dict[str, Any], *, world,
-                           principal_for: PrincipalResolver) -> dict[str, Any] | None:
+                           principal_for: PrincipalResolver,
+                           authorize: Authorizer | None = None) -> dict[str, Any] | None:
     """The typed-confirmation modal was submitted.
 
     Returns ``{"ack": <view response>, "respond_to": url, "message": <update>}``:
@@ -513,7 +521,7 @@ def handle_view_submission(payload: dict[str, Any], *, world,
     typed = str((values.get(CONFIRM_INPUT) or {}).get("value") or "")
     result, error = _decide(world, approval_id=approval_id, decision="approved",
                             principal=principal, binding=meta.get("binding"),
-                            confirmed=True, typed=typed)
+                            confirmed=True, typed=typed, authorize=authorize)
     if error:
         errors["errors"][CONFIRM_BLOCK] = error[:200]
         return {"ack": errors, "respond_to": "", "message": None}
@@ -540,7 +548,8 @@ def _status_text(world, principal: str) -> str:
 
 
 def handle_slash_command(form: dict[str, Any], *, world, principal_for: PrincipalResolver,
-                         ask: Callable[[str, str], str] | None = None) -> dict[str, Any]:
+                         ask: Callable[[str, str], str] | None = None,
+                         authorize: Authorizer | None = None) -> dict[str, Any]:
     """``/lightwork approve|reject|status|help|ask|link`` -> a Slack response."""
     from . import channel_identities
 
@@ -575,7 +584,7 @@ def handle_slash_command(form: dict[str, Any], *, world, principal_for: Principa
     if approval_id is None:
         return _ephemeral(f"Say which request: `/lightwork {verb} <number>`.")
     if verb == "undo":
-        reply = _undo_message(world, approval_id, principal=principal)
+        reply = _undo_message(world, approval_id, principal=principal, authorize=authorize)
         if reply.get("replace_original"):
             return _ephemeral(f"Your decision on request #{approval_id} is taken back; "
                               "it is waiting for a decision again.")
@@ -588,7 +597,8 @@ def handle_slash_command(form: dict[str, Any], *, world, principal_for: Principa
 
         binding = card_content(approval).get("binding")
     result, error = _decide(world, approval_id=approval_id, decision=decision,
-                            principal=principal, binding=binding, confirmed=confirmed, typed=typed)
+                            principal=principal, binding=binding, confirmed=confirmed, typed=typed,
+                            authorize=authorize)
     if error:
         hint = ""
         if "Confirm you really mean it" in error:

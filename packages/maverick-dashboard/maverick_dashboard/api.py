@@ -190,6 +190,7 @@ from .approval_decisions import (  # noqa: F401 -- re-exported for tests
     _require_acknowledgement,
     _safe_action_label,
     require_current_decision_card,
+    undo_from_dashboard,
 )
 from .auth import (
     assert_goal_access,
@@ -13212,9 +13213,8 @@ def undo_approval(request: Request, approval_id: int) -> Response:
     undo_grace_seconds``, default 30): the agent-side consumer waits that long
     before acting, so nothing has run yet. After that the answer is a plain
     409. The undo is written to the audit log; the original decision stays in
-    the signed chain."""
-    from maverick.safety.consent import approval_undo_grace_seconds
-
+    the signed chain. The rule itself is shared with the chat channels
+    (``maverick.channel_approvals.undo_decision``)."""
     from .approval_authority import require_approval_authority
 
     require_approval_authority(
@@ -13222,56 +13222,7 @@ def undo_approval(request: Request, approval_id: int) -> Response:
     )
     who = _supervisor(request)
     world = _world()
-    before = world.get_approval(approval_id)
-    if before is None:
-        raise HTTPException(status_code=404, detail="no such approval")
-    grace = approval_undo_grace_seconds()
-    outcome = world.undo_approval_decision(
-        approval_id, undone_by=who, within_seconds=grace,
-    )
-    if outcome == "not_found":
-        raise HTTPException(status_code=404, detail="no such approval")
-    if outcome == "not_decided":
-        raise HTTPException(
-            status_code=409, detail="There is no decision to undo yet.",
-        )
-    if outcome != "undone":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Too late to undo: the agent has already been told about this "
-                "decision. Ask for a new request if it should not go ahead."
-            ),
-        )
-    from maverick import audit
-
-    label = _safe_action_label(before)
-    previous = "approval" if before.status == "approved" else "rejection"
-    recorded = audit.audit_event(
-        audit.EventKind.CONSENT_RESULT,
-        agent=who,
-        action="approval_decision_undone",
-        approval_id=int(approval_id),
-        previous_status=before.status,
-        previously_decided_by=before.decided_by or "",
-        summary=(
-            f"{who} undid the {previous} of '{label}'; it is waiting for a decision again."
-        ),
-    )
-    if not recorded:
-        raise HTTPException(
-            status_code=503,
-            detail="The decision was undone but could not be recorded in the audit log.",
-        )
-    return JSONResponse(
-        status_code=200,
-        content={
-            "status": "pending",
-            "previous_status": before.status,
-            "undone_by": who,
-            "approval_id": int(approval_id),
-        },
-    )
+    return JSONResponse(status_code=200, content=undo_from_dashboard(world, approval_id, who=who))
 
 
 @router.post("/approvals/{approval_id}/revise")

@@ -1011,12 +1011,13 @@ def _episode_spend_from_row(row) -> EpisodeSpend:
     return EpisodeSpend(**_row_for(EpisodeSpend, d))
 
 
-def _notify_approval_created(approval_id: int, provenance: str | None) -> None:
-    """Best-effort chat notification (Teams approval cards); never raises."""
+def _notify_approval_created(world, approval_id: int, provenance: str | None) -> None:
+    """Best-effort chat notification (Slack and Teams approval cards); never
+    raises. Called once, after the approval row is committed."""
     try:
         from .approval_notify import approval_created
 
-        approval_created(int(approval_id), provenance=provenance)
+        approval_created(int(approval_id), provenance=provenance, world=world)
     except Exception:  # noqa: BLE001 -- the queue row is already durable
         logging.getLogger(__name__).warning("approval notification failed", exc_info=True)
 
@@ -3059,7 +3060,7 @@ class WorldModel:
                  goal["domain"] if goal else ""),
             )
             approval_id = cur.lastrowid
-        _notify_approval_created(approval_id, provenance)
+        _notify_approval_created(self, approval_id, provenance)
         self._emit_approval_event("approval.created", approval_id, {"risk": risk, "action": action})
         return approval_id
 

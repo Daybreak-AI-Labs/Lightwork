@@ -1,72 +1,67 @@
-"""One decision path for human approvals, whatever surface the vote comes from.
+"""The dashboard's layer over the shared approval decision path.
 
-The ``/api/v1/approvals/{id}/approve|deny`` routes and the Microsoft Teams
-approval cards both go through the functions here: the current-card check,
-the audited vote, and the signed audit delivery. A chat channel adds only its
-own identity mapping (Teams account -> Lightwork user) and permission check on
-top; it never records a decision another way.
+The primitives (card check, acknowledgement rule, audited vote with undo
+rounds, signed audit delivery, undo) live in :mod:`maverick.channel_approvals`
+so the Approvals page, the Microsoft Teams cards and the Slack cards share ONE
+implementation. This module adds only what the dashboard owns: the HTTP
+error mapping the ``/api/v1/approvals/{id}/approve|deny|undo`` routes answer
+with, the role check for a chat vote (the linked person needs ``operate``,
+like a dashboard voter), the "send back for changes" form of a denial, and
+the queue-row projection the Teams cards render.
 """
 from __future__ import annotations
 
-import hmac
 import logging
-import time
 
 from fastapi import HTTPException
+from maverick.channel_approvals import (
+    CONFIRM_RISKS,
+    ChannelApprovalRefused,
+    approval_requires_acknowledgement,
+    approval_undo_grace_seconds,
+    audit_approval_decision,
+    deliver_approval_audit_event,
+    record_vote,
+    require_acknowledgement,
+    require_current_card,
+    safe_action_label,
+)
+from maverick.channel_approvals import decide_from_channel as _decide_shared
+from maverick.channel_approvals import undo_decision as _undo_shared
 
 log = logging.getLogger(__name__)
 
-# Chat channels may decide these risk levels only after a second, explicit
-# confirmation step (the dashboard shows them with a blocked badge).
-CONFIRM_RISKS = frozenset({"high", "critical"})
+# The routes and their tests reach the shared functions through these names.
+_audit_approval_decision = audit_approval_decision
+_deliver_approval_audit_event = deliver_approval_audit_event
+_safe_action_label = safe_action_label
 
 
-def approval_undo_grace_seconds() -> float:
-    """How long a decision can still be undone (``[approval] undo_grace_seconds``,
-    env ``MAVERICK_APPROVAL_UNDO_GRACE_SECONDS``; default 30; 0 disables undo).
-    The kernel's consent module owns the value; this is the dashboard's one
-    import point for it."""
-    from maverick.safety.consent import approval_undo_grace_seconds as kernel_value
+class ApprovalDecisionRefused(ChannelApprovalRefused):
+    """A vote was not accepted; ``detail`` is a plain sentence for the person."""
 
-    return float(kernel_value())
+    def __init__(self, detail: str, *, status_code: int = 409, reason: str = "refused") -> None:
+        super().__init__(reason, detail, status_code=status_code)
 
 
-def approval_requires_acknowledgement() -> bool:
-    """Whether approving high/critical risk needs an explicit acknowledgement
-    (``[approval] require_acknowledgement``, env
-    ``MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT``; default on). Owned by the
-    kernel's consent module."""
-    from maverick.safety.consent import approval_requires_acknowledgement as kernel_value
-
-    return bool(kernel_value())
+def _refused(exc: ChannelApprovalRefused) -> ApprovalDecisionRefused:
+    if isinstance(exc, ApprovalDecisionRefused):
+        return exc
+    return ApprovalDecisionRefused(exc.message, status_code=exc.status_code, reason=exc.reason)
 
 
-def _safe_action_label(approval) -> str:
-    """The queued action as plain, redacted text for audit summaries."""
-    from maverick.safety.secret_detector import redact
+# ------------------------------------------------------------ HTTP mapping
 
+
+def require_current_decision_card(world, approval_id: int, binding: str) -> None:
+    """Reject a stale card, expired card, or corrupted structured approval (409)."""
+    approval = world.get_approval(approval_id)
+    if approval is None or approval.status != "pending":
+        return
     try:
-        text, _matches = redact(" ".join(str(getattr(approval, "action", "") or "").split()))
-    except Exception:  # noqa: BLE001
-        return "the reviewed action"
-    return (text[:200] or "the reviewed action").replace(".", " ").replace("_", " ")
-
-
-def _decision_summary(world, event) -> str:
-    """One plain sentence for the audit log: who decided what."""
-    try:
-        approval = world.get_approval(int(event.approval_id))
-    except Exception:  # noqa: BLE001 -- the summary is decoration, never authority
-        approval = None
-    label = _safe_action_label(approval) if approval is not None else "the reviewed action"
-    risk = str(getattr(approval, "risk", "") or "").strip() or "unrated"
-    verb = "approved" if event.status == "approved" else "rejected"
-    if event.final_status is None:
-        return (
-            f"{event.decided_by} {verb} '{label}' ({risk} risk); "
-            "more approvers are needed before it takes effect."
-        )
-    return f"{event.decided_by} {verb} '{label}' ({risk} risk)."
+        require_current_card(approval, binding=binding)
+    except ChannelApprovalRefused as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
 
 
 def _require_acknowledgement(world, approval_id: int, payload: dict, who: str, *,
@@ -82,249 +77,62 @@ def _require_acknowledgement(world, approval_id: int, payload: dict, who: str, *
     approval = world.get_approval(approval_id)
     if approval is None or approval.status != "pending":
         return
-    risk = str(approval.risk or "").lower()
-    if risk not in CONFIRM_RISKS or not approval_requires_acknowledgement():
-        return
     payload = payload if isinstance(payload, dict) else {}
-    acknowledged = payload.get("acknowledged") is True
-    typed = " ".join(str(payload.get("confirmation") or "").split()).lower()
-    if not acknowledged:
-        raise HTTPException(
-            status_code=422,
-            detail="Confirm you have read what this action will do before approving it.",
-        )
-    if risk == "critical" and typed != "approve":
-        raise HTTPException(
-            status_code=422,
-            detail="Type APPROVE to confirm this critical action.",
-        )
-    from maverick import audit
-
-    label = _safe_action_label(approval)
-    recorded = audit.audit_event(
-        audit.EventKind.CONSENT_RESULT,
-        agent=who,
-        action="approval_confirmation",
-        approval_id=int(approval_id),
-        risk=risk,
-        acknowledged=True,
-        typed_confirmation=(risk == "critical"),
-        channel=channel,
-        summary=(
-            f"{who} confirmed reading what '{label}' will do ({risk} risk) before approving it."
-        ),
-    )
-    if not recorded:
-        log.warning("approval confirmation audit write failed (approval_id=%s)", approval_id)
-
-
-class ApprovalDecisionRefused(Exception):
-    """A vote was not accepted; ``detail`` is a plain sentence for the person."""
-
-    def __init__(self, detail: str, *, status_code: int = 409) -> None:
-        super().__init__(detail)
-        self.detail = detail
-        self.status_code = status_code
-
-
-def require_current_decision_card(world, approval_id: int, binding: str) -> None:
-    """Reject a stale card, expired card, or corrupted structured approval."""
-    from maverick.approval_cards import (
-        ApprovalCardError,
-        decode_approval_detail,
-        require_current_approval_card,
-    )
-
-    approval = world.get_approval(approval_id)
-    if approval is None or approval.status != "pending":
-        return
     try:
-        card = decode_approval_detail(approval.detail)
-        if card is None:
-            raise ApprovalCardError(
-                "this approval predates exact-operation review; reject it and "
-                "ask the requester to prepare a fresh review"
-            )
-        if not hmac.compare_digest(card["action"], approval.action):
-            raise ApprovalCardError(
-                "the approval card does not match the queued action; request a fresh review"
-            )
-        if not binding:
-            raise ApprovalCardError(
-                "review the current approval card before submitting this decision"
-            )
-        require_current_approval_card(card, expected_binding=binding)
-    except ApprovalCardError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-def _deliver_approval_audit_event(world, event) -> bool:
-    """Deliver exactly one queued vote and persist its delivery marker."""
-    if event.delivered_at is not None:
-        return True
-
-    from maverick.audit import AuditRefused, EventKind, audit_event
-
-    try:
-        written = audit_event(
-            EventKind.APPROVAL_DECISION,
-            approval_event_id=event.event_id,
-            approval_id=int(event.approval_id),
-            status=event.status,
-            decided_by=event.decided_by,
-            occurred_at=float(event.created_at),
-            summary=_decision_summary(world, event),
+        require_acknowledgement(
+            approval, who=who, channel=channel, decision="approved", confirmed=True,
+            acknowledged=payload.get("acknowledged") is True,
+            typed_confirmation=str(payload.get("confirmation") or ""),
         )
-    except AuditRefused as exc:
-        # This is not refusal swallowing: no approval becomes effective. The
-        # exact event remains in the durable outbox for a policy/key repair and
-        # idempotent retry.
-        log.error(
-            "approval audit refused; decision remains non-effective (event_id=%s): %s",
-            event.event_id,
-            exc,
-        )
-        return False
-    if not written:
-        log.error(
-            "approval audit write failed; decision remains non-effective (event_id=%s)",
-            event.event_id,
-        )
-        return False
-
-    try:
-        return bool(world.mark_approval_audit_delivered(event.event_id))
-    # The signed append may have succeeded while the delivery-marker commit
-    # acknowledgement failed. Reconcile instead of returning an error that
-    # invites an unsafe, differently-keyed retry.
-    # failure-policy: fail_soft_with_audit
-    except Exception:
-        log.exception(
-            "approval audit was written but delivery finalization failed (event_id=%s)",
-            event.event_id,
-        )
-        try:
-            reconciled = world.get_approval_audit_event(event.event_id)
-        except Exception:
-            return False
-        return bool(reconciled and reconciled.delivered_at is not None)
-
-
-def _audit_approval_decision(world, event) -> bool:
-    """Deliver an approval's queued votes in durable occurrence order.
-
-    The world-model outbox is the authority seam: an audit refusal leaves every
-    later vote durable but non-effective. A retry uses stable event ids and
-    resumes at the oldest undelivered row, so a quorum-reaching vote cannot
-    overtake an earlier sign-off in the signed chain.
-    """
-    try:
-        pending = world.pending_approval_audit_events(
-            approval_id=event.approval_id,
-            limit=1000,
-        )
-    # The vote/outbox commit already succeeded. A read failure here is an
-    # explicit audit-pending response, not a 500 that falsely invites a new
-    # decision.
-    # failure-policy: fail_soft_with_audit
-    except Exception:
-        log.exception(
-            "approval audit outbox could not be read (event_id=%s)",
-            event.event_id,
-        )
-        return False
-    for queued in pending:
-        if not _deliver_approval_audit_event(world, queued):
-            return False
-    try:
-        current = world.get_approval_audit_event(event.event_id)
-    except Exception:
-        return False
-    return bool(current and current.delivered_at is not None)
+    except ChannelApprovalRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
 def _record_vote_or_raise(world, approval_id: int, status: str, who: str):
-    """Apply one approver's vote, mapping rejection to the right HTTP error.
+    """Apply one approver's vote, mapping a refusal to the right HTTP error.
 
-    Under N-of-M dual control a vote can be refused for segregation-of-duties
-    reasons (the requester can't self-approve, or an approver identity is needed)
-    -- distinguish that (403) from an unknown/already-decided approval (404)."""
-    event_id = world.approval_audit_event_id(approval_id, status, who)
+    Segregation-of-duties refusals are 403, an unknown/already-decided approval
+    404, a final decision awaiting signed audit delivery 409; the two
+    commit-reconciliation outcomes keep their stable decision id in the
+    response so a retry is keyed exactly."""
     try:
-        event = world.decide_approval_audited(
-            approval_id,
-            status,
-            decided_by=who,
-        )
-    except Exception as decision_error:
-        # A commit acknowledgement can be lost after both the vote and outbox
-        # row are durable. The stable id lets us prove that outcome before
-        # deciding whether this request failed.
-        try:
-            event = world.get_approval_audit_event(event_id)
-        except Exception as reconcile_error:
-            log.exception(
-                "approval decision outcome is uncertain (event_id=%s)",
-                event_id,
-            )
+        return record_vote(world, approval_id, status, who)
+    except ChannelApprovalRefused as exc:
+        if exc.reason in ("outcome_uncertain", "outbox_integrity_error"):
+            state = "uncertain" if exc.reason == "outcome_uncertain" else "integrity_error"
+            headers = {
+                "X-Lightwork-Decision-Id": exc.decision_id or "",
+                "X-Lightwork-Approval-State": state,
+            }
+            if exc.retry_safe:
+                headers["Retry-After"] = "1"
             raise HTTPException(
-                status_code=503,
+                status_code=exc.status_code,
                 detail={
-                    "decision": "outcome_uncertain",
-                    "decision_id": event_id,
-                    "retry_safe": True,
+                    "decision": exc.reason,
+                    "decision_id": exc.decision_id,
+                    "retry_safe": bool(exc.retry_safe),
                 },
-                headers={
-                    "Retry-After": "1",
-                    "X-Lightwork-Decision-Id": event_id,
-                    "X-Lightwork-Approval-State": "uncertain",
-                },
-            ) from reconcile_error
-        if event is not None and not event.matches(approval_id, status, who):
-            log.critical(
-                "approval outbox identity mismatch during commit reconciliation (event_id=%s)",
-                event_id,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "decision": "outbox_integrity_error",
-                    "decision_id": event_id,
-                    "retry_safe": False,
-                },
-                headers={
-                    "X-Lightwork-Decision-Id": event_id,
-                    "X-Lightwork-Approval-State": "integrity_error",
-                },
-            ) from decision_error
-        if event is None:
-            raise decision_error
-    if event is not None:
-        return event
+                headers=headers,
+            ) from exc
+        if exc.reason == "not_pending":
+            raise HTTPException(status_code=404, detail="no such pending approval") from exc
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
-    st = world.approval_state(approval_id)
-    if st is None or st.get("status") != "pending":
-        raise HTTPException(status_code=404, detail="no such pending approval")
-    if world.approval_has_pending_finalization(approval_id):
-        raise HTTPException(
-            status_code=409,
-            detail="a final decision is accepted and awaiting signed audit delivery",
-        )
-    raise HTTPException(
-        status_code=403,
-        detail="vote not accepted: the requester can't approve their own request "
-        "(segregation of duties), or an approver identity is required for "
-        "multi-party approval",
-    )
+
+def undo_from_dashboard(world, approval_id: int, *, who: str) -> dict:
+    """The ``/approvals/{id}/undo`` route's undo, through the shared rule."""
+    try:
+        result = _undo_shared(world, int(approval_id), undone_by=who, channel="dashboard")
+    except ChannelApprovalRefused as exc:
+        if exc.reason == "not_found":
+            raise HTTPException(status_code=404, detail="no such approval") from exc
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return {"status": "pending", "previous_status": result["previous_status"],
+            "undone_by": result["undone_by"], "approval_id": int(approval_id)}
 
 
 # ----------------------------------------------------------------- channels
-
-
-def _plain(detail: object) -> str:
-    if isinstance(detail, dict):
-        return str(detail.get("decision") or detail)
-    return str(detail)
 
 
 def _channel_authority(principal: str, *, channel: str, approval_id: int) -> None:
@@ -355,8 +163,14 @@ def _channel_authority(principal: str, *, channel: str, approval_id: int) -> Non
     )
     raise ApprovalDecisionRefused(
         "Your Lightwork account can't decide approvals. Ask an administrator for "
-        "the operator role.", status_code=403,
+        "the operator role.", status_code=403, reason="not_permitted",
     )
+
+
+def _authority_for(channel: str):
+    def authorize(principal: str, approval_id: int) -> None:
+        _channel_authority(principal, channel=channel, approval_id=approval_id)
+    return authorize
 
 
 def decide_from_channel(*, approval_id: int, status: str, principal: str, binding: str,
@@ -364,9 +178,10 @@ def decide_from_channel(*, approval_id: int, status: str, principal: str, bindin
                         acknowledgement: dict | None = None, world=None) -> dict:
     """Record a vote that arrived through a chat channel.
 
-    Returns ``{"status", "effective", "decided_by", "risk", "audit"}``. Raises
-    :class:`ApprovalDecisionRefused` with a plain sentence when the vote cannot
-    be accepted: not linked to a permitted user, a protected-settings change
+    Returns ``{"status", "effective", "decided_by", "risk", "audit", ...}``.
+    Raises :class:`ApprovalDecisionRefused` with a plain sentence when the vote
+    cannot be accepted: not linked to a permitted user (the linked person needs
+    the ``operate`` role, like a dashboard voter), a protected-settings change
     (dashboard only), a high or critical risk without the confirmation step
     (``confirmed``) or without the acknowledgement the dashboard also demands
     (``acknowledgement={"acknowledged": True, "confirmation": "approve"}``, the
@@ -375,72 +190,19 @@ def decide_from_channel(*, approval_id: int, status: str, principal: str, bindin
     signed audit round, exactly as on the Approvals page.
     """
     from ._shared import _world
-    from .settings_quorum import is_settings_approval
 
-    if status not in ("approved", "denied"):
-        raise ValueError("status must be 'approved' or 'denied'")
-    who = str(principal or "").strip()
-    if not who:
-        raise ApprovalDecisionRefused(
-            "Your Teams account isn't linked to a Lightwork user yet.", status_code=403,
-        )
     world = world if world is not None else _world()
-    approval = world.get_approval(int(approval_id))
-    if approval is None or approval.status != "pending":
-        raise ApprovalDecisionRefused(
-            "This request was already decided or no longer exists.", status_code=404,
-        )
-    _channel_authority(who, channel=channel, approval_id=int(approval_id))
-    if is_settings_approval(approval):
-        raise ApprovalDecisionRefused(
-            "Changes to protected settings are decided in the Lightwork dashboard, "
-            "not from chat.", status_code=403,
-        )
-    if status == "approved" and str(approval.risk) in CONFIRM_RISKS and not confirmed:
-        raise ApprovalDecisionRefused(
-            f"This is a {approval.risk} risk action. Confirm it before it is approved.",
-            status_code=428,
-        )
+    ack = acknowledgement if isinstance(acknowledgement, dict) else {}
     try:
-        if status == "approved":
-            require_current_decision_card(world, int(approval_id), binding)
-            _require_acknowledgement(world, int(approval_id), acknowledgement or {}, who,
-                                     channel=channel)
-        event = _record_vote_or_raise(world, int(approval_id), status, who)
-    except HTTPException as exc:
-        raise ApprovalDecisionRefused(_plain(exc.detail), status_code=exc.status_code) from exc
-    delivered = _audit_approval_decision(world, event)
-    try:
-        state = world.approval_state(int(approval_id)) or {}
-    except Exception:  # noqa: BLE001 -- the vote is durable; the read is diagnostic
-        state = {}
-    from maverick import audit
-
-    audit.audit_event(
-        audit.EventKind.CONSENT_RESULT,
-        agent=who,
-        action="approval_decided_via_channel",
-        channel=channel,
-        channel_user=str(channel_user or ""),
-        approval_id=int(approval_id),
-        decision=status,
-        decision_id=event.event_id,
-        effective=bool(delivered and state.get("status") not in (None, "pending")),
-    )
-    effective = bool(delivered and state.get("status") not in (None, "pending"))
-    return {
-        "status": str(state.get("status") or ("pending" if not delivered else status)),
-        "effective": effective,
-        "decided_by": who,
-        "risk": str(approval.risk),
-        "audit": "delivered" if delivered else "pending",
-        "approvals_required": int(state.get("approvals_required") or 1),
-        "approved_count": int(state.get("approved_count") or 0),
-        # The card offers Undo for this long; the agent-side consumer waits
-        # the same window before acting.
-        "undo_seconds": int(approval_undo_grace_seconds()) if effective else 0,
-        "decided_at": time.time(),
-    }
+        return _decide_shared(
+            world, int(approval_id), status, principal=principal, channel=channel,
+            binding=binding, confirmed=confirmed,
+            acknowledged=ack.get("acknowledged") is True,
+            typed_confirmation=str(ack.get("confirmation") or ""),
+            channel_user=channel_user, authorize=_authority_for(channel),
+        )
+    except ChannelApprovalRefused as exc:
+        raise _refused(exc) from exc
 
 
 def undo_from_channel(*, approval_id: int, principal: str, channel: str,
@@ -451,54 +213,14 @@ def undo_from_channel(*, approval_id: int, principal: str, channel: str,
     """
     from ._shared import _world
 
-    who = str(principal or "").strip()
-    if not who:
-        raise ApprovalDecisionRefused(
-            "Your Teams account isn't linked to a Lightwork user yet.", status_code=403,
-        )
     world = world if world is not None else _world()
-    before = world.get_approval(int(approval_id))
-    if before is None:
-        raise ApprovalDecisionRefused("This request no longer exists.", status_code=404)
-    _channel_authority(who, channel=channel, approval_id=int(approval_id))
-    undo = getattr(world, "undo_approval_decision", None)
-    if undo is None:
-        raise ApprovalDecisionRefused("Undo isn't available on this server yet.", status_code=409)
-    grace = approval_undo_grace_seconds()
-    outcome = undo(int(approval_id), undone_by=who, within_seconds=grace)
-    if outcome == "not_found":
-        raise ApprovalDecisionRefused("This request no longer exists.", status_code=404)
-    if outcome == "not_decided":
-        raise ApprovalDecisionRefused("There is no decision to undo yet.", status_code=409)
-    if outcome != "undone":
-        raise ApprovalDecisionRefused(
-            "Too late to undo: the agent has already been told about this decision. "
-            "Ask for a new request if it should not go ahead.", status_code=409,
-        )
-    from maverick import audit
-
-    label = _safe_action_label(before)
-    previous = "approval" if before.status == "approved" else "rejection"
-    recorded = audit.audit_event(
-        audit.EventKind.CONSENT_RESULT,
-        agent=who,
-        action="approval_decision_undone",
-        approval_id=int(approval_id),
-        previous_status=before.status,
-        previously_decided_by=before.decided_by or "",
-        channel=channel,
-        channel_user=str(channel_user or ""),
-        summary=(
-            f"{who} undid the {previous} of '{label}'; it is waiting for a decision again."
-        ),
-    )
-    if not recorded:
-        raise ApprovalDecisionRefused(
-            "The decision was undone but could not be recorded in the audit log.",
-            status_code=503,
-        )
-    return {"status": "pending", "previous_status": before.status, "undone_by": who,
-            "approval_id": int(approval_id)}
+    try:
+        result = _undo_shared(world, int(approval_id), undone_by=principal, channel=channel,
+                              channel_user=channel_user, authorize=_authority_for(channel))
+    except ChannelApprovalRefused as exc:
+        raise _refused(exc) from exc
+    return {"status": "pending", "previous_status": result["previous_status"],
+            "undone_by": result["undone_by"], "approval_id": int(approval_id)}
 
 
 def send_back_from_channel(*, approval_id: int, principal: str, rationale: str,
@@ -623,10 +345,13 @@ def approval_view(approval_id: int, *, world=None) -> dict | None:
 
 __all__ = [
     "CONFIRM_RISKS",
-    "approval_view",
     "ApprovalDecisionRefused",
+    "approval_requires_acknowledgement",
+    "approval_undo_grace_seconds",
+    "approval_view",
     "decide_from_channel",
     "require_current_decision_card",
     "send_back_from_channel",
     "undo_from_channel",
+    "undo_from_dashboard",
 ]

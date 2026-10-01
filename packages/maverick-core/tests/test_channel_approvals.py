@@ -172,25 +172,9 @@ def test_acknowledgement_rule_can_be_switched_off(tmp_path, recorded, monkeypatc
     assert result["status"] == "approved" and result["undo_seconds"] == 0.0
 
 
-class _UndoableWorld:
-    """A world with the confirmable-queue undo primitive (lands with package B)."""
-
-    def __init__(self, inner, outcome="undone"):
-        self._inner, self.outcome, self.calls = inner, outcome, []
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
-
-    def undo_approval_decision(self, approval_id, *, undone_by, within_seconds):
-        self.calls.append((approval_id, undone_by, within_seconds))
-        if self.outcome == "undone":
-            with self._inner._writing() as conn:
-                conn.execute("UPDATE approvals SET status = 'pending', decided_at = NULL, "
-                             "decided_by = NULL WHERE id = ?", (approval_id,))
-        return self.outcome
-
-
-def test_undo_uses_the_shared_rule_and_audit(tmp_path, recorded):
+def test_undo_uses_the_shared_rule_and_audit(tmp_path, recorded, monkeypatch):
+    """Undo goes through the kernel's ``WorldModel.undo_approval_decision``: the
+    request is pending again, the next vote is a new signed audit round."""
     from maverick.channel_approvals import (
         ChannelApprovalRefused,
         decide_from_channel,
@@ -198,29 +182,34 @@ def test_undo_uses_the_shared_rule_and_audit(tmp_path, recorded):
         undo_seconds_left,
     )
 
-    plain = _world(tmp_path)
-    aid = _park(plain, detail="x")
+    world = _world(tmp_path)
+    aid = _park(world, detail="x")
     with pytest.raises(ChannelApprovalRefused) as exc:
-        undo_decision(plain, aid, undone_by="user:a", channel="slack")
-    assert exc.value.reason == "unavailable"
-    world = _UndoableWorld(plain)
-    decide_from_channel(world, aid, "denied", principal="user:a", channel="slack")
-    assert 0 < undo_seconds_left(plain.get_approval(aid)) <= 30
+        undo_decision(world, aid, undone_by="user:a", channel="slack")
+    assert exc.value.reason == "not_decided"
+    first = decide_from_channel(world, aid, "denied", principal="user:a", channel="slack")
+    assert 0 < undo_seconds_left(world.get_approval(aid)) <= 30
     result = undo_decision(world, aid, undone_by="user:a", channel="slack")
     assert result["status"] == "pending" and result["previous_status"] == "denied"
-    assert world.calls == [(aid, "user:a", 30.0)]
     note = recorded[-1]
     assert note[0] == "consent_result" and note[1]["action"] == "approval_decision_undone"
     assert note[1]["channel"] == "slack" and note[1]["previous_status"] == "denied"
-    assert plain.get_approval(aid).status == "pending"
-    for outcome, reason in (("too_late", "too_late"), ("not_decided", "not_decided"),
-                            ("not_found", "not_found")):
-        with pytest.raises(ChannelApprovalRefused) as exc:
-            undo_decision(_UndoableWorld(plain, outcome), aid, undone_by="user:a", channel="slack")
-        assert exc.value.reason == reason
+    assert world.get_approval(aid).status == "pending"
+    # Deciding again is a new audit round: a different signed event id.
+    again = decide_from_channel(world, aid, "denied", principal="user:a", channel="slack")
+    assert again["decision_id"] != first["decision_id"]
+    assert world.get_approval(aid).status == "denied"
+    # Outside the window the undo is refused plainly.
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "0")
+    with pytest.raises(ChannelApprovalRefused) as exc:
+        undo_decision(world, aid, undone_by="user:a", channel="slack")
+    assert exc.value.reason == "too_late"
     with pytest.raises(ChannelApprovalRefused) as exc:
         undo_decision(world, 9999, undone_by="user:a", channel="slack")
     assert exc.value.reason == "not_found"
+    with pytest.raises(ChannelApprovalRefused) as exc:
+        undo_decision(world, aid, undone_by="", channel="slack")
+    assert exc.value.reason == "unlinked"
 
 
 def test_expired_stale_and_legacy_approvals_are_refused(tmp_path, recorded):
@@ -313,7 +302,9 @@ def test_new_approval_is_announced_to_slack_when_configured(tmp_path, monkeypatc
                         posted.update(token=token, channel=channel, blocks=blocks) or "1.2")
     aid = _park(world, risk="high", card=_card())
     outcomes = channel_approvals.announce_new_approval(world, aid)
-    assert outcomes == {"slack": True}
+    assert outcomes["slack"] is True
+    # Teams (registered by maverick.approval_notify) is quiet when not configured.
+    assert all(v is False for name, v in outcomes.items() if name != "slack")
     assert posted["channel"] == "C123" and posted["token"] == "xoxb-test-not-real"
     assert posted["blocks"][-1]["type"] == "actions"
 
@@ -323,15 +314,40 @@ def test_registered_announcer_and_missing_config_are_quiet(tmp_path, monkeypatch
 
     world = _world(tmp_path)
     aid = _park(world, detail="x")
-    assert channel_approvals.announce_new_approval(world, aid) == {"slack": False}
+    quiet = channel_approvals.announce_new_approval(world, aid)
+    assert quiet["slack"] is False and all(v is False for v in quiet.values())
     seen = []
+    previous = dict(channel_approvals._announcers)
     channel_approvals.register_approval_announcer("teams", lambda a, c: seen.append(c["id"]) or True)
     try:
         assert channel_approvals.announce_new_approval(world, aid)["teams"] is True
         assert seen == [aid]
     finally:
-        channel_approvals.register_approval_announcer("teams", None)
+        channel_approvals.register_approval_announcer("teams", previous.get("teams"))
     assert channel_approvals.announce_new_approval(world, 9999) == {}
+
+
+def test_world_model_announces_once_after_the_row_commits(tmp_path, monkeypatch):
+    """The one call site: WorldModel.create_approval -> approval_notify (background
+    thread) -> announce_new_approval; consent no longer announces on its own."""
+    import inspect
+
+    from maverick import approval_notify, channel_approvals
+    from maverick.safety import consent
+
+    started = []
+    monkeypatch.setattr(approval_notify.threading, "Thread",
+                        lambda **kw: started.append(kw) or type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr(approval_notify, "announcements_configured", lambda: True)
+    world = _world(tmp_path)
+    aid = _park(world, detail="x")
+    assert len(started) == 1 and started[0]["daemon"] is True
+    assert "teams" in channel_approvals.registered_announcers()
+    assert "announce_new_approval" not in inspect.getsource(consent)
+    # Settings requests are decided on the dashboard only: no card anywhere.
+    world.create_approval("settings", detail="x", provenance="settings_quorum")
+    assert len(started) == 1
+    assert aid
 
 
 # ---------------------------------------------------------- identity linking

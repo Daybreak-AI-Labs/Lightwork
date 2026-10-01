@@ -262,3 +262,26 @@ def test_expiring_access_keys_section_is_optional(tmp_path, monkeypatch):
     assert "stop working within 7 days" in digest_blocks(mine)[1]["text"]["text"]
     fake.list_keys = lambda owner=None: (_ for _ in ()).throw(RuntimeError("store down"))
     assert daily_digest.compose_digest(world, "user:a", can_decide=False, now=now)["expiring_keys"] == []
+
+
+def test_expiring_access_keys_come_from_the_real_api_keys_module(tmp_path, monkeypatch):
+    """With the dashboard installed the guarded import resolves to
+    ``maverick_dashboard.api_keys.expiring_soon`` (no fake module needed)."""
+    import importlib
+
+    from maverick import daily_digest
+
+    api_keys = importlib.import_module("maverick_dashboard.api_keys")
+    assert callable(api_keys.expiring_soon) and callable(api_keys.list_keys)
+    calls = []
+
+    def expiring_soon(keys, *, within_days=7, now=None):
+        calls.append((list(keys), within_days))
+        return []
+
+    monkeypatch.setattr(api_keys, "expiring_soon", expiring_soon)
+    monkeypatch.setattr(api_keys, "list_keys", lambda owner=None: [])
+    now = 1_800_000_000.0
+    world = _world(tmp_path)
+    assert daily_digest.compose_digest(world, "user:a", can_decide=False, now=now)["expiring_keys"] == []
+    assert calls == [([], daily_digest.KEY_EXPIRY_DAYS)]
