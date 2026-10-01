@@ -66,8 +66,8 @@
     "id": "LW-191",
     "status": "implemented-test-needed",
     "implementation_evidence": "Neovim halt/unhalt use bounded async jobstart with progress, owned cancellation and generation guards; Emacs status/halt use bounded make-process with timeout/cancel and owner guards; exact halt acknowledgement preserved. Lua/ERT fixtures authored.",
-    "validation": "2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash.",
-    "remaining": "Actual Lua source passed in Fengari with a controlled vim API. Native Neovim and Emacs/ERT, UI responsiveness, cancellation and editor lifecycle still need installed-host qualification."
+    "validation": "2026-09-30: all60 maintained client-contract Node cases passed with pinned TypeScript5.3.3/jsdom29.1.1/Fengari0.1.5; mock host APIs and actual source transpilation/Lua execution only. See native-client-qualification.json for sourceSHA and log hash. 2026-10-01: both existing ERT tests passed in portable native Emacs 30.2; the unchanged Lua mock fixture passed in native Neovim 0.12.5. Exact frozen source 7db4b18 and all four product/test hashes match the recorded integrated checkpoint. The initial sandbox host crash/timeout and successful exact guarded native rerun are preserved in native-editor-qualification.json; no assertion, product code or deadline was relaxed.",
+    "remaining": "Native-runtime mock contracts now pass. Interactive UI responsiveness/focus, real CLI process stalls/cancellation, editor lifecycle and the supported host/version matrix still need installed-editor qualification; these mocks do not exercise server authorization or replace LW-184 distribution checks."
   },
   {
     "id": "LW-192",

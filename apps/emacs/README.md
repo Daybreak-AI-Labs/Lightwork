@@ -34,7 +34,9 @@ cancellation and nonzero exit never claim that external effects stopped; inspect
 local state before another action. Late callbacks cannot replace a newer result.
 The halt acknowledgement still requires exact local scope and checkpoint semantics.
 
-Deferred regression fixtures are in `tests/maverick-control-tests.el`; run them
-with Emacs ERT during the later testing phase. They have not been run for this audit.
+The two regression tests in `tests/maverick-control-tests.el` passed in native
+Emacs 30.2 using mocked processes and timers. This does not qualify interactive
+editing or real CLI cancellation; see the [native editor qualification
+receipt](../../docs/ux-audit-2026-09-30/native-editor-qualification.md).
 
 See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

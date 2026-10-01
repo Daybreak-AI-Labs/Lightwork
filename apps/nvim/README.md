@@ -40,8 +40,11 @@ callbacks cannot overwrite a newer control. Status/monitor already use terminal
 jobs and remain independent of the editor event loop. Closing the terminal stops
 its local supervision, not external effects.
 
-The asynchronous job fixtures in `../client-contract-tests/nvim-command.test.cjs`
-are authored but unrun pending the requested later testing phase.
+The asynchronous job fixture in `../client-contract-tests/nvim-command.test.cjs`
+has passed in Fengari and native Neovim 0.12.5 with mocked job/timer APIs.
+Interactive editing and real CLI cancellation still need installed-host checks;
+see the [native editor qualification
+receipt](../../docs/ux-audit-2026-09-30/native-editor-qualification.md).
 
 Classic Vim (non-Neovim) users: the CLI works in any `:terminal` —
 `maverick monitor` is the same TUI.
