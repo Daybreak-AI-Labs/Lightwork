@@ -2,6 +2,8 @@
 gated, and every answer comes from the compiled policy itself."""
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
@@ -13,6 +15,7 @@ BASE = "/api/v1/regulatory"
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     from maverick import config, world_model
+    from maverick.audit import signing
     from maverick_dashboard import api
 
     home = tmp_path / "home"
@@ -21,13 +24,16 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     for name in ("MAVERICK_CONFIG", "MAVERICK_COMPLIANCE_PROFILES", "MAVERICK_DASHBOARD_TOKEN",
                  "MAVERICK_DASHBOARD_REQUIRE_AUTH", "MAVERICK_OIDC_ENABLED",
-                 "MAVERICK_PROXY_AUTH", "MAVERICK_TENANT", "MAVERICK_TENANT_BY_USER"):
+                 "MAVERICK_PROXY_AUTH", "MAVERICK_TENANT", "MAVERICK_TENANT_BY_USER",
+                 "MAVERICK_AUDIT_SIGNING_KEY", "MAVERICK_AUDIT_SIGNING_KEY_WRAPPED"):
         monkeypatch.delenv(name, raising=False)
+    signing._reset_injected_keypair_cache()
     config.reset_config_cache()
     api._world_cache.clear()
     yield
     config.reset_config_cache()
     api._world_cache.clear()
+    signing._reset_injected_keypair_cache()
 
 
 TOKEN = "test-dashboard-token"  # pragma: allowlist secret
@@ -40,11 +46,14 @@ def _activate(monkeypatch, tmp_path, *keys):
     enterprise mode, which makes the dashboard require sign-in, so the
     tests below talk to it as an authenticated operator (``authed``)."""
     from maverick import config
+    from maverick.audit import signing
     cfg = tmp_path / "config.toml"
     cfg.write_text("[compliance]\nprofiles = [" + ", ".join(f'"{k}"' for k in keys) + "]\n")
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", TOKEN)
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme-test")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", hashlib.sha256(str(tmp_path).encode()).hexdigest())
+    signing._reset_injected_keypair_cache()
     config.reset_config_cache()
 
 
