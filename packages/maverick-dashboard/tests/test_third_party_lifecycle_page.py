@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import unescape
 from pathlib import Path
 
 import pytest
@@ -10,21 +11,14 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def page_client() -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    templates = Jinja2Templates(directory=str(template_dir))
-    templates.env.globals.update(
-        {
-            "theme": "dark",
-            "font": "default",
-            "lang": "en",
-            "density": "comfortable",
-            "custom_theme_css": "",
-            "custom_theme_names": [],
-            "dir": "ltr",
-            "nav_groups": [],
-            "t": lambda key: key,
-        }
+    templates = Jinja2Templates(
+        directory=str(template_dir),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     app = FastAPI()
 
     @app.get("/third-party/lifecycle")
@@ -43,7 +37,7 @@ def test_page_is_a_list_workflow_in_plain_words(page_client) -> None:
     assert response.status_code == 200
     page = response.text
     assert "Third-Party Lifecycle" in page
-    assert "doesn't contact vendors" in page
+    assert "doesn't contact vendors" in unescape(page)
     assert "/api/v1/third-party/lifecycle" in page
     # Lists load on open, with a button to start each kind of record.
     for host in ("tpl-templates", "tpl-assessments", "tpl-lifecycles", "tpl-offboarding"):
