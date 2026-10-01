@@ -10380,23 +10380,45 @@ async def form_page(request: Request, token: str) -> HTMLResponse:
     )
 
 
+def _registered_form_trigger(token: str) -> dict | None:
+    """Resolve one public form token to exactly one active tenant namespace."""
+    from maverick.paths import implicit_tenant_id
+
+    from . import event_triggers_store
+
+    matches = [
+        trigger for trigger in event_triggers_store.list_triggers()
+        if trigger.get("source") == "form"
+        and str((trigger.get("config") or {}).get("token") or "") == token
+        and (trigger.get("flow") or trigger.get("template"))
+    ]
+    tenants = {str(trigger.get("tenant") or "") for trigger in matches}
+    floor = implicit_tenant_id()
+    if len(tenants) != 1 or (floor and tenants != {floor}):
+        return None
+    return matches[0]
+
+
 @app.post("/form/{token}")
 async def form_submit(request: Request, token: str) -> JSONResponse:
     """Record a hosted-form submission under ``token`` so a ``form`` event trigger
     fires a flow with the submitted fields as data. Public by design (a form is
     meant to be filled by anyone with the link); the unguessable ``token`` in the
     path is the addressing secret, the body is size/field-bounded, and firing is
-    rate-limited. Gated on event triggers being enabled — except a vendor
-    questionnaire token, which stays answerable while only the vendor
-    register is on (404 otherwise)."""
-    from maverick import automation_events
+    rate-limited before parsing. Only a registered form trigger or a live vendor
+    questionnaire can accept a submission."""
+    from maverick import automation_events, form_store
 
-    if not automation_events.enabled():
-        questionnaire = await run_in_threadpool(
-            _vendor_questionnaire_for, token)
+    # Unknown tokens must never allocate a per-token file. Check the shared
+    # admission limit before parsing even a multipart request.
+    check_goal_rate_limit(request, source="form")
+    trigger = None
+    if automation_events.enabled() and form_store.valid_token(token):
+        trigger = await run_in_threadpool(_registered_form_trigger, token)
+    if trigger is None:
+        questionnaire = await run_in_threadpool(_vendor_questionnaire_for, token)
         if questionnaire is None:
-            raise HTTPException(status_code=404,
-                                detail="event triggers are disabled")
+            raise HTTPException(status_code=404, detail="no such form")
     fields: dict = {}
     ctype = request.headers.get("content-type", "")
     if "application/json" in ctype:
@@ -10407,17 +10429,31 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
             parsed = _json.loads(body or b"{}")
         except ValueError as e:
             raise HTTPException(status_code=400, detail="invalid JSON body") from e
-        if isinstance(parsed, dict):
-            fields = parsed
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=400, detail="form fields must be an object")
+        fields = parsed
     else:
-        # urlencoded / multipart form post -- read the stream once via the form
-        # parser (its own size limits apply); don't pre-read the body above.
-        form = await request.form()
+        # Limit the complete body before Starlette's multipart parser can spool
+        # anything to disk. The Request body cache lets the parser reuse it.
+        body = await _read_limited_webhook_body(request)
+        request._body = body  # noqa: SLF001 - bounded body replay for form parser
+        form = await request.form(max_files=0, max_fields=form_store._MAX_FIELDS)
         fields = {k: str(v) for k, v in form.items()}
-    check_goal_rate_limit(request, source="form")
-    from maverick import form_store
-
-    seq = form_store.append(token, fields)
+    # A trigger may have been deleted while its public caller uploaded a body.
+    if trigger is not None:
+        current = await run_in_threadpool(_registered_form_trigger, token)
+        if current is None or current.get("tenant", "") != trigger.get("tenant", ""):
+            raise HTTPException(status_code=404, detail="no such form")
+    try:
+        if trigger is not None:
+            with _stored_trigger_tenant(trigger):
+                seq = await run_in_threadpool(form_store.append, token, fields)
+        else:
+            seq = await run_in_threadpool(form_store.append, token, fields)
+    except form_store.FormStoreFull as exc:
+        raise HTTPException(status_code=507, detail="This form is temporarily full.") from exc
+    if not seq:
+        raise HTTPException(status_code=503, detail="This form could not accept a submission.")
     return JSONResponse({"ok": True, "seq": seq}, status_code=201)
 
 

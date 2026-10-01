@@ -1,4 +1,4 @@
-"""A tiny append-only store of hosted-form submissions.
+"""A bounded append-only store of hosted-form submissions.
 
 A ``form`` event trigger points a public web form (or any POST) at
 ``/form/<token>``; each submission is appended here under that token, and the
@@ -6,9 +6,10 @@ A ``form`` event trigger points a public web form (or any POST) at
 submission fires a flow -- the push-to-poll bridge that lets a form be a
 first-class trigger without a bespoke inbound queue.
 
-Best-effort NDJSON, 0600, bounded, in the tenant data dir. A submission is one
+Private NDJSON in the tenant data dir. A submission is one
 line ``{"seq", "ts", "fields"}``; ``seq`` is a per-token monotonic counter used
-as the poll cursor (deletion-safe, unlike id-walking).
+as the poll cursor (deletion-safe, unlike id-walking). Full stores refuse new
+submissions instead of silently dropping entries that a trigger has not polled.
 """
 from __future__ import annotations
 
@@ -18,12 +19,25 @@ import re
 
 _MAX_FIELDS = 50          # per submission
 _MAX_VALUE = 2000         # per field value
-_MAX_LINES = 5000         # keep the tail bounded
+_MAX_LINES = 5000         # per form; refuse rather than lose pending events
+_MAX_BYTES = 32 * 1024 * 1024
+_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
+
+
+class FormStoreFull(RuntimeError):
+    """The form cannot accept another submission without losing existing data."""
+
+
+def valid_token(token: str) -> bool:
+    return isinstance(token, str) and bool(_TOKEN_RE.fullmatch(token))
 
 
 def _safe_token(token: str) -> str:
-    s = re.sub(r"[^A-Za-z0-9_-]+", "-", str(token or "").strip())
-    return s[:120] or "form"
+    # Sanitizing/truncating mapped different public tokens to one file. A form
+    # token is an exact address, so reject aliases instead of sharing storage.
+    if not valid_token(token):
+        raise ValueError("form token must be 1-120 letters, digits, '_' or '-'")
+    return token
 
 
 def _path(token: str):
@@ -42,27 +56,51 @@ def _bound_fields(fields: dict) -> dict:
 
 def append(token: str, fields: dict, *, ts: float = 0.0) -> int:
     """Append one submission for ``token``; return its ``seq`` (1-based). Fields
-    are stringified + bounded. Best-effort -- returns 0 on write failure."""
+    are stringified + bounded. Returns 0 on write failure and raises
+    :class:`FormStoreFull` when the bounded store has reached capacity."""
     p = _path(token)
+    from .file_lock import cross_process_lock, ensure_private_directory, open_private_append
+
     try:
-        p.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        seq = _count(p) + 1
-        line = json.dumps({"seq": seq, "ts": float(ts), "fields": _bound_fields(fields)},
-                          separators=(",", ":"), sort_keys=True)
-        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-        return seq
-    except OSError:  # pragma: no cover -- best-effort
+        # This is a dedicated Lightwork-owned directory. Harden an older
+        # installation's existing directory as well as newly created ones.
+        ensure_private_directory(p.parent)
+        with cross_process_lock(p, strict=True):
+            count, highest = _state(p)
+            if count >= _MAX_LINES:
+                raise FormStoreFull("form submission limit reached")
+            seq = highest + 1
+            line = (json.dumps({"seq": seq, "ts": float(ts), "fields": _bound_fields(fields)},
+                               separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
+            size = p.stat().st_size if p.exists() else 0
+            if size + len(line) > _MAX_BYTES:
+                raise FormStoreFull("form storage limit reached")
+            fd = open_private_append(p, require_private_parent=True)
+            with os.fdopen(fd, "ab") as f:
+                f.write(line)
+            return seq
+    except (OSError, RuntimeError) as exc:
+        if isinstance(exc, FormStoreFull):
+            raise
         return 0
 
 
-def _count(p) -> int:
+def _state(p) -> tuple[int, int]:
+    """Read count and high-water sequence under the caller's file lock."""
+    count = highest = 0
     try:
         with open(p, encoding="utf-8") as f:
-            return sum(1 for _ in f)
-    except OSError:
-        return 0
+            for line in f:
+                count += 1
+                try:
+                    seq = json.loads(line).get("seq")
+                    if type(seq) is int and seq > highest:
+                        highest = seq
+                except (ValueError, AttributeError):
+                    continue
+    except FileNotFoundError:
+        pass
+    return count, highest
 
 
 def since(token: str, cursor: str) -> tuple[list[dict], str]:
@@ -71,8 +109,13 @@ def since(token: str, cursor: str) -> tuple[list[dict], str]:
     where each event is the flat ``fields`` dict plus ``_seq``/``_ts``."""
     p = _path(token)
     rows: list[dict] = []
+    if not p.exists():
+        # Do not create a lock sidecar on a baseline poll for a new form.
+        return [], cursor or "0"
+    from .file_lock import cross_process_lock
+
     try:
-        with open(p, encoding="utf-8") as f:
+        with cross_process_lock(p, strict=True), open(p, encoding="utf-8") as f:
             for ln in f:
                 ln = ln.strip()
                 if not ln:
@@ -106,4 +149,4 @@ def since(token: str, cursor: str) -> tuple[list[dict], str]:
     return events, str(fresh[-1].get("seq") or highest)
 
 
-__all__ = ["append", "since"]
+__all__ = ["FormStoreFull", "append", "since", "valid_token"]

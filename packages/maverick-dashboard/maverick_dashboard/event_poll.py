@@ -46,6 +46,13 @@ def admit_event_source_config(source: str, config: dict) -> dict:
     that was checked.
     """
     cfg = dict(config or {})
+    if source == "form":
+        from maverick.form_store import valid_token
+
+        if not valid_token(cfg.get("token")):
+            raise EventSourceAdmissionError(
+                "Form link must use a 1–120 character token of letters, numbers, '-' or '_'."
+            )
     if source != "file_dir":
         return cfg
 
