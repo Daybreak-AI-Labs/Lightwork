@@ -337,7 +337,7 @@ def backup_group() -> None:
                    "instead of storing them next to the data they unlock.")
 def backup_create_cmd(out, include_keys) -> None:
     """Create a consistent backup of this client's data."""
-    from ..backup import BackupError, create_backup
+    from ..backup import BackupError, create_backup, withheld_key_files
     if include_keys:
         click.echo(click.style(
             "WARNING: --include-keys bundles the at-rest encryption and audit "
@@ -350,6 +350,18 @@ def backup_create_cmd(out, include_keys) -> None:
         path = create_backup(out, include_keys=include_keys)
     except BackupError as e:
         raise click.ClickException(str(e)) from e
+    if not include_keys:
+        try:
+            left_out = withheld_key_files()
+        except OSError:  # the list is advice; the backup itself is already written
+            left_out = []
+        if left_out:
+            click.echo(click.style(
+                "Key files left out of this backup. Keep a separate, safe copy "
+                "of each: the encryption keys among them are needed to open "
+                "this backup's protected data:", fg="yellow"))
+            for name in left_out:
+                click.echo(f"  {name}")
     click.echo(click.style(f"backup written: {path}", fg="green"))
 
 

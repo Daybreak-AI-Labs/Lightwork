@@ -2,11 +2,11 @@
 
 The Operating Record capsule (:mod:`maverick.operating_record`) already exports
 the firm's decisions signed. What it cannot do is convince somebody who trusts
-nobody: :func:`operating_record.verify_capsule` checks the signature using the
-public key stored *inside the capsule*, which proves the file has not been edited
-since signing and says nothing whatever about who signed it. Anyone can mint a
-keypair and sign anything. That is integrity; a regulator, insurer or acquirer
-came for provenance.
+nobody: :func:`operating_record.verify_capsule_integrity` checks the signature
+using the public key stored *inside the capsule*, which proves the file has not
+been edited since signing and says nothing whatever about who signed it. Anyone
+can mint a keypair and sign anything. That is integrity; a regulator, insurer or
+acquirer came for provenance.
 
 This module builds the artifact that answers them. A bundle binds three claims
 to evidence somebody else can re-derive:

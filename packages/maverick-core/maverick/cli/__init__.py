@@ -6099,10 +6099,36 @@ def record_export(ctx, out: str, limit: int) -> None:
 
 @record_grp.command("verify")
 @click.argument("capsule", type=click.Path(exists=True))
-def record_verify(capsule: str) -> None:
-    """Verify a capsule's signature + integrity offline."""
+@click.option("--pubkey", "pubkeys", multiple=True,
+              help="Trusted Ed25519 public key (hex) the capsule must be signed "
+                   "with, e.g. the firm's published key. Repeatable. Default: "
+                   "this installation's own audit keys.")
+@click.option("--trusted-keys", "trusted_file", default=None,
+              type=click.Path(exists=True, dir_okay=False),
+              help="File of trusted public keys (hex), one per line; blank "
+                   "lines and # comments are ignored.")
+def record_verify(capsule: str, pubkeys: tuple[str, ...], trusted_file: str | None) -> None:
+    """Verify a capsule's integrity AND that it was signed by a trusted key.
+
+    A capsule carries its own public key, so a signature alone proves only that
+    the file is unedited, not who made it. Without --pubkey/--trusted-keys the
+    signer must be one of this installation's audit keys; to check a capsule
+    from another installation, pass that publisher's key.
+    """
     from .. import operating_record as orec
-    ok, reason = orec.verify_capsule(capsule)
+    trusted: list[str] | None = None
+    if pubkeys or trusted_file:
+        trusted = list(pubkeys)
+        if trusted_file:
+            try:
+                with open(trusted_file, encoding="utf-8") as handle:
+                    lines = (ln.split("#", 1)[0].strip() for ln in handle)
+                    trusted += [ln for ln in lines if ln]
+            except (OSError, UnicodeDecodeError) as e:
+                raise click.ClickException(
+                    "cannot read the trusted keys file: it must be a text file "
+                    "with one public key per line") from e
+    ok, reason = orec.verify_capsule(capsule, trusted_pubkeys=trusted)
     click.echo(reason)
     if not ok:
         raise click.ClickException("verification failed")

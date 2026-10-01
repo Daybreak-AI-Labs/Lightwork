@@ -98,11 +98,16 @@ def authorize(
 
     # 2. Shield: the tool name and its rendered params are model- or
     #    template-derived, so they are attacker-reachable. This is the same
-    #    screen the agent applies at its tool sink.
+    #    tool-call screen the agent applies at its tool sink. The text screen on
+    #    a repr of the call stays as a floor that an operator's
+    #    ``[safety] scan_tool_calls = false`` cannot remove (it is what ran here
+    #    before); on its own the repr quotes each value and hides
+    #    ``rm -rf /`` from the destructive-command rules.
     from . import shield_policy
 
-    payload = f"{tool} {params}"
-    if (reason := shield_policy.scan_block(payload)) is not None:
+    reason = (shield_policy.scan_tool_call_block(tool, params)
+              or shield_policy.scan_block(f"{tool} {params}"))
+    if reason is not None:
         _record_denial(tool, origin, goal_id, "shield", reason)
         return f"ERROR: BLOCKED by Shield: {reason}"
 
