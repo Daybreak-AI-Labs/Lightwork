@@ -52,10 +52,16 @@ def test_404_json_for_api(monkeypatch, tmp_path):
 @pytest.mark.parametrize("scoped_cookie", [False, True])
 def test_unmatched_browser_route_with_unverified_auth_stays_404(monkeypatch, scoped_cookie):
     """Unmatched routes have no route-auth principal; chrome stays public."""
+    from maverick_dashboard import invites, rbac
     from maverick_dashboard.app import app
 
-    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "synthetic-error-page-token")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    email = "error-page@example.test"
+    rbac.set_role("user:" + email, "admin")
     with TestClient(app, headers={"Origin": "http://testserver"}, raise_server_exceptions=False) as client:
+        client.cookies.set("mvk_session", invites.mint_local_session(email))
+        assert client.get("/users").status_code == 200
         if scoped_cookie:
             client.cookies.set("mvk_pref_context", "unverified-account-context")
             client.cookies.set("mvk_lang", "fr")
