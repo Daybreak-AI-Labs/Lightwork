@@ -1,6 +1,9 @@
 # Employee content and administrator authority
 
-Draft implementation, September 30, 2026. Runtime acceptance has not been run.
+Draft implementation, September 30, 2026, with subsequent local regression
+qualification. Exact source revisions, executed checks and remaining installed
+acceptance boundaries are recorded in
+[local qualification](ux-audit-2026-09-30/local-qualification.md).
 
 Named administrators no longer inherit employee task content through the task
 authorization helper. Lists remain owner scoped. Existing task ownership is
@@ -41,11 +44,12 @@ named employees' tasks. Existing named owners remain unchanged. An owner who
 approves a request must retain viewing membership in that request's workspace;
 removing that membership immediately invalidates the approval.
 
-Remaining integration review must cover every task/chat export, attachment,
-search, audit page and model-recall path, including additions in sibling slices.
-Direct UI and API contracts are implemented; global Copilot execution of access
-requests and reviews still requires integration with its closed operation
-catalog. No deployment or production migration was performed.
+Task/chat exports, attachments, search, audit pages and model-recall paths are
+covered by the integrated authorization helpers and their recorded route and
+store regressions. Direct UI, API and closed Copilot operation contracts share
+the same service; see the adapters described below. The implementation register
+retains remaining installed and distributed acceptance checks. No deployment or
+production migration was performed.
 
 Retention now uses explicit indefinite values and a saved effective-policy
 review. A run retains its cutoff, workspace targets and per-store receipts.

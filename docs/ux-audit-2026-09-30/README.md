@@ -3,7 +3,8 @@
 This register tracks the requested consolidation into draft PR #2528. It is an
 implementation worklist, not acceptance or release evidence.
 
-Start with the [195-entry checklist](implementation-checklist.md); the complete
+Start with the [review guide](review-guide.md) and
+[195-entry checklist](implementation-checklist.md); the complete
 JSON register retains the code evidence, validation and remaining criteria for
 each item. [Local qualification](local-qualification.md) distinguishes failed,
 focused and full-suite checkpoints.
