@@ -8,6 +8,10 @@ async function availablePort(){
 }
 
 test('fresh owner setup and login submit real browser origin without header injection',async({browser},info)=>{
+  // This journey owns a cold server (up to 30 seconds), two real password
+  // operations, screenshots and process cleanup. Keep ordinary assertions at
+  // ten seconds while bounding the complete lifecycle independently.
+  test.setTimeout(90000);
   const port=await availablePort(),origin=`http://127.0.0.1:${port}`;
   const child=spawn(pythonExecutable,[path.join(__dirname,'owner_server.py'),'--port',String(port)],{cwd:__dirname,stdio:'ignore',windowsHide:true});
   const exited=new Promise(resolve=>child.once('exit',resolve));
@@ -42,6 +46,11 @@ test('fresh owner setup and login submit real browser origin without header inje
     expect(await signedIn.request().headerValue('origin')).toBe(origin);
     await expect(page).toHaveURL(origin+'/start');expect(errors).toEqual([]);
   }finally{
-    try{if(context)await context.close();}finally{child.kill();await exited;}
+    try{
+      await test.step('Close isolated browser context',async()=>{if(context)await context.close();});
+    }finally{
+      child.kill();
+      await test.step('Wait for owned fixture process to exit',async()=>{await exited;});
+    }
   }
 });
