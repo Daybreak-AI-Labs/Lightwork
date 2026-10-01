@@ -67,13 +67,16 @@ def test_questions_are_answered_from_the_tasks_a_person_may_see(client, monkeypa
     pytest.importorskip("duckdb")
     _task("user:ada", "Ada's report", 2.5)
     _task("user:bob", "Bob's report", 4.0, status="failed")
+    unidentified = client.post("/api/v1/analytics/ask", json={"metric": "spend", "group": "none"}).json()
+    assert unidentified["rows"] == []
+    _as(monkeypatch, "admin", "user:ada")
     whole = client.post("/api/v1/analytics/ask", json={"metric": "spend", "group": "none"}).json()
-    assert whole["rows"] == [{"group": "all", "value": 6.5}]
+    assert whole["rows"] == [{"group": "all", "value": 2.5}]
     by_status = client.post("/api/v1/analytics/ask", json={"metric": "tasks", "group": "status"}).json()
-    assert {r["group"]: r["value"] for r in by_status["rows"]} == {"done": 1, "failed": 1}
-    _as(monkeypatch, "operator", "user:ada")
+    assert {r["group"]: r["value"] for r in by_status["rows"]} == {"done": 1}
+    _as(monkeypatch, "operator", "user:bob")
     mine = client.post("/api/v1/analytics/ask", json={"metric": "spend", "group": "task"}).json()
-    assert len(mine["rows"]) == 1 and "Ada's report" in mine["rows"][0]["group"] and mine["rows"][0]["value"] == 2.5
+    assert len(mine["rows"]) == 1 and "Bob's report" in mine["rows"][0]["group"] and mine["rows"][0]["value"] == 4.0
     today = dt.date.today().isoformat()
     ranged = client.post("/api/v1/analytics/ask", json={"metric": "runs", "group": "day", "since": today, "until": today}).json()
     assert ranged["rows"] == [{"group": today, "value": 1.0}] or ranged["rows"][0]["value"] == 1.0
@@ -120,6 +123,7 @@ def test_questions_say_plainly_when_the_add_on_is_missing(client, monkeypatch):
 def test_typed_questions_are_for_installation_administrators_and_read_only(client, monkeypatch):
     pytest.importorskip("duckdb")
     _task("user:ada", "Ada's report", 1.0)
+    _as(monkeypatch, "admin", "user:ada")
     choices = client.get("/api/v1/analytics/choices").json()
     assert choices["can_write_queries"] is True
     r = client.post("/api/v1/analytics/query", json={"query": "SELECT count(*) AS n FROM goals"})
@@ -129,7 +133,7 @@ def test_typed_questions_are_for_installation_administrators_and_read_only(clien
         assert r.status_code == 422, bad
         assert "SELECT" in r.json()["detail"]
     assert client.post("/api/v1/analytics/query", json={"query": "x" * 4001}).status_code == 422
-    _as(monkeypatch, "operator", "user:ada")
+    _as(monkeypatch, "operator", "user:bob")
     assert client.get("/api/v1/analytics/choices").json()["can_write_queries"] is False
     assert client.post("/api/v1/analytics/query", json={"query": "SELECT 1"}).status_code == 403
 
