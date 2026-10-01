@@ -88,7 +88,7 @@ class TextBridge:
                for value in self.encoder.passage_embed(documents)]
         vectors = validate_vectors(raw, len(documents), params.size)
         points = [PointStruct(id=point_id, vector={field: vector},
-                              payload={**metadata, "document": document})
+                              payload={"document": document, **metadata})
                   for point_id, vector, metadata, document in
                   zip(point_ids, vectors, metadatas, documents, strict=True)]
         # Embedding/preparation failures cannot delete or partially replace the

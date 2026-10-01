@@ -335,3 +335,15 @@ def test_uncertain_native_upsert_is_not_retried_or_followed_by_deletion(native_t
         store.add(["replacement needle"], ids=["original"])
     assert len(attempts) == 1
     assert _snapshot(store) == original
+
+
+def test_display_document_metadata_preserves_legacy_precedence_and_typed_values(native_text):
+    make_store, calls, _ = native_text
+    store = make_store()
+    store.add(["needle indexing text"], ids=["record"], metadatas=[{
+        "document": "separate display text", "ordinal": 7, "nested": {"valid": True},
+    }])
+    hit, = store.query("needle")
+    assert hit["document"] == "separate display text"
+    assert hit["metadata"] == {"document": "separate display text", "ordinal": 7, "nested": {"valid": True}}
+    assert ("passage", "synthetic/current", ["needle indexing text"]) in calls

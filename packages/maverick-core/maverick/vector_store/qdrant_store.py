@@ -10,9 +10,9 @@ Defaults to local persistent mode under ``~/.maverick/qdrant/`` (chmod
   - ``MAVERICK_QDRANT_URL``  -> remote server URL (overrides path)
   - ``MAVERICK_QDRANT_API_KEY`` -> remote API key
 
-Optional dep behind ``[qdrant]`` extra. qdrant-client >= 1.6 ships
-fastembed integration; this adapter uses ``client.add``/``client.query``
-so embeddings happen client-side without an extra wiring step.
+Optional dep behind ``[qdrant]`` extra. Text embeddings run client-side
+through FastEmbed. Older clients retain their text helpers; current clients
+use native point operations while preserving the recorded embedding space.
 """
 from __future__ import annotations
 
