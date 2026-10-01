@@ -49,7 +49,17 @@ def _prf():
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    """The requester's address for rate limiting and the submission record.
+
+    Proxy-aware through :func:`maverick_dashboard.ip_allowlist.client_ip`: an
+    ``X-Forwarded-For`` chain counts only when the peer is one of the pinned
+    ``[auth.proxy] trusted_proxies``, so a visitor cannot dodge the per-address
+    limit by sending the header themselves.
+    """
+    from .ip_allowlist import client_ip
+
+    addr = client_ip(request)
+    return str(addr) if addr is not None else "unknown"
 
 
 _TOKEN_LIMIT = None

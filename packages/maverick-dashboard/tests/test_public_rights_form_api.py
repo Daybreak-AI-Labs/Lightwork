@@ -319,3 +319,25 @@ def test_dashboard_open_accepts_jurisdiction_and_new_kinds():
     bad = client.post("/api/v1/privacy/dsar", json={
         "subject_id": "jo@example.com", "kind": "opt_out", "jurisdiction": "eu_gdpr"})
     assert bad.status_code == 422
+
+
+def test_client_address_is_proxy_aware_only_behind_a_pinned_proxy(tmp_path, _isolate):
+    """Rate limiting keys on the real visitor: a forwarded header is honoured
+    only when the peer is a trusted proxy (shared with the IP allowlist)."""
+    from types import SimpleNamespace
+
+    from maverick_dashboard import public_rights_api
+    from starlette.datastructures import Headers
+
+    def req(host, forwarded=None):
+        headers = {"X-Forwarded-For": forwarded} if forwarded else {}
+        return SimpleNamespace(client=SimpleNamespace(host=host), headers=Headers(headers))
+
+    assert public_rights_api._client_ip(req("203.0.113.7", "10.9.9.9")) == "203.0.113.7"
+    assert public_rights_api._client_ip(SimpleNamespace(client=None, headers=Headers({}))) == "unknown"
+    (tmp_path / "config.toml").write_text(
+        _CONFIG + "\n[auth.proxy]\ntrusted_proxies = [\"10.0.0.0/24\"]\n", encoding="utf-8",
+    )
+    config.reset_config_cache()
+    assert public_rights_api._client_ip(req("10.0.0.5", "198.51.100.4, 10.0.0.6")) == "198.51.100.4"
+    assert public_rights_api._client_ip(req("10.0.0.5")) == "10.0.0.5"
