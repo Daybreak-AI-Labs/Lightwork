@@ -16,6 +16,23 @@ Seven real-PostgreSQL cursor variants and final integrated checks remain queued.
 The five separately approved security repairs remain implemented with final
 integrated qualification pending.
 
+The later `e7b7bf66b269fac4190ce90a59946b1d4389768a` checkpoint also includes
+the accessible plan cost labels and honest stale-snapshot recovery, plus browser
+acceptance cases for archive verification, retention reset, workspace switching,
+explicit role grants, the embedded widget and reduced motion. The new browser
+cases have been authored and collected, not yet executed. The plan controller's
+11 cases and reduced-motion call-site checks pass locally. The complete retention
+API module passes 18 cases in each posture on Python 3.10. These focused results
+do not replace a complete run on the later source.
+
+The running final07 ordinary phase has one unresolved failure in
+`test_bounded_queue_overflow_is_durable_serial_and_in_intake_order`. Its preserved
+receipt journal shows all eight items admitted but only the first executed,
+remaining in `completed / sending`; the remaining seven did not execute before
+the test deadline. Unchanged focused passes do not explain that failure. The
+investigation is following delivery confirmation and journal operations, without
+increasing the test deadline or treating the original failure as a pass.
+
 | Evidence | Exact execution source | Current result and limit |
 | --- | --- | --- |
 | Full Python 3.12 ordinary | `2a765aa3e93cc7775090f574f027bd855b33aef5` (`qualification-final-07`) | Ordinary is active. Later cursor/mobile fixes are outside this frozen run; subsequent secure, serial-heavy and floor-interpreter phases require a new source binding. No complete pass is claimed. Source/process receipts are retained under `audit/qualification-final-07-*`. |
