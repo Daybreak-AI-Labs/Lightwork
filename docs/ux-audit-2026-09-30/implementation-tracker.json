@@ -563,10 +563,10 @@
     "category": "Accessibility language and mobile",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Settings worker commit6eaca67f1c16dd1b549e4969fb4827fa46b4fa92 supplies account/device in-place display preferences, OS system mode with live matchMedia changes, explicit theme override, shared base/chat display menu, font/density/text-size presets and rollback/Undo."
+      "Integrated account/device in-place display preferences, OS System mode with live matchMedia changes, explicit theme override, shared base/chat display menu, font/density/text-size presets and revision-bound rollback/Undo. The settings foundation is present in the consolidated source; no collaborator integration is outstanding."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
-    "remaining": "Parent must integrate settings worker checkpoint with this slice. Browser/OS-follow/max-text qualification remains unrun.",
+    "validation": "2026-10-01: complete installed-Chrome cohort at d4b71e3f11546568b234cd22535c0b507b7a2672 passed 78 distinct journeys (71 default plus all 7 setup-only). Its display-preferences journey passed at 375x480 with high contrast, dyslexic font, acknowledged in-place saves, document/URL preservation, persistence after reload and Escape focus return. customer_navigation.spec.js separately exercised five pages/settings sections at 1280x950 with CSS zoom 1 and 2. Complete Node/jsdom suite at that same SHA passed 1,686 tests across 177 files. Exact reports and boundaries: browser-and-javascript-checkpoint-2026-10-01.md.",
+    "remaining": "Final consolidated-source complete rerun is pending after the later theme/focus and hosted-index changes. Actual OS appearance transitions, browser/OS text scaling beyond the recorded CSS-zoom checks, maximum text-size presets across all dialogs, and human assistive-technology acceptance are not established by these results.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -575,10 +575,10 @@
     "category": "Accessibility language and mobile",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "themes.py contrast_ratio/contrast_issues/readable_palette; settings_all_page._plan_table refuses unreadable palette saves; lightwork-theme-preview.js shows isolated form/focus/disabled/status/progress preview; legacy palettes derive readable fallback colors. test_theme_contrast.py and JS contrast regression authored. Settings worker6eaca67 supplies shared prior-theme Undo through the same revision-bound preferences endpoint."
+      "themes.py enforces text/control/focus contrast and supplies readable legacy fallback; settings_all_page refuses unreadable palette saves. lightwork-theme-preview.js shows form/focus/disabled/status/progress previews and shared preferences provide revision-bound prior-theme Undo. Root 5bc069b derives all omitted semantic colors from the validated text color in both runtime CSS and preview, preventing a four-key white palette from inheriting dark-theme tokens. These fixes are integrated."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
-    "remaining": "Integrate settings worker6eaca67 and mobile asset-registration38fcc2f together. Browser/background/contrast qualification remains unrun.",
+    "validation": "The d4b71e3 complete JavaScript cohort passed the contrast-warning regression within all 1,686 tests, including preserving the editor when white-on-white colors are rejected. After the semantic-color repair, installed Chrome passed the four-key white palette case using an actual acknowledged device preference: computed runtime and settings-preview text/status/control/border/focus tokens were readable against white, and the preview screenshot was visually inspected. This belongs to the 4/4 theme_drawer.spec.js cohort at a4b6cfd37e54a237e3594f92363854d9f8ea8d61, whose tree exactly matches 8db2fc1d090b403c8c7a0d1f1616f687436bf219 (integrated as 3f8dc75); 9/9 focused drawer/theme DOM tests also passed. Evidence: audit/browser-theme-drawer-fixed-results.json and audit/browser-theme-preview-white.png. Root separately reported 24 focused Python tests in each posture and 8 DOM tests for 5bc069b.",
+    "remaining": "Complete final-source browser/JavaScript rerun is pending. The targeted palette result does not qualify every custom palette, OS high-contrast implementation or human visual/accessibility preference. Existing source-level contrast refusal remains required for each saved palette.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -587,10 +587,10 @@
     "category": "Accessibility language and mobile",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "static/lightwork-read-aloud.js owns cancellable server/browser playback, complete 3000-character request chunks, pause/resume/stop, skip-code/tables option, visible preparation/failure state, URL cleanup, navigation stop and answer-ready invalidation. chat_goal.html binds it. JS cancellation/long-answer regression authored."
+      "Integrated lightwork-read-aloud.js owns cancellable server/browser playback, complete 3000-character request chunks, pause/resume/stop, skip-code/tables, visible preparation/failure state, URL cleanup, navigation stop and answer-panel replacement invalidation. Dynamic answer controls bind the current controller once and never restart paid playback automatically. The consolidated implementation has no pending PR2529 adoption dependency."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization: dashboard accessibility DOM regressions passed4/4 (voice cancellation/full fallback/panel replacement/contrast warning). Real browser/assistive technology checks remain outstanding.",
-    "remaining": "PR2529 has overlapping bounded-read implementation and dynamic answer changes; integrator must preserve current review gating when combining. Engine/autoplay/native acceptance unrun.",
+    "validation": "2026-10-01: complete Node/jsdom cohort at d4b71e3 passed 1,686 tests. audit_accessibility.test.js includes successful cancellation during a pending voice fetch with late audio ignored, complete 7,100-character browser-speech fallback with Stop, and answer replacement canceling pending audio/rebinding without autoplay (four file cases including contrast). These use synthetic speech/audio boundaries; the complete Chrome cohort is not evidence of real speech-engine playback.",
+    "remaining": "Real browser/server voice engines, audible full-content delivery, autoplay refusal, pause/resume behavior across installed platforms and human assistive-technology interaction remain unqualified. No live voice-provider call was made. Final-source complete JavaScript rerun is pending.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -599,10 +599,10 @@
     "category": "Accessibility language and mobile",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "mobile SettingsScreen.tsx captures test generation, cancels on edits/unmount, clears prior result, guards stale responses and prevents save/test overlap; native ConnectionSettingsView.swift locks tested inputs/save and verifies current normalized candidate/visible lifetime."
+      "Mobile SettingsScreen.tsx captures the test generation, cancels on edits/unmount, clears the prior result, guards stale responses and prevents save/test overlap. Native ConnectionSettingsView.swift locks tested inputs/save and validates the current normalized candidate and visible lifetime. The implementation is integrated."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified. New user authorization superseded test deferral: mock-only mobile suite passed 75/75 on 2026-09-30; strict TypeScript static check passed all15 TS/TSX sources. This is not installed-device/keychain/accessibility qualification.",
-    "remaining": "Delayed-response, save/unmount and native-device acceptance remain unrun.",
+    "validation": "The latest native-build-evidence.json records all 91 mobile mocked tests passing, plus TypeScript tsc --noEmit against the locked installed dependencies and reproducible native generation/autolinking checks. audit-recovery.test.cjs explicitly tests that editing connection A to B cannot inherit A's delayed success. This supersedes the earlier 75-case checkpoint; it does not claim an installed iOS/Android or Apple XCTest run.",
+    "remaining": "Installed-device save/test/unmount races, keychain/SecureStore and actual native transport/lifecycle behavior remain unqualified. Apple SDK/Xcode and Android SDK are unavailable on this Windows executor. Swift regression sources have not compiled or executed here; source review and mobile mocks do not substitute for them.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -635,10 +635,10 @@
     "category": "Accessibility language and mobile",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "chat_goal.html pollQuestions only updates the polite question region for a new question ID and never calls answerInput.focus during polling."
+      "Integrated chat_goal.html pollQuestions changes the polite question text only when the question ID changes, retains a draft when the current question/revision changes, and never calls answerInput.focus during polling. The adjacent conversation/composer lifecycle is integrated; no collaborator merge remains."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
-    "remaining": "Keyboard/screen-reader refresh acceptance unrun; reconcile adjacent conversation worker polling edits.",
+    "validation": "2026-10-01 current-source review confirms the question-ID guard and absence of focus assignment in pollQuestions. The d4b71e3 complete Node/jsdom cohort passed all 1,686 tests, including the related answer-panel completion case preserving a focused composer. No dedicated repeated-identical-question polling/selection runtime result is claimed from that broader test.",
+    "remaining": "A dedicated repeated-question polling/selection browser regression and human screen-reader announcement/keyboard acceptance remain unqualified. The final-source browser/JavaScript rerun is also pending; unrelated passing focus cases are not substituted for the exact polling criterion.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -767,10 +767,10 @@
     "category": "Accessibility language and mobile",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "chat_base.html moves close default-hide before narrow-screen override; existing named close button remains focus-returning. Exact same fix independently exists in PR2529."
+      "Integrated chat_base.html places the default hidden Close rule before its mobile override and retains the accessible named keyboard-operable Close control. Desktop transitions release the drawer and its covered-content isolation. Equivalent historical overlap in PR2529 is provenance only, not an outstanding adoption dependency."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
-    "remaining": "Integrator should keep one equivalent fix when combining2529. 320/390/768/RTL/large-text rendered acceptance unrun.",
+    "validation": "2026-10-01: installed Chrome theme_drawer.spec.js passed the actual Close visibility/focus behavior at 390x844 and its hidden desktop state after resizing to 1280x900, within 4/4 targeted cases. The tested tree is 205d2753877341f8635cdc92443fce55c81a3d88 (a4b6cfd and committed 8db2fc1; root integration 3f8dc75). Focused drawer/theme Node tests passed 9/9, including keyboard wrap and return behavior. Exact report: audit/browser-theme-drawer-fixed-results.json.",
+    "remaining": "Drawer-specific 320/768-width, RTL and enlarged-text rendered acceptance is not established by the 390-width case or unrelated narrow-page coverage. Human screen-reader checks and final-source complete rerun remain pending.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -779,10 +779,10 @@
     "category": "Accessibility language and mobile",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "chat_base drawer saves/restores prior inert state, isolates covered body content and wraps Tab/Shift+Tab; existing close/finder/resize paths release isolation. PR2529 supplies overlapping richer focusable filtering."
+      "The integrated chat drawer saves/restores prior inert state, isolates covered body content, wraps Tab/Shift+Tab, and releases isolation on close/finder/resize. 8db2fc1 (root 3f8dc75) records actual drawer focus before CSS hides Close; desktop resize restores visible brand focus only when the open drawer lost Close focus to body/documentElement, preserving a visible link or deliberate dialog focus. No PR2529 adoption dependency remains."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
-    "remaining": "Integrator should prefer one reconciled drawer primitive from2529 if adopted. Native assistive-technology acceptance unrun.",
+    "validation": "2026-10-01: 9/9 focused drawer/theme DOM tests passed, including explicit blur-to-body before the media-query callback, preserved visible-link/dialog focus, keyboard wrapping and original inert-state restoration. Four actual Chrome cases passed on the exact same committed tree, including 390x844 to 1280x900 Close-focus recovery and subsequent keyboard navigation, plus separate visible-link and search-dialog preservation. Report: audit/browser-theme-drawer-fixed-results.json. Earlier complete d4b71e3 JavaScript cohort passed all 1,686 cases; it predates this native-resize repair.",
+    "remaining": "Final consolidated-source complete browser/JavaScript rerun is pending. Human assistive-technology navigation through inert content, additional desktop/mobile engines, RTL and enlarged-text drawer checks remain unqualified; synthetic DOM and installed Chrome are reported separately.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -2188,17 +2188,19 @@
     "category": "Onboarding support and qualification",
     "status": "test-needed",
     "implementation_evidence": [
-      "Installed Chrome/Playwright browser qualification against isolated real dashboard and encrypted local stores; docs/ux-audit-2026-09-30/browser-qualification.md records exact evidence and limits.",
-      "enterprise_server.py and enterprise_lifecycle.spec.js exercise actual invitation/session/RBAC/own-account/knowledge/review/export/departure flows for five roles with socket-blocked synthetic provider/source boundaries.",
-      "Production fixes:23 advertised static assets and current companion navigation; lazy ordinary-record search; approved employee Connections page policy; My Data private state clears/locks on revoked sign-in, permission loss or proven context mismatch."
+      "Installed Chrome/Playwright qualification runs the real dashboard and encrypted disposable local stores at an immutable source with outbound sockets blocked and synthetic provider/model/identity boundaries. browser-and-javascript-checkpoint-2026-10-01.md records the complete frozen checkpoint and its limits.",
+      "enterprise_server.py and enterprise_lifecycle.spec.js exercise actual invitation/session/RBAC/own-account/knowledge/review/export/departure flows for five roles. Actual catalog-loading/cache/fallback, owner setup, review access, recovery, navigation and connected-account journeys are included; no real model answer or paid exchange is claimed.",
+      "Integrated repairs include advertised static asset routes, owner-scoped lazy search/Action Center projection, current employee Connections policy, My Data access-loss clearing, scoped interface-preference fixtures and public content-addressed localization catalogs. Later theme semantic-color and native drawer-resize fixes are separately qualified at 8db2fc1 (root 3f8dc75)."
     ],
     "validation": [
-      "Original69-case complete run:64passed5failed. All five corrected/environment-qualified cases pass targeted reruns; independent pilot passes25.1s after four exact owner-approved five-minute content grants and explicit audited read-only source resolver f96eabe. Together with the new enterprise journey,70distinct local cases pass across complete+targeted runs, not a single final-commit70-case run.",
-      "New enterprise lifecycle passes55.0s. Seven controller access-loss/preservation regressions pass; ten native workspace/connection regressions and own-connect visibility regression pass.174 advertised asset HTTP/MIME contracts pass."
+      "At d4b71e3f11546568b234cd22535c0b507b7a2672, the complete default browser cohort collected 78: 71 passed, 0 failed and 7 setup-only skipped in 1,094.486 seconds. All 7 setup-only cases passed separately at the same SHA in 65.423 seconds. Exact spec/title reconciliation proves 78 distinct successful journeys, zero retries/flaky results/top-level errors, and no unexecuted journey across those two profiles. Reports: audit/browser-final-complete-d4b71e3-results.json, audit/browser-final-setup-d4b71e3-results.json and audit/browser-final-d4b71e3-summary.json.",
+      "At that same SHA, the complete dashboard Node/jsdom suite passed 1,686 tests across 177 files with zero failures/cancellations/skips in 408.667 seconds; audit/qualification-d4b71e3-all-js.json contains the exact source and file-hash manifest. Environment: installed Chrome 154.0.8037.58, Playwright 1.58.2, Python 3.12.12, Node 24.13.0, jsdom 29.1.1, one worker per run, unchanged dependencies.",
+      "After the later theme/focus fixes, 4/4 theme_drawer.spec.js installed-Chrome cases and 9/9 focused DOM cases passed. Browser source a4b6cfd37e54a237e3594f92363854d9f8ea8d61 and committed 8db2fc1d090b403c8c7a0d1f1616f687436bf219 share exact tree 205d2753877341f8635cdc92443fce55c81a3d88. This targeted evidence is not a full-suite result on the later source. Report: audit/browser-theme-drawer-fixed-results.json.",
+      "The complete default log retains a Windows Proactor WinError 10054 peer-close callback between two successful recovery cases. It produced no application-route traceback or Playwright error and was not removed from the retained evidence."
     ],
     "remaining": [
-      "Run the complete browser gate against the final consolidated commit; current evidence spans the complete baseline plus focused fix qualification.",
-      "Approved real IdP/provider sandbox accounts were not supplied or invoked. Live consent/refresh/revocation, provider-grounded model answer quality, actual paid-cost reconciliation, packaged desktop/native OS integration and customer acceptance remain unqualified. Captured artifact and provider exchange in the local enterprise journey are explicitly synthetic; no real model was run."
+      "Run the complete browser default/setup profiles and complete JavaScript suite on the final frozen consolidated source after the theme/focus and hosted-index changes. The full green d4b71e3 checkpoint and later targeted passes remain separate until that completes.",
+      "Approved real IdP/provider sandbox accounts were not supplied or invoked. Live consent/refresh/revocation, provider-grounded answer quality, actual paid-cost reconciliation, packaged desktop/native OS behavior, human translation/accessibility review and customer acceptance remain unqualified. Local enterprise source/provider exchanges are explicitly synthetic; no live model was run."
     ],
     "evidence_slice": "slices/browser.json"
   },
@@ -2338,10 +2340,10 @@
     "implementation_evidence": [
       "maverick.episode_reporting.iter_episodes: authorized keyset traversal with insertion ceiling; no 10,000-row cap",
       "app.billing_page and cost_csv: finished-attempt population and bounded streaming month export",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2352,10 +2354,10 @@
     "implementation_evidence": [
       "maverick.workforce_value.compute / savings.compute: complete paginated history, unavailable costs/read errors, owner scope across dashboard consumers",
       "savings and shoring templates: explicit unavailable state",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2366,10 +2368,10 @@
     "implementation_evidence": [
       "Savings compares USD only; non-USD existing assumptions require review without automatic conversion",
       "api.put_savings_assumptions and savings page show the same USD basis",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2382,8 +2384,8 @@
       "Spend row/source links, streaming cost/billing exports include full provenance manifest and exclusions without treating task-wide receipts as episode costs.",
       "cost_reconciliation_api.py and cost_reconciliation.html compare owned runtime attempts, personal acknowledged usage and exact work-item reservations by their different scopes/periods, with drill-through and interrupted-settlement explanation."
     ],
-    "validation": "Python 3.10 AST and whitespace checks. Four regression cases authored; local tests now authorized and pending environment setup.",
-    "remaining": "Run local regression suites and authenticated UI/revocation fixtures. No provider invoices verified and no live provider access required.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2394,11 +2396,11 @@
     "implementation_evidence": [
       "billing_sync_reviews.prepare/execute: sealed short-lived field/account/workspace/plan/connection/rated-content binding and frozen Invoice execution",
       "lightwork-billing-ops.js: edit invalidation, exact reviewed details, explicit confirmed dispatch",
-      "tests/test_billing_sync_reviews.py: provider-free fault cases authored, unrun",
+      "tests/test_billing_sync_reviews.py: executed provider-free fault cases; see validation below",
       "docs/billing-review-recovery.md: detailed boundaries and recovery semantics"
     ],
-    "validation": "Python 3.10 AST and JavaScript syntax passed; suites, provider calls and browser journeys not run.",
-    "remaining": "Runtime/browser/Stripe/distributed-fault qualification deferred. Unresolved provider outcomes remain explicitly held for reconciliation; no new invoice identity bypass.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2409,11 +2411,11 @@
     "implementation_evidence": [
       "billing_sync_reviews: CAS workspace admission, per-stage and per-dispatch durable pending/confirmed/unknown receipts",
       "Retained receipt UI/API, explicit same-attempt resume, unchanged native collection identities, conservative provider retry-window refusal",
-      "tests/test_billing_sync_reviews.py: provider-free fault cases authored, unrun",
+      "tests/test_billing_sync_reviews.py: executed provider-free fault cases; see validation below",
       "docs/billing-review-recovery.md: detailed boundaries and recovery semantics"
     ],
-    "validation": "Python 3.10 AST and JavaScript syntax passed; suites, provider calls and browser journeys not run.",
-    "remaining": "Runtime/browser/Stripe/distributed-fault qualification deferred. Unresolved provider outcomes remain explicitly held for reconciliation; no new invoice identity bypass.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2424,10 +2426,10 @@
     "implementation_evidence": [
       "billing_invoice_api._display_amounts: same deterministic currency allocation as collection",
       "Invoice preview and CSV display identical allocated line amounts and total, including minimum lines",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2438,10 +2440,10 @@
     "implementation_evidence": [
       "audit_search.search_events: project private content, filter complete selected reader stream before result paging",
       "app.audit_page and audit template: anchored older-page continuation plus completeness report",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2451,10 +2453,10 @@
     "status": "implemented-test-needed",
     "implementation_evidence": [
       "app.audit_page validates both supplied dates and ordering; invalid scope returns visible error and no normal result set",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2464,10 +2466,10 @@
     "status": "implemented-test-needed",
     "implementation_evidence": [
       "board.js: owned request generation, AbortController, bounded fetch, selected-period last-good stamp and page lifecycle cancellation",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed. Three additional Node/jsdom lifecycle regressions passed on 2026-10-01: late old-period response exclusion, correctly labelled last-good retention after failure, and pagehide/bfcache cancellation and fresh request. Test file: tests/js/board_request_lifecycle.test.js; final full-JavaScript run remains separate.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2477,10 +2479,10 @@
     "status": "implemented-test-needed",
     "implementation_evidence": [
       "api._board_spend reads all authorized attempts within selected interval for outcomes; running and finished denominators explained",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2491,10 +2493,10 @@
     "implementation_evidence": [
       "spend page labels all-time totals, selected-period charts, latest-50 table and independently chosen month export",
       "_spend_insights states independent retrospective controls; billing periods unchanged",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2505,10 +2507,10 @@
     "implementation_evidence": [
       "lightwork-analytics.js displays latest-100 scope, generation-bound manual refresh and last-updated status",
       "embed_demo removes shared credential recommendation and uses each viewer session",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2519,10 +2521,10 @@
     "implementation_evidence": [
       "api._board_oversight reports per-source availability/partial counts and scoped complete approval count",
       "oversight_page and template render source errors/unknown stop and retain last-known chart state with timestamps",
-      "core/dashboard tests/test_reporting_integrity.py: authored regression cases; not executed"
+      "core/dashboard tests/test_reporting_integrity.py: executed synthetic regressions; see validation below"
     ],
-    "validation": "Python 3.10 AST and standalone/extractable inline JavaScript syntax; whitespace checked. No test suites, browser journeys, native runtime, or provider calls run. Jinja renderer unavailable in this executor.",
-    "remaining": "Runtime and acceptance qualification deferred at user request. Integration review continues.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
@@ -2535,8 +2537,8 @@
       "View separates confirmed, reserved, estimated and unavailable amounts, source currency and included/excluded fees. Drill-through links preserve independent ledger authority; no summed cross-ledger total or provider-invoice verification is fabricated.",
       "packages/maverick-core/tests/test_cost_provenance.py includes interrupted/unknown attempt and synthetic provider-receipt cases; root focused budget/billing/cost group passed 12 local tests."
     ],
-    "validation": "Local synthetic cost tests passed as part of the 12-test root budget/billing/cost checkpoint. Full integrated and authenticated browser verification pending; no live provider calls.",
-    "remaining": "Final integrated local qualification and release qualification remain pending.",
+    "validation": "Local test execution is authorized and performed. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all 12 reporting-integrity cases (six core, six dashboard), five billing-sync-review cases and four cost-provenance cases. These are 21 distinct cases, not per-row additive counts. Actual templates and local encrypted stores were available. The full run still failed 17 unrelated assertions in two subsequently repaired modules; no complete green runtime qualification is claimed. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. No live provider or invoice reconciliation was performed.",
+    "remaining": "Fresh final-source ordinary/secure and browser qualification remains pending. Live Stripe/provider receipts, invoice reconciliation, multi-host fault injection and customer acceptance require their corresponding service/host evidence. Uncertain paid outcomes remain held; synthetic checks do not establish external billing correctness.",
     "evidence_slice": "slices/reporting.json"
   },
   {
