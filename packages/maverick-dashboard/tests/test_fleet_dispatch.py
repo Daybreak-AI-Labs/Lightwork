@@ -390,7 +390,7 @@ def _install_specialist_pack(monkeypatch, tmp_path):
 def _save_specialist_fleet(domain="ledger_reviewer"):
     from maverick.fleet import Fleet, FleetAgent, save_fleet
 
-    save_fleet(Fleet(name="dept-ledger", owner="user:dana", agents=(
+    save_fleet(Fleet(name="dept-ledger", owner="", agents=(
         FleetAgent("ledger_reviewer", "analyst", "reviews ledgers", domain=domain),
         FleetAgent("plain", "analyst", "no specialist pack"),
     )))

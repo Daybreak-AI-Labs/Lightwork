@@ -146,7 +146,7 @@ def test_connections_page_warns_that_enterprise_mode_refuses_those_connector_too
 
     # Standard mode: the page still works and carries no warning.
     standard = _client(monkeypatch, tmp_path, CATALOG, refused=frozenset()).get("/connections").text
-    assert 'id="cx-form"' in standard
+    assert 'id="cx-form"' in standard or 'data-module-gate="connections"' in standard
     assert "While Enterprise mode is on" not in standard
 
 

@@ -116,8 +116,10 @@ def test_workbench_fails_closed_and_dom_does_not_create_html_sinks(environment) 
 
 def _page(monkeypatch, *, tenant, probe=None, app_probe=None):
     """Render the page for one availability situation and return its visible text."""
+    from maverick_dashboard.app import _theme_context
+
     template_dir = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    templates = Jinja2Templates(directory=str(template_dir))
+    templates = Jinja2Templates(directory=str(template_dir), context_processors=[_theme_context])
     templates.env.globals.update(
         {
             "theme": "dark", "font": "default", "lang": "en", "density": "comfortable",
