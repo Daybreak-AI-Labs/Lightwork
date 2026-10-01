@@ -586,8 +586,11 @@ def suites_for_domain(name: str, profile: DomainProfile | None = None) -> frozen
         return frozenset()
     if profile is None:
         profile = available_domains().get(name)
-    if profile is None and suite_for(name) is None:
-        return frozenset({_UNAVAILABLE_DOMAIN_SUITE})
+    if profile is None:
+        # A named fork may have inherited a *second* suite that its own prefix
+        # cannot reveal. Keep the visible prefix but deny scoped principals
+        # until the missing pack can be recovered.
+        return frozenset({suite for suite in (suite_for(name), _UNAVAILABLE_DOMAIN_SUITE) if suite})
     return frozenset(
         suite for suite in (suite_for(name), suite_for(profile.name) if profile else None)
         if suite is not None

@@ -227,6 +227,18 @@ def test_deleted_generic_specialist_does_not_lose_persisted_goal_scope(monkeypat
     assert not auth.can_access_goal(request, goal)
     assert domain.suites_for_domain("finance_ap") == frozenset({"finance"})
 
+    # A fork's own prefix can still be granted while the missing parent suite
+    # cannot be reconstructed from the persisted goal's domain string.
+    prefixed = tmp_path / "gtm_fork.toml"
+    prefixed.write_text('name = "gtm_fork"\nextends = "finance_ap"\n', encoding="utf-8")
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"sales_gtm"}))
+    goal.domain = "gtm_fork"
+    assert domain.suites_for_domain("gtm_fork") == frozenset({"sales_gtm", "finance"})
+    assert not auth.can_access_goal(request, goal)
+    prefixed.unlink()
+    assert not auth.domain_suites_allowed(request, "gtm_fork")
+    assert not auth.can_access_goal(request, goal)
+
     # A valid generic pack has no inherited department and stays available.
     monkeypatch.setattr(
         domain, "available_domains",
