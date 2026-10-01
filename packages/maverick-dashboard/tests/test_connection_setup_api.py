@@ -201,6 +201,12 @@ def test_employee_self_connection_cannot_manage_app_registration(monkeypatch, cl
     assert denied.status_code == 403
 
 
+def test_employee_overview_refuses_when_self_connection_is_not_approved(monkeypatch, client):
+    monkeypatch.setattr(connection_oauth, "self_connect_profiles", lambda: frozenset())
+    response = client.get("/api/v1/connection-setup", headers={"X-Test-User": "other"})
+    assert response.status_code == 403
+
+
 def test_self_connection_policy_fails_closed_when_disabled(monkeypatch):
     monkeypatch.setattr(config, "config_source_errors", lambda **kwargs: [])
     monkeypatch.setattr(config, "load_config", lambda: {"connections": {"allow_self_connect": False, "self_connect_profiles": "google-drive"}})

@@ -158,11 +158,13 @@ NAMED_SIGN_IN_NEEDED = (
 
 @router.get("")
 def overview(request: Request, response: Response):
-    require_permission(request, "admin")
     if not str(caller_principal(request) or "").startswith("user:"):
         # Single-user and shared-token installations have no named person to own a
         # renewable account sign-in. Nothing was lost, so answer plainly instead of
         # a 403 the page would read as revoked access. Changing routes still refuse.
+        # Only an administrator may inspect this branch; a named employee with
+        # approved self-connect access is admitted below by _authority.
+        require_permission(request, "admin")
         from .local_owner import available as local_owner_available
 
         can_set_up = local_owner_available(request)
