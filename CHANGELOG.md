@@ -56,6 +56,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shows each provider's list status. `[models] discovery` (default on, wizard
   question) and `MAVERICK_MODEL_DISCOVERY=0` switch it off;
   `discovery_ttl_minutes` sets freshness.
+- **Tools and Connections say what Enterprise mode refuses** — while
+  Enterprise mode is on, a signed-in person's task cannot run the
+  hand-written connector tools that read server-wide environment credentials
+  (Salesforce, ServiceNow, Workday, SAP, Jira, Slack and more than sixty
+  others).
+  The Tools page now marks each such tool "Not available in Enterprise mode
+  yet" and counts them, and the Connections page warns that a saved connection
+  does not unlock them, so an administrator learns this before rollout instead
+  of from a refused task. `maverick.tools.enterprise_unavailable_tool_names()`
+  states the same rule the registry applies at call time. Moving those
+  connectors onto saved connections is not part of this change.
 
 ### Changed
 - **Ordinary tasks have optional limits** — omitted dollar, time, token,

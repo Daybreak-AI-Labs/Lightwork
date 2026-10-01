@@ -7146,6 +7146,7 @@ def tools_page(
     """Bounded registered-tool inventory (post-ACL, post-rate-limit)."""
     tools: list[dict] = []
     error = None
+    enterprise_blocked_total = 0
     query = q.strip()
     tool_page = {
         "query": query,
@@ -7160,21 +7161,24 @@ def tools_page(
     }
     try:
         from maverick.sandbox import build_sandbox
-        from maverick.tools import base_registry
+        from maverick.tools import base_registry, enterprise_unavailable_tool_names
 
         from .tool_summary import plain_tool_summary
 
         wm = _world()  # honor the configured backend (SQLite or Postgres)
         sb = build_sandbox()
         reg = base_registry(world=wm, sandbox=sb)
+        enterprise_blocked = enterprise_unavailable_tool_names()
         catalog = [
             {
                 "name": t.name,
                 "description": (t.description or "")[:240],
                 "summary": plain_tool_summary(t.name, t.description),
+                "enterprise_blocked": t.name in enterprise_blocked,
             }
             for t in sorted(reg.all(), key=lambda x: x.name)
         ]
+        enterprise_blocked_total = sum(1 for tool in catalog if tool["enterprise_blocked"])
         folded = query.casefold()
         filtered = [
             tool
@@ -7212,7 +7216,12 @@ def tools_page(
     return templates.TemplateResponse(
         request,
         "tools.html",
-        {"tools": tools, "error": error, "tool_page": tool_page},
+        {
+            "tools": tools,
+            "error": error,
+            "tool_page": tool_page,
+            "enterprise_blocked_total": enterprise_blocked_total,
+        },
     )
 
 
@@ -11499,9 +11508,22 @@ async def connections_page(request: Request) -> HTMLResponse:
             people = _people(rbac.list_users(), labels, _signed_in_principals())
         except Exception:
             people = []
+    try:
+        from maverick.tools import enterprise_unavailable_tool_names
+        refused = enterprise_unavailable_tool_names()
+    except Exception:  # pragma: no cover -- a missing notice never hides the page
+        refused = frozenset()
+    # Name only the well-known systems that really are refused, so the notice
+    # stays true as individual connectors move onto saved connections.
+    refused_examples = [label for key, label in (
+        ("salesforce", "Salesforce"), ("servicenow", "ServiceNow"),
+        ("workday", "Workday"), ("sap", "SAP"), ("jira", "Jira"),
+    ) if key in refused]
     return templates.TemplateResponse(request, "connections.html", {
         "connections_enabled": enabled,
         "people": people,
+        "enterprise_connectors_limited": bool(refused),
+        "enterprise_connector_examples": refused_examples,
     })
 
 

@@ -3043,6 +3043,26 @@ AWS (`s3`, `lambda`, `dynamodb`, `ses`, `sns`) and a few others (`airtable`,
 they register only when `MAVERICK_ENABLE_CRED_TOOLS=1`. See
 [env-vars.md](env-vars.md).
 
+## Enterprise mode and the hand-written connectors
+
+In Enterprise mode (the `enterprise` profile, or a compliance profile that
+requires the egress lock such as HIPAA), a task run by a signed-in person or
+agent cannot use operator-global environment credentials. The REST and GraphQL
+connectors in `enterprise_connectors.py` honour that: they use only a saved
+connection that admits the person (see **Connections** in the dashboard). The
+hand-written connectors, such as `salesforce`, `servicenow`, `workday`, `sap`,
+`msgraph`, `slack_bot`, `jira`, `confluence`, `notion`, `hubspot`, `snowflake`,
+`gmail` and `stripe`, still read environment credentials directly, so in that
+situation the registry refuses them with `REFUSED (credentials)`, even when a
+saved connection of the same name exists. Tasks with no signed-in person, and
+deployments outside Enterprise mode, are unaffected.
+
+The dashboard **Tools** page marks every affected tool as "Not available in
+Enterprise mode yet", so an administrator can see the list before rollout. The
+list is the `AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES` set in
+`maverick/tools/__init__.py`; a connector leaves it once it resolves its
+credentials from a principal-authorized saved connection.
+
 ## Don't see your system?
 
 Most enterprise SaaS exposes a token-authed JSON REST or GraphQL API, which

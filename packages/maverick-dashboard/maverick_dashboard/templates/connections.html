@@ -45,6 +45,7 @@
                  Administrators manage connections; workflows use them only
                  with the access you approve.') }}
 {% endcall %}
+{% if enterprise_connectors_limited %}<p class="panel" role="note">While Enterprise mode is on, workflows run by signed-in people can't use the connector tools marked “Not available in Enterprise mode yet” on the <a href="/tools">Tools page</a>{% if enterprise_connector_examples %}, including {{ enterprise_connector_examples | join(', ') }},{% endif %} even with a saved connection.</p>{% endif %}
 
 <div class="cx">
   {% if not connections_enabled %}

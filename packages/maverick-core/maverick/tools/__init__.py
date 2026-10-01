@@ -731,6 +731,19 @@ def _ambient_credential_denial(name: str, principal: str | None) -> str | None:
     )
 
 
+def enterprise_unavailable_tool_names() -> frozenset[str]:
+    """Connector tools a signed-in person cannot run while Enterprise mode is on.
+
+    The same rule :func:`_ambient_credential_denial` applies at call time, stated
+    ahead of time so the Tools page can tell an administrator before rollout
+    rather than the person's task being refused. Empty when Enterprise mode is
+    off. Callers intersect it with the tools actually registered.
+    """
+    from ..enterprise import enterprise_enabled
+
+    return AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES if enterprise_enabled() else frozenset()
+
+
 def _deferred_loading_enabled() -> bool:
     """Whether deferred tool loading is on (default off -- unchanged behavior).
 
