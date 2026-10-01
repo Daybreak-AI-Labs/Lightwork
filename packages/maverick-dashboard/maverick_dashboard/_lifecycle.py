@@ -194,6 +194,8 @@ def register_main_components(app, supervisor):
         ("ai_cost", "ai_cost_scheduler", "stop_ai_cost_scheduler", "_scheduler_thread"),
         ("identity", "identity_governance_scheduler", "stop_identity_governance_scheduler", "_scheduler_thread"),
         ("data_use_checks", "data_use_scheduler", "stop_data_use_scheduler", "_scheduler_thread"),
+        ("deadline_alerts", "deadline_alerts_scheduler", "stop_deadline_alerts_scheduler",
+         "_scheduler_thread"),
         ("code_watch", "code_ops_api", "stop_watchers", "_watch_threads"),
         ("code_sessions", "repl_ops_api", "close_all_sessions", "_threads"),
         # Every child program: the Maintenance services and the programs a

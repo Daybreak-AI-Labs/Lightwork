@@ -39,8 +39,10 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from ..deadline_alerts import POSTGRES_SCHEMA as _DEADLINE_ALERT_SCHEMA_PG
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
 from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
+from ..webhook_subscriptions import POSTGRES_SCHEMA as _WEBHOOK_SUBSCRIPTION_SCHEMA_PG
 
 log = logging.getLogger(__name__)
 
@@ -706,6 +708,7 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
         "ALTER TABLE event_goal_admissions ADD COLUMN IF NOT EXISTS sealed_contract TEXT",
         "CREATE INDEX IF NOT EXISTS idx_pg_event_admission_goal ON event_goal_admissions(tenant_id,goal_id)",
     ]),
+    (42, [*_WEBHOOK_SUBSCRIPTION_SCHEMA_PG, *_DEADLINE_ALERT_SCHEMA_PG]),
 ]
 
 # Highest migration version = the reported schema version.

@@ -792,6 +792,16 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("data-use checks not started")
         try:
+            # Deadline alerts (requests, incidents, assessments, vendor contracts,
+            # approvals) and the webhook retry pump; stopped at shutdown.
+            from maverick_dashboard.deadline_alerts_scheduler import (
+                start_deadline_alerts_scheduler,
+            )
+
+            await run_in_threadpool(start_deadline_alerts_scheduler)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("deadline alerts scheduler not started")
+        try:
             # Profiling, the kernel activity monitor and the model proxy, each
             # only when its setting is on (All settings); stopped at shutdown.
             from maverick_dashboard.background_programs import start_enabled
@@ -1291,10 +1301,14 @@ from .governance_ops_api import router as _governance_ops_router  # noqa: E402
 from .immune_ops_api import router as _immune_ops_router  # noqa: E402
 from .privacy_ops_api import router as _privacy_ops_router  # noqa: E402
 from .security_ops_api import router as _security_ops_router  # noqa: E402
+from .webhooks_api import create_webhooks_page_router  # noqa: E402
+from .webhooks_api import router as _webhooks_router  # noqa: E402
 
 for _ops_router in (_audit_ops_router, _governance_ops_router, _immune_ops_router,
                     _privacy_ops_router, _security_ops_router):
     app.include_router(_ops_router)
+app.include_router(_webhooks_router)
+app.include_router(create_webhooks_page_router(templates))
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_immune_console_page_router(templates))
@@ -4033,9 +4047,16 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     labels = {a["value"]: a["label"] for a in assessments}
     for link in record.get("links") or []:
         link["label"] = labels.get(link.get("reference")) or link.get("reference")
+    from .webhooks_api import record_alerts
+
+    alerts: list[dict] = []
+    for c in record.get("contracts") or []:
+        alerts.extend(record_alerts("vendor_contract", f"{record.get('id')}:{c.get('kind')}"))
+    alerts.sort(key=lambda a: float(a.get("sent_at") or 0), reverse=True)
     return templates.TemplateResponse(
         request, "vendor_detail.html",
-        {"vendor": record, "questionnaire_types": questionnaire_types, "assessments": assessments})
+        {"vendor": record, "questionnaire_types": questionnaire_types, "assessments": assessments,
+         "record_alerts": alerts})
 
 
 @app.get("/privacy/dsar/{request_id}", response_class=HTMLResponse)
@@ -4071,10 +4092,13 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
         if fulfillment and fulfillment.get("response"):
             fulfillment["response"]["expires_date"] = _date(
                 fulfillment["response"].get("expires_at"))
+    from .webhooks_api import record_alerts
+
     return templates.TemplateResponse(
         request, "dsar_detail.html",
         {"dsar": record, "fulfillment": fulfillment,
          "fulfillment_enabled": fulfillment_enabled,
+         "record_alerts": record_alerts("dsar", record["id"]),
          "can_admin": has_permission(request, "admin"),
          "email_log": (record.get("public_form") or {}).get("emails") or []})
 

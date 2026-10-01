@@ -105,6 +105,7 @@ def test_bluesky_channel_env_vars():
     "pick_retention",
     "pick_persona",
     "pick_notifications",
+    "pick_deadline_alerts",
     "pick_webhooks",
     "pick_self_learning",
     "pick_ekko",

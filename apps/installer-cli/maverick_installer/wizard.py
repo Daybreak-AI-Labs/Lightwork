@@ -188,6 +188,7 @@ STEPS: list[tuple[str, str]] = [
     ("analytics", "Analytics"),
     ("persona", "Persona"),
     ("notifications", "Notifications"),
+    ("deadline_alerts", "Deadline alerts"),
     ("webhooks", "Webhooks"),
     ("a2a", "A2A"),
 ]
@@ -6389,6 +6390,57 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     return {}, []
 
 
+def pick_deadline_alerts(notifications: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Alerts when a privacy or governance record is due (``[deadline_alerts]``).
+
+    Reads ``maverick.deadline_alerts``: on by default while the privacy register
+    is on, so declining writes ``enabled = false`` explicitly. Lead times are
+    stored under ``[deadline_alerts.lead_days]`` / ``[deadline_alerts.lead_hours]``.
+    """
+    if not notifications:
+        console.print(
+            "  [dim]Deadline alerts use the notification backend above; without one "
+            "they are recorded on the record page but reach nobody.[/dim]"
+        )
+    if not _q_confirm(
+        "Alert people when a data request, incident clock, assessment renewal, "
+        "vendor contract or approval is due?",
+        default=True,
+    ):
+        return {"enabled": False}
+    mode = _q_select(
+        "  How should alerts be sent?",
+        ["immediate - one message per deadline", "digest - one message per person per check"],
+        default="immediate - one message per deadline",
+    ).split()[0]
+    owner = _q_text(
+        "  Who is named when a record has no assignee?", default="the privacy owner"
+    ).strip() or "the privacy owner"
+    quiet = _q_text(
+        "  Quiet hours for non-urgent alerts (HH:MM-HH:MM, server time; empty = none)",
+        default="",
+    ).strip()
+    cfg: dict[str, Any] = {"enabled": True, "mode": mode, "owner": owner}
+    if quiet:
+        cfg["quiet_hours"] = quiet
+    lead_days = _q_text("  Days before a data request is due to warn (comma-separated)", default="7, 2")
+    cfg["lead_days"] = {"dsar": [_safe_int(x, default=0) for x in _csv_list(lead_days)] or [7, 2],
+                        "assessment": [30, 7], "vendor": [30, 7]}
+    cfg["lead_days"]["dsar"] = [d for d in cfg["lead_days"]["dsar"] if d > 0] or [7, 2]
+    cfg["lead_hours"] = {"incident": [24, 4], "approval": [24, 4]}
+    return cfg
+
+
+def _deadline_alerts_step(state: dict[str, Any], notifications: dict[str, Any] | None) -> dict[str, Any]:
+    """Resume-aware wrapper: reuse a saved answer, else ask and save it."""
+    picked = state.get("deadline_alerts")
+    if picked is None:
+        picked = pick_deadline_alerts(notifications)
+        state["deadline_alerts"] = picked
+        _save_partial(state)
+    return picked
+
+
 def pick_webhooks() -> tuple[dict[str, Any], list[str]]:
     """Outbound run-lifecycle webhooks. Returns (config, env_vars_needed).
 
@@ -8992,6 +9044,24 @@ def _cfg_rate_limits(rate_limits: dict[str, str] | None) -> list[str]:
     return lines
 
 
+def _cfg_deadline_alerts(cfg: dict[str, Any] | None) -> list[str]:
+    """``[deadline_alerts]`` plus its lead-time sub-tables (nested dicts are
+    not something _emit_kv renders)."""
+    if not cfg:
+        return []
+    flat = {k: v for k, v in cfg.items() if not isinstance(v, dict)}
+    lines = _cfg_table("deadline_alerts", flat)
+    for sub in ("lead_days", "lead_hours"):
+        table = cfg.get(sub)
+        if isinstance(table, dict) and table:
+            # Lead times are whole numbers, not strings (what _emit_kv would write).
+            lines += ["", f"[deadline_alerts.{sub}]"]
+            for key, values in table.items():
+                rendered = ", ".join(str(int(v)) for v in (values or []))
+                lines.append(f"{key} = [{rendered}]")
+    return lines
+
+
 def _cfg_table(header: str, mapping: dict[str, Any] | None) -> list[str]:
     if not mapping:
         return []
@@ -9153,6 +9223,7 @@ def write_config(
     analytics: dict[str, Any] | None = None,
     persona: dict[str, str] | None = None,
     notifications: dict[str, Any] | None = None,
+    deadline_alerts: dict[str, Any] | None = None,
     webhooks: dict[str, Any] | None = None,
     deliverables: dict[str, Any] | None = None,
     personas: dict[str, Any] | None = None,
@@ -9347,6 +9418,7 @@ def write_config(
     lines += _cfg_table("analytics", analytics)
     lines += _cfg_table("persona", persona)
     lines += _cfg_table("notifications", notifications)
+    lines += _cfg_deadline_alerts(deadline_alerts)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)
@@ -10613,6 +10685,9 @@ def run(fast: bool = False, resume: bool = False) -> int:
     _save_partial(state)
 
     _announce()
+    deadline_alerts = _deadline_alerts_step(state, notifications)
+
+    _announce()
     webhooks, webhook_envs = state.get("_webhooks_pair") or pick_webhooks()
     state["_webhooks_pair"] = [webhooks, webhook_envs]
     _save_partial(state)
@@ -10687,6 +10762,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         analytics=analytics,
         persona=persona,
         notifications=notifications,
+        deadline_alerts=deadline_alerts,
         webhooks=webhooks,
         deliverables=deliverables,
         personas=personas,
