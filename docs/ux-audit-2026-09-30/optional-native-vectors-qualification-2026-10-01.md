@@ -1,4 +1,10 @@
-# Optional native vector qualification — 2026-10-01
+# Optional native vector qualification - 2026-10-01
+
+Later qualification uncovered and repaired the current Qdrant client's removed
+text-helper API, then passed the complete native files and real loopback server
+case with actual offline ONNX inference. See the
+[current-client follow-up](qdrant-current-client-qualification-e22ffbc.md). The
+results and no-server boundary below describe this earlier source checkpoint.
 
 The optional local Chroma and Qdrant paths are now exercised with installed native
 clients. Both postures passed **41 tests**, with **one intentional skip**, across
