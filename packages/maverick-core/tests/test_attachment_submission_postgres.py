@@ -6,7 +6,6 @@ import os
 import secrets
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 
 import pytest
 from maverick import attachments
@@ -90,12 +89,13 @@ def test_native_postgres_receipt_error_rolls_back_goal(postgres_test_dsn, monkey
 
 def test_native_postgres_api_key_atomic_admission_and_read_reconciliation(postgres_test_dsn):
     from fastapi import HTTPException
+    from maverick_dashboard.api_schemas import GoalIn
     from maverick_dashboard.goal_submission import lookup_receipt, reserve_api
 
     def reserve(index):
         with PostgresWorldModel(dsn=postgres_test_dsn) as world:
             return reserve_api(world, key="api-original-key", owner="user:alice",
-                payload=SimpleNamespace(model_dump=lambda **kw: {"title": "Review", "max_dollars": 1}),
+                payload=GoalIn(title="Review", max_dollars=1),
                 title="Review", description="Complete instructions", domain=None, caps={"max_dollars": 1})
 
     with ThreadPoolExecutor(max_workers=3) as executor:
@@ -110,7 +110,7 @@ def test_native_postgres_api_key_atomic_admission_and_read_reconciliation(postgr
         assert denied.value.status_code == 404
         with pytest.raises(HTTPException) as conflict:
             reserve_api(world, key="api-original-key", owner="user:alice",
-                payload=SimpleNamespace(model_dump=lambda **kw: {"title": "Review", "max_dollars": 2}),
+                payload=GoalIn(title="Review", max_dollars=2),
                 title="Review", description="Complete instructions", domain=None, caps={"max_dollars": 2})
         assert conflict.value.status_code == 409 and len(world.list_goals()) == 1
 

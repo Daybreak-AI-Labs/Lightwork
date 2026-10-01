@@ -898,6 +898,13 @@ def test_erase_conversations_deletes_pg_rows(world, monkeypatch):
     world.create_share_link(grandchild, created_by="reviewer")
     world.record_goal_origin(grandchild, "webhook", "private-origin")
     world.set_goal_status(grandchild, "done", result="private result")
+    # Human-edit receipts are part of the signed erasure scope as well.
+    # Create one through the native transaction, then prove it is removed.
+    from maverick.goal_mutations import edit_result
+
+    edit_result(world, grandchild, text="private revised result",
+                expected_updated_at=world.get_goal(grandchild).updated_at,
+                operation_id=uuid.uuid4().hex, actor="erase-me")
     world.record_signoff(grandchild, "approved", decided_by="reviewer")
 
     plan = world.plan_conversation_erasure([conv.id])

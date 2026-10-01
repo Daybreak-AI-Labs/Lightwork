@@ -568,7 +568,8 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
     # PLATFORM_IMPROVEMENT_AUDIT.md W1-47: domain/project_id joined the
     # column list (signature parity with the SQLite backend), between
     # execution_principal and tenant_id.
-    assert "owner, execution_principal, domain, project_id, tenant_id" in sql
+    assert "owner, execution_principal, domain, project_id, tenant_id, connection_selection" in sql
+    assert sql.count("%s") == len(params)
     assert params == (
         4,
         "owned goal",
@@ -580,6 +581,7 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
         "",     # domain default
         None,   # project_id default
         "tenant-a",
+        "",     # no selected connection references; no implicit authority
     )
 
 
