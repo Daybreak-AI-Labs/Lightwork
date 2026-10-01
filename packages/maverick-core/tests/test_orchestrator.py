@@ -144,12 +144,12 @@ async def test_domain_build_failure_blocks_instead_of_falling_back(
         domain="broken",
     )
 
-    assert "workspace pack failed validation" in out
+    assert "setup needs review" in out
     assert "No work was started" in out
     assert fake_llm.calls == []
     goal = world.get_goal(gid)
     assert goal.status == "blocked"
-    assert "workspace pack failed validation" in (goal.result or "")
+    assert "setup needs review" in (goal.result or "")
 
 
 @pytest.mark.asyncio

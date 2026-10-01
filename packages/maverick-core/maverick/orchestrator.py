@@ -1973,9 +1973,9 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 if _profile is None:
                     if domain in rejected_workspace_domains():
                         msg = (
-                            f"domain {domain!r} cannot run: its workspace pack failed "
-                            "validation. Ask an admin to review its allowed actions "
-                            "and risk limit. No work was started."
+                            f"{domain!r} cannot start because its setup needs review. "
+                            "Ask an administrator to check its permissions and "
+                            "operating limits. No work was started."
                         )
                     else:
                         msg = (f"no such domain: {domain!r} (unknown or its suite is "
