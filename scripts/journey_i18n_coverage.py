@@ -53,7 +53,14 @@ class CopyParser(HTMLParser):
 
 def report():
     catalog = {}
-    for path in DASHBOARD.glob("i18n_journey_*.py"):
+    # Follow the catalog modules actually wired into ROWS. New journey copy may
+    # have a feature-specific filename (for example flow credential migration).
+    wiring = ast.parse((DASHBOARD / "i18n_journeys.py").read_text(encoding="utf-8"))
+    modules = [node.module for node in wiring.body
+               if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module
+               and any(alias.name == "ROWS" for alias in node.names)]
+    for module in modules:
+        path = DASHBOARD / (module + ".py")
         for node in ast.parse(path.read_text(encoding="utf-8")).body:
             if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "ROWS" for target in node.targets):
                 catalog.update({row[0]: row[1:] for row in ast.literal_eval(node.value)})

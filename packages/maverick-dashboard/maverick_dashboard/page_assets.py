@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, Response
 
 router = APIRouter()
 _STATIC = Path(__file__).parent / "static"
@@ -46,6 +46,26 @@ ASSETS = (
     "lightwork-viewpoints.js",
 )
 STYLES: tuple[str, ...] = ("lightwork-i18n.css",)
+
+
+@router.get("/static/lightwork-i18n-catalog/{language}/{revision}.js", include_in_schema=False)
+def journey_catalog(language: str, revision: str, request: Request) -> Response:
+    """Serve only shipped public copy, independently of session preferences."""
+    from .i18n import LANGS
+    from .i18n_journeys import browser_catalog_asset
+
+    if language not in LANGS or len(revision) != 64:
+        raise HTTPException(404, "No such product catalog")
+    current, content = browser_catalog_asset(language)
+    if revision != current:
+        raise HTTPException(404, "No such product catalog")
+    # GZip middleware can choose a different encoding of the same catalog.
+    etag = f'W/"{current}"'
+    headers = {"Cache-Control": "public, max-age=31536000, immutable",
+               "ETag": etag, "X-Content-Type-Options": "nosniff"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(content, media_type="application/javascript; charset=utf-8", headers=headers)
 
 
 def _route(name: str):

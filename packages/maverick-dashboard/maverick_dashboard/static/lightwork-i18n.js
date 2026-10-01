@@ -2,6 +2,11 @@
   'use strict';
   var payload = document.getElementById('lightwork-i18n-data'), data = {language: 'en', locale: 'en', catalog: {}};
   try { if (payload) data = JSON.parse(payload.textContent); } catch (_) { /* Honest English fallback. */ }
+  // The synchronous, content-addressed asset precedes this script. A missing or
+  // mismatched asset retains the same honest English fallback as unknown copy.
+  if (!data.catalog && window.LightworkJourneyCatalog && window.LightworkJourneyCatalog.language === data.language) {
+    data.catalog = window.LightworkJourneyCatalog.catalog;
+  }
   // A bounded page-local record preserves language when a product formatter's
   // string result is subsequently handed to a status or toast controller.
   var formatted = new Map();

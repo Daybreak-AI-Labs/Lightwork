@@ -6,6 +6,7 @@ and consequence-copy review. Arabic remains the community seed, unchanged.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from string import Formatter
 
@@ -103,7 +104,8 @@ def locale_for(request, lang):
     return lang
 
 
-def context(request, lang):
+def browser_catalog(lang):
+    """Public product strings only; no request, account, or regional state."""
     from .i18n import MESSAGES
     catalog = {}
     for source, *_ in ROWS:
@@ -115,8 +117,25 @@ def context(request, lang):
         if row.get("en") not in catalog:
             actual = lang if row.get(lang) else "en"
             catalog[row["en"]] = {"text": row.get(actual, row["en"]), "lang": actual}
+    return catalog
+
+
+def browser_catalog_asset(lang):
+    """Content-address the complete catalog so HTML need not repeat it."""
+    payload = {"language": lang, "catalog": browser_catalog(lang)}
+    encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    content = ("window.LightworkJourneyCatalog=" + encoded + ";\n").encode("utf-8")
+    return hashlib.sha256(content).hexdigest(), content
+
+
+def context(request, lang):
+    catalog = browser_catalog(lang)
+    metadata = {"language": lang, "locale": locale_for(request, lang),
+                "review_status": "source" if lang == "en" else "community_seed" if lang == "ar" else "draft_partial"}
+    revision, _ = browser_catalog_asset(lang)
     return {"ui": lambda source, **values: region(source, lang, **values),
             "ut": lambda source, **values: text(source, lang, **values),
             "ul": lambda source: entry(source, lang)[1],
-            "journey_i18n": {"language": lang, "locale": locale_for(request, lang), "catalog": catalog,
-                              "review_status": "source" if lang == "en" else "community_seed" if lang == "ar" else "draft_partial"}}
+            "journey_i18n": {**metadata, "catalog": catalog},
+            "journey_i18n_bootstrap": metadata,
+            "journey_i18n_asset": f"/static/lightwork-i18n-catalog/{lang}/{revision}.js"}
