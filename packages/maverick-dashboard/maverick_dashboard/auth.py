@@ -628,6 +628,23 @@ def require_global_permission(request: Request, permission: str) -> None:
         raise _permission_denied(request, permission, installation=True)
 
 
+def require_page_permission(request: Request, path: str) -> None:
+    """Apply a registered page's security floor to a backing API read.
+
+    Page-visibility overrides only control navigation and HTML admission;
+    they do not revoke the underlying role permission or API-key scope.
+    """
+    from . import ui_visibility
+
+    page = ui_visibility.page_for(path)
+    if page is None or page["path"] != path:
+        raise RuntimeError(f"no exact page security floor for {path}")
+    if page.get("scope") == "global":
+        require_global_permission(request, page["floor"])
+    else:
+        require_permission(request, page["floor"])
+
+
 def caller_suites(request: Request) -> frozenset[str] | None:
     """The department suites the caller may use, or ``None`` for unrestricted.
 

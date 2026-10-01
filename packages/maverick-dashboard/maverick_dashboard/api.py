@@ -207,6 +207,7 @@ from .auth import (
     has_permission,
     is_dashboard_admin,
     require_global_permission,
+    require_page_permission,
     require_permission,
     require_suite,
     stored_automation_identity,
@@ -1037,6 +1038,10 @@ def _board_oversight(w, owner, days: int, request=None) -> dict:
 def dashboard_board(request: Request, board: str, days: int | None = None) -> dict:
     """Executive-board payload for the Overview / Spend / Workforce pages."""
     require_permission(request, "view")
+    if board in ("privacy", "finance", "security"):
+        require_page_permission(request, f"/{board}")
+        if board == "finance":
+            require_suite(request, "finance")
     w = _world()
     owner = goal_owner_filter(request)
     d = _board_days(days)
@@ -3617,7 +3622,7 @@ async def privacy_board(request: Request) -> dict:
     transfer map, AI Act tiers, and the posture gauges. Operate-gated like
     the workspace it summarizes; works (with empty registers) when
     [privacy_ops] is disabled."""
-    require_permission(request, "operate")
+    require_page_permission(request, "/privacy")
     from maverick import privacy_ops
 
     now = time.time()
@@ -3756,7 +3761,8 @@ async def finance_board(request: Request) -> dict:
     from decided records, the SoD lint, the finance control-coverage
     posture (with its not-an-audit-opinion disclaimer), and the regulatory
     license renewal runway."""
-    require_permission(request, "operate")
+    require_page_permission(request, "/finance")
+    require_suite(request, "finance")
     now = time.time()
     sessions = await run_in_threadpool(_finance_session_rows)
     payload = _board_assessment_plane(sessions, now)
@@ -8958,13 +8964,14 @@ def _security_register_snapshot() -> dict:
 
 
 @router.get("/security")
-async def security_register() -> dict:
+async def security_register(request: Request) -> dict:
     """The privacy/security agent team's register, read-only and fail-soft.
 
     The audit hunt is bounded to a recent window, cached briefly, and run off
     the event loop so cross-site or repeated GETs cannot force unbounded
     synchronous audit-log scans on every request.
     """
+    require_page_permission(request, "/security")
     return await run_in_threadpool(_security_register_snapshot)
 
 
@@ -10260,8 +10267,9 @@ async def list_mcp_servers(request: Request) -> dict:
 
 
 @router.get("/tools")
-def list_tools() -> dict:
+def list_tools(request: Request) -> dict:
     """Tools the agent currently has registered (post-ACL, post-rate-limit)."""
+    require_page_permission(request, "/tools")
     try:
         from maverick.sandbox import build_sandbox
         from maverick.tools import base_registry
@@ -13148,6 +13156,7 @@ async def external_agents_list(request: Request) -> dict:
     """The bring-your-own-agent roster: platform provenance, ownership,
     ceilings, lifecycle, reported spend, and which credential surfaces each
     agent holds (never token values)."""
+    require_page_permission(request, "/external-agents")
     from maverick import external_agents as xa
 
     return {"enabled": xa.enabled(), "status": xa.status(), "agents": xa.roster()}
@@ -13235,6 +13244,7 @@ async def external_agent_reset_budget(request: Request, agent_id: str) -> dict:
 async def external_agent_detail(request: Request, agent_id: str) -> dict:
     """One enrolled agent: roster row + its Operating Record footprint
     (spend, recent episodes)."""
+    require_page_permission(request, "/external-agents")
     from maverick import external_agents as xa
 
     try:
@@ -13375,12 +13385,14 @@ async def compliance_packet_download(request: Request) -> Response:
 
 @router.get("/permissions")
 async def permissions(
+    request: Request,
     q: str = Query(default="", max_length=128),
     state: str = Query(default="all"),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=100, ge=1, le=100),
 ) -> dict:
     """Bounded, filterable view of what the agent may currently attempt."""
+    require_page_permission(request, "/permissions")
     from maverick_dashboard.app import _permissions_snapshot, _permissions_tool_page
 
     return _permissions_tool_page(
@@ -14262,13 +14274,14 @@ def _compliance_checks(framework: str):
 
 
 @router.get("/compliance/report.md")
-async def compliance_report_md(framework: str = "all") -> Response:
+async def compliance_report_md(request: Request, framework: str = "all") -> Response:
     """Download the control-coverage report as Markdown for an auditor.
 
     Same data as the /compliance page (``maverick.compliance``). The
     ``?framework=eu|us|all`` filter mirrors ``maverick compliance``. Returned as
     an attachment so an operator can hand the file to an auditor.
     """
+    require_page_permission(request, "/compliance")
     from maverick.compliance import render_report_text
 
     framework, checks = _compliance_checks(framework)
@@ -14282,12 +14295,13 @@ async def compliance_report_md(framework: str = "all") -> Response:
 
 
 @router.get("/compliance/report.csv")
-async def compliance_report_csv(framework: str = "all") -> Response:
+async def compliance_report_csv(request: Request, framework: str = "all") -> Response:
     """Download the control-coverage report as CSV for an auditor.
 
     Same data source + ``?framework=`` filter as ``report.md``. One row per
     control: framework, control, regulation, status, detail.
     """
+    require_page_permission(request, "/compliance")
     import csv
     import io as _io
 
@@ -14513,12 +14527,13 @@ async def _cached_perf_sla() -> tuple[list[dict], str | None]:
 
 
 @router.get("/cache/stats")
-async def cache_stats() -> dict:
+async def cache_stats(request: Request) -> dict:
     """In-process cache sizes (file reads, repo-map, skill embeddings).
 
     Mirrors ``maverick cache stats`` — surfaced here so the dashboard
     Cache page can render without shelling out.
     """
+    require_page_permission(request, "/cache")
     from maverick.cache import stats
 
     return stats()

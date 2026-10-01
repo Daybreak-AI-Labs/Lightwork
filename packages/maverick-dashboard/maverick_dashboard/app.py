@@ -5938,6 +5938,7 @@ async def finance_board_page(request: Request) -> HTMLResponse:
     and the learning loop over finance decisions. Data from
     GET /api/v1/finance/board."""
     require_permission(request, "operate")
+    require_suite(request, "finance")
     return templates.TemplateResponse(request, "finance_board.html", {})
 
 
