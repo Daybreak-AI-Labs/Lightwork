@@ -1,0 +1,339 @@
+{
+  "source_head": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+  "source_execution": {
+    "source_head": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+    "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-08",
+    "started_at": 1790840521.2951255,
+    "inherited_environment_allowlist": [
+      "APPDATA",
+      "COMMONPROGRAMFILES",
+      "COMMONPROGRAMFILES(X86)",
+      "COMSPEC",
+      "LOCALAPPDATA",
+      "NUMBER_OF_PROCESSORS",
+      "OS",
+      "PATH",
+      "PATHEXT",
+      "PROCESSOR_ARCHITECTURE",
+      "PROGRAMDATA",
+      "PROGRAMFILES",
+      "PROGRAMFILES(X86)",
+      "SYSTEMROOT",
+      "USERPROFILE",
+      "WINDIR"
+    ],
+    "runner_sha256": "17dbcefe009908782812a1849f3c80d7aed5df2fcbe035e64e942f1c0400c1e4"
+  },
+  "qualification_summary": {
+    "source_head": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+    "checkout_clean": true,
+    "matching_environment": ".venv-qualification-final-08",
+    "static_gates_passed": 2,
+    "offline_contracts_passed": 16,
+    "wheel_builds_passed": 8,
+    "wheel_archive_integrity_passed": 8,
+    "wheel_hashes_verified": 8,
+    "wheel_payloads_match_exact_git_archive": true,
+    "wheel_payload_files_verified": 4827,
+    "source_archive_commit": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+    "source_archive_sha256": "a83891941c08affe4641d3ec9f74aabdac9d2ff5aad4174047899d70d3bd131b",
+    "verified_at": 1790840767.2656484,
+    "wheel_hashes_file": "wheel-sha256.json",
+    "wheel_payload_details_file": "wheel-payload-verification.json",
+    "results_file": "results.json",
+    "full_test_suite": "Separate parent-owned run; not represented by these gate results."
+  },
+  "checks": [
+    {
+      "name": "ruff",
+      "exit_code": 0,
+      "seconds": 3.93
+    },
+    {
+      "name": "vulture",
+      "exit_code": 0,
+      "seconds": 18.31
+    },
+    {
+      "name": "maverick.plugin_matrix",
+      "exit_code": 0,
+      "seconds": 0.22
+    },
+    {
+      "name": "maverick.reachability",
+      "exit_code": 0,
+      "seconds": 12.89
+    },
+    {
+      "name": "maverick.dispatch_contract",
+      "exit_code": 0,
+      "seconds": 22.96
+    },
+    {
+      "name": "maverick.egress_contract",
+      "exit_code": 0,
+      "seconds": 9.04
+    },
+    {
+      "name": "maverick.audit_contract",
+      "exit_code": 0,
+      "seconds": 6.88
+    },
+    {
+      "name": "maverick.deprecations",
+      "exit_code": 0,
+      "seconds": 0.11
+    },
+    {
+      "name": "maverick.a11y_audit",
+      "exit_code": 0,
+      "seconds": 4.47
+    },
+    {
+      "name": "maverick.async_route_audit",
+      "exit_code": 0,
+      "seconds": 3.16
+    },
+    {
+      "name": "maverick.failure_policy",
+      "exit_code": 0,
+      "seconds": 0.16
+    },
+    {
+      "name": "maverick.schema_migrations",
+      "exit_code": 0,
+      "seconds": 0.2
+    },
+    {
+      "name": "maverick.migration_governance",
+      "exit_code": 0,
+      "seconds": 0.24
+    },
+    {
+      "name": "maverick.evaluator_evolution",
+      "exit_code": 0,
+      "seconds": 0.15
+    },
+    {
+      "name": "maverick.grpc_api.contract",
+      "exit_code": 0,
+      "seconds": 0.14
+    },
+    {
+      "name": "maverick.regulatory_compiler",
+      "exit_code": 0,
+      "seconds": 0.33
+    },
+    {
+      "name": "maverick.domain_audit",
+      "exit_code": 0,
+      "seconds": 0.21
+    },
+    {
+      "name": "verify_constraint_closure",
+      "exit_code": 0,
+      "seconds": 0.28
+    },
+    {
+      "name": "wheel-maverick-channels",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-core",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-dashboard",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-evolve",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-knowledge",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-mcp",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-shield",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-installer-cli",
+      "exit_code": 0
+    }
+  ],
+  "wheels": [
+    {
+      "wheel": "maverick_agent-0.1.7-py3-none-any.whl",
+      "sha256": "448dd9fe9bec5441ed672aebd7c75ebc50962d456cdc79896ed4fb11f0bf0d18",
+      "git_export_payload_files_verified": 3857
+    },
+    {
+      "wheel": "maverick_channels-0.1.7-py3-none-any.whl",
+      "sha256": "194fc3fa916f375b13f3a821bde14a737bf43d1d913b79790c7184c9d574c825",
+      "git_export_payload_files_verified": 31
+    },
+    {
+      "wheel": "maverick_dashboard-0.1.7-py3-none-any.whl",
+      "sha256": "cd7272dd5dd2046aa73d6412b0cab45cf785d3342fa66952a295d14275bdd79c",
+      "git_export_payload_files_verified": 887
+    },
+    {
+      "wheel": "maverick_evolve-0.1.7-py3-none-any.whl",
+      "sha256": "b8e6ffadac2247343fb6122135729ed896c8741393f3c28b3cb7016792894edd",
+      "git_export_payload_files_verified": 12
+    },
+    {
+      "wheel": "maverick_installer-0.1.7-py3-none-any.whl",
+      "sha256": "a4425ad06fb34013244949fadfa83d5f5c99e7693a4ee920e5e4aa7ab20c2505",
+      "git_export_payload_files_verified": 5
+    },
+    {
+      "wheel": "maverick_knowledge-0.1.7-py3-none-any.whl",
+      "sha256": "bda4ae23826811ba6b562bd7801dadb166107d629cf5fe93a2363093876bad47",
+      "git_export_payload_files_verified": 12
+    },
+    {
+      "wheel": "maverick_mcp_server-0.1.7-py3-none-any.whl",
+      "sha256": "611dddf2979a0a7d75a04445367e66a1f60a401b6d525ffd94f95c42be1d6c1b",
+      "git_export_payload_files_verified": 9
+    },
+    {
+      "wheel": "maverick_shield-0.1.7-py3-none-any.whl",
+      "sha256": "f3520925ea3da0478f79af81a23f5aaddbc98c9586869b6a37d4579802d1a177",
+      "git_export_payload_files_verified": 14
+    }
+  ],
+  "receipt_review": "Root verified all eight archives and all 4827 payload files against this exact Git export; no permission changes were needed.",
+  "artifacts": {
+    "maverick.a11y_audit.log": {
+      "sha256": "5071148995ba96708597197056691e5e9f0f8abb81866f0f5217c42780f584c7",
+      "bytes": 104
+    },
+    "maverick.async_route_audit.log": {
+      "sha256": "25d266b3db6a15c7410a5bc1b30429a30394504b85d4c7fcef230f2ced6b8cc5",
+      "bytes": 84
+    },
+    "maverick.audit_contract.log": {
+      "sha256": "610ca3ae1dd9b2383f0e4f8b51f888e99f064c5f27cee9733b85b6b7ac3f20a8",
+      "bytes": 76
+    },
+    "maverick.deprecations.log": {
+      "sha256": "a5401a16b89579f8af5595980e461f9e6affedb35012c437f310f3708942d507",
+      "bytes": 338
+    },
+    "maverick.dispatch_contract.log": {
+      "sha256": "d5459a36ac0bba9f36e5a218b5dffd67934d6655cd5b8a0d0c19f366ca3b1272",
+      "bytes": 123
+    },
+    "maverick.domain_audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "maverick.egress_contract.log": {
+      "sha256": "16473e02deb4c101ad4f2443a6d422b7c0236ceb9c8ce52a179e341a6383a1a5",
+      "bytes": 105
+    },
+    "maverick.evaluator_evolution.log": {
+      "sha256": "fad7f82ef9d91fc65bfe010570a27595ad42854c36157868db95c23b6583d033",
+      "bytes": 96
+    },
+    "maverick.failure_policy.log": {
+      "sha256": "e32c1347095b78190db76959935ac72f01c62c08a3cb0ba17b0abcdd08e1341c",
+      "bytes": 68
+    },
+    "maverick.grpc_api.contract.log": {
+      "sha256": "6ac484ef54c2a40dbe67abb7174e7ec2bd44fb40090061dd6f3216ca245b9487",
+      "bytes": 34
+    },
+    "maverick.migration_governance.log": {
+      "sha256": "6231413d02132ed5df26e3a126e15cfbaf428c87573d7dda2d01bd24fb6a80b4",
+      "bytes": 195
+    },
+    "maverick.plugin_matrix.log": {
+      "sha256": "448d69ba2126de93bfd479497b3ef6af2afa06980a957cc517fef0df9827d03d",
+      "bytes": 318
+    },
+    "maverick.reachability.log": {
+      "sha256": "feb8439c99af46f3220aa8f238cb8da949d7cd310d1ff73d10b9919083bf8fad",
+      "bytes": 116
+    },
+    "maverick.regulatory_compiler.log": {
+      "sha256": "67d5f2d6f19650a4bf857b17bcaabcd1edb6f4b6ab4dae671a94b672077b6454",
+      "bytes": 1074
+    },
+    "maverick.schema_migrations.log": {
+      "sha256": "73517fb3bc4f926dfba2c7f3120cedef7cc99589d04ef5905d0b1e1b2364c707",
+      "bytes": 54
+    },
+    "results.json": {
+      "sha256": "7d8f968944d32ece00eabfa6296197ffebff31a8fa7c67fb678853e2e0661592",
+      "bytes": 2217
+    },
+    "ruff.log": {
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "bytes": 19
+    },
+    "source.json": {
+      "sha256": "fdbd8aa0ee64e7919ff269b0afcbdf8fb1d876de93df7d35fe36093828b7e002",
+      "bytes": 665
+    },
+    "summary.json": {
+      "sha256": "08fc6ea1f55a55f0ab75aefe6b14db02362c14d4db748abbc87b3a48a8783f43",
+      "bytes": 852
+    },
+    "verify_constraint_closure.log": {
+      "sha256": "753f5d1e5b152a457292a571997cbe394c4c94a48bf7fb58665197d510014d6a",
+      "bytes": 76
+    },
+    "vulture.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "wheel-installer-cli.log": {
+      "sha256": "67c571cfd532f5849c8497327a414a32a641acb4fe860cd148fcdb85d1b6118b",
+      "bytes": 3402
+    },
+    "wheel-maverick-channels.log": {
+      "sha256": "c5b1081ef1fb8f160df63531f12ea0ce32875f2a0989a960eed2fa1909b5f5fa",
+      "bytes": 8658
+    },
+    "wheel-maverick-core.log": {
+      "sha256": "e8c71afdc00ad6d3651c00eac79c9ebbdf5b799baaef0041cb75e4dd85ebfcbe",
+      "bytes": 896036
+    },
+    "wheel-maverick-dashboard.log": {
+      "sha256": "778624eac8ac57ec3f4d6b6b3d2fc243dcdbbc3d3a1f1c6513535a40ffdc4ff5",
+      "bytes": 246215
+    },
+    "wheel-maverick-evolve.log": {
+      "sha256": "bbe8d97b775a6cf74636fe6c79720f0404609ff9bebd59089ef12e42ac1b01df",
+      "bytes": 4703
+    },
+    "wheel-maverick-knowledge.log": {
+      "sha256": "fb18e84c6eabe157cebe764697af403b6745c005deedf5d238fb24091556f9dc",
+      "bytes": 4774
+    },
+    "wheel-maverick-mcp.log": {
+      "sha256": "b6ef5b679f6ff13fcf0228a9dcdeed7c4aea209eaaba1ed745bef81126d764ff",
+      "bytes": 4057
+    },
+    "wheel-maverick-shield.log": {
+      "sha256": "37b57d5b34ea64cbea802a7a6e020feb69a22e825b5a657fcd1459128a1cf9a3",
+      "bytes": 4994
+    },
+    "wheel-payload-verification.json": {
+      "sha256": "c877fab5eb11e1397e96897b57656c91e03c26ccb2fe42c0331dafa8239cfa59",
+      "bytes": 1578
+    },
+    "wheel-sha256.json": {
+      "sha256": "8c22df3e6a72f47ff9801d1cc8988f2a75a376b944311adc80b21eb7abfb028b",
+      "bytes": 921
+    }
+  }
+}

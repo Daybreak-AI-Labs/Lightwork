@@ -18,8 +18,9 @@ Browser acceptance reopened LW-064, LW-091 and LW-099. Their widget, native role
 form and workspace recovery repairs are now integrated, and all 18 focused
 acceptance cases pass at `1719f2f`. The complete 108-case browser and 1,711-case
 JavaScript cohorts also pass there. A subsequent short-viewport widget boundary
-was reproduced and repaired; [all seven updated widget cases pass](widget-short-viewport-88cd66f.md). Fresh full
-Python/static/build qualification remains in progress.
+was reproduced and repaired; [all seven updated widget cases pass](widget-short-viewport-88cd66f.md).
+[All 26 fresh static/build gates pass](static-build-qualification-57a027a.md).
+Final full Python qualification remains in progress.
 
 The latest complete ordinary run still has one
 [unresolved transport timeout](transport-timeout-investigation-95aa61e.md).

@@ -9,7 +9,9 @@ No deployment configuration or credentials were changed.
 
 The register has **190 implemented entries awaiting final acceptance and five
 qualification entries**. All five separately approved security repairs are
-implemented; final integrated Python/static/build qualification remains pending.
+implemented. Fresh static/build qualification passes all 26 gates at `57a027a`,
+including all 4,827 exact-source wheel payload checks. Final integrated Python
+qualification remains pending.
 
 The complete browser cohort passes **108 distinct cases** across default/setup
 profiles at `1719f2fc0e01216e8daea5f77228da9835409657`, and all **1,711 JavaScript
@@ -47,6 +49,7 @@ increasing the test deadline or treating the original failure as a pass.
 
 | Evidence | Exact execution source | Current result and limit |
 | --- | --- | --- |
+| [Final08 static gates and package builds](static-build-qualification-57a027a.md) | `57a027adfdd8df955d33aaea88ec7089aafc6c60` | All 26 checks pass: Ruff, Vulture, 16 offline contracts and eight wheels. All 4,827 payload files match the exact Git archive. Frozen checkout unchanged. Runtime qualification remains separate. |
 | Full Python 3.12 ordinary | `2a765aa3e93cc7775090f574f027bd855b33aef5` (`qualification-final-07`) | 40,072 passed, one failed, 590 skipped and 22 warnings in 3,281.79 seconds; source unchanged. The transport failure remains unresolved. [Exact skip reconciliation](skip-reconciliation-final07.md), followed by [real-speaker recovery](speechbrain-real-model-qualification.md): 458 executable identities have supplementary passes in both postures, five collection placeholders expanded, 127 entries retain explicit boundaries. The prior 457 + five + 128 checkpoint remains preserved. These do not rewrite the full-run outcomes. Later cursor/mobile fixes are outside this source; subsequent phases require a new binding. |
 | Expanded browser acceptance | `be3496571342c242af6ba956206e2446781996bb` | Default: 95 passed, six failed, seven setup-only skips. Setup: all seven passed. Therefore 102 distinct passes and six failures across all 108 registrations. Subsequent widget, native-form, error-page and workspace-alert repairs are integrated. All 18 focused cases pass at `1719f2f`; the complete 108-case browser and 1,711-case JavaScript reruns now pass at 1719f2f. Earlier failed Chrome launch attempts did not execute test bodies and remain separate infrastructure evidence. |
 | [Static gates and package builds](static-build-qualification-3640fcf.md) | `3640fcf7906d3f7129df1b34bc1718492a164bcf` | All 26 checks passed: Ruff, Vulture, 16 offline contracts and eight wheels. All 4,827 payload files match the exact Git archive. Later product changes require renewed build/static verification. |
