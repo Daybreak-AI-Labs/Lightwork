@@ -72,6 +72,21 @@ def test_unmatched_browser_route_with_unverified_auth_stays_404(monkeypatch, sco
     assert "unverified-account-context" not in response.text
 
 
+@pytest.mark.parametrize("scoped_cookie", [False, True])
+def test_unmatched_route_without_required_dashboard_token_stays_unauthorized(monkeypatch, scoped_cookie):
+    """Display recovery must never bypass the earlier static-token gate."""
+    from maverick_dashboard.app import app
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "synthetic-error-page-token")
+    with TestClient(app, headers={"Origin": "http://testserver"}, raise_server_exceptions=False) as client:
+        if scoped_cookie:
+            client.cookies.set("mvk_pref_context", "unverified-account-context")
+            client.cookies.set("mvk_lang", "fr")
+        response = client.get("/missing-acceptance-page", headers={"Accept": "text/html"})
+    assert response.status_code == 401
+    assert "unverified-account-context" not in response.text
+
+
 def test_browser_http_errors_are_branded_and_actionable(monkeypatch):
     """Ordinary authorization/conflict/outage failures must not strand a
     browser user on a raw JSON document."""
