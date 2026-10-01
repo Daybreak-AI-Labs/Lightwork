@@ -37,6 +37,7 @@ MODULE_SUMMARIES: dict[str, str] = {
     "/privacy/data-discovery": "Scan your storage to find where personal data lives.",
     "/privacy/notice-governance": "Approve and publish new versions of your privacy notices.",
     "/privacy/drop": "Handle California deletion and opt-out requests.",
+    "/privacy/rights-form": "Let people submit privacy requests from your website.",
     "/consent": "Record and honour what each person agreed to.",
     "/consent/publishing": "Publish your consent banner and preference center.",
     "/consent/global-opt-out": "Honour browser opt-out signals such as Global Privacy Control.",

@@ -2478,6 +2478,13 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "registered-broker interoperability remain separately operated.",
             default=False,
         )
+    privacy_public_rights_form = _q_confirm(
+        "Let people submit privacy requests from your website? Publishes a "
+        "public request form per site or app; requesters confirm their email "
+        "address before a request opens, and deadlines follow the law they "
+        "choose (needs the platform email account for the confirmation link).",
+        default=False,
+    )
     privacy_notice_governance = _q_confirm(
         "Enable governed Privacy Automation notice approvals and publication "
         "intents? Notice content stays external and publication remains local "
@@ -2674,6 +2681,7 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         or privacy_ott_ctv_rights
         or privacy_drop_management
         or privacy_notice_governance
+        or privacy_public_rights_form
     ):
         data_discovery_config: dict[str, Any] = {"enable": privacy_data_discovery}
         if privacy_discovery_adapter_providers:
@@ -2749,6 +2757,21 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
                 "scheduler_jitter_seconds": 60,
                 "scheduler_retry_max_seconds": 900,
             },
+            **(
+                {
+                    "public_rights_form": {
+                        "enable": True,
+                        "verification_ttl_hours": 24,
+                        "status_ttl_days": 90,
+                        "requests_per_ip_per_hour": 5,
+                        "requests_per_email_per_day": 3,
+                        "internal_target_days": 30,
+                        "max_message_chars": 4000,
+                    }
+                }
+                if privacy_public_rights_form
+                else {}
+            ),
             "notice_governance": {
                 "enable": privacy_notice_governance,
                 **(

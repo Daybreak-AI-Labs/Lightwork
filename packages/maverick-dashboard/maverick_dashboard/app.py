@@ -1380,6 +1380,13 @@ app.state.public_consent_error_origin_resolver = lambda request: public_consent_
     request, _public_consent_dependencies
 )
 app.include_router(create_consent_public_router(_public_consent_dependencies))
+# The public rights-request form: JSON API under /api/v1/public/rights and
+# the hosted pages under /rights/. Fail-closed on its module gate.
+from .public_rights_api import pages as _public_rights_pages  # noqa: E402
+from .public_rights_api import router as _public_rights_router  # noqa: E402
+
+app.include_router(_public_rights_router)
+app.include_router(_public_rights_pages)
 from .consent_native_admin_api import (  # noqa: E402
     create_consent_native_public_metadata_router,
 )
@@ -1759,6 +1766,11 @@ async def bound_public_governance_body(request: Request, call_next):
 
         maximum = configured_request_byte_limit() or _MAX_PUBLIC_CONSENT_BODY_BYTES
         detail = "public consent request body too large"
+    elif path.startswith("/api/v1/public/rights/"):
+        from .public_rights_api import MAX_BODY_BYTES as _rights_max
+
+        maximum = _rights_max
+        detail = "rights request body too large"
     elif path.startswith("/api/v1/external/third-party-collaboration/"):
         if request.method == "POST" and path.endswith("/evidence"):
             # Evidence files are not buffered here: the route authenticates the
@@ -2178,6 +2190,10 @@ async def bearer_auth(request: Request, call_next):
         # a private bearer. The admin policy-publication prefix remains
         # under normal dashboard authentication.
         or request.url.path.startswith("/api/v1/public/policies/")
+        # The public rights-request form (pages + JSON). Anonymous by
+        # design; gated, origin-checked and token-addressed in its router.
+        or request.url.path.startswith("/rights/")
+        or request.url.path.startswith("/api/v1/public/rights/")
     ):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
@@ -4038,11 +4054,16 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="no such DSAR")
     record = dict(record)
     now = _time.time()
-    record["days_left"] = int((float(record.get("due_at", now)) - now) // 86400)
-    record["overdue"] = (record["days_left"] < 0
-                         and record.get("status") in ("open", "awaiting_erasure"))
+    record.update(privacy_ops.dsar_clock(record, now=now))
     record["created_date"] = _date(record.get("created_at"))
-    record["due_date"] = _date(record.get("due_at"))
+    record["due_date"] = _date(record.get("effective_due_at"))
+    record["acknowledge_date"] = _date(record.get("acknowledge_by"))
+    record["extended_date"] = _date(record.get("extended_until"))
+    from maverick import rights_deadlines
+
+    regime = rights_deadlines.REGIMES.get(str(record.get("jurisdiction") or ""))
+    record["jurisdiction_name"] = regime["name"] if regime else ""
+    record["citation"] = regime["citation"] if regime else ""
     fulfillment = None
     fulfillment_enabled = dsar_fulfillment.enabled()
     if fulfillment_enabled:
@@ -4054,7 +4075,8 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
         request, "dsar_detail.html",
         {"dsar": record, "fulfillment": fulfillment,
          "fulfillment_enabled": fulfillment_enabled,
-         "can_admin": has_permission(request, "admin")})
+         "can_admin": has_permission(request, "admin"),
+         "email_log": (record.get("public_form") or {}).get("emails") or []})
 
 
 @app.get("/consent", response_class=HTMLResponse)
@@ -4425,6 +4447,20 @@ async def privacy_rights_consumer_delivery_page(request: Request) -> HTMLRespons
             "can_admin": has_global_permission(request, "admin"),
             "can_audit": has_global_permission(request, "audit"),
         },
+    )
+
+
+@app.get("/privacy/rights-form", response_class=HTMLResponse)
+async def privacy_rights_form_page(request: Request) -> HTMLResponse:
+    """Administration of the public rights-request form: properties, the
+    public link and embed snippet, and the email templates."""
+    require_permission(request, "operate")
+    from maverick import public_rights_form
+
+    return templates.TemplateResponse(
+        request, "privacy_rights_form.html",
+        {"enabled": public_rights_form.enabled(),
+         "can_admin": has_global_permission(request, "admin")},
     )
 
 

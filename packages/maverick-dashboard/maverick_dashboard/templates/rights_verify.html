@@ -1,0 +1,11 @@
+{% extends "public_base.html" %}
+{% block title %}{{ rf.verify_title }}{% endblock %}
+{% block content %}
+<section class="panel" style="max-width: 40rem; margin: 0 auto;">
+  <h1>{{ rf.verify_title }}</h1>
+  <p class="muted">{{ rf.verify_intro }}</p>
+  <form method="post" action="/rights/verify/{{ token }}">
+    <button class="btn btn--primary" type="submit">{{ rf.verify_button }}</button>
+  </form>
+</section>
+{% endblock %}

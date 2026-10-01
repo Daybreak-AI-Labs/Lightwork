@@ -109,7 +109,11 @@ def _self_authenticated_path(path: str) -> bool:
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
         ("/share/", "/scim/", "/form/", "/dsar/response/", "/saml/",
          "/auth/invite/", "/api/v1/external/",
-         "/api/v1/public/consent/", "/api/v1/public/policies/")
+         "/api/v1/public/consent/", "/api/v1/public/policies/",
+         # The public rights-request form: pages and JSON API. The
+         # requester is anonymous; the module gate, the origin/JSON
+         # contract and single-use tokens stand in (public_rights_api.py).
+         "/rights/", "/api/v1/public/rights/")
     )
 
 

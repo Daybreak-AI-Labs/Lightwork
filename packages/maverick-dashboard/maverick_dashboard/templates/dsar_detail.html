@@ -6,11 +6,16 @@
   'portability': 'Move their data',
   'erasure': 'Delete their data',
   'rectification': 'Correct their data',
+  'correction': 'Correct their data',
   'objection': 'Stop using their data',
   'restriction': 'Limit use of their data',
+  'opt_out': 'Opt out of sale or sharing',
+  'limit_sensitive': 'Limit use of sensitive data',
+  'withdraw_consent': 'Withdraw consent',
 } %}
 {% set status_labels = {
   'open': 'Open',
+  'unverified': 'Waiting for email confirmation',
   'awaiting_erasure': 'Waiting for deletion',
   'fulfilled': 'Answered',
   'closed': 'Closed',
@@ -39,12 +44,15 @@
      data-subject="{{ dsar.subject_id }}"
      data-channel="{{ dsar.channel or '' }}"
      data-kind="{{ dsar.kind }}"
+     data-source="{{ dsar.source or 'dashboard' }}"
+     data-status="{{ dsar.status }}"
+     data-extended="{{ 'yes' if dsar.extended_until else 'no' }}"
      {% if fulfillment %}data-fulfillment-id="{{ fulfillment.id }}" data-revision="{{ fulfillment.revision }}"{% endif %}>
   <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Back to Privacy</a></p>
   <h1 class="page-title">{{ kind_label }}: request from {{ dsar.subject_id }}</h1>
   <p class="page-subtitle">
-    <span class="badge {{ 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status == 'awaiting_erasure' else 'info' if dsar.status == 'open' else '' }}">{{ status_labels.get(dsar.status, dsar.status | humanize) }}</span>
-    {% if dsar.status in ('open', 'awaiting_erasure') %}
+    <span class="badge {{ 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status in ('awaiting_erasure', 'unverified') else 'info' if dsar.status == 'open' else '' }}">{{ status_labels.get(dsar.status, dsar.status | humanize) }}</span>
+    {% if dsar.status in ('open', 'unverified', 'awaiting_erasure') %}
       · <span {% if dsar.overdue %}class="pw-due-warn"{% endif %}>{{ (dsar.days_left ~ ' days left') if not dsar.overdue else ((dsar.days_left | abs) ~ ' days overdue') }}</span>
     {% endif %}
     · <span class="muted">Reference {{ dsar.id }}</span>
@@ -54,8 +62,33 @@
     <p class="muted" style="margin: 0;">
       Opened {{ dsar.created_date or 'on an unknown date' }}{% if dsar.opened_by %} by {{ dsar.opened_by | identity }}{% endif %}
       {% if dsar.channel %} · received by {{ dsar.channel | humanize }}{% endif %}
-      · answer due {{ dsar.due_date or 'date not set' }}
+      {% if dsar.source == 'public_form' %} · from your website{% endif %}
+      · answer due {{ dsar.due_date or 'date not set' }}{% if dsar.extended_until %} (extended){% endif %}
     </p>
+    <p class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;">
+      {% if dsar.jurisdiction_name %}
+        Law: {{ dsar.jurisdiction_name }} ({{ dsar.citation }}).
+        {% if dsar.due_basis == 'internal_target' %}This law fixes no number of days; the date is your internal target.{% endif %}
+        {% if dsar.acknowledge_by %} Confirm receipt by {{ dsar.acknowledge_date }}{% if dsar.acknowledged_at %} — done{% elif dsar.acknowledge_overdue %} — <strong>not done in time</strong>{% endif %}.{% endif %}
+      {% else %}
+        No law recorded: the 30-day fallback clock applies.
+      {% endif %}
+      {% if dsar.extended_until %}Extended to {{ dsar.extended_date }}: {{ dsar.extension_reason }}.{% endif %}
+      Identity:
+      {% if dsar.verification and dsar.verification.status == 'verified' %}
+        confirmed ({{ method_labels.get(dsar.verification.method, dsar.verification.method | humanize) }}).
+      {% elif dsar.status == 'unverified' %}
+        not yet confirmed — the requester has not opened their email link.
+      {% else %}
+        not recorded on the request.
+      {% endif %}
+    </p>
+    {% if dsar.requester %}
+      <p class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;">
+        Requester: {{ dsar.requester.name or 'no name given' }} ({{ dsar.requester.relationship | humanize }}{% if dsar.requester.authorised_agent %}, acting as an authorised agent{% endif %}).
+        {% if dsar.requester.message %}<br>They wrote: “{{ dsar.requester.message }}”{% endif %}
+      </p>
+    {% endif %}
     {% if dsar.intake %}
       <p class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;">
         Created automatically from an incoming message that looked like a privacy request.</p>
@@ -70,10 +103,37 @@
       {% if dsar.kind == 'erasure' and dsar.status in ('open', 'awaiting_erasure') and can_admin %}
         <button type="button" class="btn btn--danger" id="dsar-erase">Erase their data now</button>
       {% endif %}
+      {% if dsar.status in ('open', 'unverified', 'awaiting_erasure') and not dsar.acknowledged_at %}
+        <button type="button" class="btn btn--ghost" id="dsar-acknowledge">Mark receipt confirmed</button>
+      {% endif %}
+      {% if dsar.status in ('open', 'unverified', 'awaiting_erasure') and not dsar.extended_until %}
+        <button type="button" class="btn btn--ghost" id="dsar-extend">Record an extension</button>
+      {% endif %}
+      {% if dsar.status == 'unverified' %}
+        <button type="button" class="btn btn--ghost" id="dsar-verify-manual">Confirm identity another way</button>
+      {% endif %}
       {% if dsar.status != 'closed' %}
         <button type="button" class="btn btn--ghost" id="dsar-close">Close request</button>
       {% endif %}
     </div>
+    <div class="dsar-actions" aria-label="Send a notice to the requester">
+      <span class="muted">Send:</span>
+      <button type="button" class="btn dsar-send" data-kind="acknowledgement">We received it</button>
+      <button type="button" class="btn dsar-send" data-kind="identity_followup">Need more identity proof</button>
+      <button type="button" class="btn dsar-send" data-kind="extension" {% if not dsar.extended_until %}disabled title="Record an extension first"{% endif %}>Extension notice</button>
+      <button type="button" class="btn dsar-send" data-kind="completion">Completed (with secure link)</button>
+      <button type="button" class="btn dsar-send" data-kind="refusal">Refusal (with lawful basis)</button>
+    </div>
+    {% if email_log %}
+      <details style="margin-top: var(--space-2);">
+        <summary>Notices sent ({{ email_log | length }})</summary>
+        <ul class="dsar-list">
+          {% for e in email_log %}
+            <li>{{ e.kind | humanize }} — {{ 'sent' if e.sent else 'not sent: ' ~ e.reason }} (template version {{ e.template_version }})</li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
     <div id="dsar-status" role="status" aria-live="polite" class="muted"></div>
     <div id="dsar-worksheet-result"></div>
   </div>

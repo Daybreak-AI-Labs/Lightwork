@@ -20,6 +20,7 @@ ASSETS = (
     "lightwork-compliance-scope-actions.js",
     "lightwork-dsar-detail.js",
     "lightwork-privacy-notice-governance.js",
+    "lightwork-privacy-rights-form.js",
     "lightwork-privacy-regulatory-intelligence.js",
     "lightwork-privacy-rights-consumer-delivery.js",
     "lightwork-privacy-rights-orchestration.js",

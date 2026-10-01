@@ -340,3 +340,35 @@ def test_generated_notice_publication_runtime_config_is_exact_and_lints_clean(
         "notice_resource_version": 4,
     }
     assert lint_config(parsed) == []
+
+
+def test_pick_assessments_can_enable_the_public_rights_form(monkeypatch):
+    def confirm(prompt, *, default=False, **_kwargs):
+        if prompt.startswith("Enable consumer Consent & Preferences"):
+            return False
+        if prompt.startswith("Enable Privacy Automation"):
+            return True
+        if prompt.startswith("Let people submit privacy requests from your website"):
+            return True
+        if prompt.startswith("Enable the Data Use Governance"):
+            return False
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: "")
+
+    selected = wizard.pick_assessments()
+    form = selected["privacy_automation"]["public_rights_form"]
+    assert form == {
+        "enable": True,
+        "verification_ttl_hours": 24,
+        "status_ttl_days": 90,
+        "requests_per_ip_per_hour": 5,
+        "requests_per_email_per_day": 3,
+        "internal_target_days": 30,
+        "max_message_chars": 4000,
+    }
+    lines = wizard._cfg_assessments(selected)
+    parsed = tomllib.loads("\n".join(lines))
+    assert parsed["privacy_automation"]["public_rights_form"] == form
+    assert lint_config(parsed) == []

@@ -631,6 +631,29 @@
               <option value="access">A copy of their data</option>
               <option value="portability">Their data in a portable format</option>
               <option value="erasure">Delete their data</option>
+              <option value="correction">Correct their data</option>
+              <option value="opt_out">Opt out of sale or sharing</option>
+              <option value="limit_sensitive">Limit use of sensitive data</option>
+              <option value="objection">Stop a use they object to</option>
+              <option value="restriction">Restrict how their data is used</option>
+              <option value="withdraw_consent">Withdraw consent</option>
+            </select></label>
+          <label><span>Law that applies (sets the deadline)</span>
+            <select class="select" name="jurisdiction">
+              <option value="">Not recorded (30-day fallback)</option>
+              <option value="eu_gdpr">European Union (GDPR)</option>
+              <option value="uk_gdpr">United Kingdom (UK GDPR)</option>
+              <option value="us_ca_ccpa">California (CCPA/CPRA)</option>
+              <option value="us_va">Virginia</option>
+              <option value="us_co">Colorado</option>
+              <option value="us_ct">Connecticut</option>
+              <option value="us_ut">Utah</option>
+              <option value="us_tx">Texas</option>
+              <option value="us_or">Oregon</option>
+              <option value="br_lgpd">Brazil (LGPD)</option>
+              <option value="ca_pipeda">Canada (PIPEDA)</option>
+              <option value="au_privacy">Australia (Privacy Act)</option>
+              <option value="jp_appi">Japan (APPI)</option>
             </select></label>
           <label><span>How it arrived (optional)</span>
             <select class="select" name="channel">
@@ -645,10 +668,13 @@
             </select></label>
         </div>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" type="submit">Open request (the 30-day deadline starts now)</button>
+          <button class="btn btn--primary" type="submit">Open request (the deadline starts now)</button>
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
+      <p class="muted" style="font-size: var(--text-sm);">People can also file requests themselves from your website:
+        <a href="/privacy/rights-form">set up the rights request form</a>. Those arrive here as
+        <em>From your website</em> and open once the person confirms their email address.</p>
       <form class="pw-form" data-endpoint="/api/v1/privacy/dsar/from-message">
         <label><span>…or paste an inbound message</span>
           <textarea class="textarea" name="text" rows="3" required
@@ -664,27 +690,34 @@
       <div class="pw-scroll">
       <table>
         <thead><tr><th scope="col">Person</th>
-          <th scope="col">Asked for</th><th scope="col">Status</th>
+          <th scope="col">Asked for</th><th scope="col">Where from</th><th scope="col">Law</th>
+          <th scope="col">Status</th>
           <th scope="col">Deadline</th><th scope="col">Actions</th></tr></thead>
         <tbody>
           {% for r in records.dsar %}
           <tr>
             <td><a href="/privacy/dsar/{{ r.id }}">{{ r.subject_id }}</a>{% if r.intake %}<br><span class="muted" style="font-size:var(--text-xs);" title="Matched: {{ r.intake.signals | join('; ') }}">Opened from a message</span>{% endif %}</td>
-            <td>{{ {'access': 'A copy of their data', 'portability': 'Portable copy', 'erasure': 'Delete their data'}.get(r.kind, (r.kind or '') | replace('_', ' ') | capitalize) }}</td>
+            <td>{{ {'access': 'A copy of their data', 'portability': 'Portable copy', 'erasure': 'Delete their data', 'correction': 'Correct their data', 'opt_out': 'Opt out of sale or sharing', 'limit_sensitive': 'Limit sensitive data use', 'objection': 'Stop a use', 'restriction': 'Restrict use', 'withdraw_consent': 'Withdraw consent'}.get(r.kind, (r.kind or '') | replace('_', ' ') | capitalize) }}</td>
+            <td>{{ {'public_form': 'From your website', 'message': 'From a message', 'dashboard': 'Entered here'}.get(r.source, 'Entered here') }}
+              {% if r.verification and r.verification.status == 'verified' %}<br><span class="badge done">Identity confirmed</span>{% elif r.status == 'unverified' %}<br><span class="badge warn">Awaiting email confirmation</span>{% endif %}</td>
+            <td>{{ {'eu_gdpr': 'EU GDPR', 'uk_gdpr': 'UK GDPR', 'us_ca_ccpa': 'California', 'us_va': 'Virginia', 'us_co': 'Colorado', 'us_ct': 'Connecticut', 'us_ut': 'Utah', 'us_tx': 'Texas', 'us_or': 'Oregon', 'br_lgpd': 'Brazil', 'ca_pipeda': 'Canada', 'au_privacy': 'Australia', 'jp_appi': 'Japan'}.get(r.jurisdiction, '—') }}
+              {% if r.due_basis == 'internal_target' %}<br><span class="muted" style="font-size:var(--text-xs);">No fixed legal deadline; internal target</span>{% endif %}</td>
             <td>
-              <span class="badge {{ 'done' if r.status == 'fulfilled' else 'warn' if r.status == 'awaiting_erasure' else 'info' if r.status == 'open' else '' }}">{{ {'open': 'Open', 'awaiting_erasure': 'Waiting for deletion', 'fulfilled': 'Completed', 'closed': 'Closed'}.get(r.status, (r.status or '') | replace('_', ' ') | capitalize) }}</span>
+              <span class="badge {{ 'done' if r.status == 'fulfilled' else 'warn' if r.status in ('awaiting_erasure', 'unverified') else 'info' if r.status == 'open' else '' }}">{{ {'open': 'Open', 'unverified': 'Not yet confirmed', 'awaiting_erasure': 'Waiting for deletion', 'fulfilled': 'Completed', 'closed': 'Closed'}.get(r.status, (r.status or '') | replace('_', ' ') | capitalize) }}</span>
               {% if r.status == 'awaiting_erasure' and r.fulfillment %}
                 <br><span class="muted pw-erase-note">Open the request to delete this person&rsquo;s data.</span>
               {% endif %}
             </td>
             <td {% if r.overdue %}class="pw-due-warn"{% endif %}>
-              {% if r.status in ('open', 'awaiting_erasure') %}
+              {% if r.status in ('open', 'unverified', 'awaiting_erasure') %}
                 {% if not r.overdue %}{{ r.days_left }} day{{ '' if r.days_left == 1 else 's' }} left{% else %}{{ r.days_left | abs }} day{{ '' if (r.days_left | abs) == 1 else 's' }} overdue{% endif %}
+                {% if r.extended_until %}<br><span class="muted" style="font-size:var(--text-xs);">Extended</span>{% endif %}
+                {% if r.acknowledge_overdue %}<br><span class="badge warn">Receipt not confirmed in time</span>{% endif %}
               {% else %}—{% endif %}</td>
             <td>
               {% if r.status == 'open' %}
                 <button class="btn pw-dsar-act" data-id="{{ r.id }}" data-act="fulfill" data-kind="{{ r.kind }}" type="button">
-                  {{ 'Gather their data' if r.kind in ('access', 'portability') else 'Prepare deletion' }}</button>
+                  {{ 'Gather their data' if r.kind in ('access', 'portability') else 'Prepare deletion' if r.kind == 'erasure' else 'Mark answered' }}</button>
               {% endif %}
               {% if r.status != 'closed' %}
                 <button class="btn pw-dsar-act" data-id="{{ r.id }}" data-act="close" data-kind="{{ r.kind }}" type="button">Close</button>

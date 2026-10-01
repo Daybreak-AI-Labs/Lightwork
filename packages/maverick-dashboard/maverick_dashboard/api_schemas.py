@@ -976,8 +976,12 @@ class SharePointSyncIn(BaseModel):
 class DsarIn(BaseModel):
     """Open a data-subject request with its statutory due date."""
     subject_id: str = Field(..., min_length=1, max_length=200)
-    kind: str = Field(..., pattern="^(access|portability|erasure)$")
+    kind: str = Field(..., pattern="^(access|portability|erasure|correction|opt_out|"
+                                   "limit_sensitive|objection|restriction|withdraw_consent)$")
     channel: str = Field("", max_length=64)
+    # A verified regime id from maverick.rights_deadlines; empty keeps the
+    # 30-day fallback clock.
+    jurisdiction: str = Field("", max_length=32)
 
 
 class IncidentIn(BaseModel):
