@@ -1089,9 +1089,11 @@ app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)
 app.include_router(outcome_pilot_costs_router)
 app.include_router(project_reviews_router)
+from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
+app.include_router(first_outcome_router)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
 from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
@@ -11456,6 +11458,8 @@ def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLRes
         reviewed_outcome=guided["outcome"] if guided else None,
     )
     state["guided"] = guided
+    from .guided_outcome import first_outcomes_for
+    state["first_outcomes"] = first_outcomes_for(request)
     from .local_owner import available as local_owner_available
     state["local_owner_setup_available"] = local_owner_available(request)
     return templates.TemplateResponse(

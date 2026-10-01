@@ -40,6 +40,9 @@ KNOWN_SECTIONS = frozenset({
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.
     "alerts",
+    # [first_outcome] department / sample_workspace_created: the department
+    # first task picked at setup (maverick.sample_outcomes).
+    "first_outcome",
     # [third_party_portal] routing_keyring: the vendor portal link keyring
     # rotated on the Third-Party Collaboration page (sealed).
     "third_party_portal",

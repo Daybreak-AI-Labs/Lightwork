@@ -76,6 +76,32 @@
   </section>
   {% endif %}
 
+  {% if first_outcomes and first_outcomes.outcomes %}
+  <section class="panel gs__demo" aria-labelledby="first-outcome-title" style="margin-bottom:var(--space-5)">
+    <span class="gs__demo-label">Sample data</span>
+    <h2 id="first-outcome-title">Run your first task on sample data</h2>
+    <p>Pick your team. Lightwork runs that team's specialist on a small set of made-up files
+      (a sample company) and hands the result to you for review. {{ first_outcomes.rule }}</p>
+    {% if first_outcomes.can_operate %}
+    <form id="first-outcome-form" style="display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:end;">
+      <label>Which team will try Lightwork first?<select class="input" id="first-outcome-department" name="department">
+        {% for row in first_outcomes.outcomes %}<option value="{{ row.department }}" data-goal="{{ row.goal }}" data-lands-in="{{ row.lands_in }}" {% if row.department == first_outcomes.selected %}selected{% endif %}>{{ row.label }}</option>{% endfor %}
+      </select></label>
+      <button class="btn btn--primary" type="submit" id="first-outcome-run">Run the sample task</button>
+    </form>
+    <p id="first-outcome-goal" class="muted"></p>
+    {% if not first_outcomes.ready %}
+    <p id="first-outcome-message" role="status" aria-live="polite">{{ first_outcomes.not_ready_detail }}
+      <a href="{{ first_outcomes.connect_href }}">Connect an AI service</a></p>
+    {% else %}
+    <p id="first-outcome-message" role="status" aria-live="polite"></p>
+    {% endif %}
+    {% else %}
+    <p class="muted" role="note">Someone who can run work can start the sample task. You can view its result.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
   {% if runtime_all_set %}
   <div class="mv-empty" style="margin-bottom: var(--space-5);">
     <p class="mv-empty__title">Your setup checklist is complete</p>
