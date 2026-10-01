@@ -713,7 +713,7 @@ def suite_allowed(request: Request, suite: str | None) -> bool:
 
 
 def domain_suites_allowed(request: Request, domain: str | None) -> bool:
-    """Honor the live suite of a custom specialist and its inherited profile."""
+    """Honor inherited suites; scoped users cannot read an unavailable pack."""
     if not domain:
         return True
     from maverick.domain import suites_for_domain
@@ -773,8 +773,12 @@ def can_access_goal(request: Request, goal) -> bool:
 
     Ownership grants normal access. A named administrator needs an independent
     scoped read approval for another person's content or unowned legacy work.
-    A read approval never grants mutation or publishing authority.
+    A read approval never grants mutation or publishing authority. A current
+    department grant is also required for a specialist-owned goal, including
+    when the specialist's pack was removed after the goal was created.
     """
+    if goal is None or not domain_suites_allowed(request, getattr(goal, "domain", None)):
+        return False
     principal = _authorization_principal(request)
     if getattr(request.state, "paired_device_id", None):
         return bool(principal) and getattr(goal, "owner", "") == principal

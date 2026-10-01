@@ -569,16 +569,25 @@ def suite_for(name: str) -> str | None:
     return None
 
 
+_UNAVAILABLE_DOMAIN_SUITE = "__unavailable_specialist__"
+
+
 def suites_for_domain(name: str, profile: DomainProfile | None = None) -> frozenset[str]:
     """Suites governing a roster name and any specialist it inherits from.
 
     A custom fork can have a generic public name while retaining a built-in
     specialist's profile name. Both suites must be allowed at every boundary.
     Callers with a resolved catalog should pass its profile to avoid a second
-    workspace read.
+    workspace read. A persisted record can outlive a generic-named custom
+    pack. In that case its inherited suite cannot be reconstructed, so return
+    a non-grantable scope rather than treating the record as unrestricted.
     """
+    if not name:
+        return frozenset()
     if profile is None:
         profile = available_domains().get(name)
+    if profile is None and suite_for(name) is None:
+        return frozenset({_UNAVAILABLE_DOMAIN_SUITE})
     return frozenset(
         suite for suite in (suite_for(name), suite_for(profile.name) if profile else None)
         if suite is not None

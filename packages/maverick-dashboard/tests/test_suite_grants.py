@@ -203,6 +203,47 @@ def test_domain_read_scope_checks_inherited_suite(monkeypatch, tmp_path):
     assert auth.domain_suites_allowed(None, "finance_ap")
 
 
+def test_deleted_generic_specialist_does_not_lose_persisted_goal_scope(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from maverick import domain
+    from maverick_dashboard import auth
+    from starlette.requests import Request
+
+    pack = tmp_path / "client_fork.toml"
+    pack.write_text('name = "client_fork"\nextends = "finance_ap"\n', encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"sales"}))
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
+    request = Request({"type": "http", "method": "GET", "path": "/chat/goal/1", "headers": []})
+    goal = SimpleNamespace(id=1, owner="user:alice", domain="client_fork")
+
+    assert domain.suites_for_domain("client_fork") == frozenset({"finance"})
+    assert not auth.domain_suites_allowed(None, "client_fork")
+    assert not auth.can_access_goal(request, goal)
+    pack.unlink()
+    # Old goals retain the domain string after their specialist is removed.
+    assert not auth.domain_suites_allowed(None, "client_fork")
+    assert not auth.can_access_goal(request, goal)
+    assert domain.suites_for_domain("finance_ap") == frozenset({"finance"})
+
+    # A valid generic pack has no inherited department and stays available.
+    monkeypatch.setattr(
+        domain, "available_domains",
+        lambda: {"general_assistant": domain.DomainProfile(name="general_assistant")},
+    )
+    assert domain.suites_for_domain("general_assistant") == frozenset()
+    assert auth.domain_suites_allowed(None, "general_assistant")
+    goal.domain = "general_assistant"
+    assert auth.can_access_goal(request, goal)
+
+    # Unscoped administrators can still recover old records after deletion.
+    monkeypatch.setattr(auth, "caller_suites", lambda request: None)
+    assert auth.domain_suites_allowed(None, "client_fork")
+    goal.domain = "client_fork"
+    assert auth.can_access_goal(request, goal)
+
+
 def test_finance_operations_and_workspace_require_finance_grant(monkeypatch, tmp_path):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[finance_operations]\nenable = true\n", encoding="utf-8")
