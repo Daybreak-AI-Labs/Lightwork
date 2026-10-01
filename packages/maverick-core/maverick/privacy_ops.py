@@ -2666,6 +2666,30 @@ def _write_dsar_export_artifact(path: Path, intent: dict, bundle: dict) -> str:
     return digest
 
 
+def _emit_record_event(event: str, record_type: str, record: dict | None) -> None:
+    """Tell webhook subscribers about a request or incident change. Never
+    raises; nothing is sent when nobody is subscribed."""
+    if not isinstance(record, dict) or not record.get("id"):
+        return
+    try:
+        from .webhook_events import emit, record_link
+
+        rid = str(record.get("id"))
+        if record_type == "dsar":
+            title = f"{record.get('kind') or 'access'} request from {record.get('subject_id') or 'a person'}"
+            link = record_link(f"/privacy/dsar/{rid}")
+            summary = {"status": record.get("status"), "kind": record.get("kind"),
+                       "due_at": record.get("due_at"), "jurisdiction": record.get("jurisdiction")}
+        else:
+            title = str(record.get("title") or "privacy incident")
+            link = record_link("/privacy#incidents")
+            summary = {"status": record.get("status"), "severity": record.get("severity"),
+                       "notify_deadline_at": record.get("notify_deadline_at")}
+        emit(event, record_type=record_type, record_id=rid, title=title, summary=summary, link=link)
+    except Exception:  # pragma: no cover - webhooks never block a record change
+        log.debug("privacy_ops: webhook event %s not sent", event, exc_info=True)
+
+
 def open_dsar(
     subject_id: str,
     kind: str,
@@ -2708,7 +2732,9 @@ def open_dsar(
         }
     _queue_audit(record, "open", opened_by)
     saved = _DSAR.save(record, expected_revision=0)
-    return _audit_mutation(_DSAR, "dsar", saved)
+    saved = _audit_mutation(_DSAR, "dsar", saved)
+    _emit_record_event("dsar.opened", "dsar", saved)
+    return saved
 
 
 # What an inbound data-subject request sounds like. Deterministic and
@@ -2996,6 +3022,8 @@ def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
         return None
     if changed or isinstance(saved.get("_audit_pending"), (dict, list)):
         saved = _audit_mutation(_DSAR, "dsar", saved)
+    if changed:
+        _emit_record_event("dsar.closed", "dsar", saved)
     return saved
 
 
@@ -3018,6 +3046,8 @@ def close_dsar(request_id: str, *, closed_by: str = "") -> dict | None:
         changed or isinstance(saved.get("_audit_pending"), (dict, list))
     ):
         saved = _audit_mutation(_DSAR, "dsar", saved)
+    if changed:
+        _emit_record_event("dsar.closed", "dsar", saved)
     return saved
 
 
@@ -3057,7 +3087,9 @@ def open_incident(title: str, *, severity: str = "medium",
         raise ValueError("title is required")
     _queue_audit(record, "open", reported_by)
     saved = _INCIDENT.save(record, expected_revision=0)
-    return _audit_mutation(_INCIDENT, "incident", saved)
+    saved = _audit_mutation(_INCIDENT, "incident", saved)
+    _emit_record_event("incident.opened", "incident", saved)
+    return saved
 
 
 def decide_incident_notification(incident_id: str, notifiable: bool, *,
@@ -3093,6 +3125,8 @@ def decide_incident_notification(incident_id: str, notifiable: bool, *,
         changed or isinstance(saved.get("_audit_pending"), (dict, list))
     ):
         saved = _audit_mutation(_INCIDENT, "incident", saved)
+    if changed:
+        _emit_record_event("incident.notifiable_decided", "incident", saved)
     return saved
 
 
@@ -3114,6 +3148,8 @@ def close_incident(incident_id: str, *, closed_by: str = "") -> dict | None:
         changed or isinstance(saved.get("_audit_pending"), (dict, list))
     ):
         saved = _audit_mutation(_INCIDENT, "incident", saved)
+    if changed:
+        _emit_record_event("incident.closed", "incident", saved)
     return saved
 
 

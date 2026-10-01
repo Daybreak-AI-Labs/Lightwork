@@ -4263,6 +4263,34 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   delivered over the SSRF-safe webhook path. Best-effort and never blocks the
   sign-off; the payload carries the parsed deliverable (table rows) and
   attribution. Fires only on `approved` (`webhooks.fire_deliverable_handoff`).
+- **Deadline alerts** — nothing used to tell anyone that a data-subject
+  request, an incident's 72-hour notification clock, an assessment renewal or
+  review, a vendor contract renewal or an approval card was about to run out.
+  `maverick.deadline_alerts` evaluates every such record per workspace and
+  sends plain-language alerts (`due_soon_<lead>`, `due_today`, `overdue`;
+  lead times per type under `[deadline_alerts.lead_days]` /
+  `[deadline_alerts.lead_hours]`, quiet hours, immediate or one summary per
+  person) through `notifications.notify`, so every configured backend — and
+  any backend added later — carries them. Each (record, state, deadline)
+  alerts once, recorded in the `deadline_alerts` ledger table (world-model
+  migration v42) so restarts never re-send; the record pages show an "Alerts"
+  section and `GET /api/v1/deadline-alerts` lists them. Routing prefers the
+  record's assignee, else the workspace owner named in `[deadline_alerts]
+  owner`. Run by `maverick_dashboard.deadline_alerts_scheduler` (a wizard step,
+  rows on All settings). On by default while the privacy register is on.
+- **Webhook subscriptions, delivery log and retries** — outbound webhooks are
+  now records (`maverick.webhook_subscriptions`: address, event filter, sealed
+  secret, on/off, description) managed on Settings → Webhooks
+  (`/settings/webhooks/manage`, `/api/v1/webhooks/subscriptions`,
+  `/api/v1/webhooks/deliveries`) with "Send test event" and "Retry now"; the
+  `[webhooks] outbound` list keeps working as a legacy default subscription.
+  Every delivery is logged (attempts, status, latency, response snippet, next
+  retry) and retried five times over about an hour with jitter before it is
+  parked as dead. Record events (`dsar.*`, `incident.*`, `assessment.*`,
+  `vendor.*`, `approval.*`, `policy.published`; `maverick.webhook_events`)
+  share one envelope (event id, type, occurred_at, workspace, record summary,
+  link) documented in `docs/webhooks.md`; the HMAC signature scheme is
+  unchanged. Addresses go through the same SSRF guard as the dispatcher.
 - **In-dashboard skill authoring** — the `/skills` page can now *create* a skill,
   not just install one: a form (name, trigger phrases, tools, instructions)
   composes a `SKILL.md` and writes it via the same validate + secret/shield-scan

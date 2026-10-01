@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
+from .deadline_alerts import SQLITE_SCHEMA as _DEADLINE_ALERT_SCHEMA
 from .event_admission import SQLITE_SCHEMA as _EVENT_ADMISSION_SCHEMA
 from .file_lock import (
     atomic_create_bytes,
@@ -38,6 +39,7 @@ from .file_lock import (
     prepare_private_directory,
 )
 from .paths import bind_tenant_namespace, current_tenant_id, data_dir
+from .webhook_subscriptions import SQLITE_SCHEMA as _WEBHOOK_SUBSCRIPTION_SCHEMA
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 41
+SCHEMA_VERSION = 42
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -428,6 +430,9 @@ MIGRATIONS: dict[int, list[str]] = {
         "ALTER TABLE event_goal_admissions ADD COLUMN sealed_contract TEXT",
         "CREATE INDEX IF NOT EXISTS idx_event_admission_goal ON event_goal_admissions(goal_id)",
     ],
+    # v42: webhook subscriptions + delivery log and the deadline-alert ledger
+    # (which alert went out for which record, so restarts never re-send).
+    42: [*_WEBHOOK_SUBSCRIPTION_SCHEMA, *_DEADLINE_ALERT_SCHEMA],
     # v11: per-goal owner principal for multi-user dashboard authz (owner-scoped
     # reads/mutations). Legacy goals get '' (treated as unowned -> admin-only).
     11: ["ALTER TABLE goals ADD COLUMN owner TEXT NOT NULL DEFAULT ''"],
@@ -3020,7 +3025,22 @@ class WorldModel:
                  (requested_by or None), goal["id"] if goal else None,
                  goal["domain"] if goal else ""),
             )
-            return cur.lastrowid
+            approval_id = cur.lastrowid
+        self._emit_approval_event("approval.created", approval_id, {"risk": risk, "action": action})
+        return approval_id
+
+    def _emit_approval_event(self, event: str, approval_id: int, payload: dict) -> None:
+        """Webhook subscribers hear about approvals; never raises, and costs one
+        read of the subscription table when nobody is subscribed."""
+        try:
+            from .webhook_events import emit, record_link
+
+            emit(event, record_type="approval", record_id=str(approval_id),
+                 title=str(payload.get("action") or "approval")[:200],
+                 summary={k: v for k, v in payload.items() if k != "action"},
+                 link=record_link("/approvals"), payload=dict(payload), world=self)
+        except Exception:  # pragma: no cover - webhooks never block an approval
+            pass
 
     def get_approval(self, approval_id: int) -> Approval | None:
         row = self._read_one(
@@ -3304,6 +3324,7 @@ class WorldModel:
         commit acknowledgement is lost, the caller can safely append the same
         stable ``event_id`` again and retry this method.
         """
+        finalized: tuple[str, str] | None = None
         with self._writing() as conn:
             event = conn.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -3340,7 +3361,7 @@ class WorldModel:
                     (approval_id,),
                 ).fetchone()
                 if final is not None:
-                    conn.execute(
+                    applied = conn.execute(
                         "UPDATE approvals SET status = ?, decided_at = ?, "
                         "decided_by = ? WHERE id = ? AND status = 'pending'",
                         (
@@ -3349,7 +3370,12 @@ class WorldModel:
                             final["decided_by"],
                             approval_id,
                         ),
-                    )
+                    ).rowcount
+                    if applied:
+                        finalized = (final["final_status"], final["decided_by"])
+            if finalized is not None:
+                self._emit_approval_event("approval.decided", approval_id,
+                                          {"status": finalized[0], "decided_by": finalized[1] or ""})
             return True
 
     def decide_approval(self, approval_id: int, status: str,
@@ -3394,7 +3420,12 @@ class WorldModel:
                         approval_id,
                     ),
                 )
-                return cur.rowcount > 0
+                decided = cur.rowcount > 0
+            if decided:
+                self._emit_approval_event("approval.decided", approval_id,
+                                          {"status": status, "decided_by": decided_by or "",
+                                           "action": appr.action})
+            return decided
 
         approver = (decided_by or "").strip()
         if not approver:
