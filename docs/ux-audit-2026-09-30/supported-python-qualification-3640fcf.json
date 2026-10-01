@@ -1,0 +1,1443 @@
+{
+  "source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+  "interpreters": {
+    "310": {
+      "runs": {
+        "all-collect-ordinary-final06-01": {
+          "source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "mode": "ordinary",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "0",
+            "MAVERICK_SECURE_DEFAULT": "0"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 201.916,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.10.19",
+          "selected_cases": 40660,
+          "heavy_cases": 7,
+          "collection_reports": [
+            {
+              "nodeid": "packages/maverick-channels/tests/test_telegram_target.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-channels\\\\tests\\\\test_telegram_target.py', 12, \"Skipped: could not import 'telegram': No module named 'telegram'\")"
+            },
+            {
+              "nodeid": "packages/maverick-core/tests/test_capability_glob_smt.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-core\\\\tests\\\\test_capability_glob_smt.py', 40, \"Skipped: could not import 'z3': No module named 'z3'\")"
+            },
+            {
+              "nodeid": "packages/maverick-core/tests/test_duckdb_analytics.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-core\\\\tests\\\\test_duckdb_analytics.py', 10, \"Skipped: could not import 'duckdb': No module named 'duckdb'\")"
+            },
+            {
+              "nodeid": "packages/maverick-core/tests/test_observability_export.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-core\\\\tests\\\\test_observability_export.py', 23, 'Skipped: observability extra not installed')"
+            },
+            {
+              "nodeid": "packages/maverick-core/tests/test_pandas_query.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-core\\\\tests\\\\test_pandas_query.py', 11, \"Skipped: could not import 'pandas': No module named 'pandas'\")"
+            },
+            {
+              "nodeid": "benchmarks/test_dgm_container_score.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\benchmarks\\\\test_dgm_container_score.py', 31, 'Skipped: official swebench harness required')"
+            },
+            {
+              "nodeid": "benchmarks/test_swebench_container_grade.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\benchmarks\\\\test_swebench_container_grade.py', 22, 'Skipped: official swebench harness required')"
+            },
+            {
+              "nodeid": "benchmarks/test_swebench_container_run.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\benchmarks\\\\test_swebench_container_run.py', 23, 'Skipped: official swebench harness required')"
+            }
+          ],
+          "evidence_sha256": {
+            "result.json": "ad9ddddc820d81f9cdbe2bc95b1bbcac0b727d5075775a5f7f3b7852fb96e1fb",
+            "source.json": "06aa576ca0db3173b998ca853badcae7118f0d8dd82a262db6745904282f9f7f",
+            "collection.json": "12c4158ac495ab62e054e87e72fcc29dad20c24818b40d275a295ff27a2b9e21",
+            "xml": "3ff22dff13248c8d7b284774ad709711d8060c721e747d2261b95a08c26935a6",
+            "log": "a70246360bb7c677730b155bd51f53ba447a24d0e6c7a6e1eb8bc0e89bc69fda"
+          }
+        },
+        "critical-run-ordinary-f1f41a3-01": {
+          "source_sha": "f1f41a3e13a8d3f574546e8a577a48555e3ec8bc",
+          "mode": "ordinary",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "0",
+            "MAVERICK_SECURE_DEFAULT": "0"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 107.27,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.10.19",
+          "selected_cases": 412,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "afaa9e44f248ae3f195a0b8dcce3a0b84872c4d62222640279178c13b5b15017",
+            "source.json": "79e4064b86d102005f6fdb45962595ac64f838af158c222d250d2288d437c31e",
+            "collection.json": "9c6bd5681dccbefe1951c34cf87a2cfbc60c8153e81d30680b0f733c1e9a8aa0",
+            "xml": "eb92aef15012b617d0617971e09280282a667e6e64ada0490660e2f415041c3e",
+            "log": "23159b435e1c63cbec7df0c8ccf16fe37e4a77a1a361cf175ad1a7d8c6886d4c"
+          },
+          "runtime": {
+            "passed": 405,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 7
+          },
+          "nonpassing_cases": [
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:368: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:382: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_read_uses_bounded_server_cursor",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:430: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_psycopg2_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:451: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_kill_query_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_server_limit_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            }
+          ]
+        },
+        "critical-run-ordinary-final06-01": {
+          "source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "mode": "ordinary",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "0",
+            "MAVERICK_SECURE_DEFAULT": "0"
+          },
+          "source_unchanged": true,
+          "exit_code": 1,
+          "elapsed_seconds": 108.475,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.10.19",
+          "selected_cases": 410,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "664bbccec71f0b3c2f03af2d4662444050ae20bc45964002f37fb8122214208c",
+            "source.json": "1e17baf9a5511e50a777822c6404ac2ea33b7b6a416bedacccba7016f3d5fa12",
+            "collection.json": "eea4457a1e5c5916d99e315e528270e2b795d0883e72496812ea808785a0288a",
+            "xml": "b16ff065bf6f461e669c0f5d6b962544c0172ba1a76c499169654a710f5f8ee3",
+            "log": "5349973037c5893714654ccfcb33c9323ec6485f8deae37b9027fa495584d1de"
+          },
+          "runtime": {
+            "passed": 402,
+            "failed": 1,
+            "errors": 0,
+            "skipped": 7
+          },
+          "nonpassing_cases": [
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_long_sqlite_query_stops_at_progress_deadline_and_releases_connection[sqlalchemy]",
+              "outcome": "failure",
+              "message": "AssertionError: assert 'unsupported' == 'sqlite_progr...and_interrupt'\n  \n  - sqlite_progress_and_interrupt\n  + unsupported",
+              "details": "packages\\maverick-core\\tests\\test_query_execution.py:66: in test_long_sqlite_query_stops_at_progress_deadline_and_releases_connection\n    assert executions[0].cancellation_support == \"sqlite_progress_and_interrupt\"\nE   AssertionError: assert 'unsupported' == 'sqlite_progr...and_interrupt'\nE     \nE     - sqlite_progress_and_interrupt\nE     + unsupported"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-06\\packages\\maverick-core\\tests\\test_query_execution.py:306: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-06\\packages\\maverick-core\\tests\\test_query_execution.py:320: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_read_uses_bounded_server_cursor",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-06\\packages\\maverick-core\\tests\\test_query_execution.py:368: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_psycopg2_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-06\\packages\\maverick-core\\tests\\test_query_execution.py:389: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-06\\packages\\maverick-core\\tests\\test_query_execution.py:437: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_kill_query_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-06\\packages\\maverick-core\\tests\\test_query_execution.py:437: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_server_limit_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-06\\packages\\maverick-core\\tests\\test_query_execution.py:437: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            }
+          ]
+        },
+        "critical-run-secure-f1f41a3-01": {
+          "source_sha": "f1f41a3e13a8d3f574546e8a577a48555e3ec8bc",
+          "mode": "secure",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "1",
+            "MAVERICK_SECURE_DEFAULT": "1"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 113.306,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.10.19",
+          "selected_cases": 412,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "91fe0c7c3a2c7b228c6a8743f57ff4836034fbeaac1851f760cf07d87d37e05e",
+            "source.json": "f16143553524437a53bd3ea8ddb76aebd8dff9137531c1b831d57b8ad01528c0",
+            "collection.json": "fc6e109283e3d9c55818711899f74a1dcd21e3887a43845c15c523961dd30d7b",
+            "xml": "a02c045ca5da70a39ea67431b028e888af8b34fb8b915ac7bf68eb3d48e9e462",
+            "log": "052e08776e02b7bf214e773e42f4982eb5acbccafb9ebe1ea724c04b82387057"
+          },
+          "runtime": {
+            "passed": 405,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 7
+          },
+          "nonpassing_cases": [
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:368: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:382: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_read_uses_bounded_server_cursor",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:430: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_psycopg2_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:451: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_kill_query_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_server_limit_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            }
+          ]
+        },
+        "query_module-run-ordinary-f1f41a3-01": {
+          "source_sha": "f1f41a3e13a8d3f574546e8a577a48555e3ec8bc",
+          "mode": "ordinary",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "0",
+            "MAVERICK_SECURE_DEFAULT": "0"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 2.429,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.10.19",
+          "selected_cases": 32,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "75e730d27c305afba65ee5e897fe31fb6feeb5db3d22f0835d4e91ed8e27e72d",
+            "source.json": "ac66441064418fe2224a65ddf911dd52aa1615bca9795982d7b9cc1154af2b62",
+            "collection.json": "31d6dbf469c75ca40bcbc1b8e697e186e02c4a18ecedb7afd205b306813e026d",
+            "xml": "bc609afddc3eb57f6d19fa6d4aae3c8da94cc77b479b9a3a455fa410a31b1d63",
+            "log": "c2c316fd6464109867511153b8504b3fa8bd2acd6a10cd03be2f122417011a81"
+          },
+          "runtime": {
+            "passed": 25,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 7
+          },
+          "nonpassing_cases": [
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:368: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:382: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_read_uses_bounded_server_cursor",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:430: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_psycopg2_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:451: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_kill_query_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_server_limit_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            }
+          ]
+        },
+        "query_module-run-secure-f1f41a3-01": {
+          "source_sha": "f1f41a3e13a8d3f574546e8a577a48555e3ec8bc",
+          "mode": "secure",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "1",
+            "MAVERICK_SECURE_DEFAULT": "1"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 2.465,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.10.19",
+          "selected_cases": 32,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "fe766551627352cab2deb3e3ec8f34dee36bfc3f80a4bc28763fb422dab69c6d",
+            "source.json": "c9dc1e6768e403f8687194033ddcbdc33312a1863152171976e171a084178974",
+            "collection.json": "af2943387c6901e752b7158ddd0f1cf656340bfd8c5e0a7406ea2cd7d61b829c",
+            "xml": "754e3379f6015291535c64e758324718495c82db8d4cb2acff05fdfe47177d05",
+            "log": "2e5581b12d47c2c4e1f831d7a0bdc7e8767a20ea96c911154a934f83ca5a0234"
+          },
+          "runtime": {
+            "passed": 25,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 7
+          },
+          "nonpassing_cases": [
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:368: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:382: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_read_uses_bounded_server_cursor",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:430: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_psycopg2_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:451: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_kill_query_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_server_limit_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            }
+          ]
+        },
+        "query_probe-run-ordinary-final06-01": {
+          "source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "mode": "ordinary",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "0",
+            "MAVERICK_SECURE_DEFAULT": "0"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 1.58,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.10.19",
+          "selected_cases": 1,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "be9978c999fb6fd2d23ec47b94941090c2c0bb4e7175d52853cb198ca92cddb7",
+            "source.json": "856656cbcda0f5f48859bcccf39441998677d42f5efad8501df86a5336cab2b2",
+            "collection.json": "9f03a1ca232306462a31d023a5e3d88587b1d5e5f3615660f1055e5a452c32b8",
+            "xml": "f729c0f16a3f40fe1b31c0858b08cfb4ecf8ace66338d9de2b64352706d247d5",
+            "log": "9dd199ab94e11be293cfb8d44f58bd794bc906d7e94595acb3c048e42380b8f4"
+          },
+          "runtime": {
+            "passed": 1,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "nonpassing_cases": []
+        }
+      },
+      "installation": {
+        "python": "3.10.19",
+        "wheels": 100,
+        "wheel_bytes": 81922852,
+        "tool_pins_checked": 4,
+        "active_requirements_checked": 41,
+        "provenance_sha256": "79d737d3679ee8ee7af5eac81225fc94ce95a3dd1ae4ebcb9777b795ac3dc57c",
+        "requirements_sha256": "ad111840c664c7cef498de378f274080d441f4c5b9231f0c60bff2376564c284"
+      }
+    },
+    "311": {
+      "runs": {
+        "all-collect-ordinary-final06-01": {
+          "source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "mode": "ordinary",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "0",
+            "MAVERICK_SECURE_DEFAULT": "0"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 175.764,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.11.14",
+          "selected_cases": 40660,
+          "heavy_cases": 7,
+          "collection_reports": [
+            {
+              "nodeid": "packages/maverick-channels/tests/test_telegram_target.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-channels\\\\tests\\\\test_telegram_target.py', 12, \"Skipped: could not import 'telegram': No module named 'telegram'\")"
+            },
+            {
+              "nodeid": "packages/maverick-core/tests/test_capability_glob_smt.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-core\\\\tests\\\\test_capability_glob_smt.py', 40, \"Skipped: could not import 'z3': No module named 'z3'\")"
+            },
+            {
+              "nodeid": "packages/maverick-core/tests/test_duckdb_analytics.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-core\\\\tests\\\\test_duckdb_analytics.py', 10, \"Skipped: could not import 'duckdb': No module named 'duckdb'\")"
+            },
+            {
+              "nodeid": "packages/maverick-core/tests/test_observability_export.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-core\\\\tests\\\\test_observability_export.py', 23, 'Skipped: observability extra not installed')"
+            },
+            {
+              "nodeid": "packages/maverick-core/tests/test_pandas_query.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\packages\\\\maverick-core\\\\tests\\\\test_pandas_query.py', 11, \"Skipped: could not import 'pandas': No module named 'pandas'\")"
+            },
+            {
+              "nodeid": "benchmarks/test_dgm_container_score.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\benchmarks\\\\test_dgm_container_score.py', 31, 'Skipped: official swebench harness required')"
+            },
+            {
+              "nodeid": "benchmarks/test_swebench_container_grade.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\benchmarks\\\\test_swebench_container_grade.py', 22, 'Skipped: official swebench harness required')"
+            },
+            {
+              "nodeid": "benchmarks/test_swebench_container_run.py",
+              "outcome": "skipped",
+              "longrepr": "('C:\\\\Users\\\\Cstep\\\\Documents\\\\Codex\\\\2026-09-30\\\\task-5\\\\qualification-final-06\\\\benchmarks\\\\test_swebench_container_run.py', 23, 'Skipped: official swebench harness required')"
+            }
+          ],
+          "evidence_sha256": {
+            "result.json": "161ad886b8b1139ce8a0bfea4c0328733470a7d4e55c35998aca5bc89c30e522",
+            "source.json": "761acc28b24e9e50aad4157823e7db6991af97914944332a4711960ab7e04acd",
+            "collection.json": "b03f92d99fe1b9e2b8563c82f7c99f7f22e4b19739fa304ef8620f6c49cf75e1",
+            "xml": "8700ca63aa3f184b637e979bb39c4ece9d94a672feafaff59f56265ea6354a15",
+            "log": "bc4d1d2f1c7bd20265eace047516a6269aca59a55e4e47e56b0f20c7a724a15f"
+          }
+        },
+        "critical-run-ordinary-f1f41a3-01": {
+          "source_sha": "f1f41a3e13a8d3f574546e8a577a48555e3ec8bc",
+          "mode": "ordinary",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "0",
+            "MAVERICK_SECURE_DEFAULT": "0"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 112.12,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.11.14",
+          "selected_cases": 412,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "e08e223b5f7bc211ff5a989ff6809d697f9c031690006876489934f4a24a974a",
+            "source.json": "427dec4798b398eac3665bd0b622e27f71116978990baf1edd09518d33c5f306",
+            "collection.json": "3a8952a6536dc610e872518f735da997926d5941a0a9f318b3bb1b3e633bc762",
+            "xml": "8ad988dd0d69930493a40c77f5bf33e26ad7155119755a4e7f31a60be12ba2d3",
+            "log": "96a0c7823df05577675cfa9e018ad87906f2833e47ea83752e5ec87c73de8749"
+          },
+          "runtime": {
+            "passed": 405,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 7
+          },
+          "nonpassing_cases": [
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:368: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:382: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_read_uses_bounded_server_cursor",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:430: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_psycopg2_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:451: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_kill_query_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_server_limit_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            }
+          ]
+        },
+        "critical-run-secure-f1f41a3-01": {
+          "source_sha": "f1f41a3e13a8d3f574546e8a577a48555e3ec8bc",
+          "mode": "secure",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "1",
+            "MAVERICK_SECURE_DEFAULT": "1"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 133.425,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.11.14",
+          "selected_cases": 412,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "7a9f48db3a4abfac0a91f27c94dbf5e3bc60f7fcff3a55e64c452ec2a1f76901",
+            "source.json": "86d29e28e212ab6e3fc4961873802fcc820bfbfd6dbaf47eb805a783f07dbe0c",
+            "collection.json": "3776545970e1c6e041982f10a650568e0bbc6938fc7de0d3a5df59d1206e4caa",
+            "xml": "b9e264a8b9a00d40d187f66e69b380881ce49cd50de3ba9f9a338795838c8c5a",
+            "log": "2631593221185247ce1ac74124f1aaa615ca14b5e111bb5260103541b5f5a0a3"
+          },
+          "runtime": {
+            "passed": 405,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 7
+          },
+          "nonpassing_cases": [
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:368: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:382: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_read_uses_bounded_server_cursor",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:430: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_psycopg2_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:451: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_kill_query_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_server_limit_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            }
+          ]
+        },
+        "query_module-run-ordinary-f1f41a3-01": {
+          "source_sha": "f1f41a3e13a8d3f574546e8a577a48555e3ec8bc",
+          "mode": "ordinary",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "0",
+            "MAVERICK_SECURE_DEFAULT": "0"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 3.35,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.11.14",
+          "selected_cases": 32,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "837331c3470512cd8470c003ca3c4f761ea4c33ff5aaafebf75c51d27d66c444",
+            "source.json": "67a5ad2df31bfb3530e60e7410a785357d8fb73d1acae11adbdf1f393f9a3b9c",
+            "collection.json": "2541a45adf1550ecda0ebfdac98d9617510f4ad26ec09f35268d75634c647d63",
+            "xml": "d949ac3850b78ec4c46bb3b0d590c6bc3e2aace6749509c48d048724724d38e5",
+            "log": "66963bb7b74a640673261dc60f81cd414c68d449bf2b56b1c8b763424fe58ec3"
+          },
+          "runtime": {
+            "passed": 25,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 7
+          },
+          "nonpassing_cases": [
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:368: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:382: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_read_uses_bounded_server_cursor",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:430: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_psycopg2_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:451: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_kill_query_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_server_limit_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            }
+          ]
+        },
+        "query_module-run-secure-f1f41a3-01": {
+          "source_sha": "f1f41a3e13a8d3f574546e8a577a48555e3ec8bc",
+          "mode": "secure",
+          "secure_flags": {
+            "MAVERICK_TEST_SECURE_DEFAULT": "1",
+            "MAVERICK_SECURE_DEFAULT": "1"
+          },
+          "source_unchanged": true,
+          "exit_code": 0,
+          "elapsed_seconds": 2.448,
+          "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+          "python": "3.11.14",
+          "selected_cases": 32,
+          "heavy_cases": 0,
+          "collection_reports": [],
+          "evidence_sha256": {
+            "result.json": "cd733c54239dd99baa24355b6334b27a535f12a3d923803798f723f452127a6b",
+            "source.json": "b34e2157f1f24cc6d869efa165448efdddd88f5db8a6003563d8009fccd4ef14",
+            "collection.json": "6e64d4e43a159b6b91f74854b5584f47211dcabb9cfa6dec4c4031777f1f3e03",
+            "xml": "2bdaad645b45ee70b4a1f7bb05ddce60d640da80d21314f5f1fcaa3aa694b2d7",
+            "log": "0ac466ed76317d8b614d25ff8e01753b220f2ff7b6011e113041153705819947"
+          },
+          "runtime": {
+            "passed": 25,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 7
+          },
+          "nonpassing_cases": [
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:368: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:382: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_native_postgres_read_uses_bounded_server_cursor",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:430: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_psycopg2_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_PG_DSN not set (no dedicated Postgres test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:451: MAVERICK_PG_DSN not set (no dedicated Postgres test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_statement_deadline_and_fresh_next_query",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_kill_query_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            },
+            {
+              "classname": "packages.maverick-core.tests.test_query_execution",
+              "name": "test_mysql_server_limit_alone_stops_a_read",
+              "outcome": "skipped",
+              "message": "MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)",
+              "details": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\slice-compatibility-final\\packages\\maverick-core\\tests\\test_query_execution.py:499: MAVERICK_MYSQL_TEST_URL not set (no MySQL/MariaDB test service)"
+            }
+          ]
+        }
+      },
+      "installation": {
+        "python": "3.11.14",
+        "wheels": 96,
+        "wheel_bytes": 81854152,
+        "tool_pins_checked": 4,
+        "active_requirements_checked": 40,
+        "provenance_sha256": "a5479e4ec739bf0da6ca29e84eedf208b21da8e3da440a161f2dcd2c7acff9b5",
+        "requirements_sha256": "016507e9900fbcc3cb98c3226d20773dd0762cf351dcab4a3714bfdcbfc95b97"
+      }
+    }
+  },
+  "full_floor_runtime": "Not started; separately scheduled by root after the final Python 3.12 phases.",
+  "limit": "Full collection is not runtime proof; critical cohorts cover complete explicitly listed files only.",
+  "test_only_checkpoint": {
+    "source_sha": "f1f41a3e13a8d3f574546e8a577a48555e3ec8bc",
+    "checkout": "slice-compatibility-final",
+    "product_wheel_source_sha": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+    "changed_test_files": [
+      "packages/maverick-core/tests/test_query_execution.py"
+    ],
+    "limit": "Test-only checkpoint; exact unchanged product payloads remain the eight verified final06 wheels."
+  },
+  "critical_files": [
+    "packages/maverick-core/tests/test_employee_companion.py",
+    "packages/maverick-core/tests/test_employee_companion_model.py",
+    "packages/maverick-core/tests/test_hosted_knowledge_reindex.py",
+    "packages/maverick-core/tests/test_knowledge_reindex_jobs.py",
+    "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py",
+    "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py",
+    "packages/maverick-core/tests/test_flow_credential_refusal.py",
+    "packages/maverick-core/tests/test_ux_store_workspace_boundary.py",
+    "packages/maverick-core/tests/test_query_execution.py",
+    "packages/maverick-dashboard/tests/test_employee_companion_api.py",
+    "packages/maverick-dashboard/tests/test_employee_content_privacy.py",
+    "packages/maverick-dashboard/tests/test_private_content_secondary_surfaces.py",
+    "packages/maverick-dashboard/tests/test_feedback_workspace_boundary.py",
+    "packages/maverick-dashboard/tests/test_hero_template.py",
+    "packages/maverick-dashboard/tests/test_theme_contrast.py",
+    "packages/maverick-dashboard/tests/test_journey_i18n.py",
+    "packages/maverick-dashboard/tests/test_product_operations_reindex_cost.py",
+    "apps/installer-cli/tests/test_wizard_employee_companions.py"
+  ],
+  "verified_product_build": {
+    "source_head": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+    "checkout_clean": true,
+    "matching_environment": ".venv-qualification-final-06",
+    "static_gates_passed": 2,
+    "offline_contracts_passed": 16,
+    "wheel_builds_passed": 8,
+    "wheel_archive_integrity_passed": 8,
+    "wheel_hashes_verified": 8,
+    "wheel_payloads_match_exact_git_archive": true,
+    "wheel_payload_files_verified": 4827,
+    "source_archive_commit": "3640fcf7906d3f7129df1b34bc1718492a164bcf",
+    "source_archive_sha256": "ee91f88c1705b09b47a7ce9a651c7e312a5d7645f48545ea5722cfc728c4d0b5",
+    "verified_at": 1790828979.2273784,
+    "wheel_hashes_file": "wheel-sha256.json",
+    "wheel_payload_details_file": "wheel-payload-verification.json",
+    "results_file": "results.json",
+    "full_test_suite": "Separate parent-owned run; not represented by these gate results."
+  },
+  "verified_product_wheels": [
+    {
+      "wheel": "maverick_agent-0.1.7-py3-none-any.whl",
+      "sha256": "77409150a2e8bfc34d6e3eda7a37bbbe2bd40df00f6c9d9b2eff90d41227ad0a",
+      "git_export_payload_files_verified": 3857
+    },
+    {
+      "wheel": "maverick_channels-0.1.7-py3-none-any.whl",
+      "sha256": "304236a9b522b8ae25c1cfed9d373c6d83b188871189f892a19c1da4237d20c9",
+      "git_export_payload_files_verified": 31
+    },
+    {
+      "wheel": "maverick_dashboard-0.1.7-py3-none-any.whl",
+      "sha256": "8009f12dbdb1b39243c721f99938296523bb612ed37163c53c0c06f2e55a4c35",
+      "git_export_payload_files_verified": 887
+    },
+    {
+      "wheel": "maverick_evolve-0.1.7-py3-none-any.whl",
+      "sha256": "53e7d329b9f2ae60a32797aedf4874089b42e65bab35d86b7c22521a032858f1",
+      "git_export_payload_files_verified": 12
+    },
+    {
+      "wheel": "maverick_installer-0.1.7-py3-none-any.whl",
+      "sha256": "3bf3678ad6e9ff7564e485d101b84ce1f26ea7874d50dd581373b274b077825f",
+      "git_export_payload_files_verified": 5
+    },
+    {
+      "wheel": "maverick_knowledge-0.1.7-py3-none-any.whl",
+      "sha256": "0ba7fdbd2c38694780b5c2fc2c5bcdff2ace21982f4f83e629b00dafc5022ecd",
+      "git_export_payload_files_verified": 12
+    },
+    {
+      "wheel": "maverick_mcp_server-0.1.7-py3-none-any.whl",
+      "sha256": "c811a52f1a5ed7cb07eb43e6308fc16f0771f047a136394feb9501b22d623819",
+      "git_export_payload_files_verified": 9
+    },
+    {
+      "wheel": "maverick_shield-0.1.7-py3-none-any.whl",
+      "sha256": "dac4d4f6b8e8bbcde533bbd3a54c2cd6981bf7ec4b5d21f54c552e81fd448595",
+      "git_export_payload_files_verified": 14
+    }
+  ],
+  "final_critical_identity_comparison": {
+    "four_selected_sets_identical": true,
+    "selected": 412,
+    "four_passing_sets_identical": true,
+    "distinct_passing_cases": 405,
+    "selected_ids": [
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_companion_copilot_guidance_distinguishes_ai_drafts_from_actions",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_companion_navigation_has_separate_employee_and_workspace_admin_floors",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_default_off_and_explicitly_enabled",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_fail_closed_for_unreadable_configuration",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_require_literal_true[0]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_require_literal_true[1]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_require_literal_true[False]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_require_literal_true[None]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_require_literal_true[false]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_require_literal_true[true]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_require_literal_true[value6]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_employee_companions_require_literal_true[value7]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_installer_does_not_enable_companions_for_non_boolean_opt_ins[0]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_installer_does_not_enable_companions_for_non_boolean_opt_ins[1]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_installer_does_not_enable_companions_for_non_boolean_opt_ins[False]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_installer_does_not_enable_companions_for_non_boolean_opt_ins[None]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_installer_does_not_enable_companions_for_non_boolean_opt_ins[false]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_installer_does_not_enable_companions_for_non_boolean_opt_ins[true]",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_installer_prompt_and_serialization_are_explicit_default_off",
+      "apps/installer-cli/tests/test_wizard_employee_companions.py::test_settings_discoverability_and_effective_policy_readback",
+      "packages/maverick-core/tests/test_employee_companion.py::test_admin_policy_and_events_never_decrypt_or_return_private_content",
+      "packages/maverick-core/tests/test_employee_companion.py::test_capability_expanding_fields_cannot_be_passed_to_policy_update[action_mode-write]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_capability_expanding_fields_cannot_be_passed_to_policy_update[admin_content_access-True]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_capability_expanding_fields_cannot_be_passed_to_policy_update[approvals-skip]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_capability_expanding_fields_cannot_be_passed_to_policy_update[memory_enabled-True]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_clear_history_is_owner_only_and_does_not_change_another_employee",
+      "packages/maverick-core/tests/test_employee_companion.py::test_clearing_empty_history_cancels_pending_reply_and_refuses_queued_old_generation",
+      "packages/maverick-core/tests/test_employee_companion.py::test_context_expiring_during_model_call_invalidates_completion",
+      "packages/maverick-core/tests/test_employee_companion.py::test_context_expiring_during_reply_sealing_invalidates_completion",
+      "packages/maverick-core/tests/test_employee_companion.py::test_copied_ciphertext_cannot_open_for_another_employee_or_tenant",
+      "packages/maverick-core/tests/test_employee_companion.py::test_corrupt_authority_is_refused_without_resetting_policy[audit]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_corrupt_authority_is_refused_without_resetting_policy[identity]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_corrupt_authority_is_refused_without_resetting_policy[missing_audit]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_corrupt_authority_is_refused_without_resetting_policy[plaintext]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_corrupt_authority_is_refused_without_resetting_policy[policy]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_corrupt_turn_authority_is_refused_without_issuing_another_ticket[clock]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_corrupt_turn_authority_is_refused_without_issuing_another_ticket[generation]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_corrupt_turn_authority_is_refused_without_issuing_another_ticket[overlap]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_corrupt_turn_authority_is_refused_without_issuing_another_ticket[token]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_default_policy_is_disabled_private_read_only_and_has_no_saved_history",
+      "packages/maverick-core/tests/test_employee_companion.py::test_disabling_retention_or_companion_erases_saved_history[override0]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_disabling_retention_or_companion_erases_saved_history[override1]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_draft_permission_is_separate_from_task_status_and_task_sources",
+      "packages/maverick-core/tests/test_employee_companion.py::test_draft_task_context_requires_own_tasks_but_not_status_tool",
+      "packages/maverick-core/tests/test_employee_companion.py::test_duplicate_json_fields_are_refused",
+      "packages/maverick-core/tests/test_employee_companion.py::test_duplicate_request_never_gets_another_dispatch_ticket",
+      "packages/maverick-core/tests/test_employee_companion.py::test_employee_capacity_blocks_new_records_but_preserves_existing_ones",
+      "packages/maverick-core/tests/test_employee_companion.py::test_employee_records_and_encrypted_histories_are_separate",
+      "packages/maverick-core/tests/test_employee_companion.py::test_encryption_failure_never_falls_back_to_plaintext_or_records_success",
+      "packages/maverick-core/tests/test_employee_companion.py::test_every_policy_change_invalidates_pending_model_turn[override0]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_every_policy_change_invalidates_pending_model_turn[override1]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_every_policy_change_invalidates_pending_model_turn[override2]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_every_policy_change_invalidates_pending_model_turn[override3]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_exchange_size_and_source_reference_contract[override0]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_exchange_size_and_source_reference_contract[override1]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_exchange_size_and_source_reference_contract[override2]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_exchange_size_and_source_reference_contract[override3]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_exchange_size_and_source_reference_contract[override4]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_expired_lease_is_consumed_and_late_completion_cannot_publish",
+      "packages/maverick-core/tests/test_employee_companion.py::test_failed_turn_is_consumed_and_does_not_retry",
+      "packages/maverick-core/tests/test_employee_companion.py::test_history_and_metadata_journals_are_bounded",
+      "packages/maverick-core/tests/test_employee_companion.py::test_history_expiry_removes_ciphertext_and_keeps_only_metadata",
+      "packages/maverick-core/tests/test_employee_companion.py::test_independent_store_writers_cannot_both_win_same_policy_revision",
+      "packages/maverick-core/tests/test_employee_companion.py::test_independent_workers_admit_only_one_dispatch_for_duplicate_request",
+      "packages/maverick-core/tests/test_employee_companion.py::test_lease_expiring_during_encryption_cannot_publish_a_reply",
+      "packages/maverick-core/tests/test_employee_companion.py::test_legacy_records_are_read_without_enabling_drafts_and_upgrade_on_write",
+      "packages/maverick-core/tests/test_employee_companion.py::test_model_route_provenance_accepts_only_safe_bounded_identifiers[]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_model_route_provenance_accepts_only_safe_bounded_identifiers[model_route3]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_model_route_provenance_accepts_only_safe_bounded_identifiers[provider/model?api_key=secret]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_model_route_provenance_accepts_only_safe_bounded_identifiers[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_multi_replica_or_invalid_topology_is_refused_at_every_operation[0]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_multi_replica_or_invalid_topology_is_refused_at_every_operation[2]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_multi_replica_or_invalid_topology_is_refused_at_every_operation[]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_multi_replica_or_invalid_topology_is_refused_at_every_operation[garbage]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_named_tenant_is_required",
+      "packages/maverick-core/tests/test_employee_companion.py::test_owner_must_be_an_exact_authenticated_employee_identity[]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_owner_must_be_an_exact_authenticated_employee_identity[alice]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_owner_must_be_an_exact_authenticated_employee_identity[service:alice]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_owner_must_be_an_exact_authenticated_employee_identity[user:\\n../bob]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_owner_must_be_an_exact_authenticated_employee_identity[user:]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_policy_and_history_files_use_existing_private_permissions",
+      "packages/maverick-core/tests/test_employee_companion.py::test_policy_compare_and_swap_and_reply_revision_fence",
+      "packages/maverick-core/tests/test_employee_companion.py::test_pruning_old_receipts_and_clock_rollback_cannot_make_old_id_dispatchable",
+      "packages/maverick-core/tests/test_employee_companion.py::test_receipt_capacity_refuses_new_paid_request_without_evicting_live_dedup_records",
+      "packages/maverick-core/tests/test_employee_companion.py::test_required_audit_and_mutation_fail_together_on_publication_failure[delete]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_required_audit_and_mutation_fail_together_on_publication_failure[policy]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_required_audit_and_mutation_fail_together_on_publication_failure[reply]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_retention_increase_does_not_resurrect_expired_content",
+      "packages/maverick-core/tests/test_employee_companion.py::test_reused_store_refuses_changed_storage_root",
+      "packages/maverick-core/tests/test_employee_companion.py::test_reused_store_refuses_changed_tenant_and_new_tenant_has_no_access",
+      "packages/maverick-core/tests/test_employee_companion.py::test_shorter_retention_cannot_be_undone_by_later_retention_increase",
+      "packages/maverick-core/tests/test_employee_companion.py::test_stale_or_excessively_future_request_id_is_refused[-901]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_stale_or_excessively_future_request_id_is_refused[61]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_status_write_prunes_expired_context_and_rejects_old_queued_draft_generation",
+      "packages/maverick-core/tests/test_employee_companion.py::test_success_is_published_once_and_completed_id_cannot_dispatch_again",
+      "packages/maverick-core/tests/test_employee_companion.py::test_task_source_references_require_both_policy_grants",
+      "packages/maverick-core/tests/test_employee_companion.py::test_task_status_cannot_append_while_model_reply_is_pending",
+      "packages/maverick-core/tests/test_employee_companion.py::test_turn_state_and_required_audit_publish_atomically[finish]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_turn_state_and_required_audit_publish_atomically[reserve]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_turn_ticket_is_bound_to_employee_and_secret",
+      "packages/maverick-core/tests/test_employee_companion.py::test_unsupported_or_ambiguous_policy_values_are_rejected[override0]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_unsupported_or_ambiguous_policy_values_are_rejected[override1]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_unsupported_or_ambiguous_policy_values_are_rejected[override2]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_unsupported_or_ambiguous_policy_values_are_rejected[override3]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_unsupported_or_ambiguous_policy_values_are_rejected[override4]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_unsupported_or_ambiguous_policy_values_are_rejected[override5]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_unsupported_or_ambiguous_policy_values_are_rejected[override6]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_unsupported_or_ambiguous_policy_values_are_rejected[override7]",
+      "packages/maverick-core/tests/test_employee_companion.py::test_zero_retention_draft_receipts_and_admin_events_never_store_text_or_lease_secrets",
+      "packages/maverick-core/tests/test_employee_companion.py::test_zero_retention_saves_only_event_metadata_without_encryption_call",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_authority_revoked_at_physical_dispatch_refuses_and_settles",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_context_is_bounded_and_only_projects_known_fields",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_draft_uses_single_attempt_existing_runtime_and_safe_context",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_executable_or_unreviewed_provider_is_refused[codex_cli]",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_executable_or_unreviewed_provider_is_refused[unknown-plugin]",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_guard_refusal_before_budget_never_starts_a_model_turn",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_invalid_identity_or_input_never_reaches_provider[overrides0]",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_invalid_identity_or_input_never_reaches_provider[overrides1]",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_invalid_identity_or_input_never_reaches_provider[overrides2]",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_prepare_route_does_not_construct_or_call_a_client",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_preview_caps_never_raise_configured_limits",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_provider_failure_still_settles",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_route_revalidation_refuses_another_tenant",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_route_revalidation_refuses_provider_configuration_rotation",
+      "packages/maverick-core/tests/test_employee_companion_model.py::test_unexpected_tool_response_is_not_published_or_executed",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_data_alias_cannot_deliver_unresolved_secret_expression_to_action",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_durable_legacy_snapshot_resume_refuses_without_replaying_history",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_every_secret_call_form_refuses_at_shared_render_boundary[before {{concat('prefix', lower(secret(name)))}} after]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_every_secret_call_form_refuses_at_shared_render_boundary[{{default(secret(name), 'fallback')}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_every_secret_call_form_refuses_at_shared_render_boundary[{{secret ('LIGHTWORK_LOCAL_SECRET_FIXTURE')}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_every_secret_call_form_refuses_at_shared_render_boundary[{{secret('LIGHTWORK_LOCAL_SECRET_FIXTURE')}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_every_secret_call_form_refuses_at_shared_render_boundary[{{secret()}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_every_secret_call_form_refuses_at_shared_render_boundary[{{secret(concat('LIGHTWORK_LOCAL_', 'SECRET_FIXTURE'))}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_every_secret_call_form_refuses_at_shared_render_boundary[{{secret(name)}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_every_secret_call_form_refuses_at_shared_render_boundary[{{upper(secret(name))}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_legacy_definition_remains_readable_without_migrating_credentials",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_native_action_resolves_exact_account_inside_authorized_connector",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_nested_graph_and_persisted_resume_do_not_bypass_preflight[foreach]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_nested_graph_and_persisted_resume_do_not_bypass_preflight[parallel]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_nested_graph_and_persisted_resume_do_not_bypass_preflight[resume]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_nested_graph_and_persisted_resume_do_not_bypass_preflight[scope]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_nested_graph_and_persisted_resume_do_not_bypass_preflight[subflow]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_nested_graph_and_persisted_resume_do_not_bypass_preflight[while]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_plain_data_transforms_and_literal_examples_keep_their_contract",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_reviewed_saved_subflow_copy_cannot_change_between_review_and_dispatch",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_unavailable_saved_subflow_is_a_failed_run_without_unchecked_prefix[False]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_unavailable_saved_subflow_is_a_failed_run_without_unchecked_prefix[True]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_unknown_wrapper_is_conservatively_flagged_for_review_not_evaluated",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_whole_graph_refusal_precedes_even_harmless_prefix[before {{concat('prefix', lower(secret(name)))}} after]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_whole_graph_refusal_precedes_even_harmless_prefix[value8]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_whole_graph_refusal_precedes_even_harmless_prefix[{{default(secret(name), 'fallback')}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_whole_graph_refusal_precedes_even_harmless_prefix[{{secret ('LIGHTWORK_LOCAL_SECRET_FIXTURE')}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_whole_graph_refusal_precedes_even_harmless_prefix[{{secret('LIGHTWORK_LOCAL_SECRET_FIXTURE')}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_whole_graph_refusal_precedes_even_harmless_prefix[{{secret()}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_whole_graph_refusal_precedes_even_harmless_prefix[{{secret(concat('LIGHTWORK_LOCAL_', 'SECRET_FIXTURE'))}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_whole_graph_refusal_precedes_even_harmless_prefix[{{secret(name)}}]",
+      "packages/maverick-core/tests/test_flow_credential_refusal.py::test_whole_graph_refusal_precedes_even_harmless_prefix[{{upper(secret(name))}}]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_cancel_after_paid_batch_preserves_live_index_and_exact_charge",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_completed_publication_is_recovered_without_fresh_paid_admission",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_current_policy_and_model_change_prevent_paid_dispatch",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_different_response_model_keeps_unknown_cost_hold[None]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_different_response_model_keeps_unknown_cost_hold[text-embedding-3-large]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_expired_review_refuses_before_any_provider_call",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_intervening_configuration_or_source_change_stops_next_paid_batch[cost_authority]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_intervening_configuration_or_source_change_stops_next_paid_batch[credential]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_intervening_configuration_or_source_change_stops_next_paid_batch[source]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_invalid_usage_retains_hold_and_never_retries[None]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_invalid_usage_retains_hold_and_never_retries[usage1]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_invalid_usage_retains_hold_and_never_retries[usage2]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_invalid_usage_retains_hold_and_never_retries[usage3]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_invalid_usage_retains_hold_and_never_retries[usage4]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_invalid_usage_retains_hold_and_never_retries[usage5]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_invalid_usage_retains_hold_and_never_retries[usage6]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_native_organization_admission_and_ledger_settlement[0.005-failed-0]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_native_organization_admission_and_ledger_settlement[0.02-completed-2]",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_paid_job_reserves_before_http_and_publishes_only_after_all_batches",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_partial_organization_acknowledgement_never_releases_or_resends",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_personal_task_cap_counts_earlier_batches_and_native_usage_ledger",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_process_interruption_holds_paid_attempt_and_resume_does_not_resend",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_recovery_refuses_changed_requester_without_mutating_the_record",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_reported_usage_above_bound_is_recorded_then_stops",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_same_identity_publication_recovery_requires_the_actual_atomic_publish",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_sealed_paid_checkpoint_resumes_only_unsent_batch",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_swapped_sealed_shadow_is_rejected_without_another_paid_call",
+      "packages/maverick-core/tests/test_hosted_knowledge_reindex.py::test_voyage_default_transport_disables_truncation_and_accounts_native_usage",
+      "packages/maverick-core/tests/test_knowledge_reindex_jobs.py::test_cancel_finishes_only_current_batch_and_preserves_live_index",
+      "packages/maverick-core/tests/test_knowledge_reindex_jobs.py::test_explicit_restart_resumes_shadow_without_repeating_saved_batches",
+      "packages/maverick-core/tests/test_knowledge_reindex_jobs.py::test_paid_adapter_is_blocked_before_embedding_or_dispatch",
+      "packages/maverick-core/tests/test_knowledge_reindex_jobs.py::test_rebuild_publishes_all_at_once_and_duplicate_start_is_status_only",
+      "packages/maverick-core/tests/test_knowledge_reindex_jobs.py::test_source_change_and_revoked_authority_prevent_publication",
+      "packages/maverick-core/tests/test_knowledge_reindex_jobs.py::test_source_edit_between_review_and_second_read_is_refused",
+      "packages/maverick-core/tests/test_query_execution.py::test_budget_expiring_during_sql_remains_a_budget_stop[sqlalchemy]",
+      "packages/maverick-core/tests/test_query_execution.py::test_budget_expiring_during_sql_remains_a_budget_stop[sqlite]",
+      "packages/maverick-core/tests/test_query_execution.py::test_cancel_after_commit_ack_keeps_commit_state_and_never_replays",
+      "packages/maverick-core/tests/test_query_execution.py::test_cancel_before_commit_rolls_back_without_commit_call",
+      "packages/maverick-core/tests/test_query_execution.py::test_deadline_during_insert_select_rolls_back_all_sqlite_changes",
+      "packages/maverick-core/tests/test_query_execution.py::test_expired_agent_budget_prevents_query_dispatch[sqlalchemy]",
+      "packages/maverick-core/tests/test_query_execution.py::test_expired_agent_budget_prevents_query_dispatch[sqlite]",
+      "packages/maverick-core/tests/test_query_execution.py::test_finished_handle_cannot_cancel_a_future_driver",
+      "packages/maverick-core/tests/test_query_execution.py::test_halt_during_sql_reaches_full_control_watcher[sqlalchemy]",
+      "packages/maverick-core/tests/test_query_execution.py::test_halt_during_sql_reaches_full_control_watcher[sqlite]",
+      "packages/maverick-core/tests/test_query_execution.py::test_long_sqlite_query_stops_at_progress_deadline_and_releases_connection[sqlalchemy]",
+      "packages/maverick-core/tests/test_query_execution.py::test_long_sqlite_query_stops_at_progress_deadline_and_releases_connection[sqlite]",
+      "packages/maverick-core/tests/test_query_execution.py::test_lost_commit_ack_remains_unknown_even_when_later_rollback_returns",
+      "packages/maverick-core/tests/test_query_execution.py::test_monitor_completion_does_not_pretend_connection_close_has_finished",
+      "packages/maverick-core/tests/test_query_execution.py::test_mysql_kill_query_alone_stops_a_read",
+      "packages/maverick-core/tests/test_query_execution.py::test_mysql_server_limit_alone_stops_a_read",
+      "packages/maverick-core/tests/test_query_execution.py::test_mysql_statement_deadline_and_fresh_next_query",
+      "packages/maverick-core/tests/test_query_execution.py::test_native_postgres_cancellation_releases_actual_driver_and_owns_connection",
+      "packages/maverick-core/tests/test_query_execution.py::test_native_postgres_read_uses_bounded_server_cursor",
+      "packages/maverick-core/tests/test_query_execution.py::test_native_postgres_statement_deadline_and_fresh_next_query",
+      "packages/maverick-core/tests/test_query_execution.py::test_psycopg2_statement_deadline_and_fresh_next_query",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlalchemy_engine_admission_deadline_prevents_connection_and_dispatch[False]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlalchemy_engine_admission_deadline_prevents_connection_and_dispatch[True]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlite_admission_deadline_returns_public_error_without_dispatch[False]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlite_admission_deadline_returns_public_error_without_dispatch[True]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlite_admission_preserves_control_stop[budget]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlite_admission_preserves_control_stop[cancel]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlite_admission_preserves_control_stop[halt]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlite_async_cancellation_stops_worker_before_executor_join_returns[sqlalchemy]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlite_async_cancellation_stops_worker_before_executor_join_returns[sqlite]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlite_vm_progress_reuses_published_control_state",
+      "packages/maverick-core/tests/test_query_execution.py::test_unsupported_driver_unknown_transaction_is_invalidated_after_execution_ends",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_bootstrap_keeps_real_claim_and_tombstone_bytes_under_startup_hold",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_concurrent_barrier_wins_atomic_publication_and_survives_rollback[claim]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_concurrent_barrier_wins_atomic_publication_and_survives_rollback[deletion]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_failed_publication_keeps_new_barriers_even_when_other_payloads_roll_back",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_old_snapshot_cannot_release_a_name_after_uncertain_creation[Acme]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_old_snapshot_cannot_release_a_name_after_uncertain_creation[caf\\xe9]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_old_snapshot_cannot_release_a_name_after_uncertain_creation[team/name]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_public_restore_cannot_reactivate_interrupted_deletion[False]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_public_restore_cannot_reactivate_interrupted_deletion[True]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_public_restore_recovers_old_journal_without_removing_or_rewinding_barriers[False]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_public_restore_recovers_old_journal_without_removing_or_rewinding_barriers[True]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_unchanged_retirement_survives_backup_and_full_restore[False]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_recovery.py::test_unchanged_retirement_survives_backup_and_full_restore[True]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_ambiguous_legacy_role_inventory_refuses_new_provisioning[{\"acme\":[]}]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_ambiguous_legacy_role_inventory_refuses_new_provisioning[{\"acme\":{},\"acme\":{}}]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_ambiguous_legacy_role_inventory_refuses_new_provisioning[{]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_automatic_allocation_skips_casing_of_legacy_active_roster",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_case_alias_and_purged_namespace_remain_reserved[Acme]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_case_alias_and_purged_namespace_remain_reserved[acme]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_concurrent_new_display_name_allocations_get_distinct_incarnations",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_deleted_exact_id_cannot_reopen_old_data_roles_or_credentials[False-False]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_deleted_exact_id_cannot_reopen_old_data_roles_or_credentials[False-True]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_deleted_exact_id_cannot_reopen_old_data_roles_or_credentials[True-False]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_deleted_exact_id_cannot_reopen_old_data_roles_or_credentials[True-True]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_existing_active_legacy_workspace_is_readable_without_reprovisioning",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_fresh_allocation_skips_all_historical_representations",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_fresh_creation_and_existing_active_scope_still_work",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_interrupted_delete_cannot_leave_live_or_resumable_old_roster",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_legacy_orphan_namespace_and_global_membership_are_not_adopted",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_lifecycle_refuses_when_strict_cross_process_lock_is_unavailable[create]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_lifecycle_refuses_when_strict_cross_process_lock_is_unavailable[delete]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_new_process_cannot_reuse_a_purged_incarnation",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_separate_process_create_racing_delete_never_reuses_incarnation[False]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_separate_process_create_racing_delete_never_reuses_incarnation[True]",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_tombstone_survives_missing_roster_and_corrupt_tombstone_fails_closed",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_uncertain_create_publication_never_releases_its_reserved_name",
+      "packages/maverick-core/tests/test_tenant_lifecycle_reservations.py::test_unicode_equivalent_retirement_survives_cache_reset",
+      "packages/maverick-core/tests/test_ux_store_workspace_boundary.py::test_concurrent_contexts_retain_one_store_lock_per_workspace",
+      "packages/maverick-core/tests/test_ux_store_workspace_boundary.py::test_legacy_first_workspace_file_is_not_silently_adopted",
+      "packages/maverick-core/tests/test_ux_store_workspace_boundary.py::test_repeated_workspace_switch_scopes_all_ux_records",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_active_durable_work_does_not_block_replies_or_mutate_work",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_admin_cannot_target_other_tenant_or_inactive_employee",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_admin_metadata_never_contains_private_conversation_or_task_titles",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_clear_only_removes_callers_history_and_works_when_feature_is_off",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_clearing_history_while_generation_waits_discards_late_answer",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_config_admin_still_needs_explicit_workspace_membership",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_cannot_dispatch_without_current_model_permission[draft_permission]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_cannot_dispatch_without_current_model_permission[feature]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_cannot_dispatch_without_current_model_permission[policy]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_produces_a_draft_without_tools_or_task_changes",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_requires_bounded_request_identity_and_payload[changes0]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_requires_bounded_request_identity_and_payload[changes1]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_requires_bounded_request_identity_and_payload[changes2]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_requires_bounded_request_identity_and_payload[changes3]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_requires_bounded_request_identity_and_payload[changes4]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_requires_bounded_request_identity_and_payload[changes5]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_requires_bounded_request_identity_and_payload[changes6]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_revalidates_authority_at_dispatch_and_before_publication[after_dispatch-department]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_revalidates_authority_at_dispatch_and_before_publication[after_dispatch-membership]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_revalidates_authority_at_dispatch_and_before_publication[after_dispatch-offboarding]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_revalidates_authority_at_dispatch_and_before_publication[after_dispatch-policy]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_revalidates_authority_at_dispatch_and_before_publication[before_dispatch-department]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_revalidates_authority_at_dispatch_and_before_publication[before_dispatch-membership]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_revalidates_authority_at_dispatch_and_before_publication[before_dispatch-offboarding]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_revalidates_authority_at_dispatch_and_before_publication[before_dispatch-policy]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_sources_respect_owner_tenant_department_and_project[user:administrator]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_sources_respect_owner_tenant_department_and_project[user:alice]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_conversation_without_sources_uses_only_employee_prompt_and_history",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_current_department_and_project_scope_applies_to_admin_owned_tasks",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_current_revocation_prevents_source_fetch[membership]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_current_revocation_prevents_source_fetch[offboarding]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_current_revocation_prevents_source_fetch[policy]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_current_revocation_prevents_source_fetch[sources]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_current_revocation_prevents_source_fetch[tools]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_department_revocation_hides_current_sources_and_historical_links",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_department_revoke_waits_for_authority_bound_read",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_duplicate_pending_and_completed_requests_never_generate_twice",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_employee_policy_starts_disabled_and_bounded",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_foreign_origin_blocked_even_with_valid_context[clear]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_foreign_origin_blocked_even_with_valid_context[message]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_foreign_origin_blocked_even_with_valid_context[policy]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_message_payload_rejects_authority_spoofing_and_coercion[extra0]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_message_payload_rejects_authority_spoofing_and_coercion[extra1]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_message_payload_rejects_authority_spoofing_and_coercion[extra2]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_message_payload_rejects_authority_spoofing_and_coercion[extra3]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_message_payload_rejects_authority_spoofing_and_coercion[extra4]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_message_payload_rejects_authority_spoofing_and_coercion[extra5]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_missing_feature_flag_disables_reads_and_messages",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_model_history_never_crosses_employee_or_tenant_boundaries",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_named_explicit_member_required_even_with_default_operator[]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_named_explicit_member_required_even_with_default_operator[service:worker]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_named_explicit_member_required_even_with_default_operator[user:unassigned]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_other_employee_credential_changes_do_not_invalidate_own_conversation[after_dispatch]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_other_employee_credential_changes_do_not_invalidate_own_conversation[before_dispatch]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_owner_only_tasks_and_history_even_for_configuration_admin",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_personal_and_administrative_responses_are_not_cacheable",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_administration_requires_admin_permission[user:alice]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_administration_requires_admin_permission[user:bob]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_compare_and_swap_and_stale_message_fail_closed",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes0]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes10]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes1]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes2]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes3]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes4]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes5]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes6]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes7]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes8]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_policy_payload_cannot_expand_supported_capabilities[changes9]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_provider_failure_is_generic_and_consumes_request_without_retry",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_request_metadata_is_owner_and_tenant_scoped_without_private_content",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_required_state_and_audit_publication_failure_returns_no_answer",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_revoked_history_sources_are_not_sent_into_later_model_context",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_same_employee_isolated_between_tenants",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_session_revocation_during_conversation_invalidates_admitted_reply[after_dispatch]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_session_revocation_during_conversation_invalidates_admitted_reply[before_dispatch]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_stale_account_or_workspace_context_rejected_for_reads_and_writes[user:alice-globex]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_stale_account_or_workspace_context_rejected_for_reads_and_writes[user:bob-acme]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_workspace_switch_away_and_back_invalidates_admitted_generation[after_dispatch]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_workspace_switch_away_and_back_invalidates_admitted_generation[before_dispatch]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_writes_require_context_from_current_get[clear]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_writes_require_context_from_current_get[message]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_writes_require_context_from_current_get[policy]",
+      "packages/maverick-dashboard/tests/test_employee_companion_api.py::test_zero_retention_returns_reply_without_saving_private_text",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_admin_role_alone_does_not_reveal_task",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_approval_read_is_exact_card_and_does_not_authorize_task_mutation",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_audit_projection_preserves_control_metadata_without_free_text[False]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_audit_projection_preserves_control_metadata_without_free_text[True]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_audit_projection_rejects_unbounded_or_non_numeric_scores[-1]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_audit_projection_rejects_unbounded_or_non_numeric_scores[0.9]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_audit_projection_rejects_unbounded_or_non_numeric_scores[2]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_audit_projection_rejects_unbounded_or_non_numeric_scores[True]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_audit_projection_rejects_unbounded_or_non_numeric_scores[inf]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_audit_projection_rejects_unbounded_or_non_numeric_scores[nan]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_exceptional_read_requires_confirmed_receipt",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_installation_credential_is_not_employee_identity",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_malformed_control_fields_do_not_break_metadata_projection[decision]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_malformed_control_fields_do_not_break_metadata_projection[obligation_id]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_malformed_control_fields_do_not_break_metadata_projection[rule]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_malformed_control_fields_do_not_break_metadata_projection[stage]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_metadata_projection_removes_content_before_search",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_oversight_local_metadata_scope_never_adopts_named_or_unknown_goals",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_owner_approval_requires_current_workspace_membership",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_private_approval_has_no_ambient_administrator_read",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_stale_or_wrong_scope_grant_denies[updates0]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_stale_or_wrong_scope_grant_denies[updates1]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_stale_or_wrong_scope_grant_denies[updates2]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_stale_or_wrong_scope_grant_denies[updates3]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_stale_or_wrong_scope_grant_denies[updates4]",
+      "packages/maverick-dashboard/tests/test_employee_content_privacy.py::test_unidentified_caller_cannot_access_a_missing_record",
+      "packages/maverick-dashboard/tests/test_feedback_workspace_boundary.py::test_ambiguous_deployment_legacy_rows_are_not_adopted",
+      "packages/maverick-dashboard/tests/test_feedback_workspace_boundary.py::test_colliding_goal_ids_never_read_another_workspace",
+      "packages/maverick-dashboard/tests/test_feedback_workspace_boundary.py::test_current_owner_lineage_is_required_for_readback",
+      "packages/maverick-dashboard/tests/test_feedback_workspace_boundary.py::test_native_goal_read_and_aggregate_pass_trusted_owner",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_plain_text_cannot_create_markup[&lt;xprobe&gt;Already encoded & \"quoted\"&lt;/xprobe&gt;-copy]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_plain_text_cannot_create_markup[&lt;xprobe&gt;Already encoded & \"quoted\"&lt;/xprobe&gt;-lede]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_plain_text_cannot_create_markup[&lt;xprobe&gt;Already encoded & \"quoted\"&lt;/xprobe&gt;-title]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_plain_text_cannot_create_markup[</h1><svg data-probe=\"alternate\">R\\xe9sum\\xe9</svg>-copy]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_plain_text_cannot_create_markup[</h1><svg data-probe=\"alternate\">R\\xe9sum\\xe9</svg>-lede]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_plain_text_cannot_create_markup[</h1><svg data-probe=\"alternate\">R\\xe9sum\\xe9</svg>-title]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_plain_text_cannot_create_markup[<xprobe title=\"quotes\">Caf\\xe9 & \\u6771\\u4eac</xprobe>-copy]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_plain_text_cannot_create_markup[<xprobe title=\"quotes\">Caf\\xe9 & \\u6771\\u4eac</xprobe>-lede]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_plain_text_cannot_create_markup[<xprobe title=\"quotes\">Caf\\xe9 & \\u6771\\u4eac</xprobe>-title]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_preserves_explicit_trusted_markup[copy]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_preserves_explicit_trusted_markup[lede]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_hero_preserves_explicit_trusted_markup[title]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_roles_hero_keeps_template_owned_emphasis",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_tenants_hero_keeps_template_owned_link",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_users_hero_keeps_emphasis_and_escapes_dynamic_role[<xprobe>reviewer</xprobe>]",
+      "packages/maverick-dashboard/tests/test_hero_template.py::test_users_hero_keeps_emphasis_and_escapes_dynamic_role[viewer]",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_account_interface_language_is_independent_and_query_cannot_override",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_arabic_seed_remains_partial_and_draft_regions_are_honest",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_browser_override_stays_bound_to_account_and_policy",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_display_language_legacy_key_does_not_change_response_preferences",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_display_options_are_text_and_custom_theme_names_stay_verbatim",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_interpolation_cannot_add_html_or_change_user_text",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_native_preferences_page_renders_memory_source",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_placeholder_names_do_not_collide_with_translation_arguments",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_quality_and_region_match_actual_preference",
+      "packages/maverick-dashboard/tests/test_journey_i18n.py::test_selected_journey_bindings_have_actual_catalog_entries",
+      "packages/maverick-dashboard/tests/test_private_content_secondary_surfaces.py::test_canary_source_never_samples_another_employees_card",
+      "packages/maverick-dashboard/tests/test_private_content_secondary_surfaces.py::test_shoring_measurement_forwards_exact_owner",
+      "packages/maverick-dashboard/tests/test_product_operations_reindex_cost.py::test_copilot_preserves_nonzero_ceiling_rate_basis_model_and_native_review",
+      "packages/maverick-dashboard/tests/test_theme_contrast.py::test_legacy_palette_stays_recoverable_on_both_surfaces",
+      "packages/maverick-dashboard/tests/test_theme_contrast.py::test_omitted_semantic_colours_are_explicit_and_readable[#000-#fff]",
+      "packages/maverick-dashboard/tests/test_theme_contrast.py::test_omitted_semantic_colours_are_explicit_and_readable[#fff-#111]",
+      "packages/maverick-dashboard/tests/test_theme_contrast.py::test_quiet_text_control_and_focus_pairs_are_checked",
+      "packages/maverick-dashboard/tests/test_theme_contrast.py::test_white_on_white_is_refused_with_human_readable_reasons"
+    ],
+    "new_cases_after_original_full_collection": [
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlalchemy_engine_admission_deadline_prevents_connection_and_dispatch[False]",
+      "packages/maverick-core/tests/test_query_execution.py::test_sqlalchemy_engine_admission_deadline_prevents_connection_and_dispatch[True]"
+    ]
+  },
+  "retained_diagnostic_trace": {
+    "artifact": "audit/compat-interpreters/310/query_probe-run-ordinary-final06-01.trace.json",
+    "sha256": "7866ffc7e5dc0534678736efde4d7134edf6769ace0baaab5146642caf07ea63",
+    "meaning": "Instrumented unchanged-source isolated passing probe, not the original failed cohort. SQLAlchemy before_cursor_execute is a pre-driver boundary; the repaired test uses SQLite set_trace_callback.",
+    "original_failure_cause_limit": "Deadline expiry before SQLite binding is consistent with the original result; the exact original initialization substage was not measured."
+  },
+  "collection_set_difference": {
+    "only_310": [],
+    "only_311": [],
+    "intersection": 40660
+  }
+}
