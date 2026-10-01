@@ -161,9 +161,9 @@ class SlackChannel(Channel):
 
     def _approval_world(self):
         if self._world is None:
-            from maverick.world_model import WorldModel
+            from maverick.world_model import open_world
 
-            self._world = WorldModel()
+            self._world = open_world()
         return self._world
 
     @staticmethod

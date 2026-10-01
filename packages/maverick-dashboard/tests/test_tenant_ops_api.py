@@ -152,8 +152,8 @@ def test_key_preview_then_confirmed_rotation_never_returns_key_material(client, 
 def test_workspaces_page_offers_the_new_controls_in_plain_words(client):
     page = client.get("/tenants")
     assert page.status_code == 200
-    for marker in ('id="tenant-onboard"', 'id="tenant-keys"', "/static/lightwork-tenant-ops.js",
-                   "Create workspace and invite", "Re-protect workspaces"):
+    for marker in ('id="tenant-add"', 'id="tenant-invite"', 'id="tenant-keys"',
+                   "/static/lightwork-tenant-ops.js", "Create a workspace", "Re-protect workspaces"):
         assert marker in page.text
     assert not _BANNED.search(_visible(page.text))
     assert client.get("/static/lightwork-tenant-ops.js").status_code == 200

@@ -95,8 +95,14 @@ def test_channels_page_reads_plainly(client):
 
 
 def test_connections_page_reads_plainly_and_offers_people_and_regions(client, monkeypatch):
+    from maverick import connections
     from maverick_dashboard import rbac
     rbac.set_role("user:dana@example.com", "operator")
+    # The setup form is shown once Connections is turned on; while off the
+    # page stays quiet and offers the shared Turn on banner.
+    quiet = client.get("/connections").text
+    assert 'data-module-gate="connections"' in quiet
+    monkeypatch.setattr(connections, "enabled", lambda: True)
     page = client.get("/connections").text
     text = visible_text(page)
     for word in ("user:id", "principals", "Base URL", "API token", "encrypted at rest", "bearer",
@@ -106,5 +112,3 @@ def test_connections_page_reads_plainly_and_offers_people_and_regions(client, mo
     assert 'value="user:dana@example.com"' in page and "dana@example.com" in text
     assert '<option value="eu-west-1">Europe (Ireland)</option>' in page
     assert "Copy return address" in text
-    # Connections are off by default: the shared Turn on banner is offered.
-    assert 'data-module-gate="connections"' in page

@@ -82,7 +82,9 @@ def test_headless_first_run_journey(monkeypatch, tmp_path):
 
     started = client.get("/start")
     assert started.status_code == 200, started.text
-    assert "Your selected AI services are configured." in started.text
+    # A saved key that never passed a connection test is "not tested yet",
+    # never "configured": the same truth every readiness page tells.
+    assert "not tested yet" in started.text
     assert "Your setup checklist is complete" not in started.text
     assert "Installation checks" in started.text
 

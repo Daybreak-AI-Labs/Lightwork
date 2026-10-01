@@ -27,9 +27,9 @@ def test_popout_decision_bridges_to_the_approval_row():
     html = client.get("/approvals").text
     # The pop-out announces its decision...
     assert "mv-assessment-decided" in html
-    # ...and the queue page listens and clicks the matching row's own
+    # ...and the queue page listens and clicks the matching card's own
     # (audited) approve/deny path.
-    assert "tr.dataset.assessment" in html
+    assert "item.dataset.assessment" in html
     assert "addEventListener('mv-assessment-decided'" in html
 
 

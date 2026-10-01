@@ -252,7 +252,7 @@ async def settings_set_model(request: Request) -> RedirectResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
     _admin_audit(request, "settings_models")
-    return RedirectResponse("/settings?saved=modelsNone", status_code=303)
+    return RedirectResponse("/settings?saved=models", status_code=303)
 
 
 @router.post("/settings/budget")
@@ -303,7 +303,7 @@ def settings_set_budget(request: Request, max_dollars: str = Form(""),
 
         settings_quorum.settle(approved)
     _admin_audit(request, "settings_budget")
-    return RedirectResponse("/settings?saved=budgetNone", status_code=303)
+    return RedirectResponse("/settings?saved=budget", status_code=303)
 
 
 # The per-task spending limit as the quorum sees it: one protected setting
@@ -374,7 +374,7 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
     _admin_audit(request, "settings_roles")
-    return RedirectResponse("/settings?saved=rolesNone", status_code=303)
+    return RedirectResponse("/settings?saved=roles", status_code=303)
 
 @router.post("/settings/models/allowed")
 async def settings_set_allowed_models(request: Request) -> RedirectResponse:
@@ -391,7 +391,7 @@ async def settings_set_allowed_models(request: Request) -> RedirectResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
     _admin_audit(request, "settings_allowed")
-    return RedirectResponse("/settings?saved=allowedNone", status_code=303)
+    return RedirectResponse("/settings?saved=allowed", status_code=303)
 
 
 @router.post("/settings/models/discover")
@@ -407,7 +407,7 @@ async def settings_discover_models(request: Request, provider: str = Form("")) -
         raise HTTPException(status_code=400, detail="unknown provider")
     await run_in_threadpool(model_discovery.refresh, [name] if name else None)
     _admin_audit(request, "settings_discover")
-    return RedirectResponse("/settings?saved=discoverNone", status_code=303)
+    return RedirectResponse("/settings?saved=discover", status_code=303)
 
 
 def _refresh_models_quietly(provider: str) -> None:
@@ -485,7 +485,7 @@ def settings_set_model_discovery(request: Request, enabled: str = Form("on")) ->
     except Exception:  # pragma: no cover -- cache reset is best effort
         pass
     _admin_audit(request, "settings_discovery")
-    return RedirectResponse("/settings?saved=discoveryNone", status_code=303)
+    return RedirectResponse("/settings?saved=discovery", status_code=303)
 
 
 @router.post("/settings/providers")
@@ -524,7 +524,7 @@ async def settings_set_provider(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await run_in_threadpool(_refresh_models_quietly, provider_name)
     _admin_audit(request, "settings_providers")
-    return RedirectResponse("/settings?saved=providersNone", status_code=303)
+    return RedirectResponse("/settings?saved=providers", status_code=303)
 
 
 @router.post("/settings/providers/clear")
@@ -538,7 +538,7 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="unknown provider") from exc
     _admin_audit(request, "settings_providers")
-    return RedirectResponse("/settings?saved=providersNone", status_code=303)
+    return RedirectResponse("/settings?saved=providers", status_code=303)
 
 
 @router.post("/settings/providers/test")
@@ -564,7 +564,7 @@ async def settings_test_provider(
     if next == "providers":  # the Providers page's own Test connection button
         return RedirectResponse("/providers?tested=1", status_code=303)
     _admin_audit(request, "settings_provider_test")
-    return RedirectResponse("/settings?saved=provider_testNone", status_code=303)
+    return RedirectResponse("/settings?saved=provider_test", status_code=303)
 
 
 @router.post("/settings/capabilities")
@@ -584,7 +584,7 @@ async def settings_set_capabilities(request: Request) -> RedirectResponse:
             detail="Settings are unavailable. Retry after storage is restored.",
         ) from exc
     _admin_audit(request, "settings_capabilities")
-    return RedirectResponse("/settings?saved=capabilitiesNone", status_code=303)
+    return RedirectResponse("/settings?saved=capabilities", status_code=303)
 
 
 @router.post("/settings/features")
@@ -609,7 +609,7 @@ async def settings_set_features(request: Request) -> RedirectResponse:
             detail="Settings are unavailable. Retry after storage is restored.",
         ) from exc
     _admin_audit(request, "settings_features")
-    return RedirectResponse("/settings?saved=featuresNone", status_code=303)
+    return RedirectResponse("/settings?saved=features", status_code=303)
 
 
 @router.post("/settings/ui-visibility")
@@ -922,7 +922,7 @@ def users_invite(request: Request, email: str = Form(...),
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
-    _admin_audit(request, "invite_created", email=inv.email, role=inv.role)
+    _admin_audit(request, "invite_created", email=inv.email, role=getattr(inv, "role", role))
     # Best-effort email (fail-soft): the copyable link below is always the
     # fallback, so a broken SMTP account can never strand an invite.
     sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)

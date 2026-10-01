@@ -692,11 +692,15 @@ def test_parked_approval_notifies_and_fires_webhook(monkeypatch, tmp_path):
                         detail="issue contract", risk="high")
     assert verdict["requires_approval"] is True
     assert pushes and pushes[0][0] == "external_approval.pending"
-    assert fired and fired[0][0] == "external_approval.created"
-    payload = fired[0][1]
+    # The world model also announces every parked approval as ``approval.created``
+    # (webhook subscriptions); the external-agent event still carries its own payload.
+    external = [f for f in fired if f[0] == "external_approval.created"]
+    assert external
+    payload = external[0][1]
     assert payload["agent_id"] == "sf-quotebot"
     assert "detail" not in payload  # untrusted text never leaves
-    assert fired[0][2]["urls"] == ["https://hooks.corp.test/lw"]
+    assert all("detail" not in f[1] for f in fired)
+    assert external[0][2]["urls"] == ["https://hooks.corp.test/lw"]
 
 
 def test_status_aggregates_containment_and_wall_violations():

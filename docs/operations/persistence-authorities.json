@@ -176,21 +176,21 @@
     }
   },
   "counts": {
-    "governed": 73,
-    "artifact": 48,
+    "governed": 75,
+    "artifact": 50,
     "a2a": 4,
-    "preferences": 3,
+    "preferences": 4,
     "learning": 55,
-    "sqlite_domain": 79,
-    "configuration": 59,
+    "sqlite_domain": 80,
+    "configuration": 62,
     "read_projection": 18,
     "coordinator": 1,
     "audit": 24,
     "transient": 22,
     "business_records": 13,
-    "execution": 24,
+    "execution": 25,
     "recovery": 9,
-    "derived": 14,
+    "derived": 15,
     "composition": 55,
     "external": 18,
     "key_custody": 2,
@@ -24317,6 +24317,329 @@
           "function": "_workspace_counts",
           "kind": "data_dir",
           "expression": "data_dir('data_use_governance', 'data-use-governance.sqlite3', tenant=tenant)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/channel_identities.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-core/maverick/channel_identities.py",
+      "purpose": "Links between chat accounts (Slack, Teams, email) and Lightwork people, plus one-time link codes, in one private JSON file.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 41,
+          "function": "store_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 77,
+          "function": "_locked",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 80,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 108,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/teams_identity.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-core/maverick/teams_identity.py",
+      "purpose": "Microsoft Teams account links and one-time link codes for approvers, in one private JSON file.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 47,
+          "function": "store_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 90,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/user_preferences.py",
+      "contract": "preferences",
+      "owner": "packages/maverick-core/maverick/user_preferences.py",
+      "purpose": "Per-person daily summary preferences (time zone, hour, email, opt-out) and the last-sent marker.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 31,
+          "function": "store_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 40,
+          "function": "_locked",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 43,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 66,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/api_keys.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/api_keys.py",
+      "purpose": "Personal and service-account API keys: hashed secrets, scopes, expiry and rotation state in one private JSON file.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 255,
+          "function": "store_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 264,
+          "function": "_locked",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 268,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 363,
+          "function": "_load",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 389,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/daily_digest_scheduler.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/daily_digest_scheduler.py",
+      "purpose": "The daily summary scheduler's single-runner lease file; it coordinates one host and authorizes no work.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 32,
+          "function": "lease_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 48,
+          "function": "acquire_lease",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 60,
+          "function": "acquire_lease",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps({'holder': holder, 'expires_at': current + ttl_seconds}))"
+        },
+        {
+          "line": 70,
+          "function": "release_lease",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/integration_readiness.py",
+      "contract": "derived",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/integration_readiness.py",
+      "purpose": "Connection-test receipts for providers and channels, kept across restarts; the live test is the source of truth.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 109,
+          "function": "_receipts_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 145,
+          "function": "_persist",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(_receipts_path(), json.dumps({'schema': 1, 'providers': rows}, sort_keys=True, indent=1), mode=384)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/session_registry.py",
+      "contract": "sqlite_domain",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/session_registry.py",
+      "purpose": "Signed-in sessions (device, address, last seen, revocation) for the Sessions page and sign-out everywhere, in a private SQLite file.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 88,
+          "function": "_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 99,
+          "function": "_connect",
+          "kind": "connect",
+          "expression": "sqlite3.connect(str(path), timeout=5.0)"
+        },
+        {
+          "line": 104,
+          "function": "_connect",
+          "kind": "commit",
+          "expression": "conn.commit()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/domain_prose_lint.py",
+      "contract": "artifact",
+      "owner": "packages/maverick-core/maverick/domain_prose_lint.py",
+      "purpose": "Prose lint for specialist packs; --fix rewrites pack files in the source tree (tooling output, not runtime state).",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 330,
+          "function": "fix_dir",
+          "kind": "write_text",
+          "expression": "path.write_text(after, encoding='utf-8')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/sample_outcomes/__init__.py",
+      "contract": "artifact",
+      "owner": "packages/maverick-core/maverick/sample_outcomes/__init__.py",
+      "purpose": "Sample data for the first-outcome walkthrough, copied into a marked folder of the user's workspace.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 152,
+          "function": "create_sample_workspace",
+          "kind": "write_text",
+          "expression": "(target / SAMPLE_MARKER_FILENAME).write_text(f\"# Sample data\\n\\nThis folder was created by Lightwork for the {outcome.label} first outcome. {SAMPLE_RULE}\\n\\nPac"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/public_rights_form.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/public_rights_form.py",
+      "purpose": "Public rights-request form: per-property intake settings (slug, jurisdictions, challenge) behind the privacy register.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [
+        {
+          "namespace": "rights_form_properties",
+          "line": 78,
+          "recovery_policy": "dsar_request_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 78,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('rights_form_properties', 'RFP', 'rights_form_property')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/rights_templates.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/rights_templates.py",
+      "purpose": "Correspondence templates sent to rights requesters (acknowledgement, verification, extension), per jurisdiction and kind.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [
+        {
+          "namespace": "rights_templates",
+          "line": 62,
+          "recovery_policy": "dsar_delivery_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 62,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('rights_templates', 'RTPL', 'rights_template')"
         }
       ]
     }
