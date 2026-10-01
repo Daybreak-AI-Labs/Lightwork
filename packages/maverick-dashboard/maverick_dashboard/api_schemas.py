@@ -184,6 +184,15 @@ class GoalOut(BaseModel):
     # and why in plain words. A reading of the words, not of the actions.
     risk_tier: str | None = None
     risk_reasons: str | None = None
+    # ``blocked`` also covers a task parked on a question. ``needs_input`` is
+    # true when it is waiting for a person's answer (not finished: answering
+    # lets it carry on); ``open_question_ids`` are the questions to answer via
+    # POST /goals/{id}/answer. Both are empty for every other state.
+    needs_input: bool = False
+    open_question_ids: list[int] = Field(default_factory=list)
+    # Seconds since the epoch. ``updated_at`` moves on every status change.
+    created_at: float | None = None
+    updated_at: float | None = None
 
 
 class ScheduleIn(BaseModel):
@@ -352,7 +361,11 @@ class GoalEventsResponse(BaseModel):
     next_id: int
     events: list[GoalEventOut]
     has_more: bool = False
+    # False while the goal is waiting for an answer, even though its status is
+    # ``blocked``: a client that stops at ``terminal`` must keep watching.
     terminal: bool = False
+    needs_input: bool = False
+    open_question_ids: list[int] = Field(default_factory=list)
 
 
 class FactIn(BaseModel):

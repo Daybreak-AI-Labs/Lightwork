@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+# `blocked` ends a stream even when the goal is only waiting for an answer (a
+# stream cannot stay open for a person); only the short-poll endpoint
+# (`api.goal_events`) holds `terminal` open for that case. See docs/api.md.
 TERMINAL_RUN_STATUSES = frozenset({"done", "completed", "failed", "cancelled", "blocked", "error"})
 
 

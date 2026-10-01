@@ -295,8 +295,10 @@ def _active_cache_context() -> tuple[str, str]:
 
 
 def _to_goal_out(g) -> GoalOut:
+    from .goal_waiting import open_question_ids
     from .plain_labels import risk_label
 
+    open_ids = open_question_ids(_world(), g)
     risk = risk_label(g) or {}
     return GoalOut(
         id=g.id,
@@ -306,6 +308,10 @@ def _to_goal_out(g) -> GoalOut:
         result=g.result,
         risk_tier=risk.get("tier"),
         risk_reasons=risk.get("reasons"),
+        needs_input=bool(open_ids),
+        open_question_ids=open_ids,
+        created_at=g.created_at,
+        updated_at=g.updated_at,
     )
 
 
@@ -1597,6 +1603,9 @@ def goal_events(
     assert_goal_access(request, g)
     since = replay_cursor(since)
     events, has_more = event_page(w, goal_id, since, limit)
+    from .goal_waiting import open_question_ids
+
+    open_ids = open_question_ids(w, g)
     return GoalEventsResponse(
         status=g.status,
         result=g.result,
@@ -1606,7 +1615,10 @@ def goal_events(
             for e in events
         ],
         has_more=has_more,
-        terminal=g.status in TERMINAL_RUN_STATUSES and not has_more,
+        # A goal waiting for an answer is blocked but not finished.
+        terminal=g.status in TERMINAL_RUN_STATUSES and not has_more and not open_ids,
+        needs_input=bool(open_ids),
+        open_question_ids=open_ids,
     )
 
 

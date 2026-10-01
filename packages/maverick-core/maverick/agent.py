@@ -1809,7 +1809,7 @@ class Agent:
         deny-all grant instead of silently restoring unrestricted authority.
         """
         if explicit is not None:
-            return explicit
+            return self._narrowed_to_run_grant(explicit)
         inherited = getattr(self.ctx, "capability", None)
         if inherited is not None:
             return inherited
@@ -1853,6 +1853,27 @@ class Agent:
             except Exception:
                 pass
             return root
+
+    def _narrowed_to_run_grant(self, explicit):
+        """An explicit grant (a domain pack's envelope) only ever NARROWS the
+        run's own grant -- it never replaces it (UX-012).
+
+        The run's grant is what the requester is allowed to do: the caller's
+        capability, or at the goal root the one minted from the requester's RBAC
+        role, ``[security]`` ACL and active regulatory attenuation. Returning the
+        pack's envelope alone let a read-only user (or a HIPAA deployment that
+        forbids outbound tools) regain those tools by starting the task through a
+        specialist pack. With no run grant (enforcement off, nothing supplied) the
+        pack's envelope stays the boundary, as before.
+        """
+        ambient = getattr(self.ctx, "capability", None)
+        if ambient is None and self.depth == 0:
+            # Mint (and stash on the context) the requester's grant exactly as a
+            # plain orchestrator root would; None when enforcement is off.
+            ambient = self._resolve_capability(None)
+        if ambient is None or ambient is explicit:
+            return explicit
+        return ambient.intersect(explicit, principal=explicit.principal)
 
     @property
     def checkpoint_id(self) -> str:
@@ -2249,6 +2270,10 @@ class Agent:
             parse_blocks,
             render_diff,
         )
+        from .git_safety import (
+            git_env_without_user_config,
+            git_metadata_may_execute_filters,
+        )
 
         workdir = _Path(getattr(self.ctx.sandbox, "workdir", "."))
         blocks = parse_blocks(final)
@@ -2275,6 +2300,19 @@ class Agent:
                 candidate = _Path(temp_root.name) / "worktree"
                 hooks_dir = _Path(temp_root.name) / "hooks"
                 try:
+                    # UX-013: this is HOST git against a workdir the agent (or
+                    # a container it controls) can write. A repo-local
+                    # `filter.<x>.smudge` runs during the checkout below and
+                    # `core.hooksPath` does not stop it, so refuse outright
+                    # (same guard as coding_mode.evaluate_candidate) and run
+                    # git under a scrubbed environment.
+                    if git_metadata_may_execute_filters(workdir):
+                        raise RuntimeError(
+                            "the workspace's git settings (a filter such as "
+                            "git-lfs, or another command) are not allowed to "
+                            "run on the host, so git was not run. This is "
+                            "not a problem with the edits themselves"
+                        )
                     hooks_dir.mkdir(mode=0o700)
                     wt = _sub.run(
                         [
@@ -2283,6 +2321,7 @@ class Agent:
                             "--detach", "--quiet", str(candidate), "HEAD",
                         ],
                         capture_output=True, timeout=60,
+                        env=git_env_without_user_config(),
                     )
                     if wt.returncode != 0:
                         raise RuntimeError(
@@ -2344,6 +2383,7 @@ class Agent:
                                 "remove", "--force", str(apply_workdir),
                             ],
                             capture_output=True, timeout=30,
+                            env=git_env_without_user_config(),
                         )
                     except Exception:
                         pass
@@ -2370,15 +2410,29 @@ class Agent:
             return
         import subprocess as _sub
         from pathlib import Path as _Path
+
+        from .git_safety import (
+            git_env_without_user_config,
+            git_metadata_may_execute_filters,
+        )
         workdir = _Path(getattr(sandbox, "workdir", "."))
+        # UX-013: host git on an agent-writable workdir -- a planted
+        # `filter.<x>.smudge` runs during `reset --hard`. Skip rather than run.
+        if git_metadata_may_execute_filters(workdir):
+            log.warning(
+                "workdir reset skipped: unsafe git filter/fsmonitor metadata in %s",
+                workdir,
+            )
+            return
+        env = git_env_without_user_config()
         try:
             _sub.run(
                 ["git", "-C", str(workdir), "reset", "--hard", "HEAD"],
-                capture_output=True, timeout=20,
+                capture_output=True, timeout=20, env=env,
             )
             _sub.run(
                 ["git", "-C", str(workdir), "clean", "-fd"],
-                capture_output=True, timeout=20,
+                capture_output=True, timeout=20, env=env,
             )
         except Exception:
             pass
@@ -2420,11 +2474,25 @@ class Agent:
                     except OSError:
                         pass
         import subprocess as _sub
+
+        from .git_safety import (
+            git_env_without_user_config,
+            git_metadata_may_execute_filters,
+        )
+        # UX-013: `git apply` runs a repo-local clean/smudge filter too, so the
+        # host fallback refuses a workdir that carries filter metadata.
+        if git_metadata_may_execute_filters(workdir):
+            log.warning(
+                "patch apply refused: unsafe git filter/fsmonitor metadata in %s",
+                workdir,
+            )
+            return False
         try:
             ap = _sub.run(
                 ["git", "-C", str(workdir), "apply", "-"],
                 input=patch.encode("utf-8"),
                 capture_output=True, timeout=30,
+                env=git_env_without_user_config(),
             )
             return ap.returncode == 0
         except Exception:
