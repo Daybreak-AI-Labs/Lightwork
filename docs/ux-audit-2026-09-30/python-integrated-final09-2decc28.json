@@ -1,6 +1,6 @@
 {
   "schema": "lightwork.python-integrated-final09.v1",
-  "status": "partial_qualification_completed_phases_passed",
+  "status": "python312_integrated_phases_passed",
   "source_sha": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
   "checkout": "qualification-final-09",
   "python_version": "3.12.12",
@@ -657,22 +657,664 @@
       ]
     },
     "secure": {
-      "status": "pending",
-      "execution": "In progress; no completed outcome included."
+      "status": "passed",
+      "summary": {
+        "passed": 40099,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 597,
+        "warnings": 22,
+        "deselected": null,
+        "pytest_seconds": 3185.99,
+        "junit_seconds": 3184.889,
+        "controller_seconds": 3190.82
+      },
+      "source_receipt": {
+        "source_head": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09",
+        "phase": "secure",
+        "runner_pid": 42332,
+        "attempt": null,
+        "artifact_label": "qualification-final-09-secure",
+        "faulthandler_timeout": 0,
+        "fatal_tracebacks": true,
+        "started_at": 1790849913.9148386,
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-qualification-final-09\\Scripts\\python.exe",
+        "tracked_before": "",
+        "runner_sha256": "038712315e83df2352b9c09cb2c14e8afc86d431fc3bcd085c957984bbe9fc4c",
+        "inherited_environment_allowlist": [
+          "APPDATA",
+          "COMMONPROGRAMFILES",
+          "COMMONPROGRAMFILES(X86)",
+          "COMSPEC",
+          "LOCALAPPDATA",
+          "NUMBER_OF_PROCESSORS",
+          "OS",
+          "PATH",
+          "PATHEXT",
+          "PROCESSOR_ARCHITECTURE",
+          "PROGRAMDATA",
+          "PROGRAMFILES",
+          "PROGRAMFILES(X86)",
+          "SYSTEMROOT",
+          "USERPROFILE",
+          "WINDIR"
+        ],
+        "secure_flags": {
+          "MAVERICK_TEST_SECURE_DEFAULT": "1",
+          "MAVERICK_SECURE_DEFAULT": "1"
+        },
+        "node_dependency_receipt": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\final-node-qualification-final-09.json",
+        "node_dependency_receipt_sha256": "2db56164ddbd5e05c0315d518a7de13cbff28bd3878c97e491ad6ac05f7fa17a",
+        "node_resolution_status": "passed_checkout_only_temp_shadowing",
+        "node_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\node_modules",
+        "reporter_sha256": "9d673f64873a2638139b46929136cd1faa4888ec74ef750abbefcb02203427a1",
+        "installed_reporter_sha256": "9d673f64873a2638139b46929136cd1faa4888ec74ef750abbefcb02203427a1",
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-qualification-final-09\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "audit_local_failure_reporter",
+          "-q",
+          "--tb=short",
+          "--durations=40",
+          "--timeout-method=thread",
+          "--basetemp",
+          "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-amiappwt\\t",
+          "--junitxml",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-09-secure.xml",
+          "-o",
+          "faulthandler_timeout=0",
+          "-n",
+          "4",
+          "--dist",
+          "loadfile",
+          "--max-worker-restart=0",
+          "-m",
+          "not heavy_concurrency",
+          "--timeout=180"
+        ],
+        "phase_timeout_seconds": 7200,
+        "pytest_pid": 50200
+      },
+      "result_receipt": {
+        "source_head": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
+        "head_after": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
+        "tracked_after": "",
+        "source_unchanged": true,
+        "checkout": "qualification-final-09",
+        "phase": "secure",
+        "exit_code": 0,
+        "pytest_exit_code": 0,
+        "phase_timed_out": false,
+        "cleanup_returncode": null,
+        "basetemp": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-amiappwt\\t",
+        "cleanup_errors": [],
+        "pytest_pid": 50200,
+        "controller_error": null,
+        "source_verification_error": null,
+        "pytest_still_running": false,
+        "elapsed_seconds": 3190.82,
+        "log": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-09-secure.log"
+      },
+      "junit_summary": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "597",
+        "tests": "40696",
+        "time": "3184.889",
+        "timestamp": "2026-10-01T06:18:34.280095-04:00",
+        "hostname": "The_Firm"
+      },
+      "warning_details": {
+        "count": 22,
+        "groups": [
+          {
+            "attributions": [
+              "..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53",
+              "..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53",
+              "..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53",
+              "..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53"
+            ],
+            "count": 4,
+            "emitter_and_message": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead."
+          },
+          {
+            "attributions": [
+              "apps/installer-msi/test_msi_acceptance_preflight.py::test_actual_invocation_refuses_unusable_or_changed_package_before_process[empty-test-customer.ps1]"
+            ],
+            "count": 1,
+            "emitter_and_message": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\apps\\installer-msi\\test_msi_acceptance_preflight.py:22: DeprecationWarning: 'msilib' is deprecated and slated for removal in Python 3.13"
+          },
+          {
+            "attributions": [
+              "packages/maverick-core/tests/test_q1_2026_batch2.py::test_plugin_manifest_compatible_by_major[1]"
+            ],
+            "count": 1,
+            "emitter_and_message": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\packages\\maverick-core\\tests\\test_q1_2026_batch2.py:244: DeprecationWarning: plugin manifests declaring api_version = \"1\" is deprecated since 0.1.6 and will be REMOVED in 0.3.0; use api_version = \"2\" (see docs/plugin-api-v2.md)"
+          },
+          {
+            "attributions": [
+              "packages/maverick-channels/tests/test_delivery_journal.py::test_saved_reply_retries_only_definitively_unsent_chunk",
+              "packages/maverick-channels/tests/test_gateway_durable_delivery.py::test_redelivery_and_concurrency_execute_once[slack]",
+              "packages/maverick-channels/tests/test_whatsapp_cloud.py::test_signed_message_drives_handler_and_replies",
+              "packages/maverick-channels/tests/test_threads.py::test_poll_cycle_processes_allowed_reply_once",
+              "packages/maverick-channels/tests/test_bluesky_channel.py::test_bluesky_dispatch_allows_member_and_shapes_reply"
+            ],
+            "count": 5,
+            "emitter_and_message": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\packages\\maverick-channels\\maverick_channels\\delivery.py:393: DeprecationWarning: channel handlers returning bare str is deprecated since 0.1.6 and will be REMOVED in 0.3.0; use return maverick_channels.Reply (RFC 0001 C2)"
+          },
+          {
+            "attributions": [
+              "apps/installer-msi/test_msi_native_payload.py::test_real_embedded_msi_native_bytes_are_read_without_installation[None]"
+            ],
+            "count": 1,
+            "emitter_and_message": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\apps\\installer-msi\\test_msi_native_payload.py:56: DeprecationWarning: 'msilib' is deprecated and slated for removal in Python 3.13"
+          },
+          {
+            "attributions": [
+              "packages/maverick-core/tests/test_cli_role_models.py: 2 warnings",
+              "packages/maverick-core/tests/test_start_exit_code.py: 8 warnings"
+            ],
+            "count": 10,
+            "emitter_and_message": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\packages\\maverick-core\\maverick\\cli\\__init__.py:269: DeprecationWarning: 'get_text_stream' is deprecated and will be removed in Click 9.0."
+          }
+        ],
+        "raw_section": "..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53\n..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53\n..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53\n..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53\n  C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.\n    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]\n\napps/installer-msi/test_msi_acceptance_preflight.py::test_actual_invocation_refuses_unusable_or_changed_package_before_process[empty-test-customer.ps1]\n  C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\apps\\installer-msi\\test_msi_acceptance_preflight.py:22: DeprecationWarning: 'msilib' is deprecated and slated for removal in Python 3.13\n    import msilib\n\npackages/maverick-core/tests/test_q1_2026_batch2.py::test_plugin_manifest_compatible_by_major[1]\n  C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\packages\\maverick-core\\tests\\test_q1_2026_batch2.py:244: DeprecationWarning: plugin manifests declaring api_version = \"1\" is deprecated since 0.1.6 and will be REMOVED in 0.3.0; use api_version = \"2\" (see docs/plugin-api-v2.md)\n    m = parse_dict({\n\npackages/maverick-channels/tests/test_delivery_journal.py::test_saved_reply_retries_only_definitively_unsent_chunk\npackages/maverick-channels/tests/test_gateway_durable_delivery.py::test_redelivery_and_concurrency_execute_once[slack]\npackages/maverick-channels/tests/test_whatsapp_cloud.py::test_signed_message_drives_handler_and_replies\npackages/maverick-channels/tests/test_threads.py::test_poll_cycle_processes_allowed_reply_once\npackages/maverick-channels/tests/test_bluesky_channel.py::test_bluesky_dispatch_allows_member_and_shapes_reply\n  C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\packages\\maverick-channels\\maverick_channels\\delivery.py:393: DeprecationWarning: channel handlers returning bare str is deprecated since 0.1.6 and will be REMOVED in 0.3.0; use return maverick_channels.Reply (RFC 0001 C2)\n    reply = as_reply(await channel.handler(inbound))\n\napps/installer-msi/test_msi_native_payload.py::test_real_embedded_msi_native_bytes_are_read_without_installation[None]\n  C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\apps\\installer-msi\\test_msi_native_payload.py:56: DeprecationWarning: 'msilib' is deprecated and slated for removal in Python 3.13\n    import msilib\n\npackages/maverick-core/tests/test_cli_role_models.py: 2 warnings\npackages/maverick-core/tests/test_start_exit_code.py: 8 warnings\n  C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\packages\\maverick-core\\maverick\\cli\\__init__.py:269: DeprecationWarning: 'get_text_stream' is deprecated and will be removed in Click 9.0.\n    if (not click.get_text_stream(\"stderr\").isatty()"
+      },
+      "streamed_report_counts": [
+        {
+          "when": "call",
+          "outcome": "passed",
+          "count": 40099
+        },
+        {
+          "when": "call",
+          "outcome": "skipped",
+          "count": 95
+        },
+        {
+          "when": "setup",
+          "outcome": "passed",
+          "count": 40194
+        },
+        {
+          "when": "setup",
+          "outcome": "skipped",
+          "count": 494
+        },
+        {
+          "when": "teardown",
+          "outcome": "passed",
+          "count": 40688
+        }
+      ],
+      "no_duplicate_call_reports": true,
+      "selected_reports": [
+        {
+          "nodeid": "packages/maverick-core/tests/test_flow_payloads.py::test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[bytes]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.023314799997024238,
+          "worker": "gw2",
+          "wall_time": 1790851635.715881
+        },
+        {
+          "nodeid": "packages/maverick-core/tests/test_flow_payloads.py::test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[bytes]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.17974800000956748,
+          "worker": "gw2",
+          "wall_time": 1790851635.8963063
+        },
+        {
+          "nodeid": "packages/maverick-core/tests/test_flow_payloads.py::test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[bytes]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.008323700007167645,
+          "worker": "gw2",
+          "wall_time": 1790851635.905647
+        },
+        {
+          "nodeid": "packages/maverick-channels/tests/test_transport_supervision.py::test_bounded_queue_overflow_is_durable_serial_and_in_intake_order",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.021881399996345863,
+          "worker": "gw3",
+          "wall_time": 1790851965.0123236
+        },
+        {
+          "nodeid": "packages/maverick-channels/tests/test_transport_supervision.py::test_bounded_queue_overflow_is_durable_serial_and_in_intake_order",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 5.399798700003885,
+          "worker": "gw3",
+          "wall_time": 1790851970.4130824
+        },
+        {
+          "nodeid": "packages/maverick-channels/tests/test_transport_supervision.py::test_bounded_queue_overflow_is_durable_serial_and_in_intake_order",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.008912499994039536,
+          "worker": "gw3",
+          "wall_time": 1790851970.4222288
+        }
+      ],
+      "junit_identity_count": 40696,
+      "sorted_junit_identity_sha256": "03d54cdff06da07d25a69e8e42c7f8b82d4127b1471a9c23d480ac151a1a4c74",
+      "sorted_skipped_identity_sha256": "6063f4e3b1fdf726144a69516023d4f2714ee48f06d7697215c44c74e083b1b3",
+      "collection_skip_placeholders": [
+        {
+          "classname": "",
+          "name": "packages.maverick-channels.tests.test_telegram_target",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "packages.maverick-core.tests.test_capability_glob_smt",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "packages.maverick-core.tests.test_duckdb_analytics",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "packages.maverick-core.tests.test_observability_export",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "packages.maverick-core.tests.test_pandas_query",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "benchmarks.test_dgm_container_score",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "benchmarks.test_swebench_container_grade",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "benchmarks.test_swebench_container_run",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/qualification-final-09-secure.failures.json",
+          "bytes": 309,
+          "sha256": "92b45bd262572cdc6f5ba2eb315fcb4abd787751ae5660b49da0fe17801d565b"
+        },
+        {
+          "path": "audit/qualification-final-09-secure.failures.jsonl",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "audit/qualification-final-09-secure.failures.jsonl.reports",
+          "bytes": 31106128,
+          "sha256": "2ccd788464c0d79139ff64f2a4922a27ea41db043f927889d2c4dfe2882d43d0"
+        },
+        {
+          "path": "audit/qualification-final-09-secure.log",
+          "bytes": 54639,
+          "sha256": "0a3ddfe4c6e9e2b84e209a773fbb755d519d0c19e67b5e11527361e24df177db"
+        },
+        {
+          "path": "audit/qualification-final-09-secure.result.json",
+          "bytes": 711,
+          "sha256": "70344dcca7ac2a8169a54dc02e453cbf081007b62190dfd32d91e417409b302d"
+        },
+        {
+          "path": "audit/qualification-final-09-secure.source.json",
+          "bytes": 2458,
+          "sha256": "c0f8df876c1c0add042f7ddde902e96af5adf68c46f39f8b066648fae1f5aaab"
+        },
+        {
+          "path": "audit/qualification-final-09-secure.xml",
+          "bytes": 6652485,
+          "sha256": "1e9c2c7632d5bee887d3c6aa379c18b8b86eca45d877022b7b5ea2d025d18a5b"
+        }
+      ],
+      "comparison_to_ordinary_posture": {
+        "counterpart_phase": "ordinary",
+        "same_identity_to_outcome_map": true,
+        "same_identity_set": true,
+        "same_skipped_identity_set": true,
+        "outcome_changes": []
+      }
     },
     "heavy-secure": {
-      "status": "pending",
-      "execution": "Scheduled after secure ordinary; no outcome included."
+      "status": "passed",
+      "summary": {
+        "passed": 7,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 8,
+        "warnings": 1,
+        "deselected": 40688,
+        "pytest_seconds": 77.47,
+        "junit_seconds": 77.461,
+        "controller_seconds": 87.19
+      },
+      "source_receipt": {
+        "source_head": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
+        "checkout": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09",
+        "phase": "heavy-secure",
+        "runner_pid": 50828,
+        "attempt": null,
+        "artifact_label": "qualification-final-09-heavy-secure",
+        "faulthandler_timeout": 0,
+        "fatal_tracebacks": true,
+        "started_at": 1790853105.2442849,
+        "interpreter": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-qualification-final-09\\Scripts\\python.exe",
+        "tracked_before": "",
+        "runner_sha256": "038712315e83df2352b9c09cb2c14e8afc86d431fc3bcd085c957984bbe9fc4c",
+        "inherited_environment_allowlist": [
+          "APPDATA",
+          "COMMONPROGRAMFILES",
+          "COMMONPROGRAMFILES(X86)",
+          "COMSPEC",
+          "LOCALAPPDATA",
+          "NUMBER_OF_PROCESSORS",
+          "OS",
+          "PATH",
+          "PATHEXT",
+          "PROCESSOR_ARCHITECTURE",
+          "PROGRAMDATA",
+          "PROGRAMFILES",
+          "PROGRAMFILES(X86)",
+          "SYSTEMROOT",
+          "USERPROFILE",
+          "WINDIR"
+        ],
+        "secure_flags": {
+          "MAVERICK_TEST_SECURE_DEFAULT": "1",
+          "MAVERICK_SECURE_DEFAULT": "1"
+        },
+        "node_dependency_receipt": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\final-node-qualification-final-09.json",
+        "node_dependency_receipt_sha256": "2db56164ddbd5e05c0315d518a7de13cbff28bd3878c97e491ad6ac05f7fa17a",
+        "node_resolution_status": "passed_checkout_only_temp_shadowing",
+        "node_path": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\qualification-final-09\\node_modules",
+        "reporter_sha256": "9d673f64873a2638139b46929136cd1faa4888ec74ef750abbefcb02203427a1",
+        "installed_reporter_sha256": "9d673f64873a2638139b46929136cd1faa4888ec74ef750abbefcb02203427a1",
+        "command": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-qualification-final-09\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "-p",
+          "audit_local_failure_reporter",
+          "-q",
+          "--tb=short",
+          "--durations=40",
+          "--timeout-method=thread",
+          "--basetemp",
+          "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-vx5xop3x\\t",
+          "--junitxml",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-09-heavy-secure.xml",
+          "-o",
+          "faulthandler_timeout=0",
+          "-m",
+          "heavy_concurrency",
+          "--timeout=600"
+        ],
+        "phase_timeout_seconds": 1800,
+        "pytest_pid": 16712
+      },
+      "result_receipt": {
+        "source_head": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
+        "head_after": "2decc28d5a2709ec1d362bdfb8499aaa13aacfce",
+        "tracked_after": "",
+        "source_unchanged": true,
+        "checkout": "qualification-final-09",
+        "phase": "heavy-secure",
+        "exit_code": 0,
+        "pytest_exit_code": 0,
+        "phase_timed_out": false,
+        "cleanup_returncode": null,
+        "basetemp": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lw-vx5xop3x\\t",
+        "cleanup_errors": [],
+        "pytest_pid": 16712,
+        "controller_error": null,
+        "source_verification_error": null,
+        "pytest_still_running": false,
+        "elapsed_seconds": 87.19,
+        "log": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\audit\\qualification-final-09-heavy-secure.log"
+      },
+      "junit_summary": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "8",
+        "tests": "15",
+        "time": "77.461",
+        "timestamp": "2026-10-01T07:11:45.612017-04:00",
+        "hostname": "The_Firm"
+      },
+      "warning_details": {
+        "count": 1,
+        "groups": [
+          {
+            "attributions": [
+              "..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53"
+            ],
+            "count": 1,
+            "emitter_and_message": "C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead."
+          }
+        ],
+        "raw_section": "..\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53\n  C:\\Users\\Cstep\\Documents\\Codex\\2026-09-30\\task-5\\.venv-audit\\Lib\\site-packages\\starlette\\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.\n    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]"
+      },
+      "streamed_report_counts": [
+        {
+          "when": "call",
+          "outcome": "passed",
+          "count": 7
+        },
+        {
+          "when": "setup",
+          "outcome": "passed",
+          "count": 7
+        },
+        {
+          "when": "teardown",
+          "outcome": "passed",
+          "count": 7
+        }
+      ],
+      "no_duplicate_call_reports": true,
+      "selected_reports": [],
+      "junit_identity_count": 15,
+      "sorted_junit_identity_sha256": "1d7ac78ce66dab5ce44bfe69b2f228adf81c91c10407a4311318ac9f4d085d8f",
+      "sorted_skipped_identity_sha256": "85f04029b52c4392b1ec73597c3b4ba63a11a0c0628e094044d591da37da4cdc",
+      "collection_skip_placeholders": [
+        {
+          "classname": "",
+          "name": "packages.maverick-channels.tests.test_telegram_target",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "packages.maverick-core.tests.test_capability_glob_smt",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "packages.maverick-core.tests.test_duckdb_analytics",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "packages.maverick-core.tests.test_observability_export",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "packages.maverick-core.tests.test_pandas_query",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "benchmarks.test_dgm_container_score",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "benchmarks.test_swebench_container_grade",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        },
+        {
+          "classname": "",
+          "name": "benchmarks.test_swebench_container_run",
+          "outcome": "skipped",
+          "skip_reason": "collection skipped",
+          "seconds": 0.0
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "audit/qualification-final-09-heavy-secure.failures.json",
+          "bytes": 302,
+          "sha256": "1c946d36998f34d0b32acb489a78f2ba43338fc56cc0054ea146676e5a8c52f8"
+        },
+        {
+          "path": "audit/qualification-final-09-heavy-secure.failures.jsonl",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "audit/qualification-final-09-heavy-secure.failures.jsonl.reports",
+          "bytes": 5487,
+          "sha256": "24835a6631a963bacc5828210ff69a3da12629065be5d205ea879e1d91c35a5b"
+        },
+        {
+          "path": "audit/qualification-final-09-heavy-secure.log",
+          "bytes": 2704,
+          "sha256": "70c2abd212643167c5f3e9693e6e224634d9d3fda0a191b8c43fe6302047ea73"
+        },
+        {
+          "path": "audit/qualification-final-09-heavy-secure.result.json",
+          "bytes": 721,
+          "sha256": "b512f7f5b8b88728a648a6e6575496d1f3b94ac1afd1923b44ec1a1794fe4df7"
+        },
+        {
+          "path": "audit/qualification-final-09-heavy-secure.source.json",
+          "bytes": 2388,
+          "sha256": "da8524d7987ad72b5610aab01215be9eedd304e870889f24ab6088ca4e7b1d3a"
+        },
+        {
+          "path": "audit/qualification-final-09-heavy-secure.xml",
+          "bytes": 4098,
+          "sha256": "a749e28d76451bb141a9f8aa20a6c3205474ea3a2bc53af69af196c2e1403c87"
+        }
+      ],
+      "passed_identities": [
+        {
+          "classname": "packages.maverick-core.tests.test_control_data_plane_soak",
+          "name": "test_soak_holds_under_concurrency",
+          "outcome": "passed",
+          "skip_reason": null,
+          "seconds": 1.641
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_control_data_plane_soak",
+          "name": "test_exactly_once_executed_total_matches_goals",
+          "outcome": "passed",
+          "skip_reason": null,
+          "seconds": 1.874
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_control_data_plane_soak",
+          "name": "test_soak_above_queue_list_cap",
+          "outcome": "passed",
+          "skip_reason": null,
+          "seconds": 4.374
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_control_data_plane_soak",
+          "name": "test_single_worker_still_drains",
+          "outcome": "passed",
+          "skip_reason": null,
+          "seconds": 0.812
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_discovery_sensor_test_estate_runner",
+          "name": "test_fixed_acceptance_exercises_three_sources_lifecycle_recovery_and_scale",
+          "outcome": "passed",
+          "skip_reason": null,
+          "seconds": 13.297
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_discovery_sensor_test_estate_runner",
+          "name": "test_acceptance_evidence_is_digest_only_and_truthful_about_external_scope",
+          "outcome": "passed",
+          "skip_reason": null,
+          "seconds": 13.004
+        },
+        {
+          "classname": "packages.maverick-core.tests.test_discovery_sensor_test_estate_runner",
+          "name": "test_runner_requires_explicit_consent_and_cli_writes_report",
+          "outcome": "passed",
+          "skip_reason": null,
+          "seconds": 0.028
+        }
+      ],
+      "comparison_to_ordinary_posture": {
+        "counterpart_phase": "heavy",
+        "same_identity_to_outcome_map": true,
+        "same_identity_set": true,
+        "same_skipped_identity_set": true,
+        "outcome_changes": []
+      }
     }
   },
   "completed_posture_coverage": {
-    "posture": "ordinary defaults",
+    "posture": "Both ordinary defaults and both secure-default flags enabled",
     "ordinary_and_heavy_passed_identities": 40106,
     "shared_junit_entries_are_only_collection_placeholders": true,
     "shared_collection_placeholders": 8,
     "union_junit_entries": 40703,
     "distinct_skipped_junit_entries": 597,
-    "boundary": "Do not add the eight repeated collection placeholders to the 597 ordinary skips."
+    "boundary": "Do not add the eight repeated collection placeholders to the 597 ordinary skips.",
+    "same_40106_passing_executable_identities_each_posture": true,
+    "repeated_posture_executions_are_not_additional_distinct_cases": true
   },
   "comparison_to_final08_ordinary": {
     "source_sha": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
@@ -805,7 +1447,15 @@
     "original_denial_assertion_preserved": true,
     "test_budgets_unchanged": true,
     "original_fixture_proof": "docs/ux-audit-2026-09-30/flow-payload-fault-injection-57a027a.json",
-    "repair": "Flip the final byte low bit and assert damaged bytes differ before writing; the exact repaired case passes in the complete ordinary run."
+    "repair": "Flip the final byte low bit and assert damaged bytes differ before writing; the exact repaired case passes in the complete ordinary run.",
+    "secure_call_report": {
+      "nodeid": "packages/maverick-core/tests/test_flow_payloads.py::test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[bytes]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.17974800000956748,
+      "worker": "gw2",
+      "wall_time": 1790851635.8963063
+    }
   },
   "transport_case": {
     "nodeid": "packages/maverick-channels/tests/test_transport_supervision.py::test_bounded_queue_overflow_is_durable_serial_and_in_intake_order",
@@ -821,7 +1471,15 @@
     "original_waiter_timeout_seconds": 5,
     "deadline_and_assertions_unchanged": true,
     "historical_final07_cause": "unexplained",
-    "historical_evidence": "docs/ux-audit-2026-09-30/transport-timeout-investigation-95aa61e.md"
+    "historical_evidence": "docs/ux-audit-2026-09-30/transport-timeout-investigation-95aa61e.md",
+    "secure_call_report": {
+      "nodeid": "packages/maverick-channels/tests/test_transport_supervision.py::test_bounded_queue_overflow_is_durable_serial_and_in_intake_order",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 5.399798700003885,
+      "worker": "gw3",
+      "wall_time": 1790851970.4130824
+    }
   },
   "skipped_case_boundary": "The 597 skipped identities are unchanged from final08. That receipt maps all seven added PostgreSQL cursor variants to separate ordinary/secure passing service runs; remaining prerequisite and platform qualifications remain separate.",
   "reference_artifacts": [
@@ -847,9 +1505,26 @@
     }
   ],
   "remaining_qualification": [
-    "Complete final09 secure ordinary phase.",
-    "Complete final09 serial heavy secure phase.",
     "Complete supported Python 3.10 and 3.11 runs, tracked separately.",
     "Retain explicit platform, installed-device, compiler/container, provider and other prerequisite limits."
-  ]
+  ],
+  "secure_warning_comparison": {
+    "ordinary_count": 25,
+    "secure_count": 22,
+    "same_warning_families": true,
+    "all_warnings_category": "DeprecationWarning",
+    "ordinary_plugin_api_v1_count": 4,
+    "secure_plugin_api_v1_count": 1,
+    "ordinary_attributions_absent_from_secure_summary": [
+      "packages/maverick-core/tests/test_plugin_permissions.py::test_ungranted_permission_skipped_when_enforced",
+      "packages/maverick-core/tests/test_plugin_matrix.py::test_matrix_rows_cover_groups_and_compat",
+      "packages/maverick-core/tests/test_plugin_api_v2.py::test_v1_plugin_loads_with_deprecation_warning"
+    ],
+    "channel_warning_count_both_postures": 5,
+    "channel_attribution_change": {
+      "ordinary": "packages/maverick-channels/tests/test_irc.py::test_dispatch_allowed_sender_replies",
+      "secure": "packages/maverick-channels/tests/test_threads.py::test_poll_cycle_processes_allowed_reply_once"
+    },
+    "cause_of_emission_count_variation": "Not established by these receipts; no warning suppression or new warning family is inferred."
+  }
 }

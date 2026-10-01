@@ -20,14 +20,17 @@ acceptance cases pass at `1719f2f`. The complete 108-case browser and 1,711-case
 JavaScript cohorts also pass there. A subsequent short-viewport widget boundary
 was reproduced and repaired; [all seven updated widget cases pass](widget-short-viewport-88cd66f.md).
 [All 26 fresh static/build gates pass](static-build-qualification-2decc28.md).
-Final full Python qualification remains in progress.
+All four full Python 3.12 phases pass. Full Python 3.10/3.11 qualification
+remains in progress.
 
 The [latest complete ordinary run](python-integrated-final09-2decc28.md) at `2decc28` passes **40,099 tests**, with
 597 skips, 25 warnings and no failures/errors. The earlier
 [proven corruption-test fault](flow-payload-fault-injection-57a027a.md)
 was repaired without changing production code or relaxing assertions. Serial
-heavy qualification also passes all seven tests. Secure-default and
-supported-interpreter phases remain pending. The
+heavy qualification also passes all seven tests. The complete secure-default
+run passes the same 40,099 identities, with the same 597 skips and 22 warnings;
+secure heavy passes all seven tests. Supported-interpreter phases remain
+pending. The
 [earlier transport timeout](transport-timeout-investigation-95aa61e.md)
 passed in the later full run with its original deadline, but its historical
 cause remains unexplained. The
