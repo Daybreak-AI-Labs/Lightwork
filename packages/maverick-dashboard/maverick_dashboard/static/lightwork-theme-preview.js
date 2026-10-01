@@ -31,6 +31,9 @@
     }
     var palette = values(row), problems = [];
     ['bg', 'panel', 'text', 'accent'].forEach(function (key) { if (!palette[key]) problems.push('Choose ' + key + ' before saving.'); });
+    ['border', 'muted', 'warn', 'danger'].forEach(function (key) {
+      if (!palette[key] && palette.text) palette[key] = palette.text;
+    });
     if (!problems.length) ['bg', 'panel'].forEach(function (background) {
       ['text', 'muted', 'accent', 'warn', 'danger', 'border'].forEach(function (foreground) {
         if (!palette[foreground]) return;
@@ -56,7 +59,7 @@
     });
     var chart = document.createElement('meter'); chart.min = 0; chart.max = 100; chart.value = 60; chart.setAttribute('aria-label', 'Example progress: 60 percent'); sample.appendChild(chart);
     panel.appendChild(sample);
-    var advice = document.createElement('p'); advice.textContent = 'The editor keeps its current colours. Older unreadable saved palettes use readable derived colours so settings remain reachable.'; panel.appendChild(advice);
+    var advice = document.createElement('p'); advice.textContent = 'The editor keeps its current colours. Omitted optional colours use this theme\'s text colour. Older unreadable saved palettes use readable derived colours so settings remain reachable.'; panel.appendChild(advice);
   }
   document.addEventListener('input', preview);
   document.addEventListener('focusin', preview);

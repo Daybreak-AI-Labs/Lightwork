@@ -52,10 +52,20 @@ def contrast_ratio(first: str, second: str) -> float:
     return (light + 0.05) / (dark + 0.05)
 
 
+def complete_palette(values: dict[str, str]) -> dict[str, str]:
+    """Unspecified semantic colours inherit this theme's text, never another theme."""
+    palette = dict(values)
+    if "text" in palette:
+        for key in OPTIONAL_KEYS:
+            palette.setdefault(key, palette["text"])
+    return palette
+
+
 def contrast_issues(values: dict[str, str]) -> list[str]:
     """Human-readable checks for text, status, controls and focus indicators."""
     if not all(key in values and _HEX.fullmatch(values[key]) for key in REQUIRED_KEYS):
         return ["Choose all four required colours first."]
+    values = complete_palette(values)
     issues = []
     for background in ("bg", "panel"):
         for foreground, label, minimum in (
@@ -74,7 +84,7 @@ def contrast_issues(values: dict[str, str]) -> list[str]:
 
 def readable_palette(values: dict[str, str]) -> dict[str, str]:
     """Keep older deployment palettes recoverable without hiding their editor."""
-    palette = dict(values)
+    palette = complete_palette(values)
     if not contrast_issues(palette):
         return palette
     foreground = max(("#000000", "#ffffff"), key=lambda colour: contrast_ratio(colour, palette["bg"]))
@@ -123,10 +133,11 @@ def theme_css(themes: dict[str, dict[str, str]]) -> str:
     """
     blocks: list[str] = []
     for name in sorted(themes):
+        palette = complete_palette(themes[name])
         decls = "; ".join(
-            f"--{key}: {themes[name][key]}"
+            f"--{key}: {palette[key]}"
             for key in (*REQUIRED_KEYS, *OPTIONAL_KEYS)
-            if key in themes[name]
+            if key in palette
         )
         blocks.append(f"body.theme-{name} {{ {decls}; }}")
     return "\n".join(blocks)

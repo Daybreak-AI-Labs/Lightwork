@@ -1,5 +1,12 @@
 """Palette checks; runtime/browser qualification is tracked separately."""
-from maverick_dashboard.themes import contrast_issues, contrast_ratio, readable_palette
+import pytest
+from maverick_dashboard.themes import (
+    OPTIONAL_KEYS,
+    contrast_issues,
+    contrast_ratio,
+    readable_palette,
+    theme_css,
+)
 
 
 def test_white_on_white_is_refused_with_human_readable_reasons():
@@ -19,3 +26,15 @@ def test_quiet_text_control_and_focus_pairs_are_checked():
     assert "Quiet text" in issues
     assert "Highlights and focus" in issues
     assert "Control borders" in issues
+
+
+@pytest.mark.parametrize("background,text", [("#fff", "#111"), ("#000", "#fff")])
+def test_omitted_semantic_colours_are_explicit_and_readable(background, text):
+    supplied = {"bg": background, "panel": background, "text": text, "accent": text}
+    palette = readable_palette(supplied)
+    assert set(OPTIONAL_KEYS) <= set(palette)
+    assert contrast_issues(palette) == []
+    css = theme_css({"custom": supplied})
+    for key in OPTIONAL_KEYS:
+        assert palette[key] == text
+        assert f"--{key}: {text}" in css

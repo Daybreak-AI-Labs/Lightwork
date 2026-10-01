@@ -317,7 +317,20 @@
       // Leaving the small-screen layout never leaves the page locked behind the drawer.
       if (window.matchMedia) {
         var mq = window.matchMedia('(max-width: 860px)');
-        var onChange = function () { if (!mq.matches) close(false); };
+        var onChange = function () {
+          if (mq.matches) return;
+          var wasOpen = isOpen(), active = document.activeElement;
+          close(false);
+          // The mobile Close/Menu controls disappear on desktop. Preserve a
+          // visible navigation/dialog target, but never strand focus on Close.
+          if (wasOpen && active === closeBtn) {
+            var target = Array.prototype.find.call(side.querySelectorAll('a[href], button, input, [tabindex="0"]'), function (node) {
+              return node !== closeBtn && !node.disabled && !node.hidden && node.getClientRects().length;
+            });
+            if (!target) { side.setAttribute('tabindex', '-1'); target = side; }
+            target.focus();
+          }
+        };
         if (mq.addEventListener) mq.addEventListener('change', onChange); else if (mq.addListener) mq.addListener(onChange);
       }
       var kbd = document.getElementById('cs-find-kbd');
