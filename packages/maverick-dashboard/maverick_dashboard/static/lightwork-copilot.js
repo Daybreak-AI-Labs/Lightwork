@@ -342,9 +342,9 @@
       if (payload.page_context) renderContext(payload.page_context);
       renderProviderSetup(payload);
       if (payload.mode === "built_in_fallback") {
-        note.textContent = "The AI provider is not available — using the built-in page guide.";
+        note.textContent = payload.warning || "The AI provider is not available — using the built-in page guide.";
       } else if (payload.mode === "built_in") {
-        note.textContent = "Built-in page guide — no AI provider needed.";
+        note.textContent = payload.warning || "Built-in page guide — no AI provider needed.";
       } else {
         note.textContent = payload.warning ||
           "AI answers can be wrong — check them against what the page shows before acting.";

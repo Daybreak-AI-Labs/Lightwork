@@ -206,6 +206,16 @@ def test_model_success_is_unverified_bounded_and_ignores_assistant_history(
         "We cancelled the running task.",
         "Your request has been approved.",
         "Done. The flow is ready.",
+        "I have successfully completed the request.",
+        "I've set your theme to dark.",
+        "I went ahead and changed your theme.",
+        "Your setting is now dark.",
+        "Your theme is dark.",
+        "Your theme has changed.",
+        "The workflow is published.",
+        "Settings updated.",
+        "Updated your theme.",
+        "Email sent.",
     ),
 )
 def test_model_completion_claim_is_replaced_with_page_guidance(
@@ -241,9 +251,54 @@ def test_model_completion_claim_is_replaced_with_page_guidance(
     assert payload["action_link"] == {
         "href": "/goals", "label": f"Open {payload['page_context']['title']}"
     }
-    assert "without an operation receipt" in payload["warning"]
+    assert "No action was taken" in payload["warning"]
     assert len(payload["reply"].split()) <= 120
     assert len(payload["reply"]) <= 1_000
+
+
+@pytest.mark.parametrize(
+    ("guidance", "question", "expected"),
+    (
+        ("To change your theme, open Settings and choose an appearance.",
+         "Where can I change my theme?", "open Settings"),
+        ("The workflow is complete when all steps finish. Check its run progress.",
+         "When is a workflow complete?", "when all steps finish"),
+        ("I did not change your theme. Open Settings to choose an appearance.",
+         "Did you change my theme?", "did not change"),
+    ),
+)
+def test_model_can_still_explain_how_to_use_a_control(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    guidance: str,
+    question: str,
+    expected: str,
+) -> None:
+    from maverick import llm
+    from maverick_dashboard import api
+
+    class FakeLlm:
+        def __init__(self, _model: str) -> None:
+            pass
+
+        def complete(self, **_kwargs):
+            return SimpleNamespace(text=guidance)
+
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(api, "require_provider_or_400", lambda **_kwargs: None)
+    monkeypatch.setattr(llm, "LLM", FakeLlm)
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: "test:model")
+
+    response = client.post(
+        "/api/v1/copilot",
+        json={"message": question, "page": "/settings", "history": []},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "model"
+    assert expected in payload["reply"]
+    assert payload["model_output_verified"] is False
 
 
 def test_context_endpoint_maps_unregistered_browser_path_to_generic(

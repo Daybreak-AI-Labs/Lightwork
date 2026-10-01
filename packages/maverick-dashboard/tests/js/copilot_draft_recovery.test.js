@@ -57,9 +57,11 @@ test('Copilot shows a local page link for refused actions and rejects external d
   const p = page(); await settle();
   p.setAnswer(async () => ({ok: true, status: 200, json: async () => ({
     mode: 'built_in', reply: 'No action was taken.',
+    warning: 'No action was taken. Use the page controls if available.',
     action_link: {href: '/goals', label: 'Open Goals'}
   })}));
   p.send('Cancel my task'); await settle();
+  assert.match(p.doc.getElementById('mv-copilot-note').textContent, /No action was taken/);
   const link = p.doc.querySelector('.mv-copilot__msg--bot a');
   assert.equal(link?.getAttribute('href'), '/goals');
   assert.equal(link?.textContent, 'Open Goals');
@@ -70,5 +72,17 @@ test('Copilot shows a local page link for refused actions and rejects external d
   })}));
   p.send('Cancel another task'); await settle();
   assert.equal(p.doc.querySelectorAll('.mv-copilot__msg--bot a').length, 1);
+  p.dom.window.close();
+});
+
+test('Copilot shows the truthful fallback notice when a model claims an action was done', async () => {
+  const p = page(); await settle();
+  p.setAnswer(async () => ({ok: true, status: 200, json: async () => ({
+    mode: 'built_in_fallback', reply: 'No action was taken by this guide.',
+    warning: 'Copilot could not verify that claim, so it showed the page guide instead. No action was taken.'
+  })}));
+  p.send('What happened with my theme?'); await settle();
+  assert.match(p.doc.getElementById('mv-copilot-note').textContent, /No action was taken/);
+  assert.doesNotMatch(p.doc.getElementById('mv-copilot-note').textContent, /provider is not available/);
   p.dom.window.close();
 });

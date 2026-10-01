@@ -38,22 +38,46 @@ _ACTION_LEADS = (
     ("i", "want", "to"), ("i", "need", "to"), ("i", "would", "like", "to"),
     ("i", "would", "like", "you", "to"), ("help", "me"), ("let", "s"),
 )
-_FIRST_PERSON_COMPLETION = compile_regex(
-    r"\b(?:i|we)(?:'ve|\s+have)?\s+(?:already\s+|just\s+)?"
+_COMPLETED_VERB = (
     r"(?:did|done|completed?|finished|changed|updated|created|approved|"
     r"cancelled|canceled|deleted|removed|enabled|disabled|sent|shared|"
-    r"published|submitted|started|stopped|turned\s+(?:on|off))\b",
+    r"published|submitted|started|stopped|saved|set|switched|applied|"
+    r"scheduled|launched|ran|handled|turned\s+(?:on|off)|"
+    r"(?:took|taken)\s+care\s+of)"
+)
+_FIRST_PERSON_COMPLETION = compile_regex(
+    r"\b(?:i|we)(?:['’]ve|\s+(?:have|had))?\s+"
+    r"(?:(?:already|just|now|successfully|fully)\s+){0,3}"
+    r"(?:(?:went|have\s+gone)\s+ahead\s+and\s+)?"
+    + _COMPLETED_VERB + r"\b(?!\s+(?:not|nothing)\b)",
     IGNORECASE,
 )
 _PASSIVE_COMPLETION = compile_regex(
-    r"\b(?:your|the|this)\s+(?:[\w-]+\s+){0,5}"
-    r"(?:has\s+been|was|is\s+now)\s+(?:successfully\s+)?"
-    r"(?:completed|finished|changed|updated|created|approved|"
-    r"cancelled|canceled|deleted|removed|enabled|disabled|sent|shared|"
-    r"published|submitted|started|stopped|done)\b",
+    r"\b(?:your|the|this|that|it)\s+(?:[\w-]+\s+){0,5}"
+    r"(?:has(?:\s+been)?|have(?:\s+been)?|was|were|is(?:\s+now)?|are(?:\s+now)?)\s+"
+    r"(?:(?:already|just|successfully|fully)\s+){0,2}"
+    + _COMPLETED_VERB + r"\b(?!\s+(?:when|if|after|once)\b)",
     IGNORECASE,
 )
-_DONE_LEAD = compile_regex(r"^(?:final:\s*)?(?:done|all\s+set|completed)\b", IGNORECASE)
+_CURRENT_STATE_CLAIM = compile_regex(
+    r"\b(?:your|the|this)\s+(?:[\w-]+\s+){0,5}"
+    r"(?:is|are)\s+(?:now\s+[\w-]+|dark|light|active|inactive|ready|live|"
+    r"complete|done|approved|denied|cancelled|canceled|published|saved|sent)"
+    r"\b(?!\s+(?:when|if|after|once)\b)",
+    IGNORECASE,
+)
+_TERSE_COMPLETION = compile_regex(
+    r"(?:^|[.!?]\s+)(?:(?:successfully|now)\s+)?(?:"
+    + _COMPLETED_VERB + r"\s+(?:your|the|this)\b|"
+    r"(?:settings|task|flow|workflow|request|approval|report|file|"
+    r"document|email|notification|policy|theme|access)\s+"
+    + _COMPLETED_VERB + r"(?=[.!?,;:]|$))",
+    IGNORECASE,
+)
+_DONE_LEAD = compile_regex(
+    r"^(?:(?:final|status):\s*)?(?:done|all\s+set|completed|it['’]s\s+done)\b",
+    IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1749,7 +1773,10 @@ def model_claims_completed_action(reply: str) -> bool:
 
     return any(
         pattern.search(reply)
-        for pattern in (_FIRST_PERSON_COMPLETION, _PASSIVE_COMPLETION, _DONE_LEAD)
+        for pattern in (
+            _FIRST_PERSON_COMPLETION, _PASSIVE_COMPLETION, _CURRENT_STATE_CLAIM,
+            _TERSE_COMPLETION, _DONE_LEAD,
+        )
     )
 
 

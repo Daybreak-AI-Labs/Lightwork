@@ -12567,7 +12567,7 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
                 + built_in_reply(context, msg, permissions)
             ),
             "mode": "built_in_fallback",
-            "warning": "The model answer claimed completed work without an operation receipt; it was not shown.",
+            "warning": "Copilot could not verify that claim, so it showed the page guide instead. No action was taken.",
             "page_context": public_context(context, permissions),
             "action_link": {"href": context.path, "label": f"Open {context.title}"},
         }

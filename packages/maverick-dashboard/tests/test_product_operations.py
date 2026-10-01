@@ -62,7 +62,8 @@ def test_review_does_not_execute_and_native_receipt_recovers_exact_retry(registr
     review = prepare(client, state)
     assert review.status_code == 200 and state["calls"] == 0
     payload = {"token": review.json()["token"], "confirmed": True}
-    assert client.post(BASE + "/execute", json=payload).json()["status"] == "confirmed"
+    completed = client.post(BASE + "/execute", json=payload).json()
+    assert completed["status"] == "confirmed" and completed["message"] == "saved"
     assert client.post(BASE + "/execute", json=payload).json()["status"] == "replayed"
     assert state["calls"] == 1
 
