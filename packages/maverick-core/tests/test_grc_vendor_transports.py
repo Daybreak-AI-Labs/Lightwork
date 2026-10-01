@@ -878,7 +878,7 @@ def test_default_http_path_uses_shared_ssrf_guard(monkeypatch) -> None:
     )
     monkeypatch.setattr(enterprise, "enterprise_egress_denial", lambda *_a, **_k: None)
 
-    def blocked(_host: str) -> str:
+    def blocked(_host: str, **_kwargs: bool) -> str:
         raise _ssrf.BlockedHost("resolved to metadata address")
 
     monkeypatch.setattr(_ssrf, "resolve_pinned_ip", blocked)
