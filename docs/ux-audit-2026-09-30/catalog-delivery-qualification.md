@@ -33,6 +33,14 @@ Local evidence from the working patch:
   matching, missing and mismatched asset startup, safe interpolation, language
   tagging, regional formatting and existing dynamic controls.
 - Changed-file Ruff and whitespace checks passed.
+- Final ordinary targeted cohort: 23 passed, including all 13 new asset/size
+  cases, eight journey helper cases and both unchanged Settings/compartments
+  page-size regressions (`audit/catalog-assets-final-ordinary.log`).
+
+The earlier dashboard-only "secure-default" label above records the requested
+test switch but does not independently establish production secure posture:
+the dashboard-only harness also needs `MAVERICK_SECURE_DEFAULT=1`. Both flags
+are now explicit in subsequent cohorts and final consolidated qualification.
 
 Logs are retained locally as audit/catalog-assets-01.log,
 audit/catalog-assets-02.log and audit/catalog-assets-js.log. Final integrated

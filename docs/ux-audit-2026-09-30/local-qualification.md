@@ -102,3 +102,30 @@ materialized task rows to the exact request owner. The same three real-DuckDB
 regressions failed on the prepatch source, returning other employees' rows,
 and passed after repair in ordinary and secure modes. This belongs to the
 original approved privacy policy; it is not a sixth PR2530 finding.
+
+## Complete ordinary checkpoint, 2026-10-01
+
+The frozen `29aee7e75b6d31012f087ec725456eec20e206af` ordinary run
+completed in 2,892.21 seconds: **39,763 passed, 219 failed, 555 skipped**,
+with no collection errors or worker losses. Both previously crashing Settings
+cases passed unchanged. This is a failed qualification result, not acceptance.
+The exact source, JUnit, streamed failure details and process result are retained
+under `audit/qualification-final-02-ordinary.*` in the local workspace.
+
+Repairs made after that frozen source include SQL analytics owner filtering,
+bounded translation delivery, named identity dispatch for code notes, and a
+Preferences rendering fix for the `source` interpolation placeholder. Each
+has native regressions; no response-size, access-denial or revocation assertion
+was relaxed. Standalone page fixtures now assemble the same template context as
+the installed application. Historical migration fixtures explicitly construct
+the historical schema instead of writing it through the current schema writer.
+Current-revision save, reviewed erasure and source-lineage tests use their real
+native contracts. Remaining failures continue through focused review and a
+fresh consolidated run; counts are not inferred from patch inspection.
+
+Dashboard-only secure cohorts must explicitly set both
+`MAVERICK_SECURE_DEFAULT=1` and `MAVERICK_TEST_SECURE_DEFAULT=1`. The latter is
+consumed by the core test fixture and alone does not establish dashboard-only
+production posture. The harness now sets both. Earlier dashboard-only labels
+without this evidence are ordinary/posture-unspecified checks; corrected
+cohorts and the final full secure run are tracked separately.
