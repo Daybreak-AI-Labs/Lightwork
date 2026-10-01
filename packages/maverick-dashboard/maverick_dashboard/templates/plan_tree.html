@@ -32,7 +32,7 @@
     <span><span class="badge failure">Failed</span></span>
     <span><span class="badge blocked">Blocked</span></span>
     <span><span class="badge pending">Waiting</span></span>
-    <span class="live" id="plan-tree-status" aria-live="polite">Loading…</span>
+    <span class="live" id="plan-tree-status" aria-live="polite">Plan captured when this page loaded.</span>
   </div>
   <div id="plan-tree" role="img"
        aria-label="Map of the steps for {{ goal.title }}"></div>
@@ -47,8 +47,8 @@
 </div>
 
 <p class="muted">
-  This map updates live as Lightwork splits the task into smaller steps and
-  finishes them. Click a step to open it.
+  The task list is available even when live updates or the map are unavailable.
+  Open a step to review its current state. Reload the page to refresh the saved view.
 </p>
 <p><a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory">Review task activity</a></p>
 
@@ -66,11 +66,14 @@
     const container = document.getElementById("plan-tree");
     const statusEl = document.getElementById("plan-tree-status");
     const list = document.getElementById("plan-tree-list");
+    function costLabel(node) {
+      return node.dollars ? "  $" + Number(node.dollars).toFixed(4) : "";
+    }
     function renderList(root) {
       function item(node) {
         const li = document.createElement('li'), link = document.createElement('a');
         link.href = '/chat/goal/' + encodeURIComponent(node.id);
-        link.textContent = (node.title || 'Untitled task') + ' — ' + String(node.status || 'Waiting').replace(/_/g, ' ');
+        link.textContent = (node.title || 'Untitled task') + ' - ' + String(node.status || 'Waiting').replace(/_/g, ' ') + costLabel(node);
         li.appendChild(link);
         if ((node.children || []).length) {
           const children = document.createElement('ul');
@@ -102,10 +105,9 @@
       const els = [];
       (function walk(n) {
         if (!n || n.id === undefined) return;
-        const cost = n.dollars ? "  $" + Number(n.dollars).toFixed(4) : "";
         els.push({ data: {
           id: String(n.id),
-          label: (n.title || "(untitled)") + cost,
+          label: (n.title || "(untitled)") + costLabel(n),
           status: n.status || "",
         }});
         (n.children || []).forEach((c) => {
@@ -172,7 +174,9 @@
       } catch (e) {
         failures++;
         statusEl.textContent = (e.name === 'AbortError' ? 'Plan refresh timed out.' : 'Plan updates unavailable.')
-          + (lastRefresh ? ' Showing older data from ' + lastRefresh + '.' : ' No current plan was loaded.') + ' Choose Refresh plan to retry.';
+          + (lastRefresh ? ' Showing older data from ' + lastRefresh + '.'
+            : list.querySelector('a') ? ' Showing the plan captured when this page loaded; it may be out of date.'
+              : ' No current plan was loaded.') + ' Choose Refresh plan to retry.';
         if (failures >= 5) stopped = true;
       } finally {
         clearTimeout(timeout); busy = false; controller = null;
