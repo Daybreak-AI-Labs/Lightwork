@@ -13,6 +13,18 @@ mean that every external service, native platform, language or distribution is
 qualified. The [local qualification record](local-qualification.md) identifies
 failed/incomplete runs, later repairs and exact-source results.
 
+The latest complete ordinary run still has one
+[unresolved transport timeout](transport-timeout-investigation-95aa61e.md).
+Its focused passes do not replace fresh integrated qualification. The
+[skip identity ledger](skip-reconciliation-final07.md) distinguishes separate
+dependency-cohort passes from tests that remain unavailable.
+
+The user's separate PR #2531 has a confirmed conflicting version-42 schema
+migration on both database backends. The
+[read-only comparison](concurrent-pr2531-overlap.md) records the exact source
+heads and the migration/approval contracts that must be reconciled before
+combining the drafts. That separate work has not been imported or changed.
+
 ## Changes that affect existing installations
 
 - **Employee content:** administrator policy authority no longer grants automatic
