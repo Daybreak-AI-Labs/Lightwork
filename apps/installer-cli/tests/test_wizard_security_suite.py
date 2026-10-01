@@ -1129,6 +1129,7 @@ def test_vendor_resume_preserves_saved_owner_decision(tmp_path, monkeypatch, own
         "safety",
         "signed_skills",
         "budget",
+        "approval",
         "sandbox",
         "research_execution",
         "candidate_promotion",
@@ -1150,6 +1151,8 @@ def test_vendor_resume_preserves_saved_owner_decision(tmp_path, monkeypatch, own
         "advanced",
     )
     saved = dict.fromkeys(keys, {"enable": False})
+    # The API access answer rides inside ``advanced``; a saved one is not asked again.
+    saved["advanced"] = {"enable": False, "api_keys": {"api_keys": False}}
     saved["security_suite"] = {
         "vendor_onboarding": True, "vendor_onboarding_owner": owner,
         "vendor_reviewed_uploads": False,

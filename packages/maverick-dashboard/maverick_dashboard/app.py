@@ -775,7 +775,6 @@ def _warm_goal_runtime() -> None:
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
 
 
-@asynccontextmanager
 def repair_default_workspace() -> None:
     """Keep the deployment's default workspace admitted once named ones exist.
 
@@ -792,6 +791,7 @@ def repair_default_workspace() -> None:
         log.exception("default workspace repair skipped")
 
 
+@asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Application lifespan: run startup tasks, then yield to serve.
 

@@ -126,6 +126,7 @@ class _ShellLinks(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.in_sidebar = 0
+        self.in_quick = 0  # the "Most used" shortcuts repeat links from the groups
         self.in_finder = 0
         self.sidebar_hrefs: list[str] = []
         self.finder_hrefs: list[str] = []
@@ -136,10 +137,12 @@ class _ShellLinks(HTMLParser):
             self.in_sidebar += 1
         if tag == "dialog" and values.get("id") == "navfinder-dialog":
             self.in_finder += 1
+        if tag == "ul" and "navquick-list" in (values.get("class") or "").split():
+            self.in_quick += 1
         if tag != "a" or not values.get("href"):
             return
         classes = set((values.get("class") or "").split())
-        if self.in_sidebar and "navquick" not in classes:
+        if self.in_sidebar and not self.in_quick and "navquick" not in classes:
             self.sidebar_hrefs.append(values["href"])
         if self.in_finder and "data-navfinder-target" in values:
             self.finder_hrefs.append(values["href"])
@@ -147,6 +150,8 @@ class _ShellLinks(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag == "aside" and self.in_sidebar:
             self.in_sidebar -= 1
+        if tag == "ul" and self.in_quick:
+            self.in_quick -= 1
         if tag == "dialog" and self.in_finder:
             self.in_finder -= 1
 
