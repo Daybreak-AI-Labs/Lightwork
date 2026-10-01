@@ -1,8 +1,12 @@
-# Employee companions: first increment
+# Employee companions: bounded conversation preview
 
-Implementation date: September 30, 2026. **Draft, untested.** The user requested
-that testing follow implementation. This document describes code boundaries,
-not deployment, security qualification, or customer acceptance evidence.
+Implementation began September 30, 2026. This remains a draft feature with
+executed local regression evidence and unqualified installed/provider boundaries.
+Local tests were subsequently authorized; the original test deferral no longer
+applies. This document describes the companion service, while the consolidated
+[195-entry register](ux-audit-2026-09-30/implementation-tracker.json) records the
+related task, privacy, memory and product-operation changes. Neither code delivery
+nor passing local tests establishes release or customer acceptance.
 
 ## What this increment provides
 
@@ -17,10 +21,11 @@ drafts; their task-context links identify data supplied to the model, not proof
 that every generated statement is correct. Restored history does not restore
 previously authorized links.
 
-The existing `ChatThreads`, runner, task queue, submission receipts, task
-approval and cancellation behavior are unchanged. This separate conversation
-does not acquire the active chat's single-turn admission fence. It does not
-steer an active agent, start another task, or become a replacement agent runtime.
+This separate companion conversation does not acquire the active chat's
+single-turn admission fence, steer an active agent, start another task, or become
+a replacement agent runtime. The consolidated audit separately adds the
+[governed conversation inbox](conversation-inbox.md) to ordinary task chats;
+those queue/guidance controls are not companion capabilities.
 
 The existing installation provider configuration is untouched. AI turns send
 the employee's message, up to six eligible retained exchanges and optional own
@@ -116,9 +121,11 @@ timeouts still apply, and a physical request can outlive the browser wait.
   text. It is stateless across turns; unsaved browser text is not sent back as
   model history. Retained exchanges carry their draft/status kind and model
   route metadata inside the encrypted envelope.
-- Admin APIs return only policy and event metadata. No administrator route
-  accepts an employee ID to retrieve their conversation. There is no privileged
-  content-access process in this increment.
+- Companion admin APIs return only policy and event metadata. No companion
+  administrator route accepts an employee ID to retrieve their conversation.
+  The separate reviewed content-access process covers supported ordinary task,
+  approval-card and subject-data resources; it does not grant companion-history
+  access.
 - Each policy change or completed companion reply is published atomically with
   its required local metadata receipt. Failed persistence does not return a
   successful reply. The journal records actor, owner, action, revision and time;
@@ -147,12 +154,20 @@ enterprise retrieval. Provider contracts and routing must be qualified before
 deployment. Every external effect will need current
 authority checks and exact approval/replay semantics at its execution boundary.
 
-Privacy here applies to the new companion conversation. Existing administrator
-access to ordinary tasks/chats and general audit content has not been removed.
-This feature does not establish deployment-wide employee conversation privacy,
-no-egress guarantees, compliance, or privileged-host confidentiality. Installation
-administrators and operating-system/key holders remain trusted. The metadata
-journal is bounded and mutable, not an immutable compliance archive.
+The consolidated LW-095 implementation also removes automatic administrator
+content access to existing employee tasks and chats. Named accounts list their
+own task content; administrator policy authority does not itself authorize
+reading private employee content. Supported exceptional reads require an exact
+resource request, an independent current reviewer, expiry and an acknowledged
+audit receipt. Each exceptional read requires its own acknowledged receipt, and
+the grant does not authorize mutation or publication. Audit search and export
+use metadata projections instead of raw prompts or tool payloads. These changes
+are draft code, not a production migration or a deployment-wide privacy
+certification.
+
+No-egress, compliance, privileged-host confidentiality and immutable audit
+retention are not promised. Operating-system/key holders remain trusted; the
+companion metadata journal is bounded and mutable.
 The shared runtime's usage settlement retains its existing best-effort behavior;
 this feature does not make global audit or billing failure handling fail-closed.
 
@@ -167,23 +182,28 @@ employee, change policy, answer from companion state, or clear history. These
 missing operations and unverified browser/recovery journeys mean the customer
 experience contract is only partially implemented.
 
-## Qualification to perform later
+## Qualification and remaining checks
 
-Regression tests have been authored for policy validation, revision conflicts,
-tenant and employee isolation, admin metadata privacy, retention, deletion,
-persistence failure, current membership/revocation, configured model isolation,
-physical attempt guards, request replay, late-result suppression and API/UI behavior. They have
-**not been executed**. No model call, provider acceptance, browser render,
-authenticated installation journey, lint, full suite, or secure-default run is
-claimed by this PR.
+Regression tests cover policy validation, revision conflicts, tenant and employee
+isolation, administrator metadata privacy, retention, deletion, persistence
+failure, current membership/revocation, configured-model isolation, physical
+attempt guards, request replay, late-result suppression and API behavior. The
+three companion Python files passed all 190 cases in the complete ordinary run
+at `2c1e8a888eee011a2851836079b57c9929b8d745`: 90 store cases, 15 model-facade
+cases and 85 dashboard API cases, using synthetic providers and isolated stores.
+The source evidence is `audit/qualification-final-03-ordinary.xml`. This is the
+same 190-case cohort described below, not an additional count. That complete run
+had 17 unrelated failures subsequently repaired; it was not an all-green run.
 
-After preparing an isolated supported Python environment and confirming local
-package imports, run the added core, dashboard and installer tests, then the
-relevant existing authentication/chat/settings regressions. Repeat under
-`MAVERICK_TEST_SECURE_DEFAULT=1`; run Ruff, Vulture and repository contract gates.
-Review desktop/narrow layouts, keyboard use, stale tabs, policy revocation,
-retention changes, missing encryption support, corrupted stores and account
-switches in an authenticated local application before enabling the feature.
+The [local qualification record](ux-audit-2026-09-30/local-qualification.md)
+tracks exact source revisions, later integrated runs, static checks and remaining
+failures. Final-source ordinary/secure and browser verification are coordinated
+there. Local mocked provider exchanges do not qualify real model behavior,
+provider retention or billing, an installed distribution, customer accessibility
+or distributed deployment. Desktop/narrow layouts, keyboard use, stale tabs,
+policy revocation, retention changes, missing encryption support, corrupted
+stores and account switches remain subject to their recorded browser/native
+coverage and any unexecuted installed acceptance checks before enablement.
 
 ### Local regression checkpoint
 

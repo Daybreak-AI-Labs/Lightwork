@@ -524,7 +524,7 @@
     "category": "Accessibility language and mobile",
     "status": "implemented-test-needed",
     "implementation_evidence": [
-      "Integrated 1659 wired source-keyed product-copy entries with draft French/German/Japanese/Chinese translations and shared catalog/placeholder validation; Arabic seed unchanged.",
+      "Integrated 1660 wired source-keyed product-copy entries with draft French/German/Japanese/Chinese translations and shared catalog/placeholder validation; Arabic seed unchanged.",
       "Explicit server regions/browser bindings across first-task, preferences, answer, project reviews and task-file recovery. Source documents, inputs, result streams and parameter values remain escaped/verbatim and independently directed.",
       "Independent interface_language account/workspace/organization inheritance, portable profile field, device/account header controls, legacy display API key normalization. Response language and response prompts remain unchanged; saves preserve editor drafts.",
       "BCP47 regional browser formatting, weighted Accept-Language, Intl date/number/currency/plurals, calendar-date no-UTC-drift, actual fallback-region lang and RTL dialog/table rules, opt-in native confirmation and field validation.",
@@ -547,7 +547,8 @@
       "Live chat/preferences follow-on: 27 focused chat/stream/attachment Python cases passed; 31 locale/catalog/memory Python cases passed, followed by 13 targeted cases after the added select/custom-theme regression. Browser checks: 41 existing workflow/authority/CLI cases, 9 locale/preferences cases and 5 final preferences/restart cases passed. These reruns overlap and are not a unique-test total. Ruff, AST3.10, Jinja parsing, inline/external JavaScript syntax and whitespace checks passed.",
       "First-task follow-on: 19 focused Python cases passed; 29 DOM cases passed including actual file review, SpeechRecognition and prepared-template input selectors plus existing workflow handoff and draft integrity checks. Earlier locale/file-selection cohort passed 11 DOM cases before added real-composer cases. AST3.10, Jinja, actual inline JavaScript syntax, Ruff and whitespace passed.",
       "Final integrated qualification: 90 unique Python cases passed across the 75-case main cohort and 22-case follow-on (seven overlap), based on JUnit case identities. The 135-case DOM cohort passed 134 initially; the remaining fixture lacked the LW068 hidden connection reference field. Updating the fixture to the actual form and asserting exact metadata preservation yielded 35/35 affected cases passing. No production controller bypass or assertion removal.",
-      "Final inventory: 1659 actual wired source messages; every literal ui/ut binding in the 10 selected journey templates has a catalog entry. Placeholder validation, Python3.10 AST, Ruff, JavaScript syntax and whitespace passed. See web-localization-qualification.md for commands and boundaries."
+      "Historical d388321 qualification inventory: 1659 actual wired source messages; every literal ui/ut binding in the 10 selected journey templates has a catalog entry. Placeholder validation, Python3.10 AST, Ruff, JavaScript syntax and whitespace passed. See web-localization-qualification.md for commands and boundaries.",
+      "Read-only final register review at 7d38f76ccc7c8b1752eaeb44d65dccfd0646d4d5 recomputed the current static inventory: 1660 wired source messages, 496 literal bindings across ten selected templates, no missing bound-source catalog entry, and exact equality with web-localization-coverage.json. This static check does not qualify dynamic copy, linguistic accuracy or browser/accessibility acceptance; the earlier 1659 count belongs to its historical checkpoint."
     ],
     "remaining": [
       "Native-language review of French/German/Japanese/Chinese draft translations, including approval, spending, privacy, restore and publication consequences. Automated tests do not qualify linguistic or legal wording.",
@@ -2217,8 +2218,8 @@
       "templates/500.html and support_api.PreviewIn: safe copy/help handoff into reviewed bundle",
       "tests/test_failure_references.py: distinct references and independent rendering fallback"
     ],
-    "validation": "Python 3.10 AST, JavaScript syntax, git diff --check passed. Regression cases authored, not executed.",
-    "remaining": "Runtime, authenticated browser and acceptance validation deferred at user request.",
+    "validation": "Local tests are authorized. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed both failure-reference cases; the combined support cohort contains eight distinct cases, not per-row additive counts. The API cases include scrubbed local preview, reviewed edits, current task authority, and oldest-task discovery across 60 synthetic records. Failure-reference cases verify distinct restricted-log references and independent rendering fallback. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. That full run retained 17 unrelated failures subsequently repaired; this is not a complete green-suite claim. Earlier Python 3.10 AST, JavaScript syntax and whitespace checks passed. No external report was sent.",
+    "remaining": "Fresh final-source ordinary/secure and authenticated browser qualification remain coordinated with the consolidated PR. Human support-report comprehension, installed accessibility and actual external publication remain separate; no permission to send a report or contact support is inferred from local tests.",
     "evidence_slice": "slices/support.json"
   },
   {
@@ -2232,8 +2233,8 @@
       "static/lightwork-support-ops.js and templates/support.html: editable local preview, explicit GitHub transfer, local copy/download, no persistent draft",
       "tests/test_support_ops_api.py: preparation excludes external URL; edits scrubbed; revoked task denied"
     ],
-    "validation": "Python 3.10 AST, JavaScript syntax, git diff --check passed. Regression cases authored, not executed.",
-    "remaining": "Runtime, authenticated browser and acceptance validation deferred at user request.",
+    "validation": "Local tests are authorized. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all six support-operation API cases; the combined support cohort contains eight distinct cases, not per-row additive counts. The API cases include scrubbed local preview, reviewed edits, current task authority, and oldest-task discovery across 60 synthetic records. Failure-reference cases verify distinct restricted-log references and independent rendering fallback. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. That full run retained 17 unrelated failures subsequently repaired; this is not a complete green-suite claim. Earlier Python 3.10 AST, JavaScript syntax and whitespace checks passed. No external report was sent.",
+    "remaining": "Fresh final-source ordinary/secure and authenticated browser qualification remain coordinated with the consolidated PR. Human support-report comprehension, installed accessibility and actual external publication remain separate; no permission to send a report or contact support is inferred from local tests.",
     "evidence_slice": "slices/support.json"
   },
   {
@@ -2247,8 +2248,8 @@
       "static/lightwork-support-ops.js: older-page continuation and distinct empty/error feedback",
       "tests/test_support_ops_api.py: 60-task oldest lookup, disjoint pages and denied selection"
     ],
-    "validation": "Python 3.10 AST, JavaScript syntax, git diff --check passed. Regression cases authored, not executed.",
-    "remaining": "Runtime, authenticated browser and acceptance validation deferred at user request.",
+    "validation": "Local tests are authorized. At frozen 2c1e8a888eee011a2851836079b57c9929b8d745, the complete ordinary run passed all six support-operation API cases; the combined support cohort contains eight distinct cases, not per-row additive counts. The API cases include scrubbed local preview, reviewed edits, current task authority, and oldest-task discovery across 60 synthetic records. Failure-reference cases verify distinct restricted-log references and independent rendering fallback. Evidence: audit/qualification-final-03-ordinary.xml and local-qualification.md. That full run retained 17 unrelated failures subsequently repaired; this is not a complete green-suite claim. Earlier Python 3.10 AST, JavaScript syntax and whitespace checks passed. No external report was sent.",
+    "remaining": "Fresh final-source ordinary/secure and authenticated browser qualification remain coordinated with the consolidated PR. Human support-report comprehension, installed accessibility and actual external publication remain separate; no permission to send a report or contact support is inferred from local tests.",
     "evidence_slice": "slices/support.json"
   },
   {

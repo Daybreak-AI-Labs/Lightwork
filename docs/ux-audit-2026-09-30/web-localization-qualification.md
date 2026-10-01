@@ -55,6 +55,15 @@ Generate the static inventory with:
 python scripts/journey_i18n_coverage.py --output docs/ux-audit-2026-09-30/web-localization-coverage.json
 ```
 
+## Later inventory check
+
+At `7d38f76ccc7c8b1752eaeb44d65dccfd0646d4d5`, a read-only recomputation of
+`scripts/journey_i18n_coverage.py` matched the saved coverage JSON exactly:
+1,660 current wired source messages, 496 literal bindings across ten templates
+and no bound source missing a catalog entry. The 1,659-message count above
+belongs to the earlier qualification checkpoint. No additional runtime or
+linguistic acceptance is inferred from this static inventory.
+
 ## Remaining qualification
 
 English remains the only qualified complete-body locale. The four expanded catalogs remain visibly marked as drafts/partial languages until native-language reviewers validate wording, including approval, spending, privacy, restore and publication consequences. Unknown backend messages and administrative pages outside the selected journey retain honest English/source fallbacks.
