@@ -215,3 +215,21 @@ The original failure lacks a timer receipt, so its cause remains an inference.
 The unchanged case passed focused execution and the complete secure run. Future
 full-run diagnostics record timer invocation before calling the original timeout
 handler; deadlines and failure behavior remain unchanged.
+
+## Complete browser and JavaScript checkpoint `11c3099`
+
+The integrated onboarding repair and later SQL/test corrections are included in
+`11c30996c98a0ad0c9583005223019ad0d75b8b4`. All **90 distinct installed-Chrome
+journeys** passed across the complete default/setup profiles, with zero retries
+or unexecuted cases. All **1,695 JavaScript tests across 179 files** passed, with
+zero failures, cancellations or skips. Source and tracked tree remained unchanged.
+The [dated qualification record](browser-quiet-qualification-2026-10-01.md)
+retains original failed runs, case reconciliation, hashes and fixture posture.
+
+The measured repair avoids more than 2,000 unnecessary bundled-agent reads for
+activated owners or workspaces with no parseable overrides. Thirteen focused
+regressions pass in each Python posture. This improvement and the green quiet
+rerun do not fully attribute the earlier 25.805-second outlier. Native platform,
+live-provider and human accessibility/translation limits remain explicit.
+Qdrant compatibility, native supplementary checks and fresh complete Python
+qualification are the remaining active local work.
