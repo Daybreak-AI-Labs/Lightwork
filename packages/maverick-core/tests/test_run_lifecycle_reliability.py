@@ -148,6 +148,39 @@ async def test_paid_finalize_is_included_in_episode_and_quota(run_state, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_private_goal_skips_opted_in_shared_skill_distillation(run_state, monkeypatch):
+    from maverick import audit
+
+    ctx = run_state
+    ctx.goal_id = ctx.world.create_goal("private payroll plan", owner="user:alice")
+    monkeypatch.setenv("MAVERICK_AUTO_DISTILL", "1")
+    monkeypatch.setattr("maverick.orchestrator._build_shield", lambda: None)
+
+    async def answer(self):
+        return AgentResult(role=self.role, name=self.name, final="assessment ready")
+
+    def forbidden_distill(*args, **kwargs):
+        pytest.fail("private goal must not reach the tenant-wide distiller")
+
+    skipped = []
+    original_audit = audit.audit_event
+
+    def capture_audit(kind, **payload):
+        if kind == audit.EventKind.SKILL_DISTILL_SKIPPED:
+            skipped.append(payload)
+        return original_audit(kind, **payload)
+
+    monkeypatch.setattr(Agent, "run", answer)
+    monkeypatch.setattr("maverick.orchestrator.distill", forbidden_distill)
+    monkeypatch.setattr(audit, "audit_event", capture_audit)
+    result = await run_goal(ctx.llm, ctx.world, ctx.budget, ctx.goal_id, sandbox=ctx.sandbox)
+    assert "skill distill skipped: this task is private" in result
+    assert ctx.world.get_goal(ctx.goal_id).status == "done"
+    assert skipped == [{"agent": "skill_distillation", "goal_id": ctx.goal_id,
+                        "reason": "private_source"}]
+
+
+@pytest.mark.asyncio
 async def test_resume_counts_history_once_and_settles_only_new_usage(run_state, monkeypatch):
     ctx = run_state
     monkeypatch.setattr("maverick.orchestrator._build_shield", lambda: None)

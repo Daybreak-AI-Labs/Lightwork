@@ -323,6 +323,13 @@ class EventKind:
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.
     LEARNING_UPDATE = "learning_update"
+    # A validated, shared-source provider skill was authorized for an atomic
+    # write. Contains source goal ID and exact output-byte digest, but makes
+    # no claim that the subsequent filesystem publication succeeded.
+    SKILL_DISTILL_PREPARED = "skill_distill_prepared"
+    # A per-run shared-skill attempt was skipped because its source was not
+    # explicitly shared. No goal title or trajectory content is logged.
+    SKILL_DISTILL_SKIPPED = "skill_distill_skipped"
     # Deployment-global operator control over learning gates. Kept distinct
     # from learned-state writes so an auditor can identify who armed DGM.
     # payload: control, enabled, actor, acknowledged, previous_requested,

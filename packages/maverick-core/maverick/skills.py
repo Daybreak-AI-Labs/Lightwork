@@ -295,6 +295,12 @@ def _source_readable(skill: Skill) -> bool:
         return False
     try:
         from .memory_ownership import current_owner, source_allowed
+        # Provider-distilled skills live in the tenant-wide installed-skill
+        # directory. Older private-source files may still be present there;
+        # retain them for review but never serve them to any employee. A
+        # personal skill needs a separate owner-scoped store and recall path.
+        if skill.source == "auto-distilled-provider-v1":
+            return all(source_allowed(gid, "") for gid in skill.source_goal_ids)
         owner = current_owner()
         return all(source_allowed(gid, owner) or source_allowed(gid, "")
                    for gid in skill.source_goal_ids)
@@ -975,9 +981,19 @@ def distill(
     llm: LLM,
     budget: Budget | None = None,
     skills_dir: Path | None = None,
+    source_world=None,
 ) -> Skill | None:
     from .learning_guard import learning_write_allowed
     if not learning_write_allowed("skill_distillation", "provider_distill"):
+        return None
+    from .logging_config import current_goal_id
+    from .memory_ownership import source_allowed
+    source_id = current_goal_id()
+    # The destination is shared by a tenant. An absent/private/excluded source
+    # must not reach the model or land in that shared directory, even when an
+    # operator opted into provider distillation. Recheck after model work too.
+    if not source_id or not source_allowed(source_id, "", world=source_world):
+        log.info("shared skill distillation skipped: source goal is not shared")
         return None
     target_dir = _resolved_skills_dir(skills_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -1004,8 +1020,6 @@ def distill(
     try:
         # The model cannot choose provenance. Retain the server's exact source
         # before storing generated text in the shared installed-skill directory.
-        from .logging_config import current_goal_id
-        source_id = current_goal_id()
         match = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
         if match:
             front = "\n".join(line for line in match[1].splitlines()
@@ -1019,7 +1033,28 @@ def distill(
         # render_for_prompt -- so it must be frontmatter-validated and
         # shield-scanned, and (unlike the old raw write_text) must NOT land
         # on disk if it fails. _validate_and_write parses before writing.
-        return _validate_and_write(text, target_dir)
+        def _authorize_write() -> None:
+            from .audit import EventKind, audit_event
+            from .learning_guard import check_learning_halt
+
+            check_learning_halt("skill_distillation", "save")
+            if not source_allowed(source_id, "", world=source_world):
+                raise ValueError("source goal is no longer shared")
+            # This receipt records an authorized, validated candidate. It
+            # deliberately does not claim publication, which happens next.
+            if not audit_event(
+                EventKind.SKILL_DISTILL_PREPARED,
+                agent="skill_distillation",
+                goal_id=source_id,
+                # atomic_write_text currently uses text mode, which expands
+                # LF to CRLF on Windows. Commit to the persisted bytes.
+                content_sha256=hashlib.sha256(
+                    text.replace("\n", os.linesep).encode("utf-8")
+                ).hexdigest(),
+            ):
+                raise ValueError("learning audit unavailable")
+
+        return _validate_and_write(text, target_dir, before_save=_authorize_write)
     except Exception as e:
         log.warning("distilled skill rejected (not written): %s", e)
         return None

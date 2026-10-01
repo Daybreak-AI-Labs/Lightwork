@@ -2524,19 +2524,30 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         # skill either. This is the second of the two distillation call
         # sites the freeze needs to reach -- this one is opt-in but still
         # live wherever an operator has set MAVERICK_AUTO_DISTILL=1.
-        if auto_distill and _skill_distillation_frozen():
+        if auto_distill and getattr(goal, "owner", None) != "":
+            auto_distill = False
+            skill_note = "\n\n[skill distill skipped: this task is private]"
+            try:
+                from .audit import EventKind, audit_event
+                if not audit_event(EventKind.SKILL_DISTILL_SKIPPED,
+                                   agent="skill_distillation", goal_id=goal_id,
+                                   reason="private_source"):
+                    log.warning("private skill distillation skip audit unavailable")
+            except Exception:  # no learning action to roll back
+                log.warning("private skill distillation skip audit unavailable")
+        elif auto_distill and _skill_distillation_frozen():
             auto_distill = False
             skill_note = "\n\n[skill distill skipped: learning is frozen (verifier calibration inadequate)]"
         elif auto_distill:
             try:
-                skill = distill(goal.title, summary, blackboard, llm, budget=budget)
-                # A None return means the distiller's output failed the skill
-                # validation/shield gate (#396) and was NOT written. Say so:
-                # auto-distill used to go silent here, indistinguishable from
-                # "never ran" (platform-test finding).
+                skill = distill(goal.title, summary, blackboard, llm,
+                                budget=budget, source_world=world)
+                # A None return means no skill was installed (validation,
+                # source scope, HALT, or audit may have refused it). Do not
+                # claim a specific failed gate that the caller cannot know.
                 skill_note = (
                     f"\n\n[distilled skill: {skill.name}]" if skill
-                    else "\n\n[skill distill: output failed validation; no skill written]"
+                    else "\n\n[skill distill: no skill installed]"
                 )
             except BudgetExceeded:
                 skill_note = "\n\n[skill distill skipped: budget]"
