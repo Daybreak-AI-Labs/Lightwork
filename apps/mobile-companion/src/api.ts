@@ -244,8 +244,8 @@ export function executeDeviceAction(cfg: Settings, token: string, signal?: Abort
   return apiRequest(cfg, '/api/v1/devices/actions/execute', signal, {token, confirmed: true});
 }
 
-export function listGoals(cfg: Settings, limit = 50, signal?: AbortSignal, offset = 0, status = ""): Promise<Goal[]> {
-  return apiGet<Goal[]>(cfg, `/api/v1/goals?limit=${limit}&offset=${offset}&status=${encodeURIComponent(status)}`, signal);
+export function listGoals(cfg: Settings, limit = 50, signal?: AbortSignal, offset = 0, status = "", beforeId?: number): Promise<Goal[]> {
+  return apiGet<Goal[]>(cfg, `/api/v1/goals?limit=${limit}&offset=${offset}&status=${encodeURIComponent(status)}${beforeId == null ? '' : `&before_id=${beforeId}`}`, signal);
 }
 
 export function searchGoals(cfg: Settings, query: string, signal?: AbortSignal): Promise<Goal[]> {

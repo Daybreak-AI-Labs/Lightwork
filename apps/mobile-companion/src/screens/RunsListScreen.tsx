@@ -1,16 +1,51 @@
 import {msg, messageLanguage, useLanguage, formattedTime} from "../language";
 /* Tasks list — GET /api/v1/goals (newest first), polled every 10s.
  * Falls back to the cached offline bundle when the dashboard is unreachable. */
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { BundleGoal, Goal, Settings, listGoals, searchGoals } from "../api";
+import { ApiError, BundleGoal, Goal, Settings, isAccessDenied, listGoals, searchGoals } from "../api";
 import { ConnectionNotice } from "../components/ConnectionNotice";
 import { Banner, Button, EmptyState, Loading, StatusPill } from "../components/ui";
 import { statusLabel, taskTitle } from "../format";
 import { offlineBanner, useCachedBundle } from "../offlineCache";
 import { usePolling } from "../poll";
 import { useTheme, type Palette } from "../theme";
+
+// Re-read the visible ID window so removed or newly inaccessible older rows do
+// not survive in an append-only cache. Every cursor page is scoped by the server
+// again; usePolling publishes a complete window only for its current generation.
+async function readTaskWindow(settings: Settings, signal: AbortSignal, status: string,
+  floor: number | null, extend: boolean): Promise<{rows: Goal[]; hasMore: boolean}> {
+  const rows: Goal[] = [];
+  let before: number | undefined, addedBelow = 0;
+  while (true) {
+    if (signal.aborted) throw new ApiError('Request cancelled.', undefined, 'cancelled');
+    const page = await listGoals(settings, 50, signal, 0, status, before);
+    if (signal.aborted) throw new ApiError('Request cancelled.', undefined, 'cancelled');
+    if (!Array.isArray(page) || page.length > 50) {
+      throw new ApiError('The task list changed in a way this app could not read. Refresh, or ask your administrator to update the dashboard.', undefined, 'protocol');
+    }
+    let previous = before ?? Infinity;
+    for (const row of page) {
+      if (!Number.isSafeInteger(row.id) || row.id <= 0 || row.id >= previous) {
+        throw new ApiError('The task list changed in a way this app could not read. Refresh, or ask your administrator to update the dashboard.', undefined, 'protocol');
+      }
+      previous = row.id;
+    }
+    for (const row of page) {
+      const below = floor !== null && row.id < floor;
+      if (rows.length >= 50 && (floor === null || below) && (!extend || addedBelow >= 50)) {
+        return {rows, hasMore: true};
+      }
+      rows.push(row);
+      if (below) addedBelow++;
+    }
+    if (page.length < 50) return {rows, hasMore: false};
+    if (floor === null || (extend ? addedBelow >= 50 : previous <= floor)) return {rows, hasMore: true};
+    before = previous;
+  }
+}
 
 export function RunsListScreen(props: {
   settings: Settings;
@@ -21,35 +56,60 @@ export function RunsListScreen(props: {
   const theme = useTheme(), styles = stylesFor(theme);
   const { settings, onOpenRun, onOpenSettings } = props;
   const [query, setQuery] = useState(''), [search, setSearch] = useState(''), [status, setStatus] = useState('');
-  const [older, setOlder] = useState<Goal[]>([]), [loadingMore, setLoadingMore] = useState(false), [exhausted, setExhausted] = useState(false);
-  const [pageError, setPageError] = useState('');
-  const requestOwner = useRef(0), pageRequest = useRef<AbortController | null>(null);
-  const fetcher = useCallback((signal: AbortSignal) => search ? searchGoals(settings, search, signal) : listGoals(settings, 50, signal, 0, status), [settings, search, status]);
+  const window = useMemo(() => ({floor: null as number | null, expanding: false, busy: false, sequence: 0}), [settings, search, status]);
+  const activeWindow = useRef<typeof window | null>(window); activeWindow.current = window;
   useEffect(() => {
-    requestOwner.current += 1; pageRequest.current?.abort(); setOlder([]); setExhausted(false); setLoadingMore(false); setPageError('');
-    return () => { requestOwner.current += 1; pageRequest.current?.abort(); };
-  }, [fetcher]);
-  async function loadMore(): Promise<void> {
-    if (loadingMore || search || !data) return;
-    const owner = requestOwner.current, controller = new AbortController(); pageRequest.current = controller;
-    setLoadingMore(true); setPageError('');
+    activeWindow.current = window;
+    return () => { if (activeWindow.current === window) activeWindow.current = null; };
+  }, [window]);
+  const [pageState, setPageState] = useState({owner: window, loading: false, hasMore: true});
+  const loadingMore = pageState.owner === window && pageState.loading;
+  const hasMore = pageState.owner !== window || pageState.hasMore;
+  const fetcher = useCallback(async (signal: AbortSignal): Promise<Goal[]> => {
+    if (signal.aborted || activeWindow.current !== window) throw new ApiError('Request cancelled.', undefined, 'cancelled');
+    if (search) return searchGoals(settings, search, signal);
+    const sequence = ++window.sequence;
+    window.busy = window.expanding;
+    setPageState(previous => ({owner: window, loading: window.expanding, hasMore: previous.owner !== window || previous.hasMore}));
     try {
-      const page = await listGoals(settings, 50, controller.signal, data.length + older.length, status);
-      if (owner !== requestOwner.current) return;
-      setOlder(previous => Array.from(new Map([...previous, ...page].map(goal => [goal.id, goal])).values()));
-      setExhausted(page.length < 50);
-    } catch { if (owner === requestOwner.current) setPageError('Could not load older tasks. Try Load older tasks again.'); }
-    finally { if (owner === requestOwner.current) setLoadingMore(false); }
-  }
+      const result = await readTaskWindow(settings, signal, status, window.floor, window.expanding);
+      if (!signal.aborted && activeWindow.current === window && window.sequence === sequence) {
+        window.floor = result.rows.at(-1)?.id ?? null;
+        window.expanding = false;
+        setPageState({owner: window, loading: false, hasMore: result.hasMore});
+      }
+      return result.rows;
+    } catch (failure) {
+      if (activeWindow.current === window && window.sequence === sequence
+          && (isAccessDenied(failure) || (failure as {kind?: string})?.kind === 'unsupported')) {
+        window.floor = null; window.expanding = false;
+      }
+      throw failure;
+    } finally {
+      if (activeWindow.current === window && window.sequence === sequence) {
+        window.busy = false;
+        setPageState(previous => ({owner: window, loading: false, hasMore: previous.owner !== window || previous.hasMore}));
+      }
+    }
+  }, [settings, search, status, window]);
   const { data, error, accessDenied, unsupported, refresh, updatedAt } = usePolling<Goal[]>(fetcher, 10_000);
   useEffect(() => {
-    if (accessDenied || unsupported) { requestOwner.current += 1; pageRequest.current?.abort(); setOlder([]); }
-  }, [accessDenied, unsupported]);
+    if (error) {
+      window.busy = false;
+      setPageState(previous => ({owner: window, loading: false, hasMore: previous.owner !== window || previous.hasMore}));
+    }
+  }, [error, window]);
+  function loadMore(): void {
+    if (activeWindow.current !== window || window.busy || loadingMore || search || !data || !hasMore || accessDenied || unsupported) return;
+    window.expanding = true; window.busy = true;
+    setPageState({owner: window, loading: true, hasMore});
+    refresh();
+  }
   const cached = useCachedBundle(settings, Boolean(error && !data && !accessDenied && !unsupported));
 
   const offline = !data && cached;
   const rows: Goal[] = data
-    ? Array.from(new Map([...older, ...data].map(goal => [goal.id, goal])).values()).sort((a, b) => b.id - a.id)
+    ? data
     : cached
       ? cached.bundle.goals.map((g: BundleGoal) => ({
           id: g.id, status: g.status, title: g.title, result: g.result,
@@ -79,7 +139,6 @@ export function RunsListScreen(props: {
       </View>
       {updatedAt ? <Text style={styles.sub}>Updated {formattedTime(updatedAt)}</Text> : null}
       {search ? <Banner text="Search shows up to 200 matches. Refine your search to find a specific task." /> : null}
-      {pageError ? <Banner text={pageError} /> : null}
       {offline && cached ? <Banner text={offlineBanner(cached)} /> : null}
       {error ? (
         <ConnectionNotice message={error} accessDenied={accessDenied} unsupported={unsupported}
@@ -90,11 +149,12 @@ export function RunsListScreen(props: {
   return (
     <View style={styles.fill}>
       <FlatList
+        maintainVisibleContentPosition={{minIndexForVisible: 0}}
         ListHeaderComponent={header}
         data={rows.filter(row => (!status || row.status === status) && (!offline || !search || `${row.title} ${row.result || ''}`.toLowerCase().includes(search.toLowerCase())))}
         keyExtractor={(g: Goal) => String(g.id)}
         ListEmptyComponent={empty}
-        ListFooterComponent={!search && data && data.length === 50 && !exhausted ? <Button label={loadingMore ? 'Loading older tasks…' : 'Load older tasks'} disabled={loadingMore} onPress={loadMore} /> : null}
+        ListFooterComponent={!search && data && data.length > 0 && hasMore ? <Button label={loadingMore ? 'Loading older tasks…' : 'Load older tasks'} disabled={loadingMore} onPress={loadMore} /> : null}
         renderItem={({ item }: { item: Goal }) => (
           <Pressable
             style={styles.row}
