@@ -1,0 +1,56 @@
+{
+  "status": "Exact retained fixture proves original corruption was a no-op; deterministic test repair awaits focused execution.",
+  "source_sha": "57a027adfdd8df955d33aaea88ec7089aafc6c60",
+  "original_failure": {
+    "nodeid": "packages/maverick-core/tests/test_flow_payloads.py::test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[bytes]",
+    "when": "call",
+    "worker": "gw1",
+    "duration_seconds": 0.17903149999619927,
+    "wall_time": 1790844389.1158323,
+    "reason": "DID NOT RAISE FlowPayloadError",
+    "local_failure_log": "audit/qualification-final-08-ordinary-native-02.failures.jsonl",
+    "failure_log_snapshot_sha256": "1f094dab05b60a48b7add9568d1bc80aa05da13b288c281523295a18ecb30db4"
+  },
+  "retained_fixture": {
+    "path": "C:/Users/Cstep/AppData/Local/Temp/lw-pu7xan1y/t/popen-gw1/test_unavailable_or_mismatched1",
+    "read_only": true,
+    "payload_decrypted": false,
+    "keys_read": false,
+    "row_bytes": 33332,
+    "row_sha256": "185e03655dc7480e341095e8b4b8f3eb408c7e4c0511b07bf19b50c653d835a2",
+    "artifact_bytes": 35159,
+    "artifact_last_byte_decimal": 88,
+    "artifact_last_byte_hex": "58",
+    "reference_sha256": "ac70f2c20dcae1f529f2ee9d1bcbd248eb16ef92492ba606edf5ff2aa620ce63",
+    "artifact_sha256": "ac70f2c20dcae1f529f2ee9d1bcbd248eb16ef92492ba606edf5ff2aa620ce63",
+    "artifact_matches_reference": true,
+    "original_injection_changes_bytes": false,
+    "original_injection_sha256": "ac70f2c20dcae1f529f2ee9d1bcbd248eb16ef92492ba606edf5ff2aa620ce63",
+    "corrected_injection_changes_bytes": true,
+    "corrected_injection_sha256": "448c44e5a756bb8314ee9401ef7528f958cba4d51a22be59a0343d3e401c0c8a",
+    "fixture_unchanged_during_read": true,
+    "probe_path": "audit/probe-flow-payload-fault-57a027a.py",
+    "probe_sha256": "3cf2904719d73ef0dbd30fd7c8f64a5ebc2f1cbe32584b617b21c9217fb60983"
+  },
+  "reviewed_sources": {
+    "production_path": "packages/maverick-core/maverick/flow/payloads.py",
+    "production_git_blob": "ceb2f9216ee1fc37ead8e22c5f3587528453aabe",
+    "production_disk_sha256": "399e5a420c32ec7dc83d99510b12c8ba5361442da8ac8a0378b2b565bc21bcb5",
+    "original_test_git_blob": "ed3d65a84e63a56fd5fafd998102c72c726589ed",
+    "original_test_disk_sha256": "60cb444f3bc270b6d4f99fc2996137d4120348cbe5169f940c44f8e970ec7b23",
+    "production_guard": "Artifact length and SHA-256 must match the stored reference before decryption."
+  },
+  "repair": {
+    "path": "packages/maverick-core/tests/test_flow_payloads.py",
+    "expression": "original[:-1] + bytes([original[-1] ^ 1])",
+    "explicit_assertion": "damaged != original",
+    "production_changed": false,
+    "original_denial_assertion_preserved": true,
+    "test_budgets_unchanged": true
+  },
+  "validation": {
+    "focused_execution": "pending phase boundary",
+    "full_suite_closure_claimed": false,
+    "related_pattern_scan": "No additional unsafe fixed-byte suffix replacement on randomized/encrypted blobs in the targeted read-only search."
+  }
+}

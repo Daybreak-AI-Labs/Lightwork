@@ -115,7 +115,10 @@ def test_unavailable_or_mismatched_artifact_never_falls_back_to_preview(damage, 
     if damage == "missing":
         path.unlink()
     elif damage == "bytes":
-        path.write_bytes(path.read_bytes()[:-1] + b"X")
+        original = path.read_bytes()
+        damaged = original[:-1] + bytes([original[-1] ^ 1])
+        assert damaged != original
+        path.write_bytes(damaged)
     elif damage == "owner":
         saved["owner"] = "user:other"
     elif damage == "flow":
