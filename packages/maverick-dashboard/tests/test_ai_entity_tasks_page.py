@@ -24,19 +24,14 @@ class _Markup(HTMLParser):
         self.tags.append((tag, dict(attrs)))
 
 
-def _templates(*, custom_theme_css: str = "") -> Jinja2Templates:
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
-    templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css=custom_theme_css,
-        custom_theme_names=["custom"] if custom_theme_css else [],
-        dir="ltr",
-        nav_groups=[],
-        t=lambda key: key,
+def _templates() -> Jinja2Templates:
+    from maverick_dashboard.app import _theme_context
+
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     return templates
 
 
@@ -217,6 +212,13 @@ def test_page_rejects_query_material_and_requires_tenant(
 def test_page_supports_custom_theme_with_one_csp_nonce(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import maverick.config as config
+
+    monkeypatch.setattr(config, "load_config", lambda: {
+        "dashboard": {"themes": {"custom": {
+            "bg": "#000", "panel": "#111", "text": "#fff", "accent": "#0f0",
+        }}},
+    })
     monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
@@ -226,22 +228,14 @@ def test_page_supports_custom_theme_with_one_csp_nonce(
         lambda _request, _permission: True,
     )
     app = FastAPI()
-    app.include_router(
-        page.create_ai_entity_tasks_page_router(
-            _templates(
-                custom_theme_css=(
-                    "body.theme-custom { --bg:#000; --panel:#111; "
-                    "--text:#fff; --accent:#0f0; }"
-                )
-            )
-        )
-    )
+    app.include_router(page.create_ai_entity_tasks_page_router(_templates()))
     response = TestClient(app, headers={"Origin": "http://testserver"}).get(ROUTE)
     parser = _Markup()
     parser.feed(response.text)
     nonces = [attrs.get("nonce") for tag, attrs in parser.tags if tag == "style"]
 
     assert len(nonces) == 2
+    assert "body.theme-custom { --bg: #000; --panel: #111;" in response.text
     assert len(set(nonces)) == 1
     assert nonces[0]
     assert f"'nonce-{nonces[0]}'" in response.headers["content-security-policy"]

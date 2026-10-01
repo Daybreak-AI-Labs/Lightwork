@@ -25,22 +25,17 @@ class _Markup(HTMLParser):
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from maverick_dashboard.app import _theme_context
+
     monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
     app = FastAPI()
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
-    templates.env.globals.update(
-        theme="dark",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="",
-        custom_theme_names=[],
-        dir="ltr",
-        nav_groups=[],
-        t=lambda key: key,
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     app.include_router(page.create_ai_evidence_analysis_page_router(templates))
     return TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -192,20 +187,21 @@ def test_workbench_server_renders_exact_role_controls(
 def test_custom_theme_css_uses_a_per_response_csp_nonce(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import maverick.config as config
+    from maverick_dashboard.app import _theme_context
+
+    monkeypatch.setattr(config, "load_config", lambda: {
+        "dashboard": {"theme": "custom", "themes": {"custom": {
+            "bg": "#000", "panel": "#111", "text": "#fff", "accent": "#0f0",
+        }}},
+    })
     monkeypatch.setattr(page, "_tenant_selected", lambda: True)
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
-    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
-    templates.env.globals.update(
-        theme="custom",
-        font="default",
-        lang="en",
-        density="comfortable",
-        custom_theme_css="body.theme-custom { --bg:#000; --panel:#111; --text:#fff; --accent:#0f0; }",
-        custom_theme_names=["custom"],
-        dir="ltr",
-        nav_groups=[],
-        t=lambda key: key,
+    templates = Jinja2Templates(
+        directory=str(PACKAGE / "templates"),
+        context_processors=[_theme_context],
     )
+    templates.env.globals.update(nav_groups=[])
     app = FastAPI()
     app.include_router(page.create_ai_evidence_analysis_page_router(templates))
     response = TestClient(app, headers={"Origin": "http://testserver"}).get(ROUTE)
@@ -214,6 +210,7 @@ def test_custom_theme_css_uses_a_per_response_csp_nonce(
     parser.feed(response.text)
     nonces = [attrs.get("nonce") for tag, attrs in parser.tags if tag == "style"]
     assert len(nonces) == 1
+    assert "body.theme-custom { --bg: #000; --panel: #111;" in response.text
     assert nonces[0]
     assert f"'nonce-{nonces[0]}'" in response.headers["content-security-policy"]
 
