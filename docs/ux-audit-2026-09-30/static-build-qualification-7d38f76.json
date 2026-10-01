@@ -1,0 +1,191 @@
+{
+  "summary": {
+    "source_head": "7d38f76ccc7c8b1752eaeb44d65dccfd0646d4d5",
+    "checkout_clean": true,
+    "matching_environment": ".venv-qualification-final-05",
+    "static_gates_passed": 2,
+    "offline_contracts_passed": 16,
+    "wheel_builds_passed": 8,
+    "wheel_archive_integrity_passed": 8,
+    "wheel_hashes_verified": 8,
+    "wheel_payloads_match_exact_git_archive": true,
+    "wheel_payload_files_verified": 4826,
+    "source_archive_commit": "7d38f76ccc7c8b1752eaeb44d65dccfd0646d4d5",
+    "source_archive_sha256": "ba73d35f0d1ea7fb11fd1e449001cd0b425cb2655e3f1603cc43995677356d72",
+    "verified_at": 1790821315.415486,
+    "wheel_hashes_file": "wheel-sha256.json",
+    "wheel_payload_details_file": "wheel-payload-verification.json",
+    "results_file": "results.json",
+    "full_test_suite": "Separate parent-owned run; not represented by these gate results."
+  },
+  "checks": [
+    {
+      "name": "ruff",
+      "exit_code": 0,
+      "seconds": 5.14
+    },
+    {
+      "name": "vulture",
+      "exit_code": 0,
+      "seconds": 27.28
+    },
+    {
+      "name": "maverick.plugin_matrix",
+      "exit_code": 0,
+      "seconds": 0.26
+    },
+    {
+      "name": "maverick.reachability",
+      "exit_code": 0,
+      "seconds": 19.55
+    },
+    {
+      "name": "maverick.dispatch_contract",
+      "exit_code": 0,
+      "seconds": 37.04
+    },
+    {
+      "name": "maverick.egress_contract",
+      "exit_code": 0,
+      "seconds": 13.63
+    },
+    {
+      "name": "maverick.audit_contract",
+      "exit_code": 0,
+      "seconds": 9.07
+    },
+    {
+      "name": "maverick.deprecations",
+      "exit_code": 0,
+      "seconds": 0.16
+    },
+    {
+      "name": "maverick.a11y_audit",
+      "exit_code": 0,
+      "seconds": 5.01
+    },
+    {
+      "name": "maverick.async_route_audit",
+      "exit_code": 0,
+      "seconds": 3.59
+    },
+    {
+      "name": "maverick.failure_policy",
+      "exit_code": 0,
+      "seconds": 0.23
+    },
+    {
+      "name": "maverick.schema_migrations",
+      "exit_code": 0,
+      "seconds": 0.27
+    },
+    {
+      "name": "maverick.migration_governance",
+      "exit_code": 0,
+      "seconds": 0.32
+    },
+    {
+      "name": "maverick.evaluator_evolution",
+      "exit_code": 0,
+      "seconds": 0.19
+    },
+    {
+      "name": "maverick.grpc_api.contract",
+      "exit_code": 0,
+      "seconds": 0.17
+    },
+    {
+      "name": "maverick.regulatory_compiler",
+      "exit_code": 0,
+      "seconds": 0.42
+    },
+    {
+      "name": "maverick.domain_audit",
+      "exit_code": 0,
+      "seconds": 0.24
+    },
+    {
+      "name": "verify_constraint_closure",
+      "exit_code": 0,
+      "seconds": 1.11
+    },
+    {
+      "name": "wheel-maverick-channels",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-core",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-dashboard",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-evolve",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-knowledge",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-mcp",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-shield",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-installer-cli",
+      "exit_code": 0
+    }
+  ],
+  "wheels": [
+    {
+      "wheel": "maverick_agent-0.1.7-py3-none-any.whl",
+      "sha256": "ddc57ef5908ed8b1d3e7f6377286f0e2a44346b823a1235e8c56b127a0ba29b4",
+      "git_export_payload_files_verified": 3856
+    },
+    {
+      "wheel": "maverick_channels-0.1.7-py3-none-any.whl",
+      "sha256": "5f586942db8c9959a0fd0b00643feb9c14d6d6791c4a1546439e9d0bb09c74e6",
+      "git_export_payload_files_verified": 31
+    },
+    {
+      "wheel": "maverick_dashboard-0.1.7-py3-none-any.whl",
+      "sha256": "802d74750f9845d4fd98d0fd97d6529c160bf4584696284f15137ea728ab70aa",
+      "git_export_payload_files_verified": 887
+    },
+    {
+      "wheel": "maverick_evolve-0.1.7-py3-none-any.whl",
+      "sha256": "6612ba464d836a4110ed32acca36e0459920ac2694c3ad5429dcca8b0e6667bc",
+      "git_export_payload_files_verified": 12
+    },
+    {
+      "wheel": "maverick_installer-0.1.7-py3-none-any.whl",
+      "sha256": "622d5b589ef7ccfbd60c6ecb2b2d16b9984a2b6b47e86f975c447fd7e1a13276",
+      "git_export_payload_files_verified": 5
+    },
+    {
+      "wheel": "maverick_knowledge-0.1.7-py3-none-any.whl",
+      "sha256": "e89d59f5e7a7c9f803349c76cc853109fdba231d5f2be49e61b52267a8a6a272",
+      "git_export_payload_files_verified": 12
+    },
+    {
+      "wheel": "maverick_mcp_server-0.1.7-py3-none-any.whl",
+      "sha256": "f67e4d37cde9292e3230b42be92aee0ffe4107b556bc44d0a5470d8cf9f7b269",
+      "git_export_payload_files_verified": 9
+    },
+    {
+      "wheel": "maverick_shield-0.1.7-py3-none-any.whl",
+      "sha256": "c94e60386a53663baa46b17052643ace8170083829d0746df769200e0718b542",
+      "git_export_payload_files_verified": 14
+    }
+  ],
+  "helper_sha256": {
+    "run-local-contracts.py": "3cfd7e1f0d7eccd8e52aecfc6705f1d741e887c0aaffe0556b9fb287b3e40479",
+    "verify-local-contracts.py": "f7bbb732ebc990289ff4af630975d9c253c8ab6294e0ae39eb53bf18c28af92c"
+  }
+}
