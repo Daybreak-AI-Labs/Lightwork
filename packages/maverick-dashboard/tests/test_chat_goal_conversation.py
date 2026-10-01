@@ -68,7 +68,8 @@ def test_goal_page_folds_the_kernels_withheld_markers_and_renders_prose(page_env
     assert 'class="chat-shell' in text
     assert 'aria-label="Chats"' in text
     assert 'aria-label="Lightwork product"' in text
-    assert 'href="/flows/designer"' in text
+    # The rail opens saved flows; the designer is one click from that page.
+    assert 'href="/workflows"' in text
     assert 'href="/action-center"' in text
 
 
@@ -174,6 +175,9 @@ def test_markdown_export_fails_closed_when_policy_read_fails(page_env, monkeypat
 
     monkeypatch.setattr(domain, "available_domains", unavailable)
     assert client.get(f"/chat/goal/{gid}/download.md").status_code == 503
+    page = client.get(f"/chat/goal/{gid}")
+    assert page.status_code == 503
+    assert "private result" not in page.text
 
 
 def test_markdown_export_rejects_concurrent_answer_change(page_env, monkeypatch):

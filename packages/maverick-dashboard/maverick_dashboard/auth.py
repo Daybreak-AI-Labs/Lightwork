@@ -718,7 +718,14 @@ def domain_suites_allowed(request: Request, domain: str | None) -> bool:
         return True
     from maverick.domain import suites_for_domain
 
-    return all(suite_allowed(request, suite) for suite in suites_for_domain(domain))
+    try:
+        return all(suite_allowed(request, suite) for suite in suites_for_domain(domain))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # An unreadable pack or grant policy is not evidence of access.  Keep
+        # the server error out of customer responses without releasing data.
+        raise HTTPException(status_code=503, detail="specialist access policy is temporarily unavailable") from exc
 
 
 BOARD_SCOPE_DETAIL = (
