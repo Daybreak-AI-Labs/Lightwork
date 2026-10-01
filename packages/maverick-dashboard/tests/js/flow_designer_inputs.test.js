@@ -42,6 +42,41 @@ test("v1 exact input_shape supports mixed fixed lists, empty structures, and col
   assert.equal(new Set(plan.fields.map(field => field.id)).size, plan.fields.length);
   assert.deepEqual(clone(inputs.read(plan, values(plan, expected))), {input: expected});
 });
+test("a retained 65-item list uses ordinary fields without changing its fixed shape", () => {
+  const shape = [{path: [], kind: "object", keys: ["lines"]},
+    {path: ["lines"], kind: "array", length: 65}];
+  for (let index = 0; index < 65; index++) shape.push({path: ["lines", index], kind: "integer"});
+  const plan = inputs.plan({schema: "lightwork.action-recipe.v1", input_shape: shape});
+  assert.equal(plan.fields.length, 65);
+  const data = inputs.read(plan, values(plan, {lines: Array.from({length: 65}, (_, index) => index)}));
+  assert.deepEqual(clone(data), {input: {lines: Array.from({length: 65}, (_, index) => index)}});
+  assert.deepEqual(JSON.parse(inputs.wireData(plan, data)), clone(data));
+  const ui = dom(), pending = ui.api.prompt(ui.api.plan({schema: "lightwork.action-recipe.v1", input_shape: shape}));
+  for (const field of plan.fields) ui.elements.find(element => element.id === field.id).value = String(field.path[1]);
+  ui.elements.find(element => element.tagName === "form").dispatch("submit");
+  return pending.then(result => {
+    assert.deepEqual(clone(result), clone(data));
+    assert.ok(ui.elements.some(element => /Enter 65 values/.test(element.textContent || "")));
+    assert.equal(ui.opener.focused, true);
+  });
+});
+test("bounded nested declared records may have more than 64 actual values", () => {
+  const first = Object.fromEntries(Array.from({length: 64}, (_, index) => [`field_${index}`, integer]));
+  const plan = inputs.plan(artifact(families[0], {first: obj(first), last: integer}));
+  assert.equal(plan.fields.length, 65);
+  const submitted = Object.fromEntries(plan.fields.map(field => [field.id, "2"]));
+  assert.equal(Object.keys(inputs.read(plan, submitted).input.first).length, 64);
+});
+test("legacy form covers the native 512-leaf limit and refuses a larger list", () => {
+  function shape(size) {
+    return [{path: [], kind: "object", keys: ["lines"]}, {path: ["lines"], kind: "array", length: size},
+      ...Array.from({length: size}, (_, index) => ({path: ["lines", index], kind: "integer"}))];
+  }
+  const model = inputs.plan({schema: "lightwork.action-recipe.v1", input_shape: shape(512)});
+  assert.equal(model.fields.length, 512);
+  assert.equal(inputs.read(model, Object.fromEntries(model.fields.map(field => [field.id, "1"]))).input.lines.length, 512);
+  assert.throws(() => inputs.plan({schema: "lightwork.action-recipe.v1", input_shape: shape(513)}), /cannot display safely/);
+});
 test("prototype-like keys stay data, and markup labels are not interpreted", () => {
   const props = JSON.parse('{"__proto__":{"type":"string","maxLength":10},"<img src=x>":{"type":"boolean"}}');
   const plan = inputs.plan(artifact(families[0], props));
@@ -88,7 +123,7 @@ for (const schema of invalidSchemas) test(`unsupported declared schema fails vis
 });
 test("expanded array size is bounded even when the compact schema is small", () => {
   assert.throws(() => inputs.plan(artifact(families[0], {grid: {type: "array", minItems: 64, maxItems: 64,
-    items: {type: "array", minItems: 64, maxItems: 64, items: integer}}})), /more than 64 values/);
+    items: {type: "array", minItems: 64, maxItems: 64, items: integer}}})), /more than 512 values/);
 });
 for (const shape of [
   [{path: [], kind: "object", keys: ["missing"]}],

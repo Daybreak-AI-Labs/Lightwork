@@ -71,8 +71,9 @@ def test_actual_artifact_and_typed_inputs_survive_form_draft_roundtrip(transform
     result = subprocess.run(
         [node, "-e", SCRIPT, str(HELPER)],
         input=json.dumps({"flow_text": json.dumps(flow.to_dict()), "inputs": entered}),
-        capture_output=True, text=True, check=True, timeout=20,
+        capture_output=True, text=True, check=False, timeout=20,
     )
+    assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     retained = payload["flow"]["learned_recipe"]
     action_recipe.validate_artifact(retained)
@@ -88,3 +89,32 @@ def test_actual_artifact_and_typed_inputs_survive_form_draft_roundtrip(transform
     assert not payload["flow"].get("inputs")
     from maverick.flow.ir import Flow
     recipe_flow.validate_flow(Flow.from_dict(payload["flow"]))
+
+
+def test_actual_legacy_recipe_with_65_inputs_survives_form_transport():
+    node = shutil.which("node")
+    assert node, "The qualified local JS runtime is required for this UI transport test"
+    def inputs(index):
+        return {f"field_{position:02d}": index + position for position in range(65)}
+
+    episodes = [{"id": f"episode-{index}", "inputs": inputs(index), "steps": [
+        {"tool": "record_case", "arguments": {"number": inputs(index)["field_00"]}, "result": {}},
+        {"tool": "finish_case", "arguments": {}, "result": {}},
+    ]} for index in (1, 2)]
+    artifact = action_recipe.synthesize(episodes, allowed_tools=["record_case", "finish_case"])
+    flow = recipe_flow.make_flow(artifact, flow_id="many-inputs", name="Many inputs")
+    entered = inputs(3)
+    result = subprocess.run(
+        [node, "-e", SCRIPT, str(HELPER)],
+        input=json.dumps({"flow_text": json.dumps(flow.to_dict()), "inputs": entered}),
+        capture_output=True, text=True, check=False, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["data"] == {"input": entered}
+    retained = payload["flow"]["learned_recipe"]
+    action_recipe.validate_artifact(retained)
+    assert retained["artifact_sha256"] == artifact["artifact_sha256"]
+    decision = action_recipe.resolve_step(retained, 0, payload["data"]["input"], [])
+    assert decision.applied, decision.reason
+    assert decision.arguments == {"number": entered["field_00"]}

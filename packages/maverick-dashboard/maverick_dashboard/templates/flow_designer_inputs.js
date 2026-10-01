@@ -3,6 +3,9 @@
 var FDRecipeInputs = (function () {
   'use strict';
   var TYPES = ['object', 'array', 'string', 'integer', 'number', 'boolean', 'null'];
+  // The native v1 recipe language admits 512 scalar leaves. Do not reject a
+  // valid retained workflow just because the browser form once stopped at 64.
+  var MAX_FIELDS = 512, MAX_NODES = 8192;
   var DOMAINS = ['lightwork.action-recipe.v2', 'lightwork.action-choice.v1',
     'lightwork.workflow-transducer.v1', 'lightwork.workflow-memory.v1'];
   function fail(message) { throw new Error('Workflow inputs: ' + message); }
@@ -88,7 +91,7 @@ var FDRecipeInputs = (function () {
   function responseJson(response) { return response.text().then(parseText); }
   function plan(artifact) {
     if (!object(artifact)) fail('the saved workflow is unavailable. Reopen it and try again.');
-    var fields = [], remaining = 256, rows, consumed = new Set();
+    var fields = [], remaining = MAX_NODES, rows, consumed = new Set();
     function visit(source, path, legacy) {
       if (--remaining < 0 || path.length > 12) fail('this workflow has too many nested fields for this form. Ask your workspace administrator to review it.');
       var type, children = [], node;
@@ -111,7 +114,8 @@ var FDRecipeInputs = (function () {
       node = { type: type, path: path.slice(), label: label(path), children: children, declared: !legacy };
       if (type === 'object') {
         var names = legacy ? source.keys : object(source.properties) && Object.keys(source.properties);
-        if (!strings(names) || names.length > 64 || names.some(function (key) { return key.length > 1024; }))
+        if (!strings(names) || names.length > (legacy ? MAX_FIELDS : 64) ||
+            names.some(function (key) { return key.length > 1024; }))
           fail('the saved field names cannot be displayed safely. Ask your workspace administrator to review them.');
         if (!legacy && (source.additionalProperties !== false || !strings(source.required) ||
             JSON.stringify(source.required.slice().sort()) !== JSON.stringify(names.slice().sort())))
@@ -121,8 +125,9 @@ var FDRecipeInputs = (function () {
         });
       } else if (type === 'array') {
         var count = legacy ? source.length : source.minItems;
-        if (!Number.isSafeInteger(count) || count < 0 || count > 64 || (!legacy && count !== source.maxItems))
-          fail('this form needs a list with a fixed length of at most 64 items. Ask your workspace administrator to review it.');
+        if (!Number.isSafeInteger(count) || count < 0 || count > (legacy ? MAX_FIELDS : 64) ||
+            (!legacy && count !== source.maxItems))
+          fail('this workflow has a list this form cannot display safely. Ask your workspace administrator to review it.');
         // Validate an empty list's declared item schema too; never ignore an unsupported keyword.
         if (!legacy && count === 0) {
           var before = fields.length;
@@ -131,7 +136,8 @@ var FDRecipeInputs = (function () {
         }
         for (var i = 0; i < count; i++) children.push({ key: i, node: visit(legacy ? null : source.items, path.concat(i), legacy) });
       } else {
-        if (fields.length >= 64) fail('this workflow needs more than 64 values. Ask your workspace administrator to review it.');
+        if (fields.length >= MAX_FIELDS)
+          fail('this workflow needs more than ' + MAX_FIELDS + ' values. Ask your workspace administrator to review it.');
         if (type === 'string') {
           node.min = legacy ? 0 : (source.minLength === undefined ? 0 : source.minLength);
           node.max = legacy ? 1024 : source.maxLength;
@@ -152,7 +158,8 @@ var FDRecipeInputs = (function () {
     }
     var tree;
     if (artifact.schema === 'lightwork.action-recipe.v1') {
-      if (!Array.isArray(artifact.input_shape) || artifact.input_shape.length > 256) fail('the saved fields cannot be displayed. Ask your workspace administrator to review them.');
+      if (!Array.isArray(artifact.input_shape) || artifact.input_shape.length > MAX_NODES)
+        fail('the saved fields cannot be displayed. Ask your workspace administrator to review them.');
       rows = new Map();
       artifact.input_shape.forEach(function (row) {
         if (!object(row) || !Array.isArray(row.path) || row.path.length > 12 || row.path.some(function (part) {
@@ -251,7 +258,9 @@ var FDRecipeInputs = (function () {
     var heading = document.createElement('h2'); heading.id = 'recipe-input-title'; heading.className = 'mv-form__title'; heading.textContent = options.title || 'Workflow inputs';
     form.appendChild(heading);
     var help = document.createElement('p');
-    help.textContent = 'Enter this case’s values. The saved learned rules determine the fields. Actions still require their normal approvals.';
+    var inputCount = model.fields.filter(function (field) { return field.type !== 'null'; }).length;
+    help.textContent = (inputCount ? 'Enter ' + inputCount + ' value' + (inputCount === 1 ? '' : 's') +
+      ' for this case. ' : '') + 'The saved workflow determines the fields. Actions still require their normal approvals.';
     form.appendChild(help);
     var controls = Object.create(null), errors = Object.create(null);
     var fields = document.createElement('div'); fields.className = 'fd-recipe-fields';
