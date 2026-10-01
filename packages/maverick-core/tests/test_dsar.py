@@ -336,3 +336,18 @@ def test_tenant_isolation():
     assert "acme-store-message" in blob
     # The shared-store conversation must NOT bleed into the tenant export.
     assert "shared-store-message" not in blob
+
+
+def test_anonymous_audit_subject_lookup_uses_selected_tenant(monkeypatch):
+    from maverick.paths import data_dir, tenant_scope
+
+    monkeypatch.setenv("MAVERICK_ANON", "1")
+    with tenant_scope(tenant="acme"):
+        audit_dir = data_dir("audit")
+        log = AuditLog(audit_dir=audit_dir)
+        assert log.record(_audit_event("telegram", "alice", "tenant event"))
+        assert log.record(_audit_event("telegram", "bob", "other tenant subject"))
+
+    bundle = export_subject_data("alice", channel="telegram", tenant="acme")
+    assert bundle["counts"]["audit_events"] == 1
+    assert bundle["audit"][0]["channel"].startswith("channel#")
