@@ -916,11 +916,21 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
     if compatibility:
         raise ValueError(f"Domain {profile.name!r} has incompatible tool requirements: "
                          + "; ".join(compatibility))
+    run_principal = principal
     principal = principal or f"agent:{profile.name}-{depth}"
     if parent is not None and hasattr(parent, "_effective_capability"):
         parent_cap = parent._effective_capability("spawn_specialist")
     else:
         parent_cap = getattr(parent, "capability", None)
+        if parent is None and parent_cap is None:
+            # A root specialist has no parent agent, but the run may still
+            # carry a grant of its own (a fleet agent's role + the caller's
+            # grant). Bound the pack's envelope by it -- never widen it back
+            # out -- and keep that run's principal so the oversight control
+            # plane keeps governing the work as the agent that was dispatched.
+            parent_cap = getattr(ctx, "capability", None)
+            if parent_cap is not None and run_principal is None:
+                principal = parent_cap.principal
     cap = domain_capability(profile, parent_cap, principal)
     memory = _department_memory(
         profile, task,

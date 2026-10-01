@@ -305,3 +305,149 @@ def test_deployed_department_agent_runs_under_domain_capability(monkeypatch, tmp
     cap = calls[-1]["kwargs"]["capability"]
     assert "shell" in cap.deny_tools
     assert "write_file" in cap.deny_tools
+
+
+# --- A department specialist runs AS its specialist -------------------------
+#
+# Deploying a department hands each pack's agent its pack name in
+# ``FleetAgent.domain``. Giving that agent a task used to queue a goal with no
+# domain at all, so the run was an unbriefed generic orchestrator wearing the
+# specialist's name: the pack's persona, refusals, workflow and deliverable
+# contract never reached the model.
+
+_SPECIALIST_PERSONA = "You are the Ledger Reviewer specialist. Quote every figure you use."
+
+
+class _RecordingLLM:
+    """LLM stand-in: records each request and ends the run immediately."""
+
+    model = "fake:test"
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def _reply(self, system, tools):
+        from maverick.llm import LLMResponse
+
+        self.calls.append({"system": system, "tools": tools})
+        return LLMResponse(
+            text="FINAL: done", thinking=None, tool_calls=[], stop_reason="end_turn",
+        )
+
+    def complete(self, system, messages, tools=None, **_kw):
+        return self._reply(system, tools)
+
+    async def complete_async(self, system, messages, tools=None, **_kw):
+        return self._reply(system, tools)
+
+
+def _install_specialist_pack(monkeypatch, tmp_path):
+    packs = tmp_path / "packs"
+    packs.mkdir()
+    (packs / "ledger_reviewer.toml").write_text(
+        'name = "ledger_reviewer"\n'
+        'compartment = "ledger"\n'
+        'description = "Reviews ledgers."\n'
+        f'persona = "{_SPECIALIST_PERSONA}"\n'
+        'allow_tools = ["read_file", "web_search", "write_file"]\n'
+        'deny_tools = ["shell"]\n'
+        'max_risk = "high"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(packs))
+
+
+def _save_specialist_fleet(domain="ledger_reviewer"):
+    from maverick.fleet import Fleet, FleetAgent, save_fleet
+
+    save_fleet(Fleet(name="dept-ledger", owner="user:dana", agents=(
+        FleetAgent("ledger_reviewer", "analyst", "reviews ledgers", domain=domain),
+        FleetAgent("plain", "analyst", "no specialist pack"),
+    )))
+
+
+def test_specialist_agent_goal_is_stamped_with_its_pack(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _install_specialist_pack(monkeypatch, tmp_path)
+    _save_specialist_fleet()
+    _stub_runner(monkeypatch)
+    c = _client()
+
+    r = c.post("/api/v1/fleets/dept-ledger/run",
+               json={"agent": "ledger_reviewer", "prompt": "review the March ledger"})
+    assert r.status_code == 201, r.text
+    from maverick.world_model import WorldModel
+    world = WorldModel(tmp_path / "world.db")
+    assert world.get_goal(r.json()["goal_id"]).domain == "ledger_reviewer"
+
+    # An agent that carries no specialist pack still runs as a plain agent.
+    r2 = c.post("/api/v1/fleets/dept-ledger/run",
+                json={"agent": "plain", "prompt": "tidy the notes"})
+    assert r2.status_code == 201, r2.text
+    assert not world.get_goal(r2.json()["goal_id"]).domain
+
+
+def test_specialist_agent_run_reaches_the_model_as_the_specialist(monkeypatch, tmp_path):
+    """The real orchestrator runs the goal: the specialist's persona is what the
+    model is briefed with, and the run stays inside the role's grant."""
+    _isolate(monkeypatch, tmp_path)
+    _install_specialist_pack(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda *a, **k: {"roles": {"analyst": {"allow_tools": ["read_file"], "max_risk": "low"}}},
+    )
+    _save_specialist_fleet()
+
+    from maverick import budget as budget_mod
+    from maverick import domain as domain_mod
+    from maverick import llm as llm_mod
+    from maverick import sandbox as sandbox_mod
+    from maverick import trace_pin
+
+    class _Sandbox:
+        def close(self):
+            return None
+
+    llm = _RecordingLLM()
+    roots: list = []
+    real_build = domain_mod.agent_from_profile
+
+    def _capture_root(profile, ctx, task, **kw):
+        agent = real_build(profile, ctx, task, **kw)
+        roots.append(agent)
+        return agent
+
+    monkeypatch.setattr(llm_mod, "LLM", lambda: llm)
+    monkeypatch.setattr(sandbox_mod, "build_sandbox", _Sandbox)
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kw: budget_mod.Budget())
+    monkeypatch.setattr(trace_pin, "pin_trace", lambda *_a, **_kw: None)
+    monkeypatch.setattr(domain_mod, "agent_from_profile", _capture_root)
+
+    r = _client().post("/api/v1/fleets/dept-ledger/run",
+                       json={"agent": "ledger_reviewer", "prompt": "review the March ledger"})
+    assert r.status_code == 201, r.text
+
+    assert llm.calls, "the goal never reached the model"
+    assert _SPECIALIST_PERSONA in llm.calls[0]["system"]
+    # The pack allows web_search and write_file; the agent's role does not.
+    assert len(roots) == 1
+    cap = roots[0].capability
+    assert cap.permits("read_file") is True
+    assert cap.permits("web_search") is False
+    assert cap.permits("write_file") is False
+    assert cap.principal == "agent:dept-ledger.ledger_reviewer"
+
+
+def test_specialist_agent_whose_pack_is_gone_is_refused_not_run_generically(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _install_specialist_pack(monkeypatch, tmp_path)
+    _save_specialist_fleet(domain="removed_specialist")
+    calls = _stub_runner(monkeypatch)
+
+    r = _client().post("/api/v1/fleets/dept-ledger/run",
+                       json={"agent": "ledger_reviewer", "prompt": "review the March ledger"})
+    assert r.status_code == 400, r.text
+    assert "removed_specialist" not in r.text  # no internal pack id in customer copy
+    assert not calls, "nothing may be queued for a specialist that cannot run"
+    from maverick.world_model import WorldModel
+    assert WorldModel(tmp_path / "world.db").list_goals() == []
