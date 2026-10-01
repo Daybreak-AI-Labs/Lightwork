@@ -961,7 +961,9 @@ def test_colour_themes_are_made_on_the_page_and_offered_to_everyone(as_token, au
     theme = dict(_THEME, name="midnight", warn="#FFAA00", danger="")
     r = _save([{"id": "dashboard.themes", "value": [theme]}], confirm=True)
     assert r.status_code == 200, r.text
-    assert themes.custom_themes() == {"midnight": dict(_THEME, warn="#ffaa00")}
+    assert themes.custom_themes() == {"midnight": dict(
+        _THEME, warn="#ffaa00", danger="#e0e0f0", muted="#e0e0f0", border="#e0e0f0",
+    )}
     assert "body.theme-midnight" in themes.theme_css(themes.custom_themes())
     assert "midnight" in [c["value"] for c in _row("dashboard.theme")["choices"]]
     assert _save([{"id": "dashboard.theme", "value": "midnight"}]).status_code == 200
