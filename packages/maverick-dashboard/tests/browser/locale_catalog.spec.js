@@ -8,18 +8,28 @@ async function localOnly(context,baseURL){
   await context.route('**/*',route=>new URL(route.request().url()).origin===new URL(baseURL).origin?route.continue():route.abort('blockedbyclient'));
 }
 async function syntheticBudget(page){
-  await page.route('**/api/v1/budget/preview?*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+  await page.route('**/api/v1/budget/preview*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
     context:'synthetic-catalog-budget',effective:{max_dollars:1,max_wall_seconds:60},
     headroom_complete:false,admission_allowed:false,reset_at:'2030-01-01T00:00:00Z',observed_at:1900000000,
   })}));
+}
+async function chooseInterface(page,language){
+  await page.goto('/chat');await page.locator('#prefs-menu > summary').click();
+  await page.locator('#prefs-device-only').check();
+  const saved=page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname==='/api/v1/preferences/display');
+  const picker=page.locator('[data-ui-preference="interface_language"]');
+  await picker.selectOption(language);expect((await saved).status()).toBe(200);
+  await expect(picker).toHaveAttribute('data-saved-value',language);
+  await expect(picker).toBeEnabled();
 }
 
 for(const language of Object.keys(labels))test(`shipped ${language} catalog initializes chat and shared-shell controls with honest language regions`,async({page,context,baseURL},info)=>{
   await localOnly(context,baseURL);await syntheticBudget(page);
   await context.setExtraHTTPHeaders({Origin:baseURL,'Accept-Language':language});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await chooseInterface(page,language);
   const catalog=page.waitForResponse(response=>catalogPath.test(new URL(response.url()).pathname));
-  await page.goto('/chat');const response=await catalog;expect(response.status()).toBe(200);
+  await page.reload();const response=await catalog;expect(response.status()).toBe(200);
   const body=await response.body(),path=new URL(response.url()).pathname,match=path.match(catalogPath);
   expect(match[1]).toBe(language);expect(crypto.createHash('sha256').update(body).digest('hex')).toBe(match[2]);
   expect(response.headers()['cache-control']).toContain('immutable');
@@ -60,7 +70,7 @@ test('Chrome reuses the public catalog across shells and conditional reads retur
     context=await browser.newContext({baseURL,locale:'fr',extraHTTPHeaders:{Origin:baseURL},
       proxy:{server:`http://127.0.0.1:${proxy.address().port}`,bypass:'127.0.0.1'}});
     const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
-    await page.goto('/chat');
+    await chooseInterface(page,'fr');await page.reload();
     const path=await page.locator('script[src*="/static/lightwork-i18n-catalog/"]').getAttribute('src');
     expect(path).toMatch(/\/fr\/[0-9a-f]{64}\.js$/);
     expect(await page.evaluate(()=>window.LightworkI18n.text('Add details'))).toBe(labels.fr);
@@ -78,7 +88,9 @@ test('Chrome reuses the public catalog across shells and conditional reads retur
     expect(cached.status()).toBe(304);expect((await cached.body()).length).toBe(0);
     expect((await context.request.get(path.replace(/[0-9a-f]{64}\.js$/,'0'.repeat(64)+'.js'))).status()).toBe(404);
     // Prove the cache-preserving outbound boundary refuses an external fetch.
-    expect(await page.evaluate(async()=>{try{await fetch('https://browser-outbound.invalid/probe',{mode:'no-cors'});return false;}catch{return true;}})).toBe(true);
+    const probe=await context.newPage();let rejected=false;
+    try{await probe.goto('https://browser-outbound.invalid/probe',{timeout:10000});}catch{rejected=true;}
+    await probe.close();expect(rejected).toBe(true);
     expect(denied).toBeGreaterThan(0);expect(errors).toEqual([]);
     await info.attach('real-cache-evidence',{body:JSON.stringify({path,timing,etag,externalProxyRejections:denied}),contentType:'application/json'});
   }finally{
@@ -89,8 +101,9 @@ test('Chrome reuses the public catalog across shells and conditional reads retur
 test('an unavailable catalog keeps dynamic product fallback marked as English',async({page,context,baseURL})=>{
   await localOnly(context,baseURL);await syntheticBudget(page);
   await context.setExtraHTTPHeaders({Origin:baseURL,'Accept-Language':'fr'});
+  await chooseInterface(page,'fr');
   await page.route('**/static/lightwork-i18n-catalog/**',route=>route.abort('failed'));
-  await page.goto('/chat');await page.locator('[data-budget-launch] > summary').click();
+  await page.reload();await page.locator('[data-budget-launch] > summary').click();
   await expect(page.locator('.composer details > summary [data-product-copy]')).toHaveText(labels.fr);
   await expect(page.locator('[data-budget-summary] a')).toHaveAttribute('lang','en');
   expect(await page.evaluate(()=>window.LightworkI18n.text('Add details'))).toBe(labels.en);
