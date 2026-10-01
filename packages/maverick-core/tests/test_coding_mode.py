@@ -241,7 +241,8 @@ class TestValidatePatch:
             subprocess.run(
                 ["git", "-C", str(tmp_path), "config", key, val], check=True,
             )
-        (tmp_path / "foo.py").write_text("old line\n")
+        # Keep fixture bytes aligned with the LF-only diff on Windows too.
+        (tmp_path / "foo.py").write_bytes(b"old line\n")
         subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
         subprocess.run(
             ["git", "-C", str(tmp_path), "commit", "-qm", "init"], check=True,
@@ -582,8 +583,8 @@ class TestBestOfNAntiCheat:
         import subprocess
         repo = tmp_path / "repo"
         (repo / "tests").mkdir(parents=True)
-        (repo / "tests" / "test_x.py").write_text(
-            "def test_a():\n    assert 1 == 2\n", encoding="utf-8")
+        (repo / "tests" / "test_x.py").write_bytes(
+            b"def test_a():\n    assert 1 == 2\n")
         env = ["-c", "user.email=t@t", "-c", "user.name=t"]
         subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
         subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
