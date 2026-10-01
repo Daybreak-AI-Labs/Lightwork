@@ -339,7 +339,11 @@ def _signoff_source(world, owner, specs):
     items, coverage = [], []
     try:
         rows = world.list_goals(status="done", owner=owner, limit=SOURCE_LIMIT + 1, order="desc")
-        scoped_specs = {spec["domain"]: spec for spec in specs if spec.get("gate")}
+        # Resolve current suite permissions only when this owner has completed
+        # work. Loading every specialist pack for an empty queue delays unrelated
+        # assigned reviews; authorization-dependent specs must never be cached.
+        resolved_specs = (specs() if callable(specs) else specs) if rows else []
+        scoped_specs = {spec["domain"]: spec for spec in resolved_specs if spec.get("gate")}
         candidates = [goal for goal in rows[:SOURCE_LIMIT] if goal.domain in scoped_specs]
         signed = world.signoffs_for_goals([goal.id for goal in candidates])
         for goal in candidates:
@@ -380,7 +384,8 @@ def _assessment_source(assessments, assessment_allowed, principal):
         coverage.append({"kind": "assessment", "status": "unavailable"})
     return items, coverage
 
-def collect(world, *, principal: str | None, owner: str | None, specs: list[dict],
+def collect(world, *, principal: str | None, owner: str | None,
+            specs: list[dict] | Callable[[], list[dict]],
             assessments: Callable[[], list[dict]], assessment_allowed: Callable[[dict], bool],
             project_reviews: Callable[[], list[dict]] | None = None,
             vendor_reconciliations: Callable[[], dict] | None = None,

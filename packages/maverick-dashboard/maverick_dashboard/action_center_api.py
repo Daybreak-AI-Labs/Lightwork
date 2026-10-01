@@ -105,7 +105,8 @@ def _model(request):
     )
 
     principal = caller_principal(request)
-    specs = scope_to_suites(request, _deliverable_specs(), suite_of=lambda spec: spec.get("suite"))
+    def specs():
+        return scope_to_suites(request, _deliverable_specs(), suite_of=lambda spec: spec.get("suite"))
     mapping = {kind: suite for suite, kinds in (("finance", FINANCE_ASSESSMENT_TYPES),
         ("privacy", PRIVACY_ASSESSMENT_TYPES), ("security", SECURITY_ASSESSMENT_TYPES)) for kind in kinds}
     try:
