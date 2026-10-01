@@ -7,7 +7,7 @@ unavailable. Opt-out semantics: absent/true = enabled, so the default behaviour
 """
 from __future__ import annotations
 
-from maverick.domain import available_domains, enabled_domains, suite_for
+from maverick.domain import available_domains, enabled_domains, suite_for, suites_for_domain
 
 
 def test_suite_for_prefix_mapping():
@@ -55,6 +55,7 @@ def test_fork_cannot_bypass_disabled_inherited_suite(tmp_path, monkeypatch):
         'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
     )
     assert "client_fork" in available_domains()
+    assert suites_for_domain("client_fork") == frozenset({"aerospace_defense"})
     assert "client_fork" not in enabled_domains(
         cfg={"suites": {"aerospace_defense": False}}
     )

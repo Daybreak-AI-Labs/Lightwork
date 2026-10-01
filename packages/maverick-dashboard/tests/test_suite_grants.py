@@ -170,6 +170,27 @@ def test_scoped_user_sees_only_granted_departments(monkeypatch, tmp_path):
     assert c.get("/api/v1/departments/nope").status_code == 404
 
 
+def test_direct_goal_admission_checks_inherited_suite(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+    from maverick_dashboard import api
+
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    checked = []
+
+    def require(request, suite):
+        checked.append(suite)
+        raise HTTPException(403, "outside granted departments")
+
+    monkeypatch.setattr(api, "require_suite", require)
+    with pytest.raises(HTTPException) as exc:
+        api._require_enabled_specialist(None, "client_fork")
+    assert exc.value.status_code == 403
+    assert checked == ["aerospace_defense"]
+
+
 def test_finance_operations_and_workspace_require_finance_grant(monkeypatch, tmp_path):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[finance_operations]\nenable = true\n", encoding="utf-8")

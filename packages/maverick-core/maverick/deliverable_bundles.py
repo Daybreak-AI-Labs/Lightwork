@@ -73,9 +73,12 @@ class DeliverableBundles:
 
     def _allowed(self, actor, domain, permission):
         self._context()
-        from .domain import suite_for
+        from .domain import suites_for_domain
 
-        if self.eligible(actor, suite_for(domain), permission, True) is not True:
+        suites = suites_for_domain(domain) if domain else ()
+        if any(self.eligible(actor, suite, permission, True) is not True for suite in suites):
+            raise BundleDenied("Current workspace membership or permissions do not allow this bundle.")
+        if not suites and self.eligible(actor, None, permission, True) is not True:
             raise BundleDenied("Current workspace membership or permissions do not allow this bundle.")
 
     def _source(self, goal_id):
@@ -248,8 +251,11 @@ class DeliverableBundles:
         result = copy.deepcopy({k: v for k, v in record.items() if k not in {"_audit_pending", "operations", "request_hash"}})
         result["stale"] = self.stale(record)
         result["acceptance_current"] = bool(record["acceptance"] and not result["stale"])
-        from .domain import suite_for
-        operates = self.eligible(self.actor, suite_for(record["payload"]["source"]["domain"]), "operate", True) is True
+        from .domain import suites_for_domain
+        suites = suites_for_domain(record["payload"]["source"]["domain"])
+        operates = all(self.eligible(self.actor, suite, "operate", True) is True for suite in suites)
+        if not suites:
+            operates = self.eligible(self.actor, None, "operate", True) is True
         result["can_accept"] = operates and self.actor == record["payload"]["recipient"] and not result["stale"]
         result["can_revoke"] = operates and self.actor == record["owner"] and record["status"] == "shared"
         return result

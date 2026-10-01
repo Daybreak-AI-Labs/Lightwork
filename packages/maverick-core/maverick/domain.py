@@ -569,6 +569,22 @@ def suite_for(name: str) -> str | None:
     return None
 
 
+def suites_for_domain(name: str, profile: DomainProfile | None = None) -> frozenset[str]:
+    """Suites governing a roster name and any specialist it inherits from.
+
+    A custom fork can have a generic public name while retaining a built-in
+    specialist's profile name. Both suites must be allowed at every boundary.
+    Callers with a resolved catalog should pass its profile to avoid a second
+    workspace read.
+    """
+    if profile is None:
+        profile = available_domains().get(name)
+    return frozenset(
+        suite for suite in (suite_for(name), suite_for(profile.name) if profile else None)
+        if suite is not None
+    )
+
+
 def _disabled_suites(cfg: dict | None = None) -> set[str]:
     """Suites turned OFF in the ``[suites]`` table (``suite = false``).
 
@@ -595,7 +611,7 @@ def enabled_domains(cfg: dict | None = None) -> dict[str, DomainProfile]:
         return domains
     return {
         name: prof for name, prof in domains.items()
-        if suite_for(name) not in disabled and suite_for(prof.name) not in disabled
+        if not suites_for_domain(name, prof) & disabled
     }
 
 

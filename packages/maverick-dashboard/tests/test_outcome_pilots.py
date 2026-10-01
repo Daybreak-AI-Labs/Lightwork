@@ -780,7 +780,9 @@ def test_prepare_task_in_app_is_private_idempotent_and_does_not_run(monkeypatch)
     world = world_model.WorldModel(world_model.DEFAULT_DB)
     monkeypatch.setattr("maverick_dashboard.app._world", lambda: world)
     monkeypatch.setattr("maverick_dashboard.app._deliverable_specs", lambda: [{"domain": "finance_sox", "gate": "human", "suite": "finance"}])
-    monkeypatch.setattr("maverick.domain.enabled_domains", lambda: ["finance_sox"])
+    monkeypatch.setattr("maverick.domain.enabled_domains", lambda: {
+        "finance_sox": SimpleNamespace(name="finance_sox"),
+    })
     monkeypatch.setattr(sources, "suite_allowed", lambda *a: True)
     monkeypatch.setattr(sources, "caller_principal", lambda *a: "user:alice")
     monkeypatch.setattr(sources, "can_access_goal", lambda request, goal: goal.owner == "user:alice")

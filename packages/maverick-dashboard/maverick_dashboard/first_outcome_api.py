@@ -62,7 +62,7 @@ def list_first_outcomes(request: Request) -> dict:
 def run_first_outcome(request: Request, payload: FirstOutcomeRunIn, bg: BackgroundTasks) -> dict:
     require_permission(request, "operate")
     from maverick import sample_outcomes
-    from maverick.domain import enabled_domains, suite_for
+    from maverick.domain import enabled_domains, suites_for_domain
 
     from maverick_dashboard.app import check_goal_rate_limit
 
@@ -70,9 +70,11 @@ def run_first_outcome(request: Request, payload: FirstOutcomeRunIn, bg: Backgrou
     if department is None:
         raise HTTPException(404, "Choose one of the listed departments.")
     outcome = sample_outcomes.get(department)
-    if outcome.pack not in enabled_domains():
+    profile = enabled_domains().get(outcome.pack)
+    if profile is None:
         raise HTTPException(409, f"The {outcome.label} specialist is turned off in this workspace.")
-    require_suite(request, suite_for(outcome.pack))
+    for suite in suites_for_domain(outcome.pack, profile):
+        require_suite(request, suite)
     if not provider_ready():
         raise HTTPException(409, {"ready": False, "detail": NOT_READY_DETAIL, "href": CONNECT_HREF})
     check_goal_rate_limit(request)

@@ -1966,6 +1966,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     agent_from_profile,
                     enabled_domains,
                     rejected_workspace_domains,
+                    suites_for_domain,
                 )
                 # enabled_domains() honors the operator's [suites] toggles, so a
                 # domain whose suite is switched off is treated as unavailable.
@@ -1980,6 +1981,16 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     else:
                         msg = (f"no such domain: {domain!r} (unknown or its suite is "
                                "disabled). See `maverick compartments` for available domains.")
+                    world.set_goal_status(goal_id, "blocked", result=msg)
+                    _lifecycle.end_episode(msg, "blocked")
+                    _fire_webhook("goal_finished", {
+                        "goal_id": goal_id, "status": "blocked", "result": msg,
+                    })
+                    return msg
+                if (allowed_suites is not None
+                        and not suites_for_domain(domain, _profile) <= allowed_suites):
+                    msg = ("This specialist is outside your department access. "
+                           "No work was started.")
                     world.set_goal_status(goal_id, "blocked", result=msg)
                     _lifecycle.end_episode(msg, "blocked")
                     _fire_webhook("goal_finished", {

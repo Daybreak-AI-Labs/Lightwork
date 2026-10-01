@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .domain import SUITE_PREFIXES, DomainProfile, enabled_domains, suite_for
+from .domain import SUITE_PREFIXES, DomainProfile, enabled_domains, suites_for_domain
 
 # Human-facing label + one-line charter per suite key (the value side of
 # ``SUITE_PREFIXES``). A suite missing here still resolves to a derived title
@@ -199,11 +199,9 @@ def _group(cfg: dict | None) -> dict[str, list[str]]:
     Packs with no recognized suite prefix (legacy/generic) are skipped — a
     department is a suite, and those packs belong to no suite."""
     by_suite: dict[str, list[str]] = {}
-    for name in enabled_domains(cfg):
-        suite = suite_for(name)
-        if suite is None:
-            continue
-        by_suite.setdefault(suite, []).append(name)
+    for name, profile in enabled_domains(cfg).items():
+        for suite in suites_for_domain(name, profile):
+            by_suite.setdefault(suite, []).append(name)
     for names in by_suite.values():
         names.sort()
     return by_suite

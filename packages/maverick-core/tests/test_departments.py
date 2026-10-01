@@ -44,6 +44,18 @@ def test_disabled_suite_drops_the_department():
     assert dept.roster("finance", cfg) == []
 
 
+def test_inherited_suite_fork_is_in_its_department(tmp_path, monkeypatch):
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    assert "client_fork" in dept.get_department("aerospace_defense").members
+    assert "client_fork" not in {
+        member for department in dept.list_departments({"suites": {"aerospace_defense": False}})
+        for member in department.members
+    }
+
+
 def test_unknown_suite_key_is_none():
     assert dept.get_department("not_a_suite") is None
 

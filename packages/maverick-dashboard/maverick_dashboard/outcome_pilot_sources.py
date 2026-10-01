@@ -187,12 +187,15 @@ def choices(request):
 
 
 def prepare_task(request, body, context):
-    from maverick.domain import enabled_domains, suite_for
+    from maverick.domain import enabled_domains, suites_for_domain
 
     from .app import _deliverable_specs, _world
 
     domain = body["domain"]
-    if domain not in enabled_domains() or not suite_allowed(request, suite_for(domain)):
+    profile = enabled_domains().get(domain)
+    if profile is None or any(
+        not suite_allowed(request, suite) for suite in suites_for_domain(domain, profile)
+    ):
         raise PermissionError("Choose an enabled specialist in your permitted departments.")
     if not any(s["domain"] == domain and s.get("gate") for s in _deliverable_specs()):
         raise ValueError("Choose a specialist whose deliverable requires sign-off.")

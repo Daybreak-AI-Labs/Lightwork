@@ -1391,6 +1391,17 @@ async def remove_user_suites(request: Request, principal: str) -> Response:
     return Response(status_code=204)
 
 
+def _require_enabled_specialist(request: Request, domain: str) -> None:
+    """Check the live inherited suite before accepting a specialist run."""
+    from maverick.domain import enabled_domains, suites_for_domain
+
+    profile = enabled_domains().get(domain)
+    if profile is None:
+        raise HTTPException(status_code=400, detail=f"unknown specialist: {domain!r}")
+    for suite in suites_for_domain(domain, profile):
+        require_suite(request, suite)
+
+
 @router.post(
     "/goals",
     response_model=GoalOut,
@@ -1459,11 +1470,7 @@ def create_goal(
     # and the caller's department grant before accepting it.
     domain = (payload.domain or "").strip() or None
     if domain:
-        from maverick.domain import enabled_domains, suite_for
-
-        if domain not in enabled_domains():
-            raise HTTPException(status_code=400, detail=f"unknown specialist: {domain!r}")
-        require_suite(request, suite_for(domain))
+        _require_enabled_specialist(request, domain)
     w = _world()
     # Keyed admission uses the same atomic goal/receipt transaction as chat
     # attachments, binding the complete reviewed payload and effective limits.
@@ -1616,8 +1623,9 @@ def reconcile_goal_submission(request: Request, response: Response, kind: str = 
                                       owner=caller_principal(request) or "", kind=kind)
         assert_goal_access(request, goal)
         if goal.domain:
-            from maverick.domain import suite_for
-            require_suite(request, suite_for(goal.domain))
+            from maverick.domain import suites_for_domain
+            for suite in suites_for_domain(goal.domain):
+                require_suite(request, suite)
     except HTTPException as exc:
         exc.headers = {**(exc.headers or {}), "Cache-Control": "no-store"}
         raise
@@ -12657,7 +12665,7 @@ def _require_jd_hiring() -> None:
 
 
 def _scoped_jd_matches(request: Request, jd_text: str, k: int) -> dict:
-    from maverick.domain import available_domains, suite_for
+    from maverick.domain import available_domains, suites_for_domain
     from maverick.jd_hiring import match_jd
 
     # Job-function scoping, mirroring /agents: a department-scoped caller only
@@ -12670,7 +12678,7 @@ def _scoped_jd_matches(request: Request, jd_text: str, k: int) -> dict:
         domains = {
             name: profile
             for name, profile in domains.items()
-            if (suite := suite_for(name)) is None or suite in allowed
+            if suites_for_domain(name, profile) <= allowed
         }
     matches = match_jd(jd_text, k=k, domains=domains)
     return {"matches": [m.to_dict() for m in matches]}
@@ -14223,7 +14231,7 @@ async def add_fleet_agent(request: Request, fleet_name: str, payload: FleetAgent
     must cover the pack's suite — the same kernel gate department deploys use.
     """
     require_permission(request, "operate")
-    from maverick.domain import suite_for
+    from maverick.domain import suites_for_domain
     from maverick.fleet import load_fleet, valid_name
     from maverick.jd_hiring import add_pack_to_fleet
     from maverick.suite_grants import DepartmentAccessError, ensure_suite_allowed
@@ -14235,7 +14243,8 @@ async def add_fleet_agent(request: Request, fleet_name: str, payload: FleetAgent
     if existing is not None and existing.owner != (principal or ""):
         raise HTTPException(status_code=404, detail="no such fleet")
     try:
-        ensure_suite_allowed(principal, suite_for(payload.pack))
+        for suite in suites_for_domain(payload.pack):
+            ensure_suite_allowed(principal, suite)
     except DepartmentAccessError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
     owner = existing.owner if existing is not None else (principal or "")

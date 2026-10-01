@@ -76,12 +76,16 @@ def projected_window(rows, *, offset, after, before, oldest):
 
 
 def _world(request, source, **options):
-    from maverick.domain import suite_for
+    from maverick.domain import available_domains, suites_for_domain
 
     from .api import _world as world
     require_permission(request, "view")
+    profiles = available_domains()
     value = world_window(world(), source=source, owner=caller_principal(request) or "",
-                         allowed_domain=lambda domain: suite_allowed(request, suite_for(domain) if domain else None), **options)
+                         allowed_domain=lambda domain: not domain or all(
+                             suite_allowed(request, suite)
+                             for suite in suites_for_domain(domain, profiles.get(domain))
+                         ), **options)
     rows = []
     for row in value.rows:
         if source == "tasks":

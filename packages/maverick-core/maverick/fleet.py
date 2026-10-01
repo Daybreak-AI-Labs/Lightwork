@@ -122,9 +122,10 @@ def ensure_dispatch_allowed(principal: str | None, agent: FleetAgent) -> None:
     fail-open invariant as :func:`maverick.departments.deploy_department`."""
     if not agent.domain:
         return
-    from .domain import suite_for
+    from .domain import suites_for_domain
     from .suite_grants import ensure_suite_allowed
-    ensure_suite_allowed(principal, suite_for(agent.domain))
+    for suite in suites_for_domain(agent.domain):
+        ensure_suite_allowed(principal, suite)
 
 
 def save_fleet(fleet: Fleet, *, tenant: str | None = "__active__") -> Path:

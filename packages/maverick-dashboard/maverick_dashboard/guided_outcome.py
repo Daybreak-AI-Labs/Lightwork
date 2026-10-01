@@ -115,7 +115,7 @@ def first_outcomes_for(request) -> dict:
 
 
 def for_request(request, world, selected: str = "deliverable") -> dict:
-    from maverick.domain import suite_for
+    from maverick.domain import suites_for_domain
 
     plans = {key: value for key, value in PLANS.items() if suite_allowed(request, value["suite"])}
     selected = selected if selected in plans else "deliverable"
@@ -123,7 +123,7 @@ def for_request(request, world, selected: str = "deliverable") -> dict:
 
     def admitted(domain):
         try:
-            return suite_allowed(request, suite_for(domain))
+            return all(suite_allowed(request, suite) for suite in suites_for_domain(domain))
         except Exception:
             return False
 
