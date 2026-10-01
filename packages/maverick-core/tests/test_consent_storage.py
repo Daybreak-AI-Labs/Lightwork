@@ -244,6 +244,82 @@ def test_local_records_are_copied_verified_and_never_doubled(shared, monkeypatch
     assert any(workspace in r["workspace"] for r in refused)
 
 
+@live
+def test_pre_upgrade_restored_profile_moves_with_atomic_consent_reset(
+    shared, monkeypatch, tmp_path,
+):
+    from maverick.consent_preferences import (
+        ConsentContext,
+        ConsentPreferenceStore,
+        PreferenceChoice,
+    )
+
+    now = 1_700_000_100.0
+    path = tmp_path / f"legacy-{uuid.uuid4().hex}.sqlite3"
+    monkeypatch.setenv(storage.BACKEND_ENV, "sqlite")
+    storage._reset_for_testing()
+    local = ConsentPreferenceStore(path, clock=lambda: now)
+    _policy(local)
+    local.create_profile("tenant-a", "profile-001", "known", "b" * 64, "create")
+    receipt = local.record_preferences(
+        "tenant-a", "profile-001", "privacy-notice", 1,
+        ConsentContext(
+            jurisdiction="us-state-ca", country_code="US", region_code="US-CA",
+            collection_point="privacy-center", asserted_source="client",
+        ),
+        [PreferenceChoice(purpose_id="analytics", action="grant")],
+        expected_revision=0, idempotency_key="grant", actor_sha256="c" * 64,
+    )
+    local.delete_subject(
+        "tenant-a", "profile-001", expected_revision=1,
+        reason_code="subject-request", idempotency_key="erase",
+        actor_sha256="d" * 64,
+    )
+    local.change_identifier_type(
+        "tenant-a", "profile-001", "known", "a" * 64,
+        expected_revision=2, idempotency_key="restore", actor_sha256="d" * 64,
+    )
+    # Simulate a pre-upgrade file: the erasure event and old grant exist, but
+    # neither the restoration floor table nor its migration marker does.
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE consent_profile_restoration_floors")
+        connection.execute(
+            "DELETE FROM consent_meta WHERE key = 'restoration_floor_backfill_v1'"
+        )
+
+    monkeypatch.setenv(storage.BACKEND_ENV, "postgres")
+    storage._reset_for_testing()
+    shared.append(storage.schema_name(path))
+    target_store = ConsentPreferenceStore(path, clock=lambda: now)
+    connection = storage.connect(path)
+    try:
+        assert connection.execute(
+            "SELECT 1 FROM consent_meta WHERE key = 'restoration_floor_backfill_v1'"
+        ).fetchone() is None
+        # Recreate the destination-only row written by the earlier build.
+        connection.execute(
+            "INSERT INTO consent_meta(key, value) "
+            "VALUES ('restoration_floor_backfill_v1', '1')"
+        )
+    finally:
+        connection.close()
+    storage.move_store(path)
+    decision = target_store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert decision.allowed is False
+    assert decision.reason == "no_current_explicit_grant"
+    assert target_store.get_receipt("tenant-a", receipt["receipt_id"])
+    connection = storage.connect(path)
+    try:
+        assert connection.execute(
+            "SELECT source FROM consent_profile_restoration_floors"
+        ).fetchone()[0] == "legacy_backfill"
+    finally:
+        connection.close()
+    assert storage.move_store(path)["copied"] == 0
+
+
 # ------------------------------------------------- literals and json_extract parity
 def test_percent_signs_are_never_read_as_placeholders_when_values_are_bound():
     t = storage.translate
