@@ -73,6 +73,7 @@ def test_qdrant_explicit_legacy_model_failure_does_not_fall_back(monkeypatch, tm
     with pytest.raises(ValueError, match="unsupported selected model"):
         QdrantStore(path=tmp_path / "qd", embedding_model="synthetic/selected")
     fake_client.set_model.assert_called_once_with("synthetic/selected")
+    fake_client.close.assert_called_once()
     fake_client.add.assert_not_called()
 
 

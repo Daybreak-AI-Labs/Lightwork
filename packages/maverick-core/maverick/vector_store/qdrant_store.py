@@ -122,7 +122,14 @@ class QdrantStore:
         self._text_bridge = None
         if embedding_model and self._legacy_text:
             # An explicit model failure must never silently switch vector space.
-            self._client.set_model(embedding_model)
+            try:
+                self._client.set_model(embedding_model)
+            except Exception:
+                try:
+                    self._client.close()
+                except Exception:
+                    log.warning("qdrant: client cleanup failed after rejected text model")
+                raise
         location = url or str(store_path.resolve())
         self.recall_identity = hashlib.sha256(f"{location}:{collection}".encode()).hexdigest()
         self.requires_precomputed_embeddings = True

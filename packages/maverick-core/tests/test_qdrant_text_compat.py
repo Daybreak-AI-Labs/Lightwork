@@ -347,3 +347,31 @@ def test_display_document_metadata_preserves_legacy_precedence_and_typed_values(
     assert hit["document"] == "separate display text"
     assert hit["metadata"] == {"document": "separate display text", "ordinal": 7, "nested": {"valid": True}}
     assert ("passage", "synthetic/current", ["needle indexing text"]) in calls
+
+
+def test_failed_legacy_model_initialization_releases_native_path_lock(native_text, monkeypatch, tmp_path):
+    import qdrant_client
+    from maverick.vector_store.qdrant_store import QdrantStore
+
+    real_client = qdrant_client.QdrantClient
+    path = tmp_path / "model-failure-lock"
+
+    def legacy_client(*args, **kwargs):
+        client = real_client(*args, **kwargs)
+        client.add = lambda **values: None
+        client.query = lambda **values: []
+
+        def rejected(model):
+            raise ValueError("selected legacy model rejected")
+
+        client.set_model = rejected
+        return client
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", legacy_client)
+    with pytest.raises(ValueError, match="selected legacy model rejected") as retained_error:
+        QdrantStore(path=path, embedding_model="synthetic/rejected")
+    # Retaining the traceback keeps constructor self alive; cleanup must be
+    # explicit instead of depending on garbage collection to release the lock.
+    assert retained_error.value.__traceback__ is not None
+    recovered = real_client(path=str(path))
+    recovered.close()
