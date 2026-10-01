@@ -317,7 +317,7 @@
             ? 'This file could not be confirmed. It may have been changed, or it is not a signed Lightwork record.'
             : (out.from_this_installation
               ? 'This record is intact and was signed by this Lightwork installation. It holds ' + plural(out.records, 'decision', 'decisions') + '.'
-              : 'This record is intact, but it was signed by a different Lightwork installation.')));
+              : 'The signature is valid for the key in this file, but who signed it has not been verified. Obtain the publisher’s key through a trusted channel before relying on its origin.')));
         } else {
           box.appendChild(el('p', out.intact
             ? (out.from_this_installation === false

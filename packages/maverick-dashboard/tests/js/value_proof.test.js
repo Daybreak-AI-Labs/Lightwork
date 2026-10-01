@@ -119,6 +119,22 @@ test("checking a record file reports in plain words", async (t) => {
   assert.match(ui.doc.getElementById("vp-check-result").textContent, /intact and was signed by this Lightwork installation/);
 });
 
+test("a self-signed record does not claim another Lightwork installation as its origin", async (t) => {
+  const ui = await fixture(PROOF, { over: { "/record-verify": {
+    intact: true, from_this_installation: false, records: 1,
+  } } });
+  t.after(() => ui.window.close());
+  const input = ui.doc.getElementById("vp-check-file");
+  Object.defineProperty(input, "files", { value: [new ui.window.File(
+    ['{"sig":"x"}'], "record.json", { type: "application/json" },
+  )] });
+  ui.doc.getElementById("vp-check").dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
+  await ui.settle();
+  const message = ui.doc.getElementById("vp-check-result").textContent;
+  assert.match(message, /who signed it has not been verified/);
+  assert.doesNotMatch(message, /different Lightwork installation/);
+});
+
 test("a learning statement from another installation is checked with its key file", async (t) => {
   const html = PROOF.replace('<button type="submit">', '<input id="vp-check-key" type="file"><button type="submit">');
   const ui = await fixture(html, { over: { "/memory-verify": { intact: true, from_this_installation: false, claims: [] } } });
