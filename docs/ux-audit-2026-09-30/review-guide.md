@@ -23,7 +23,9 @@ was reproduced and repaired; [all seven updated widget cases pass](widget-short-
 All four full Python 3.12 phases pass. The user then explicitly stopped testing.
 Both Python 3.10/3.11 collections passed; Python 3.10 ordinary execution was
 stopped at displayed 36% progress, and its heavy phase plus Python 3.11 runtime
-phases were cancelled before starting. No test process remains active.
+phases were cancelled before starting. No test process remains active. The
+[cancellation evidence](compatibility-final09-user-stop-2decc28.md) preserves
+the exact stop, collection and source receipts.
 
 The [latest complete ordinary run](python-integrated-final09-2decc28.md) at `2decc28` passes **40,099 tests**, with
 597 skips, 25 warnings and no failures/errors. The earlier

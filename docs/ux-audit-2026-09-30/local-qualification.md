@@ -24,6 +24,8 @@ stopped at its displayed 36% progress; it is incomplete, not a passing full run.
 Python 3.10 heavy and both Python 3.11 runtime phases were cancelled before
 starting. The exact task-owned process tree and controller are confirmed absent;
 source remained unchanged. No further tests or test-driven fixes are scheduled.
+The [cancellation receipt](compatibility-final09-user-stop-2decc28.md) preserves
+the completed collections, interrupted raw results and process-absence proof.
 
 The first final08 ordinary attempt stopped after 1,255.54 seconds with ten
 recorded failures and no final JUnit result. Read-only Windows probes established
