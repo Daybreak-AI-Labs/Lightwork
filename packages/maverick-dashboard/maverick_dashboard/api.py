@@ -12571,7 +12571,9 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
             "page_context": public_context(context, permissions),
             "action_link": {"href": context.path, "label": f"Open {context.title}"},
         }
-    qualified_reply = sanitize_model_reply(f"Unverified model guidance: {safe_reply}")
+    qualified_reply = sanitize_model_reply(
+        f"I haven't changed anything in Lightwork. Here's my answer: {safe_reply}"
+    )
     return {
         "reply": qualified_reply,
         "mode": "model",
