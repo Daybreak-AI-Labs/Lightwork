@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from enum import Enum
 from functools import lru_cache
-from importlib import resources
+from pathlib import Path
 from types import MappingProxyType
 
 
@@ -267,9 +267,9 @@ def _parse_evidence_entry(raw: object) -> RateEvidence:
 def load_pricing_evidence_pack() -> PricingEvidencePack:
     """Load and validate the tracked evidence data shipped with the wheel."""
 
-    path = resources.files("maverick").joinpath(
-        "data/pricing-rate-card-2026-07-29.json"
-    )
+    # Namespace-package resources may resolve another distribution's empty
+    # maverick directory in an editable install. Anchor data to this module.
+    path = Path(__file__).resolve().parent / "data/pricing-rate-card-2026-07-29.json"
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

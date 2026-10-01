@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from importlib import resources
@@ -24,6 +26,14 @@ from maverick.pricing import (
     assert_price_evidenced,
     load_pricing_evidence_pack,
 )
+
+
+def test_pricing_pack_loads_from_isolated_installed_interpreter() -> None:
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", "from maverick.pricing import load_pricing_evidence_pack; assert load_pricing_evidence_pack().entries"],
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture(autouse=True)
