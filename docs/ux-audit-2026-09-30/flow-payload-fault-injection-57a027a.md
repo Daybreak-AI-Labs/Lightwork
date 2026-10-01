@@ -11,8 +11,9 @@ asserts that the damaged bytes differ before writing them; the original
 The original source was `57a027adfdd8df955d33aaea88ec7089aafc6c60`. Worker `gw1`
 reported `DID NOT RAISE FlowPayloadError` for
 `test_unavailable_or_mismatched_artifact_never_falls_back_to_preview[bytes]`.
-The call lasted 0.1790315 seconds. The original run was still active when this
-investigation was recorded; these notes do not claim its overall outcome.
+The call lasted 0.1790315 seconds. The original run subsequently completed with
+40,098 passes, this one failure, 597 skips, and 23 warnings in 3,049.04 seconds
+(3,053.92 seconds in the controller). Its source remained unchanged.
 
 A read-only probe of its retained synthetic fixture found a 35,159-byte artifact
 whose final byte was `0x58`, the byte for `X`. Its SHA-256 was
@@ -36,10 +37,26 @@ timeout increase, or exception suppression is part of this repair.
 
 ## Validation boundary
 
-The changed test has not yet been executed. Focused execution is held until
-the active full-suite phase ends, to avoid competing with that run. The original
-failure and fixture metadata remain recorded in the
+After the original full-suite phase ended, the entire corrected payload module
+passed **18/18 ordinary** in 8.08 seconds and **18/18 secure** in 5.16 seconds,
+with no failures, errors, skips, or warnings. These are the same 18 test identities
+executed in two postures, including all six artifact-damage cases. Both runs used
+the unchanged frozen source `2decc28d5a2709ec1d362bdfb8499aaa13aacfce` and Python
+3.12. The secure run set both `MAVERICK_TEST_SECURE_DEFAULT=1` and
+`MAVERICK_SECURE_DEFAULT=1`; the ordinary run inherited neither flag.
+
+The corrected test has Git blob `088c100deade0506b007ebea8b466b92cac3c8e4`.
+The production payload implementation retains Git blob
+`ceb2f9216ee1fc37ead8e22c5f3587528453aabe`. Source/result receipts, complete JUnit
+test identities, logs, streamed reports, and empty failure logs were independently
+checked; their hashes and commands are preserved in the
 [machine-readable evidence](flow-payload-fault-injection-57a027a.json).
+
+The private runner change only adds the secure probe choice, flags, and target
+branch. Its existing 90-second per-test probe timeout remains unchanged. No
+production assertion or test assertion was relaxed. The corrected module passes
+close this specific no-op fault-injection failure; they do not turn the original
+full run into an all-green result or replace the remaining final-09 qualification.
 
 A targeted read-only search found no additional fixed-byte suffix replacement
 on randomized or encrypted blobs. Related attachment, crypto-bound,
