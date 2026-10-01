@@ -96,8 +96,16 @@ def _has_user_template() -> bool:
 
 def _has_user_agent() -> bool:
     try:
+        from maverick.domain import _load_raw_domains, user_dir
         from maverick.domain_edit import list_agents
 
+        # The editor roster resolves every bundled specialist. An empty or
+        # malformed-only override directory cannot contain a customized agent,
+        # so avoid hydrating that catalog just to render the setup checklist.
+        # Use the same bounded, no-follow parser and re-read the active workspace
+        # on every request; existing overrides still use the full resolver.
+        if not _load_raw_domains(user_dir()):
+            return False
         return any(agent.get("is_override") for agent in list_agents())
     except Exception:
         return False
@@ -226,7 +234,7 @@ def build(
     model_route_state = selected_model_route_state()
     provider_ok = model_route_state["configured"] is True
     activated = _has_run(world, owner)
-    built = _has_user_template() or _has_user_agent() or activated
+    built = activated or _has_user_template() or _has_user_agent()
     if reviewed_outcome is None:
         from .guided_outcome import reviewed_goal
 
