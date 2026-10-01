@@ -43,6 +43,16 @@ Ruff and whitespace checks passed for the changed Python tests.
 These focused results do not turn a failed or incomplete full run into a pass.
 The consolidated source still requires fresh complete runtime and browser runs.
 
+The next frozen run at `500fc87` exposed one further outdated Settings assertion
+in both postures: it expected omitted semantic colours to remain absent after a
+save. `00c1b84` instead asserts every exact completed colour, including the
+explicit warning override. It retains theme selection and invalid-input denial
+checks. The complete `test_settings_catalog_access.py` module then passed
+**417 cases with two POSIX-only skips in each posture** (402.90 and 394.06
+seconds), against unchanged product source plus that test-only correction.
+Evidence: `audit/late-theme-catalog-{ordinary,secure}-01.*`. Ruff and whitespace
+checks passed. The original full-run failures remain recorded separately.
+
 The next full-run helper disables only the optional timed traceback dump that
 was active during the Windows worker crash. Fatal traceback reporting remains
 enabled, as do the existing 180-second test timeout and the self-harness's own
