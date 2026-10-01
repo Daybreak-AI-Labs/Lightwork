@@ -408,6 +408,30 @@ def test_list_goals_filters_by_domain_and_project_id(world):
     assert g_no_domain not in {x.id for x in by_domain}
 
 
+def test_recent_goals_by_domain_matches_one_query_per_domain(world):
+    # The Results page asks for every deliverable pack's latest runs at once;
+    # one grouped query must give the answer the per-pack loop gave.
+    tag = uuid.uuid4().hex[:8]
+    busy, quiet, empty = f"busy_{tag}", f"quiet_{tag}", f"empty_{tag}"
+    busy_ids = [
+        world.create_goal(f"busy {i}", owner="user:alice" if i % 2 else "user:bob", domain=busy)
+        for i in range(7)
+    ]
+    world.create_goal("quiet one", domain=quiet, owner="user:alice")
+    domains = [busy, quiet, empty]
+
+    got = world.recent_goals_by_domain(domains)
+    assert [g.id for g in got[busy]] == busy_ids[::-1][:5]
+    assert [g.title for g in got[quiet]] == ["quiet one"]
+    assert empty not in got
+    for owner in (None, "user:alice", "user:bob", "user:nobody"):
+        looped = {d: world.list_goals(domain=d, owner=owner, limit=5, order="desc") for d in domains}
+        assert world.recent_goals_by_domain(domains, owner=owner) == {
+            d: goals for d, goals in looped.items() if goals
+        }
+    assert world.recent_goals_by_domain([]) == {}
+
+
 def test_active_goal(world):
     gid = world.create_goal("to-activate")
     world.set_goal_status(gid, "active")

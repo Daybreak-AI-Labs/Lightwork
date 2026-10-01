@@ -3315,20 +3315,14 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     (``[personas]`` config) so a logged-in analyst lands on their deliverables;
     ``?role=all`` widens to everything, ``?role=<r>`` picks a single role."""
     from .auth import scope_to_suites
-    from .deliverables import build_inbox, persona_roles_for
+    from .deliverables import build_inbox, persona_roles_for, recent_runs_by_domain
 
     # Job-function scoping: a scoped caller's inbox lists only their
     # departments' deliverable specs (plus generic packs), matching /agents.
     specs = scope_to_suites(request, _deliverable_specs(), suite_of=lambda s: s.get("suite"))
     owner = goal_owner_filter(request)
-    runs_by_domain: dict[str, list] = {}
-    for s in specs:
-        try:
-            runs_by_domain[s["domain"]] = _world().list_goals(
-                domain=s["domain"], owner=owner, limit=5, order="desc"
-            )
-        except Exception:  # pragma: no cover -- a bad domain query never breaks the page
-            runs_by_domain[s["domain"]] = []
+    # One grouped read for every pack's latest runs, not one query per pack.
+    runs_by_domain = recent_runs_by_domain(_world(), [s["domain"] for s in specs], owner=owner)
     ids = [g.id for runs in runs_by_domain.values() for g in runs]
     try:
         signoffs = _world().signoffs_for_goals(ids)
