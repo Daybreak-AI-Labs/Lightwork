@@ -173,4 +173,12 @@ def test_deliverables_page_shows_plain_role_names(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert 'id="dlv-role-pick"' in r.text
     assert "<datalist" not in r.text
-    assert "{{" not in r.text and " gate</span>" not in r.text
+    from test_support.element_text import element_texts
+    from test_support.plain_language import visible_text
+
+    page_text = visible_text(r.text)
+    assert "{{" not in page_text
+    badges = element_texts(r.text, "span", {"class": "badge"})
+    assert badges and all(not label.endswith(" gate") for label in badges)
+    assert element_texts(r.text, "option", {"value": "fpa_analyst"}) == ["Fpa analyst"]
+    assert "fpa_analyst" not in page_text

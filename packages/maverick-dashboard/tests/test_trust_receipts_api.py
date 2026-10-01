@@ -19,6 +19,7 @@ DAY = "2026-01-01"
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     from maverick import config, world_model
+    from maverick.audit import signing
     from maverick.audit import writer as audit_writer
     from maverick_dashboard import api
 
@@ -33,10 +34,14 @@ def _isolated(tmp_path, monkeypatch):
                  "MAVERICK_AUDIT_SIGNING_KEY_WRAPPED"):
         monkeypatch.delenv(name, raising=False)
     config.reset_config_cache()
+    # Injected keys are consumed and cached once for the process. Clearing the
+    # environment alone cannot undo a previous test's selected signer.
+    signing._reset_injected_keypair_cache()
     audit_writer._default = None
     audit_writer._defaults.clear()
     api._world_cache.clear()
     yield
+    signing._reset_injected_keypair_cache()
     config.reset_config_cache()
     audit_writer._default = None
     audit_writer._defaults.clear()
@@ -64,15 +69,23 @@ def _write_day(rows=None):
             (audit_dir / f"{DAY}.ndjson").read_text().splitlines() if line.strip()]
 
 
-def test_status_reports_signing_key_and_days():
+@pytest.mark.parametrize("source", ["injected", "local"])
+def test_status_reports_signing_key_and_days(monkeypatch, source):
+    from maverick.audit import signing
+
+    if source == "injected":
+        monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", "ab" * 32)
     _write_day()
     r = client.get(f"{BASE}/status")
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["schema"] == "lightwork.trust-receipts-status.v1"
     assert body["signing_enabled"] is True
-    assert body["key_custody"] == "colocated"
+    assert body["key_custody"] == ("offhost" if source == "injected" else "colocated")
     assert body["key_id"] and body["pubkey"] and len(body["pubkey"]) == 64
+    key_dir = signing._key_dir()
+    assert (key_dir / f"{body['key_id']}.key").exists() is (source == "local")
+    assert (key_dir / f"{body['key_id']}.injected").exists() is (source == "injected")
     assert any(k["key_id"] == body["key_id"] for k in body["trusted_keys"])
     assert body["days"] == [DAY]
     assert len(body["verifier_sha256"]) == 64

@@ -112,10 +112,10 @@ def test_goal_destructive_actions_and_attachment_failures_recover():
     assert "if (!accepted) cancelBtn.disabled = false" in source
     sharing = (TEMPLATES.parent / "static" / "lightwork-deliverable-sharing.js").read_text(encoding="utf-8")
     assert "mvConfirm" in sharing
-    assert "window.mvRenderError(status, error, 'revoke this link'); button.disabled = false" in sharing
+    assert "window.mvRenderError(status, error, 'revoke this link'); button.disabled = denied" in sharing
     assert "Attachments could not be loaded. You can still add a file" in source
     assert "panel.style.display = 'block'" in source
-    assert 'id="attach-add" multiple aria-label="Add files to this task"' in source
+    assert 'id="attach-add" multiple aria-label="{{ ut(\'Add files to this task\') }}"' in source
     assert 'tabindex="-1"' in source
 
 

@@ -104,10 +104,14 @@ def test_chat_form_submits_via_fetch(monkeypatch, tmp_path):
 def test_chat_can_handoff_an_unsaved_flow_or_agent_draft(monkeypatch, tmp_path):
     """Authoring choices stay browser-local until the user explicitly saves."""
     _prep(monkeypatch, tmp_path)
-    page = _client().get("/chat").text
+    response = _client().get("/chat")
+    assert response.status_code == 200
+    page = response.text
     assert 'name="authoring_kind"' in page
-    assert '<option value="flow">Draft a workflow</option>' in page
-    assert '<option value="agent">Draft an agent</option>' in page
+    from test_support.element_text import element_texts
+
+    assert element_texts(page, "option", {"value": "flow"}) == ["Draft a workflow"]
+    assert element_texts(page, "option", {"value": "agent"}) == ["Draft an agent"]
 
     ui = _client().get("/static/lightwork-ui.js").text
     assert "lightwork.authoring-handoff" in ui

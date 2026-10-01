@@ -28,3 +28,33 @@ test('review alone never creates a link and permission loss removes an already s
   assert.match(p.doc.body.textContent,/Private result/);assert.equal(calls.filter(([url,method])=>method==='POST'&&!url.endsWith('/preview')).length,0);
   p.doc.dispatchEvent(new p.dom.window.CustomEvent('lightwork:task-access-lost'));assert.doesNotMatch(p.doc.body.textContent,/Private result/);assert.equal(p.doc.getElementById('share-confirm'),null);p.stop();
 });
+
+test('a refused revoke shows the error and permits an explicit retry while access remains',async()=>{
+  const calls=[];const p=page(async(url,options)=>{
+    calls.push([url,options.method]);
+    if(url.endsWith('/7/revoke'))return response({detail:'Could not record revocation'},503);
+    return response({links:[{id:7,label:'Current link',state:'active',expires_at:1}]});
+  });await settle();
+  const button=p.doc.querySelector('.share-revoke');button.click();await settle();
+  assert.equal(button.disabled,false);
+  assert.match(p.doc.getElementById('share-msg').textContent,/Unable to manage link/);
+  assert.equal(calls.filter(([url])=>url.endsWith('/7/revoke')).length,1);
+  button.click();await settle();
+  assert.equal(calls.filter(([url])=>url.endsWith('/7/revoke')).length,2);p.stop();
+});
+
+test('a revoke rejected after access loss clears private data and cannot be retried',async()=>{
+  const calls=[];const p=page(async(url,options)=>{
+    calls.push([url,options.method]);
+    if(url.endsWith('/7/revoke'))return response({},403);
+    return response({links:[{id:7,label:'Private current link',state:'active',expires_at:1}]});
+  });await settle();
+  const button=p.doc.querySelector('.share-revoke');button.click();await settle();
+  assert.equal(button.disabled,true);
+  assert.equal(p.doc.querySelector('.share-revoke'),null);
+  assert.equal(p.doc.getElementById('share-create').disabled,true);
+  assert.doesNotMatch(p.doc.body.textContent,/Private current link/);
+  assert.match(p.doc.getElementById('share-msg').textContent,/access changed/);
+  button.click();p.dom.window.dispatchEvent(new p.dom.window.Event('focus'));await settle();
+  assert.equal(calls.filter(([url])=>url.endsWith('/7/revoke')).length,1);p.stop();
+});

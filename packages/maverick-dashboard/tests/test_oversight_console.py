@@ -70,8 +70,17 @@ def test_consent_approve_excluded_deny_counted(monkeypatch, tmp_path):
     from maverick.audit import record
     record("consent_result", agent="a", decision="approve", action="deploy")
     record("consent_result", agent="a", decision="deny", action="rm -rf /")
-    text = _client().get("/oversight").text
+    from test_support.element_text import element_texts
+    from test_support.plain_language import visible_text
+
+    response = _client().get("/oversight")
+    assert response.status_code == 200
+    text = visible_text(response.text)
     # A denial is an intervention; an approval is not.
+    assert "1 intervention in this window" in text
+    cells = element_texts(response.text, "td")
+    assert len(cells) == 5  # Exactly one five-column event row, never the approval.
+    assert cells[1] == cells[4] == "Consent refused"
     assert "Consent refused" in text
     assert "rm -rf /" not in text
     assert "deploy" not in text
