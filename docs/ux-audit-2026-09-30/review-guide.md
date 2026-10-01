@@ -16,8 +16,10 @@ failed/incomplete runs, later repairs and exact-source results.
 
 Browser acceptance reopened LW-064, LW-091 and LW-099. Their widget, native role
 form and workspace recovery repairs are now integrated, and all 18 focused
-acceptance cases pass at `1719f2f`. Full browser/JavaScript and fresh integrated
-Python qualification remain in progress.
+acceptance cases pass at `1719f2f`. The complete108-case browser and1711-case
+JavaScript cohorts also pass there. A subsequent short-viewport widget boundary
+was reproduced and repaired; all seven updated widget cases pass. Fresh full
+Python/static/build qualification remains in progress.
 
 The latest complete ordinary run still has one
 [unresolved transport timeout](transport-timeout-investigation-95aa61e.md).

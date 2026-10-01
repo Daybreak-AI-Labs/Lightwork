@@ -7,38 +7,33 @@ No deployment configuration or credentials were changed.
 
 ## Current evidence snapshot, 2026-10-01
 
-This snapshot includes the completed final07 Python ordinary phase and the subsequent native PostgreSQL cursor receipts.
 The register has **190 implemented entries awaiting final acceptance and five
-qualification entries**. The expanded
-browser run at `be34965` completed with 102 distinct passes and six failures
-across its default/setup profiles. Three failures confirm widget clipping; one
-exposes early role-form submission before JavaScript binds the workspace. Two
-workspace-test fixtures require ownership and route corrections, and their
-investigation also found an unmatched-route error-page rendering bug. These
-findings were repaired. Subsequent focused acceptance at `d4d6e25` also
-found the workspace-change recovery button obscured by the sidebar; draft
-preservation and stale-workspace refusal pass, but pointer-click recovery needs
-a layout repair. That repair is now integrated: all 18 focused acceptance cases
-pass at `1719f2fc0e01216e8daea5f77228da9835409657`, including actual pointer-click
-recovery, 320px bounds and retained draft focus. Both complete five-module native
-cohorts pass 69 cases at `d4d6e25`; the later delta is the alert JavaScript and its
-browser test. The full 108-case browser rerun is underway; no complete new browser
-pass is claimed yet. LW-052's 125-task regression reproduced a missing
-page-boundary task and retained deleted content. The scoped cursor/window repair
-is integrated; all 108 mobile tests and the 22-case backend group pass locally.
-Both complete new backend files now pass against native PostgreSQL in each posture (23 cases, including all seven service-gated variants). Final integrated checks remain queued.
-The five separately approved security repairs remain implemented with final
-integrated qualification pending.
+qualification entries**. All five separately approved security repairs are
+implemented; final integrated Python/static/build qualification remains pending.
 
-The later `e7b7bf66b269fac4190ce90a59946b1d4389768a` checkpoint also includes
-the accessible plan cost labels and honest stale-snapshot recovery, plus browser
-acceptance cases for archive verification, retention reset, workspace switching,
-explicit role grants, the embedded widget and reduced motion. The new browser
-cases ran at `be34965` with the failures described above; same-length checksum
-tampering was also added and passed. The plan controller's
-11 cases and reduced-motion call-site checks pass locally. The complete retention
-API module passes 18 cases in each posture on Python 3.10. These focused results
-do not replace a complete run on the later source.
+The complete browser cohort passes **108 distinct cases** across default/setup
+profiles at `1719f2fc0e01216e8daea5f77228da9835409657`, and all **1,711 JavaScript
+tests in 181 files** pass at that source. The earlier failures led to actual
+widget, native-role-form, error-page and workspace-recovery repairs; their logs
+and traces remain retained. Both complete affected native cohorts pass 69 cases
+per posture. See [exact UI evidence](browser-final-1719f2f.md).
+
+Subsequent review reproduced one additional widget boundary: a 200px visible
+keyboard viewport could clip status text without allowing user scrolling. The
+narrow vertical-overflow repair is integrated as `79bbed8f`; all seven updated
+widget cases pass, preserving the original six and adding real wheel scrolling,
+keyboard/pointer recovery and receipt-count assertions. Committed reviewed source
+`88cd66f29309ba64026077a835b1c755d0c19256` matches the retained repaired runtime
+inputs. This is a full 108-case baseline plus a seven-case delta, not a full
+109-case run. The standalone widget change does not alter dashboard JavaScript.
+
+LW-052's original 125-task regression reproduced a missing page-boundary task
+and retained deleted content. The scoped cursor/window repair is integrated;
+all 108 mobile tests and TypeScript pass. Both complete new backend cursor files
+pass all 23 cases in each posture against native PostgreSQL, including all seven
+service-gated variants. The unchanged native editor fixtures also now pass:
+two Emacs ERT tests and one Neovim Lua fixture. Their initial sandbox crash and
+successful native-host recovery are preserved in [editor evidence](native-editor-qualification.md).
 
 The completed final07 ordinary phase has one unresolved failure in
 `test_bounded_queue_overflow_is_durable_serial_and_in_intake_order`. Its preserved
@@ -51,13 +46,13 @@ increasing the test deadline or treating the original failure as a pass.
 | Evidence | Exact execution source | Current result and limit |
 | --- | --- | --- |
 | Full Python 3.12 ordinary | `2a765aa3e93cc7775090f574f027bd855b33aef5` (`qualification-final-07`) | 40,072 passed, one failed, 590 skipped and 22 warnings in 3,281.79 seconds; source unchanged. The transport failure remains unresolved. [Exact skip reconciliation](skip-reconciliation-final07.md), followed by [real-speaker recovery](speechbrain-real-model-qualification.md): 458 executable identities have supplementary passes in both postures, five collection placeholders expanded, 127 entries retain explicit boundaries. The prior 457 + five + 128 checkpoint remains preserved. These do not rewrite the full-run outcomes. Later cursor/mobile fixes are outside this source; subsequent phases require a new binding. |
-| Expanded browser acceptance | `be3496571342c242af6ba956206e2446781996bb` | Default: 95 passed, six failed, seven setup-only skips. Setup: all seven passed. Therefore 102 distinct passes and six failures across all 108 registrations. Subsequent widget, native-form, error-page and workspace-alert repairs are integrated. All 18 focused cases pass at `1719f2f`; complete rerun remains in progress. Earlier failed Chrome launch attempts did not execute test bodies and remain separate infrastructure evidence. |
+| Expanded browser acceptance | `be3496571342c242af6ba956206e2446781996bb` | Default: 95 passed, six failed, seven setup-only skips. Setup: all seven passed. Therefore 102 distinct passes and six failures across all 108 registrations. Subsequent widget, native-form, error-page and workspace-alert repairs are integrated. All 18 focused cases pass at `1719f2f`; the complete108-case browser and1711-case JavaScript reruns now pass at1719f2f. Earlier failed Chrome launch attempts did not execute test bodies and remain separate infrastructure evidence. |
 | [Static gates and package builds](static-build-qualification-3640fcf.md) | `3640fcf7906d3f7129df1b34bc1718492a164bcf` | All 26 checks passed: Ruff, Vulture, 16 offline contracts and eight wheels. All 4,827 payload files match the exact Git archive. Later product changes require renewed build/static verification. |
 | [Complete browser and JavaScript](browser-quiet-qualification-2026-10-01.md) | `11c30996c98a0ad0c9583005223019ad0d75b8b4` | All 90 distinct Chrome journeys across default/setup profiles and all 1,695 JavaScript tests passed. [Exact source comparison](browser-source-relationship-2a765aa.md) proves the unchanged dashboard/frontend relationship to `2a765aa`; it does not claim a browser rerun there or cover the active mobile change. |
 | [Current-client Qdrant repair](qdrant-current-client-qualification-e22ffbc.md) | `e22ffbcca2af43887ed4c142b2633fd86a51471c` | 75 distinct passing IDs across native adapter and real loopback-server checks; both postures include actual offline ONNX inference. One intentional parameter skip remains. Repeated executions are not additional unique tests. |
 | [Secure PostgreSQL follow-up](postgresql-secure-gap-qualification.md) | `aa37a5a58d81940af4ab87434f6c33e6af96c75e` | All 363 cases in 29 complete files passed with both secure flags, zero skips/errors/failures. This covers all 270 identities previously lacking secure PostgreSQL evidence. The private server stopped; twelve pgvector extension cases still require the absent native compiler prerequisites. |
 | [Real SpeechBrain model](speechbrain-real-model-qualification.md) | `7151b78c8d3579016c4875077dcb602e7a64ab50` | Original public-fixture test passed ordinary and secure: one identity, two executions, zero skips/warnings. Verified YAML and all three real checkpoints loaded with forced weights-only CPU inference and Python network denial. Six implementation/test/fixture blobs match review source `18efb85`. One former model/sample gate is now recovered; native microphone and customer-recording qualification remain separate. |
-| [Python 3.10 / 3.11 compatibility](supported-python-qualification-3640fcf.md) | Full collection at `3640fcf`; critical test source `f1f41a3e13a8d3f574546e8a577a48555e3ec8bc`, unchanged `3640fcf` product wheels | Each interpreter collected the same 40,660 executable IDs before the two later admission tests. All four ordinary/secure critical cohorts passed the same 405 cases, with seven explicit database-service skips each. Full Python 3.10 ordinary/heavy runtime remains scheduled after Python 3.12; no full Python 3.11 runtime is claimed. |
+| [Python 3.10 / 3.11 compatibility](supported-python-qualification-3640fcf.md) | Full collection at `3640fcf`; critical test source `f1f41a3e13a8d3f574546e8a577a48555e3ec8bc`, unchanged `3640fcf` product wheels | Each interpreter collected the same 40,660 executable IDs before the two later admission tests. All four ordinary/secure critical cohorts passed the same 405 cases, with seven explicit database-service skips each. Full ordinary/heavy runtime on both Python 3.10 and 3.11 remains scheduled after Python 3.12; no complete floor runtime pass is claimed yet. |
 | [Mobile pagination](mobile-pagination-qualification-4d8dedb.md) and [scoped backend cursor](mobile-task-cursor-qualification.md) | Mobile `4d8dedb11b940e98875867021b70f151e74c7fcb`; backend `737ba45287df2c09370d5f83056889f2e5be16d0` | Complete mobile suite: 108 passed; TypeScript passed. Backend: earlier 22-pass/seven-skip expanded cohorts; native PostgreSQL follow-up at `a0c1da8b9005a15fc80882ce286c75d786a48e57` passes all 23 cases in both complete new files in each posture, including all seven PostgreSQL variants. Six changed Python blobs match review source `0d0755b`. Original failing reproductions are retained. Native device scrolling/accessibility remains separate. |
 
 The dated sections below preserve earlier failed, incomplete and focused runs,
