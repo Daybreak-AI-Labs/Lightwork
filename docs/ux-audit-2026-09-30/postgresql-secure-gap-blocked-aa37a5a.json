@@ -1,5 +1,5 @@
 {
-  "recorded_status": "qualification blocked; incomplete original attempt; no passing secure rerun",
+  "recorded_status": "Launcher blocker recovered by direct foreground startup; complete secure qualification still in progress.",
   "source_head": "aa37a5a58d81940af4ab87434f6c33e6af96c75e",
   "selected_complete_files": 29,
   "target_original_identities_without_completed_secure_rerun": 270,
@@ -260,5 +260,20 @@
       "bytes": 7668,
       "sha256": "ff180be1bb1325ace6704f750d888e6bcaabd5786e7655e7ff6145449d4c87f0"
     }
-  ]
+  ],
+  "historical_blocked_status": "qualification blocked; incomplete original attempt; no passing secure rerun",
+  "launcher_recovery_update": {
+    "recorded_stage": "attempt02 running; no completion or passing total claimed",
+    "source_head": "aa37a5a58d81940af4ab87434f6c33e6af96c75e",
+    "startup_method": "direct_foreground_postgres_default_sandbox",
+    "sandbox": "default",
+    "server_ready": true,
+    "readiness": "127.0.0.1:60165 - accepting connections",
+    "posture_flags": {
+      "MAVERICK_TEST_SECURE_DEFAULT": "1",
+      "MAVERICK_SECURE_DEFAULT": "1"
+    },
+    "credential_or_acl_changes": false,
+    "preservation": "Earlier timeouts, token error87 and original artifacts remain historical evidence. Direct foreground server startup succeeded under the same sandbox identity; pg_ctl wrapper failure is no longer the current blocker."
+  }
 }

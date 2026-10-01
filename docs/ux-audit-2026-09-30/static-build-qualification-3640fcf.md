@@ -24,5 +24,6 @@ permissions or repeat builds.
 This supersedes the `7d38f76` static/build checkpoint and includes the Qdrant
 current-client repair. Runtime, browser, interpreter compatibility, and native
 service results remain separate. In particular, the
-[PostgreSQL secure rerun blocker](postgresql-secure-gap-blocked-aa37a5a.md)
-is not resolved by these passing static/build checks.
+[PostgreSQL secure rerun](postgresql-secure-gap-blocked-aa37a5a.md)
+has its own recovery and completion evidence; passing static/build checks do not
+qualify it.
