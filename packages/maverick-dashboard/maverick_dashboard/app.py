@@ -1451,7 +1451,12 @@ app.include_router(oidc_login_router)
 # Email invite links (/auth/invite/{token}): single-use onboarding links an
 # admin mints on /users. Self-gates on [dashboard] invites (default off), so
 # including it unconditionally is inert. See maverick_dashboard.invite_routes.
+from .api_keys_api import router as api_keys_router  # noqa: E402
 from .invite_routes import router as invite_router  # noqa: E402
+
+# Personal / service-account API keys: page + JSON routes. Self-gates on
+# [dashboard] api_keys (404 when off).
+app.include_router(api_keys_router)
 from .local_owner_routes import router as local_owner_router  # noqa: E402
 
 app.include_router(local_owner_router)
@@ -2104,6 +2109,22 @@ def _configured_oidc_bearer_present(request: Request) -> bool:
         return False
 
 
+def _api_key_bearer_present(request: Request) -> bool:
+    """Whether this request presents a personal / service-account API key.
+
+    Like an OIDC bearer it is explicit, non-ambient authority: no Origin check
+    applies, and the global auth dependency verifies it (and 401s a bad,
+    expired, revoked or out-of-scope one) before any cookie identity could be
+    selected. Cheap shape check only -- no store read here.
+    """
+    try:
+        from . import auth as auth_boundary
+
+        return bool(auth_boundary._api_key_bearer(request))
+    except Exception:
+        return False
+
+
 @app.middleware("http")
 async def http_metrics(request: Request, call_next):
     """Count every request into the always-on runtime metrics registry.
@@ -2175,7 +2196,8 @@ async def bearer_auth(request: Request, call_next):
         from . import auth as auth_boundary
 
         if not auth_boundary.auth_genuinely_off():
-            explicit_oidc_bearer = _configured_oidc_bearer_present(request)
+            explicit_oidc_bearer = (_configured_oidc_bearer_present(request)
+                                    or _api_key_bearer_present(request))
             if (
                 not explicit_oidc_bearer
                 and not _is_same_origin(request)
@@ -2212,6 +2234,12 @@ async def bearer_auth(request: Request, call_next):
                 )
         except Exception:  # pragma: no cover - never break auth on a read error
             pass
+        # A personal / service-account API key is an explicit credential the
+        # local operator minted on this computer: let the global dependency
+        # verify it (it fails closed), so a script can reach Lightwork from
+        # another computer without a shared static token.
+        if _api_key_bearer_present(request):
+            return await call_next(request)
         # No token configured: serve loopback only. An operator who binds
         # --host 0.0.0.0 without setting a token must NOT silently expose
         # run history, spend, and the control surface unauthenticated to
@@ -2286,7 +2314,7 @@ async def bearer_auth(request: Request, call_next):
         # A non-static bearer may be an OIDC token in a mixed deployment. Let
         # the global dependency verify it; malformed/invalid credentials never
         # fall back to proxy or cookie identity there.
-        if _configured_oidc_bearer_present(request):
+        if _configured_oidc_bearer_present(request) or _api_key_bearer_present(request):
             return await call_next(request)
         _auth_metrics.record_auth_failure("bad_token")
         return JSONResponse({"detail": "unauthorized"}, status_code=401)

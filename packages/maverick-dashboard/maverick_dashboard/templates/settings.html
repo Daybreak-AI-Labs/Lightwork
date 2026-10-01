@@ -438,7 +438,29 @@
     </form>
   </div>
 
-  <div class="section-head" data-settings-group="access" id="settings-access"><h2 id="ui-visibility">Pages each role can see</h2></div>
+  <div class="section-head" data-settings-group="access" id="settings-access"><h2 id="api-keys">Access keys for scripts and integrations</h2></div>
+  <div class="panel" data-settings-group="access">
+    <p class="muted settings-lead">
+      {% if api_keys_enabled %}
+      People create their own keys on <a href="/account/api-keys">Account &rsaquo; Access keys</a>.
+      A key only does what its scopes allow and never more than its owner's role, it stops
+      on its expiry date, and it can be rotated or revoked at any time. Administrators see
+      every key there and can create service accounts: named identities for programs that
+      hold keys and a role but cannot sign in.
+      {% else %}
+      Access keys are turned off on this installation. Turn on "Access keys for scripts and
+      integrations" under All settings to let people create them.
+      {% endif %}
+    </p>
+    {% if static_token_set %}
+    <p class="settings-lead" role="note"><strong>The shared server access token is set.</strong>
+      Anyone holding it can do everything an administrator can, it never expires and it is
+      not tied to a person. Its use is recorded in the activity record as break-glass access.
+      Prefer personal keys or service accounts for scripts, and keep the token for emergencies.</p>
+    {% endif %}
+  </div>
+
+  <div class="section-head" data-settings-group="access"><h2 id="ui-visibility">Pages each role can see</h2></div>
   <div class="panel" data-settings-group="access">
     <p class="muted settings-lead">
       Choose which pages each role sees. Unticking a box removes the page from
