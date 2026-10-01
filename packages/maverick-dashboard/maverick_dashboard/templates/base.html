@@ -106,6 +106,8 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-settings"></use></svg>
       </a>
       {% endif %}
+      <a class="iconbtn iconbtn--text" href="{{ docs_learn_more.url if docs_learn_more else docs_home }}" target="_blank" rel="noopener noreferrer"
+         aria-label="Documentation (opens in a new tab)" title="Documentation (opens in a new tab)"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-walkthroughs"></use></svg><span class="iconbtn__text">Docs</span></a>
       <a class="iconbtn" href="/help" aria-label="Help and diagnostics" title="Help and diagnostics"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-facts"></use></svg></a>
       <details class="prefs" id="prefs-menu">
         <summary class="iconbtn" aria-label="Display preferences" title="Display preferences">
@@ -166,6 +168,9 @@
         <kbd aria-hidden="true">Ctrl K</kbd>
       </button>
       {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
+      {# The five most-used pages sit above the groups so a first visit never
+         lands on closed headers alone. Only pages the caller may see appear. #}
+      {% set _quick_hrefs = ['/chat', '/goals', '/approvals', '/deliverables', '/settings'] %}
       {% set _path = request.url.path if request else '' %}
       {# The dashboard lands on /chat, so highlight Chat when at the bare root. #}
       {% set _active_path = '/chat' if _path == '/' else _path %}
@@ -182,6 +187,20 @@
           {% endif %}
         {% endfor %}
       {% endfor %}
+      {% set _quick = namespace(links=[]) %}
+      {% for _href in _quick_hrefs %}
+        {% for _group in nav_groups %}{% for _link in _group.links if _link.href == _href %}
+          {% set _quick.links = _quick.links + [_link] %}
+        {% endfor %}{% endfor %}
+      {% endfor %}
+      {% if _quick.links %}
+      <ul class="navquick-list" aria-label="Most used">
+        {% for _link in _quick.links %}
+          {% set _active = (_active_nav.href == _link.href) %}
+          <li><a href="{{ _link.href }}"{% if _active %} class="active" aria-current="page"{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ _link.label }}</span></a></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
       {% for _group in nav_groups %}
         <div class="navgrp">
           <button type="button" class="navgrp__toggle" data-grp="{{ _group.label }}"
@@ -192,7 +211,8 @@
           <ul class="navgrp__items" id="navgrp-{{ loop.index0 }}">
             {% for _link in _group.links %}
               {% set _active = (_active_nav.href == _link.href) %}
-              <li><a href="{{ _link.href }}"{% if _active %} class="active" aria-current="page"{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ _link.label }}</span></a></li>
+              {# A page that also sits in the Most used list carries its aria-current there. #}
+              <li><a href="{{ _link.href }}"{% if _active %} class="active"{% if _link.href not in _quick_hrefs %} aria-current="page"{% endif %}{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ _link.label }}</span></a></li>
             {% endfor %}
           </ul>
         </div>
@@ -207,6 +227,10 @@
      destination. #}
   {% include "_navfinder.html" %}
   <main id="content" tabindex="-1">
+    {% include "_halt_banner.html" %}
+    {% if docs_learn_more %}
+    <p class="page-docs"><a href="{{ docs_learn_more.url }}" target="_blank" rel="noopener noreferrer">Learn more about {{ docs_learn_more.label }} in the documentation<span class="sr-only"> (opens in a new tab)</span></a></p>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   <footer>

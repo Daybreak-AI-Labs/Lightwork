@@ -56,13 +56,18 @@ def test_plan_page_renders_interactive_container_and_script(client, world_with_t
     assert "Refresh to see live state" not in body
 
 
-def test_plan_page_keeps_noscript_fallback(client, world_with_tree):
+def test_plan_page_keeps_readable_fallback(client, world_with_tree):
     _, g1, *_ = world_with_tree
     body = client.get(f"/goals/{g1}/plan").text
-    assert "<noscript>" in body
+    # The readable plan is always on the page (not only in <noscript>): it is
+    # what shows without JavaScript, when the map library cannot load, and
+    # while the map loads. The map itself starts hidden until it renders.
+    assert 'id="plan-tree-list"' in body and "<noscript>" not in body
+    assert 'id="plan-tree" role="img" hidden' in body
     # The root task links from the fallback markup (by address, not a "#id").
     assert f'href="/chat/goal/{g1}"' in body
-    assert "in_progress" not in body.split("<noscript>")[1].split("</noscript>")[0]
+    listing = body.split('id="plan-tree-list"')[1].split("</div>")[0]
+    assert "in_progress" not in listing
 
 
 def test_tree_api_still_returns_json(client, world_with_tree):

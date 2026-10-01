@@ -1,14 +1,14 @@
 <section id="connection-setup" class="cx__form" aria-labelledby="cs-title">
-  <h2 id="cs-title">Connect an account</h2>
-  <p>Connect Google Drive, Google Cloud Storage, or Jira Cloud with renewable authorization. You review access on the provider's website, then return here to finish saving the connection.</p>
+  <h2 id="cs-title">Connect an account (sign-in-based)</h2>
+  <p>Connect Google Drive, Google Cloud Storage, or Jira Cloud by signing in to the account. You review access on the provider's website, then return here to finish saving the connection.</p>
   <p id="cs-status" role="status" aria-live="polite" tabindex="-1">Loading account connection options…</p>
   <button id="cs-refresh" class="btn" type="button">Refresh account connections</button>
   <button id="cs-retry" class="btn btn--primary" type="button" hidden>Retry account sign-in</button>
   <p id="cs-task-return" hidden>Your original request is still saved. <a id="cs-task-link" class="btn">Return to request</a></p>
   <div id="cs-enable" hidden>
-    <p>Saved account authorization is off. An administrator can enable it here when deployment policy permits.</p>
-    <label class="cs-check"><input id="cs-enable-confirm" type="checkbox">Enable saved connections and renewable account authorization for this app.</label>
-    <button id="cs-enable-button" class="btn" type="button" disabled>Enable account connections</button>
+    <p>Sign-in-based connections are off. Key-based connections still work. Turning this on lets people sign in to Google or Atlassian accounts here and lets Lightwork renew that access when a workflow needs it.</p>
+    <label class="cs-check"><input id="cs-enable-confirm" type="checkbox">Turn on sign-in-based connections for this app.</label>
+    <button id="cs-enable-button" class="btn" type="button" disabled>Turn on sign-in-based connections</button>
   </div>
   <details id="cs-disable" hidden>
     <summary>Turn off account connections</summary>

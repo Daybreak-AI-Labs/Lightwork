@@ -235,6 +235,8 @@
       </svg>
 {%- endmacro %}
 <div class="convo">
+  {% from "_task_tabs.html" import task_tabs %}
+  {{ task_tabs(goal, 'result') }}
   {% if latest_chat_goal_id and latest_chat_goal_id != goal.id %}
   <p class="muted" id="newer-chat-turn">You are viewing an earlier message.
     <a href="/chat/goal/{{ latest_chat_goal_id }}">Open the latest message in this chat</a>.</p>

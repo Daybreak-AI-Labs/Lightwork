@@ -152,16 +152,31 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
-def _format_datetime(ts) -> str:
-    """Jinja filter: float epoch -> 'HH:MM:SS'."""
+def _format_datetime(ts, mode: str = "relative"):
+    """Jinja filter: epoch seconds -> a ``<time>`` the viewer reads in their zone.
+
+    The server text is the full date, time and zone (UTC), so a page without
+    JavaScript still says when; ``lightwork-ui.js`` (``mvFormatTimes``) then
+    rewrites it in the viewer's time zone -- relative with the absolute time on
+    hover (default), or absolute with ``mode="absolute"``. Never a bare
+    ``HH:MM:SS`` and never a raw epoch.
+    """
     import datetime as _dt
 
-    if ts is None:
+    from markupsafe import Markup, escape
+
+    if ts is None or ts == "":
         return "-"
     try:
-        return _dt.datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
+        stamp = float(ts)
+        when = _dt.datetime.fromtimestamp(stamp, tz=_dt.timezone.utc)
     except (TypeError, ValueError, OverflowError, OSError):
         return str(ts)
+    text = when.strftime("%d %b %Y, %H:%M UTC")
+    return Markup(
+        f'<time datetime="{when.isoformat()}" data-mv-time="{stamp:.3f}"'
+        f' data-mv-time-mode="{escape(mode)}">{text}</time>'
+    )
 
 
 templates.env.filters["datetime"] = _format_datetime
@@ -480,6 +495,22 @@ def _workspace_context(request: Request) -> dict:
 
 
 templates.context_processors.append(_workspace_context)
+
+
+def _docs_context(request: Request) -> dict:
+    """The Docs link in the top bar and the per-page Learn more link."""
+    from .docs_links import DOCS_HOME, learn_more_for
+
+    try:
+        path = request.url.path
+    except Exception:  # pragma: no cover -- shell rendering stays fail-soft
+        path = ""
+    return {"docs_home": DOCS_HOME, "docs_learn_more": learn_more_for(path)}
+
+
+templates.context_processors.append(_docs_context)
+templates.env.globals.setdefault("docs_home", "https://daybreak-ai-labs.github.io/Lightwork/")
+templates.env.globals.setdefault("docs_learn_more", None)
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
@@ -3478,6 +3509,9 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     mine = set(persona_roles_for(caller_principal(request)))
     default_mine = mine if (not selected and role != "all") else None
     model = build_inbox(specs, runs_by_domain, selected, signoffs, mine=default_mine)
+    # ?role=all is the explicit request to browse the whole catalogue even
+    # before any result exists; the plain page shows a real empty state.
+    model["showing_all"] = role == "all"
     return templates.TemplateResponse(request, "deliverables.html", model)
 
 
@@ -3535,10 +3569,18 @@ async def tenants_page(request: Request) -> HTMLResponse:
         tenants = list_tenants()
     except Exception:  # pragma: no cover -- never 500 the console
         tenants = []
+    # Plans (Free / Pro / Enterprise) only mean something when platform billing
+    # collects for them; a self-hosted administrator never sees them otherwise.
+    try:
+        from maverick import billing_stripe
+
+        billing_on = bool(billing_stripe.enabled())
+    except Exception:  # pragma: no cover -- billing is optional
+        billing_on = False
     return templates.TemplateResponse(
         request,
         "tenants.html",
-        {"tenants": tenants, "is_admin": True},
+        {"tenants": tenants, "is_admin": True, "billing_on": billing_on},
     )
 
 
@@ -5930,6 +5972,24 @@ def safe_audit_day(day: str | None) -> str | None:
 _AUDIT_RANGE_SCAN_LIMIT = 2_000_000
 
 
+def _global_audit_tail(request: Request, audit_log, n: int, day: str | None) -> list[dict]:
+    """The deployment-wide chain's tail for a global administrator, tagged
+    ``scope=deployment``; empty when the caller may not see it or when the
+    workspace chain is already the global one."""
+    try:
+        if not has_global_permission(request, "admin"):
+            return []
+        from maverick.audit import global_audit_log
+
+        global_log = global_audit_log()
+        if global_log is audit_log or getattr(global_log, "audit_dir", None) == getattr(audit_log, "audit_dir", None):
+            return []
+        rows = global_log.tail(n, day=day)
+    except Exception:  # pragma: no cover -- the workspace chain still renders
+        return []
+    return [{**e, "scope": "deployment"} for e in rows if isinstance(e, dict)]
+
+
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
     """The activity log: recent events for a day or a date range, filtered by
@@ -6007,9 +6067,18 @@ async def audit_page(request: Request) -> HTMLResponse:
                            "Choose fewer days or add a filter to see earlier ones.")
     else:
         events = await run_in_threadpool(audit_log.tail, n, day=day, report=read_report)
+        # Deployment-wide changes (a workspace created, paused or removed) are
+        # recorded in the global chain, not the workspace's own. An administrator
+        # allowed to see the whole deployment reads both here, so an action they
+        # just took never seems to have gone unrecorded.
+        events = events + await run_in_threadpool(_global_audit_tail, request, audit_log, n, day)
         kind_set = {str(e.get("kind")) for e in events if e.get("kind")}
         people_set = {_audit_plain.event_person(e) for e in events}
         events = [e for e in events if _matches(e)]
+    # Newest first by default (what happened just now is what people look for);
+    # ?order=oldest keeps the chain order.
+    order = "oldest" if request.query_params.get("order") == "oldest" else "newest"
+    events = sorted(events, key=lambda e: float(e.get("ts") or 0), reverse=(order == "newest"))
     # Distinct kinds and people in the window (for the filter dropdowns),
     # gathered before filtering so every choice stays selectable.
     kinds = sorted(kind_set, key=_audit_plain.kind_label)
@@ -6028,6 +6097,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             "person": person,
             "people": [{"value": p, "label": _idfmt.humanize_principal(p).name} for p in people],
             "q": q,
+            "order": order,
             "can_admin": has_permission(request, "admin"),
             "can_global_admin": has_global_permission(request, "admin"),
             "audit_signing_enabled": bool(audit_log.signing_enabled),
@@ -8271,6 +8341,11 @@ async def channels_save(request: Request) -> RedirectResponse:
         settings_store.set_channel(name, enabled, values)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from .audit_actions_api import _audit_event
+
+    # Only which fields changed is recorded, never their values.
+    _audit_event(request, "channel_saved", channel=name, enabled=enabled,
+                 fields=sorted(k for k, v in values.items() if str(v).strip()))
     return RedirectResponse("/channels?saved=save", status_code=303)
 
 
@@ -8285,6 +8360,9 @@ def channels_clear(request: Request, channel: str = Form(...)) -> RedirectRespon
         settings_store.clear_channel((channel or "").strip())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from .audit_actions_api import _audit_event
+
+    _audit_event(request, "channel_settings_removed", channel=(channel or "").strip())
     return RedirectResponse("/channels?saved=clear", status_code=303)
 
 
@@ -9065,10 +9143,25 @@ def _submission_conversation(w, receipt) -> int | None:
 # bare root renders it too; the overview/stats view lives at /overview. This is
 # a distinct handler rather than a second decorator on chat_page so the route
 # name stays unique (duplicate names collide as OpenAPI operationIds).
+def _owner_setup_first(request: Request) -> bool:
+    """A fresh install opens on owner creation before anything else, unless the
+    person chose Skip for now (a cookie the /start page sets)."""
+    if request.query_params.get("owner") == "later" or request.cookies.get("mvk_owner_later"):
+        return False
+    try:
+        from .local_owner import available as local_owner_available
+
+        return bool(local_owner_available(request))
+    except Exception:  # pragma: no cover -- never block the home page on this
+        return False
+
+
 @app.get("/", response_class=HTMLResponse, response_model=None)
 async def home(request: Request) -> HTMLResponse | RedirectResponse:
     from .onboarding_state import selected_model_routes_ready
 
+    if _owner_setup_first(request):
+        return RedirectResponse("/auth/local-owner", status_code=303)
     if not await run_in_threadpool(selected_model_routes_ready):
         return RedirectResponse("/start", status_code=303)
     return await run_in_threadpool(chat_page, request)
@@ -10673,6 +10766,18 @@ def _render_tree_html(node: dict) -> str:
     return f"<ul>{_render(node)}</ul>"
 
 
+@app.get("/goals/{goal_id}", response_class=HTMLResponse, response_model=None)
+def goal_page(request: Request, goal_id: int) -> RedirectResponse:
+    """The task's own address: the Result tab (the readable chat view). The
+    other tabs live at /goals/{id}/trajectory, /plan and /errors."""
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    return RedirectResponse(f"/chat/goal/{goal_id}", status_code=302)
+
+
 @app.get("/goals/{goal_id}/plan", response_class=HTMLResponse)
 def plan_tree_page(request: Request, goal_id: int) -> HTMLResponse:
     """HTML plan-tree visualization."""
@@ -11593,12 +11698,15 @@ async def workflow_builder_page(
     )
 
 
-@app.get("/start", response_class=HTMLResponse)
-def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLResponse:
+@app.get("/start", response_class=HTMLResponse, response_model=None)
+def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLResponse | RedirectResponse:
     """First-run guide: a live checklist from zero to a running AI workforce.
     Each step reflects real workspace state (provider configured? a workflow or
     agent built? anything run or automated?) so it self-completes as you go."""
     from maverick.config import get_features
+
+    if _owner_setup_first(request):
+        return RedirectResponse("/auth/local-owner", status_code=303)
 
     from .guided_outcome import for_request
     from .onboarding_state import build
@@ -11617,11 +11725,14 @@ def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLRes
     state["first_outcomes"] = first_outcomes_for(request)
     from .local_owner import available as local_owner_available
     state["local_owner_setup_available"] = local_owner_available(request)
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "get_started.html",
         state,
     )
+    if request.query_params.get("owner") == "later":
+        response.set_cookie("mvk_owner_later", "1", max_age=7 * 24 * 3600, httponly=True, samesite="lax")
+    return response
 
 
 @app.get("/workflows", response_class=HTMLResponse)

@@ -590,7 +590,30 @@
     }
     .halt-pill:hover { border-color: var(--danger); text-decoration: none; }
     .halt-pill.armed { background: var(--danger); color: var(--danger-fg); border-color: var(--danger); }
+    .halt-pill { white-space: nowrap; }
     .halt-pill .dot { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--muted); }
+    /* The banner shown on every page while work is stopped. */
+    .halt-banner {
+      display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+      margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-4); border-radius: var(--radius-md);
+      background: var(--danger); color: var(--danger-fg); font-size: var(--text-sm);
+    }
+    .halt-banner[hidden] { display: none; }
+    .halt-banner__dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: currentColor; flex: none; animation: pulse 1.2s ease-in-out infinite; }
+    .halt-banner__text { flex: 1 1 16rem; min-width: 0; }
+    .halt-banner .btn.halt-banner__resume { background: var(--danger-fg); color: var(--danger); border-color: var(--danger-fg); }
+    .chat-shell .halt-banner { border-radius: 0; }
+    .iconbtn--text { width: auto; padding-inline: 0.55rem; gap: 0.35rem; }
+    .iconbtn__text { font-size: var(--text-sm); }
+    .page-docs { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--muted); }
+    /* Task pages share one tab strip: Result · Steps · Plan · Problems. */
+    .task-tabs { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; margin: 0 0 var(--space-4); }
+    .task-tabs__back { font-size: var(--text-sm); color: var(--muted); }
+    .task-tabs__list { display: flex; gap: var(--space-1); list-style: none; margin: 0; padding: 0; border-bottom: 1px solid var(--border); flex: 1 1 auto; }
+    .task-tabs__list a { display: inline-block; padding: var(--space-2) var(--space-3); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .task-tabs__list a:hover { color: var(--text); text-decoration: none; }
+    .task-tabs__list a.task-tabs__on { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
+    .navquick-list { list-style: none; margin: 0 0 var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border); }
     .halt-pill.armed .dot { background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
@@ -648,9 +671,15 @@
         gap: var(--space-1);
         flex-wrap: nowrap;
       }
-      .halt-pill { min-width: 0; padding-inline: 0.55rem; white-space: normal; }
+      /* Narrow screens: the pill never wraps to "Emerg / ency / stop"; the
+         label is spoken by the aria-label and shown again in the banner. */
+      .halt-pill { min-width: 0; padding-inline: 0.55rem; white-space: nowrap; }
       .halt-pill .dot { flex: none; }
-      #halt-label { overflow-wrap: anywhere; }
+      .halt-pill:not(.armed):not(.unavailable) #halt-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      .halt-pill #halt-label { max-width: 6.5rem; overflow: hidden; text-overflow: ellipsis; }
+      .halt-banner { padding-inline: var(--space-3); }
+      .iconbtn__text { display: none; }
+      .iconbtn--text { width: 36px; padding-inline: 0; }
       .prefs__panel {
         position: fixed; inset-inline: var(--space-3);
         top: calc(var(--shell-topbar-h) + var(--space-2));

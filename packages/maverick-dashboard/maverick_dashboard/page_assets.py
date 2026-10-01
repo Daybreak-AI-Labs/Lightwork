@@ -15,6 +15,7 @@ _STATIC = Path(__file__).parent / "static"
 ASSETS = (
     "lightwork-settings-admin.js",
     "lightwork-tenants.js",
+    "lightwork-typeahead.js",
     "lightwork-compliance.js",
     "lightwork-compliance-scoping.js",
     "lightwork-compliance-scope-actions.js",

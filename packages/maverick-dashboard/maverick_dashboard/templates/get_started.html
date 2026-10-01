@@ -166,8 +166,9 @@
     <p class="muted">{{ intro }}</p>
     {% if report.next_fix and can_configure %}
     <p role="{{ 'alert' if report.next_fix.status == 'blocked' else 'status' }}"><strong>Fix next:</strong> {{ report.next_fix.title }}.
+      {% if report.next_fix.outcome %}{{ report.next_fix.outcome[0] | upper }}{{ report.next_fix.outcome[1:] }}.{% endif %}
       {% if report.next_fix.module %}
-      <span data-module-gate="{{ report.next_fix.module }}"><button type="button" class="btn btn--primary mg-on">Turn on {{ report.next_fix.title | lower }}</button>
+      <span data-module-gate="{{ report.next_fix.module }}"><button type="button" class="btn btn--primary mg-on">{{ report.next_fix.fix_label or ('Turn on ' ~ (report.next_fix.title | lower)) }}</button>
         <span class="mg-err" role="alert"></span></span>
       {% elif report.next_fix.fix_href %}<a class="btn btn--primary" href="{{ report.next_fix.fix_href }}">{{ report.next_fix.fix_label }}</a>{% endif %}
     </p>
@@ -182,7 +183,7 @@
           <span class="gs__check-state">{{ check.state_label }}</span>
           <strong>{{ check.title }}</strong> — {{ check.summary }}
           {% if can_configure and check.module %}
-          <span data-module-gate="{{ check.module }}"><button type="button" class="btn mg-on" aria-label="Turn on {{ check.title }}">Turn on</button><span class="mg-err" role="alert"></span></span>
+          <span data-module-gate="{{ check.module }}"><button type="button" class="btn mg-on" aria-label="{{ check.fix_label or ('Turn on ' ~ check.title) }}">Turn on</button><span class="mg-err" role="alert"></span></span>
           {% elif can_configure and check.fix_href %}
           <a class="btn btn--ghost" href="{{ check.fix_href }}" aria-label="{{ check.fix_label }} ({{ check.title }})">{{ check.fix_label }}</a>
           {% endif %}

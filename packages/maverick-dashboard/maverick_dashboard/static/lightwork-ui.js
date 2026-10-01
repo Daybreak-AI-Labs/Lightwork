@@ -357,13 +357,119 @@
         if (!ts || !isFinite(ts)) return '';
         try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
       };
+      // One shared time formatter for every timestamp people read. Servers
+      // send an epoch (seconds) or an ISO string; the viewer sees it in their
+      // own time zone. Convention (any page, any markup owner):
+      //   <time data-mv-time="1790790000">fallback</time>
+      //   data-mv-time-mode="relative" (default: "2 minutes ago", absolute on
+      //   hover) | "absolute" ("30 Sep 2026, 17:15 BST") | "both".
+      // Elements added later are formatted by calling window.mvFormatTimes(root).
+      function mvParseTime(raw) {
+        if (raw === null || raw === undefined || raw === '') return null;
+        var n = Number(raw);
+        var d = isFinite(n) ? new Date((n > 1e12 ? n : n * 1000)) : new Date(String(raw));
+        return isNaN(d.getTime()) || d.getTime() <= 0 ? null : d;
+      }
+      window.mvTimeAbsolute = function (raw) {
+        var d = mvParseTime(raw);
+        if (!d) return '';
+        try {
+          return d.toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+        } catch (e) { return d.toLocaleString(); }
+      };
+      window.mvTimeRelative = function (raw) {
+        var d = mvParseTime(raw);
+        if (!d) return '';
+        var diff = (d.getTime() - Date.now()) / 1000;
+        var abs = Math.abs(diff), past = diff < 0;
+        var units = [[60, 'second'], [3600, 'minute'], [86400, 'hour'], [604800, 'day'], [2629800, 'week'], [31557600, 'month']];
+        if (abs < 45) return past ? 'just now' : 'in a moment';
+        var value, unit = 'year', size = 31557600;
+        for (var i = 1; i < units.length; i++) {
+          if (abs < units[i][0]) { unit = units[i - 1][1]; size = units[i - 1][0]; break; }
+        }
+        value = Math.round(abs / size);
+        if (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) {
+          try { return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
+        }
+        var word = value + ' ' + unit + (value === 1 ? '' : 's');
+        return past ? word + ' ago' : 'in ' + word;
+      };
+      window.mvFormatTimes = function (root) {
+        var scope = root && root.querySelectorAll ? root : document;
+        Array.prototype.forEach.call(scope.querySelectorAll('[data-mv-time]'), function (el) {
+          var raw = el.getAttribute('data-mv-time');
+          var d = mvParseTime(raw);
+          if (!d) return;
+          var mode = el.getAttribute('data-mv-time-mode') || 'relative';
+          var absolute = window.mvTimeAbsolute(raw);
+          var relative = window.mvTimeRelative(raw);
+          if (el.tagName === 'TIME' && !el.getAttribute('datetime')) el.setAttribute('dateTime', d.toISOString());
+          if (mode === 'absolute') { el.textContent = absolute; el.title = relative; }
+          else if (mode === 'both') { el.textContent = absolute + ' (' + relative + ')'; }
+          else { el.textContent = relative; el.title = absolute; }
+          el.setAttribute('data-mv-time-done', mode);
+        });
+      };
+      window.mvFormatTimes(document);
+      // "Resets at midnight UTC" is only meaningful next to the viewer's own
+      // clock: <span data-mv-utc-midnight></span> becomes ", which is 01:00 for you".
+      Array.prototype.forEach.call(document.querySelectorAll('[data-mv-utc-midnight]'), function (el) {
+        try {
+          var next = new Date(); next.setUTCHours(24, 0, 0, 0);
+          var local = next.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+          var zone = (Intl.DateTimeFormat().resolvedOptions().timeZone || '').replace(/_/g, ' ');
+          if (next.getTimezoneOffset() !== 0) el.textContent = ', which is ' + local + ' in your time zone' + (zone ? ' (' + zone + ')' : '');
+        } catch (e) {}
+      });
+      // Relative labels drift; refresh them once a minute.
+      setInterval(function () {
+        Array.prototype.forEach.call(document.querySelectorAll('[data-mv-time-done="relative"]'), function (el) {
+          el.textContent = window.mvTimeRelative(el.getAttribute('data-mv-time'));
+        });
+      }, 60000);
+      // A server-rendered "Saved." notice after a redirect also announces as a
+      // toast, so feedback lands where the person is looking, not above the
+      // fold. <div data-mv-toast="Workspace limit saved." ...>.
+      Array.prototype.forEach.call(document.querySelectorAll('[data-mv-toast]'), function (el) {
+        var text = el.getAttribute('data-mv-toast');
+        if (text) window.mvToast(text, { error: el.getAttribute('data-mv-toast-error') === 'true' });
+      });
+      // A page that reloads right after a change hands its toast to the next load.
+      var FLASH = 'lightwork.flash-toast';
+      window.mvToastAfterReload = function (message) {
+        try { sessionStorage.setItem(FLASH, String(message)); } catch (e) { window.mvToast(message); }
+      };
+      try {
+        var flashed = sessionStorage.getItem(FLASH);
+        if (flashed) { sessionStorage.removeItem(FLASH); window.mvToast(flashed); }
+      } catch (e) {}
     })();
 
     // Halt indicator + arm/clear via /api/v1/halt.
     (function() {
       const pill = document.getElementById('halt-pill');
       const label = document.getElementById('halt-label');
-      if (!pill || !label) return;
+      if (!pill || !label) {
+        // Shells without the pill (the chat shell) still show the stop banner,
+        // read from the same status document and only when it verifies.
+        const soloBanner = document.getElementById('halt-banner');
+        if (!soloBanner) return;
+        async function readSolo() {
+          try {
+            const r = await fetch('/api/v1/halt', { cache: 'no-store' });
+            if (!r.ok) throw new Error('halt status ' + r.status);
+            const body = await r.json();
+            const armed = !!(body && body.active === true && (body.scope !== 'cluster' || body.cluster_halt === true));
+            soloBanner.hidden = !armed;
+            document.body.classList.toggle('halt-armed', armed);
+          } catch (e) { soloBanner.hidden = true; }
+        }
+        readSolo();
+        setInterval(readSolo, 15000);
+        return;
+      }
       const canHalt = pill.dataset.canHalt === 'true';
       const configuredTimeout = Number(pill.dataset.haltTimeoutMs);
       const haltTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
@@ -386,6 +492,21 @@
       function knownState() {
         return haltState === 'armed' || haltState === 'clear';
       }
+      // The red banner every page shows while work is stopped. The pill alone
+      // is easy to miss; the banner names the state and offers the resume
+      // action to people allowed to take it.
+      const banner = document.getElementById('halt-banner');
+      function renderBanner(show) {
+        if (!banner) return;
+        banner.hidden = !show;
+        document.body.classList.toggle('halt-armed', !!show);
+        const resume = banner.querySelector('[data-halt-resume]');
+        if (resume) resume.hidden = !canHalt;
+      }
+      if (banner) {
+        const resume = banner.querySelector('[data-halt-resume]');
+        if (resume) resume.addEventListener('click', function (ev) { ev.preventDefault(); pill.click(); });
+      }
       function render(state, detail) {
         haltState = state;
         const armed = state === 'armed';
@@ -395,8 +516,9 @@
         label.textContent = detail || (armed
           ? (canHalt ? 'STOPPED — click to resume' : 'STOPPED')
           : state === 'clear'
-            ? (canHalt ? 'Emergency stop' : 'Work is not stopped')
+            ? 'Emergency stop'
             : 'Stop status unavailable');
+        renderBanner(armed && !pending);
         if (canHalt) {
           pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');
         } else {
@@ -665,8 +787,11 @@
     // every group open (aria-expanded="true"), so nothing is hidden without JS.
     (function() {
       const KEY = 'mvk_nav_expanded';
-      let expanded = {};
-      try { expanded = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) {}
+      let expanded = null;
+      try { expanded = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
+      // No remembered choice yet (a fresh sign-in): open the two groups a new
+      // administrator needs first, so the rail is never ten closed headers.
+      if (!expanded || typeof expanded !== 'object') expanded = { Operate: true, Admin: true };
       document.querySelectorAll('.navgrp__toggle').forEach(function(btn) {
         const grp = btn.getAttribute('data-grp');
         const hasActive = btn.parentElement.querySelector('a.active');
@@ -675,7 +800,7 @@
         btn.addEventListener('click', function() {
           const nowOpen = btn.getAttribute('aria-expanded') === 'true';
           btn.setAttribute('aria-expanded', nowOpen ? 'false' : 'true');
-          if (nowOpen) delete expanded[grp]; else expanded[grp] = true;
+          if (nowOpen) expanded[grp] = false; else expanded[grp] = true;
           try { localStorage.setItem(KEY, JSON.stringify(expanded)); } catch (e) {}
         });
       });

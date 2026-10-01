@@ -153,6 +153,34 @@ _CHECK_WORDS: dict[str, tuple[str, str, str]] = {
     "tenant_scope": ("Workspace", "Choose a workspace", "/workspace/tenant"),
 }
 _STATUS_WORDS = {"ready": "Ready", "blocked": "Needs fixing", "attention": "Could be improved"}
+# What fixing a check gets you, in the words of the outcome rather than the
+# feature's internal name ("Fix next: Evidence graph" told nobody anything).
+# id -> (title, what to do, what it is for). The provider checks keep their
+# own wording (they belong to the provider readiness work).
+_CHECK_OUTCOMES: dict[str, tuple[str, str, str]] = {
+    "evidence_graph": ("Evidence linking", "Turn on evidence linking",
+                       "so reviews can cite the sources behind each result"),
+    "evidence_gateway": ("Signed evidence records", "Turn on signed evidence records",
+                         "so auditors can verify that results were not changed"),
+    "model_risk_assurance": ("Model assurance checks", "Turn on model assurance checks",
+                             "so AI models are reviewed before their work is relied on"),
+    "tenant_scope": ("Workspace", "Choose a workspace",
+                     "so records are kept for the right client or team"),
+    "storage": ("Saved data", "Repair saved data",
+                "so tasks and results are kept between restarts"),
+    "dashboard": ("This dashboard", "Run the health check",
+                  "so the dashboard can show what is happening"),
+    "config": ("Lightwork's settings", "Save or repair the settings",
+               "so every page reads the same setup"),
+    "gateway_key_custody": ("Evidence signing key", "Store the signing key safely",
+                            "so signed records cannot be forged"),
+    "gateway_signing": ("Evidence signing", "Turn on evidence signing",
+                        "so each evidence record carries a signature"),
+    "gateway_trust_registry": ("Trusted signers", "Register the trusted signers",
+                               "so signatures can be checked against known keys"),
+    "gateway_ledgers": ("Signed evidence ledgers", "Set up the signed ledgers",
+                        "so evidence records are kept in order"),
+}
 
 
 def _plain_check(check: dict[str, Any], switchable: frozenset[str]) -> dict[str, Any]:
@@ -168,8 +196,16 @@ def _plain_check(check: dict[str, Any], switchable: frozenset[str]) -> dict[str,
     elif not fix_label:
         module = check_id if check_id in switchable else ""
         fix_label, fix_href = ("", "") if module else ("Open assurance setup", "/security/assurance")
+    outcome = ""
+    if check_id in _CHECK_OUTCOMES:
+        title, action, purpose = _CHECK_OUTCOMES[check_id]
+        outcome = f"{action} {purpose}"
+        if module:
+            fix_label = action
     if status == "ready":
         summary = "Ready."
+    elif outcome:
+        summary = outcome[0].upper() + outcome[1:] + "."
     elif check_id == "config":
         summary = "Lightwork's settings need to be saved or repaired."
     elif module or check_id not in _CHECK_WORDS:
@@ -179,7 +215,8 @@ def _plain_check(check: dict[str, Any], switchable: frozenset[str]) -> dict[str,
     return {**check, "title": title, "state_label": _STATUS_WORDS.get(status, "Could be improved"),
             "summary": summary, "fix_label": "" if status == "ready" else fix_label,
             "fix_href": "" if status == "ready" else fix_href,
-            "module": "" if status == "ready" else module}
+            "module": "" if status == "ready" else module,
+            "outcome": "" if status == "ready" else outcome}
 
 
 def _with_plain_checks(payload: dict[str, Any]) -> dict[str, Any]:

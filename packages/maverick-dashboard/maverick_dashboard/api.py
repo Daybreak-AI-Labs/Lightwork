@@ -1081,13 +1081,29 @@ async def get_tenant(request: Request, tenant_id: str) -> TenantOut:
     return _to_tenant_out(_get_tenant_or_404(tenant_id))
 
 
+async def _audit_tenant_change(request: Request, kind: str, tenant_id: str, **payload) -> None:
+    """Record a workspace lifecycle change in the deployment-wide chain (the
+    same chain as tenant creation), so the activity log shows it."""
+    from maverick.audit import AuditRefused, audit_event
+
+    actor = caller_principal(request) or "local"
+    try:
+        await run_in_threadpool(
+            audit_event, kind, agent=actor, _global=True, actor=actor, tenant=tenant_id, **payload
+        )
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail="The activity log refused this change.") from exc
+
+
 @router.post("/admin/tenants/{tenant_id}/suspend", response_model=TenantOut)
 async def suspend_tenant(request: Request, tenant_id: str) -> TenantOut:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
 
     _get_tenant_or_404(tenant_id)
-    return _to_tenant_out(tenant_registry.suspend_tenant(tenant_id))
+    rec = tenant_registry.suspend_tenant(tenant_id)
+    await _audit_tenant_change(request, "tenant_suspended", tenant_id)
+    return _to_tenant_out(rec)
 
 
 @router.post("/admin/tenants/{tenant_id}/resume", response_model=TenantOut)
@@ -1096,7 +1112,9 @@ async def resume_tenant(request: Request, tenant_id: str) -> TenantOut:
     from maverick.tenant import registry as tenant_registry
 
     _get_tenant_or_404(tenant_id)
-    return _to_tenant_out(tenant_registry.resume_tenant(tenant_id))
+    rec = tenant_registry.resume_tenant(tenant_id)
+    await _audit_tenant_change(request, "tenant_resumed", tenant_id)
+    return _to_tenant_out(rec)
 
 
 @router.post("/admin/tenants/{tenant_id}/plan", response_model=TenantOut)
@@ -1189,6 +1207,7 @@ async def delete_tenant(
 
     _get_tenant_or_404(tenant_id)
     tenant_registry.delete_tenant(tenant_id, purge=purge)
+    await _audit_tenant_change(request, "tenant_deleted", tenant_id, purge=purge)
     return Response(status_code=204)
 
 

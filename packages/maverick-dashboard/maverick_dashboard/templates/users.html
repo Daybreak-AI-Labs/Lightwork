@@ -12,10 +12,19 @@
     {% endfor %}
   {% endmacro %}
   {% macro department_boxes(prefix, chosen) %}
-    <div class="users-checks" role="group" aria-label="Departments">
-      {% for key, title in all_suites %}
-      <label><input type="checkbox" name="suites" value="{{ key }}"{% if key in chosen %} checked{% endif %} id="{{ prefix }}-{{ loop.index }}" /> {{ title }}</label>
-      {% endfor %}
+    <div class="users-depts" data-departments>
+      <div class="users-depts__tools">
+        <label class="users-field users-grow"><span>Find a department</span>
+          <input class="input" type="search" placeholder="Type to filter, for example: finance" data-departments-filter autocomplete="off" aria-controls="{{ prefix }}-list" /></label>
+        <button type="button" class="btn btn--ghost" data-departments-all>Select all</button>
+        <button type="button" class="btn btn--ghost" data-departments-none>Clear all</button>
+        <span class="muted users-help" data-departments-count aria-live="polite"></span>
+      </div>
+      <div class="users-checks users-checks--columns" role="group" aria-label="Departments" id="{{ prefix }}-list">
+        {% for key, title in all_suites %}
+        <label data-department-label="{{ title | lower }}"><input type="checkbox" name="suites" value="{{ key }}"{% if key in chosen %} checked{% endif %} id="{{ prefix }}-{{ loop.index }}" /> {{ title }}</label>
+        {% endfor %}
+      </div>
     </div>
   {% endmacro %}
   {% call hero('Administration', 'Users &amp; roles',
@@ -34,7 +43,7 @@
   {% endcall %}
 
   {% if saved %}
-  <div class="panel users-saved" role="status"><strong>Saved.</strong> {{ saved }}</div>
+  <div class="panel users-saved" role="status" data-mv-toast="Saved. {{ saved }}"><strong>Saved.</strong> {{ saved }}</div>
   {% endif %}
 
   {% if not auth_on %}
@@ -114,7 +123,7 @@
   <div class="section-head"><h2 id="invite-email">Invite someone by email</h2></div>
   <div class="panel">
     {% if invite_link %}
-    <div class="panel users-saved" role="status">
+    <div class="panel users-saved" role="status" data-mv-toast="Invitation for {{ invite_email }} created. Copy the link below.">
       {% if invite_sent %}
       <strong>Invitation emailed to {{ invite_email }}.</strong>
       <p class="muted users-help">The same link is below if you also want to send it yourself. It works once and expires in 7 days.</p>
@@ -141,12 +150,13 @@
       </label>
       <label class="users-field">
         <span>Role</span>
-        <select class="select" name="role">
+        <select class="select" name="role" aria-describedby="invite-role-help">
           {% for r in roles %}<option value="{{ r }}"{% if r == 'viewer' %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}
         </select>
       </label>
       <button type="submit" class="btn btn--primary">Create invite link</button>
     </form>
+    <p class="muted users-help" id="invite-role-help">The invite starts as <strong>{{ 'viewer' | role_label }}</strong> (can look at dashboards and results but change nothing), the safest choice for someone new. Pick <strong>{{ 'operator' | role_label }}</strong> for people who will run work and approve actions, or <strong>{{ 'admin' | role_label }}</strong> for someone who will manage people and settings. You can change it later on this page.</p>
     <p class="muted users-help">
       {% if auth_on %}The link asks them to sign in with your company account and then gives them the role.
       {% else %}Opening the link signs them in with their email address.{% endif %}
@@ -352,6 +362,10 @@
     .users-list li { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; padding-top: var(--space-2); border-top: 1px solid var(--hairline); }
     .users-checks { border: 0; padding: 0; margin: var(--space-2) 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr)); gap: var(--space-2); }
     .users-checks legend { font-size: var(--text-sm); margin-bottom: var(--space-1); }
+    .users-depts__tools { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-end; margin: var(--space-2) 0; }
+    .users-checks--columns { grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); max-height: 22rem; overflow: auto; padding-inline-end: var(--space-2); border: 1px solid var(--hairline); border-radius: 8px; padding: var(--space-2); }
+    .users-checks--columns label { display: flex; gap: var(--space-2); align-items: center; }
+    .users-checks--columns label[hidden] { display: none; }
     .users-grant { border-top: 1px solid var(--hairline); padding: var(--space-2) 0; }
     .users-grant > summary { cursor: pointer; }
     .users-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-3); }
@@ -374,6 +388,28 @@
           if (form.requestSubmit) form.requestSubmit(); else form.submit();
         });
       });
+    });
+    // Department boxes: filter as you type, select or clear all, and a live count.
+    document.querySelectorAll('[data-departments]').forEach(function (root) {
+      var boxes = Array.prototype.slice.call(root.querySelectorAll('input[type="checkbox"]'));
+      var filter = root.querySelector('[data-departments-filter]');
+      var count = root.querySelector('[data-departments-count]');
+      function visible() { return boxes.filter(function (b) { return !b.closest('label').hidden; }); }
+      function sync() {
+        var chosen = boxes.filter(function (b) { return b.checked; }).length;
+        count.textContent = chosen + ' of ' + boxes.length + ' departments chosen';
+      }
+      filter.addEventListener('input', function () {
+        var q = filter.value.trim().toLowerCase();
+        boxes.forEach(function (b) {
+          var label = b.closest('label');
+          label.hidden = !!q && label.getAttribute('data-department-label').indexOf(q) === -1;
+        });
+      });
+      root.querySelector('[data-departments-all]').addEventListener('click', function () { visible().forEach(function (b) { b.checked = true; }); sync(); });
+      root.querySelector('[data-departments-none]').addEventListener('click', function () { visible().forEach(function (b) { b.checked = false; }); sync(); });
+      boxes.forEach(function (b) { b.addEventListener('change', sync); });
+      sync();
     });
     document.querySelectorAll('[data-copy-target]').forEach(function (button) {
       button.addEventListener('click', function () {

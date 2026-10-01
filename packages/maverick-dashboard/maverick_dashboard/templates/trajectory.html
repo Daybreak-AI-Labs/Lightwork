@@ -40,7 +40,8 @@
   'tool': 'Action', 'thinking': 'Thinking', 'thought': 'Thinking', 'handoff': 'Handed over',
   'status': 'Update', 'question': 'Question', 'answer': 'Answer', 'result': 'Result',
 } %}
-<p class="muted"><a href="/goals">← All tasks</a> · <a href="/goals/{{ goal.id }}/plan">Plan</a> · <a href="/chat/goal/{{ goal.id }}">Open the task</a></p>
+{% from "_task_tabs.html" import task_tabs %}
+{{ task_tabs(goal, 'steps') }}
 <div class="section-head"><h2>Step-by-step history: {{ goal.title }}</h2></div>
 <div class="panel goal-export" id="goal-export" data-goal="{{ goal.id }}" data-can-share="{{ '1' if can_operate else '0' }}">
   <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/export.json" download="task-{{ goal.id }}.json">Download full history</a>

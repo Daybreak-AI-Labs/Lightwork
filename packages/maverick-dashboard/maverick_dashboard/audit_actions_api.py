@@ -51,6 +51,8 @@ KIND_LABELS: dict[str, str] = {
     "workspace_selected": "Workspace chosen", "access_grant_changed": "Access changed",
     "federation_delegate": "Access passed to a partner", "agent_trust_denied": "Outside assistant not trusted",
     "control_plane_action": "Administrator action", "learning_update": "Learning changed",
+    "tenant_suspended": "Workspace paused", "tenant_resumed": "Workspace resumed",
+    "tenant_deleted": "Workspace removed",
     "codebase_action": "Code project action", "immune_action": "Safety monitoring action",
     "approval_decision": "Approval decided", "approval_requested": "Approval requested",
 }
@@ -64,8 +66,19 @@ FIELD_LABELS: dict[str, str] = {
     "obligations_checked": "Rules checked", "source": "Source", "tenant": "Workspace",
     "tenant_id": "Workspace", "labels": "Kinds of data", "outcome": "Outcome", "line": "Lesson",
     "phase": "Step", "repo": "Code project", "proposal": "Change",
+    "email": "Email", "channel": "Chat app", "enabled": "Turned on", "suites": "Departments",
+    "occurred_at": "Occurred at", "approval_id": "Approval", "scope": "Recorded in",
 }
 _HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id"}
+# Machine identifiers (event ids, fingerprints, 64-hex tokens) are kept for
+# support staff under "Technical details" instead of in the readable row.
+_TECHNICAL_KEYS = {"approval_event_id", "event_id", "request_id", "idempotency_key",
+                   "session_id", "trace_id", "correlation_id", "digest", "sha256", "artifact_sha256",
+                   "row_hash", "previous_tenant"}
+_TECHNICAL_VALUE = re.compile(r"^(?:[a-z0-9_-]+-)?[0-9a-f]{32,}$", re.IGNORECASE)
+# Epoch timestamps recorded alongside the event (never shown as a raw float).
+_TIME_KEYS = {"occurred_at", "created_at", "decided_at", "expires_at", "started_at",
+              "ended_at", "finished_at", "updated_at", "requested_at", "at"}
 _PERSON_KEYS = ("principal", "actor", "user", "requested_by", "decided_by", "owner")
 _SLUG_KEYS = {"name", "tool", "action", "stage", "provider", "rule", "outcome", "status",
               "decision", "risk", "source", "phase", "labels", "agent"}
@@ -87,6 +100,8 @@ def value_text(key: str, value: Any) -> str:
         return "Yes" if value else "No"
     if key in _PERSON_KEYS and isinstance(value, str):
         return humanize_principal(value).name
+    if key == "scope" and value == "deployment":
+        return "Deployment-wide record (all workspaces)"
     if key in _SLUG_KEYS and isinstance(value, str) and _SLUG.fullmatch(value):
         return humanize(value)
     if isinstance(value, float):
@@ -107,10 +122,27 @@ def event_person(event: dict) -> str:
     return ""
 
 
+def is_time_key(key: object) -> bool:
+    key = str(key)
+    return key in _TIME_KEYS or key.endswith(("_at", "_ts"))
+
+
+def _technical(key: str, value: Any) -> bool:
+    if key in _TECHNICAL_KEYS:
+        return True
+    return isinstance(value, str) and bool(_TECHNICAL_VALUE.fullmatch(value.strip()))
+
+
 def event_details(event: dict) -> list[tuple[str, str, str]]:
-    """``[(raw key, label, text)]`` for the visible detail fields of an event."""
+    """``[(raw key, label, text)]`` for the readable detail fields of an event."""
     return [(str(k), field_label(k), value_text(str(k), v))
-            for k, v in event.items() if k not in _HIDDEN]
+            for k, v in event.items() if k not in _HIDDEN and not _technical(str(k), v)]
+
+
+def event_technical(event: dict) -> list[tuple[str, str, str]]:
+    """The machine identifiers of an event, shown under "Technical details"."""
+    return [(str(k), field_label(k), value_text(str(k), v))
+            for k, v in event.items() if k not in _HIDDEN and _technical(str(k), v)]
 
 
 def event_who(event: dict) -> str:
@@ -122,7 +154,8 @@ def event_who(event: dict) -> str:
 
 
 def page_helpers() -> dict:
-    return {"kind_label": kind_label, "event_details": event_details, "event_who": event_who}
+    return {"kind_label": kind_label, "event_details": event_details, "event_who": event_who,
+            "event_technical": event_technical, "is_time_key": is_time_key}
 
 
 def _day(value: str | None) -> str | None:
