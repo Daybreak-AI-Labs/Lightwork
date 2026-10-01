@@ -101,5 +101,15 @@
     "runtime": false,
     "artifact": "audit/remaining-acceptance-browser-collection-03.log",
     "sha256": "2c4822328b4bae8d3a72d4ba1ffeb7272a444f3d7d31946081b8c256481d47d9"
+  },
+  "execution_followup": {
+    "source_sha": "1719f2fc0e01216e8daea5f77228da9835409657",
+    "document": "browser-final-1719f2f.md",
+    "receipt": "browser-final-1719f2f.json",
+    "browser_distinct_passed": 108,
+    "new_original_criteria_passed": 18,
+    "dashboard_js_passed": 1711,
+    "product_repairs_since_original_authored_checkpoint": true,
+    "prior_results_retained": true
   }
 }

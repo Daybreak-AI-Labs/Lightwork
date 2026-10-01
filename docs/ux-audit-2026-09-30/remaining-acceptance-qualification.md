@@ -1,5 +1,11 @@
 # Original-criteria acceptance checks
 
+Execution follow-up: all seven browser cases authored here now pass within the
+complete 108-case qualification, alongside 11 widget/motion cases. See
+[browser-final-1719f2f.md](browser-final-1719f2f.md) for the current result,
+subsequent product repairs and retained failures. The account below records the
+original authored checkpoint.
+
 This checkpoint adds targeted acceptance checks for LW-091, LW-099, LW-102,
 LW-130 and LW-137 on product source
 `7798b3db81c5ec4f718eeeeefefdafc6cb7cf8a7`. It changes no product behavior.
@@ -29,10 +35,11 @@ case IDs and artifact hashes are in the accompanying JSON receipt. One existing 
 are no skipped cases in this module. No live provider, deployment or production
 operation occurred.
 
-## Authored browser acceptance — not yet executed
+## Browser acceptance at the original authored checkpoint
 
-Chromium execution is deliberately held until the concurrent full Python phase
-finishes. The following are authored tests, not passing browser evidence:
+At this checkpoint Chromium execution was held until the concurrent full Python
+phase finished. The following then-described authored tests were not yet passing
+browser evidence:
 
 - `archive_receiving.spec.js` has three cases using native goal-archive and
   selected-deliverable exports. The source installation is removed, then a
@@ -67,8 +74,8 @@ viewer, its malformed/newer-file refusal, or WebCrypto. Those earlier test
 counts are valid, but the LW-137 coverage attribution was inaccurate. The
 five native `test_goal_bundle_completeness.py` cases prove producer-side
 snapshot/count/checksum bounds. The register and conversation evidence now make
-that distinction. Offline receiving remains unqualified until the authored
-browser cases run.
+that distinction. Offline receiving was unqualified at that authored checkpoint;
+the linked final report now records execution of the actual offline browser cases.
 
 Collection-only Playwright check lists all seven cases in four files; Chromium
 was not launched. An initial collection hit Windows system-temp permissions;
