@@ -42,7 +42,7 @@
   }
 
   var panel = el("div", {id: "lightwork-widget-panel", role: "region", "aria-label": TITLE}, {
-    position: "fixed", bottom: "calc(84px + env(safe-area-inset-bottom, 0px))", insetInlineEnd: "12px", width: "min(320px, calc(100vw - 24px))", boxSizing: "border-box",
+    position: "fixed", bottom: "calc(84px + env(safe-area-inset-bottom, 0px))", insetInlineEnd: "12px", width: "min(320px, calc(100% - 24px))", boxSizing: "border-box",
     maxHeight: "min(60dvh, calc(100dvh - 100px))", display: "none", flexDirection: "column",
     background: "#fff", border: "1px solid #ddd", borderRadius: "12px",
     boxShadow: "0 8px 30px rgba(0,0,0,.18)", overflow: "hidden",
@@ -50,14 +50,14 @@
   });
 
   var header = el("div", { textContent: TITLE }, {
-    padding: "10px 14px", fontWeight: "600", background: "#111", color: "#fff"
+    padding: "10px 14px", flexShrink: "0", fontWeight: "600", background: "#111", color: "#fff"
   });
   var closeButton = el('button', {type: 'button', textContent: 'Close', 'aria-label': 'Close ' + TITLE}, {marginInlineStart: 'auto', minHeight: '44px'});
   header.style.display = 'flex'; header.style.alignItems = 'center'; header.appendChild(closeButton);
   var log = el("div", {'aria-label': 'Conversation'}, {
     flex: "1", minHeight: "0", overflowWrap: "anywhere", padding: "12px", overflowY: "auto", color: "#111"
   });
-  var form = el("form", null, { display: "flex", borderTop: "1px solid #eee" });
+  var form = el("form", null, { display: "flex", flexShrink: "0", borderTop: "1px solid #eee" });
   var input = el("input", {
     type: "text", placeholder: "Type a goal…", "aria-label": "Message to Lightwork", required: true
   }, { flex: "1", minWidth: "0", boxSizing: "border-box", border: "0", padding: "12px" });
@@ -67,9 +67,9 @@
   });
   form.appendChild(input); form.appendChild(send);
   panel.appendChild(header); panel.appendChild(log); panel.appendChild(form);
-  var check = el("button", { type: "button", textContent: "Check start status", hidden: true });
+  var check = el("button", { type: "button", textContent: "Check start status", hidden: true }, {flexShrink: "0"});
   panel.appendChild(check);
-  var status = el('p', {role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true'}, {margin: '8px 12px', color: '#111'});
+  var status = el('p', {role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true'}, {margin: '8px 12px', flexShrink: '0', color: '#111'});
   panel.appendChild(status);
 
   var fab = el("button", { textContent: "💬", "aria-label": TITLE }, {
@@ -92,19 +92,39 @@
   function setOpen(open) {
     panel.style.display = open ? 'flex' : 'none';
     fab.setAttribute('aria-expanded', String(open));
-    if (open) input.focus(); else fab.focus();
+    if (open) { fit(); input.focus(); }
+    else { fab.hidden = false; fab.focus(); }
   }
   fab.addEventListener('click', function () { setOpen(panel.style.display !== 'flex'); });
   closeButton.addEventListener('click', function () { setOpen(false); });
   panel.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') { event.preventDefault(); setOpen(false); }
   });
+  function fit() {
+    if (panel.style.display !== 'flex') return;
+    var viewport = window.visualViewport;
+    var width = viewport ? viewport.width : window.innerWidth;
+    var height = viewport ? viewport.height : window.innerHeight;
+    var top = viewport ? viewport.offsetTop : 0;
+    var left = viewport ? viewport.offsetLeft : 0;
+    // A host's CSS zoom scales the widget too. Convert the visible bounds to
+    // its layout units, keeping the person's enlarged text and controls.
+    var scale = panel.getBoundingClientRect().width / panel.offsetWidth || 1;
+    var compact = height / scale < 400;
+    var gap = compact ? 12 : 84;
+    panel.style.width = Math.max(0, Math.min(320, width / scale - 24)) + 'px';
+    panel.style.maxHeight = Math.max(0, height / scale - gap - 12) + 'px';
+    panel.style.bottom = (window.innerHeight - height - top) / scale + gap + 'px';
+    var end = getComputedStyle(panel).direction === 'rtl' ? left : window.innerWidth - width - left;
+    panel.style.insetInlineEnd = end / scale + 12 + 'px';
+    // Short windows and the on-screen keyboard need the space normally kept
+    // for the launcher. Close and Escape remain available in the open panel.
+    fab.hidden = compact;
+  }
+  window.addEventListener('resize', fit);
   if (window.visualViewport) {
-    var fit = function () {
-      panel.style.maxHeight = Math.max(80, window.visualViewport.height - 110) + 'px';
-      panel.style.bottom = (window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop + 84) + 'px';
-    };
-    window.visualViewport.addEventListener('resize', fit); fit();
+    window.visualViewport.addEventListener('resize', fit);
+    window.visualViewport.addEventListener('scroll', fit);
   }
 
   function controls() {
