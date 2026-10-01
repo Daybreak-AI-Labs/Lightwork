@@ -764,6 +764,27 @@ def providers_per_tenant_keys() -> bool:
     return _strict_config_bool(providers, "per_tenant_keys", False)
 
 
+def provider_test_receipt_max_age_days() -> int:
+    """How many days a passing provider connection test stays valid
+    (``[providers] test_receipt_max_age_days``; env
+    ``MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS`` wins). Default 30, at
+    least 1. After that the provider reads "not tested yet" again with the
+    age of the last test, so a green badge can never be older than this.
+    Never raises."""
+    raw = os.environ.get("MAVERICK_PROVIDER_TEST_RECEIPT_MAX_AGE_DAYS", "").strip()
+    if not raw:
+        try:
+            providers = load_global_config().get("providers") or {}
+        except Exception:  # pragma: no cover -- config never blocks a run
+            providers = {}
+        raw = providers.get("test_receipt_max_age_days", 30) if isinstance(providers, dict) else 30
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return 30
+    return max(1, days)
+
+
 def tenant_provider_key_env(tenant_id: str, provider: str) -> str:
     """The secret-provider name that holds ``tenant_id``'s own API key for
     ``provider``.

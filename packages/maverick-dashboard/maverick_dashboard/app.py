@@ -5721,7 +5721,11 @@ def _provider_integration_inventory() -> list[dict]:
         row["readiness"] = provider_readiness(
             row["name"], configured=row["configured"]
         )
-    return rows
+    # The one truth (configured, last test, status words) overrides the raw
+    # store view so this page can never disagree with Settings, Chat or /start.
+    from maverick_dashboard.provider_readiness import apply_to_rows, workspace_readiness
+
+    return apply_to_rows(rows, workspace_readiness())
 
 
 @app.get("/providers", response_class=HTMLResponse)
@@ -5736,10 +5740,12 @@ async def providers_page(request: Request) -> HTMLResponse:
             detail="provider inventory is unavailable",
         ) from exc
     from .auth import has_global_permission
+    from .provider_readiness import workspace_readiness
     return templates.TemplateResponse(
         request,
         "providers.html",
         {"inventory": inventory, "rows": _health().snapshot(),
+         "workspace": workspace_readiness(),
          "is_admin": has_global_permission(request, "admin"),
          "tested": request.query_params.get("tested") == "1"},
     )
@@ -8140,10 +8146,13 @@ async def providers_api(request: Request) -> JSONResponse:
             status_code=503,
             detail="provider inventory is unavailable",
         ) from exc
+    from .provider_readiness import public_verdict, workspace_readiness
+
     return JSONResponse(
         {
             "providers": inventory,
             "health": _health().snapshot(),
+            "workspace": public_verdict(workspace_readiness()),
         }
     )
 
@@ -8743,8 +8752,9 @@ async def shield_calibration_api() -> JSONResponse:
 
 @app.get("/chat", response_class=HTMLResponse)
 def chat_page(request: Request) -> HTMLResponse:
-    from .onboarding_state import selected_model_routes_ready
+    from .onboarding_state import workspace_readiness
 
+    workspace = workspace_readiness()
     w = _world()
     recent = w.list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
     # "Use template" on /templates links here with ?title=&description= to
@@ -8760,7 +8770,10 @@ def chat_page(request: Request) -> HTMLResponse:
             "prefill_title": prefill_title,
             "prefill_description": prefill_description,
             "submission_key": secrets.token_urlsafe(24),
-            "model_route_ready": selected_model_routes_ready(),
+            # One truth: a missing, blocked or failed AI service disables the
+            # composer; a saved-but-untested key still lets work start.
+            "model_route_ready": workspace["verdict"] != "not_ready",
+            "workspace": workspace,
             "director_profiles": _director_choices(),
         },
     )
@@ -11976,9 +11989,12 @@ def _health_should_redact() -> bool:
 @app.get("/healthz")
 async def healthz() -> JSONResponse:
     """Deep health: DB writable, LLM provider key present, runner alive."""
+    from .provider_readiness import public_verdict, workspace_readiness
+
     return await _health_response(
         world_provider=_world,
         provider_key_set=_any_provider_key_set,
+        provider_verdict=lambda: public_verdict(workspace_readiness()),
     )
 
 

@@ -1,6 +1,26 @@
 {# One plain status for a provider, channel or tool-server connection, with
    the individual checks kept inside a collapsed "Technical details".
    `r` is the readiness contract from integration_readiness.contract(). #}
+{% macro provider_status(p) %}
+  {# One plain status for an AI service from provider_readiness.workspace_readiness():
+     "Connected" only after a passing test; "Key saved, not tested yet";
+     "Connection failed: <plain reason>". `p` is a provider row. #}
+  {% set cls = {'connected': 'active', 'failed': 'blocked', 'blocked': 'blocked', 'untested': 'warn'}.get(p.status, '') %}
+  <div class="integration-readiness" style="display: grid; gap: var(--space-1); min-width: min(100%, 15rem); font-size: var(--text-sm);">
+    <div><span class="muted">Status:</span> <span class="badge {{ cls }}">{{ p.status_label }}</span></div>
+    <p class="muted integration-readiness__copy" style="margin: 0;">{{ p.reason }}{% if p.last_test.tested_at %} Last tested {{ p.last_test.tested_at | datetime }}.{% endif %}</p>
+    {% if p.used_by_roles %}<p class="muted integration-readiness__copy" style="margin: 0;">Used by your models for: {{ p.used_by_roles | join(', ') | replace('_', ' ') }}.</p>{% endif %}
+    <details>
+      <summary>Technical details</summary>
+      <ul class="muted integration-readiness__steps" style="margin: var(--space-1) 0; padding-left: var(--space-4);">
+        <li>Set up: {{ 'Yes' if p.configured else 'No' }}</li>
+        <li>Connection test: {{ {'passed': 'Passed', 'failed': 'Failed', 'never': 'Not run yet'}[p.last_test.status] }}</li>
+      </ul>
+      <p class="muted integration-readiness__copy" style="margin: 0;">{{ p.last_test.detail or p.readiness.live.detail }}</p>
+    </details>
+  </div>
+{% endmacro %}
+
 {% macro integration_readiness(r) %}
   {% set step_words = {'passed': 'Passed', 'failed': 'Failed', 'unknown': 'Not checked yet', 'not_applicable': 'Not needed', 'verified': 'Passed'} %}
   {% if r.policy_allowed is sameas false %}

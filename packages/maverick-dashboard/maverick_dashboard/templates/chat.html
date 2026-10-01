@@ -25,10 +25,9 @@
   <h1 class="cs-greet">What should Lightwork take on?</h1>
   {% if not model_route_ready %}
   <section class="panel" id="model-route-setup" role="status">
-    <h2 style="margin-top:0">Finish connecting AI</h2>
-    <p class="muted">This workspace is not ready to start AI work yet. Finish
-      the connection setup and readiness checks before starting a task.</p>
-    <a class="btn btn--primary" href="/start">Continue setup</a>
+    <h2 style="margin-top:0">Connect an AI service to start</h2>
+    <p class="muted">{{ workspace.reason }}</p>
+    {% if workspace.next_action %}<a class="btn btn--primary" href="{{ workspace.next_action.href }}">{{ workspace.next_action.label }}</a>{% endif %}
   </section>
   {% endif %}
   <p id="template-draft-notice" class="muted" role="status" hidden></p>
@@ -125,7 +124,13 @@
 </form>
 <p id="goal-error" role="alert" aria-live="assertive"
    style="display: none; margin: var(--space-3) 0 0; color: var(--danger); font-size: var(--text-sm); text-align: center;"></p>
+{% if not model_route_ready %}
+<p class="cs-dock__note" id="composer-readiness" role="status">{{ workspace.reason }}{% if workspace.next_action %} <a href="{{ workspace.next_action.href }}">{{ workspace.next_action.label }}</a>{% endif %}</p>
+{% elif workspace.verdict == 'needs_test' %}
+<p class="cs-dock__note" id="composer-readiness" role="status">{{ workspace.reason }}{% if workspace.next_action %} <a href="{{ workspace.next_action.href }}">{{ workspace.next_action.label }}</a>{% endif %} You can still start a task.</p>
+{% else %}
 <p class="cs-dock__note">Lightwork runs your request within your budget and pauses for your approval where it matters.</p>
+{% endif %}
 {% endblock %}
 
 {% block scripts_extra %}
