@@ -7,14 +7,17 @@ is its shorter index. The original 24 fields per entry remain in
 [source-backlog.json](source-backlog.json). The five separately approved
 security fixes have their own [register](additional-security-fixes.json).
 
-There are 187 implemented entries awaiting acceptance, three reopened repairs
-(LW-064 widget viewport fitting, LW-091 early keyboard role submission and
-LW-099 workspace-change recovery-button visibility), and
-five explicit qualification entries:
+There are 190 implemented entries awaiting final acceptance and five explicit
+qualification entries:
 LW057, LW149, LW154, LW155 and LW184. These counts do not
 mean that every external service, native platform, language or distribution is
 qualified. The [local qualification record](local-qualification.md) identifies
 failed/incomplete runs, later repairs and exact-source results.
+
+Browser acceptance reopened LW-064, LW-091 and LW-099. Their widget, native role
+form and workspace recovery repairs are now integrated, and all 18 focused
+acceptance cases pass at `1719f2f`. Full browser/JavaScript and fresh integrated
+Python qualification remain in progress.
 
 The latest complete ordinary run still has one
 [unresolved transport timeout](transport-timeout-investigation-95aa61e.md).

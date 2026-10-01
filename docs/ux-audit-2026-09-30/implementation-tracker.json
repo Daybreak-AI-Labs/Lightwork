@@ -802,12 +802,13 @@
     "id": "LW-064",
     "title": "Keep the embeddable widget within narrow viewports",
     "category": "Accessibility language and mobile",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "widget panel uses border-box/min(320px, viewport insets), logical inline end, safe area/dynamic viewport and visualViewport resize handling; shrinkable input and scrollable log prevent narrow panel overflow."
+      "The widget uses logical insets and border-box sizing with a shrinkable input and scrollable transcript.",
+      "b6ccecbc + 2e8543a4: visible-viewport bounds convert host CSS zoom into layout units, keep receipt/header/form controls from shrinking, reserve the bottom safe inset and hide the launcher only when its space is needed."
     ],
-    "validation": "Full browser acceptance at be3496571342c242af6ba956206e2446781996bb reproduces clipping in landscape, 200% content zoom and emulated keyboard viewports. Portrait and RTL cases pass. This confirms a product gap; prior static review is not acceptance.",
-    "remaining": "Active repair: fit the whole panel, input and receipt controls within short and zoomed viewports; retain unchanged six-case browser assertions and qualify the final source.",
+    "validation": "Original expanded browser run be34965 reproduced landscape, 200% content-zoom and emulated-keyboard clipping. All six unchanged widget cases pass at 1719f2fc0e01216e8daea5f77228da9835409657 within the complete 18-case focused acceptance pass; zero retries and source unchanged. Root visually reviewed retained landscape/200% unknown-receipt screenshots. Native nonzero insets are not inferred from the desktop style-contract checks.",
+    "remaining": "Complete consolidated browser/JavaScript rerun remains. Physical on-screen keyboard, native safe-area insets, OS zoom and assistive-technology traversal require actual target devices; desktop viewport emulation is explicitly limited.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -1279,12 +1280,13 @@
     "id": "LW-091",
     "title": "Make new role grants least-privileged",
     "category": "Identity administration and privacy",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "e18aa52: users.html requires an empty explicit role choice and previews built-in/custom permission atoms."
+      "e18aa52: users.html requires an empty explicit role choice and previews built-in/custom permission atoms.",
+      "b35d5661: all native Users forms carry the trusted server-rendered workspace before JavaScript loads, preserving missing/stale-scope refusal and explicitly selected roles."
     ],
-    "validation": "Full browser acceptance at be3496571342c242af6ba956206e2446781996bb confirms empty-role prevention, but fast keyboard submission can precede the shared JavaScript expected-tenant binding and fails to record the explicitly chosen custom role. The role-grant acceptance criterion is reopened.",
-    "remaining": "Active repair: bind native Users forms to their server-rendered workspace before JavaScript loads, retain missing/stale-scope denial, and qualify delayed-script keyboard submission plus the explicit custom-role readback.",
+    "validation": "All 18 focused installed acceptance cases pass at 1719f2fc0e01216e8daea5f77228da9835409657, including an empty-role Enter refusal and an explicit custom-role native submission while shared shell JavaScript is held. Missing/stale workspace bindings remain denied. Both complete five-module native cohorts pass 69 cases at d4d6e25a402df02bec91abaa9d7126e60c3f895b; subsequent source changes affect only workspace-alert JavaScript and its browser test.",
+    "remaining": "Complete consolidated browser/JavaScript and fresh full Python qualification remain; no live IdP role migration is claimed.",
     "evidence_slice": "slices/identity-final-qualification.json"
   },
   {
@@ -1397,12 +1399,13 @@
     "id": "LW-099",
     "title": "Make multi-tab workspace switches explicit",
     "category": "Identity administration and privacy",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "e18aa52: persistent workspace context, cross-tab change banner and mutation guard, fixed-binding picker disabled and server rejects changes while MAVERICK_TENANT is set."
+      "e18aa52: persistent workspace context, cross-tab change banner and mutation guard, fixed-binding picker disabled and server rejects changes while MAVERICK_TENANT is set.",
+      "97ad6dea: the cross-tab context alert lives inside the main content layout, where its recovery link is not covered by the sidebar; role=alert and draft focus remain intact."
     ],
-    "validation": "Earlier API/controller and fixed-workspace checks passed. Focused installed acceptance at d4d6e25a402df02bec91abaa9d7126e60c3f895b confirms draft preservation, blocked writes and stale-header refusal, but the real pointer click on Reopen in current workspace is intercepted by the fixed sidebar. The body-level alert sits outside the main content layout, so recovery acceptance is reopened. See identity-final-qualification.md for earlier exact run boundaries.",
-    "remaining": "The exact two-tab workspace-switch draft/approval journey on the final installed build remains; component/context tests do not replace that browser scenario.",
+    "validation": "The corrected real multi-tab fixture first exposed a recovery link covered by the sidebar at d4d6e25. All 18 focused browser cases pass at 1719f2fc0e01216e8daea5f77228da9835409657 after the layout repair, including the real desktop pointer click, 320px notice bounds, retained draft focus/content, stale-workspace write refusal and fixed-workspace selection refusal. Zero retries; source unchanged.",
+    "remaining": "Complete consolidated browser/JavaScript rerun remains. Local browser fixtures use real loopback dashboard sessions and synthetic identities, not a live IdP.",
     "evidence_slice": "slices/identity-final-qualification.json"
   },
   {

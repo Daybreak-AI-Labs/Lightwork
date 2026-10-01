@@ -1,12 +1,13 @@
 [
   {
     "id": "LW-091",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "e18aa52: users.html requires an empty explicit role choice and previews built-in/custom permission atoms."
+      "e18aa52: users.html requires an empty explicit role choice and previews built-in/custom permission atoms.",
+      "b35d5661: all native Users forms carry the trusted server-rendered workspace before JavaScript loads, preserving missing/stale-scope refusal and explicitly selected roles."
     ],
-    "validation": "Full browser acceptance at be3496571342c242af6ba956206e2446781996bb confirms empty-role prevention, but fast keyboard submission can precede the shared JavaScript expected-tenant binding and fails to record the explicitly chosen custom role. The role-grant acceptance criterion is reopened.",
-    "remaining": "Active repair: bind native Users forms to their server-rendered workspace before JavaScript loads, retain missing/stale-scope denial, and qualify delayed-script keyboard submission plus the explicit custom-role readback."
+    "validation": "All 18 focused installed acceptance cases pass at 1719f2fc0e01216e8daea5f77228da9835409657, including an empty-role Enter refusal and an explicit custom-role native submission while shared shell JavaScript is held. Missing/stale workspace bindings remain denied. Both complete five-module native cohorts pass 69 cases at d4d6e25a402df02bec91abaa9d7126e60c3f895b; subsequent source changes affect only workspace-alert JavaScript and its browser test.",
+    "remaining": "Complete consolidated browser/JavaScript and fresh full Python qualification remain; no live IdP role migration is claimed."
   },
   {
     "id": "LW-092",
@@ -95,12 +96,13 @@
   },
   {
     "id": "LW-099",
-    "status": "planned",
+    "status": "implemented-test-needed",
     "implementation_evidence": [
-      "e18aa52: persistent workspace context, cross-tab change banner and mutation guard, fixed-binding picker disabled and server rejects changes while MAVERICK_TENANT is set."
+      "e18aa52: persistent workspace context, cross-tab change banner and mutation guard, fixed-binding picker disabled and server rejects changes while MAVERICK_TENANT is set.",
+      "97ad6dea: the cross-tab context alert lives inside the main content layout, where its recovery link is not covered by the sidebar; role=alert and draft focus remain intact."
     ],
-    "validation": "Earlier API/controller and fixed-workspace checks passed. Focused installed acceptance at d4d6e25a402df02bec91abaa9d7126e60c3f895b confirms draft preservation, blocked writes and stale-header refusal, but the real pointer click on Reopen in current workspace is intercepted by the fixed sidebar. The body-level alert sits outside the main content layout, so recovery acceptance is reopened. See identity-final-qualification.md for earlier exact run boundaries.",
-    "remaining": "The exact two-tab workspace-switch draft/approval journey on the final installed build remains; component/context tests do not replace that browser scenario."
+    "validation": "The corrected real multi-tab fixture first exposed a recovery link covered by the sidebar at d4d6e25. All 18 focused browser cases pass at 1719f2fc0e01216e8daea5f77228da9835409657 after the layout repair, including the real desktop pointer click, 320px notice bounds, retained draft focus/content, stale-workspace write refusal and fixed-workspace selection refusal. Zero retries; source unchanged.",
+    "remaining": "Complete consolidated browser/JavaScript rerun remains. Local browser fixtures use real loopback dashboard sessions and synthetic identities, not a live IdP."
   },
   {
     "id": "LW-100",

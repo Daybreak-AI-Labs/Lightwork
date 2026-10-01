@@ -148,10 +148,13 @@
   },
   {
     "id": "LW-064",
-    "status": "planned",
-    "implementation_evidence": "widget panel uses border-box/min(320px, viewport insets), logical inline end, safe area/dynamic viewport and visualViewport resize handling; shrinkable input and scrollable log prevent narrow panel overflow.",
-    "validation": "Full browser acceptance at be3496571342c242af6ba956206e2446781996bb reproduces clipping in landscape, 200% content zoom and emulated keyboard viewports. Portrait and RTL cases pass. This confirms a product gap; prior static review is not acceptance.",
-    "remaining": "Active repair: fit the whole panel, input and receipt controls within short and zoomed viewports; retain unchanged six-case browser assertions and qualify the final source."
+    "status": "implemented-test-needed",
+    "implementation_evidence": [
+      "The widget uses logical insets and border-box sizing with a shrinkable input and scrollable transcript.",
+      "b6ccecbc + 2e8543a4: visible-viewport bounds convert host CSS zoom into layout units, keep receipt/header/form controls from shrinking, reserve the bottom safe inset and hide the launcher only when its space is needed."
+    ],
+    "validation": "Original expanded browser run be34965 reproduced landscape, 200% content-zoom and emulated-keyboard clipping. All six unchanged widget cases pass at 1719f2fc0e01216e8daea5f77228da9835409657 within the complete 18-case focused acceptance pass; zero retries and source unchanged. Root visually reviewed retained landscape/200% unknown-receipt screenshots. Native nonzero insets are not inferred from the desktop style-contract checks.",
+    "remaining": "Complete consolidated browser/JavaScript rerun remains. Physical on-screen keyboard, native safe-area insets, OS zoom and assistive-technology traversal require actual target devices; desktop viewport emulation is explicitly limited."
   },
   {
     "id": "LW-065",

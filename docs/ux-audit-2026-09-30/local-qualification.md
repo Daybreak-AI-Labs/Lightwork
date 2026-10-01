@@ -8,17 +8,22 @@ No deployment configuration or credentials were changed.
 ## Current evidence snapshot, 2026-10-01
 
 This snapshot includes the completed final07 Python ordinary phase and the subsequent native PostgreSQL cursor receipts.
-The register has **187 implemented entries awaiting acceptance, three active
-repairs (LW-064, LW-091 and LW-099), and five qualification entries**. The expanded
+The register has **190 implemented entries awaiting final acceptance and five
+qualification entries**. The expanded
 browser run at `be34965` completed with 102 distinct passes and six failures
 across its default/setup profiles. Three failures confirm widget clipping; one
 exposes early role-form submission before JavaScript binds the workspace. Two
 workspace-test fixtures require ownership and route corrections, and their
 investigation also found an unmatched-route error-page rendering bug. These
-findings are being repaired. Subsequent focused acceptance at `d4d6e25` also
+findings were repaired. Subsequent focused acceptance at `d4d6e25` also
 found the workspace-change recovery button obscured by the sidebar; draft
 preservation and stale-workspace refusal pass, but pointer-click recovery needs
-a layout repair. No complete browser pass is claimed. LW-052's 125-task regression reproduced a missing
+a layout repair. That repair is now integrated: all 18 focused acceptance cases
+pass at `1719f2fc0e01216e8daea5f77228da9835409657`, including actual pointer-click
+recovery, 320px bounds and retained draft focus. Both complete five-module native
+cohorts pass 69 cases at `d4d6e25`; the later delta is the alert JavaScript and its
+browser test. The full 108-case browser rerun is underway; no complete new browser
+pass is claimed yet. LW-052's 125-task regression reproduced a missing
 page-boundary task and retained deleted content. The scoped cursor/window repair
 is integrated; all 108 mobile tests and the 22-case backend group pass locally.
 Both complete new backend files now pass against native PostgreSQL in each posture (23 cases, including all seven service-gated variants). Final integrated checks remain queued.
@@ -46,7 +51,7 @@ increasing the test deadline or treating the original failure as a pass.
 | Evidence | Exact execution source | Current result and limit |
 | --- | --- | --- |
 | Full Python 3.12 ordinary | `2a765aa3e93cc7775090f574f027bd855b33aef5` (`qualification-final-07`) | 40,072 passed, one failed, 590 skipped and 22 warnings in 3,281.79 seconds; source unchanged. The transport failure remains unresolved. [Exact skip reconciliation](skip-reconciliation-final07.md), followed by [real-speaker recovery](speechbrain-real-model-qualification.md): 458 executable identities have supplementary passes in both postures, five collection placeholders expanded, 127 entries retain explicit boundaries. The prior 457 + five + 128 checkpoint remains preserved. These do not rewrite the full-run outcomes. Later cursor/mobile fixes are outside this source; subsequent phases require a new binding. |
-| Expanded browser acceptance | `be3496571342c242af6ba956206e2446781996bb` | Default: 95 passed, six failed, seven setup-only skips. Setup: all seven passed. Therefore 102 distinct passes and six failures across all 108 registrations. Product repairs and fixture corrections are in progress. Earlier failed Chrome launch attempts did not execute test bodies and remain separate infrastructure evidence. |
+| Expanded browser acceptance | `be3496571342c242af6ba956206e2446781996bb` | Default: 95 passed, six failed, seven setup-only skips. Setup: all seven passed. Therefore 102 distinct passes and six failures across all 108 registrations. Subsequent widget, native-form, error-page and workspace-alert repairs are integrated. All 18 focused cases pass at `1719f2f`; complete rerun remains in progress. Earlier failed Chrome launch attempts did not execute test bodies and remain separate infrastructure evidence. |
 | [Static gates and package builds](static-build-qualification-3640fcf.md) | `3640fcf7906d3f7129df1b34bc1718492a164bcf` | All 26 checks passed: Ruff, Vulture, 16 offline contracts and eight wheels. All 4,827 payload files match the exact Git archive. Later product changes require renewed build/static verification. |
 | [Complete browser and JavaScript](browser-quiet-qualification-2026-10-01.md) | `11c30996c98a0ad0c9583005223019ad0d75b8b4` | All 90 distinct Chrome journeys across default/setup profiles and all 1,695 JavaScript tests passed. [Exact source comparison](browser-source-relationship-2a765aa.md) proves the unchanged dashboard/frontend relationship to `2a765aa`; it does not claim a browser rerun there or cover the active mobile change. |
 | [Current-client Qdrant repair](qdrant-current-client-qualification-e22ffbc.md) | `e22ffbcca2af43887ed4c142b2633fd86a51471c` | 75 distinct passing IDs across native adapter and real loopback-server checks; both postures include actual offline ONNX inference. One intentional parameter skip remains. Repeated executions are not additional unique tests. |
