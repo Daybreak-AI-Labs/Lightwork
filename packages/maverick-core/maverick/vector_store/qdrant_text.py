@@ -56,13 +56,14 @@ class TextBridge:
             if len(candidates) != 1:
                 raise ValueError("The existing Qdrant vector space has no unique supported model; choose its original model")
             selected = candidates.pop()
+        candidate = None
         if selected is None:
             # Do not introduce an application model default. This branch is
             # reachable only for a collection with no prior vectors/schema.
             invocation.check()
-            self.encoder = TextEmbedding()
+            candidate = TextEmbedding()
             invocation.check()
-            selected = self.encoder.model_name
+            selected = candidate.model_name
         candidates = [row for row in models if row["model"] == selected]
         if len(candidates) != 1:
             raise ValueError("The selected Qdrant text embedding model is not supported by FastEmbed")
@@ -76,11 +77,15 @@ class TextBridge:
             existing = vectors.get(field) if isinstance(vectors, dict) else None
             if existing is None or existing.size != dimension or existing.distance != Distance.COSINE:
                 raise ValueError("The embedding model does not match the existing Qdrant vector space; use its original model or rebuild explicitly")
-        if self.encoder is None or self.model not in {None, selected}:
+        if candidate is None and (self.encoder is None or self.model != selected):
             invocation.check()
-            self.encoder = TextEmbedding(model_name=selected)
+            candidate = TextEmbedding(model_name=selected)
             invocation.check()
-        self.model = selected
+        # A cancelled or rejected construction must never publish an encoder
+        # without its validated identity for a later invocation to reuse.
+        invocation.check()
+        if candidate is not None:
+            self.encoder, self.model = candidate, selected
         return field, params
 
     def encode(self, inputs, *, query, dimension, invocation):

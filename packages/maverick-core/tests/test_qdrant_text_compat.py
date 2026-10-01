@@ -510,3 +510,57 @@ def test_wall_budget_expiring_during_query_embedding_prevents_native_search(nati
     assert ("query", "synthetic/legacy", ["needle"]) in calls
     assert closed == [True]
     assert _snapshot(store) == original
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_cancelled_encoder_is_not_reused_for_a_different_later_identity(native_text, monkeypatch, explicit):
+    import asyncio
+
+    from maverick.budget import Budget
+    from maverick.connector_attempts import bind_tool_budget, invocation_scope
+
+    make_store, calls, encoder = native_text
+    store = make_store(embedding_model="synthetic/current" if explicit else None)
+    original_init = encoder.__init__
+
+    def cancel_during_init(self, model_name="synthetic/current", **kwargs):
+        original_init(self, model_name=model_name, **kwargs)
+        invocation.cancel()
+
+    with monkeypatch.context() as cancelled:
+        cancelled.setattr(encoder, "__init__", cancel_during_init)
+        with bind_tool_budget(Budget()), invocation_scope() as invocation:
+            with pytest.raises(asyncio.CancelledError):
+                store.add(["needle cancelled"], ids=["cancelled"])
+    assert not store._client.collection_exists(store._collection)
+    assert store._text_bridge.encoder is None
+    assert store._text_bridge.model is None
+    calls.clear()
+    if explicit:
+        store._embedding_model = "synthetic/legacy"
+    _seed(store)
+    with bind_tool_budget(Budget()), invocation_scope():
+        assert [hit["id"] for hit in store.query("needle")] == ["original"]
+    assert calls == [("init", "synthetic/legacy"), ("query", "synthetic/legacy", ["needle"])]
+
+
+def test_unsupported_sdk_default_does_not_publish_an_unvalidated_encoder(native_text, monkeypatch):
+    make_store, calls, encoder = native_text
+    store = make_store()
+    original_init = encoder.__init__
+
+    def unrecognized_default(self, model_name="synthetic/current", **kwargs):
+        original_init(self, model_name=model_name, **kwargs)
+        self.model_name = "unrecognized/default"
+
+    with monkeypatch.context() as unsupported:
+        unsupported.setattr(encoder, "__init__", unrecognized_default)
+        with pytest.raises(ValueError, match="not supported"):
+            store.add(["needle rejected"], ids=["rejected"])
+    assert not store._client.collection_exists(store._collection)
+    assert store._text_bridge.encoder is None
+    assert store._text_bridge.model is None
+    calls.clear()
+    _seed(store)
+    assert [hit["id"] for hit in store.query("needle")] == ["original"]
+    assert calls == [("init", "synthetic/legacy"), ("query", "synthetic/legacy", ["needle"])]
