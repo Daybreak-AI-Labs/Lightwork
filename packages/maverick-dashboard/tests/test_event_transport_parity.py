@@ -133,3 +133,39 @@ async def test_polling_terminal_only_after_replay_is_drained(event_world, surfac
     assert not last["has_more"] and last["terminal"]
     assert len(first["events"]) + len(last["events"]) == 3
     assert json.dumps(last)
+
+
+@pytest.mark.asyncio
+async def test_goal_waiting_for_an_answer_is_held_open_only_by_the_rest_poll(event_world, monkeypatch):
+    """UX-068 transport contract (docs/api.md): a goal parked on a question is
+    ``blocked``. GET /api/v1/goals/{id}/events says so with ``terminal: false``
+    and ``needs_input: true``; the push streams and the older browser poller
+    still end at ``blocked`` (a stream cannot be held open for a person's
+    answer), so a client that sees one end reads ``needs_input`` from the REST
+    goal instead."""
+    monkeypatch.setattr(api.asyncio, "sleep", _unexpected_sleep)
+    goal_id = _goal(event_world, status="blocked")
+    question_id = event_world.ask("Which market first?", goal_id=goal_id)
+
+    poll = await run_in_threadpool(api.goal_events, _request(), goal_id)
+    assert poll.status == "blocked"
+    assert (poll.terminal, poll.needs_input, poll.open_question_ids) == (False, True, [question_id])
+    goal = api._to_goal_out(event_world.get_goal(goal_id))
+    assert (goal.needs_input, goal.open_question_ids) == (True, [question_id])
+
+    response = await api.goal_events_stream(_request(), goal_id)
+    body = "".join([frame async for frame in response.body_iterator])
+    assert "event: end" in body and '"status": "blocked"' in body
+
+    legacy = await run_in_threadpool(dashboard.api_goal_events_legacy, _request(), goal_id)
+    assert legacy["status"] == "blocked" and legacy["terminal"] is True
+
+    socket = Socket()
+    await dashboard.run_events_firehose(socket, goal_id, principal=None)
+    assert socket.frames[-1]["content"] == "blocked" and socket.frames[-1]["terminal"] is True
+
+    # Answering lets the task carry on: the same poll then stops reporting it.
+    event_world.answer(question_id, "US")
+    event_world.set_goal_status(goal_id, "blocked", result="stopped")
+    again = await run_in_threadpool(api.goal_events, _request(), goal_id)
+    assert (again.terminal, again.needs_input, again.open_question_ids) == (True, False, [])

@@ -89,12 +89,43 @@ Individual goal budget caps are also bounded server-side:
 | `GET`    | `/api/v1/goals/{id}` | One goal. |
 | `GET`    | `/api/v1/goals/{id}/events` | **Short-poll** live progress (returns events with `id > since`). |
 | `POST`   | `/api/v1/goals/{id}/answer` | Resolve a queued question. Body: `{"question_id": int, "answer": str}`. |
+| `GET`    | `/api/v1/goals/{id}/cost-breakdown` | What the goal has spent so far (`total_dollars`), split by outcome. |
 
 Note on polling: the events endpoint is **short-poll** (returns
 immediately with whatever's available since `?since=<last_id>`). The
 client drives the poll cadence (suggest 2-3s). For push-based streaming use
 Server-Sent Events at `GET /api/v1/goals/{id}/events/stream` (supports
 `Last-Event-ID`) or the WebSocket at `/ws/v1/runs/{id}/events`.
+
+A goal with status `blocked` is not running, but it is not always finished:
+
+- `needs_input: true` -- the task asked a question and is waiting for a
+  person. `open_question_ids` lists the questions to answer with
+  `POST /api/v1/goals/{id}/answer`. `GET /api/v1/goals/{id}/events` reports
+  `terminal: false` while this holds, so a client that stops at `terminal`
+  keeps watching until the task is answered and continues. Stop polling on
+  `terminal`, not on `status == "blocked"`.
+- `needs_input: false` -- the task stopped for another reason (a failed or
+  refused run, a spending or quota limit, a halt, a hold nobody approved).
+  `terminal` is `true` and `result` says why in plain words. There is no
+  separate machine-readable reason code for these yet, so an integration that
+  must tell them apart has to read `result`.
+
+`needs_input` is read from the open questions alone. A task that asked a
+question, was continued without an answer and then stopped for another reason
+still has that question open, so it keeps reporting `needs_input: true` (and
+`terminal: false` on the events endpoint) until the question is answered; read
+`result` to see why it last stopped.
+
+Only the short-poll endpoint holds `terminal` open for a task that waits for an
+answer. The Server-Sent Events stream, the WebSocket and the older
+`/api/goal/{id}/events` poller end at `blocked` -- a stream cannot be kept
+open for as long as a person takes to answer -- so a client that sees one of
+them end with status `blocked` should read `needs_input` from
+`GET /api/v1/goals/{id}`, and reopen the stream once the question is answered.
+
+Every goal also carries `created_at` and `updated_at` (seconds since the
+epoch; `updated_at` moves on each status change).
 
 ### Facts
 

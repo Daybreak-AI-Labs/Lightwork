@@ -84,6 +84,192 @@ class TestGitSafetyShared:
         assert env["GIT_CONFIG_VALUE_0"] == "false"
         assert env["GIT_CONFIG_NOSYSTEM"] == "1"
 
+    def test_scrubbed_env_stops_repo_local_hooks(self, tmp_path):
+        """`git reset --hard` runs `.git/hooks/reference-transaction` (and
+        `post-index-change`); a hook planted by whatever can write `.git` must
+        not run under the scrubbed environment (UX-013)."""
+        from maverick.git_safety import git_env_without_user_config
+        repo = _make_git_repo(tmp_path)
+        marker = tmp_path / "hook-ran"
+        for name in ("reference-transaction", "post-index-change"):
+            hook = repo / ".git" / "hooks" / name
+            hook.write_text(f"#!/bin/sh\necho {name} >> {marker}\nexit 0\n")
+            hook.chmod(0o755)
+        (repo / "seed.py").write_text("print('edited')\n")
+        env = git_env_without_user_config()
+        # The shared env is a complete family: git aborts on a partial one.
+        assert int(env["GIT_CONFIG_COUNT"]) == sum(k.startswith("GIT_CONFIG_KEY_") for k in env)
+
+        subprocess.run(["git", "-C", str(repo), "reset", "--hard", "HEAD"],
+                       check=True, capture_output=True, env=env)
+
+        assert not marker.exists(), "a repo-local hook ran under the scrubbed env"
+        assert (repo / "seed.py").read_text() == "print('seed')\n"
+
+
+def _git_ok(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+_FILTER_PWN = 'sh -c "id > PWNED; cat"'
+
+
+class TestGitDirDiscovery:
+    """The guard must read the settings git will actually use, not just
+    `<wd>/.git/config` (UX-013 repair): a `.git` pointer file, a symlinked
+    `.git`, a linked worktree's common dir, `config.worktree` and a bare layout
+    each put the filter somewhere the old check never looked."""
+
+    def _repo(self, tmp_path: Path) -> Path:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        return _make_git_repo(repo)
+
+    def test_gitdir_pointer_file_with_a_filter_is_flagged(self, tmp_path):
+        import shutil
+
+        from maverick.git_safety import git_metadata_may_execute_filters
+        repo = self._repo(tmp_path)
+        shutil.move(str(repo / ".git"), str(repo / "gd"))
+        (repo / ".git").write_text("gitdir: gd\n")
+        assert git_metadata_may_execute_filters(repo) is False  # clean so far
+        (repo / "gd" / "info").mkdir(exist_ok=True)
+        (repo / "gd" / "info" / "attributes").write_text("* filter=pwn\n")
+        _git_ok(repo, "config", "filter.pwn.smudge", _FILTER_PWN)
+        assert git_metadata_may_execute_filters(repo) is True
+
+    def test_absolute_gitdir_pointer_with_a_filter_is_flagged(self, tmp_path):
+        import shutil
+
+        from maverick.git_safety import git_metadata_may_execute_filters
+        repo = self._repo(tmp_path)
+        elsewhere = tmp_path / "elsewhere-gitdir"
+        shutil.move(str(repo / ".git"), str(elsewhere))
+        (repo / ".git").write_text(f"gitdir: {elsewhere}\n")
+        _git_ok(repo, "config", "filter.pwn.clean", _FILTER_PWN)
+        assert git_metadata_may_execute_filters(repo) is True
+
+    def test_symlinked_dotgit_with_a_filter_is_flagged(self, tmp_path):
+        import shutil
+
+        from maverick.git_safety import git_metadata_may_execute_filters
+        repo = self._repo(tmp_path)
+        shutil.move(str(repo / ".git"), str(tmp_path / "real-gitdir"))
+        (repo / ".git").symlink_to(tmp_path / "real-gitdir")
+        assert git_metadata_may_execute_filters(repo) is False
+        _git_ok(repo, "config", "filter.pwn.smudge", _FILTER_PWN)
+        assert git_metadata_may_execute_filters(repo) is True
+
+    def test_unreadable_pointer_file_fails_closed(self, tmp_path):
+        from maverick.git_safety import git_metadata_may_execute_filters
+        repo = self._repo(tmp_path)
+        (repo / ".git").rename(tmp_path / "moved")
+        (repo / ".git").write_text("not a pointer\n")
+        assert git_metadata_may_execute_filters(repo) is True
+        (repo / ".git").write_text("gitdir: does-not-exist\n")
+        assert git_metadata_may_execute_filters(repo) is True
+
+    def test_worktree_config_filter_is_flagged(self, tmp_path):
+        """`extensions.worktreeConfig` makes git read `.git/config.worktree`
+        too, and a filter / attributesFile defined there is just as live."""
+        from maverick.git_safety import git_metadata_may_execute_filters
+        repo = self._repo(tmp_path)
+        config = repo / ".git" / "config"
+        config.write_text(
+            config.read_text().replace("repositoryformatversion = 0", "repositoryformatversion = 1")
+            + "[extensions]\n\tworktreeConfig = true\n")
+        attrs = repo / ".git" / "evil-attributes"
+        attrs.write_text("* filter=pwn\n")
+        assert git_metadata_may_execute_filters(repo) is False
+        (repo / ".git" / "config.worktree").write_text(
+            f'[core]\n\tattributesFile = {attrs}\n[filter "pwn"]\n\tsmudge = "{_FILTER_PWN}"\n')
+        assert git_metadata_may_execute_filters(repo) is True
+
+    def test_benign_worktree_config_is_not_flagged(self, tmp_path):
+        """`git sparse-checkout` turns worktreeConfig on and keeps its own
+        settings there; that must not trip the guard."""
+        from maverick.git_safety import git_metadata_may_execute_filters
+        repo = self._repo(tmp_path)
+        config = repo / ".git" / "config"
+        config.write_text(
+            config.read_text().replace("repositoryformatversion = 0", "repositoryformatversion = 1")
+            + "[extensions]\n\tworktreeConfig = true\n")
+        (repo / ".git" / "config.worktree").write_text("[core]\n\tsparseCheckout = true\n")
+        assert git_metadata_may_execute_filters(repo) is False
+
+    def test_linked_worktree_reads_the_main_repositories_settings(self, tmp_path):
+        from maverick.git_safety import git_metadata_may_execute_filters
+        main = self._repo(tmp_path)
+        linked = tmp_path / "linked"
+        _git_ok(main, "worktree", "add", "--detach", "--quiet", str(linked), "HEAD")
+        assert (linked / ".git").is_file()
+        assert git_metadata_may_execute_filters(linked) is False  # clean linked worktree is fine
+        (main / ".git" / "info").mkdir(exist_ok=True)
+        (main / ".git" / "info" / "attributes").write_text("* filter=pwn\n")
+        _git_ok(main, "config", "filter.pwn.smudge", _FILTER_PWN)
+        assert git_metadata_may_execute_filters(linked) is True
+
+    def test_per_worktree_config_of_a_linked_worktree_is_flagged(self, tmp_path):
+        from maverick.git_safety import git_metadata_may_execute_filters
+        main = self._repo(tmp_path)
+        linked = tmp_path / "linked"
+        _git_ok(main, "worktree", "add", "--detach", "--quiet", str(linked), "HEAD")
+        (main / ".git" / "worktrees" / "linked" / "config.worktree").write_text(
+            f'[filter "pwn"]\n\tsmudge = "{_FILTER_PWN}"\n')
+        assert git_metadata_may_execute_filters(main) is True
+        assert git_metadata_may_execute_filters(linked) is True
+
+    def test_bare_layout_without_dotgit_is_scanned(self, tmp_path):
+        """With no `.git` entry git takes a directory that looks like a
+        repository as the repository itself, so its `config` is live."""
+        from maverick.git_safety import git_metadata_may_execute_filters
+        bare = tmp_path / "bare"
+        subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+        assert git_metadata_may_execute_filters(bare) is False
+        (bare / "info").mkdir(exist_ok=True)
+        (bare / "info" / "attributes").write_text("* filter=pwn\n")
+        _git_ok(bare, "config", "filter.pwn.smudge", _FILTER_PWN)
+        assert git_metadata_may_execute_filters(bare) is True
+
+    def test_section_header_spacing_does_not_hide_a_filter(self, tmp_path):
+        """git accepts any run of blanks between a section name and its
+        quoted subsection (`[filter   "pwn"]`), so a literal `[filter "` match
+        is evaded by an extra space or a tab."""
+        from maverick.git_safety import git_metadata_may_execute_filters
+        repo = self._repo(tmp_path)
+        config = repo / ".git" / "config"
+        original = config.read_text()
+        for header in ('[filter   "pwn"]', '[filter\t"pwn"]', '[FILTER "pwn"]', "[filter.pwn]"):
+            config.write_text(original + f"{header}\n\tsmudge = true\n")
+            assert git_metadata_may_execute_filters(repo) is True, header
+        for header in ('[include]', '[include  ]', '[includeIf "gitdir:/x/"]'):
+            config.write_text(original + f"{header}\n\tpath = /x\n")
+            assert git_metadata_may_execute_filters(repo) is True, header
+
+    def test_filter_attribute_such_as_git_lfs_is_refused(self, tmp_path):
+        """A repository that really uses a filter (git-lfs) is refused too:
+        the host cannot tell a legitimate clean/smudge command from a planted
+        one, so it does not run either. Documented limitation."""
+        from maverick.git_safety import git_metadata_may_execute_filters
+        repo = self._repo(tmp_path)
+        (repo / ".gitattributes").write_text("*.bin filter=lfs diff=lfs merge=lfs -text\n")
+        assert git_metadata_may_execute_filters(repo) is True
+
+    def test_ordinary_repositories_are_still_safe(self, tmp_path):
+        import shutil
+
+        from maverick.git_safety import git_metadata_may_execute_filters
+        repo = self._repo(tmp_path)
+        assert git_metadata_may_execute_filters(repo) is False
+        # a `gitdir:` pointer to a clean git directory (submodule / worktree layout)
+        shutil.move(str(repo / ".git"), str(repo / "gd"))
+        (repo / ".git").write_text("gitdir: gd\n")
+        assert git_metadata_may_execute_filters(repo) is False
+        # a directory that is not a repository at all
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        assert git_metadata_may_execute_filters(plain) is False
+
     def test_orchestrator_reexports_same_functions(self):
         """orchestrator.py's private names must be the git_safety module's
         functions, not a second reimplementation."""

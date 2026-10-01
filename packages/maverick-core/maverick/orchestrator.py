@@ -1558,6 +1558,21 @@ def _evidence_ready_goal_output(
     return str(delivery["delivered_text"])
 
 
+def _goal_already_ran(world: Any, goal_id: int) -> bool:
+    """Whether a run of this task is already on record (so it was let through).
+
+    ``resume=True`` only says the caller will pick up saved work if there is
+    any -- the shared runner passes it for every dashboard, API, schedule, flow
+    and queue start, first starts included (UX-014) -- so it cannot stand for
+    "a person already approved this". A recorded run can: the start check comes
+    before the first run is recorded, so a task it held has none. When that
+    cannot be read, the check applies."""
+    try:
+        return bool(world.list_episodes(limit=1, goal_id=goal_id))
+    except Exception:
+        return False
+
+
 async def _goal_risk_gate(goal_id: int, goal: Any, *, resuming: bool) -> tuple[dict, str | None]:
     """Classify a task from its words before it starts; hold it for a person
     only when an administrator turned that on (``[safety]
@@ -1766,7 +1781,8 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     # After the trace context is bound: an approval request takes its task and
     # requester from it. A resumed task was already let through once.
     _risk_record, _risk_refusal = await _goal_risk_gate(
-        goal_id, goal, resuming=bool(resume or resume_episode_id is not None))
+        goal_id, goal,
+        resuming=resume_episode_id is not None or (bool(resume) and _goal_already_ran(world, goal_id)))
     if _risk_refusal:
         world.set_goal_status(goal_id, "blocked", result=_risk_refusal)
         log.warning("goal #%s not started: %s", goal_id, _risk_refusal)
