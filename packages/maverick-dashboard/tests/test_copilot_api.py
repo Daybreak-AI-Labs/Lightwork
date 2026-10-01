@@ -216,6 +216,15 @@ def test_model_success_is_unverified_bounded_and_ignores_assistant_history(
         "Settings updated.",
         "Updated your theme.",
         "Email sent.",
+        "I've configured your provider connection.",
+        "I've granted you access to the finance workspace.",
+        "The employee account has been deactivated.",
+        "I uploaded your evidence to the review.",
+        "Your approval request has been filed.",
+        "The report was generated and emailed to the team.",
+        "I linked your documents to the project.",
+        "'I've granted you access to the finance workspace.'",
+        "If you check the page, I changed your theme.",
     ),
 )
 def test_model_completion_claim_is_replaced_with_page_guidance(
@@ -265,6 +274,14 @@ def test_model_completion_claim_is_replaced_with_page_guidance(
          "When is a workflow complete?", "when all steps finish"),
         ("I did not change your theme. Open Settings to choose an appearance.",
          "Did you change my theme?", "did not change"),
+        ("I've created a short checklist below: open Settings, then review your provider status.",
+         "What should I check next?", "short checklist below"),
+        ("If we changed your settings, you would see an operation receipt.",
+         "How would I know?", "operation receipt"),
+        ("Say 'I saved your workflow' only when the receipt appears.",
+         "What wording confirms a saved flow?", "only when the receipt appears"),
+        ("To understand the label, read 'Your request has been approved' as a completed review.",
+         "What does that label mean?", "as a completed review"),
     ),
 )
 def test_model_can_still_explain_how_to_use_a_control(

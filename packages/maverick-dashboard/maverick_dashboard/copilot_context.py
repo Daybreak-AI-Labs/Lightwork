@@ -43,6 +43,11 @@ _COMPLETED_VERB = (
     r"cancelled|canceled|deleted|removed|enabled|disabled|sent|shared|"
     r"published|submitted|started|stopped|saved|set|switched|applied|"
     r"scheduled|launched|ran|handled|turned\s+(?:on|off)|"
+    r"configured|connected|granted|deactivated|provisioned|uploaded|"
+    r"filed|generated|emailed|linked|deployed|exported|imported|"
+    r"invited|restored|revoked|rotated|installed|archived|assigned|"
+    r"added|moved|renamed|printed|downloaded|copied|marked|paused|"
+    r"resumed|restarted|withdrawn|"
     r"(?:took|taken)\s+care\s+of)"
 )
 _FIRST_PERSON_COMPLETION = compile_regex(
@@ -76,6 +81,19 @@ _TERSE_COMPLETION = compile_regex(
 )
 _DONE_LEAD = compile_regex(
     r"^(?:(?:final|status):\s*)?(?:done|all\s+set|completed|it['’]s\s+done)\b",
+    IGNORECASE,
+)
+_QUOTED_TEXT = compile_regex(
+    r'"[^"\n]{1,200}"|“[^”\n]{1,200}”|(?<!\w)\'[^\'\n]{1,200}\'|‘[^’\n]{1,200}’'
+)
+_EXPLANATORY_LEAD = compile_regex(
+    r"\b(?:say|read|label|phrase|example|wording|message|text)\b[^.!?]{0,60}$",
+    IGNORECASE,
+)
+_RESPONSE_LOCAL_TEXT = compile_regex(
+    r"\s+(?:a|an|the)\s+(?:short\s+)?"
+    r"(?:checklist|summary|list|outline|steps|answer|explanation)\s+"
+    r"(?:below|here|in\s+this\s+(?:reply|answer))\b",
     IGNORECASE,
 )
 
@@ -1771,13 +1789,29 @@ def model_claims_completed_action(reply: str) -> bool:
     classifier misses. Neither a prompt nor a regex is an action receipt.
     """
 
-    return any(
-        pattern.search(reply)
-        for pattern in (
-            _FIRST_PERSON_COMPLETION, _PASSIVE_COMPLETION, _CURRENT_STATE_CLAIM,
-            _TERSE_COMPLETION, _DONE_LEAD,
-        )
-    )
+    for pattern in (
+        _FIRST_PERSON_COMPLETION, _PASSIVE_COMPLETION, _CURRENT_STATE_CLAIM,
+        _TERSE_COMPLETION, _DONE_LEAD,
+    ):
+        for match in pattern.finditer(reply):
+            # Examples, conditionals, and text composed in this reply are not
+            # claims that the guide changed platform state. An isolated quoted
+            # claim without an explanatory lead is still rejected.
+            clause_start = max((reply.rfind(char, 0, match.start()) for char in ".!?;,"), default=-1) + 1
+            clause_lead = reply[clause_start:match.start()].strip().casefold()
+            if clause_lead and clause_lead.split()[0] in {"if", "when", "once", "after", "unless"}:
+                continue
+            if any(
+                quoted.start() < match.start() and match.end() < quoted.end()
+                and _EXPLANATORY_LEAD.search(reply[max(0, quoted.start() - 80):quoted.start()])
+                for quoted in _QUOTED_TEXT.finditer(reply)
+            ):
+                continue
+            if pattern is _FIRST_PERSON_COMPLETION:
+                if _RESPONSE_LOCAL_TEXT.match(reply[match.end():]):
+                    continue
+            return True
+    return False
 
 
 def _authority_notice(permissions: frozenset[str]) -> str:
