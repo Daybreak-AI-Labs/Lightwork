@@ -103,6 +103,27 @@ test("invalid JSON is rejected without echoing its content", async () => {
   });
 });
 
+test("receipt export validation explains the supported limits without echoing input", async () => {
+  const api = client();
+  const cases = [
+    ["receipt_limit", "500 records"],
+    ["after_sequence", "saved position"],
+  ];
+  for (const [field, expected] of cases) {
+    const fixture = streamingResponse([new TextEncoder().encode(JSON.stringify({
+      detail: [{ loc: ["body", "items", 0, field], type: "extra_forbidden", input: "private-subject-value" }],
+    }))], { ok: false, status: 422 });
+    await assert.rejects(api.parseResponse(fixture.response), (error) => {
+      assert.match(error.message, new RegExp(expected));
+      assert.equal(error.message.includes("private-subject-value"), false);
+      return true;
+    });
+  }
+  assert.throws(() => api.parseItems(JSON.stringify([{
+    item_id: "export-1", profile_id: "profile-1", after_sequence: 1,
+  }]), "export_receipts"), /saved position/);
+});
+
 test("export payload is closed and excludes authority injection", () => {
   const api = client();
   const built = plain(api.buildExportPayload({

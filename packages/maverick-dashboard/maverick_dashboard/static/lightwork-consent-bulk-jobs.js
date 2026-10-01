@@ -66,6 +66,18 @@
       var detail = payload && typeof payload.detail === "string"
         ? payload.detail.slice(0, 500)
         : "Consent bulk-job request failed.";
+      if (response.status === 422 && payload && Array.isArray(payload.detail)) {
+        var invalidField = payload.detail.find(function (issue) {
+          return issue && Array.isArray(issue.loc) && issue.loc[0] === "body" &&
+            issue.loc[1] === "items" && Number.isInteger(issue.loc[2]) &&
+            (issue.loc[3] === "receipt_limit" || issue.loc[3] === "after_sequence");
+        });
+        if (invalidField) {
+          detail = invalidField.loc[3] === "receipt_limit"
+            ? "Choose between 1 and 500 records per person."
+            : "Starting from a saved position is not available. Choose up to the latest 500 records per person.";
+        }
+      }
       throw failure(detail, "request_failed", response.status);
     }
     return payload;
@@ -202,6 +214,9 @@
       var item;
       var normalized;
       if (operation === "export_receipts") {
+        if (rawItem && Object.prototype.hasOwnProperty.call(rawItem, "after_sequence")) {
+          throw failure("Starting from a saved position is not available. Choose up to the latest 500 records per person.", "invalid_input");
+        }
         item = exactShape(rawItem, ["item_id", "profile_id"], ["receipt_limit"], label);
         normalized = {
           item_id: identifier(item.item_id, "Item ID"),

@@ -298,7 +298,20 @@ def test_strict_schema_rejects_authority_and_operation_shape_injection(environme
             }
         ]
     )
-    assert client.post(f"{BASE}/exports", json=oversized_receipt_page).status_code == 422
+    too_many = client.post(f"{BASE}/exports", json=oversized_receipt_page)
+    assert too_many.status_code == 422
+    assert too_many.json()["detail"][0]["loc"] == ["body", "items", 0, "receipt_limit"]
+    saved_position = client.post(
+        f"{BASE}/exports",
+        json=_export_body(items=[{
+            "item_id": "export-position",
+            "profile_id": "profile-1",
+            "after_sequence": 0,
+        }]),
+    )
+    assert saved_position.status_code == 422
+    assert saved_position.json()["detail"][0]["loc"] == ["body", "items", 0, "after_sequence"]
+
 
     malformed = _edit_body()
     malformed["items"][0]["reason_code"] = "cross-operation-field"
@@ -327,6 +340,33 @@ def test_strict_schema_rejects_authority_and_operation_shape_injection(environme
     assert client.post(f"{BASE}/actions", json=exact_reactivation).status_code == 503
 
     assert client.post(f"{BASE}/worker/run-next", json={"tenant_id": "tenant-b"}).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        ("receipt_limit is outside its bound", "Choose between 1 and 500 records per person."),
+        (
+            "Receipt exports from a saved position are not supported. "
+            "Select up to the latest 500 records per person.",
+            "Starting from a saved position is not available. Choose up to the latest 500 records per person.",
+        ),
+        ("private-subject-value", "consent bulk-job request is invalid"),
+    ],
+)
+def test_store_export_validation_returns_only_safe_detail(
+    environment, monkeypatch, reason: str, expected: str,
+) -> None:
+    client, _state, runtime, _preferences = environment
+
+    def reject(*_args, **_kwargs):
+        raise bulk.ConsentBulkJobValidationError(reason)
+
+    monkeypatch.setattr(runtime.store, "create_job", reject)
+    response = client.post(f"{BASE}/exports", json=_export_body())
+    assert response.status_code == 422
+    assert response.json()["detail"] == expected
+    assert "private-subject-value" not in response.text
 
 
 def test_disabled_unready_and_factory_failure_do_not_leak_details(environment) -> None:

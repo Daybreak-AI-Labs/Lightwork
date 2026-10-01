@@ -404,9 +404,18 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
                 detail="consent bulk-job state or revision changed",
             ) from exc
         except ops.ConsentBulkJobValidationError as exc:
+            message = str(exc)
+            detail = "consent bulk-job request is invalid"
+            if message == "receipt_limit is outside its bound":
+                detail = "Choose between 1 and 500 records per person."
+            elif message == (
+                "Receipt exports from a saved position are not supported. "
+                "Select up to the latest 500 records per person."
+            ):
+                detail = "Starting from a saved position is not available. Choose up to the latest 500 records per person."
             raise HTTPException(
                 status_code=422,
-                detail="consent bulk-job request is invalid",
+                detail=detail,
             ) from exc
         except ops.ConsentBulkJobError as exc:
             raise HTTPException(
