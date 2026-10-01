@@ -413,6 +413,54 @@ def test_timed_verdict_reuses_a_pass_until_it_expires() -> None:
     assert runs == [100.0, 130.1]
 
 
+def test_timed_verdict_rechecks_a_changed_revision_and_refuses_a_racing_write() -> None:
+    clock = _Clock()
+    revision = [0]
+    runs: list[int] = []
+
+    def check() -> bool:
+        runs.append(revision[0])
+        if len(runs) == 1:
+            revision[0] = 1  # a write during the replay cannot be certified
+        return True
+
+    verdict = composition._TimedVerdict(
+        check, pass_seconds=30, fail_seconds=5, clock=clock,
+        revision=lambda: revision[0],
+    )
+    assert verdict() is False
+    assert verdict() is True
+    assert runs == [0, 1]
+    assert verdict() is True  # unchanged burst does not replay
+    revision[0] = 2
+    assert verdict() is True
+    assert runs == [0, 1, 2]
+
+
+def test_shared_directory_revision_reads_the_database_wal_position(monkeypatch) -> None:
+    monkeypatch.setattr(composition.consent_storage, "shared", lambda: True)
+    directory = object.__new__(composition.NativeApplicationDirectory)
+    sql: list[str] = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute(self, statement):
+            sql.append(statement)
+            return self
+
+        def fetchone(self):
+            return ("0/DEADBEEF",)
+
+    monkeypatch.setattr(directory, "_connect", lambda: Connection())
+    assert directory.integrity_revision() == ("postgres", "0/DEADBEEF")
+    assert sql == ["SELECT pg_current_wal_insert_lsn()"]
+
+
 def test_timed_verdict_fails_closed_and_retries_a_failure_sooner_than_a_pass() -> None:
     clock = _Clock()
     outcomes: list[object] = [RuntimeError("database is locked"), False, True]
@@ -520,8 +568,9 @@ def test_public_gate_scans_the_directory_once_for_a_burst_of_requests(
     assert len(scans) == 1
 
 
+@pytest.mark.parametrize("mutation", ["alter", "delete"])
 def test_public_gate_stays_closed_for_a_changed_directory_and_without_an_application(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, mutation
 ) -> None:
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     dependencies = composition.attach_consent_native_composition(
@@ -546,14 +595,22 @@ def test_public_gate_stays_closed_for_a_changed_directory_and_without_an_applica
     )
     assert dependencies.gate() is True  # registering opens it at once
 
+    before_revision = directory.integrity_revision()
     with sqlite3.connect(directory.path) as connection:
-        connection.execute(
-            "UPDATE native_consent_application_directory SET current_public_key_hex=? "
-            "WHERE application_ref=?",
-            ("f" * 64, "mobile-alpha"),
-        )
-    # The audit replay is remembered briefly, so a fresh gate (a new process or
-    # a lapsed verdict) is the one that must refuse the altered directory.
+        if mutation == "alter":
+            connection.execute(
+                "UPDATE native_consent_application_directory SET current_public_key_hex=? "
+                "WHERE application_ref=?",
+                ("f" * 64, "mobile-alpha"),
+            )
+        else:
+            connection.execute("DROP TRIGGER native_consent_directory_audit_no_delete")
+            connection.execute("DELETE FROM native_consent_directory_audit")
+    after_revision = directory.integrity_revision()
+    assert before_revision != after_revision, (before_revision, after_revision)
+    # A cached pass must be invalidated as soon as a normal file mutation is
+    # observable, even before its 30-second expiry.
+    assert dependencies.gate() is False
     fresh = composition.attach_consent_native_composition(
         _fresh_app(), public_dependencies=_public_dependencies()
     )

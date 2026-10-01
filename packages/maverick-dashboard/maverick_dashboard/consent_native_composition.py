@@ -319,6 +319,12 @@ class NativeApplicationDirectory:
     def __init__(self, path: Path, *, clock: Callable[[], float] = time.time) -> None:
         self.path = Path(path).expanduser()
         self._clock = clock
+        # PRAGMA data_version is comparable only on the SAME connection. Keep a
+        # read-only observer open so rapid in-place updates are noticed even on
+        # filesystems whose timestamp/size do not move between requests.
+        self._revision_connection: sqlite3.Connection | None = None
+        self._revision_file_identity: tuple[int, int] | None = None
+        self._revision_lock = threading.Lock()
         ensure_private_directory(self.path.parent)
         with cross_process_lock(self.path, strict=True):
             self._initialize()
@@ -861,6 +867,55 @@ class NativeApplicationDirectory:
         except Exception:
             return False
 
+    def integrity_revision(self) -> object:
+        """A cheap change signal for the directory, not an integrity verdict.
+
+        Local storage is a DELETE-journal SQLite file. A persistent read-only
+        observer's data_version catches committed SQL edits; file identity,
+        timestamps and journal/WAL also catch normal replacements and direct
+        file changes. Shared Postgres storage has no local file;
+        its WAL insertion position changes as writes are recorded. Failure to observe
+        either store closes the public gate rather than reusing an old pass.
+        """
+        if consent_storage.shared():
+            with self._connect() as connection:
+                row = connection.execute("SELECT pg_current_wal_insert_lsn()").fetchone()
+            if row is None or row[0] is None:
+                raise NativeConsentCompositionError("native directory revision is unavailable")
+            return ("postgres", str(row[0]))
+
+        def stamp(path: Path) -> tuple[int, int, int, int, int] | None:
+            try:
+                state = path.stat()
+            except FileNotFoundError:
+                return None
+            return (state.st_dev, state.st_ino, state.st_size,
+                    state.st_mtime_ns, state.st_ctime_ns)
+
+        base = str(self.path)
+        main = stamp(self.path)
+        if main is None:
+            raise NativeConsentCompositionError("native directory file is unavailable")
+        identity = main[:2]
+        with self._revision_lock:
+            if self._revision_connection is None or self._revision_file_identity != identity:
+                if self._revision_connection is not None:
+                    self._revision_connection.close()
+                self._revision_connection = None
+                self._revision_file_identity = None
+                connection = sqlite3.connect(
+                    f"{self.path.resolve().as_uri()}?mode=ro", uri=True,
+                    check_same_thread=False, timeout=5.0,
+                )
+                connection.execute("PRAGMA query_only=ON")
+                self._revision_connection = connection
+                self._revision_file_identity = identity
+            row = self._revision_connection.execute("PRAGMA data_version").fetchone()
+        if row is None:
+            raise NativeConsentCompositionError("native directory revision is unavailable")
+        return (main, stamp(Path(base + "-journal")),
+                stamp(Path(base + "-wal")), int(row[0]))
+
     def verify_integrity(self) -> bool:  # noqa: C901 - explicit cross-table audit checks
         def checked_ref(value: object, label: str) -> str:
             try:
@@ -1144,8 +1199,8 @@ class _BoundedRateLimiter:
 class _TimedVerdict:
     """Share one run of a slow yes/no check between requests that arrive together.
 
-    A yes is reused for ``pass_seconds``. A no, or a check that raised, is
-    reused for only ``fail_seconds``: a transient fault clears quickly, while a
+    A yes is reused for ``pass_seconds`` only while ``revision`` stays the same.
+    A no, or a check that raised, is reused for only ``fail_seconds``: a transient fault clears quickly, while a
     store that really is broken is still re-checked at most that often rather
     than on every request. Anything but ``True`` counts as a no, so a fault can
     close a gate but never open it. Callers that arrive while the check runs
@@ -1159,18 +1214,29 @@ class _TimedVerdict:
         pass_seconds: float,
         fail_seconds: float,
         clock: Callable[[], float] = time.monotonic,
+        revision: Callable[[], object] | None = None,
     ) -> None:
         self._check = check
         self._pass_seconds = pass_seconds
         self._fail_seconds = fail_seconds
         self._clock = clock
+        self._revision = revision
         self._lock = threading.Lock()
         self._verdict = False
         self._expires = float("-inf")
+        self._observed_revision: object = object()
 
     def __call__(self) -> bool:
         with self._lock:
-            if self._clock() < self._expires:
+            try:
+                before = self._revision() if self._revision is not None else None
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception:
+                self._expires = float("-inf")
+                self._verdict = False
+                return False
+            if self._clock() < self._expires and before == self._observed_revision:
                 return self._verdict
             try:
                 verdict = self._check() is True
@@ -1178,10 +1244,24 @@ class _TimedVerdict:
                 raise
             except Exception:
                 verdict = False
+            try:
+                after = self._revision() if self._revision is not None else None
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception:
+                self._expires = float("-inf")
+                self._verdict = False
+                return False
             self._verdict = verdict
-            self._expires = self._clock() + (
-                self._pass_seconds if verdict else self._fail_seconds
-            )
+            self._observed_revision = after
+            if before != after:
+                # A write raced the replay. Recheck on the next request; no
+                # snapshot spanning two revisions may admit a public action.
+                self._verdict = False
+                self._expires = float("-inf")
+                return False
+            self._expires = self._clock() + (self._pass_seconds if verdict
+                                             else self._fail_seconds)
             return verdict
 
 
@@ -1899,6 +1979,7 @@ def attach_consent_native_composition(  # noqa: C901 - explicit deployment seam 
         directory.verify_integrity,
         pass_seconds=_GATE_INTEGRITY_PASS_SECONDS,
         fail_seconds=_GATE_INTEGRITY_FAIL_SECONDS,
+        revision=directory.integrity_revision,
     )
 
     def public_gate() -> bool:
