@@ -1,0 +1,152 @@
+{
+  "summary": {
+    "source_head": "29aee7e75b6d31012f087ec725456eec20e206af",
+    "checkout_clean": true,
+    "matching_environment": ".venv-qualification-final-02",
+    "static_gates_passed": 2,
+    "offline_contracts_passed": 16,
+    "wheel_builds_passed": 8,
+    "wheel_archive_integrity_passed": 8,
+    "core_wheel_config_matches_git_export": true,
+    "core_wheel_config_matches_commit_after_CRLF_normalization": true,
+    "source_archive_sha256": "9aaadb0fe5d09ef4c08f80be38ce11a0e2e72f158b36713c4a3668d861499a30",
+    "wheel_hashes_file": "wheel-sha256.json",
+    "results_file": "results.json",
+    "full_test_suite": "Separate parent-owned run; not represented by these gate results."
+  },
+  "checks": [
+    {
+      "name": "ruff",
+      "exit_code": 0,
+      "seconds": 3.86
+    },
+    {
+      "name": "vulture",
+      "exit_code": 0,
+      "seconds": 43.59
+    },
+    {
+      "name": "maverick.plugin_matrix",
+      "exit_code": 0,
+      "seconds": 0.3
+    },
+    {
+      "name": "maverick.reachability",
+      "exit_code": 0,
+      "seconds": 30.39
+    },
+    {
+      "name": "maverick.dispatch_contract",
+      "exit_code": 0,
+      "seconds": 51.35
+    },
+    {
+      "name": "maverick.egress_contract",
+      "exit_code": 0,
+      "seconds": 19.57
+    },
+    {
+      "name": "maverick.audit_contract",
+      "exit_code": 0,
+      "seconds": 12.52
+    },
+    {
+      "name": "maverick.deprecations",
+      "exit_code": 0,
+      "seconds": 0.18
+    },
+    {
+      "name": "maverick.a11y_audit",
+      "exit_code": 0,
+      "seconds": 5.37
+    },
+    {
+      "name": "maverick.async_route_audit",
+      "exit_code": 0,
+      "seconds": 4.62
+    },
+    {
+      "name": "maverick.failure_policy",
+      "exit_code": 0,
+      "seconds": 0.24
+    },
+    {
+      "name": "maverick.schema_migrations",
+      "exit_code": 0,
+      "seconds": 0.23
+    },
+    {
+      "name": "maverick.migration_governance",
+      "exit_code": 0,
+      "seconds": 0.3
+    },
+    {
+      "name": "maverick.evaluator_evolution",
+      "exit_code": 0,
+      "seconds": 0.22
+    },
+    {
+      "name": "maverick.grpc_api.contract",
+      "exit_code": 0,
+      "seconds": 0.19
+    },
+    {
+      "name": "maverick.regulatory_compiler",
+      "exit_code": 0,
+      "seconds": 0.44
+    },
+    {
+      "name": "maverick.domain_audit",
+      "exit_code": 0,
+      "seconds": 0.23
+    },
+    {
+      "name": "verify_constraint_closure",
+      "exit_code": 0,
+      "seconds": 0.35
+    },
+    {
+      "name": "wheel-maverick-channels",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-core",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-dashboard",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-evolve",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-knowledge",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-mcp",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-maverick-shield",
+      "exit_code": 0
+    },
+    {
+      "name": "wheel-installer-cli",
+      "exit_code": 0
+    }
+  ],
+  "wheel_sha256": {
+    "maverick_agent-0.1.7-py3-none-any.whl": "7bd075c4b424788735840ed41514be6fcb50d37ef01319bdc9feb1d272431fc4",
+    "maverick_channels-0.1.7-py3-none-any.whl": "5866cb13cc38beff02e15ff074b4b0e14dfbe78fcf59931eafad592f6c5bbd73",
+    "maverick_dashboard-0.1.7-py3-none-any.whl": "a2264c554e825a22c573bd7e84f5614322f020d27d1d991aa48167ebb85d15a6",
+    "maverick_evolve-0.1.7-py3-none-any.whl": "ae6c83e858b560349c67a7a8afbe0df077608f9812d7d1fbb1e506945f21b6c1",
+    "maverick_installer-0.1.7-py3-none-any.whl": "c9797a6789237c4c2a2cad22740aa424313fd01d7e7cd33f65e69c503fdc04c5",
+    "maverick_knowledge-0.1.7-py3-none-any.whl": "1e5194ae0003c88283092618a160fe2e964212a3cfd65ba4af4d1687b9936f57",
+    "maverick_mcp_server-0.1.7-py3-none-any.whl": "ad58fb95020bf32b811500388efbfbb84c9be38b75bb37a0c92dc408356318ef",
+    "maverick_shield-0.1.7-py3-none-any.whl": "3f7b62bd302a93f59b94289af332afdf3c2cc3b16fd975a6865f2aea2f79d6f0"
+  },
+  "limits": "Static and build evidence only at the recorded source. Later source changes require affected qualification; ordinary, secure, heavy and browser results are tracked separately."
+}

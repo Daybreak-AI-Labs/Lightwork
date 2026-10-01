@@ -60,7 +60,7 @@
   {
     "id": "UX-005",
     "title": "Preserve tenant identity retirement across provisioning and restore",
-    "status": "implemented; independent restore replay and final qualification pending",
+    "status": "implemented; final integrated qualification pending",
     "commits": [
       "2dec058",
       "de69952"
@@ -69,7 +69,7 @@
       "Immutable namespace reservations and deletion tombstones prevent same-ID/case/Unicode-alias provisioning; stale roster admission refuses. Automatic setup chooses fresh IDs. SCIM compensation deletes only proven successful creation. Retained data and memberships are not reassigned. Public restore, rollback and interrupted older journals preserve lifecycle barriers monotonically, including concurrently created barriers; snapshots cannot rewrite or erase identity retirement history."
     ],
     "validation": [
-      "Original same-ID reopen reproduced. Candidate passed252 distinct local core/API/CLI/SCIM/isolation cases. Independent review reproduced a whole-home rollback deleting a post-snapshot tombstone and reviving a stale roster; corrected public restore adds13 regression models, all passed. Eight-file secure cohort219 passed with2 Windows symlink privilege skips. Ordinary cohort218 passed with2 skips and an inventory omission; corrected inventory gate4/4 passed. Independent exact-trigger replay and final combined qualification remain pending."
+      "Original same-ID reopen reproduced. Candidate passed252 distinct local core/API/CLI/SCIM/isolation cases. Independent review reproduced a whole-home rollback deleting a post-snapshot tombstone and reviving a stale roster; corrected public restore adds13 regression models, all passed. Eight-file secure cohort219 passed with2 Windows symlink privilege skips. Ordinary cohort218 passed with2 skips and an inventory omission; corrected inventory gate4/4 passed. Independent exact-trigger replay on de699529 refused full restore with both force values, preserved retirement during additive restore, and allowed legitimate identical-barrier and fresh-destination restores. Independent older-journal replay preserved current tombstones or restored missing originals. Both synthetic review runs exited0. No surviving concrete bypass found; final combined qualification remains pending."
     ]
   }
 ]

@@ -15,6 +15,7 @@ No deployment configuration or credentials were changed.
 | `cfa16bfc6659b59d4e855beb024914409cad44a7` | Incomplete; stopped after worker crash and scheduler stall at99% | Read-only stack inspection showed all workers waiting, not executing tests. No final JUnit or pass/fail total exists; progress dots are not acceptance. The actual assertion failures remain unresolved. |
 | `f036cef90a6d6fd1ddaa3f76bd857b9ca9bd4c3e` | All1,680 dashboard JavaScript tests passed across176 files | Zero failures/skips/cancellations. Exact manifests and source boundaries: dashboard-javascript-qualification.md. |
 | `12ff6b8ad9e42f73a13467c3514f9687ba57465f` | Incomplete: 5,669 passed, 10 skipped, two worker crashes | Run ended after 837.37 seconds with both settings catalog cases losing their workers. Remaining cases were not executed. Streamed reports and JUnit retain the partial result; this is not a full-suite pass. |
+| `29aee7e75b6d31012f087ec725456eec20e206af` | Fresh ordinary Python run in progress | Includes the tested batch-local configuration decryption and monotonic tenant restore repairs. Both former crash cases passed in this run. No complete suite result claimed yet. |
 
 The initial failures are not dismissed as a single fixture problem. Production
 repairs include exact ownership for local schedules, employee content reads in
@@ -72,17 +73,32 @@ passed again; independent replay of the original restore bypass remains part
 of final qualification. Failed restores may conservatively retain newly
 published identity barriers; they never release those identities.
 
-The two settings worker losses are being investigated separately from assertion
+The two settings worker losses were investigated separately from assertion
 failures. An unchanged isolated governance case passed in 196.03 seconds,
 including 135.656 seconds rendering settings groups. Repeated authenticated
 credential-key permission checks are a measured hot path. The native access
 violation seen during a diagnostic dump has not been independently reproduced;
-its cause remains unresolved. A batch-local decryption optimization is undergoing
-rotation, corruption, permission and unchanged exhaustive-case checks, without
-changing timeouts or weakening access checks.
+its cause remains unresolved. The batch-local decryption repair passed 88
+configuration/crypto cases with two Windows privilege skips. Both unchanged
+exhaustive settings cases passed serially and in parallel; the secure parallel
+run passed those two and four new regressions. Timeouts and access assertions
+were retained. Details: settings-config-read-qualification.md.
 
 At cfa16bf,15 of16 offline contract gates and all8 package wheels passed. The
 remaining constraint check required pip26.2.1 rather than the installed25.0.1.
 After the incomplete suite was stopped, only that pinned local tool was upgraded;
 constraint closure then passed with91 exactly pinned external distributions.
 Final-source contracts/builds remain pending.
+
+At `29aee7e`, Ruff, Vulture, all 16 offline contracts and all eight wheels passed.
+Every wheel passed archive integrity checks, and the core configuration source
+matched the exact Git export. Source and wheel hashes plus individual check
+results are in static-build-qualification.json. Later source changes and the
+full runtime phases remain separately tracked; these are not release approval.
+
+Optional DuckDB qualification found a remaining LW-095 raw SQL content-read
+side path. Commit `59ab6ea` retains global query permission while restricting
+materialized task rows to the exact request owner. The same three real-DuckDB
+regressions failed on the prepatch source, returning other employees' rows,
+and passed after repair in ordinary and secure modes. This belongs to the
+original approved privacy policy; it is not a sixth PR2530 finding.
