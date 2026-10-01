@@ -449,6 +449,37 @@ def test_grant_expiry_is_enforced(store: ConsentPreferenceStore, clock: MutableC
     assert decision.reason == "no_current_explicit_grant"
 
 
+@pytest.mark.parametrize("new_action", ["grant", "deny"])
+def test_expired_newer_choice_never_revives_older_grant(
+    store: ConsentPreferenceStore,
+    clock: MutableClock,
+    new_action: str,
+) -> None:
+    _policy(store)
+    _profile(store)
+    older = _record(store)
+    newer = _record(
+        store,
+        action=new_action,
+        expected_revision=1,
+        idem="preference-temporary",
+        expires_at=NOW + 10,
+        retention_until=NOW + 20,
+    )
+    clock.value = NOW + 11
+    decision = store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert decision.allowed is False
+    assert decision.reason == "no_current_explicit_grant"
+    assert decision.receipt_id == newer["receipt_id"]
+    assert decision.receipt_id != older["receipt_id"]
+    _record(store, expected_revision=2, idem="preference-renewed")
+    assert store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    ).allowed
+
+
 def test_receipt_reactivation_date_is_auditable_and_enforced(
     store: ConsentPreferenceStore,
     clock: MutableClock,

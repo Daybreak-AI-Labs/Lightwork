@@ -394,7 +394,7 @@ def _decision_from_receipts(
         choices = _loads(row["choices_json"], "receipt choices")
         if not isinstance(choices, list):
             return EnforcementDecision(False, "untrusted_receipt")
-        matches: list[tuple[int, dict[str, Any]]] = []
+        matches: list[tuple[int, dict[str, Any], bool]] = []
         for item in choices:
             if not isinstance(item, dict):
                 return EnforcementDecision(False, "untrusted_receipt")
@@ -404,22 +404,35 @@ def _decision_from_receipts(
                 and item.get("vendor_id") in {vendor, "all"}
             ):
                 expiry = None if clear_expiration or reactivated else item.get("expires_at")
-                if expiry is None or (
+                current = expiry is None or (
                     isinstance(expiry, (int, float))
                     and not isinstance(expiry, bool)
                     and math.isfinite(float(expiry))
                     and float(expiry) > evaluated
-                ):
-                    specificity = int(item.get("channel") == channel) + int(
-                        item.get("vendor_id") == vendor
-                    )
-                    matches.append((specificity, item))
+                )
+                specificity = int(item.get("channel") == channel) + int(
+                    item.get("vendor_id") == vendor
+                )
+                matches.append((specificity, item, current))
         if not matches:
             continue
-        most_specific = max(score for score, _item in matches)
+        most_specific = max(score for score, _item, _current in matches)
+        # An expired newer choice ends its authority; it cannot reveal an older
+        # permanent grant, including one with a less specific scope.
+        if any(not current for score, _item, current in matches if score == most_specific):
+            return EnforcementDecision(
+                False,
+                "no_current_explicit_grant",
+                policy_id=policy,
+                policy_version=version,
+                receipt_id=str(row["receipt_id"]),
+                receipt_sha256=str(row["receipt_sha256"]),
+                profile_revision=profile_revision,
+                evaluated_at=evaluated,
+            )
         actions = {
             str(item.get("action"))
-            for score, item in matches
+            for score, item, _current in matches
             if score == most_specific
         }
         if not actions.issubset(_ACTIONS):
