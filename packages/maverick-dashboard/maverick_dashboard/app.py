@@ -8190,7 +8190,7 @@ async def permissions_page(
         {
             "perm": perm,
             "permissions_can_manage_sandbox": has_global_permission(request, "admin"),
-            "permissions_can_manage_tools": has_permission(request, "operate"),
+            "permissions_can_manage_tools": has_global_permission(request, "operate"),
         },
     )
 
