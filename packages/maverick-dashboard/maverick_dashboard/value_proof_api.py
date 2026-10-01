@@ -256,7 +256,7 @@ async def record_export(request: Request) -> Response:
     def _build() -> bytes:
         with tempfile.TemporaryDirectory(prefix="lw-record-") as tmp:
             path = orec.export_capsule(world, Path(tmp) / "record.json", limit=500)
-            ok, _reason = orec.verify_capsule(path)
+            ok, _reason = orec.verify_capsule_integrity(path)
             if not ok:
                 raise RuntimeError("capsule failed its own verification")
             return path.read_bytes()
@@ -315,7 +315,7 @@ async def record_verify(request: Request, body: DocumentIn) -> dict:
         with tempfile.TemporaryDirectory(prefix="lw-check-") as tmp:
             path = Path(tmp) / "record.json"
             path.write_text(body.document, encoding="utf-8")
-            ok, _reason = orec.verify_capsule(path)
+            ok, _reason = orec.verify_capsule_integrity(path)
         own = _own_key()
         return {"intact": bool(ok), "from_this_installation": bool(ok and own and capsule.get("pubkey") == own),
                 "records": len(capsule.get("records") or []) if ok else 0}

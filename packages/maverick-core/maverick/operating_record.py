@@ -11,15 +11,19 @@ operating mind as a signed, portable **capsule**.
 v1 scope (deliberate): assemble + query + signed export. Merge/split (M&A
 integration as a merge operation) builds on the capsule format later.
 Read-only over the world model — assembling the Record never mutates what
-it records. Export is Ed25519-signed with the instance's audit keypair, so
-a capsule's integrity and origin are verifiable offline (the same
-fail-closed pattern as the insight exchange).
+it records. Export is Ed25519-signed with the instance's audit keypair.
+Integrity is verifiable offline from the capsule alone; ORIGIN is verifiable
+only against a key the verifier already trusts (the publisher's public key, or
+this installation's own audit keys) -- the key embedded in a capsule proves
+nothing about who made it, so :func:`verify_capsule` fails closed on an
+untrusted key.
 """
 from __future__ import annotations
 
 import json
 import logging
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -250,27 +254,107 @@ def export_capsule(
     return out
 
 
-def verify_capsule(path: Path | str) -> tuple[bool, str]:
-    """Offline integrity + origin check. Returns ``(ok, reason)``."""
+def _fingerprint(pub_hex: str) -> str:
+    """The audit-key id of a public key (the same 16-hex digest the audit log
+    uses). Derived from the key itself: the capsule's own ``key_id`` label is
+    not covered by the signature, so anyone can write anything there."""
+    import hashlib
+    return hashlib.sha256(bytes.fromhex(pub_hex)).hexdigest()[:16]
+
+
+def _normal_key(value: Any) -> str | None:
+    key = str(value or "").strip().lower()
+    if len(key) != 64 or any(c not in "0123456789abcdef" for c in key):
+        return None
+    return key
+
+
+def _verified_capsule(path: Path | str) -> tuple[dict | None, str]:
+    """Integrity step shared by both checks: the signature must verify against
+    the public key embedded in the capsule. ``(capsule, "")`` or ``(None, why)``."""
     try:
         capsule = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        return False, f"unreadable capsule: {e}"
+        return None, f"unreadable capsule: {e}"
+    if not isinstance(capsule, dict):
+        return None, "unreadable capsule: not a capsule document"
     sig = str(capsule.get("sig", "") or "")
     pub = str(capsule.get("pubkey", "") or "")
     if not sig or not pub:
-        return False, "capsule is unsigned"
+        return None, "capsule is unsigned"
+    if _normal_key(pub) is None:
+        return None, "capsule carries a malformed public key"
     body = {k: capsule[k] for k in
             ("schema_version", "ts", "records", "learned") if k in capsule}
     from .audit.signing import _have_crypto, verify_ed25519
     if not _have_crypto():
-        return False, "cryptography not installed: cannot verify"
+        return None, "cryptography not installed: cannot verify"
     if not verify_ed25519(pub, sig, _canonical(body)):
-        return False, "signature verification FAILED"
-    return True, f"ok: {len(body.get('records', []))} record(s), key {capsule.get('key_id', pub[:8])}"
+        return None, "signature verification FAILED"
+    return capsule, ""
+
+
+def verify_capsule_integrity(path: Path | str) -> tuple[bool, str]:
+    """Offline INTEGRITY check only: the capsule is unedited since it was signed.
+
+    The signature is checked against the public key stored inside the capsule,
+    so this says nothing about who signed it -- anyone can mint a keypair and
+    sign anything. Use :func:`verify_capsule` when origin matters. Returns
+    ``(ok, reason)``.
+    """
+    capsule, why = _verified_capsule(path)
+    if capsule is None:
+        return False, why
+    n = len(capsule.get("records") or [])
+    return True, (f"ok (integrity only): {n} record(s), signed by key "
+                  f"{_fingerprint(_normal_key(capsule['pubkey']))}; this does "
+                  "not show who signed it")
+
+
+def verify_capsule(
+    path: Path | str, *, trusted_pubkeys: Iterable[str] | None = None,
+) -> tuple[bool, str]:
+    """Offline integrity AND origin check. Returns ``(ok, reason)``.
+
+    Integrity alone is self-certifying: a forger signs with a fresh key and
+    embeds it. So the signing key must also be one the verifier trusts:
+    ``trusted_pubkeys`` (hex Ed25519 public keys obtained out of band, such as
+    the firm's published key), or -- when omitted -- this installation's own
+    audit keys. An empty ``trusted_pubkeys`` trusts nobody and fails closed.
+    """
+    capsule, why = _verified_capsule(path)
+    if capsule is None:
+        return False, why
+    pub = _normal_key(capsule["pubkey"])
+    if trusted_pubkeys is None:
+        try:
+            from .audit.signing import trusted_audit_public_keys
+            anchors = [_normal_key(k) for k in trusted_audit_public_keys().values()]
+        # failure-policy: fail_closed
+        except Exception as e:
+            return False, ("cannot check who signed this capsule: this "
+                           f"installation's audit keys are unavailable ({e})")
+        where = "this installation's audit keys"
+    else:
+        anchors = [_normal_key(k) for k in trusted_pubkeys]
+        if any(k is None for k in anchors):
+            return False, "a trusted public key must be 64 hex characters (32 bytes)"
+        where = "the trusted keys given"
+    if not anchors:
+        return False, ("no trusted key to check the signature against: pass the "
+                       "publisher's public key (--pubkey) or a file of trusted keys")
+    fingerprint = _fingerprint(pub)
+    if pub not in anchors:
+        return False, (f"signed by an untrusted key {fingerprint} (public key "
+                       f"{pub}): it is not among {where}. The signature is "
+                       "valid for that key, but anyone can make a key; check "
+                       "it against the publisher's own copy, then pass it with "
+                       "--pubkey if you trust it")
+    n = len(capsule.get("records") or [])
+    return True, f"ok: {n} record(s), signed by trusted key {fingerprint}"
 
 
 __all__ = [
     "SCHEMA_VERSION", "DecisionRecord", "RecordStats", "assemble", "query",
-    "stats", "export_capsule", "verify_capsule",
+    "stats", "export_capsule", "verify_capsule", "verify_capsule_integrity",
 ]

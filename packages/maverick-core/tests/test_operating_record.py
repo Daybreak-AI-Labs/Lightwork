@@ -115,3 +115,166 @@ def test_capsule_roundtrip_and_tamper_detection(world, tmp_path, monkeypatch):
     out.write_text(text, encoding="utf-8")
     ok, reason = orec.verify_capsule(out)
     assert not ok and "FAILED" in reason
+
+
+# -- origin: a capsule is trusted only when signed by a key the verifier trusts
+
+def _forged_capsule(path, *, claimed_key_id="attacker-key"):
+    """A capsule anyone can fabricate: a fresh key signs a record nobody made."""
+    import json
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    priv = ed25519.Ed25519PrivateKey.generate()
+    pub = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    ).hex()
+    body = {
+        "schema_version": 1, "ts": 1.0, "learned": {},
+        "records": [{"ts": 1.0, "kind": "approval", "actor": "user:cfo",
+                     "subject": "FORGED: CFO approved $5M wire",
+                     "outcome": "approved"}],
+    }
+    sig = priv.sign(orec._canonical(body)).hex()
+    path.write_text(json.dumps(
+        {**body, "pubkey": pub, "key_id": claimed_key_id, "sig": sig}),
+        encoding="utf-8")
+    return pub
+
+
+@pytest.fixture()
+def genuine(world, tmp_path, monkeypatch):
+    """A capsule this installation really signed, plus its public key."""
+    pytest.importorskip("cryptography")
+    import json
+
+    import maverick.audit.signing as signing
+    monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
+    path = orec.export_capsule(world, tmp_path / "genuine.json", now=5.0)
+    return path, json.loads(path.read_text(encoding="utf-8"))["pubkey"]
+
+
+def test_forged_capsule_signed_with_any_key_is_rejected_as_untrusted(genuine, tmp_path):
+    forged = tmp_path / "forged.json"
+    pub = _forged_capsule(forged)
+
+    ok, reason = orec.verify_capsule(forged)
+
+    assert not ok
+    assert "untrusted key" in reason
+    # The fingerprint shown is derived from the signing key itself, never the
+    # capsule's own (unsigned, forgeable) key_id label.
+    import hashlib
+    assert hashlib.sha256(bytes.fromhex(pub)).hexdigest()[:16] in reason
+    assert "attacker-key" not in reason
+
+
+def test_capsule_signed_by_this_installations_audit_key_is_trusted_by_default(genuine):
+    path, pub = genuine
+    ok, reason = orec.verify_capsule(path)
+    assert ok, reason
+    import hashlib
+    assert hashlib.sha256(bytes.fromhex(pub)).hexdigest()[:16] in reason
+
+
+def test_explicit_trust_anchor_accepts_the_publishers_key_and_no_other(genuine, tmp_path):
+    forged = tmp_path / "forged.json"
+    attacker_pub = _forged_capsule(forged)
+    path, own_pub = genuine
+
+    # An auditor holding the firm's published key accepts the firm's capsule...
+    assert orec.verify_capsule(path, trusted_pubkeys=[own_pub])[0]
+    # ...and rejects the forgery even though it is internally consistent.
+    ok, reason = orec.verify_capsule(forged, trusted_pubkeys=[own_pub])
+    assert not ok and "untrusted key" in reason
+    # Trust is exactly the key the verifier names, upper-case hex included.
+    assert orec.verify_capsule(forged, trusted_pubkeys=[attacker_pub.upper()])[0]
+
+
+def test_no_trust_anchor_fails_closed(genuine):
+    path, _pub = genuine
+    ok, reason = orec.verify_capsule(path, trusted_pubkeys=[])
+    assert not ok and "no trusted key" in reason
+
+
+def test_malformed_trust_anchor_fails_closed(genuine):
+    path, _pub = genuine
+    ok, reason = orec.verify_capsule(path, trusted_pubkeys=["not-a-key"])
+    assert not ok and "64 hex" in reason
+
+
+def test_a_tampered_capsule_still_fails_its_signature_first(genuine):
+    path, pub = genuine
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "Reconcile the quarterly ledger", "Reconcile the doctored ledger"),
+        encoding="utf-8")
+    ok, reason = orec.verify_capsule(path, trusted_pubkeys=[pub])
+    assert not ok and "FAILED" in reason
+
+
+def test_integrity_check_alone_says_nothing_about_who_signed(genuine, tmp_path):
+    forged = tmp_path / "forged.json"
+    _forged_capsule(forged)
+    ok, reason = orec.verify_capsule_integrity(forged)
+    assert ok
+    assert "integrity only" in reason and "who signed" in reason
+
+
+def test_cli_record_verify_rejects_a_forged_capsule(genuine, tmp_path):
+    from click.testing import CliRunner
+    from maverick.cli import main
+    forged = tmp_path / "forged.json"
+    _forged_capsule(forged)
+
+    result = CliRunner().invoke(main, ["record", "verify", str(forged)])
+
+    assert result.exit_code != 0
+    assert "untrusted key" in result.output
+
+
+def test_cli_record_verify_accepts_this_installations_capsule(genuine):
+    from click.testing import CliRunner
+    from maverick.cli import main
+    path, _pub = genuine
+
+    result = CliRunner().invoke(main, ["record", "verify", str(path)])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("ok:")
+
+
+def test_cli_record_export_still_passes_its_own_self_check(genuine, tmp_path):
+    """``record export`` verifies what it just wrote; it signs with this
+    installation's audit key, which is trusted by default, so the check holds."""
+    from click.testing import CliRunner
+    from maverick.cli import main
+    out = tmp_path / "exported.json"
+
+    result = CliRunner().invoke(
+        main, ["--db", str(tmp_path / "cli.db"), "record", "export", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert "self-check: ok:" in result.output
+
+
+def test_cli_record_verify_takes_a_published_key_or_a_key_file(genuine, tmp_path):
+    from click.testing import CliRunner
+    from maverick.cli import main
+    forged = tmp_path / "forged.json"
+    attacker_pub = _forged_capsule(forged)
+    _path, own_pub = genuine
+    keys = tmp_path / "trusted.txt"
+    keys.write_text(f"# the firm's published keys\n{own_pub}\n\n{attacker_pub}\n",
+                    encoding="utf-8")
+    run = CliRunner().invoke
+
+    assert run(main, ["record", "verify", str(forged), "--pubkey", attacker_pub]).exit_code == 0
+    assert run(main, ["record", "verify", str(forged), "--pubkey", own_pub]).exit_code != 0
+    assert run(main, ["record", "verify", str(forged), "--trusted-keys", str(keys)]).exit_code == 0
+    # An empty key file is an explicit "trust nobody", never a silent fallback
+    # to the local keyring.
+    empty = tmp_path / "empty.txt"
+    empty.write_text("# nothing\n", encoding="utf-8")
+    assert run(main, ["record", "verify", str(forged), "--trusted-keys", str(empty)]).exit_code != 0
