@@ -54,6 +54,9 @@ def mastodon_item(index):
 
 def test_mastodon_burst_restart_drains_all_before_watermark(monkeypatch):
     monkeypatch.setattr(polling, "MAX_PAGES", 1)
+    # This checks durable 65-item pagination, not the separate poll deadline.
+    # Real journal writes can exceed 15 seconds under parallel CI load.
+    monkeypatch.setattr(polling, "POLL_DEADLINE_SECONDS", 90.0)
     calls, handler = [], AsyncMock(return_value="answer")
     def get(params):
         calls.append(params)
