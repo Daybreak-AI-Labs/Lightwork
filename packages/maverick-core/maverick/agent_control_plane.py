@@ -1971,6 +1971,15 @@ def halt_all(reason: str, *, actor: str = "") -> ControlResult:
     shared API rather than this local CLI primitive.
     """
     _require_enabled("halt")
+    return halt_local(reason, actor=actor)
+
+
+def halt_local(reason: str, *, actor: str = "") -> ControlResult:
+    """Arm the local emergency stop without requiring the optional control plane.
+
+    The basic CLI must remain available on a new installation.  Both CLI
+    entrypoints use this same locked, private, audited local authority.
+    """
     reason = _check_reason(reason)
     actor = _check_actor(actor)
     from . import killswitch
@@ -2009,15 +2018,37 @@ def halt_all(reason: str, *, actor: str = "") -> ControlResult:
         )
     except Exception as exc:
         _dependency_failure(result, authority="local HALT authority", exc=exc)
-    return _audit_result(result, actor, reason, scope="local-deployment")
+    return _audit_result(
+        result, actor, reason, scope="local-deployment",
+        outcome_detail=result.detail, _global=True,
+    )
 
 
 def clear_halt(*, actor: str = "") -> ControlResult:
     """Clear and verify this deployment's local HALT file/process state."""
     _require_enabled("clear-halt")
+    return clear_local_halt(actor=actor)
+
+
+def clear_local_halt(
+    *, actor: str = "", reason: str = "manual clear",
+) -> ControlResult:
+    """Clear only the observed local HALT generation under the strict lock."""
+    reason = _check_reason(reason)
     actor = _check_actor(actor)
     from . import killswitch
     result = ControlResult("clear-halt", "*", ok=False)
+    # Clearing expands authority. Require a deployment-global intent record
+    # before touching either the durable file or the in-process stop. A strict
+    # signing/custody refusal must leave the emergency stop in place.
+    if not _audit(
+        "clear-halt-request", "*", actor, False, reason,
+        scope="local-deployment", phase="intent", _global=True,
+    ):
+        result.code = "audit_unavailable"
+        result.detail = "local HALT was not cleared because audit is unavailable"
+        result.audit_written = False
+        return result
     try:
         from .file_lock import cross_process_lock, require_private_directory
 
@@ -2065,7 +2096,8 @@ def clear_halt(*, actor: str = "") -> ControlResult:
     except Exception as exc:
         _dependency_failure(result, authority="local HALT authority", exc=exc)
     return _audit_result(
-        result, actor, result.detail, scope="local-deployment",
+        result, actor, reason, scope="local-deployment",
+        outcome_detail=result.detail, _global=True,
     )
 
 

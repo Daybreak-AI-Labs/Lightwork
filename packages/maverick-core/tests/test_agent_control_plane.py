@@ -42,6 +42,7 @@ def _capture(monkeypatch):
         seen.append((str(kind), kw))
         return True
     monkeypatch.setattr("maverick.audit.record", _record)
+    monkeypatch.setattr("maverick.audit.record_global", _record)
     return seen
 
 
@@ -756,7 +757,9 @@ def test_halt_and_clear_use_a_verified_durable_local_file(monkeypatch):
     cleared = acp.clear_halt(actor="ops")
     assert cleared.ok and not killswitch.is_active()
     assert not path.exists()
-    assert [kw["verb"] for k, kw in seen if k == "control_plane_action"] == ["halt", "clear-halt"]
+    assert [kw["verb"] for k, kw in seen if k == "control_plane_action"] == [
+        "halt", "clear-halt-request", "clear-halt",
+    ]
     assert all(k != "halt" for k, _ in seen)
 
 

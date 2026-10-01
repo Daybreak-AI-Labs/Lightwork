@@ -7163,41 +7163,57 @@ def audit_worm_verify() -> None:
 @click.option("--json", "json_output", is_flag=True, help="Return a checked local halt-file acknowledgement.")
 def halt(reason: str, json_output: bool = False) -> None:
     """Request a local halt at upcoming execution checkpoints."""
-    import json
-
-    from ..killswitch import _halt_file_generation, _halt_file_path
-    p = _halt_file_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(reason + "\n")
-    if _halt_file_generation(p) is None:
-        raise click.ClickException("Local halt-file state was not confirmed; review before retrying.")
-    if json_output:
-        click.echo(json.dumps({"command": "halt", "acknowledged": True,
-                               "halt_file_present": True, "scope": "local", "work_stopped": False}))
-    else:
-        click.echo(f"halt set: {p}")
+    _local_halt_command("halt", reason, json_output)
 
 
 @main.command("unhalt")
+@click.option("--reason", default="manual clear", help="Why you're clearing the local halt.")
 @click.option("--json", "json_output", is_flag=True, help="Return a checked local halt-file acknowledgement.")
-def unhalt(json_output: bool = False) -> None:
-    """Remove the HALT file to allow goals to run again."""
+def unhalt(reason: str, json_output: bool = False) -> None:
+    """Clear the local HALT authority after verifying its generation."""
+    _local_halt_command("unhalt", reason, json_output)
+
+
+def _local_halt_command(command: str, reason: str, json_output: bool) -> None:
+    """Share the audited local authority while preserving the CLI wire shape."""
     import json
 
-    from ..killswitch import _halt_file_generation, _halt_file_path
-    p = _halt_file_path()
-    if p.exists():
-        p.unlink()
-        message = f"cleared: {p}"
-    else:
-        message = f"no halt file at {p}"
-    if _halt_file_generation(p) is not None:
+    from .. import agent_control_plane as acp
+    from .. import killswitch
+    from ..audit import AuditRefused
+    from ._agent_control_plane_groups import _actor
+
+    try:
+        result = (
+            acp.halt_local(reason, actor=_actor())
+            if command == "halt"
+            else acp.clear_local_halt(actor=_actor(), reason=reason)
+        )
+    except AuditRefused as exc:
+        raise click.ClickException(
+            "Halt audit was refused; local state may have changed. Check status before retrying."
+        ) from exc
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not result.ok:
+        raise click.ClickException(
+            f"Local halt-file state was not confirmed ({result.detail}); review before retrying."
+        )
+    p = killswitch._halt_file_path()
+    try:
+        present = killswitch._halt_file_generation(p) is not None
+    except OSError as exc:
+        raise click.ClickException("Local halt-file state was not confirmed; review before retrying.") from exc
+    if present != (command == "halt"):
         raise click.ClickException("Local halt-file state was not confirmed; review before retrying.")
     if json_output:
-        click.echo(json.dumps({"command": "unhalt", "acknowledged": True,
-                               "halt_file_present": False, "scope": "local", "work_stopped": False}))
+        click.echo(json.dumps({"command": command, "acknowledged": True,
+                               "halt_file_present": present, "scope": "local", "work_stopped": False,
+                               "audit_written": result.audit_written}))
     else:
-        click.echo(message)
+        click.echo(f"{'halt set' if present else 'local halt cleared'}: {p}")
+        if not result.audit_written:
+            click.echo("warning: halt audit result was not written", err=True)
 
 
 # ----- Cost / export / logs --------------------------------------------
