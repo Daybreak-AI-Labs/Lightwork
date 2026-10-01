@@ -210,6 +210,7 @@ from .auth import (
     require_page_permission,
     require_permission,
     require_suite,
+    require_unscoped_board,
     stored_automation_identity,
 )
 from .product_errors import next_action, product_error
@@ -1038,6 +1039,8 @@ def _board_oversight(w, owner, days: int, request=None) -> dict:
 def dashboard_board(request: Request, board: str, days: int | None = None) -> dict:
     """Executive-board payload for the Overview / Spend / Workforce pages."""
     require_permission(request, "view")
+    if board in ("overview", "spend", "workforce", "savings", "oversight"):
+        require_unscoped_board(request)
     if board in ("privacy", "finance", "security"):
         require_page_permission(request, f"/{board}")
         if board == "finance":

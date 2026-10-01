@@ -71,6 +71,7 @@ from .action_center_api import router as action_center_router
 from .api import router as api_router
 from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
 from .auth import (
+    BOARD_SCOPE_DETAIL,
     SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
     assert_goal_access,
@@ -90,6 +91,7 @@ from .auth import (
     require_permission,
     require_principal_in_request_context,
     require_suite,
+    require_unscoped_board,
     require_websocket_principal_in_context,
     stored_automation_identity,
     websocket_caller_principal,
@@ -2742,6 +2744,8 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         )
         if status == 400 and str(exc.detail or "").startswith("Invalid audit day"):
             message = "That date isn’t valid. Pick a day from the calendar, then try again."
+        if status == 403 and exc.detail == BOARD_SCOPE_DETAIL:
+            message = BOARD_SCOPE_DETAIL
         gate = ""
         reauthenticate = ""
         if status == 403 and isinstance(exc.detail, str):
@@ -3443,6 +3447,7 @@ def public_demo(request: Request) -> HTMLResponse:
 
 @app.get("/overview", response_class=HTMLResponse)
 def overview(request: Request) -> HTMLResponse:
+    require_unscoped_board(request)
     w = _world()
     # Use SQL aggregation instead of pulling every goal into Python. Owner-scope
     # the rollup to the caller (auth-off/admin -> all; see goal_owner_filter).
@@ -3488,6 +3493,7 @@ def workforce_page(request: Request) -> HTMLResponse:
     firm-wide delivery rollup from the Operating Record, and the catalog counts.
     Per-department governed reviews load from /api/v1/departments/{key}/review.
     """
+    require_unscoped_board(request)
     from maverick.departments import department_entitled, list_departments
     from maverick.fleet import list_fleets
     from maverick.marketplace.storefront import connector_marketplace
@@ -4068,6 +4074,7 @@ def facts_page(request: Request) -> HTMLResponse:
 
 @app.get("/spend", response_class=HTMLResponse)
 def spend_page(request: Request) -> HTMLResponse:
+    require_unscoped_board(request)
     # The burn/outcome/top-goal charts render client-side from
     # GET /api/v1/dashboards/spend; the page keeps the episode table + hero.
     # Scope both reads to the caller (matches /api/v1/spend and the on-page
@@ -6042,6 +6049,7 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     """The value dashboard: money saved vs the typical human cost, computed
     from real completed work and the client's OWN cost/value inputs (their
     hourly rate + human hours per task, editable right on the page)."""
+    require_unscoped_board(request)
     from maverick import savings as savings_mod
 
     from .api import _value_assumptions_resolution
@@ -7023,6 +7031,7 @@ def oversight_page(request: Request) -> HTMLResponse:
     /audit, /fleets) remain the deep dives; this is the at-a-glance roll-up.
     Fail-soft: an unreadable audit log yields empty panels, never a 500.
     """
+    require_unscoped_board(request)
     # This page contains the deployment-wide approval queue and mutating
     # decision controls. Authorize before reading either approval details or
     # the audit/world-model stores.

@@ -721,6 +721,18 @@ def domain_suites_allowed(request: Request, domain: str | None) -> bool:
     return all(suite_allowed(request, suite) for suite in suites_for_domain(domain))
 
 
+BOARD_SCOPE_DETAIL = (
+    "These charts can include work from departments you cannot access. "
+    "Ask an administrator to review your access. Your permitted tasks remain available in Chat."
+)
+
+
+def require_unscoped_board(request: Request) -> None:
+    """Withhold unfiltered company rollups from department-scoped callers."""
+    if caller_suites(request) is not None:
+        raise HTTPException(status_code=403, detail=BOARD_SCOPE_DETAIL)
+
+
 def scope_to_suites(request: Request, items, *, suite_of, keep_none: bool = True):
     """Filter ``items`` to the caller's granted departments (job-function scope).
 

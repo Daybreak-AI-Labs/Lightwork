@@ -428,18 +428,19 @@ def test_scoped_user_sees_filtered_pack_catalog(monkeypatch, tmp_path):
     assert "legal" in all_suites
 
 
-def test_scoped_user_sees_filtered_html_pages(monkeypatch, tmp_path):
-    # /workforce and /agents (HTML) must match the JSON filtering — the pages
-    # previously showed the full catalog, diverging from /api/v1/departments.
+def test_scoped_user_sees_filtered_agents_and_safe_workforce_recovery(monkeypatch, tmp_path):
+    # /agents keeps its filtered roster. /workforce also contains unfiltered
+    # company rollups, so a scoped user gets a clear recovery page instead.
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
     c = _client(monkeypatch, tmp_path)
     from maverick_dashboard import suite_grants
     suite_grants.set_suites("user:fin", ["finance"])
     _as(monkeypatch, "user:fin")
 
-    workforce = c.get("/workforce").text
-    assert "Close the books" in workforce            # the finance charter line
-    assert "Capital Markets" not in workforce        # another department's card
+    workforce = c.get("/workforce", headers={"Accept": "text/html"})
+    assert workforce.status_code == 403
+    assert "departments you cannot access" in workforce.text
+    assert "Capital Markets" not in workforce.text
 
     agents_page = c.get("/agents").text
     assert "finance_ap" in agents_page

@@ -441,6 +441,11 @@ window.LWBoard = (function () {
         })
         .catch(function (e) {
           if (retired || request !== generation) return;
+          if (e && e.status === 403) {
+            stamp('These charts can include work from departments you cannot access. Ask an administrator to review your access. Your permitted tasks remain available in Chat.');
+            clearInterval(poll);
+            return;
+          }
           var why = window.mvErrorText ? window.mvErrorText(e, 'load the board') : 'Could not load the board.';
           stamp(why + (updated ? ' Previous view retained: ' + updated + '.' : '') + ' Trying again in a minute.');
         }).finally(function () { clearTimeout(timeout); if (request === generation) active = null; });

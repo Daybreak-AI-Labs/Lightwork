@@ -54,6 +54,16 @@ test('an unavailable new period retains and labels the actual last successful pe
   assert.doesNotMatch(ui.stamp(), /Showing 30 days/);
 });
 
+test('a revoked company board shows access recovery and stops automatic retries', async (t) => {
+  const ui = fixture(t);
+  ui.calls[0].resolve({ok: false, status: 403});
+  await ui.settle();
+  assert.match(ui.stamp(), /departments you cannot access/i);
+  assert.match(ui.stamp(), /Ask an administrator/);
+  assert.doesNotMatch(ui.stamp(), /Trying again in a minute/);
+  assert.equal(ui.polls.size, 0);
+});
+
 test('navigation retires a pending response and restored pages make a fresh request', async (t) => {
   const ui = fixture(t);
   ui.window.dispatchEvent(new ui.window.PageTransitionEvent('pagehide'));

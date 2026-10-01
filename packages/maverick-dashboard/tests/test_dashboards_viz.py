@@ -93,6 +93,28 @@ def test_board_days_clamped_and_unknown_board_404(monkeypatch, tmp_path):
     assert c.get("/api/v1/dashboards/nope").status_code == 404
 
 
+def test_department_scoped_user_cannot_read_unfiltered_company_boards(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _seed_world()
+    from maverick_dashboard import auth
+
+    monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"finance"}))
+    client = _client()
+    for board in ("overview", "spend", "workforce", "savings", "oversight"):
+        api = client.get(f"/api/v1/dashboards/{board}")
+        page = client.get(f"/{board}", headers={"Accept": "text/html"})
+        assert api.status_code == 403, board
+        assert page.status_code == 403, board
+        assert "Vendor DPA review" not in page.text
+        assert "departments you cannot access" in page.text
+
+    # Department-specific boards retain their existing permission checks.
+    assert client.get("/api/v1/dashboards/finance").status_code == 200
+    monkeypatch.setattr(auth, "caller_suites", lambda request: None)
+    assert client.get("/api/v1/dashboards/overview").status_code == 200
+    assert client.get("/overview", headers={"Accept": "text/html"}).status_code == 200
+
+
 def test_board_payloads_survive_empty_world(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
