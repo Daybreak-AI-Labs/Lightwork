@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from test_support.element_text import element_attributes, element_texts
+
 
 def _client():
     from maverick_dashboard.app import app
@@ -33,10 +35,17 @@ def test_goal_action_errors_are_inline_not_alert(monkeypatch, tmp_path):
     assert "alert(" not in r.text
     # ...and the failure path explains itself in plain words.
     assert "cgErr(response, 'send your message')" in r.text
-    assert "actionMsg.textContent" in r.text
+    assert "cgCopy(actionMsg,cgErr(r, 'stop the task'))" in r.text
+    assert "window.mvRenderError(actionMsg, r, 'save your answer', receipt)" in r.text
 
 
 def test_answer_input_has_accessible_name(monkeypatch, tmp_path):
     """The agent-question input had only a placeholder; give it a real name."""
     r = _goal_page(monkeypatch, tmp_path)
-    assert 'aria-label="Your answer to the agent' in r.text
+    assert r.status_code == 200
+    answer, = element_attributes(r.text, "textarea", {"id": "answer-input"})
+    assert answer["aria-labelledby"] == "answer-input-label"
+    assert answer["name"] == "message"
+    assert element_texts(r.text, "label", {
+        "id": answer["aria-labelledby"], "for": "answer-input",
+    }) == ["Your answer to the agent's question, or your next message"]

@@ -11,6 +11,7 @@ class _ElementText(HTMLParser):
         self.depth = 0
         self.active = []
         self.parts = []
+        self.attributes = []
         self.feed(html)
 
     def handle_starttag(self, tag, attrs):
@@ -21,6 +22,7 @@ class _ElementText(HTMLParser):
         if not all(values.get(key) == value for key, value in self.required.items()):
             return
         parts = []
+        self.attributes.append(values)
         self.parts.append(parts)
         self.active.append((self.depth, parts))
 
@@ -37,3 +39,7 @@ class _ElementText(HTMLParser):
 def element_texts(html: str, tag: str, attrs: dict | None = None) -> list[str]:
     return [" ".join("".join(parts).split())
             for parts in _ElementText(html, tag, attrs or {}).parts]
+
+
+def element_attributes(html: str, tag: str, attrs: dict | None = None) -> list[dict]:
+    return _ElementText(html, tag, attrs or {}).attributes

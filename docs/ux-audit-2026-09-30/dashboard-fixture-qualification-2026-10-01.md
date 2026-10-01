@@ -71,3 +71,15 @@ Final results, completed at 00:38 UTC:
 Python emitted only the existing Starlette/AnyIO deprecation warning. Earlier
 intermediate logs contain the superseded markup assertions and are not final
 qualification evidence. The new tests used no skip or suppression.
+
+At 00:40 UTC, three further full-suite fixture failures were qualified in
+`test_ui_keyboard_and_tooltips`, `test_ui_goal_detail_a11y`, and
+`test_chat_goal_deliverable`. The task result and answer now receive accessible
+names through `aria-labelledby`. The updated tests resolve the exact linked
+label and retain keyboard focus, field name, Markdown/prose rendering, and
+verbatim result assertions. The inline-error check follows the actual
+localized stop-error and answer-error paths into the existing status region.
+No production changes were needed. These three complete modules passed
+**9 ordinary tests in 16.61 seconds** and **9 secure tests in 12.83 seconds**,
+again with both secure flags. Logs are `goal-accessibility-ordinary.log` and
+`goal-accessibility-secure.log`; Ruff and whitespace checks also passed.
