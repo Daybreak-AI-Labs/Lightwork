@@ -201,6 +201,7 @@ def _status_data(request: Request, device_id: str) -> dict:
     return {
         "enabled": bool(policy.get("enable", False)),
         "workflows_enabled": flows_enabled(),
+        "workflows_control_managed": "MAVERICK_FLOWS" in os.environ,
         "control_managed": "MAVERICK_EKKO" in os.environ,
         # What a person may choose from when enrolling: the admin ceiling,
         # minus anything the blocklist always wins over.
@@ -636,7 +637,11 @@ def ekko_candidate_handoff(
     if payload.kind == "flow" and not flows_enabled():
         raise HTTPException(
             status_code=409,
-            detail="Workflows are off. An administrator can turn them on in Learning; then try again.",
+            detail=(
+                "Workflows are off for this installation. Ask the person who manages Lightwork to turn them on."
+                if "MAVERICK_FLOWS" in os.environ else
+                "Workflows are off. An administrator can turn them on in Learning; then try again."
+            ),
         )
     store = _store(request, payload.device_id)
     candidate = _candidate(store, get_ekko(), opportunity_id)

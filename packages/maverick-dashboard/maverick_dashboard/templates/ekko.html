@@ -155,7 +155,7 @@
       <p class="ekko-note">Ranked by how often the same steps repeat—not employee productivity,
         speed, attendance or performance. Time savings are estimates until you check them.</p>
       <p class="ekko-note" id="ekko-workflows-off" role="note" hidden>
-        Workflows are off. {% if ekko.can_control %}<a href="/learning#lrn-flows-on">Turn them on in Learning</a> to draft a workflow from a suggestion.{% else %}Ask your workspace administrator to turn them on. You can still draft an assistant.{% endif %}
+        Workflows are off. {% if ekko.can_control and not ekko.workflows_control_managed %}<a href="/learning#lrn-flows-on">Turn them on in Learning</a> to draft a workflow from a suggestion.{% elif ekko.workflows_control_managed %}Ask the person who manages this Lightwork installation to turn them on. You can still draft an assistant.{% else %}Ask your workspace administrator to turn them on. You can still draft an assistant.{% endif %}
       </p>
       <div id="ekko-opportunities" class="ekko-stack" style="margin-top: var(--space-3);" aria-live="polite">
         <div class="mv-empty">

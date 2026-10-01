@@ -271,7 +271,9 @@ def test_workflow_handoff_refuses_off_engine_before_unusable_editor(tmp_path, mo
     _isolate(tmp_path, monkeypatch)
     store = _enroll(device="desk")
     _seed_recurring_evidence(store)
-    assert client.get("/api/v1/ekko/status?device_id=desk").json()["workflows_enabled"] is False
+    status = client.get("/api/v1/ekko/status?device_id=desk").json()
+    assert status["workflows_enabled"] is False
+    assert status["workflows_control_managed"] is True
     opportunity_id = client.get("/api/v1/ekko/candidates?device_id=desk").json()["candidates"][0]["opportunity_id"]
 
     refused = client.post(
@@ -279,11 +281,24 @@ def test_workflow_handoff_refuses_off_engine_before_unusable_editor(tmp_path, mo
         json={"device_id": "desk", "kind": "flow"},
     )
     assert refused.status_code == 409
-    assert "Learning" in refused.json()["detail"]
+    assert "installation" in refused.json()["detail"]
+    assert "/learning#lrn-flows-on" not in client.get("/ekko?device_id=desk").text
     assert client.post(
         f"/api/v1/ekko/candidates/{opportunity_id}/handoff",
         json={"device_id": "desk", "kind": "agent"},
     ).status_code == 200
+
+    monkeypatch.delenv("MAVERICK_FLOWS")
+    status = client.get("/api/v1/ekko/status?device_id=desk").json()
+    assert status["workflows_enabled"] is False
+    assert status["workflows_control_managed"] is False
+    assert "/learning#lrn-flows-on" in client.get("/ekko?device_id=desk").text
+    refused = client.post(
+        f"/api/v1/ekko/candidates/{opportunity_id}/handoff",
+        json={"device_id": "desk", "kind": "flow"},
+    )
+    assert refused.status_code == 409
+    assert "Learning" in refused.json()["detail"]
 
 
 def test_forget_device_revokes_enrollment_and_erases_data(tmp_path, monkeypatch):
