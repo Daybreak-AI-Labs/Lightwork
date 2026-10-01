@@ -10382,21 +10382,74 @@ async def form_page(request: Request, token: str) -> HTMLResponse:
 
 def _registered_form_trigger(token: str) -> dict | None:
     """Resolve one public form token to exactly one active tenant namespace."""
+    from maverick import form_store
     from maverick.paths import implicit_tenant_id
 
     from . import event_triggers_store
 
-    matches = [
+    registered = [
         trigger for trigger in event_triggers_store.list_triggers()
         if trigger.get("source") == "form"
-        and str((trigger.get("config") or {}).get("token") or "") == token
         and (trigger.get("flow") or trigger.get("template"))
+    ]
+    matches = [
+        trigger for trigger in registered
+        if str((trigger.get("config") or {}).get("token") or "") == token
     ]
     tenants = {str(trigger.get("tenant") or "") for trigger in matches}
     floor = implicit_tenant_id()
     if len(tenants) != 1 or (floor and tenants != {floor}):
         return None
+    # Older releases allowed punctuation and mapped it to a filename. Keep
+    # those links working, but never let two distinct registered tokens share
+    # a queue when their legacy storage names collide.
+    key = form_store.storage_key(token)
+    if any(
+        str(trigger.get("tenant") or "") in tenants
+        and str((trigger.get("config") or {}).get("token") or "") != token
+        and form_store.storage_key((trigger.get("config") or {}).get("token")) == key
+        for trigger in registered
+    ):
+        return None
     return matches[0]
+
+
+class _FormTargetUnavailable(RuntimeError):
+    """The form's saved automation no longer names an executable release."""
+
+
+def _append_registered_form(trigger: dict, token: str, fields: dict) -> int:
+    """Check the current target under its tenant scope before accepting data."""
+    from maverick import form_store
+    from maverick.flow import store as flow_store
+
+    from .triggers_store import bound_template
+
+    flow_id = str(trigger.get("flow") or "")
+    template_id = str(trigger.get("template") or "")
+    if bool(flow_id) == bool(template_id):
+        raise _FormTargetUnavailable("form trigger has no single target")
+    with _stored_trigger_tenant(trigger):
+        if flow_id:
+            release_id = str(trigger.get("flow_revision") or "")
+            if not release_id:
+                raise _FormTargetUnavailable("form trigger has no bound release")
+            try:
+                # This is the same release authority used for durable flow-run
+                # reservation. An unpublish/re-publish cannot race the append.
+                with flow_store.published_flow_guard(
+                    flow_id, expected_release_id=release_id,
+                ) as (flow, _release):
+                    if flow.owner != str(trigger.get("flow_owner") or ""):
+                        raise _FormTargetUnavailable("form trigger owner changed")
+                    return form_store.append(token, fields)
+            except flow_store.FlowSnapshotError as exc:
+                raise _FormTargetUnavailable("form release is unavailable") from exc
+        try:
+            bound_template(trigger)
+        except ValueError as exc:
+            raise _FormTargetUnavailable("form template is unavailable") from exc
+        return form_store.append(token, fields)
 
 
 @app.post("/form/{token}")
@@ -10411,9 +10464,9 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
 
     # Unknown tokens must never allocate a per-token file. Check the shared
     # admission limit before parsing even a multipart request.
-    check_goal_rate_limit(request, source="form")
+    check_goal_rate_limit(request)
     trigger = None
-    if automation_events.enabled() and form_store.valid_token(token):
+    if automation_events.enabled():
         trigger = await run_in_threadpool(_registered_form_trigger, token)
     if trigger is None:
         questionnaire = await run_in_threadpool(_vendor_questionnaire_for, token)
@@ -10446,10 +10499,11 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
             raise HTTPException(status_code=404, detail="no such form")
     try:
         if trigger is not None:
-            with _stored_trigger_tenant(trigger):
-                seq = await run_in_threadpool(form_store.append, token, fields)
+            seq = await run_in_threadpool(_append_registered_form, trigger, token, fields)
         else:
             seq = await run_in_threadpool(form_store.append, token, fields)
+    except _FormTargetUnavailable as exc:
+        raise HTTPException(status_code=404, detail="no such form") from exc
     except form_store.FormStoreFull as exc:
         raise HTTPException(status_code=507, detail="This form is temporarily full.") from exc
     if not seq:

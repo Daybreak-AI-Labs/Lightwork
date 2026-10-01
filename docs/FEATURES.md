@@ -2358,8 +2358,9 @@ here.
   signed Approve/Reject links to a channel (`approvals.py` — a stateless HMAC
   token; `POST /flow/approve` resumes) so a human clears it without a dashboard
   session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
-  is accepted only for a registered form trigger (or a live vendor questionnaire)
-  and becomes flow data when the trigger polls. Its per-token queue is capped at
+  is accepted only for a registered form trigger with a current published flow
+  release or bound template (or a live vendor questionnaire), and becomes flow
+  data when the trigger polls. Its per-token queue is capped at
   5,000 submissions / 32 MiB; a full queue refuses new submissions with 507
   rather than accepting data that cannot be retained.
 

@@ -6,26 +6,46 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 
-def _client():
+def _client(host="testclient"):
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, headers={"Origin": "http://testserver"}, client=(host, 50000))
 
 
 def _isolate(monkeypatch, tmp_path, triggers="1"):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", triggers)
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
 
 
-def _register_form(token: str, *, tenant: str = "") -> None:
+def _register_form(token: str, *, tenant: str = "", name: str = "") -> None:
+    from maverick.flow import store as flow_store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick.paths import reset_tenant, set_tenant
     from maverick_dashboard import event_triggers_store
 
+    scope = set_tenant(tenant or None)
+    try:
+        published = flow_store.load_published_bundle("published-form-flow")
+        if published is None:
+            saved = flow_store.save_flow(Flow(
+                id="published-form-flow", name="Published form", start="a",
+                nodes={"a": FlowNode(id="a", kind="agent", brief="Review the submission")},
+            ))
+            release = flow_store.publish_flow(
+                saved.id, expected_version=saved.version, expected_revision=saved.revision,
+            )
+        else:
+            saved, release = published
+    finally:
+        reset_tenant(scope)
     event_triggers_store.set_trigger(
-        f"accept-{token}", "", "form", config={"token": token},
-        flow="published-form-flow", tenant=tenant,
+        name or f"accept-{token}", "", "form", config={"token": token},
+        flow=saved.id, flow_owner=saved.owner,
+        flow_revision=release["release_id"], tenant=tenant,
     )
 
 
@@ -107,8 +127,8 @@ def test_form_rate_limit_runs_before_body_parser(monkeypatch, tmp_path):
     _register_form("signup")
     from maverick_dashboard import app as dashboard_app
 
-    def limited(request, *, source):
-        assert source == "form"
+    def limited(request, *, source=None):
+        assert source is None
         raise HTTPException(status_code=429, detail="slow down")
 
     async def never_parse(_request):
@@ -164,15 +184,38 @@ def test_vendor_form_still_accepts_when_event_triggers_are_on(monkeypatch, tmp_p
     assert response.status_code == 201
 
 
-def test_form_trigger_setup_rejects_aliased_storage_token():
-    from maverick_dashboard.event_poll import (
-        EventSourceAdmissionError,
-        admit_event_source_config,
-    )
+def test_new_form_trigger_rejects_aliased_storage_token(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("signup")
+    response = _client().post("/api/v1/event-triggers", json={
+        "name": "new-form", "source": "form", "flow": "published-form-flow",
+        "config": {"token": "my.form"},
+    })
+    assert response.status_code == 400
 
-    assert admit_event_source_config("form", {"token": "my-form"}) == {"token": "my-form"}
-    with pytest.raises(EventSourceAdmissionError):
-        admit_event_source_config("form", {"token": "my.form"})
+
+def test_existing_punctuation_token_keeps_its_legacy_form_file(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("lead.v1")
+    response = _client().post("/form/lead.v1", json={"name": "first"})
+    assert response.status_code == 201
+    from maverick import form_store
+    from maverick_dashboard.event_poll import admit_event_source_config
+
+    assert (tmp_path / "forms" / "lead-v1.ndjson").exists()
+    assert admit_event_source_config("form", {"token": "lead.v1"}) == {"token": "lead.v1"}
+    events, _ = form_store.since("lead.v1", "0")
+    assert [event["name"] for event in events] == ["first"]
+
+
+def test_colliding_registered_form_tokens_are_both_refused(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("lead.v1")
+    _register_form("lead-v1", name="second-form")
+    client = _client()
+    assert client.post("/form/lead.v1", json={"name": "first"}).status_code == 404
+    assert client.post("/form/lead-v1", json={"name": "second"}).status_code == 404
+    assert not list(tmp_path.rglob("*.ndjson"))
 
 
 def test_oversized_multipart_is_rejected_before_parsing(monkeypatch, tmp_path):
@@ -199,6 +242,76 @@ def test_store_write_failure_is_not_reported_as_success(monkeypatch, tmp_path):
     monkeypatch.setattr(form_store, "append", lambda *args, **kwargs: 0)
     response = _client().post("/form/signup", json={"name": "first"})
     assert response.status_code == 503
+
+
+def test_stale_flow_release_does_not_accept_a_form_submission(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("signup")
+    from maverick.flow import store as flow_store
+
+    published = flow_store.load_published_bundle("published-form-flow")
+    assert published is not None
+    flow_store.unpublish_flow(
+        published[0].id,
+        expected_version=published[0].version,
+        expected_revision=published[0].revision,
+    )
+    response = _client().post("/form/signup", json={"name": "first"})
+    assert response.status_code == 404
+    assert not list(tmp_path.rglob("*.ndjson"))
+
+
+def test_republished_flow_cannot_reuse_an_old_form_binding(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("signup")
+    from maverick.flow import store as flow_store
+
+    published = flow_store.load_published_bundle("published-form-flow")
+    assert published is not None
+    flow, old_release = published
+    assert flow_store.unpublish_flow(
+        flow.id, expected_version=flow.version, expected_revision=flow.revision,
+    )
+    new_release = flow_store.publish_flow(
+        flow.id, expected_version=flow.version, expected_revision=flow.revision,
+    )
+    assert new_release["release_id"] != old_release["release_id"]
+    response = _client().post("/form/signup", json={"name": "first"})
+    assert response.status_code == 404
+    assert not list(tmp_path.rglob("*.ndjson"))
+
+
+def test_bound_template_form_still_accepts(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.templates import Template
+    from maverick_dashboard import event_triggers_store
+    from maverick_dashboard.triggers_store import snapshot_from_template
+
+    template = Template(name="contact", title="Contact", body="Review {{name}}", params=["name"])
+    event_triggers_store.set_trigger(
+        "contact", "contact", "form", config={"token": "contact"},
+        template_snapshot=snapshot_from_template(template),
+    )
+    response = _client().post("/form/contact", json={"name": "first"})
+    assert response.status_code == 201
+
+
+def test_public_form_rate_limit_is_per_ip_not_url_token(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("signup")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "1")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "100")
+    from maverick_dashboard import app as dashboard_app
+
+    dashboard_app._goal_times.clear()
+    dashboard_app._goal_times_global.clear()
+    first = _client("192.0.2.1")
+    second = _client("192.0.2.2")
+    assert first.post("/form/signup", json={"name": "first"}).status_code == 201
+    assert first.post("/form/forged-1", json={"name": "second"}).status_code == 429
+    assert first.post("/form/forged-2", json={"name": "third"}).status_code == 429
+    assert second.post("/form/signup", json={"name": "another"}).status_code == 201
+    assert set(dashboard_app._goal_times) == {"ip:192.0.2.1", "ip:192.0.2.2"}
 
 
 @pytest.mark.parametrize("method", ["get", "post"])

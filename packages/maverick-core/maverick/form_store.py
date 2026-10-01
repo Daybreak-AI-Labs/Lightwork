@@ -32,17 +32,15 @@ def valid_token(token: str) -> bool:
     return isinstance(token, str) and bool(_TOKEN_RE.fullmatch(token))
 
 
-def _safe_token(token: str) -> str:
-    # Sanitizing/truncating mapped different public tokens to one file. A form
-    # token is an exact address, so reject aliases instead of sharing storage.
-    if not valid_token(token):
-        raise ValueError("form token must be 1-120 letters, digits, '_' or '-'")
-    return token
+def storage_key(token: str) -> str:
+    """Keep pre-upgrade form files addressable by their original token."""
+    s = re.sub(r"[^A-Za-z0-9_-]+", "-", str(token or "").strip())
+    return s[:120] or "form"
 
 
 def _path(token: str):
     from .paths import data_dir
-    return data_dir("forms") / f"{_safe_token(token)}.ndjson"
+    return data_dir("forms") / f"{storage_key(token)}.ndjson"
 
 
 def _bound_fields(fields: dict) -> dict:
@@ -149,4 +147,4 @@ def since(token: str, cursor: str) -> tuple[list[dict], str]:
     return events, str(fresh[-1].get("seq") or highest)
 
 
-__all__ = ["FormStoreFull", "append", "since", "valid_token"]
+__all__ = ["FormStoreFull", "append", "since", "storage_key", "valid_token"]

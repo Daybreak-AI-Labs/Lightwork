@@ -37,12 +37,13 @@ def test_full_form_refuses_a_new_submission_without_losing_old_ones(monkeypatch,
     assert [event["n"] for event in events] == ["1", "2"]
 
 
-def test_invalid_token_cannot_alias_a_real_form_file(monkeypatch, tmp_path):
+def test_legacy_punctuation_token_uses_its_existing_file(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick import form_store
 
-    assert form_store.append("a-b", {"n": "real"}) == 1
-    with pytest.raises(ValueError):
-        form_store.append("a.b", {"n": "other"})
-    events, _ = form_store.since("a-b", "0")
-    assert [event["n"] for event in events] == ["real"]
+    old_path = tmp_path / "forms" / "a-b.ndjson"
+    old_path.parent.mkdir()
+    old_path.write_text('{"seq":1,"ts":0.0,"fields":{"n":"old"}}\n', encoding="utf-8")
+    assert form_store.append("a.b", {"n": "new"}) == 2
+    events, _ = form_store.since("a.b", "0")
+    assert [event["n"] for event in events] == ["old", "new"]

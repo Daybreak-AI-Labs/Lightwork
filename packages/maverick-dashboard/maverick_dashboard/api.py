@@ -10744,6 +10744,14 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
     require_permission(request, "operate")
     _require_event_triggers()
     cfg = _govern_event_source_config(request, payload.source, payload.config)
+    if payload.source == "form":
+        from maverick.form_store import valid_token
+
+        if not valid_token(cfg.get("token")):
+            raise HTTPException(
+                status_code=400,
+                detail="Form link names must use 1–120 letters, numbers, '-' or '_'.",
+            )
     from maverick.automation_events import EventSourceError, get_source
 
     try:
