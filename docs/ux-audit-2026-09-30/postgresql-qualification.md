@@ -151,6 +151,13 @@ execution is required on this Windows machine; its restricted sandbox cannot
 launch PostgreSQL's restricted-token child. The helper does not install a
 service or weaken the sandbox.
 
+All secure invocations in this ledger select **core** tests. Their autouse
+`_isolate_maverick_home` fixture consumes `MAVERICK_TEST_SECURE_DEFAULT=1` and
+sets `MAVERICK_SECURE_DEFAULT=1` before each test. The launchers did not also
+set the latter flag before collection; these results therefore describe the
+core fixture's per-test secure posture, not pre-collection secure imports or
+dashboard-only secure coverage. Future launchers should set both flags.
+
 This qualifies the recorded Windows/source cohort. Linux CI with pgvector,
 managed PostgreSQL, MySQL/MariaDB, and later untested product changes remain
 separate qualifications.

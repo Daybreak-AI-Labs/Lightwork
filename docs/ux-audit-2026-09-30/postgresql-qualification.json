@@ -200,5 +200,6 @@
     "No MySQL/MariaDB instance configured.",
     "No live provider/remote database/production calls.",
     "Qualification does not cover later untested product changes."
-  ]
+  ],
+  "secure_posture_scope": "Only core tests selected. Launcher set MAVERICK_TEST_SECURE_DEFAULT=1; core autouse fixture set MAVERICK_SECURE_DEFAULT=1 before each test. Pre-collection secure imports and dashboard-only secure coverage are not claimed. Future launchers should set both flags."
 }
