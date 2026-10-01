@@ -1369,6 +1369,21 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
     assert "innerHTML" not in asset.text
 
 
+def test_vendor_page_without_workspace_shows_workspace_picker(web, monkeypatch):
+    client, *_ = web
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr(
+        "maverick_dashboard.vendor_onboarding_page.current_tenant_id_strict",
+        lambda: None,
+    )
+    response = client.get(
+        "/third-party/vendor-onboarding", headers={"Accept": "text/html"}
+    )
+    assert response.status_code == 409
+    assert "Choose a workspace" in response.text
+    assert "Refresh before continuing" not in response.text
+
+
 def test_vendor_page_has_one_main_landmark_and_labelled_decision_fields(web):
     class Markup(HTMLParser):
         def __init__(self):

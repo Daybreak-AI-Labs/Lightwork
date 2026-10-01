@@ -610,17 +610,23 @@ def init(fast: bool, resume: bool, from_file: str | None) -> None:
         return
     try:
         from maverick_installer.wizard import run as run_wizard
-    except ImportError:
-        # The wizard must come from the same reviewed source checkout as the
-        # kernel. The first-party public namespaces are not yet reserved, so
-        # suggesting an index lookup here would create a dependency-confusion
-        # path from an otherwise trusted local install.
-        click.echo(
-            "Install the installer component from the same reviewed Lightwork "
-            "checkout; public-index lookup is disabled. See "
-            "docs/getting-started.md.",
-            err=True,
-        )
+    except ImportError as exc:
+        if isinstance(exc, ModuleNotFoundError) and exc.name == "maverick_installer":
+            # First-party public namespaces are not yet reserved; never send
+            # an operator to an unreviewed package index for the installer.
+            click.echo(
+                "Install the installer component from the same reviewed Lightwork "
+                "checkout; public-index lookup is disabled. See "
+                "docs/getting-started.md.",
+                err=True,
+            )
+        else:
+            click.echo(
+                f"Lightwork setup could not load: {_strip_terminal_control(str(exc))}. "
+                "Run `maverick doctor` "
+                "to check the installation before retrying.",
+                err=True,
+            )
         sys.exit(2)
     sys.exit(run_wizard(fast=fast, resume=resume))
 
@@ -2912,12 +2918,20 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
         sys.exit(2)
     try:
         from maverick_dashboard.app import app as fastapi_app
-    except ImportError:
-        click.echo(
-            "Install the dashboard from the same reviewed Lightwork checkout; "
-            "public-index lookup is disabled.",
-            err=True,
-        )
+    except ImportError as exc:
+        if isinstance(exc, ModuleNotFoundError) and exc.name == "maverick_dashboard":
+            click.echo(
+                "Install the dashboard from the same reviewed Lightwork checkout; "
+                "public-index lookup is disabled.",
+                err=True,
+            )
+        else:
+            click.echo(
+                f"Lightwork dashboard could not load: {_strip_terminal_control(str(exc))}. "
+                "Run `maverick doctor` "
+                "to check the installation before retrying.",
+                err=True,
+            )
         sys.exit(2)
     import uvicorn
     if recovery_mode:

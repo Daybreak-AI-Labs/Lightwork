@@ -21,7 +21,7 @@ def create_vendor_onboarding_page_router(templates: Jinja2Templates) -> APIRoute
     def workbench(request: Request):
         require_permission(request, "operate")
         if current_tenant_id_strict() is None:
-            raise HTTPException(409, "Select an active tenant")
+            raise HTTPException(409, "select an active tenant before using vendor onboarding")
         nonce = secrets.token_urlsafe(18)
         response = templates.TemplateResponse(request, "vendor_onboarding.html", {
             "csp_style_nonce": nonce,
