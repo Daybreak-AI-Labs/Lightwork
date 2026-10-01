@@ -31,7 +31,7 @@ async def until(predicate, *, on_timeout=None):
         raise
 
 
-def transport_timeout_snapshot(worker, completed_count):
+def transport_timeout_snapshot(worker, handler_started_count):
     """Report owned queue state and stack locations without message contents."""
     def frame_location(frame):
         return {"file": Path(frame.f_code.co_filename).name,
@@ -58,7 +58,7 @@ def transport_timeout_snapshot(worker, completed_count):
             current = current.f_back
         threads.append(locations)
     print("TRANSPORT_TIMEOUT " + json.dumps({
-        "completed_count": completed_count,
+        "handler_started_count": handler_started_count,
         "pending_count": len(worker.pending), "overflow": worker._overflow,
         "wake": worker._wake.is_set(), "generation": worker._generation,
         "closing": worker._closing,
@@ -139,7 +139,7 @@ def test_transport_timeout_diagnostic_preserves_failure_without_message_content(
         assert private_text not in output
         if not diagnostic_failure:
             diagnostic = json.loads(output.removeprefix("TRANSPORT_TIMEOUT "))
-            assert diagnostic["completed_count"] == 0 and diagnostic["pending_count"] == 1
+            assert diagnostic["handler_started_count"] == 0 and diagnostic["pending_count"] == 1
             assert diagnostic["worker"]["stack"] and diagnostic["threads"]
         assert worker.pending[0] == private_text and not worker._closing
 
