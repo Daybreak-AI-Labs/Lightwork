@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 import threading
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from maverick import postgres_transactions as pt
@@ -163,6 +163,13 @@ class Pool:
 def fake_pool(monkeypatch):
     Pool.instances = []
     monkeypatch.setitem(sys.modules, "psycopg_pool", SimpleNamespace(ConnectionPool=Pool))
+    # These tests exercise pool ownership without opening a libpq socket. Keep
+    # the optional driver out of this fixture instead of relying on another
+    # test having imported (or faked) psycopg first.
+    fake_io = ModuleType("maverick.postgres_io")
+    fake_io.BoundedConnection = type("BoundedConnection", (), {})
+    fake_io.postgres_io_timeout_seconds = lambda: 35.0
+    monkeypatch.setitem(sys.modules, "maverick.postgres_io", fake_io)
     monkeypatch.setattr(pt, "postgres_connection_kwargs", lambda _: {
         "autocommit": False, "connect_timeout": 3, "options": "-c statement_timeout=50",
     })
