@@ -5,7 +5,7 @@ it does not mean all acceptance checks or release qualification have passed.
 
 [Full evidence and remaining criteria](implementation-tracker.json) · [Original 24-field backlog](source-backlog.json) · [Local qualification](local-qualification.md)
 
-Current dispositions: 190 implemented-test-needed, 5 test-needed.
+Current dispositions: 188 implemented-test-needed, 2 planned, 5 test-needed.
 
 | ID | Disposition | Audit item |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ Current dispositions: 190 implemented-test-needed, 5 test-needed.
 | LW-061 | Built; acceptance pending | Restore a visible Close menu control on phone chat |
 | LW-062 | Built; acceptance pending | Keep focus out of obscured chat content while its mobile drawer is open |
 | LW-063 | Built; acceptance pending | Make the task-plan text alternative work with scripts enabled and graph dependencies unavailable |
-| LW-064 | Built; acceptance pending | Keep the embeddable widget within narrow viewports |
+| LW-064 | Active implementation | Keep the embeddable widget within narrow viewports |
 | LW-065 | Built; acceptance pending | Bring widget interaction and announcements to the dashboard's accessibility baseline |
 | LW-066 | Built; acceptance pending | Honor reduced-motion preferences for programmatic scrolling |
 | LW-067 | Built; acceptance pending | Compose template search and suggested filters |
@@ -99,7 +99,7 @@ Current dispositions: 190 implemented-test-needed, 5 test-needed.
 | LW-088 | Built; acceptance pending | AWS connection region picker excludes backend-admitted regions without an escape path |
 | LW-089 | Built; acceptance pending | Replace extension setup's configuration-file instructions with the existing in-product setting |
 | LW-090 | Built; acceptance pending | Show and explain exactly what “Send this page” will share |
-| LW-091 | Built; acceptance pending | Make new role grants least-privileged |
+| LW-091 | Active implementation | Make new role grants least-privileged |
 | LW-092 | Built; acceptance pending | Separate resetting role from removing access |
 | LW-093 | Built; acceptance pending | Scope Users page to tenant admin authority |
 | LW-094 | Built; acceptance pending | Create complete employee departure workflow |

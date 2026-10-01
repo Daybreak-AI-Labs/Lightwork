@@ -802,12 +802,12 @@
     "id": "LW-064",
     "title": "Keep the embeddable widget within narrow viewports",
     "category": "Accessibility language and mobile",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "implementation_evidence": [
       "widget panel uses border-box/min(320px, viewport insets), logical inline end, safe area/dynamic viewport and visualViewport resize handling; shrinkable input and scrollable log prevent narrow panel overflow."
     ],
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
-    "remaining": "320px/landscape/200%/RTL/virtual-keyboard browser/device acceptance unrun.",
+    "validation": "Full browser acceptance at be3496571342c242af6ba956206e2446781996bb reproduces clipping in landscape, 200% content zoom and emulated keyboard viewports. Portrait and RTL cases pass. This confirms a product gap; prior static review is not acceptance.",
+    "remaining": "Active repair: fit the whole panel, input and receipt controls within short and zoomed viewports; retain unchanged six-case browser assertions and qualify the final source.",
     "evidence_slice": "slices/mobile.json"
   },
   {
@@ -1279,12 +1279,12 @@
     "id": "LW-091",
     "title": "Make new role grants least-privileged",
     "category": "Identity administration and privacy",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "implementation_evidence": [
       "e18aa52: users.html requires an empty explicit role choice and previews built-in/custom permission atoms."
     ],
-    "validation": "Static review: users.html has required empty initial choices in both installation and workspace forms and lists built-in/custom powers. The 62-case identity acceptance batch does not establish keyboard submission of every custom role. Reviewed integrated source 9bea7d4e4c751b022cf5f9d6b261c8af6f025d6c plus 43da36e8b30012023c81501f77c3307a61dc97b7. See identity-final-qualification.md for exact run boundaries.",
-    "remaining": "Final installed keyboard/custom-role grant acceptance remains to be exercised; the form does not preselect administrator.",
+    "validation": "Full browser acceptance at be3496571342c242af6ba956206e2446781996bb confirms empty-role prevention, but fast keyboard submission can precede the shared JavaScript expected-tenant binding and fails to record the explicitly chosen custom role. The role-grant acceptance criterion is reopened.",
+    "remaining": "Active repair: bind native Users forms to their server-rendered workspace before JavaScript loads, retain missing/stale-scope denial, and qualify delayed-script keyboard submission plus the explicit custom-role readback.",
     "evidence_slice": "slices/identity-final-qualification.json"
   },
   {

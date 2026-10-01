@@ -148,10 +148,10 @@
   },
   {
     "id": "LW-064",
-    "status": "implemented-test-needed",
+    "status": "planned",
     "implementation_evidence": "widget panel uses border-box/min(320px, viewport insets), logical inline end, safe area/dynamic viewport and visualViewport resize handling; shrinkable input and scrollable log prevent narrow panel overflow.",
-    "validation": "2026-09-30: Python AST parsed (3 files); JavaScript syntax parsed (26 files/template blocks); TypeScript syntax and static type analysis of all 15 mobile source files passed with zero diagnostics using already-installed dependency declarations. git diff --check passed. Ruff was unavailable during that initial checkpoint and is now installed for local validation. Initial regression execution was deferred; local tests are now authorized. See the latest validation below; native installed-host checks remain separately qualified.",
-    "remaining": "320px/landscape/200%/RTL/virtual-keyboard browser/device acceptance unrun."
+    "validation": "Full browser acceptance at be3496571342c242af6ba956206e2446781996bb reproduces clipping in landscape, 200% content zoom and emulated keyboard viewports. Portrait and RTL cases pass. This confirms a product gap; prior static review is not acceptance.",
+    "remaining": "Active repair: fit the whole panel, input and receipt controls within short and zoomed viewports; retain unchanged six-case browser assertions and qualify the final source."
   },
   {
     "id": "LW-065",
