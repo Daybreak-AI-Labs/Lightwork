@@ -5179,8 +5179,9 @@ tested without spawning py-spy.
   button appears only when `navigator.xr` reports support (untested
   without headset hardware — stated on the page).
 - **RTL language support** (`i18n.py` `RTL_LANGS` + `dir_for()`):
-  `dir="rtl"` driven by the active language (ar/he/fa/ur) through the
-  existing lang resolution, logical-property CSS in the base layout, and an
+  `dir="rtl"` driven by the language the page body is written in (ar/he/fa/ur
+  via `content_lang()`, so an English page is never mirrored by a browser
+  or cookie that selects Arabic chrome strings), logical-property CSS in the base layout, and an
   Arabic community-seed catalog (genuinely translated starter keys, English
   fallback; he/fa/ur activate the moment a catalog lands — they're not
   offered in the picker until one does, to avoid implying support).

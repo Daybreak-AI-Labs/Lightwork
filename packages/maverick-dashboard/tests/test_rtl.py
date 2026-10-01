@@ -17,12 +17,25 @@ def test_rtl_lang_set_covers_the_four_scripts():
         assert i18n.dir_for(code or "") == "ltr"
 
 
-def test_arabic_page_carries_dir_rtl_and_lang():
+def test_arabic_selection_keeps_the_english_body_left_to_right():
+    """UX-198: the page body is English, so ``<html>`` declares ``en`` and
+    ``ltr``; only the translated chrome strings carry ``lang="ar"``."""
     r = client.get("/goals", params={"lang": "ar"})
     assert r.status_code == 200
-    assert 'lang="ar"' in r.text
-    assert 'dir="rtl"' in r.text
+    assert '<html lang="en" dir="ltr">' in r.text
+    assert 'lang="ar"' in r.text  # the translated chrome strings
     assert "mvk_lang=ar" in r.headers.get("set-cookie", "")
+
+
+def test_direction_flips_once_the_body_is_translated(monkeypatch):
+    """``dir`` follows the body language: when a right-to-left language enters
+    CONTENT_LANGS (its templates exist), the page flips with it."""
+    monkeypatch.setattr(i18n, "CONTENT_LANGS", frozenset({"en", "ar"}))
+    fresh = TestClient(app)
+    r = fresh.get("/goals", params={"lang": "ar"})
+    assert '<html lang="ar" dir="rtl">' in r.text
+    r2 = fresh.get("/goals", params={"lang": "fr"})
+    assert '<html lang="en" dir="ltr">' in r2.text
 
 
 def test_ltr_languages_keep_dir_ltr():
@@ -33,11 +46,12 @@ def test_ltr_languages_keep_dir_ltr():
     assert 'dir="ltr"' in r2.text
 
 
-def test_rtl_cookie_persists_direction():
+def test_rtl_cookie_persists_the_chrome_language_not_the_direction():
     fresh = TestClient(app)
     fresh.get("/", params={"lang": "ar"})  # sets the cookie
-    r = fresh.get("/goals")                # no param: cookie drives it
-    assert 'dir="rtl"' in r.text and 'lang="ar"' in r.text
+    r = fresh.get("/goals")                # no param: cookie drives the chrome
+    assert 'lang="ar"' in r.text           # the translated chrome strings
+    assert '<html lang="en" dir="ltr">' in r.text
 
 
 def test_base_layout_uses_logical_properties():
@@ -57,7 +71,7 @@ def test_language_control_is_gone_but_lang_param_still_works():
     assert 'id="lang-select"' not in home.text
     assert 'data-ui-preference="lang"' not in home.text
     r = client.get("/", params={"lang": "ar"})
-    assert 'dir="rtl"' in r.text and 'lang="ar"' in r.text
+    assert '<html lang="en" dir="ltr">' in r.text and 'lang="ar"' in r.text
 
 
 def test_arabic_seed_is_partial_and_genuine():
