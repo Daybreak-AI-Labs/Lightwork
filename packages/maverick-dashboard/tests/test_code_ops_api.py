@@ -103,6 +103,25 @@ def test_download_is_confirmed_recorded_and_contains_the_project(client, monkeyp
     assert seen == ["code_export"]
 
 
+def test_download_removes_the_plaintext_temporary_copy(client, monkeypatch, project):
+    from pathlib import Path
+
+    from maverick_dashboard import code_ops_api
+
+    exported = []
+    original = code_ops_api._export
+
+    def capture(name):
+        path = original(name)
+        exported.append(Path(path))
+        return path
+
+    monkeypatch.setattr(code_ops_api, "_export", capture)
+    response = client.post("/api/v1/code/repos/website/export", json={"confirm": True})
+    assert response.status_code == 200, response.text
+    assert exported and not exported[0].exists() and not exported[0].parent.exists()
+
+
 def test_download_refuses_oversized_projects(client, monkeypatch, project):
     from maverick_dashboard import code_ops_api
     monkeypatch.setattr(code_ops_api, "_MAX_EXPORT_BYTES", 10)

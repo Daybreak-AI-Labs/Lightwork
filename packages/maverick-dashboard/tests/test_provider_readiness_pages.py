@@ -85,11 +85,12 @@ def test_saved_key_never_tested_reads_the_same_everywhere(workspace, monkeypatch
     assert 'class="composer__controls" disabled>' not in pages["/chat"]
     assert 'id="composer-readiness"' in pages["/chat"]
     assert "key saved, not tested yet" in visible_text(pages["/chat"])
-    assert 'href="/providers">Test the connection</a>' in pages["/chat"]
+    assert re.search(r'<a href="/providers">(?:<[^>]+>)*Test the connection', pages["/chat"])
     # Get started: step 1 is not done and the checks do not say complete.
     start = pages["/start"]
     assert "0 of 4 done" in start and 'class="gs__step gs__step--done"' not in start
-    assert "Fix next:" in start and 'href="/providers">Test the connection</a>' in start
+    assert "Fix next:" in start and re.search(
+        r'<a\b[^>]*href="/providers"[^>]*>Test the connection', start)
     assert "Setup complete" not in visible_text(start).split("Assurance setup")[0]
     api = _api(workspace.client)
     assert api["providers"]["verdict"] == api["copilot"]["verdict"] == "needs_test"

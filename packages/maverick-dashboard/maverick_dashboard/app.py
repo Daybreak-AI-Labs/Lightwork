@@ -12426,6 +12426,7 @@ def workflows_index_page(request: Request) -> HTMLResponse:
             "playbooks": playbooks,
             "flows": flows,
             "flows_enabled": flows_enabled,
+            "can_manage_flows": has_global_permission(request, "admin"),
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
         },
@@ -12436,7 +12437,12 @@ def workflows_index_page(request: Request) -> HTMLResponse:
 async def flow_analytics_page(request: Request) -> HTMLResponse:
     """Per-flow run analytics (volume, success rate, duration p50/p95, top
     errors). Data comes from /api/v1/flows/analytics client-side."""
-    return templates.TemplateResponse(request, "flow_analytics.html", {})
+    from maverick import flow
+
+    return templates.TemplateResponse(request, "flow_analytics.html", {
+        "flows_enabled": flow.enabled(),
+        "can_manage_flows": has_global_permission(request, "admin"),
+    })
 
 
 @app.get("/connections", response_class=HTMLResponse)
@@ -12489,6 +12495,8 @@ async def flow_designer_page(
     single-agent flow (the IR's degenerate case) -- the bridge from the text
     workflow builder into the graph designer: start from what you had, then add
     branches/approvals/loops around it."""
+    from maverick import flow as _flow
+
     seed_flow = None
     if from_template:
         try:
@@ -12505,7 +12513,12 @@ async def flow_designer_page(
         except (ValueError, FileNotFoundError):
             seed_flow = None  # unknown template -> a blank canvas, not a 500
     return templates.TemplateResponse(
-        request, "flow_designer.html", {"flow_id": flow_id, "seed_flow": seed_flow}
+        request, "flow_designer.html", {
+            "flow_id": flow_id,
+            "seed_flow": seed_flow,
+            "flows_enabled": _flow.enabled(),
+            "can_manage_flows": has_global_permission(request, "admin"),
+        }
     )
 
 

@@ -119,7 +119,8 @@ def test_permissions_are_enforced(monkeypatch):
 
 
 def test_client_never_injects_html():
-    js = STATIC.read_text() + (STATIC.parent / "lightwork-code.js").read_text()
+    js = STATIC.read_text(encoding="utf-8") + (
+        STATIC.parent / "lightwork-code.js").read_text(encoding="utf-8")
     for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "eval(", "new Function"):
         assert banned not in js
     from maverick.a11y_audit import audit_file

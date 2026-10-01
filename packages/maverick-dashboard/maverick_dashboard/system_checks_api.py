@@ -24,6 +24,7 @@ import threading
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -693,6 +694,53 @@ async def client_erase_preview(request: Request, keep_activity_record: bool = Tr
     }
 
 
+@router.get("/client/erase/receipt/{receipt_id}")
+async def client_erase_receipt(receipt_id: str, request: Request) -> JSONResponse:
+    """Download the surviving signed record without reopening erased client data."""
+    import json
+    import re
+
+    from maverick.audit import verify_chain
+    from maverick.paths import maverick_home
+
+    _admin(request)
+    if not re.fullmatch(r"[0-9a-f]{32}", receipt_id):
+        raise HTTPException(404, "That activity receipt was not found.")
+    base = maverick_home() / "client-erasure"
+    directory = base / receipt_id
+    receipt = directory / "events.ndjson"
+    key_file = directory / "verification-key.hex"
+    try:
+        if (directory.is_symlink() or directory.resolve().parent != base.resolve()
+                or receipt.is_symlink() or key_file.is_symlink()
+                or not receipt.is_file() or not key_file.is_file()):
+            raise HTTPException(404, "That activity receipt was not found.")
+        if receipt.stat().st_size > 64_000 or key_file.stat().st_size > 256:
+            raise ValueError("receipt is too large")
+        with key_file.open("rb") as key_stream, receipt.open("rb") as receipt_stream:
+            key_bytes = key_stream.read(257)
+            original_bytes = receipt_stream.read(64_001)
+        if len(key_bytes) > 256 or len(original_bytes) > 64_000:
+            raise ValueError("receipt is too large")
+        public_key = key_bytes.decode("utf-8").strip()
+        original = original_bytes.decode("utf-8")
+        with receipt.open("rb") as receipt_stream:
+            if verify_chain(receipt, public_key) or original_bytes != receipt_stream.read(64_001):
+                raise ValueError("receipt verification failed")
+        status = json.loads(original.splitlines()[-1]).get("status", "requested")
+    except HTTPException:
+        raise
+    except (OSError, RuntimeError, UnicodeError, ValueError, IndexError) as exc:
+        raise HTTPException(503, "The activity receipt could not be verified. Ask an administrator to check it.") from exc
+    return JSONResponse(
+        {"receipt_id": receipt_id, "status": status, "events_ndjson": original,
+         "verification_key": public_key,
+         "verification_scope": "Signature valid against the included key; keep an independent copy of that key to detect replacement."},
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+                 "Content-Disposition": f'attachment; filename="lightwork-activity-receipt-{receipt_id}.json"'},
+    )
+
+
 class EraseIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     organisation: str = Field(min_length=1, max_length=64)
@@ -710,30 +758,22 @@ async def client_erase(body: EraseIn, request: Request) -> dict:
     _mutation(request)
     if body.confirm is not True:
         raise HTTPException(409, "Confirm the erase to continue. Nothing was erased.")
-    from maverick.client import ClientBindingError, client_id, erase_client
+    from maverick.client import client_id
     current = await run_in_threadpool(client_id)
     if not current:
         raise HTTPException(409, "This installation is not set up for one organisation, so nothing was erased.")
     if current != body.organisation:
         raise HTTPException(409, "The name typed does not match this organisation, or it changed since the page "
                                  "was loaded. Nothing was erased.")
-    # Recorded first: without the activity record kept, the erase removes the
-    # record it would otherwise land in.
-    try:
-        await run_in_threadpool(_record, request, "client_erase_requested", organisation=current,
-                                keep_activity_record=body.keep_activity_record)
-    except HTTPException as exc:
-        raise HTTPException(503, "The erase could not be added to the activity record, "
-                                 "so nothing was erased.") from exc
-    try:
-        result = await run_in_threadpool(lambda: erase_client(keep_audit=body.keep_activity_record))
-    except ClientBindingError as exc:
-        raise HTTPException(409, "This installation is not set up for one organisation, so nothing was erased.") from exc
-    await run_in_threadpool(_record, request, "client_erase", organisation=current,
-                            removed=int(result.get("removed") or 0),
-                            keep_activity_record=body.keep_activity_record)
-    return {"erased": True, "files_removed": int(result.get("removed") or 0),
-            "kept_activity_record": bool(result.get("kept_audit"))}
+    # This request runs inside the live dashboard, which holds tenant database
+    # handles and may have workers writing the same root. On Windows a file can
+    # survive deletion while siblings are removed; other platforms can recreate
+    # deleted files before the server stops. Never begin a partial live erase.
+    raise HTTPException(
+        409,
+        "Lightwork must be stopped before local data can be erased safely. "
+        "This running page cannot do that yet. Nothing was erased.",
+    )
 
 
 # ---- tidy up old records (maverick gc) --------------------------------------

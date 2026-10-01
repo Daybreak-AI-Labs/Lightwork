@@ -46,7 +46,9 @@ def test_every_registered_destination_has_complete_explicit_copy(lang):
 @pytest.mark.parametrize("lang", ["fr", "de", "ja", "zh", "ar"])
 def test_finder_preserves_exact_authorized_links_and_bilingual_search(lang):
     group = {"label": "Operate", "links": [{"label": "Tasks", "href": "/goals", "aliases": "jobs"}]}
-    html = render("_navfinder.html", lang, finder_pages=[group], record_search_context="owned")
+    shell = render("_navfinder.html", lang, record_search_context="owned")
+    assert 'data-navfinder-src="/nav/finder"' in shell
+    html = render("_navfinder_items.html", lang, finder_pages=[group])
     nodes = Elements(html).nodes
     page = next(attrs for _, attrs in nodes if "data-navfinder-target" in attrs)
     assert page["href"] == "/goals"
@@ -54,8 +56,9 @@ def test_finder_preserves_exact_authorized_links_and_bilingual_search(lang):
     assert i18n_journeys.text("Tasks", lang) in page["data-search"]
     assert "jobs" in page["data-search"]
     assert 'href="/settings"' not in html
-    assert all("lang" in attrs for tag, attrs in nodes if tag == "option" and attrs["value"] not in {"20", "50"})
-    assert "<option" in html and "<option><span" not in html
+    shell_nodes = Elements(shell).nodes
+    assert all("lang" in attrs for tag, attrs in shell_nodes if tag == "option" and attrs["value"] not in {"20", "50"})
+    assert "<option" in shell and "<option><span" not in shell
 
 
 @pytest.mark.parametrize("name", ["base.html", "chat_base.html"])

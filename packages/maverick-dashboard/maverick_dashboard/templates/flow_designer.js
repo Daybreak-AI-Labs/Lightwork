@@ -66,6 +66,7 @@
   var runGen = 0;           // bumped per run so a superseded watch stops painting
   var activeES = null;      // the live run's EventSource, closed when a new run starts
 
+  var fd = document.querySelector('.fd');
   var canvas = document.getElementById('fd-canvas');
   var vp = document.getElementById('fd-viewport');
   var gNodes = document.getElementById('fd-nodes');
@@ -2157,10 +2158,16 @@
         if (r.status === 403) {
           var msg = document.getElementById('fd-msg');
           if (msg && !msg.textContent) {
-            msg.textContent = 'Workflows are turned off. You can design a flow and download a copy, '
-              + 'but saving and running need an administrator to turn workflows on.';
-            var on = document.createElement('a'); on.href = '/learning'; on.textContent = ' Turn on workflows';
-            msg.appendChild(on);
+            if (fd.dataset.flowEngineOn === 'true') {
+              msg.textContent = 'You do not have access to workflows. Ask an administrator.';
+            } else {
+              msg.textContent = 'Workflows are turned off. You can design a flow and download a copy, '
+                + 'but saving and running need an administrator to turn workflows on.';
+              if (fd.dataset.canManageFlows === 'true') {
+                var on = document.createElement('a'); on.href = '/learning#lrn-flows-on'; on.textContent = ' Turn on workflows';
+                msg.appendChild(on);
+              }
+            }
           }
         }
         return r.ok ? r.json() : { flows: [] };

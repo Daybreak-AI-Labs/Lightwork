@@ -75,7 +75,7 @@ for (const scope of ['local','cluster']) test(`localized ${scope} stop review ke
 test('Arabic fallback stop status declares English, without a invented translation',async()=>{
   const dom=page('<span id="halt-pill" data-can-halt="false"><span id="halt-label"></span></span>',{language:'ar',fetch:async()=>({ok:true,json:async()=>({active:false,scope:'local'})})});
   await tick();const label=dom.window.document.getElementById('halt-label');
-  assert.equal(label.textContent,'Work is not stopped');assert.equal(label.lang,'en');assert.equal(label.dir,'ltr');
+  assert.equal(label.textContent,'Emergency stop');assert.equal(label.lang,'en');assert.equal(label.dir,'ltr');
   assert.equal(dom.window.document.getElementById('halt-pill').getAttribute('aria-disabled'),'true');
   dom.window.close();
 });

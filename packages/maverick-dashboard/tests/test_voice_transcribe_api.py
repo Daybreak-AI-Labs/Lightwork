@@ -30,6 +30,8 @@ def _post_audio(client, data: bytes = b"fake-webm-audio", **kw):
 
 def test_transcribe_returns_text(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
+    from pathlib import Path
+
     import maverick.tools.voice as voice_mod
 
     seen: dict = {}
@@ -37,6 +39,7 @@ def test_transcribe_returns_text(monkeypatch, tmp_path):
     def _fake_transcribe(args, sandbox=None):
         seen.update(args)
         assert sandbox is None
+        assert Path(args["source"]).read_bytes() == b"fake-webm-audio"
         return "  schedule a demo with acme on friday  "
 
     monkeypatch.setattr(voice_mod, "_run_transcribe", _fake_transcribe)

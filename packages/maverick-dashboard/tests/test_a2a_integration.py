@@ -6,6 +6,20 @@ import importlib
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _restore_dashboard_module():
+    import maverick_dashboard.app as dashboard_app
+
+    # Reloading replaces the module's app and template globals. Other test
+    # modules keep references collected before this file runs.
+    previous = vars(dashboard_app).copy()
+    try:
+        yield
+    finally:
+        vars(dashboard_app).clear()
+        vars(dashboard_app).update(previous)
+
+
 def _reload_dashboard_app(monkeypatch):
     monkeypatch.setenv("HOME", "/nonexistent-a2a-dashboard-test")
     import maverick_dashboard.app as dashboard_app

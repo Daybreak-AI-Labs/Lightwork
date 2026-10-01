@@ -845,7 +845,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     assert '<summary class="wf__sched-title">' in r.text
     # Reachable from the primary nav (Operate group): the redesigned Flows
     # builder is the sidebar entry; the workflow builder is linked in-page from it.
-    assert_navigation_link(r.text, "/flows/designer", "Flows")
+    assert_navigation_link(r.text, "/workflows", "Flows")
     # A Chat handoff is verified before filling the ordinary brief for review.
     assert "lightwork.authoring-handoff" in r.text
     assert "/api/v1/templates/draft-context" in r.text

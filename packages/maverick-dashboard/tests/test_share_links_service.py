@@ -126,6 +126,24 @@ def test_revoke_is_goal_scoped(tmp_path, monkeypatch):
     assert TestClient(app).get(f"/share/{token}").status_code == 200
 
 
+def test_foreign_operator_with_task_access_cannot_revoke_owner_link(tmp_path, monkeypatch):
+    from maverick_dashboard import api
+
+    w = _world(tmp_path, monkeypatch)
+    gid = w.create_goal("Owner's approved result", "", owner="user:alice")
+    w.set_goal_status(gid, "done", result="Shared answer")
+    link_id, token = w.create_share_link(gid, created_by="user:alice")
+    # Simulate a collaborator allowed to see this task and operate generally.
+    # Task access alone must not grant authority over its public release.
+    monkeypatch.setattr(api, "assert_goal_access", lambda request, goal: None)
+    monkeypatch.setattr(api, "caller_principal", lambda request: "user:bob")
+
+    response = client.post(f"/api/v1/goals/{gid}/share/{link_id}/revoke")
+
+    assert response.status_code == 403
+    assert TestClient(app).get(f"/share/{token}").status_code == 200
+
+
 def test_preview_does_not_mint_and_changed_result_requires_a_new_preview(tmp_path, monkeypatch):
     w = _world(tmp_path, monkeypatch)
     gid = _make_goal(w)

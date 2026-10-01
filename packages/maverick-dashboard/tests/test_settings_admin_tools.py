@@ -390,14 +390,16 @@ def test_plugin_check_names_each_mismatch(client, monkeypatch):
     assert "acme-tools is a different version" in body["problems"][0]
 
 
-def test_organisation_data_download_and_erase(client, monkeypatch, audit_rows):
+def test_organisation_data_download_and_erase(client, monkeypatch, tmp_path, audit_rows):
     from maverick import client as client_binding
     monkeypatch.setenv("MAVERICK_BACKUP_SIGNING_KEY", "00" * 32)  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
     client_binding.reset_client_cache()
     try:
         from maverick import world_model
-        world_model.open_world().create_goal("Acme task")
+        world = world_model.open_world()
+        world.create_goal("Acme task")
         status = client.get("/api/v1/admin/system/client").json()
         assert status["bound"] is True and status["organisation"] == "acme"
         started = client.post("/api/v1/admin/system/client/export")
@@ -423,12 +425,39 @@ def test_organisation_data_download_and_erase(client, monkeypatch, audit_rows):
         assert client.post(erase, json={"organisation": "acme", "confirm": False}).status_code == 409
         wrong = client.post(erase, json={"organisation": "other", "confirm": True})
         assert wrong.status_code == 409 and "changed" in wrong.json()["detail"]
-        done = client.post(erase, json={"organisation": "acme", "confirm": True, "keep_activity_record": True})
-        assert done.status_code == 200, done.text
-        assert done.json()["erased"] is True and done.json()["kept_activity_record"] is True
+        refused = client.post(erase, json={"organisation": "acme", "confirm": True,
+                                           "keep_activity_record": True})
+        assert refused.status_code == 409 and "Nothing was erased" in refused.json()["detail"]
+        assert world.list_goals()
+        # The kernel offboarding operation is exercised against a quiesced
+        # client store. A live HTTP request must not attempt this.
+        world.close()
+        done = client_binding.erase_client(keep_audit=True, actor="test administrator")
+        assert done["kept_audit"] is True
+        from maverick.audit import verify_chain
+
+        receipt_id = done["audit_event_id"]
+        assert re.fullmatch(r"[0-9a-f]{32}", receipt_id)
+        receipt_dir = tmp_path / "mvhome" / "client-erasure" / receipt_id
+        receipt = receipt_dir / "events.ndjson"
+        assert verify_chain(receipt, (receipt_dir / "verification-key.hex").read_text().strip()) == []
+        import json
+
+        events = [json.loads(line) for line in receipt.read_text().splitlines()]
+        assert events[0]["kind"] == "client_erase_requested"
+        assert events[-1]["kind"] == "client_erased"
+        assert events[-1]["status"] == "completed"
+        downloaded_receipt = client.get(f"/api/v1/admin/system/client/erase/receipt/{receipt_id}")
+        assert downloaded_receipt.status_code == 200
+        assert downloaded_receipt.headers["cache-control"] == "private, no-store"
+        assert "attachment" in downloaded_receipt.headers["content-disposition"]
+        assert downloaded_receipt.json()["events_ndjson"] == receipt.read_text()
+        assert downloaded_receipt.json()["verification_key"] == (receipt_dir / "verification-key.hex").read_text().strip()
+        assert client.get("/api/v1/admin/system/client/erase/receipt/not-a-receipt").status_code == 404
+        receipt.write_text(receipt.read_text() + '{"kind":"forged"}\n')
+        assert client.get(f"/api/v1/admin/system/client/erase/receipt/{receipt_id}").status_code == 503
         verbs = [row.get("verb") for row in audit_rows]
         assert verbs.count("client_export") == 1
-        assert verbs.index("client_erase_requested") < verbs.index("client_erase")
     finally:
         monkeypatch.delenv("MAVERICK_CLIENT_ID")
         client_binding.reset_client_cache()
@@ -444,6 +473,22 @@ def test_erase_is_refused_without_a_named_organisation(client, monkeypatch):
                        json={"organisation": "acme", "confirm": True}).status_code == 403
     assert client.post("/api/v1/admin/system/client/export").status_code == 403
     assert client.get("/api/v1/admin/system/client/erase/preview").status_code == 403
+
+
+def test_live_erase_refuses_before_kernel_mutation(client, monkeypatch):
+    from maverick import client as client_binding
+
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
+    client_binding.reset_client_cache()
+    monkeypatch.setattr(client_binding, "erase_client", lambda **_kwargs: pytest.fail("live erase reached the kernel"))
+    try:
+        response = client.post("/api/v1/admin/system/client/erase", json={
+            "organisation": "acme", "confirm": True, "keep_activity_record": False,
+        })
+        assert response.status_code == 409
+        assert "Nothing was erased" in response.json()["detail"]
+    finally:
+        client_binding.reset_client_cache()
 
 
 def _old_conversation(user: str) -> None:

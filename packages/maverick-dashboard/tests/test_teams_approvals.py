@@ -230,7 +230,9 @@ def test_approval_view_matches_the_queue_projection():
 
 
 def test_dashboard_routes_still_use_the_shared_functions():
-    aid, binding = _approval()
+    # Local dashboard credentials have no employee identity and may decide
+    # only unowned approval content; a named request needs a reviewed grant.
+    aid, binding = _approval(requested_by="")
     client = TestClient(_app(), headers={"Origin": "http://testserver"})
     r = client.post(f"/api/v1/approvals/{aid}/approve",
                     headers={"X-Lightwork-Approval-Binding": binding})

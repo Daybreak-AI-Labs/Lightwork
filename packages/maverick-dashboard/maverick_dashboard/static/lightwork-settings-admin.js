@@ -361,52 +361,29 @@
       var keepLabel = el('label', 'settings-field');
       var keep = el('input'); keep.type = 'checkbox'; keep.checked = true; keep.name = 'keep_activity_record';
       var keepRow = el('span'); keepRow.appendChild(keep);
-      keepRow.appendChild(document.createTextNode(' Keep the activity record (needed if the law requires you to keep it)'));
+      keepRow.appendChild(document.createTextNode(' Preview with the activity record kept'));
       keepLabel.appendChild(keepRow);
-      var erase = el('button', 'btn btn--danger', 'Erase all data');
-      erase.type = 'button';
+      var review = el('button', 'btn btn--ghost', 'Review local data');
+      review.type = 'button';
       var previewBox = el('div');
-      erase.addEventListener('click', async function () {
-        erase.disabled = true;
+      review.addEventListener('click', async function () {
+        review.disabled = true;
         previewBox.textContent = '';
-        say('client', 'Counting what would be erased…');
+        say('client', 'Counting local files…');
         var preview;
         try {
           preview = await call(base + '/client/erase/preview?keep_activity_record=' + (keep.checked ? 'true' : 'false'), 'GET');
         } catch (failure) {
-          say('client', await plainFailure(failure, 'count what would be erased'));
-          erase.disabled = false;
+          say('client', await plainFailure(failure, 'count local files'));
+          review.disabled = false;
           return;
         }
-        previewBox.appendChild(el('p', null, 'Erasing removes ' + preview.files + ' file' + (preview.files === 1 ? '' : 's') + ':'));
+        previewBox.appendChild(el('p', null, 'This installation has ' + preview.files + ' local file' + (preview.files === 1 ? '' : 's') + ' in the selected scope:'));
         previewBox.appendChild(areaList(preview));
-        say('client', preview.keeps_activity_record ? 'The activity record is kept.' : 'The activity record is erased too.');
-        var ok = await window.mvConfirm('Erase all data for ' + data.organisation + '? Every task, conversation, lesson and saved file for this organisation is deleted for good and cannot be brought back. Download a copy first if you may need it.', {okText: 'Erase everything'});
-        if (!ok) { erase.disabled = false; return; }
-        var typed = window.mvForm ? await window.mvForm('Type the organisation name to confirm', [
-          {key: 'organisation', label: 'Organisation name (' + data.organisation + ')', type: 'text', required: true}],
-          {okText: 'Erase everything'}) : {organisation: data.organisation};
-        if (!typed) { erase.disabled = false; return; }
-        if (String(typed.organisation || '').trim() !== data.organisation) {
-          say('client', 'The name you typed does not match ' + data.organisation + '. Nothing was erased.');
-          erase.disabled = false;
-          return;
-        }
-        say('client', 'Erasing…');
-        try {
-          var response = await window.fetch(base + '/client/erase', {
-            method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({organisation: String(typed.organisation).trim(), keep_activity_record: keep.checked, confirm: true})
-          });
-          if (!response.ok) throw response;
-          var result = await response.json();
-          say('client', 'All data was erased (' + result.files_removed + ' file' + (result.files_removed === 1 ? '' : 's') + ' removed).');
-        } catch (failure) {
-          say('client', await plainFailure(failure, 'erase the data'));
-          erase.disabled = false;
-        }
+        say('client', 'This preview ' + (preview.keeps_activity_record ? 'keeps' : 'includes') + ' the activity record. This running page cannot safely erase local data. An administrator must complete removal while Lightwork is stopped. Connected services and exported copies need separate removal.');
+        review.disabled = false;
       });
-      row.appendChild(erase);
+      row.appendChild(review);
       box.appendChild(row);
       box.appendChild(keepLabel);
       box.appendChild(previewBox);

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -38,10 +39,11 @@ def test_real_child_server_drains_on_owned_pipe_and_persists_final_state(tmp_pat
 import asyncio, os, socket, sys, threading
 from contextlib import asynccontextmanager
 from pathlib import Path
+sys.path[:0] = sys.argv[3:]  # Use this checkout even with -I and another installed copy.
 from fastapi import FastAPI
 from maverick_dashboard._lifecycle import ShutdownSupervisor
 from maverick_dashboard._server import DashboardServer
-marker, ready = map(Path, sys.argv[1:])
+marker, ready = map(Path, sys.argv[1:3])
 @asynccontextmanager
 async def lifespan(app):
     stop = threading.Event()
@@ -74,7 +76,10 @@ assert app.state.lifecycle_supervisor.phase == "stopped"
     environment = {**os.environ, "MAVERICK_DESKTOP_CONTROL": "stdin-v1"}
     if command is None:
         environment["FIXTURE_NORMAL_EXIT"] = "1"
-    child = subprocess.Popen([sys.executable, "-I", str(script), str(marker), str(ready)],
+    package_root = Path(__file__).resolve().parents[1]
+    core_root = package_root.parent / "maverick-core"
+    child = subprocess.Popen([sys.executable, "-I", str(script), str(marker), str(ready),
+                              str(package_root), str(core_root)],
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              env=environment, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     try:
@@ -89,6 +94,10 @@ assert app.state.lifecycle_supervisor.phase == "stopped"
         stdout, stderr = child.communicate(command, timeout=8)
         assert child.returncode == 0, (stdout, stderr)
         assert marker.read_text(encoding="utf-8") == "final state saved"
+    except subprocess.TimeoutExpired as exc:
+        child.kill()
+        stdout, stderr = child.communicate(timeout=5)
+        raise AssertionError(("synthetic child did not drain", stdout, stderr)) from exc
     finally:
         if child.poll() is None:
             child.kill()

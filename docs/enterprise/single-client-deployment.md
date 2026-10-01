@@ -119,7 +119,9 @@ Sequenced by leverage. Each phase is independently shippable.
   tenant root. It does not erase global account/configuration records, separate
   workspaces, workspace files outside that root, offsite archives, or remote
   Postgres/Qdrant/Redis data. Inventory and handle those locations separately;
-  keeping audit records also retains the selected audit data.
+  keeping audit records also retains the selected audit data. Stop all writers
+  before erasing. The signed local activity receipt records intent, inventory
+  and whether deletion completed; a failed or partial erase is not success.
 - Residual-plaintext (`[privacy] anonymous = true`) and `[audit] retention`
   remain config knobs as before.
 - **Certification track** (organizational, not code): SOC 2 Type II, HIPAA BAA,
@@ -308,12 +310,16 @@ from the standby's binding. The CLI has no unsigned-restore bypass.
 # MAVERICK_CLIENT_ID and required retained keys as the service/backup commands.
 # Optional: hand the client their data first (portability / DSAR).
 maverick client export --out /secure/acme-final-export.tgz
-# Irreversible wipe of this client's entire data root (keep audit for retention):
+# Stop the dashboard and every worker first. Run the erase only while the
+# client data root is quiesced; open SQLite handles can block deletion.
+# Remove this client's local data except the retained audit record:
 maverick client erase --confirm --keep-audit
 ```
 
 Erase refuses unless a client is bound, so it can only ever target
-`tenants/<client>/` — never the shared root. Then decommission the VM/instance.
+`tenants/<client>/` — never the shared root. Preserve the signed activity
+receipt and inspect its completion status. Separately inventory and remove
+external stores and exported copies before decommissioning the VM/instance.
 
 ### 3.5 Cloud marketplace image
 

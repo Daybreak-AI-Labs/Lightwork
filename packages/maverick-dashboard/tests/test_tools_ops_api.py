@@ -43,7 +43,8 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     for name in ("MAVERICK_CONFIG", "MAVERICK_DASHBOARD_TOKEN", "MAVERICK_DASHBOARD_REQUIRE_AUTH",
                  "MAVERICK_OIDC_ENABLED", "MAVERICK_PROXY_AUTH", "MAVERICK_TENANT",
-                 "MAVERICK_ALLOW_SKILL_INSTALL", "MAVERICK_GOVERNED_CONNECTORS"):
+                 "MAVERICK_ALLOW_SKILL_INSTALL", "MAVERICK_GOVERNED_CONNECTORS",
+                 "MAVERICK_CONNECTIONS", "LIGHTWORK_CONNECTIONS"):
         monkeypatch.delenv(name, raising=False)
     import maverick.runtime_overrides as ro
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
@@ -539,11 +540,19 @@ def test_change_preview_simulates_and_plans_without_changing_anything(client, mo
     ("/connections", ("Systems Lightwork May Change", "Preview this change")),
     ("/templates", ("Share Your Ratings", "Download ratings")),
 ])
-def test_pages_carry_the_new_controls_in_plain_words(client, path, words):
+def test_pages_carry_the_new_controls_in_plain_words(client, monkeypatch, path, words):
     from test_support.plain_language import developer_terms, visible_text
+    if path == "/connections":
+        # The page correctly shows setup guidance when connections are off.
+        # Exercise the enabled admin journey for the controls asserted below.
+        monkeypatch.setenv("MAVERICK_CONNECTIONS", "1")
+        _connectors_on(monkeypatch)
+        assert client.get("/api/v1/governed-connectors").json()["enabled"] is True
     page = client.get(path)
     assert page.status_code == 200
     text = visible_text(page.text)
+    if path == "/connections":
+        assert "Connections is turned off." not in text
     for word in words:
         assert word in text, (path, word)
     html = page.text

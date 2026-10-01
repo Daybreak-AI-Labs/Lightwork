@@ -37,7 +37,7 @@ def _client():
 def _logs(monkeypatch, tmp_path):
     """Separate workspace and deployment-wide chains, both under tmp."""
     import maverick.audit as audit
-    from maverick.audit import writer
+    from maverick.audit import reader, writer
     from maverick.audit.writer import AuditLog
     local = AuditLog(tmp_path / "audit-local")
     global_log = AuditLog(tmp_path / "audit-global")
@@ -45,6 +45,9 @@ def _logs(monkeypatch, tmp_path):
     monkeypatch.setattr(writer, "default_audit_log", lambda: local)
     monkeypatch.setattr(audit, "global_audit_log", lambda: global_log)
     monkeypatch.setattr(writer, "global_audit_log", lambda: global_log)
+    # The activity page streams signed segments through the reader rather
+    # than using AuditLog.tail; direct the reader at the same fixture chain.
+    monkeypatch.setattr(reader, "resolve_audit_dir", lambda tenant: local.audit_dir)
     return local, global_log
 
 
@@ -125,16 +128,21 @@ def test_activity_log_records_invites_channels_and_workspace_pauses(monkeypatch,
     assert "xoxb-1" not in str(saved) and saved["fields"] == ["app_token", "bot_token"]
 
     page = client.get("/audit").text
-    assert "Invite created" in page and "bob@example.test" in page
+    assert "Invite created" in page
     assert "Channel saved" in page
+    assert "bob@example.test" not in page  # the invite recipient is private content
+    assert "xapp-1" not in page and "xoxb-1" not in page
     assert "Workspace paused" in page and "Workspace created" in page
-    assert "Deployment" in page  # the deployment-wide rows are labelled
+    assert 'aria-labelledby="aud-deployment-title"' in page
+    assert "Recent deployment activity" in page  # separate chain, outside workspace pagination
     # Newest first by default, with a toggle.
     assert "Showing newest first." in page and "order=oldest" in page
-    rows = re.findall(r'data-mv-time="([0-9.]+)" data-mv-time-mode="absolute"', page)
+    workspace_table = page.split('<table id="audit-table">', 1)[1].split('</table>', 1)[0]
+    rows = re.findall(r'data-mv-time="([0-9.]+)" data-mv-time-mode="absolute"', workspace_table)
     assert rows and rows == sorted(rows, reverse=True)
     oldest = client.get("/audit?order=oldest").text
-    rows_asc = re.findall(r'data-mv-time="([0-9.]+)" data-mv-time-mode="absolute"', oldest)
+    workspace_table_oldest = oldest.split('<table id="audit-table">', 1)[1].split('</table>', 1)[0]
+    rows_asc = re.findall(r'data-mv-time="([0-9.]+)" data-mv-time-mode="absolute"', workspace_table_oldest)
     assert rows_asc == sorted(rows_asc)
 
 
@@ -148,11 +156,10 @@ def test_activity_log_hides_machine_ids_and_never_shows_raw_epochs(monkeypatch, 
     page = _client().get("/audit").text
     assert "e+09" not in page
     assert "Approval decided" in page and "Approved" in page
-    # The 64-hex id sits under Technical details, not in the readable row.
-    assert "Technical details" in page
-    assert page.index("<summary>Technical details</summary>") < page.index("ab12" * 16)
-    # The recorded moment is a formatted <time>, in the viewer's zone once JS runs.
-    assert re.search(r'Occurred at</span>\s*<span class="aud-v"><time ', page)
+    # The projected metadata view omits private decision identity and machine
+    # identifiers; its event time is still rendered as a readable time.
+    assert "approval-v1-" not in page and "owner@example.com" not in page
+    assert re.search(r'data-mv-time="[0-9.]+" data-mv-time-mode="absolute"', page)
 
 
 # ---- task pages ------------------------------------------------------------
@@ -177,9 +184,10 @@ def test_goal_id_resolves_and_every_task_page_shares_the_tabs():
                     f'href="/goals/{g.id}/plan"', f'href="/goals/{g.id}/errors"'):
             assert tab in body, (path, tab)
         assert body.count('class="task-tabs__on" aria-current="page"') == 1
-    # A one-step task's plan page says so instead of showing an empty map.
+    # A one-step task's plan page explains the missing map without claiming
+    # the task already ran.
     plan = client.get(f"/goals/{g.id}/plan").text
-    assert "This task ran as one step" in plan
+    assert "This task has one step, so there is no map of smaller steps" in plan
     assert 'id="plan-tree-list"' in plan and "<noscript>" not in plan
     listing = client.get("/goals").text
     assert f'<a href="/chat/goal/{g.id}">Result</a>' in listing

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass
-from re import Pattern
+from re import IGNORECASE, Pattern
 from re import compile as compile_regex
 
 _READ_ONLY_BOUNDARY = (
@@ -24,18 +24,37 @@ _MAX_BUILT_IN_REPLY_WORDS = 120
 _MAX_BUILT_IN_REPLY_CHARS = 1_000
 _WORDS = compile_regex(r"\b\w+\b")
 _ACTION_VERBS = frozenset({
-    "add", "approve", "assign", "cancel", "change", "connect", "create",
-    "delete", "deny", "disable", "download", "edit", "enable", "export",
-    "find", "invite", "list", "pause", "print", "publish", "remove",
-    "restart", "resume", "revoke", "run", "search", "send", "share",
-    "show", "stop", "submit", "update", "upload", "withdraw",
+    "add", "approve", "archive", "assign", "cancel", "change", "complete",
+    "configure", "connect", "copy", "create", "delete", "deny", "disable",
+    "download", "edit", "enable", "export", "find", "grant", "install",
+    "invite", "link", "list", "mark", "move", "pause", "print", "publish",
+    "remove", "rename", "restart", "restore", "resume", "revoke", "rotate",
+    "run", "save", "schedule", "search", "send", "set", "share", "show",
+    "stop", "submit", "turn", "unlink", "unshare", "update", "upload",
+    "withdraw",
 })
 _ACTION_LEADS = (
     ("can", "you"), ("could", "you"), ("would", "you"), ("will", "you"),
     ("can", "i"), ("could", "i"), ("how", "do", "i"), ("how", "can", "i"),
     ("i", "want", "to"), ("i", "need", "to"), ("i", "would", "like", "to"),
-    ("let", "s"),
+    ("i", "would", "like", "you", "to"), ("help", "me"), ("let", "s"),
 )
+_FIRST_PERSON_COMPLETION = compile_regex(
+    r"\b(?:i|we)(?:'ve|\s+have)?\s+(?:already\s+|just\s+)?"
+    r"(?:did|done|completed?|finished|changed|updated|created|approved|"
+    r"cancelled|canceled|deleted|removed|enabled|disabled|sent|shared|"
+    r"published|submitted|started|stopped|turned\s+(?:on|off))\b",
+    IGNORECASE,
+)
+_PASSIVE_COMPLETION = compile_regex(
+    r"\b(?:your|the|this)\s+(?:[\w-]+\s+){0,5}"
+    r"(?:has\s+been|was|is\s+now)\s+(?:successfully\s+)?"
+    r"(?:completed|finished|changed|updated|created|approved|"
+    r"cancelled|canceled|deleted|removed|enabled|disabled|sent|shared|"
+    r"published|submitted|started|stopped|done)\b",
+    IGNORECASE,
+)
+_DONE_LEAD = compile_regex(r"^(?:final:\s*)?(?:done|all\s+set|completed)\b", IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1697,6 +1716,25 @@ def _is_action_request(words: tuple[str, ...]) -> bool:
     return False
 
 
+def is_action_request(message: str) -> bool:
+    """Classify direct requests before untrusted model text can imply execution."""
+
+    return _is_action_request(tuple(_WORDS.findall(message.casefold())))
+
+
+def model_claims_completed_action(reply: str) -> bool:
+    """Fail closed on common claims of completed work in read-only model text.
+
+    This is a safety net for unsolicited claims and wording the action-request
+    classifier misses. Neither a prompt nor a regex is an action receipt.
+    """
+
+    return any(
+        pattern.search(reply)
+        for pattern in (_FIRST_PERSON_COMPLETION, _PASSIVE_COMPLETION, _DONE_LEAD)
+    )
+
+
 def _authority_notice(permissions: frozenset[str]) -> str:
     """Describe caller authority without exposing identity or implying readiness."""
 
@@ -1747,6 +1785,8 @@ __all__ = [
     "CopilotPageContext",
     "built_in_reply",
     "context_for_page",
+    "is_action_request",
+    "model_claims_completed_action",
     "public_context",
     "sanitize_model_reply",
 ]

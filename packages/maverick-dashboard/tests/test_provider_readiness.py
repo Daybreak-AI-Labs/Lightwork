@@ -243,11 +243,11 @@ def _receipts_file(tmp_path):
 
 
 def test_receipt_survives_a_fresh_process(workspace, monkeypatch, tmp_path):
-    """The receipt is written to disk (0600, fingerprint hash only) and is
+    """The receipt is written privately (POSIX 0600 or Windows DACL) and is
     read back once the in-process memory is gone, as after a restart."""
     import json
-    import stat
 
+    from maverick.file_lock import private_path_is_restricted
     from maverick_dashboard import integration_readiness
     from maverick_dashboard.provider_readiness import workspace_readiness
 
@@ -257,7 +257,7 @@ def test_receipt_survives_a_fresh_process(workspace, monkeypatch, tmp_path):
     _record("openai", verified=True)
     path = _receipts_file(tmp_path)
     assert path.exists()
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert private_path_is_restricted(path, 0o600)
     text = path.read_text(encoding="utf-8")
     assert "sk-test" not in text
     stored = json.loads(text)["providers"]["openai"]

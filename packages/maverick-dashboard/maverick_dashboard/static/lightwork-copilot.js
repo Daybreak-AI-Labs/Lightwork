@@ -46,10 +46,19 @@
     while (element.firstChild) element.removeChild(element.firstChild);
   }
 
-  function addMessage(role, text) {
+  function addMessage(role, text, actionLink) {
     var message = document.createElement("div");
     message.className = "mv-copilot__msg mv-copilot__msg--" + role;
     message.textContent = String(text);
+    if (role === "bot" && actionLink && typeof actionLink.href === "string" &&
+        /^\/[a-z0-9/-]{0,159}$/.test(actionLink.href) &&
+        typeof actionLink.label === "string") {
+      var link = document.createElement("a");
+      link.href = actionLink.href;
+      link.textContent = actionLink.label.slice(0, 80);
+      message.appendChild(document.createElement("br"));
+      message.appendChild(link);
+    }
     log.appendChild(message);
     log.scrollTop = log.scrollHeight;
     return message;
@@ -324,7 +333,7 @@
       if (!response.ok || !payload.reply) throw new Error('unavailable');
       if (!(await verifyScope(started))) return;
       input.value = "";
-      addMessage("bot", payload.reply);
+      addMessage("bot", payload.reply, payload.action_link);
       // Only prior user questions return to the server. Model replies stay in
       // this browser log and can never be replayed as caller-supplied assistant
       // authority on a later request.

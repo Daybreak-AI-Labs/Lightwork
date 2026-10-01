@@ -9,7 +9,8 @@ forward.
 
 Receipts contain no response bodies, headers, credentials, or URLs.  Channel
 and MCP receipts are process-local.  Provider receipts are also written to
-``<MAVERICK_HOME>/provider_test_receipts.json`` (mode 0600, atomic write) so
+``<MAVERICK_HOME>/provider_test_receipts.json`` (atomic write with POSIX mode
+0600 or a restricted Windows ACL) so
 a working service stays "Connected" across a dashboard restart: the file holds
 only the provider name, the outcome, the timestamp, the plain reason and the
 SHA-256 fingerprint of the credential material -- a hash that stays on this

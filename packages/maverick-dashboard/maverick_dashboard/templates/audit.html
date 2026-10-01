@@ -110,7 +110,7 @@
         {% for ev in events %}
           <tr>
             <td class="muted aud-nowrap">{{ ev.get('ts') | datetime('absolute') }}</td>
-            <td>{{ kind_label(ev.kind) }}{% if ev.get('scope') == 'deployment' %} <span class="badge idle" title="Recorded in the deployment-wide log, which covers every workspace">Deployment</span>{% endif %}</td>
+            <td>{{ event_label(ev) }}{% if ev.get('scope') == 'deployment' %} <span class="badge idle" title="Recorded in the deployment-wide log, which covers every workspace">Deployment</span>{% endif %}</td>
             <td>{{ event_who(ev) }}</td>
             <td>{% if ev.goal_id is not none %}<a href="/chat/goal/{{ ev.goal_id }}">Task {{ ev.goal_id }}</a>{% else %}—{% endif %}</td>
             <td>
@@ -179,7 +179,7 @@
       <thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">Who</th></tr></thead>
       <tbody>
       {% for ev in deployment_events %}
-        <tr><td class="muted aud-nowrap">{{ ev.get('ts') | datetime('absolute') }}</td><td>{{ kind_label(ev.kind) }}</td><td>{{ event_who(ev) }}</td></tr>
+        <tr><td class="muted aud-nowrap">{{ ev.get('ts') | datetime('absolute') }}</td><td>{{ event_label(ev) }}</td><td>{{ event_who(ev) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

@@ -535,7 +535,7 @@ def test_viewpoints_job_runs_with_chosen_sides(env, ai):
     ("flow_teach.html", ["tr-learn", "rc-learn", "sg-learn", "lightwork-flow-teach.js"]),
 ])
 def test_pages_offer_the_new_controls_in_plain_words(template, needles):
-    text = (TEMPLATES / template).read_text()
+    text = (TEMPLATES / template).read_text(encoding="utf-8")
     for needle in needles:
         assert needle in text
     for added in re.findall(r'<(?:section|details|div)[^>]*id="(?:task-journal|goal-export|auto-new-sched|tplm-library|'

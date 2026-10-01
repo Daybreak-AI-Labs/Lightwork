@@ -52,3 +52,23 @@ test('closing the panel prevents a late response from clearing a newer draft', a
   assert.doesNotMatch(p.doc.getElementById('mv-copilot-log').textContent, /Late response/);
   p.dom.window.close();
 });
+
+test('Copilot shows a local page link for refused actions and rejects external destinations', async () => {
+  const p = page(); await settle();
+  p.setAnswer(async () => ({ok: true, status: 200, json: async () => ({
+    mode: 'built_in', reply: 'No action was taken.',
+    action_link: {href: '/goals', label: 'Open Goals'}
+  })}));
+  p.send('Cancel my task'); await settle();
+  const link = p.doc.querySelector('.mv-copilot__msg--bot a');
+  assert.equal(link?.getAttribute('href'), '/goals');
+  assert.equal(link?.textContent, 'Open Goals');
+
+  p.setAnswer(async () => ({ok: true, status: 200, json: async () => ({
+    mode: 'built_in', reply: 'No action was taken.',
+    action_link: {href: '//external.invalid/goals', label: 'Open Goals'}
+  })}));
+  p.send('Cancel another task'); await settle();
+  assert.equal(p.doc.querySelectorAll('.mv-copilot__msg--bot a').length, 1);
+  p.dom.window.close();
+});

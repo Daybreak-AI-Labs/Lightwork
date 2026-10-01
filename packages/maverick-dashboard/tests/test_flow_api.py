@@ -2873,8 +2873,14 @@ def test_flow_pages_render_under_strict_undefined(monkeypatch, tmp_path):
 
 def test_flow_analytics_page_renders(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
+    from maverick import flow
+
+    monkeypatch.setattr(flow, "enabled", lambda: False)
     r = _client().get("/flows/analytics")
     assert r.status_code == 200 and 'id="fa-table"' in r.text
+    assert "var flowsEnabled = false;" in r.text
+    monkeypatch.setattr(flow, "enabled", lambda: True)
+    assert "var flowsEnabled = true;" in _client().get("/flows/analytics").text
 
 
 def test_flow_schema_endpoint_returns_learned_shapes(monkeypatch, tmp_path):

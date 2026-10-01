@@ -23,9 +23,6 @@
   }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(String(value)) : String(value).replace(/[_.-]+/g, ' '); }
   function say(text) { $('status').textContent = text; }
-  function failText(failure, what) {
-    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
-  }
   async function api(path, body) {
     const response = await fetch(base + path, {
       method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
@@ -38,6 +35,11 @@
   function isoDay(epoch) { const d = new Date(epoch * 1000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function endOfDay(value) { const t = Date.parse(value + 'T23:59:00'); return Number.isFinite(t) ? t / 1000 : NaN; }
   function show(section) { ['enroll', 'review', 'grant'].forEach(name => { $(name).hidden = name !== section; }); $('next').hidden = true; }
+  function clearCurrentState() {
+    prepared = null; model = null; record = null; show(null);
+    $('describe').replaceChildren(); $('evidence').replaceChildren();
+    $('review-reason').value = ''; $('grant-reason').value = ''; $('grant-copies').checked = false;
+  }
 
   // ---- plain editor for a data description ------------------------------------------
   function blank(kind) {
@@ -175,16 +177,22 @@
       expired: 'This example has expired.', unusable: 'This run didn’t produce a usable example.' }[kind] || 'This run isn’t a learning example.');
   }
 
-  async function run(what, action) {
+  async function run(action) {
     if (busy) return;
-    busy = true; card.setAttribute('aria-busy', 'true');
-    try { await action(); } catch (failure) { say(failText(failure, what)); $('status').focus(); }
-    finally { busy = false; card.setAttribute('aria-busy', 'false'); }
+    busy = true; card.setAttribute('aria-busy', 'true'); $('refresh').disabled = true;
+    try { await action(); } catch (failure) {
+      clearCurrentState();
+      say(failure && (failure.status === 401 || failure.status === 403)
+        ? 'This learning example is not available to your account right now. Check your access or learning settings. Your unfinished review was cleared.'
+        : 'We could not confirm this run’s current learning status. Check current status before trying again. Your unfinished review was cleared.');
+      $('status').focus();
+    } finally { busy = false; card.setAttribute('aria-busy', 'false'); $('refresh').disabled = false; }
   }
   async function load() {
+    clearCurrentState(); say('Checking this run’s learning status…');
     let row = null;
     try { row = await api(''); } catch (failure) {
-      if (!(failure && failure.status === 404)) { say(failText(failure, 'check this run')); return; }
+      if (!(failure && failure.status === 404)) throw failure;
     }
     if (row) {
       status(row);
@@ -192,9 +200,11 @@
       return;
     }
     try { prepared = await api('/suggestion'); } catch (failure) {
-      show(null);
-      say('This run can’t become a learning example. Examples start at the flow’s first approval, before any action runs, and example collection must be turned on.');
-      return;
+      if (failure && (failure.status === 404 || failure.status === 409)) {
+        say('This run can’t become a learning example now. Examples start at the flow’s first approval, before any action runs, and example collection must be on.');
+        return;
+      }
+      throw failure;
     }
     model = prepared.suggestion;
     const now = Date.now() / 1000;
@@ -206,7 +216,7 @@
     say('This run is waiting at its first approval, so it can be kept as a learning example.');
   }
 
-  $('enroll-go').addEventListener('click', () => run('keep this run as an example', async () => {
+  $('enroll-go').addEventListener('click', () => run(async () => {
     if (!prepared || !model) return;
     const now = Date.now() / 1000;
     const until = Math.min(endOfDay($('until').value), now + (prepared.max_days || 7) * DAY - 60);
@@ -220,7 +230,7 @@
     status(row);
   }));
   function review(accepted) {
-    return run('record your review', async () => {
+    return run(async () => {
       if (!record) return;
       const reason = $('review-reason').value.trim();
       if (!reason) { say('Say briefly why, then choose again.'); $('review-reason').focus(); return; }
@@ -231,7 +241,7 @@
   }
   $('accept').addEventListener('click', () => review(true));
   $('reject').addEventListener('click', () => review(false));
-  $('grant-go').addEventListener('click', () => run('allow learning from this example', async () => {
+  $('grant-go').addEventListener('click', () => run(async () => {
     if (!record) return;
     const reason = $('grant-reason').value.trim();
     if (!reason) { say('Say briefly why it may be used for learning.'); $('grant-reason').focus(); return; }
@@ -246,5 +256,6 @@
       use_until: until, retain_derived_copies: true, rationale: reason });
     status(row);
   }));
-  run('check this run', load);
+  $('refresh').addEventListener('click', () => run(load));
+  run(load);
 })();

@@ -152,10 +152,9 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     # auth off: every sidebar page (in_nav: False pages are reached from
     # in-page links, never the sidebar; ready: False pages are offered nowhere).
     assert hrefs(None) == in_nav
-    # The redesigned Flows builder is the primary sidebar entry; the older
-    # workflow index/builder and the alt goal composer are reached in-page.
-    assert "/flows/designer" in in_nav
-    assert "/goal-builder" not in in_nav and "/workflows" not in in_nav \
+    # Saved flows are the sidebar entry; creation starts from that page.
+    assert "/workflows" in in_nav
+    assert "/goal-builder" not in in_nav and "/flows/designer" not in in_nav \
         and "/workflow-builder" not in in_nav
     # viewer: read-only pages only -- no run/build/admin surfaces, and the
     # groups left empty (Extend, Admin) are dropped whole.

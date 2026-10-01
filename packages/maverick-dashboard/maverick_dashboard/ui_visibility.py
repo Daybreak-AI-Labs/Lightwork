@@ -179,12 +179,9 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "view",
     },
-    # Flows: the redesigned builder (/flows/designer) is the primary sidebar
-    # entry. The saved-workflows index and the older NL builder are reached from
-    # the Flows builder / Automations / Agents pages rather than the sidebar, so
-    # the nav shows one clear "Flows" job instead of three near-duplicates.
+    # The sidebar opens saved work first; the designer stays one click away.
     {
-        "path": "/flows/designer",
+        "path": "/workflows",
         "label": "Flows",
         "group": "Operate",
         "icon": "workflow",
@@ -192,8 +189,8 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
-        "path": "/workflows",
-        "label": "Workflows",
+        "path": "/flows/designer",
+        "label": "Flow designer",
         "group": "Operate",
         "icon": "workflow",
         "floor": "view",

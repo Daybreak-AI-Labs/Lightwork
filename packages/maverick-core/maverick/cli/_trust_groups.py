@@ -293,8 +293,9 @@ def client_erase_cmd(confirm, keep_audit) -> None:
 
     Wipes the client's data root (world DB, memory, fleet, trust registry, and
     — unless --keep-audit — the audit chain). Refuses unless a client is bound
-    so it can never target the shared root. Irreversible: export first."""
-    from ..client import ClientBindingError, client_id, erase_client
+    so it can never target the shared root. A signed operation receipt and
+    public verification key remain outside that root. Irreversible: export first."""
+    from ..client import ClientBindingError, ClientErasureError, client_id, erase_client
     cid = client_id()
     if not cid:
         raise click.ClickException("no client bound — refusing to erase the shared root")
@@ -304,11 +305,12 @@ def client_erase_cmd(confirm, keep_audit) -> None:
             "Re-run with --confirm (and consider `maverick client export` first).")
     try:
         res = erase_client(keep_audit=keep_audit)
-    except ClientBindingError as e:
+    except (ClientBindingError, ClientErasureError) as e:
         raise click.ClickException(str(e)) from e
     click.echo(click.style(
         f"erased client {res['client_id']!r}: {res['removed']} path(s) removed"
         + (" (audit kept)" if res["kept_audit"] else ""), fg="yellow"))
+    click.echo(f"Activity receipt: {res['audit_event_id']} ({res['receipt_path']})")
 
 
 @main.group("backup")

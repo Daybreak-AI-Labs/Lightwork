@@ -79,7 +79,10 @@ def test_read_only_chat_projects_workspace_authority(monkeypatch, tmp_path, glob
         assert 'id="share-open"' not in page.text
         assert 'id="ps-run"' not in page.text
         assert client.get(f"/chat/goal/{gid}/download.md").status_code == 200
-        assert client.post(f"/api/v1/goals/{gid}/deliverable/edit", json={"text": "change"}).status_code == 403
+        assert client.post(f"/api/v1/goals/{gid}/deliverable/edit", json={
+            "text": "change", "expected_updated_at": world.get_goal(gid).updated_at,
+            "operation_id": "viewer-denied-edit-1",
+        }).status_code == 403
     finally:
         reset_tenant(scope)
 

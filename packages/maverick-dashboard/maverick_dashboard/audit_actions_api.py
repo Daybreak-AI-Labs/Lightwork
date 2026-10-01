@@ -89,6 +89,19 @@ def kind_label(kind: object) -> str:
     return KIND_LABELS.get(str(kind or ""), humanize(kind) or "Activity")
 
 
+def event_label(event: dict) -> str:
+    """Name a known administrator action without exposing arbitrary audit text."""
+    if event.get("kind") == "control_plane_action":
+        from .content_access import VISIBLE_CONTROL_ACTIONS
+
+        action = event.get("action")
+        if action is None and isinstance(event.get("payload"), dict):
+            action = event["payload"].get("action")
+        if isinstance(action, str) and action in VISIBLE_CONTROL_ACTIONS:
+            return humanize(action)
+    return kind_label(event.get("kind"))
+
+
 def field_label(key: object) -> str:
     return FIELD_LABELS.get(str(key), humanize(key))
 
@@ -154,7 +167,8 @@ def event_who(event: dict) -> str:
 
 
 def page_helpers() -> dict:
-    return {"kind_label": kind_label, "event_details": event_details, "event_who": event_who,
+    return {"kind_label": kind_label, "event_label": event_label,
+            "event_details": event_details, "event_who": event_who,
             "event_technical": event_technical, "is_time_key": is_time_key}
 
 
@@ -291,7 +305,7 @@ def _rows(since: str | None, until: str | None, fmt: str) -> Iterator[str]:
             when = (_dt.datetime.fromtimestamp(float(ts), _dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                     if isinstance(ts, (int, float)) else "")
             details = "; ".join(f"{label}: {text}" for _k, label, text in event_details(ev))
-            writer.writerow([when, csv_safe(kind_label(ev.get("kind"))), csv_safe(event_who(ev)),
+            writer.writerow([when, csv_safe(event_label(ev)), csv_safe(event_who(ev)),
                              ev.get("goal_id") if ev.get("goal_id") is not None else "",
                              csv_safe(details)])
             yield buf.getvalue()
@@ -432,5 +446,5 @@ async def proof_bundle(request: Request) -> StreamingResponse:
                                       "Cache-Control": "no-store"})
 
 
-__all__ = ["KIND_LABELS", "event_details", "event_person", "event_who", "kind_label",
+__all__ = ["KIND_LABELS", "event_details", "event_label", "event_person", "event_who", "kind_label",
            "page_helpers", "router"]

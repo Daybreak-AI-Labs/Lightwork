@@ -64,6 +64,26 @@ def test_metadata_projection_removes_content_before_search():
     assert "secret" not in str(projected) and "private" not in str(projected)
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_control_action_label_is_useful_without_exposing_recipient(nested):
+    from maverick_dashboard.audit_actions_api import event_label
+
+    fields = {"action": "invite_created", "email": "bob@example.test", "actor": "user:admin"}
+    event = {"kind": "control_plane_action", **({"payload": fields} if nested else fields)}
+    projected = content_access.audit_metadata(event)
+    assert event_label(projected) == "Invite created"
+    assert "bob@example.test" not in str(projected)
+
+
+@pytest.mark.parametrize("action", ["patient_jane_doe", {"private": "text"}, None])
+def test_unknown_control_action_stays_private(action):
+    from maverick_dashboard.audit_actions_api import event_label
+
+    projected = content_access.audit_metadata({"kind": "control_plane_action", "action": action})
+    assert "action" not in projected
+    assert event_label(projected) == "Administrator action"
+
+
 def test_installation_credential_is_not_employee_identity(monkeypatch):
     request = SimpleNamespace(method="GET")
     monkeypatch.setattr(auth, "_authorization_principal", lambda _: None)

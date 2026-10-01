@@ -115,9 +115,12 @@ def test_me_page_for_a_viewer_and_an_administrator(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
     _as(monkeypatch, "user:root", role="admin")
     text = _client().get("/me").text
-    assert "Forecast" in text and "Bob" in text and f"#{ids['approval']}" in text
+    # Administrator authority does not make colleagues' work appear in a
+    # personal digest. Cross-owner reads require a separate reviewed action.
+    assert "Forecast" not in text and "Bob" not in text
+    assert f"#{ids['approval']}" in text
     body = _client().get("/api/v1/me/work").json()
-    assert body["principal"] == "user:root" and body["digest"]["counts"]["results"] == 2
+    assert body["principal"] == "user:root" and body["digest"]["counts"]["results"] == 0
 
 
 def test_me_page_with_sign_in_off_uses_the_local_identity(tmp_path):

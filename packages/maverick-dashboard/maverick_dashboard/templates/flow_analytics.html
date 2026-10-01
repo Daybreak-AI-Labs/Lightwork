@@ -39,6 +39,8 @@
 (function () {
   'use strict';
   var msg = document.getElementById('fa-msg');
+  var flowsEnabled = {{ 'true' if flows_enabled else 'false' }};
+  var canManageFlows = {{ 'true' if can_manage_flows else 'false' }};
   {% include "_dash_helpers.js" %}
   function pct(x) { return x == null ? '—' : Math.round(x * 100) + '%'; }
   function secs(x) {
@@ -65,9 +67,12 @@
     (pair[0].flows || []).forEach(function (f) { names[f.id] = f.name; });
     var r = pair[1];
     if (r.status === 403) {
-      msg.textContent = 'Workflows are turned off, or you don’t have access to them.';
-      var on = document.createElement('a'); on.href = '/learning'; on.textContent = ' Turn on workflows';
-      msg.appendChild(on);
+      msg.textContent = flowsEnabled ? 'You do not have access to workflow results. Ask an administrator.'
+        : 'Workflows are turned off. Ask an administrator to turn them on.';
+      if (!flowsEnabled && canManageFlows) {
+        var on = document.createElement('a'); on.href = '/learning#lrn-flows-on'; on.textContent = ' Turn on workflows';
+        msg.appendChild(on);
+      }
       return { off: true };
     }
     if (!r.ok) { msg.textContent = window.mvErrorText ? window.mvErrorText(r, 'load flow results') : 'Could not load flow results.'; return { off: true }; }

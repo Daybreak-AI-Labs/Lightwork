@@ -22,8 +22,9 @@ registry knows, not just Anthropic:
 ``not_ready``
     one is missing, blocked, or its last test failed.
 
-Test receipts are process-local (see ``integration_readiness``), so after a
-restart a provider goes back to "not tested yet" until it is tested again.
+Provider test receipts are saved with the current configuration fingerprint
+(see ``integration_readiness``). After a restart, a matching receipt retains
+the last test result; changing the configuration returns it to "not tested yet".
 """
 from __future__ import annotations
 

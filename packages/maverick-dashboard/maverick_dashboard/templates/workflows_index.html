@@ -59,6 +59,16 @@
       <p class="mv-empty__sub">Open the flow designer, or ask Copilot to build one for you.</p><a class="btn btn--primary" href="/flows/designer">Open the flow designer</a></div>
     {% endif %}
   </section>
+  {% else %}
+  <section class="wfx__section panel" aria-labelledby="wfx-flow-off-h">
+    <h2 id="wfx-flow-off-h">Flows are turned off</h2>
+    {% if can_manage_flows %}
+    <p>Turn them on before creating or running a flow.</p>
+    <a class="btn btn--primary" href="/learning#lrn-flows-on">Turn on workflows</a>
+    {% else %}
+    <p>Ask an administrator to turn on workflows.</p>
+    {% endif %}
+  </section>
   {% endif %}
 
   <section class="wfx__section" aria-labelledby="wfx-tpl-h">

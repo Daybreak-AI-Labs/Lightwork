@@ -255,6 +255,9 @@ def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch
     # (the `flows` feature switch), not the live toggles and no config-file copy.
     assert "Turn on workflows first" in t
     assert 'id="lrn-flows-on"' in t
+    assert 'scroll-margin-top: var(--space-7)' in t
+    assert "/learning#lrn-flows-on" in client.get("/flows/designer").text
+    assert "/learning#lrn-flows-on" in client.get("/flows/analytics").text
     assert "[flows]" not in t
     assert 'id="lrn-auto-evolve"' not in t
 

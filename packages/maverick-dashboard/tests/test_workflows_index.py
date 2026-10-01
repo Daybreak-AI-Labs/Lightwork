@@ -57,12 +57,54 @@ def test_index_empty_states(monkeypatch, tmp_path):
     assert "mv-empty" in t
 
 
+def test_flows_off_index_has_an_in_product_enable_path(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import flow
+
+    monkeypatch.setattr(flow, "enabled", lambda: False)
+    page = _client().get("/workflows")
+    assert page.status_code == 200
+    assert "Flows are turned off" in page.text
+    assert 'href="/learning#lrn-flows-on"' in page.text
+
+
+def test_flows_off_index_does_not_offer_admin_control_to_others(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    import importlib
+
+    from maverick import flow
+
+    dashboard = importlib.import_module("maverick_dashboard.app")
+    monkeypatch.setattr(flow, "enabled", lambda: False)
+    monkeypatch.setattr(dashboard, "has_global_permission", lambda *_: False)
+    page = _client().get("/workflows")
+    assert page.status_code == 200
+    assert "Ask an administrator to turn on workflows." in page.text
+    assert 'href="/learning#lrn-flows-on"' not in page.text
+
+
 def test_nav_workflows_points_to_index(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import maverick.domain_edit as de
     monkeypatch.setattr(de, "list_agents", list)
     t = _client().get("/workflows").text
-    # The primary flow entry in the sidebar is now the redesigned Flows builder
-    # (/flows/designer); the saved-workflows index is reached in-page, not from
-    # the nav, so the sidebar shows one clear "Flows" job.
-    assert_navigation_link(t, "/flows/designer", "Flows")
+    assert_navigation_link(t, "/workflows", "Flows")
+    designer = _client().get("/flows/designer").text
+    assert 'href="/workflows">All saved flows</a>' in designer
+    assert 'href="/workflows" class="active" aria-current="page"' in designer
+
+
+def test_saved_flows_are_reachable_from_nav(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import flow
+    from maverick.flow import store
+
+    monkeypatch.setattr(flow, "enabled", lambda: True)
+    monkeypatch.setattr(store, "list_flow_summaries", lambda *, owner: [
+        {"id": "renewals", "name": "Customer renewals", "nodes": 4},
+    ])
+    page = _client().get("/workflows")
+    assert page.status_code == 200
+    assert_navigation_link(page.text, "/workflows", "Flows")
+    assert "Customer renewals" in page.text
+    assert 'href="/flows/designer/renewals"' in page.text

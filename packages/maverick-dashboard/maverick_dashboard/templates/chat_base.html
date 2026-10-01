@@ -93,6 +93,7 @@
     .cs-account a { color: var(--muted); font-size: var(--text-sm); }
     .cs-account a:hover { color: var(--text); }
     .cs-account .cs-spacer { flex: 1; }
+    .cs-halt { padding: var(--space-2) var(--space-2) 0; }
 
     /* ---- composer (shared by the landing and the thread) ---- */
     .composer, .ask {
@@ -239,6 +240,20 @@
       {{ chat_threads(threads or []) }}
     </div>
     {% with copilot_chat_shell=true %}{% include "_copilot.html" %}{% endwith %}
+    <div class="cs-halt">
+      {% if can_halt %}
+      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true"
+         aria-label="{{ ut('Emergency stop: stop or resume work') }}" lang="{{ ul('Emergency stop: stop or resume work') }}">
+        <span class="dot" aria-hidden="true"></span><span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
+      </a>
+      {% else %}
+      <span id="halt-pill" class="halt-pill" data-can-halt="false" aria-disabled="true"
+            aria-label="{{ ut('Emergency stop status. Halt permission is required to change it.') }}" lang="{{ ul('Emergency stop status. Halt permission is required to change it.') }}"
+            title="{{ ut('You do not have permission to stop or resume this work.') }}">
+        <span class="dot" aria-hidden="true"></span><span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
+      </span>
+      {% endif %}
+    </div>
     <div class="cs-account">
       <span class="cs-avatar" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg></span>
       {% if show_settings_link %}<a href="/settings">{{ ui("Settings") }}</a>{% endif %}

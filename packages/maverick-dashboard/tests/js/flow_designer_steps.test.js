@@ -11,30 +11,36 @@ const read = (name) => fs.readFileSync(path.join(dir, name), "utf8").replace(/\r
 const raw = (text) => text.replace(/\{% raw %\}|\{% endraw %\}/g, "");
 
 // The page body with its Jinja pieces resolved the simple way (no server).
-function pageHtml() {
+function pageHtml(options = {}) {
   let html = read("flow_designer.html");
   html = html.slice(html.indexOf("{% block content %}") + 19, html.lastIndexOf("{% endblock %}"));
   html = html.replace(/\{% call hero[\s\S]*?\{% endcall %\}/, "")
     .replace('{% include "flow_designer_core.js" %}', () => raw(read("flow_designer_core.js")))
+    .replace('{% include "flow_designer_inputs.js" %}', () => raw(read("flow_designer_inputs.js")))
     .replace('{% include "flow_designer.js" %}', () => raw(read("flow_designer.js")))
     .replace(/\{% for d in range\(1, 29\) %\}[\s\S]*?\{% endfor %\}/, '<option value="1">1st</option><option value="15">15th</option>')
     .replace(/\{% from [^%]*%\}/g, "")
     .replace(/\{\{ \(seed_flow or none\) \| tojson \}\}/, "null")
+    .replace("{{ 'true' if flows_enabled else 'false' }}", options.flowOn ? "true" : "false")
+    .replace("{{ 'true' if can_manage_flows else 'false' }}", options.canManage ? "true" : "false")
     .replace(/\{\{[^}]*\}\}/g, "");
   return "<!doctype html><html><body><p id=\"fd-state\"></p>" + html + "</body></html>";
 }
 
-function open() {
+function open(options = {}) {
   const calls = [];
-  const dom = new JSDOM(pageHtml(), {
+  const dom = new JSDOM(pageHtml(options), {
     url: "https://app.example/flows/designer", runScripts: "dangerously", pretendToBeVisual: true,
     beforeParse(window) {
-      window.fetch = async (url, options) => {
-        calls.push({ url, options });
+      window.fetch = async (url, requestOptions) => {
+        calls.push({ url, options: requestOptions });
         const body = url.startsWith("/api/v1/people/assignable") ? { items: [{ ref: "user:ana", label: "Ana Diaz" }] }
           : url.startsWith("/api/v1/flows/tools") ? { tools: [{ name: "slack_post_message", description: "Post to Slack", params: ["channel_id", "text"], category: "chat" }], categories: ["chat"] }
           : url === "/api/v1/flows" ? { flows: [{ id: "onboard-customer", name: "Onboard a customer", inputs: [{ key: "customer_name", label: "Customer name" }] }] }
           : url.startsWith("/api/v1/flows/gallery") ? { flows: [] } : {};
+        if (url.startsWith("/api/v1/flows/gallery") && options.galleryStatus === 403) {
+          return { ok: false, status: 403, json: async () => ({}) };
+        }
         return { ok: true, status: 200, json: async () => body };
       };
       window.mvHuman = (v) => String(v || "").replace(/[_.-]+/g, " ").replace(/^./, (c) => c.toUpperCase());
@@ -46,6 +52,37 @@ function open() {
   return { dom, w: dom.window, doc: dom.window.document, calls };
 }
 const settle = () => new Promise((r) => setTimeout(r, 20));
+
+test("disabled workflows lead administrators to the exact control", async () => {
+  const { dom, doc, calls } = open({ flowOn: false, canManage: true, galleryStatus: 403 });
+  try {
+    await settle();
+    assert.ok(calls.some((call) => call.url === "/api/v1/flows/gallery"), JSON.stringify(calls));
+    const msg = doc.getElementById("fd-msg");
+    assert.match(msg.textContent, /Workflows are turned off/);
+    assert.equal(msg.querySelector("a")?.getAttribute("href"), "/learning#lrn-flows-on");
+  } finally { dom.window.close(); }
+});
+
+test("permission denial does not offer an unavailable enable control", async () => {
+  const { dom, doc } = open({ flowOn: true, canManage: false, galleryStatus: 403 });
+  try {
+    await settle();
+    const msg = doc.getElementById("fd-msg");
+    assert.match(msg.textContent, /do not have access/);
+    assert.equal(msg.querySelector("a"), null);
+  } finally { dom.window.close(); }
+});
+
+test("disabled workflows tell non-administrators who can turn them on", async () => {
+  const { dom, doc } = open({ flowOn: false, canManage: false, galleryStatus: 403 });
+  try {
+    await settle();
+    const msg = doc.getElementById("fd-msg");
+    assert.match(msg.textContent, /need an administrator/);
+    assert.equal(msg.querySelector("a"), null);
+  } finally { dom.window.close(); }
+});
 
 test("steps can be added, changed and reordered without the canvas", async () => {
   const { dom, w, doc } = open();

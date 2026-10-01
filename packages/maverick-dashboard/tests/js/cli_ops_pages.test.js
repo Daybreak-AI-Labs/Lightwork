@@ -280,3 +280,66 @@ test('a finished example is reviewed, then learning is allowed only after a conf
   assert.ok(grant.use_until < reviewing.retain_until);
   assert.equal(ui.$('lx-next').hidden, false);
 });
+
+test('learning capture distinguishes an unavailable check from an ineligible run and can refresh', async t => {
+  const markup = slice('flow_run.html', '<section class="panel fr__example" id="lx-card"', '</section>');
+  let available = false;
+  const suggestion = { expected_pause_binding: 'p'.repeat(64), allowed_tools: [], max_days: 7,
+    suggestion: { input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      tool_data_schemas: {}, unknown_results: [] } };
+  const ui = await page(markup, 'lightwork-learning-capture.js', url => {
+    if (url.endsWith('/episode-capture')) return new Response('{}', { status: 404 });
+    if (url.endsWith('/suggestion')) return available ? suggestion : new Response('{}', { status: 503 });
+    throw new Error('unexpected request');
+  });
+  t.after(() => ui.w.close());
+  assert.equal(ui.$('lx-enroll').hidden, true);
+  assert.match(ui.$('lx-status').textContent, /could not confirm.*current learning status/i);
+  assert.doesNotMatch(ui.$('lx-status').textContent, /can’t become a learning example/);
+
+  available = true;
+  ui.$('lx-refresh').click();
+  await ui.settle();
+  assert.equal(ui.$('lx-enroll').hidden, false);
+  assert.match(ui.$('lx-status').textContent, /waiting at its first approval/);
+});
+
+test('learning capture does not mistake denied status for a missing example', async t => {
+  const markup = slice('flow_run.html', '<section class="panel fr__example" id="lx-card"', '</section>');
+  const ui = await page(markup, 'lightwork-learning-capture.js', () => new Response('{}', { status: 403 }));
+  t.after(() => ui.w.close());
+
+  assert.match(ui.$('lx-status').textContent, /not available to your account/);
+  assert.equal(ui.$('lx-enroll').hidden, true);
+  assert.equal(ui.$('lx-review').hidden, true);
+  assert.equal(ui.$('lx-grant').hidden, true);
+  assert.equal(ui.calls.length, 1, 'denial does not trigger a second lookup or a write');
+  assert.equal(ui.$('lx-refresh').disabled, false);
+});
+
+test('uncertain review clears stale controls and only a fresh status check reveals the result', async t => {
+  const markup = slice('flow_run.html', '<section class="panel fr__example" id="lx-card"', '</section>');
+  const pending = { status: 'awaiting_review', revision: 4, episode_sha256: 'e'.repeat(64), retain_until: Date.now() / 1000 + 5 * 86400 };
+  let current = pending;
+  const ui = await page(markup, 'lightwork-learning-capture.js', url => {
+    if (url.endsWith('/detail')) return { evidence: { inputs: {}, slots: [] } };
+    if (url.endsWith('/review')) {
+      current = { ...pending, status: 'accepted', revision: 5 };
+      throw new Error('connection lost after the decision');
+    }
+    return current;
+  });
+  t.after(() => ui.w.close());
+  ui.$('lx-review-reason').value = 'This example matches the finished run.';
+  ui.$('lx-accept').click();
+  await ui.settle();
+  assert.equal(ui.$('lx-review').hidden, true);
+  assert.equal(ui.$('lx-review-reason').value, '');
+  assert.match(ui.$('lx-status').textContent, /could not confirm.*Check current status/i);
+  assert.equal(ui.calls.filter(c => c.url.endsWith('/review')).length, 1);
+
+  ui.$('lx-refresh').click();
+  await ui.settle();
+  assert.equal(ui.$('lx-grant').hidden, false);
+  assert.equal(ui.calls.filter(c => c.url.endsWith('/review')).length, 1, 'refresh never replays a decision');
+});

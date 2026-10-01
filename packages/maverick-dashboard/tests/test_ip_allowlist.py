@@ -192,7 +192,8 @@ def test_saving_an_unparsable_entry_is_refused():
 
 def test_lockout_rail_runs_through_the_settings_api():
     client = TestClient(app, headers={"Origin": "http://testserver"})
-    resp = client.post("/api/v1/settings/catalog", json={"changes": [
+    revision = client.get("/api/v1/settings/catalog").json()["revision"]
+    resp = client.post("/api/v1/settings/catalog", json={"expected_revision": revision, "changes": [
         {"id": "auth.ip_allowlist.cidrs", "value": ["10.0.0.0/8"]}]})
     assert resp.status_code == 409
     assert resp.json().get("lockout") is True

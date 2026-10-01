@@ -16,6 +16,19 @@ from maverick.governed_records import GovernedRecordStore
 STORE = GovernedRecordStore("employee_content_access", "ECA", "employee_content_access",
                             authority_scope="deployment_global")
 
+# Only fixed dashboard operation names may be shown in the metadata view.
+# Arbitrary action text can describe an employee's work, so a slug pattern is
+# not sufficient protection here.
+VISIBLE_CONTROL_ACTIONS = frozenset({
+    "invite_created", "invite_revoked", "department_access_set", "department_access_removed",
+    "channel_saved", "channel_settings_removed", "settings_models", "settings_budget",
+    "settings_roles", "settings_allowed", "settings_discover", "settings_discovery",
+    "settings_providers", "settings_provider_test", "settings_capabilities",
+    "settings_features", "settings_visibility", "settings_visibility_reset",
+    "audit_download", "audit_forward", "audit_seal", "audit_rotate_key",
+    "audit_write_once_push", "benchmark_score_recorded",
+})
+
 
 def enabled() -> bool:
     from maverick.config import get_features
@@ -127,7 +140,7 @@ def require_employee_content(request, owner: str, *, resource_kind: str, resourc
         raise HTTPException(403, "Employee content is private. Request a scoped, independently reviewed read in Content access.")
 
 
-def _audit_fields(event: dict) -> dict:
+def _audit_fields(event: dict, *, kind: str = "") -> dict:
     """Control metadata only; free-form explanations and tool names stay private."""
     safe = {key: event[key] for key in (
         "actor", "principal", "tenant", "status", "ok", "cost_usd", "input_tokens", "output_tokens",
@@ -140,6 +153,9 @@ def _audit_fields(event: dict) -> dict:
     if isinstance(event.get("rule"), str) and event["rule"] in {"capability", "deny_actions", "deny_min_risk", "deny_above",
                             "require_human_actions", "require_human_min_risk", "require_human_above"}:
         safe["rule"] = event["rule"]
+    action = event.get("action")
+    if kind == "control_plane_action" and isinstance(action, str) and action in VISIBLE_CONTROL_ACTIONS:
+        safe["action"] = action
     score = event.get("score")
     if isinstance(score, (int, float)) and not isinstance(score, bool) and 0 <= score <= 1:
         safe["score"] = score
@@ -167,9 +183,10 @@ def audit_metadata(event: dict) -> dict:
             if key in event and isinstance(event[key], (str, int, float))}
     if isinstance(event.get("goal_id"), int) and not isinstance(event["goal_id"], bool):
         safe["goal_id"] = event["goal_id"]
-    safe.update(_audit_fields(event))
+    kind = safe.get("kind", "")
+    safe.update(_audit_fields(event, kind=kind))
     payload = event.get("payload")
     if isinstance(payload, dict):
-        safe["payload"] = _audit_fields(payload)
+        safe["payload"] = _audit_fields(payload, kind=kind)
     safe["projection"] = "audit_metadata_only"
     return safe

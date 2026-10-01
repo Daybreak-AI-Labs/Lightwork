@@ -95,17 +95,24 @@ def test_policy_off_accepts_a_sign_in_without_a_second_factor(client, monkeypatc
 
 
 def test_policy_on_refuses_a_sign_in_without_a_second_factor(client, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
     monkeypatch.setenv("MAVERICK_MFA_REQUIRE", "1")
     resp, _ = _login(client, monkeypatch, claims={"amr": ["pwd"]})
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/auth/error?reason=mfa"
+    location = urlsplit(resp.headers["location"])
+    assert location.path == "/auth/error"
+    assert parse_qs(location.query) == {"return_to": ["/"], "reason": ["mfa"]}
     assert not client.cookies.get(ol.SESSION_COOKIE)
     page = client.get("/auth/error?reason=mfa", headers={"Accept": "text/html"})
     assert page.status_code == 403
     assert "include a second factor" in page.text
     assert "/auth/login?fresh=1" in page.text
-    # No reason (or an unknown one) stays the generic, detail-free answer.
-    assert client.get("/auth/error?reason=signature").text == "login failed"
+    # An unknown reason stays a generic, detail-free recovery page.
+    generic = client.get("/auth/error?reason=signature")
+    assert generic.status_code == 401
+    assert "Sign-in could not finish" in generic.text
+    assert "signature" not in generic.text
 
 
 def test_policy_on_accepts_amr_and_configured_acr(client, monkeypatch, tmp_path):

@@ -8198,6 +8198,7 @@ async def voice_transcribe(
 
     import os as _os
     import tempfile as _tempfile
+    from pathlib import Path as _Path
 
     max_bytes = _VOICE_MAX_BYTES
     configured_bytes = _voice_setting("max_upload_bytes")
@@ -8230,12 +8231,11 @@ async def voice_transcribe(
 
     from maverick.tools.voice import _run_transcribe
 
-    tmp = _tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    try:
-        tmp.write(data)
-        tmp.close()
+    with _tempfile.TemporaryDirectory(prefix="lw-voice-input-") as temp_dir:
+        source = _Path(temp_dir) / f"recording{suffix}"
+        source.write_bytes(data)
         # sandbox=None: the path is our own temp file, not model-supplied.
-        args: dict = {"source": tmp.name}
+        args: dict = {"source": str(source)}
         if lang:
             args["language"] = lang
         sem = _get_voice_transcribe_semaphore()
@@ -8247,11 +8247,6 @@ async def voice_transcribe(
             )
         async with sem:
             text = await run_in_threadpool(_run_transcribe, args, None)
-    finally:
-        try:
-            _os.unlink(tmp.name)
-        except OSError:  # pragma: no cover
-            pass
     if text.startswith("ERROR:"):
         raise HTTPException(
             status_code=503,
@@ -8296,25 +8291,17 @@ async def voice_speak(request: Request, payload: SpeakIn) -> Response:
     except Exception:  # pragma: no cover -- shaping never blocks read-aloud
         log.warning("voice-only shaping failed; reading the text as written")
 
-    import os as _os
     import tempfile as _tempfile
     from pathlib import Path as _Path
 
     from maverick.tools.voice import _tts_elevenlabs, _tts_openai
 
     def _synthesize() -> bytes | None:
-        tmp = _tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.close()
-        out = _Path(tmp.name)
-        try:
+        with _tempfile.TemporaryDirectory(prefix="lw-voice-reply-") as temp_dir:
+            out = _Path(temp_dir) / "reply.mp3"
             if _tts_openai(text, payload.voice, out) or _tts_elevenlabs(text, payload.voice, out):
                 return out.read_bytes()
             return None
-        finally:
-            try:
-                _os.unlink(tmp.name)
-            except OSError:  # pragma: no cover
-                pass
 
     audio = await run_in_threadpool(_synthesize)
     if not audio:
@@ -10220,14 +10207,8 @@ def create_goal_share(request: Request, goal_id: int, body: ShareLinkIn) -> dict
 
 @router.post("/goals/{goal_id}/share/{link_id}/revoke")
 def revoke_goal_share(request: Request, goal_id: int, link_id: int) -> dict:
-    """Revoke a share link. Operator role + goal access; the revoke is scoped to
-    this goal so a caller can't revoke another goal's link by id."""
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-    require_permission(request, "operate")
+    """Only the task owner may revoke a link scoped to this task."""
+    w, _ = _share_goal(request, goal_id)
     return {"ok": w.revoke_share_link(link_id, goal_id=goal_id)}
 
 
@@ -12440,6 +12421,8 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
     from .copilot_context import (
         built_in_reply,
         context_for_page,
+        is_action_request,
+        model_claims_completed_action,
         public_context,
         sanitize_model_reply,
     )
@@ -12462,6 +12445,18 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
         for item in payload.history[-6:]
         if item.role == "user" and item.content.strip()
     ]
+
+    # The browser offers only registered, reviewed operations before it asks
+    # this read-only guide. A direct action request that reaches this endpoint
+    # has no operation receipt and must never be delegated to a text model.
+    if is_action_request(msg):
+        return {
+            "reply": built_in_reply(context, msg, permissions),
+            "mode": "built_in",
+            "warning": "No action was taken. Review the current page and your access before proceeding.",
+            "page_context": public_context(context, permissions),
+            "action_link": {"href": context.path, "label": f"Open {context.title}"},
+        }
 
     if not _any_provider_key_set():
         return {
@@ -12541,6 +12536,17 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
             "mode": "built_in_fallback",
             "warning": "The configured model returned no usable guidance; using the built-in page guide.",
             "page_context": public_context(context, permissions),
+        }
+    if model_claims_completed_action(safe_reply):
+        return {
+            "reply": sanitize_model_reply(
+                "No action was taken by this guide. "
+                + built_in_reply(context, msg, permissions)
+            ),
+            "mode": "built_in_fallback",
+            "warning": "The model answer claimed completed work without an operation receipt; it was not shown.",
+            "page_context": public_context(context, permissions),
+            "action_link": {"href": context.path, "label": f"Open {context.title}"},
         }
     qualified_reply = sanitize_model_reply(f"Unverified model guidance: {safe_reply}")
     return {
@@ -14728,19 +14734,14 @@ def _extract_binary_doc_text(raw: bytes, filename: str) -> str | None:
         from maverick_knowledge.parse import extract_text
     except ImportError:
         return None
-    tmp = _tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     try:
-        tmp.write(raw)
-        tmp.close()
-        out = extract_text(_Path(tmp.name))
-        return out.strip() or None
+        with _tempfile.TemporaryDirectory(prefix="lw-document-") as temp_dir:
+            source = _Path(temp_dir) / f"source{suffix}"
+            source.write_bytes(raw)
+            out = extract_text(source)
+            return out.strip() or None
     except Exception:  # noqa: BLE001 -- unparseable: caller 400s with a hint
         return None
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except OSError:  # pragma: no cover
-            pass
 
 
 def _require_provider_for_drafting() -> None:

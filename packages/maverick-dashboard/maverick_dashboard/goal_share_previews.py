@@ -96,7 +96,9 @@ def send(context, goal_id, identifier, digest):
     token = resolve_token()
     directory = _directory(context)
     path = directory / (identifier + ".preview")
-    with cross_process_lock(path, strict=True):
+    # Keep the sidecar lock shorter than the sealed receipt's ".preview" path.
+    # Windows rejects the appended ".lock" when a temp/private root is deep.
+    with cross_process_lock(directory / identifier, strict=True):
         item = _read(path)
         if item.get("context") != context or item.get("goal_id") != goal_id:
             raise ValueError("This review belongs to a different task or account.")
@@ -149,7 +151,7 @@ def reconcile(context, goal_id, identifier):
 
     directory = _directory(context)
     path = directory / (identifier + ".preview")
-    with cross_process_lock(path, strict=True):
+    with cross_process_lock(directory / identifier, strict=True):
         item = _read(path)
         if item.get("context") != context or item.get("goal_id") != goal_id:
             raise ValueError("This attempt belongs to a different task or account.")

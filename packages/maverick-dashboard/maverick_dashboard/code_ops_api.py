@@ -22,7 +22,7 @@ import contextvars
 import dataclasses
 import hashlib
 import logging
-import os
+import shutil
 import tempfile
 import threading
 import time
@@ -92,17 +92,15 @@ def _export(name: str) -> str:
     work = Path(tempfile.mkdtemp(prefix="lw-export-"))
     try:
         copy = vault.export(name, work / "copy" / name)
-        fd, out = tempfile.mkstemp(prefix="lw-export-", suffix=".zip")
-        os.close(fd)
-        try:
-            _zip_tree(copy, Path(out))
-        except BaseException:
-            Path(out).unlink(missing_ok=True)
-            raise
-        return out
-    finally:
-        import shutil
+        # Windows installations can create a private temporary directory but
+        # refuse a second open of a file created directly in the temp root.
+        # Keep the archive in that private directory until FileResponse ends.
+        out = work / "copy.zip"
+        _zip_tree(copy, out)
+        return str(out)
+    except BaseException:
         shutil.rmtree(work, ignore_errors=True)
+        raise
 
 
 @router.post("/repos/{name}/export")
@@ -120,7 +118,7 @@ async def export_repo(name: str, body: ConfirmIn, request: Request) -> FileRespo
     except Exception as exc:  # noqa: BLE001 -- vault errors can carry paths
         raise HTTPException(502, "Lightwork could not make a copy of this code project.") from exc
     return FileResponse(out, media_type="application/zip", filename=f"{name}-copy.zip",
-                        background=BackgroundTask(lambda: Path(out).unlink(missing_ok=True)),
+                        background=BackgroundTask(lambda: shutil.rmtree(Path(out).parent, ignore_errors=True)),
                         headers={"Cache-Control": "no-store"})
 
 

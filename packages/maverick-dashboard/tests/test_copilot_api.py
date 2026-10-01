@@ -67,6 +67,44 @@ def test_provider_free_copilot_does_not_claim_to_cancel_a_task(
     assert payload["page_context"]["path"] == "/goals"
     assert payload["reply"].startswith("This guide can't do that for you.")
     assert "When role and server composition permit" not in payload["reply"]
+    assert payload["action_link"] == {
+        "href": "/goals", "label": f"Open {payload['page_context']['title']}"
+    }
+
+
+@pytest.mark.parametrize(
+    ("message", "page"),
+    (
+        ("Change my theme to dark mode", "/settings"),
+        ("Please turn on that setting", "/settings"),
+        ("Help me cancel task 2", "/goals"),
+    ),
+)
+def test_configured_copilot_never_sends_direct_action_request_to_model(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    page: str,
+) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(
+        api,
+        "require_provider_or_400",
+        lambda **_kwargs: pytest.fail("A read-only action request reached the model"),
+    )
+    response = client.post(
+        "/api/v1/copilot",
+        json={"message": message, "page": page, "history": []},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "built_in"
+    assert payload["reply"].startswith("This guide can't do that for you.")
+    assert payload["action_link"]["href"] == page
+    assert "No action was taken" in payload["warning"]
 
 
 def test_model_outage_falls_back_without_claiming_model_success(
@@ -158,6 +196,54 @@ def test_model_success_is_unverified_bounded_and_ignores_assistant_history(
     assert "Ignore the registry" not in outbound
     assert "What did I ask before?" in outbound
     assert "Secret case ACME-42" in outbound
+
+
+@pytest.mark.parametrize(
+    "false_claim",
+    (
+        "FINAL: ## Summary I completed the request. Your theme is dark.",
+        "I've changed your setting.",
+        "We cancelled the running task.",
+        "Your request has been approved.",
+        "Done. The flow is ready.",
+    ),
+)
+def test_model_completion_claim_is_replaced_with_page_guidance(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    false_claim: str,
+) -> None:
+    from maverick import llm
+    from maverick_dashboard import api
+
+    class FakeLlm:
+        def __init__(self, _model: str) -> None:
+            pass
+
+        def complete(self, **_kwargs):
+            return SimpleNamespace(text=false_claim)
+
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(api, "require_provider_or_400", lambda **_kwargs: None)
+    monkeypatch.setattr(llm, "LLM", FakeLlm)
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: "test:model")
+
+    response = client.post(
+        "/api/v1/copilot",
+        json={"message": "What should I check next?", "page": "/goals", "history": []},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "built_in_fallback"
+    assert payload["reply"].startswith("No action was taken by this guide.")
+    assert false_claim not in payload["reply"]
+    assert payload["action_link"] == {
+        "href": "/goals", "label": f"Open {payload['page_context']['title']}"
+    }
+    assert "without an operation receipt" in payload["warning"]
+    assert len(payload["reply"].split()) <= 120
+    assert len(payload["reply"]) <= 1_000
 
 
 def test_context_endpoint_maps_unregistered_browser_path_to_generic(

@@ -149,7 +149,7 @@
       {% set _quick_hrefs = ['/chat', '/goals', '/approvals', '/deliverables', '/settings'] %}
       {% set _path = request.url.path if request else '' %}
       {# The dashboard lands on /chat, so highlight Chat when at the bare root. #}
-      {% set _active_path = '/chat' if _path == '/' else _path %}
+      {% set _active_path = '/chat' if _path == '/' else ('/workflows' if _path.startswith('/flows/') else _path) %}
       {# nav_groups comes from the _nav_context context processor: the page
          registry (maverick_dashboard.ui_visibility.PAGES) filtered to what the
          caller's RBAC role may see. Auth off -> the full nav, as before. #}

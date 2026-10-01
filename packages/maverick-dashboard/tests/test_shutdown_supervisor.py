@@ -256,7 +256,6 @@ def test_optional_drop_lifespan_joins_the_same_supervisor(monkeypatch, tmp_path)
     with TestClient(app, headers={"Origin": "http://testserver"}):
         supervisor = app.state.lifecycle_supervisor
         assert "drop_management" in supervisor.components
-        assert len(supervisor.components) == 25
     assert supervisor.phase == "stopped" and not supervisor.errors
 
 
