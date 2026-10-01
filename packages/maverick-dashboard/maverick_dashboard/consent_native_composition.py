@@ -88,6 +88,11 @@ _DEFAULT_MAX_APPLICATIONS = 1_000
 _DEFAULT_MAX_DEVICES = 100_000
 _DEFAULT_MAX_REQUESTS = 1_000_000
 _DEFAULT_REQUESTS_PER_MINUTE = 120
+# How long the public gate trusts one replay of the directory audit chain. A
+# failed replay is retried sooner so a transient error does not hold the
+# endpoints shut. The admin readiness and integrity checks never use this.
+_GATE_INTEGRITY_PASS_SECONDS = 30.0
+_GATE_INTEGRITY_FAIL_SECONDS = 5.0
 
 
 class NativeConsentCompositionError(NativeConsentIntegrityError):
@@ -1136,6 +1141,50 @@ class _BoundedRateLimiter:
             values.append(now)
 
 
+class _TimedVerdict:
+    """Share one run of a slow yes/no check between requests that arrive together.
+
+    A yes is reused for ``pass_seconds``. A no, or a check that raised, is
+    reused for only ``fail_seconds``: a transient fault clears quickly, while a
+    store that really is broken is still re-checked at most that often rather
+    than on every request. Anything but ``True`` counts as a no, so a fault can
+    close a gate but never open it. Callers that arrive while the check runs
+    wait for it and take its answer instead of starting their own.
+    """
+
+    def __init__(
+        self,
+        check: Callable[[], bool],
+        *,
+        pass_seconds: float,
+        fail_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._check = check
+        self._pass_seconds = pass_seconds
+        self._fail_seconds = fail_seconds
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._verdict = False
+        self._expires = float("-inf")
+
+    def __call__(self) -> bool:
+        with self._lock:
+            if self._clock() < self._expires:
+                return self._verdict
+            try:
+                verdict = self._check() is True
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception:
+                verdict = False
+            self._verdict = verdict
+            self._expires = self._clock() + (
+                self._pass_seconds if verdict else self._fail_seconds
+            )
+            return verdict
+
+
 class _DerivedEd25519ReceiptSigner:
     def __init__(self, seed: bytes, *, key_id: str, key_revision: int) -> None:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -1844,12 +1893,20 @@ def attach_consent_native_composition(  # noqa: C901 - explicit deployment seam 
     registry = _RegistryMultiplexer(directory, verifier, limiter)
     gateway = _GatewayMultiplexer(app, directory, public_dependencies, limiter)
 
+    # Replaying the audit chain grows with the fleet and used to run for every
+    # anonymous request; share one replay across a short window instead.
+    directory_intact = _TimedVerdict(
+        directory.verify_integrity,
+        pass_seconds=_GATE_INTEGRITY_PASS_SECONDS,
+        fail_seconds=_GATE_INTEGRITY_FAIL_SECONDS,
+    )
+
     def public_gate() -> bool:
         try:
             return (
                 verifier.available()
                 and directory.has_active_application()
-                and directory.verify_integrity() is True
+                and directory_intact()
             )
         except (KeyboardInterrupt, SystemExit):
             raise

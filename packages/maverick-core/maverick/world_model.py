@@ -2266,6 +2266,35 @@ class WorldModel:
         row = self._read_one("SELECT * FROM goals WHERE id = ?", (goal_id,))
         return _goal_from_row(row) if row else None
 
+    def recent_goals_by_domain(self, domains: list[str], *, owner: str | None = None,
+                               per_domain: int = 5) -> dict[str, list[Goal]]:
+        """The newest ``per_domain`` goals of each listed domain, newest first.
+
+        The same answer as one ``list_goals(domain=..., limit=per_domain,
+        order="desc")`` per domain, from one grouped query per 500 domains
+        (the Results page asks about every deliverable pack, 2,031 of them on a
+        full catalog). A domain with no goals is absent from the result.
+        """
+        wanted = sorted({str(d) for d in domains if d})
+        keep = max(1, int(per_domain))
+        found: dict[str, list[Goal]] = {}
+        for chunk in self._chunks(wanted):
+            where = f"domain IN ({','.join('?' * len(chunk))})"
+            params: list[Any] = list(chunk)
+            if owner is not None:
+                where += " AND owner = ?"
+                params.append(owner)
+            rows = self._read_all(
+                "SELECT * FROM goals WHERE id IN (SELECT id FROM ("
+                "SELECT id, ROW_NUMBER() OVER (PARTITION BY domain ORDER BY id DESC) AS n "
+                f"FROM goals WHERE {where}) WHERE n <= ?) ORDER BY id DESC",
+                (*params, keep),
+            )
+            for row in rows:
+                goal = _goal_from_row(row)
+                found.setdefault(goal.domain, []).append(goal)
+        return found
+
     def list_goals(
         self,
         status: str | None = None,
