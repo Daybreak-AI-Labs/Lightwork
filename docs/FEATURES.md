@@ -4435,7 +4435,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   model, unchanged).
 - **Bounded governed-record Postgres connections** — the governed backend shares
   the world-model libpq timeout policy and offers separate opt-in
-  `[governed_records] pool_size` / `pool_timeout_seconds` settings. Transactions
+  `[governed_records] pool_size` / `pool_timeout_seconds` / `pool_min_size`
+  (connections kept open while idle, default 1) settings. Transactions
   retain current RLS, schema, role and encryption-key checks; pooled tenant state
   is cleared before reuse and unknown writes are never replayed automatically.
   The installer offers a one-connection starting point. See

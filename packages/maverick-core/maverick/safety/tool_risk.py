@@ -26,6 +26,8 @@ behaviour is unchanged unless a ceiling is configured.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import fnmatch
 import logging
 
@@ -366,6 +368,41 @@ def _load_overrides() -> dict[str, str]:
     return out
 
 
+#: Overrides pinned for the duration of one registry build (see
+#: :func:`pinned_overrides`). ``None`` outside such a block.
+_PINNED_OVERRIDES: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "maverick_tool_risk_pinned_overrides", default=None,
+)
+
+
+@contextlib.contextmanager
+def pinned_overrides():
+    """Read ``[security.tool_risk]`` once for everything inside the block.
+
+    Building a base registry registers thousands of tools, and each
+    ``register`` runs the ACL's ``tool_risk`` check, which re-read the whole
+    config every time (measured: 2,937 ``load_config`` calls per ``Agent()``).
+    The config cannot meaningfully change mid-build, so pin one snapshot for
+    the block; outside it every call reads the live config as before. Nested
+    blocks reuse the outer snapshot.
+    """
+    if _PINNED_OVERRIDES.get() is not None:
+        yield
+        return
+    token = _PINNED_OVERRIDES.set(_load_overrides())
+    try:
+        yield
+    finally:
+        _PINNED_OVERRIDES.reset(token)
+
+
+def _current_overrides(overrides: dict[str, str] | None) -> dict[str, str]:
+    if overrides is not None:
+        return overrides
+    pinned = _PINNED_OVERRIDES.get()
+    return pinned if pinned is not None else _load_overrides()
+
+
 def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
     """Risk level for a tool: config override (exact then glob), then the
     built-in default.
@@ -378,7 +415,7 @@ def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
     e.g. ``[security.tool_risk]`` ``"mcp_*" = "medium"`` or ``okta = "medium"``.
     Any other unclassified tool falls back to ``medium``.
     """
-    overrides = _load_overrides() if overrides is None else overrides
+    overrides = _current_overrides(overrides)
     if name in overrides:
         return overrides[name]  # exact override wins, even lowering a built-in
     builtin = _DEFAULT_RISK.get(name)
@@ -432,7 +469,7 @@ def tool_risk_is_classified(
     high-risk approval gates merely because its name is absent from the table.
     """
     name = str(name or "")
-    overrides = _load_overrides() if overrides is None else overrides
+    overrides = _current_overrides(overrides)
     if name in overrides or name in _DEFAULT_RISK:
         return True
     if any(
@@ -456,7 +493,7 @@ def tools_exceeding(
     if not max_risk:
         return set()
     ceiling = risk_rank(max_risk)
-    overrides = _load_overrides() if overrides is None else overrides
+    overrides = _current_overrides(overrides)
     return {
         n for n in tool_names
         if risk_rank(tool_risk(n, overrides)) > ceiling
@@ -470,11 +507,11 @@ def risk_map(tool_names, overrides: dict[str, str] | None = None) -> dict[str, s
     re-reads config every call (it is uncached), so a UI listing ~1000 tools
     would re-parse config ~1000 times. This reads the overrides a single time
     and reuses them."""
-    overrides = _load_overrides() if overrides is None else overrides
+    overrides = _current_overrides(overrides)
     return {n: tool_risk(n, overrides) for n in tool_names}
 
 
 __all__ = [
     "RISK_LEVELS", "risk_rank", "tool_risk", "tool_risk_is_classified",
-    "tools_exceeding", "risk_map",
+    "tools_exceeding", "risk_map", "pinned_overrides",
 ]

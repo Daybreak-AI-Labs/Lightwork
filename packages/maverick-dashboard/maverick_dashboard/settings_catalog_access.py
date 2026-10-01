@@ -881,6 +881,11 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "How long to wait for a free database connection before giving up.",
           "number", grp, 5, "maverick.governed_records", subgroup=store, minimum=0.1,
           maximum=60, unit="seconds", restart=True),
+        S("governed_records", "pool_min_size", "Connections kept open while idle",
+          "How many pooled connections stay open when nothing is happening, so the first "
+          "request after a quiet spell does not wait to connect. Never more than the pool.",
+          "number", grp, 1, "maverick.governed_records", subgroup=store, minimum=0,
+          maximum=32, integer=True, unit="connections", restart=True),
         S("world_model", "backend", "Where Lightwork's records are kept",
           "Lightwork's main records (tasks, results and memory) live in a file on this server "
           "or in a shared PostgreSQL database for several servers.",

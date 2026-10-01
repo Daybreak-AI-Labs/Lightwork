@@ -165,10 +165,15 @@ def _client(monkeypatch, tmp_path) -> TestClient:
 def test_rendered_finder_indexes_folded_pages_and_sidebar_does_not(monkeypatch, tmp_path):
     from maverick_dashboard import ui_visibility
 
-    response = _client(monkeypatch, tmp_path).get("/overview")
+    client = _client(monkeypatch, tmp_path)
+    response = client.get("/overview")
     assert response.status_code == 200
     markup = _ShellLinks()
     markup.feed(response.text)
+    assert markup.finder_hrefs == []  # fetched on first open, not embedded
+    items = client.get("/nav/finder")
+    assert items.status_code == 200
+    markup.feed('<dialog id="navfinder-dialog">' + items.text + "</dialog>")
 
     registered = set(FOLDED) | set(NEWLY_GOVERNED)
     offered = {p for p in registered if ui_visibility.customer_ready(ui_visibility.page_for(p))}

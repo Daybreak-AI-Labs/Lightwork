@@ -11,7 +11,7 @@ def _client():
 
 def _stub_catalog(monkeypatch, entries):
     import maverick.catalog as cat
-    monkeypatch.setattr(cat, "load_catalog", lambda kind, indexes=None: entries)
+    monkeypatch.setattr(cat, "load_catalog", lambda kind, indexes=None, timeout=None: entries)
 
 
 def _entry(name="summarize-url", **over):

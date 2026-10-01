@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import contextvars
 import dataclasses
+import hashlib
 import itertools
+import json
 import os
 import threading
 import time
@@ -24,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -982,7 +984,34 @@ async def catalog_list(
         return JSONResponse({"detail": message, "message": message}, status_code=404,
                             headers={"Cache-Control": "no-store"})
     state = await run_in_threadpool(catalog_state, group, _words(q), changed=changed)
-    return JSONResponse(state, headers={"Cache-Control": "no-store"})
+    return _conditional_json(request, state)
+
+
+def _conditional_json(request: Request, state: dict[str, Any]) -> Response:
+    """The state as JSON with a content ETag; ``304 Not Modified`` when the
+    client's ``If-None-Match`` still matches.
+
+    The whole catalog is ~1.5 MB. ``private, no-cache`` lets the browser
+    keep its copy but revalidate every time, so a repeat load of the page
+    moves no bytes when nothing changed. The server still computes the state
+    (its inputs include per-setting choice providers, so a cheaper
+    fingerprint would risk serving stale rows).
+    """
+    body = json.dumps(state, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+    headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Cookie, Authorization"}
+    if _etag_matches(request.headers.get("if-none-match", ""), etag):
+        return Response(status_code=304, headers=headers)
+    return Response(body, media_type="application/json", headers=headers)
+
+
+def _etag_matches(header: str, etag: str) -> bool:
+    if not header:
+        return False
+    if header.strip() == "*":
+        return True
+    tags = {t.strip().removeprefix("W/") for t in header.split(",")}
+    return etag in tags
 
 
 def _audit_value(setting: catalog.Setting, value: object) -> object:

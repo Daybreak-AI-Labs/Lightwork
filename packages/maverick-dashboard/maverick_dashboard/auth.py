@@ -35,6 +35,7 @@ from starlette.concurrency import run_in_threadpool
 # maverick.suite_grants) so the HTTP gates and the kernel deploy/dispatch
 # gates both see group-derived department grants from the first request.
 from . import scim_groups  # noqa: F401
+from ._request_memo import memoized
 
 # Probe/discovery endpoints that must answer without a bearer even when OIDC is
 # on (load balancers and k8s liveness/readiness probes, plus the OpenAPI docs,
@@ -195,7 +196,12 @@ def non_static_auth_configured() -> bool:
     alternatives, not mutually exclusive deployment modes. Configuration
     uncertainty reports identity policy as configured so the request reaches
     the global dependency and fails closed unless an identity verifies.
+    Answered once per request (see :mod:`._request_memo`).
     """
+    return memoized("non_static_auth_configured", _non_static_auth_configured)
+
+
+def _non_static_auth_configured() -> bool:
     try:
         from .invites import invites_enabled
         from .local_owner import claimed
@@ -339,6 +345,10 @@ def auth_genuinely_off() -> bool:
     unauthenticated local deployment. Any unreadable auth configuration denies
     that legacy exception.
     """
+    return memoized("auth_genuinely_off", _auth_genuinely_off)
+
+
+def _auth_genuinely_off() -> bool:
     from ._shared import dashboard_token
 
     if dashboard_token() or _dashboard_require_auth_enabled():
@@ -369,11 +379,19 @@ def _authorization_principal(request: Request) -> str | None:
     ``None`` is an authorization grant only in genuine auth-off local mode or
     after the static dashboard bearer has authenticated the request. A missing
     proxy/OIDC/session identity must never inherit the legacy local-admin path.
+
+    A grant is remembered on ``request.state`` (a page render asks ten times);
+    a refusal is re-evaluated every time.
     """
     principal = caller_principal(request)
     if principal is not None:
         return principal
+    state = getattr(request, "state", None)
+    if state is not None and getattr(state, "_anonymous_grant_verified", False):
+        return None
     if anonymous_local_access_allowed() or _dashboard_token_authenticated(request):
+        if state is not None:
+            state._anonymous_grant_verified = True
         return None
     raise HTTPException(status_code=401, detail="authenticated identity required")
 

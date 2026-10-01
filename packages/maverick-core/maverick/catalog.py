@@ -65,7 +65,14 @@ log = logging.getLogger(__name__)
 VALID_KINDS = ("skills", "plugins", "mcp", "personas", "templates")
 SCHEMA_VERSION = 1
 FETCH_TIMEOUT = 15.0
+#: A page render must never wait long on the catalog host: the dashboard
+#: shows an empty store and the next visit (or a background refresh) retries.
+PAGE_FETCH_TIMEOUT = 3.0
 _CACHE_TTL = 6 * 3600  # 6 hours
+#: After a failed fetch, how long ``_fetch_index_raw`` serves the stale cache
+#: (or nothing) without touching the network again. Without it an offline or
+#: air-gapped install re-attempted the fetch on every Skill Store view.
+NEGATIVE_CACHE_TTL = 60.0
 _CACHE_DIR = data_dir("cache", "catalog")
 
 # Default index host. Until maverick.dev is registered this points at
@@ -187,6 +194,30 @@ _CACHED_FIRST: contextvars.ContextVar[bool] = contextvars.ContextVar(
 )
 _REFRESHING: set[str] = set()
 _REFRESH_LOCK = threading.Lock()
+_FETCH_TIMEOUT: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "maverick_catalog_fetch_timeout", default=None,
+)
+#: url -> monotonic deadline until which a failed fetch is not retried.
+_NEGATIVE: dict[str, float] = {}
+
+
+def _negative_cached(url: str) -> bool:
+    deadline = _NEGATIVE.get(url)
+    if deadline is None:
+        return False
+    if time.monotonic() < deadline:
+        return True
+    _NEGATIVE.pop(url, None)
+    return False
+
+
+def _read_stale(cache: Path) -> dict | None:
+    if not cache.exists():
+        return None
+    try:
+        return json.loads(cache.read_text())
+    except (OSError, ValueError):
+        return None
 
 
 @contextlib.contextmanager
@@ -241,7 +272,9 @@ def _fetch_index_raw(url: str) -> dict | None:
 
     Returns None (not raise) on any network/parse failure so an
     unreachable catalog degrades to "no entries" rather than breaking
-    the dashboard.
+    the dashboard. A failure is remembered for ``NEGATIVE_CACHE_TTL``
+    seconds: until then the stale cache (or None) is served with no
+    network attempt.
     """
     cache = _cache_path(url)
     if cache.exists():
@@ -254,23 +287,24 @@ def _fetch_index_raw(url: str) -> dict | None:
     if not url.startswith("https://"):
         log.warning("catalog: refusing non-https index url %s", url)
         return None
+    if _negative_cached(url):
+        return _read_stale(cache)
     # Shared SSRF guard: a configured index URL must not resolve to a
     # private/loopback/link-local/metadata address.
     from .tools.http_fetch import guarded_urlopen
+    timeout = _FETCH_TIMEOUT.get() or FETCH_TIMEOUT
     try:
-        with guarded_urlopen(url, timeout=FETCH_TIMEOUT) as resp:
+        with guarded_urlopen(url, timeout=timeout) as resp:
             if resp.status != 200:
+                _NEGATIVE[url] = time.monotonic() + NEGATIVE_CACHE_TTL
                 return None
             data = json.loads(resp.read(2_000_000).decode("utf-8"))
     except Exception as e:
         log.info("catalog: fetch %s failed: %s", url, e)
+        _NEGATIVE[url] = time.monotonic() + NEGATIVE_CACHE_TTL
         # Serve stale cache if we have it.
-        if cache.exists():
-            try:
-                return json.loads(cache.read_text())
-            except (OSError, ValueError):
-                return None
-        return None
+        return _read_stale(cache)
+    _NEGATIVE.pop(url, None)
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(data))
@@ -279,30 +313,37 @@ def _fetch_index_raw(url: str) -> dict | None:
     return data
 
 
-def load_catalog(kind: str, *, indexes: list[str] | None = None) -> list[CatalogEntry]:
+def load_catalog(
+    kind: str, *, indexes: list[str] | None = None, timeout: float | None = None,
+) -> list[CatalogEntry]:
     """Return merged catalog entries for ``kind`` across all indexes.
 
     Earlier indexes win on name collision. Malformed entries are
     skipped with a log line, not raised — one bad entry shouldn't hide
-    the whole catalog.
+    the whole catalog. ``timeout`` bounds each index fetch (default
+    ``FETCH_TIMEOUT``); page renders pass ``PAGE_FETCH_TIMEOUT``.
     """
     if kind not in VALID_KINDS:
         raise CatalogError(f"unknown kind {kind!r}; valid: {', '.join(VALID_KINDS)}")
     bases = indexes if indexes is not None else _configured_indexes()
     seen: dict[str, CatalogEntry] = {}
     fetch = _fetch_index_cached_first if _CACHED_FIRST.get() else _fetch_index_raw
-    for base in bases:
-        url = f"{base.rstrip('/')}/{kind}/index.json"
-        data = fetch(url)
-        if not data:
-            continue
-        for raw in data.get("entries", []):
-            try:
-                entry = CatalogEntry.from_dict(kind, raw)
-            except CatalogError as e:
-                log.info("catalog: skipping bad entry in %s: %s", url, e)
+    token = _FETCH_TIMEOUT.set(timeout)
+    try:
+        for base in bases:
+            url = f"{base.rstrip('/')}/{kind}/index.json"
+            data = fetch(url)
+            if not data:
                 continue
-            seen.setdefault(entry.name, entry)
+            for raw in data.get("entries", []):
+                try:
+                    entry = CatalogEntry.from_dict(kind, raw)
+                except CatalogError as e:
+                    log.info("catalog: skipping bad entry in %s: %s", url, e)
+                    continue
+                seen.setdefault(entry.name, entry)
+    finally:
+        _FETCH_TIMEOUT.reset(token)
     return sorted(seen.values(), key=lambda e: e.name)
 
 

@@ -1565,23 +1565,28 @@ def base_registry(
     # never set this private flag; the default remains fail-closed ACL
     # enforcement and the permissions snapshot applies the same resolver to
     # the introspection registry immediately after capturing catalog names.
-    _apply_tool_acl_unless_skipped(
-        reg,
-        skip=_skip_tool_acl,
-        channel=channel,
-        user_id=user_id,
-    )
-    if not _skip_tool_acl:
-        _apply_containment(reg)
-        _apply_network_posture(reg)
-    _apply_deferred_loading(reg)
-
-    # Route every compatible external connector write through the durable,
-    # fresh-human governed transaction boundary. Done last so it wraps the
-    # final tool objects; assembly fails closed if the boundary cannot load.
     from ..governed_tools import apply_governed_connectors
+    from ..safety.tool_risk import pinned_overrides
 
-    apply_governed_connectors(reg, goal_id=goal_id)
+    # Everything below registers tools past the ACL, whose risk check read the
+    # config once per tool (thousands of times per agent). Pin the
+    # [security.tool_risk] snapshot for the rest of the build.
+    with pinned_overrides():
+        _apply_tool_acl_unless_skipped(
+            reg,
+            skip=_skip_tool_acl,
+            channel=channel,
+            user_id=user_id,
+        )
+        if not _skip_tool_acl:
+            _apply_containment(reg)
+            _apply_network_posture(reg)
+        _apply_deferred_loading(reg)
+
+        # Route every compatible external connector write through the durable,
+        # fresh-human governed transaction boundary. Done last so it wraps the
+        # final tool objects; assembly fails closed if the boundary cannot load.
+        apply_governed_connectors(reg, goal_id=goal_id)
 
     return reg
 

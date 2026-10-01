@@ -29,6 +29,40 @@
     var activeIndex = -1;
     var returnFocus = null;
     var isOpen = false;
+    // The destinations are server-rendered by GET /nav/finder (the same
+    // role-filtered registry as the sidebar) and inserted on first open, so
+    // every page does not carry the whole list. The list is never built here.
+    var source = results.getAttribute("data-navfinder-src");
+    var loaded = !source || pageOptions.length > 0;
+    var loading = null;
+
+    function adoptPages() {
+      pageOptions = Array.prototype.slice.call(results.querySelectorAll("[data-navfinder-target]"));
+      pageOptions.forEach(bindOption);
+      options = pageOptions.concat(recordOptions);
+      loaded = true;
+    }
+
+    function ensureLoaded() {
+      if (loaded) return Promise.resolve();
+      if (loading) return loading;
+      count.textContent = "Loading pages\u2026";
+      loading = global.fetch(source, {headers: {"Accept": "text/html"}, credentials: "same-origin"})
+        .then(function (response) {
+          if (!response.ok) throw new Error("finder unavailable");
+          return response.text();
+        })
+        .then(function (html) {
+          results.insertAdjacentHTML("afterbegin", html);
+          adoptPages();
+          filterResults();
+        })
+        .catch(function () {
+          count.textContent = "Pages could not be loaded. Use the sidebar, or try again.";
+        })
+        .finally(function () { loading = null; });
+      return loading;
+    }
 
     function normalise(value) {
       return String(value || "").trim().toLowerCase();
@@ -126,7 +160,7 @@
       trigger.setAttribute("aria-expanded", "true");
       input.setAttribute("aria-expanded", "true");
       input.value = "";
-      filterResults();
+      if (loaded) filterResults(); else ensureLoaded();
       if (typeof dialog.showModal === "function") {
         dialog.showModal();
       } else {
@@ -202,6 +236,7 @@
     });
 
     options.forEach(bindOption);
+    if (!loaded) trigger.addEventListener("mouseenter", function () { ensureLoaded(); }, {once: true});
 
     doc.addEventListener("keydown", function (event) {
       var shortcut = (event.ctrlKey || event.metaKey) && !event.altKey &&

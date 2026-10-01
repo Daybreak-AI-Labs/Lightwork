@@ -30,7 +30,11 @@ from typing import Any, Protocol
 
 from . import runtime_metrics
 from .governed_record_lookup import LocalRecordLookup, RecordLookupSpec, RecordLookupUnavailable
-from .postgres_transactions import PostgresTransactions, validate_pool_settings
+from .postgres_transactions import (
+    PostgresTransactions,
+    validate_pool_min_size,
+    validate_pool_settings,
+)
 from .privacy_ops import (
     AuditOutboxError,
     PrivacyStateError,
@@ -644,6 +648,7 @@ class PostgresGovernedRecordBackend:
         pool_size: int = 0,
         pool_timeout_seconds: float = 5,
         lookup_spec: RecordLookupSpec | None = None,
+        pool_min_size: int = 1,
     ) -> None:
         # Postgres is the shared, potentially multi-tenant authority.  Keep
         # the argument for source compatibility with injected/test adapters,
@@ -673,7 +678,7 @@ class PostgresGovernedRecordBackend:
         self._schema_lock = threading.Lock()
         self._transactions = PostgresTransactions(
             self._dsn, connect=connect, pool_size=pool_size,
-            pool_timeout_seconds=pool_timeout_seconds,
+            pool_timeout_seconds=pool_timeout_seconds, pool_min_size=pool_min_size,
         )
         from .governed_record_lookup_pg import PostgresRecordLookup
         self.lookup_spec = lookup_spec
@@ -1498,6 +1503,7 @@ class _BackendSelection:
     shared_required: bool
     pool_size: int = 0
     pool_timeout_seconds: float = 5
+    pool_min_size: int = 1
 
 
 @dataclass(frozen=True)
@@ -1647,9 +1653,11 @@ def _selection() -> _BackendSelection:
             size, timeout = validate_pool_settings(
                 section.get("pool_size", 0), section.get("pool_timeout_seconds", 5),
             )
+            min_size = validate_pool_min_size(section.get("pool_min_size", 1), size)
         except ValueError as exc:
             raise GovernedRecordBackendError(str(exc)) from None
-        return _BackendSelection("postgres", dsn, shared_required, size, timeout)
+        return _BackendSelection("postgres", dsn, shared_required, size, timeout,
+                                 pool_min_size=min_size)
     if shared_required:
         raise GovernedRecordBackendError(
             "enterprise and multi-replica governed records require Postgres"
@@ -1882,6 +1890,7 @@ class GovernedRecordStore:
                     pool_size=selection.pool_size,
                     pool_timeout_seconds=selection.pool_timeout_seconds,
                     lookup_spec=self.lookup_spec,
+                    pool_min_size=selection.pool_min_size,
                 )
                 self._postgres_key = key
             selected = self._postgres_backend

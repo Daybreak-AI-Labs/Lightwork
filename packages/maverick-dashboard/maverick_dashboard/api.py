@@ -8032,7 +8032,7 @@ async def voice_captions(
 
 
 @router.get("/catalog/{kind}")
-async def catalog_list(kind: str) -> dict:
+def catalog_list(kind: str) -> dict:
     """List federated catalog entries for a kind (skills/plugins/mcp/personas).
 
     Tolerates an unreachable index by returning an empty list, so a
