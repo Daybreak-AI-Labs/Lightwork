@@ -244,7 +244,19 @@ _RLS_TABLES = (
     "attachment_submissions",
     "event_goal_admissions",
     "event_trigger_batches",
+    "webhook_subscriptions",
+    "webhook_deliveries",
+    "deadline_alerts",
 )
+# Tables whose tenant column is not called ``tenant_id``. The webhook and
+# deadline-alert tables (v42) scope rows by ``workspace`` (the same active
+# tenant id, written by ``paths.current_tenant_id``), so their RLS policy keys
+# on that column; the policy itself is identical.
+_RLS_TENANT_COLUMN: dict[str, str] = {
+    "webhook_subscriptions": "workspace",
+    "webhook_deliveries": "workspace",
+    "deadline_alerts": "workspace",
+}
 _TENANT_MIGRATION: list[str] = [
     f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS tenant_id TEXT;" for t in _TENANT_TABLES
 ] + [
@@ -1416,12 +1428,13 @@ class PostgresWorldModel:
 
     @staticmethod
     def _rls_policy_sql(table: str) -> str:
+        column = _RLS_TENANT_COLUMN.get(table, "tenant_id")
         return (
             f"CREATE POLICY mvk_tenant_isolation ON {table} "
             "USING ("
-            "  tenant_id = nullif(current_setting('maverick.tenant', true), '')"
+            f"  {column} = nullif(current_setting('maverick.tenant', true), '')"
             ") WITH CHECK ("
-            "  tenant_id = nullif(current_setting('maverick.tenant', true), '')"
+            f"  {column} = nullif(current_setting('maverick.tenant', true), '')"
             ")"
         )
 
@@ -1448,10 +1461,12 @@ class PostgresWorldModel:
             return False
         if not policy:
             return False
+        column = _RLS_TENANT_COLUMN.get(table, "tenant_id")
+
         def fail_closed(expr: object) -> bool:
             text = " ".join(str(expr).lower().split())
             return (
-                "tenant_id" in text
+                column in text
                 and "current_setting" in text
                 and "maverick.tenant" in text
                 and "nullif" in text

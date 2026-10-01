@@ -1581,6 +1581,29 @@ class TestDsarClocks:
         past = privacy_ops.dsar_clock(acked, now=r["due_at"] + 86400)
         assert past["overdue"] is True
 
+    def test_verify_acknowledge_and_extend_tell_webhook_subscribers(self, monkeypatch):
+        from maverick import webhook_events
+
+        sent: list[tuple[str, str, str]] = []
+        monkeypatch.setattr(
+            webhook_events, "emit",
+            lambda event, **kw: sent.append((event, kw["record_type"], kw["record_id"])) or 1,
+        )
+        r = privacy_ops.open_dsar(
+            "casey@example.com", "access", jurisdiction="us_ca_ccpa",
+            source="public_form", status="unverified",
+        )
+        privacy_ops.verify_dsar(r["id"], method="email_challenge", reference="link opened")
+        privacy_ops.acknowledge_dsar(r["id"], acknowledged_by="privacy-lead")
+        privacy_ops.extend_dsar(r["id"], reason="complex request", days=30)
+        # A repeat that changes nothing sends nothing.
+        privacy_ops.acknowledge_dsar(r["id"], acknowledged_by="privacy-lead")
+        assert [e for e, _rt, _rid in sent] == [
+            "dsar.opened", "dsar.verified", "dsar.acknowledged", "dsar.extended",
+        ]
+        assert all(rt == "dsar" and rid == r["id"] for _e, rt, rid in sent)
+        assert {"dsar.verified", "dsar.acknowledged", "dsar.extended"} <= webhook_events.EVENT_TYPES
+
     def test_manual_kinds_are_marked_answered(self):
         r = privacy_ops.open_dsar("casey@example.com", "opt_out", jurisdiction="us_ca_ccpa")
         done = privacy_ops.fulfill_dsar(r["id"], fulfilled_by="ops")

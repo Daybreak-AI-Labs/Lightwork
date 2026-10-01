@@ -436,6 +436,45 @@ def test_rls_covers_tables_added_after_the_v10_tenant_migration():
     assert set(postgres._TENANT_TABLES).issubset(set(postgres._RLS_TABLES))
 
 
+def test_rls_covers_the_workspace_scoped_webhook_and_alert_tables():
+    # v42's webhook_subscriptions / webhook_deliveries / deadline_alerts carry
+    # the active tenant id in a column called ``workspace``; they are
+    # RLS-scoped on that column with the same fail-closed policy.
+    for table in ("webhook_subscriptions", "webhook_deliveries", "deadline_alerts"):
+        assert table in postgres._RLS_TABLES
+        assert table not in postgres._TENANT_TABLES
+        sql = PostgresWorldModel._rls_policy_sql(table).lower()
+        assert f"policy mvk_tenant_isolation on {table}" in sql
+        assert "workspace = nullif(current_setting('maverick.tenant', true), '')" in sql
+        assert "tenant_id" not in sql
+        assert sql.count("nullif(current_setting('maverick.tenant', true), '')") == 2
+    # Every other RLS table still keys on tenant_id.
+    assert "tenant_id = nullif" in PostgresWorldModel._rls_policy_sql("approvals")
+
+
+def test_rls_policy_verification_reads_the_table_specific_column(monkeypatch):
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    rows = iter([
+        (True, True),
+        ("(workspace = NULLIF(current_setting('maverick.tenant', true), ''))",
+         "(workspace = NULLIF(current_setting('maverick.tenant', true), ''))"),
+    ])
+
+    class _Cur:
+        def execute(self, *_a, **_k):
+            pass
+
+        def fetchone(self):
+            return next(rows)
+
+    @contextmanager
+    def tx():
+        yield _Cur()
+
+    monkeypatch.setattr(world, "_tx", tx)
+    assert world._rls_policy_is_active("webhook_deliveries") is True
+
+
 # --- #51/#57: enterprise auto-on for strict isolation + RLS ----------------
 
 @pytest.fixture

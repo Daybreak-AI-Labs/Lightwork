@@ -84,6 +84,7 @@ Every POST body is this JSON object:
 | `deliverable.approved` | deliverable | A gated deliverable was signed off (sent only to `[deliverables] handoff_webhook`). |
 | `dsar.opened` | dsar | A data-subject request was opened. |
 | `dsar.verified` | dsar | The requester's identity was verified. |
+| `dsar.acknowledged` | dsar | Receipt was confirmed to the requester (the CCPA's 10-business-day step). |
 | `dsar.due_soon` | dsar | The request is inside a warning window or due today (`payload.state` says which). |
 | `dsar.overdue` | dsar | The request passed its deadline. |
 | `dsar.extended` | dsar | The deadline was extended. |
@@ -103,10 +104,10 @@ Every POST body is this JSON object:
 | `policy.published` | policy | A policy version was published. |
 | `webhook.test` | webhook_subscription | Sent from the Webhooks page. |
 
-`dsar.verified`, `dsar.extended` and `vendor.review_due` are in the catalogue
-so subscriptions can be created for them now; they are emitted once the
-matching record changes exist (identity verification and per-jurisdiction
-extensions on requests, review dates on vendors).
+`dsar.verified`, `dsar.acknowledged` and `dsar.extended` are sent when the
+matching change is recorded on the request (from the dashboard tracker or the
+public rights form). `vendor.review_due` is in the catalogue so subscriptions
+can be created for it now; it is emitted once vendors carry review dates.
 
 ## Signature (unchanged)
 

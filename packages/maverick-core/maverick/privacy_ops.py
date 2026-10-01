@@ -2950,10 +2950,11 @@ def list_dsars() -> list[dict]:
 
 
 def _dsar_mutation(
-    request_id: str, mutate, *, action: str, actor: str,
+    request_id: str, mutate, *, action: str, actor: str, event: str = "",
 ) -> dict | None:
     """Run one audited mutation on a request; ``None`` when it does not
-    exist. ``mutate`` returns True when it changed the record."""
+    exist. ``mutate`` returns True when it changed the record; ``event`` is
+    the webhook event sent to subscribers when it did."""
     changed = False
 
     def _mut(record: dict) -> None:
@@ -2967,6 +2968,8 @@ def _dsar_mutation(
         changed or isinstance(saved.get("_audit_pending"), (dict, list))
     ):
         saved = _audit_mutation(_DSAR, "dsar", saved)
+    if changed and event:
+        _emit_record_event(event, "dsar", saved)
     return saved
 
 
@@ -2994,7 +2997,8 @@ def verify_dsar(
             record["status"] = "open"
         return True
 
-    return _dsar_mutation(request_id, _verify, action="verify", actor=verified_by)
+    return _dsar_mutation(request_id, _verify, action="verify", actor=verified_by,
+                          event="dsar.verified")
 
 
 def acknowledge_dsar(request_id: str, *, acknowledged_by: str = "") -> dict | None:
@@ -3008,7 +3012,8 @@ def acknowledge_dsar(request_id: str, *, acknowledged_by: str = "") -> dict | No
         record["acknowledged_by"] = _actor_label(acknowledged_by)
         return True
 
-    return _dsar_mutation(request_id, _ack, action="acknowledge", actor=acknowledged_by)
+    return _dsar_mutation(request_id, _ack, action="acknowledge", actor=acknowledged_by,
+                          event="dsar.acknowledged")
 
 
 def extend_dsar(
@@ -3048,7 +3053,8 @@ def extend_dsar(
         record["extended_by"] = _actor_label(extended_by)
         return True
 
-    return _dsar_mutation(request_id, _extend, action="extend", actor=extended_by)
+    return _dsar_mutation(request_id, _extend, action="extend", actor=extended_by,
+                          event="dsar.extended")
 
 
 def annotate_dsar(request_id: str, mutate, *, action: str, actor: str = "") -> dict | None:

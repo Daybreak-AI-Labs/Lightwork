@@ -23,6 +23,7 @@ EVENT_CATALOG: dict[str, tuple[str, str]] = {
     "deliverable.approved": ("deliverable", "A person signed off a gated deliverable."),
     "dsar.opened": ("dsar", "A data-subject request was opened."),
     "dsar.verified": ("dsar", "The requester's identity was verified."),
+    "dsar.acknowledged": ("dsar", "Receipt of the request was confirmed to the requester."),
     "dsar.due_soon": ("dsar", "A data-subject request is due soon or due today."),
     "dsar.overdue": ("dsar", "A data-subject request passed its deadline."),
     "dsar.extended": ("dsar", "A data-subject request's deadline was extended."),
