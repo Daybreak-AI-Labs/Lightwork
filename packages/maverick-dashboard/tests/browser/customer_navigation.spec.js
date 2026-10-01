@@ -100,8 +100,15 @@ test('restricted customer sees no admin or research destination and direct pages
     expect(response.status()).toBe(403);
     expect(await response.text()).not.toContain('Synthetic captured deliverable');
   }
+  // Tasks and Results also sit in the "Most used" list above the groups, so
+  // each destination is checked where it lives: the quick link is visible at
+  // once, the group link after its group is opened from the keyboard.
   for (const path of ['/goals', '/knowledge-access', '/deliverables']) {
-    const link = page.locator(`#sidebar a[href="${path}"]`);
+    const quick = page.locator(`#sidebar .navquick-list a[href="${path}"]`);
+    await expect(quick).toHaveCount(path === '/knowledge-access' ? 0 : 1);
+    if (await quick.count()) await expect(quick).toBeVisible();
+    const link = page.locator(`#sidebar .navgrp a[href="${path}"]`);
+    await expect(link).toHaveCount(1);
     const toggle = link.locator('xpath=ancestor::div[contains(@class, "navgrp")]').locator('.navgrp__toggle');
     if (await toggle.getAttribute('aria-expanded') === 'false') {
       await toggle.focus(); await toggle.press('Enter');

@@ -412,10 +412,22 @@
           el.setAttribute('data-mv-time-done', mode);
         });
       };
-      window.mvFormatTimes(document);
+      // The page's own timestamps, flash notices and reset times are formatted
+      // once the full document is available (scripted harnesses stub it).
+      var realDocument = typeof document.querySelectorAll === 'function' && typeof document.querySelector === 'function';
+      if (realDocument) window.mvFormatTimes(document);
+      // Relative labels drift; refresh them once a minute. Only when the page
+      // has any: an idle timer would keep a scripted runtime from exiting.
+      if (realDocument && document.querySelector('[data-mv-time]')) {
+        setInterval(function () {
+          Array.prototype.forEach.call(document.querySelectorAll('[data-mv-time-done="relative"]'), function (el) {
+            el.textContent = window.mvTimeRelative(el.getAttribute('data-mv-time'));
+          });
+        }, 60000);
+      }
       // "Resets at midnight UTC" is only meaningful next to the viewer's own
       // clock: <span data-mv-utc-midnight></span> becomes ", which is 01:00 for you".
-      Array.prototype.forEach.call(document.querySelectorAll('[data-mv-utc-midnight]'), function (el) {
+      Array.prototype.forEach.call(realDocument ? document.querySelectorAll('[data-mv-utc-midnight]') : [], function (el) {
         try {
           var next = new Date(); next.setUTCHours(24, 0, 0, 0);
           var local = next.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
@@ -423,16 +435,10 @@
           if (next.getTimezoneOffset() !== 0) el.textContent = ', which is ' + local + ' in your time zone' + (zone ? ' (' + zone + ')' : '');
         } catch (e) {}
       });
-      // Relative labels drift; refresh them once a minute.
-      setInterval(function () {
-        Array.prototype.forEach.call(document.querySelectorAll('[data-mv-time-done="relative"]'), function (el) {
-          el.textContent = window.mvTimeRelative(el.getAttribute('data-mv-time'));
-        });
-      }, 60000);
       // A server-rendered "Saved." notice after a redirect also announces as a
       // toast, so feedback lands where the person is looking, not above the
       // fold. <div data-mv-toast="Workspace limit saved." ...>.
-      Array.prototype.forEach.call(document.querySelectorAll('[data-mv-toast]'), function (el) {
+      Array.prototype.forEach.call(realDocument ? document.querySelectorAll('[data-mv-toast]') : [], function (el) {
         var text = el.getAttribute('data-mv-toast');
         if (text) window.mvToast(text, { error: el.getAttribute('data-mv-toast-error') === 'true' });
       });

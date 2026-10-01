@@ -24,9 +24,19 @@ test('fresh owner can browse every sidebar destination and sign out at phone wid
     const page=await context.newPage();
     page.on('pageerror',error=>errors.push({page:page.url(),error:error.message}));
     page.on('response',response=>{if(response.status()===500)failures.push(response.url());});
+    // A fresh install opens on owner creation before anything else; "Skip for
+    // now" reaches Get started and is remembered for the next visit.
+    await page.goto(origin+'/');
+    await expect(page).toHaveURL(origin+'/auth/local-owner');
+    await page.getByRole('link',{name:'Skip for now'}).click();
+    await expect(page).toHaveURL(origin+'/start?owner=later');
+    await page.goto(origin+'/');
+    await expect(page).toHaveURL(origin+'/start');
     await page.goto(origin+'/auth/local-owner');
+    const passphrase='Synthetic first owner navigation phrase'; // pragma: allowlist secret - disposable synthetic account fixture
     await page.locator('input[name="email"]').fill('navigation-owner@example.test');
-    await page.locator('input[name="password"]').fill('Synthetic first owner navigation phrase');
+    await page.locator('input[name="password"]').fill(passphrase);
+    await page.locator('input[name="password2"]').fill(passphrase);
     await page.locator('input[name="confirm"]').check();
     await page.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(origin+'/start');
