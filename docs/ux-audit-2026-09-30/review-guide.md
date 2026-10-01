@@ -7,8 +7,9 @@ is its shorter index. The original 24 fields per entry remain in
 [source-backlog.json](source-backlog.json). The five separately approved
 security fixes have their own [register](additional-security-fixes.json).
 
-There are 188 implemented entries awaiting acceptance, two reopened repairs
-(LW-064 widget viewport fitting and LW-091 early keyboard role submission), and
+There are 187 implemented entries awaiting acceptance, three reopened repairs
+(LW-064 widget viewport fitting, LW-091 early keyboard role submission and
+LW-099 workspace-change recovery-button visibility), and
 five explicit qualification entries:
 LW057, LW149, LW154, LW155 and LW184. These counts do not
 mean that every external service, native platform, language or distribution is

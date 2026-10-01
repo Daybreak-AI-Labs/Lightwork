@@ -5,7 +5,7 @@ it does not mean all acceptance checks or release qualification have passed.
 
 [Full evidence and remaining criteria](implementation-tracker.json) · [Original 24-field backlog](source-backlog.json) · [Local qualification](local-qualification.md)
 
-Current dispositions: 188 implemented-test-needed, 2 planned, 5 test-needed.
+Current dispositions: 187 implemented-test-needed, 3 planned, 5 test-needed.
 
 | ID | Disposition | Audit item |
 | --- | --- | --- |
@@ -107,7 +107,7 @@ Current dispositions: 188 implemented-test-needed, 2 planned, 5 test-needed.
 | LW-096 | Built; acceptance pending | Explain effective permissions and their owner |
 | LW-097 | Built; acceptance pending | Make enterprise first-login defaults explicit |
 | LW-098 | Built; acceptance pending | Show effective posture, not just profile name |
-| LW-099 | Built; acceptance pending | Make multi-tab workspace switches explicit |
+| LW-099 | Active implementation | Make multi-tab workspace switches explicit |
 | LW-100 | Built; acceptance pending | View-only users receive active mutation controls |
 | LW-101 | Built; acceptance pending | Failed SSO ends at a plain-text “login failed” dead end |
 | LW-102 | Built; acceptance pending | “Keep until I choose” cannot disable an existing retention period |

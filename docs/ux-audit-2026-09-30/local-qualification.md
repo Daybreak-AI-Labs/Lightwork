@@ -8,14 +8,17 @@ No deployment configuration or credentials were changed.
 ## Current evidence snapshot, 2026-10-01
 
 This snapshot includes the completed final07 Python ordinary phase and the subsequent native PostgreSQL cursor receipts.
-The register has **188 implemented entries awaiting acceptance, two active
-repairs (LW-064 and LW-091), and five qualification entries**. The expanded
+The register has **187 implemented entries awaiting acceptance, three active
+repairs (LW-064, LW-091 and LW-099), and five qualification entries**. The expanded
 browser run at `be34965` completed with 102 distinct passes and six failures
 across its default/setup profiles. Three failures confirm widget clipping; one
 exposes early role-form submission before JavaScript binds the workspace. Two
 workspace-test fixtures require ownership and route corrections, and their
 investigation also found an unmatched-route error-page rendering bug. These
-findings are being repaired; no complete browser pass is claimed. LW-052's 125-task regression reproduced a missing
+findings are being repaired. Subsequent focused acceptance at `d4d6e25` also
+found the workspace-change recovery button obscured by the sidebar; draft
+preservation and stale-workspace refusal pass, but pointer-click recovery needs
+a layout repair. No complete browser pass is claimed. LW-052's 125-task regression reproduced a missing
 page-boundary task and retained deleted content. The scoped cursor/window repair
 is integrated; all 108 mobile tests and the 22-case backend group pass locally.
 Both complete new backend files now pass against native PostgreSQL in each posture (23 cases, including all seven service-gated variants). Final integrated checks remain queued.
