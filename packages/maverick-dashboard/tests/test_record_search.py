@@ -66,12 +66,30 @@ def test_task_owner_and_department_filter_before_search_counts(monkeypatch):
     monkeypatch.setattr(app_module, "_deliverable_specs", lambda: [{"domain":"privacy_report"}])
     monkeypatch.setattr(sources, "goal_owner_filter", lambda request: "user:alice")
     monkeypatch.setattr(sources, "require_permission", lambda *args: None)
-    monkeypatch.setattr(sources, "suite_allowed", lambda request, suite: suite != "security_ops")
+    monkeypatch.setattr(sources, "domain_suites_allowed", lambda request, domain: domain != "sec_report")
     projection = sources._tasks(object())
     assert calls[0]["owner"] == "user:alice" and calls[0]["limit"] == 1001
     assert [(row["title"], row["kind"]) for row in projection.items] == [("Visible", "report")]
     value = search.search({"tasks":lambda:projection}, query="NEVER_SEARCH_BODY")
     assert value["total"] == 0 and "NEVER_RETURN_RESULT" not in json.dumps(value)
+
+
+def test_inherited_suite_fork_is_hidden_from_task_search(monkeypatch, tmp_path):
+    from maverick_dashboard import app as app_module
+
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    monkeypatch.setattr(app_module, "_world", lambda: SimpleNamespace(list_goals=lambda **kw: [
+        SimpleNamespace(id=1, title="Private inherited task", status="done", domain="client_fork"),
+    ]))
+    monkeypatch.setattr(app_module, "_deliverable_specs", list)
+    monkeypatch.setattr(sources, "goal_owner_filter", lambda request: "user:alice")
+    monkeypatch.setattr(sources, "require_permission", lambda *args: None)
+    monkeypatch.setattr("maverick_dashboard.auth.caller_suites", lambda request: frozenset({"finance"}))
+
+    assert sources._tasks(object()).items == []
 
 
 def test_assessment_suite_filter_precedes_matches_and_counts(monkeypatch):

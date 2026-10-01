@@ -5,13 +5,17 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 
-from .auth import goal_owner_filter, require_permission, require_suite, suite_allowed
+from .auth import (
+    domain_suites_allowed,
+    goal_owner_filter,
+    require_permission,
+    require_suite,
+    suite_allowed,
+)
 from .record_search import SOURCE_LIMIT, Source, item, link
 
 
 def _tasks(request):
-    from maverick.domain import suite_for
-
     from .app import _deliverable_specs, _world
 
     require_permission(request, "view")
@@ -20,7 +24,7 @@ def _tasks(request):
              if any(row.status == "done" and row.domain for row in rows[:SOURCE_LIMIT]) else set())
     out = []
     for row in rows[:SOURCE_LIMIT]:
-        if not suite_allowed(request, suite_for(row.domain) if row.domain else None):
+        if not domain_suites_allowed(request, row.domain):
             continue
         kind = "report" if row.status == "done" and row.domain in specs else "task"
         out.append(item(kind, row.id, row.title, href=f"/chat/goal/{row.id}", state=row.status, source="tasks"))

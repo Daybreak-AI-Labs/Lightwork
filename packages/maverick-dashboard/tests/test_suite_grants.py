@@ -441,3 +441,22 @@ def test_scoped_user_sees_filtered_compartments_and_deliverables(monkeypatch, tm
     deliv = c.get("/deliverables")
     assert deliv.status_code == 200
     assert "legal_contracts" not in deliv.text
+
+
+def test_cross_suite_fork_is_hidden_from_compartments_without_both_grants(monkeypatch, tmp_path):
+    domains_dir = tmp_path / "domains"
+    domains_dir.mkdir()
+    (domains_dir / "legal_client.toml").write_text(
+        'name = "legal_client"\nextends = "aero_avionics"\n'
+        'description = "Private cross-suite sentinel"\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(domains_dir))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import suite_grants
+
+    suite_grants.set_suites("user:aero", ["aerospace_defense"])
+    _as(monkeypatch, "user:aero")
+    response = c.get("/compartments", params={"q": "Private cross-suite sentinel"})
+    assert response.status_code == 200
+    assert "No specialists match this search" in response.text

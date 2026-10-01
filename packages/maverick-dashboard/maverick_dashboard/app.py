@@ -6679,18 +6679,18 @@ async def compartments_page(
     }
     domains: list = []
     try:
-        from maverick.domain import available_domains, suite_for
+        from maverick.domain import available_domains, suites_for_domain
 
-        from .auth import scope_to_suites
+        from .auth import caller_suites
 
         # Job-function scoping: a scoped caller sees only their departments'
         # sealed agents and capability envelopes, matching /agents (this page
         # otherwise leaks every department's pack config).
-        catalog = scope_to_suites(
-            request,
-            sorted(available_domains().values(), key=lambda d: d.name),
-            suite_of=lambda d: suite_for(d.name),
-        )
+        allowed = caller_suites(request)
+        catalog = [
+            profile for name, profile in sorted(available_domains().items(), key=lambda item: item[1].name)
+            if allowed is None or suites_for_domain(name, profile) <= allowed
+        ]
         folded = query.casefold()
         filtered = [
             d
