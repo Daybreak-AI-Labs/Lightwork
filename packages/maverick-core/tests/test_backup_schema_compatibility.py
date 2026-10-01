@@ -14,6 +14,20 @@ from maverick import backup, config, file_lock, world_model
 KEY = bytes(range(32))
 
 
+def _seed_v33_goal(world, title):
+    """Write a historical row without invoking the current-schema writer."""
+    assert world.schema_version == 33
+    columns = {row[1] for row in world.conn.execute("PRAGMA table_info(goals)")}
+    assert "connection_selection" not in columns
+    cursor = world.conn.execute(
+        "INSERT INTO goals(title, description, status, created_at, updated_at, owner) "
+        "VALUES(?, '', 'pending', ?, ?, 'operator')",
+        (title, 1_700_000_000.0, 1_700_000_000.0),
+    )
+    world.conn.commit()
+    return cursor.lastrowid
+
+
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
@@ -183,7 +197,7 @@ def test_prior_v33_record_survives_upgrade_restore_and_repeat_upgrade(tmp_path, 
     with monkeypatch.context() as prior:
         prior.setattr(world_model, "SCHEMA_VERSION", 33)
         with world_model.WorldModel(source / "world.db") as world:
-            goal_id = world.create_goal("Prior schema customer record", owner="operator")
+            goal_id = _seed_v33_goal(world, "Prior schema customer record")
             assert world.schema_version == 33
     with backup.recovery_scope(source, "acme", KEY):
         archive = backup.create_backup(tmp_path / "v33.tgz")
@@ -191,6 +205,7 @@ def test_prior_v33_record_survives_upgrade_restore_and_repeat_upgrade(tmp_path, 
     with world_model.WorldModel(source / "world.db") as upgraded:
         assert upgraded.schema_version == current
         assert upgraded.get_goal(goal_id).title == "Prior schema customer record"
+        assert upgraded.goal_connection_selection(goal_id) == ""
         assert upgraded.conn.execute("SELECT name FROM sqlite_master WHERE name='provider_cap_receipts'").fetchone()
         assert upgraded.conn.execute("SELECT name FROM sqlite_master WHERE name='provider_operation_attempts'").fetchone()
     live = tmp_path / "restored"
@@ -202,6 +217,7 @@ def test_prior_v33_record_survives_upgrade_restore_and_repeat_upgrade(tmp_path, 
         assert reopened.schema_version == current
         assert reopened.get_goal(goal_id).title == "Prior schema customer record"
         assert reopened.get_goal(goal_id).owner == "operator"
+        assert reopened.goal_connection_selection(goal_id) == ""
 
 
 @pytest.mark.parametrize("relative", ["customer-world.sqlite", "tenants/acme/customer-state.data"])
@@ -241,7 +257,7 @@ def test_custom_named_prior_world_restores_and_reopens(tmp_path, monkeypatch, re
     with monkeypatch.context() as prior:
         prior.setattr(world_model, "SCHEMA_VERSION", 33)
         with world_model.WorldModel(path) as world:
-            goal_id = world.create_goal("Custom prior record", owner="operator")
+            goal_id = _seed_v33_goal(world, "Custom prior record")
     with backup.recovery_scope(source, "acme", KEY, whole_home=relative.startswith("tenants/")):
         archive = backup.create_backup(tmp_path / "custom-prior.tgz")
     live = tmp_path / "restored"
@@ -251,6 +267,7 @@ def test_custom_named_prior_world_restores_and_reopens(tmp_path, monkeypatch, re
         assert reopened.schema_version == world_model.SCHEMA_VERSION
         assert reopened.get_goal(goal_id).title == "Custom prior record"
         assert reopened.get_goal(goal_id).owner == "operator"
+        assert reopened.goal_connection_selection(goal_id) == ""
 
 
 @pytest.mark.parametrize("suffix", ["-wal", "-shm", "-journal"])
