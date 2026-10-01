@@ -140,16 +140,13 @@ class TextBridge:
         return out
 
     def reset(self):
-        info = self.info()
-        if info is None:
+        from qdrant_client.models import Filter, FilterSelector
+
+        if self.info() is None:
             return
-        params = info.config.params
-        options = {"vectors_config": params.vectors}
-        if getattr(info.config, "metadata", None) is not None:
-            options["metadata"] = info.config.metadata
-        if getattr(params, "sparse_vectors", None) is not None:
-            options["sparse_vectors_config"] = params.sparse_vectors
-        # Read the schema before any deletion. This works for both named text
-        # and unnamed precomputed-vector collections without loading a model.
-        self.call(lambda: self.store._client.delete_collection(self.store._collection), "update")
-        self.call(lambda: self.store._client.create_collection(self.store._collection, **options), "update")
+        # Clear through the supported point API, retaining the entire schema
+        # and model identity. Local Qdrant's delete/recreate can silently retain
+        # its SQLite file when Windows still holds it open; never rely on that
+        # filesystem deletion for a successful reset.
+        self.call(lambda: self.store._client.delete(
+            self.store._collection, points_selector=FilterSelector(filter=Filter()), wait=True), "update")

@@ -362,10 +362,11 @@ class QdrantStore:
             return 0
 
     def reset(self) -> None:
-        """Drop and recreate the collection. Tests use this; runtime
+        """Clear the collection. Tests use this; runtime
         users should prefer ``delete(ids)``.
 
-        Recreate after the drop so a ``query`` before the next ``add`` doesn't
+        Current clients clear points while retaining schema and model identity.
+        Legacy clients recreate after the drop so a query before the next add doesn't
         hit a missing collection. ``client.add`` auto-creates with the
         fastembed vector params, so recreate with the same params; if the
         client can't supply them (older versions / no model loaded) we leave
