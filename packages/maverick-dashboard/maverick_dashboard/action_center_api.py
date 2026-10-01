@@ -15,10 +15,10 @@ from starlette.concurrency import run_in_threadpool
 from . import action_center
 from .auth import (
     caller_principal,
+    caller_suites,
     domain_suites_allowed,
     goal_owner_filter,
     require_permission,
-    scope_to_suites,
     suite_allowed,
 )
 from .draft_api import context_for
@@ -107,7 +107,11 @@ def _model(request):
 
     principal = caller_principal(request)
     def specs():
-        return scope_to_suites(request, _deliverable_specs(), suite_of=lambda spec: spec.get("suite"))
+        allowed = caller_suites(request)
+        return [
+            spec for spec in _deliverable_specs()
+            if allowed is None or set(spec["suites"]) <= allowed
+        ]
     mapping = {kind: suite for suite, kinds in (("finance", FINANCE_ASSESSMENT_TYPES),
         ("privacy", PRIVACY_ASSESSMENT_TYPES), ("security", SECURITY_ASSESSMENT_TYPES)) for kind in kinds}
     try:

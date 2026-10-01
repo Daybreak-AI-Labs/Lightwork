@@ -47,7 +47,7 @@ def test_lazy_api_specs_recheck_current_suite_scope_on_every_projection(monkeypa
 
     app = importlib.import_module("maverick_dashboard.app")
     world = World([goal(), goal(2, "restricted")])
-    request = SimpleNamespace(allowed=True)
+    request = SimpleNamespace(allowed=frozenset({"finance"}))
     loads, scopes = [], []
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
     monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:alice")
@@ -57,26 +57,28 @@ def test_lazy_api_specs_recheck_current_suite_scope_on_every_projection(monkeypa
 
     def load_specs():
         loads.append(True)
-        return [{"domain": "forecast", "suite": "finance", "gate": "human", "deliverable": "Forecast"},
-                {"domain": "restricted", "suite": "restricted", "gate": "human", "deliverable": "Hidden"}]
+        return [{"domain": "forecast", "suite": "finance", "suites": ["finance"],
+                 "gate": "human", "deliverable": "Forecast"},
+                {"domain": "restricted", "suite": "finance", "suites": ["finance", "legal"],
+                 "gate": "human", "deliverable": "Hidden"}]
 
-    def current_scope(current_request, specs, *, suite_of):
+    def current_scope(current_request):
         scopes.append(current_request.allowed)
-        return [spec for spec in specs if current_request.allowed and suite_of(spec) == "finance"]
+        return current_request.allowed
 
     def collect(current_world, *, owner, specs, **kwargs):
         assert callable(specs)
         return center._signoff_source(current_world, owner, specs)
 
     monkeypatch.setattr(app, "_deliverable_specs", load_specs)
-    monkeypatch.setattr(api, "scope_to_suites", current_scope)
+    monkeypatch.setattr(api, "caller_suites", current_scope)
     monkeypatch.setattr(api.action_center, "collect", collect)
     rows, coverage = api._model(request)
     assert [row["href"] for row in rows] == ["/chat/goal/1"]
     assert coverage == [{"kind": "signoff", "status": "current"}]
-    request.allowed = False
+    request.allowed = frozenset()
     assert api._model(request) == ([], coverage)
-    assert len(loads) == 2 and scopes == [True, False]
+    assert len(loads) == 2 and scopes == [frozenset({"finance"}), frozenset()]
     assert world.signoff_ids == [[1], []]
     world.rows = []
     assert api._model(request) == ([], coverage)

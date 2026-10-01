@@ -45,6 +45,7 @@ from .domain import (
     overridden_fields,
     rejected_workspace_domains,
     suite_for,
+    suites_for_domain,
     user_dir,
 )
 from .file_lock import (
@@ -259,9 +260,10 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
     raw = read_override(name, directory)
     errors, warnings = lint_profile(prof)
     return {
-        "name": prof.name,
+        "name": name,
         "generation": _override_generation(name, (Path(directory) if directory else user_dir()) / f"{name}.toml"),
         "suite": suite_for(prof.name) or suite_for(name),
+        "suites": sorted(suites_for_domain(name, prof)),
         "description": prof.description,
         "persona": prof.persona,
         "allow_tools": list(prof.allow_tools),
@@ -316,6 +318,7 @@ def list_agents(directory: str | Path | None = None) -> list[dict]:
         out.append({
             "name": name,
             "suite": suite_for(prof.name) or suite_for(name),
+            "suites": sorted(suites_for_domain(name, prof)),
             "description": prof.description,
             "is_override": name in overrides,
             "has_workflow": bool(prof.workflow),

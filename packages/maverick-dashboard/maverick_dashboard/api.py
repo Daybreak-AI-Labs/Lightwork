@@ -11289,7 +11289,7 @@ async def list_agents_endpoint(request: Request) -> dict:
     allowed = caller_suites(request)
     agents = list_agents()
     if allowed is not None:
-        agents = [a for a in agents if a.get("suite") is None or a.get("suite") in allowed]
+        agents = [a for a in agents if set(a["suites"]) <= allowed]
     return {"agents": agents}
 
 
@@ -11305,7 +11305,8 @@ async def get_agent_endpoint(request: Request, name: str) -> dict:
     # Job-function scoping: pack config (persona, tool allowlist, risk ceiling)
     # for another department is not this caller's to read. 404 first (catalog
     # existence is public), 403 on grant, mirroring /departments/{key}.
-    require_suite(request, view.get("suite"))
+    for suite in view["suites"]:
+        require_suite(request, suite)
     return view
 
 
@@ -11339,7 +11340,8 @@ async def agent_jobcard(request: Request, name: str, days: int = 90) -> dict:
     view = await run_in_threadpool(resolved_view, name)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
-    require_suite(request, view.get("suite"))
+    for suite in view["suites"]:
+        require_suite(request, suite)
 
     from maverick import agent_scorecard, model_cost_tier
 
@@ -11354,6 +11356,7 @@ async def agent_jobcard(request: Request, name: str, days: int = 90) -> dict:
     jd = {
         "name": view["name"],
         "suite": view.get("suite"),
+        "suites": view["suites"],
         "role": view.get("description", ""),
         "mission": view.get("persona", ""),
         "responsibilities": view.get("workflow") or [],

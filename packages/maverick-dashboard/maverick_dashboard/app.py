@@ -3735,7 +3735,7 @@ def _deliverable_specs() -> list[dict]:
     runs on ``/goals``). Fail-soft to an empty list so the page never 500s if
     the factory layer is unavailable."""
     try:
-        from maverick.domain import available_domains, enforced_gate, suite_for
+        from maverick.domain import available_domains, enforced_gate, suite_for, suites_for_domain
     except Exception:  # pragma: no cover -- factory layer unavailable
         return []
     specs: list[dict] = []
@@ -3752,6 +3752,7 @@ def _deliverable_specs() -> list[dict]:
                 "cadence": out.cadence,
                 "gate": enforced_gate(prof),
                 "suite": suite_for(name),
+                "suites": sorted(suites_for_domain(name, prof)),
             }
         )
     return specs
@@ -3766,12 +3767,16 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     With no explicit ``?role=``, defaults to the caller's own persona roles
     (``[personas]`` config) so a logged-in analyst lands on their deliverables;
     ``?role=all`` widens to everything, ``?role=<r>`` picks a single role."""
-    from .auth import scope_to_suites
+    from .auth import caller_suites
     from .deliverables import build_inbox, persona_roles_for, recent_runs_by_domain
 
     # Job-function scoping: a scoped caller's inbox lists only their
     # departments' deliverable specs (plus generic packs), matching /agents.
-    specs = scope_to_suites(request, _deliverable_specs(), suite_of=lambda s: s.get("suite"))
+    allowed = caller_suites(request)
+    specs = [
+        spec for spec in _deliverable_specs()
+        if allowed is None or set(spec["suites"]) <= allowed
+    ]
     owner = goal_owner_filter(request)
     # One grouped read for every pack's latest runs, not one query per pack.
     runs_by_domain = recent_runs_by_domain(_world(), [s["domain"] for s in specs], owner=owner)
@@ -6751,13 +6756,17 @@ async def agents_page(request: Request) -> HTMLResponse:
         from maverick.domain_edit import list_agents, rejected_override_view, resolved_view
 
         from .api import pack_editing_denial
-        from .auth import scope_to_suites, suite_allowed
+        from .auth import caller_suites
 
         editable = pack_editing_denial(request) is None
         # Job-function scoping: mirror GET /api/v1/agents — a caller with a
         # department grant browses their departments' specialists plus generic
         # packs; a non-granted selection renders nothing rather than its config.
-        agents = scope_to_suites(request, list_agents(), suite_of=lambda a: a.get("suite"))
+        allowed = caller_suites(request)
+        agents = [
+            agent for agent in list_agents()
+            if allowed is None or set(agent["suites"]) <= allowed
+        ]
         if editable:
             rejected_agents = [
                 view for name in sorted(rejected_workspace_domains())
@@ -6766,7 +6775,7 @@ async def agents_page(request: Request) -> HTMLResponse:
         name = request.query_params.get("name")
         if name:
             view = resolved_view(name)
-            if view and suite_allowed(request, view.get("suite")):
+            if view and (allowed is None or set(view["suites"]) <= allowed):
                 selected = view
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
@@ -6791,16 +6800,17 @@ def assessments_page(request: Request) -> HTMLResponse:
     try:
         from maverick.domain_edit import list_agents
 
-        from .auth import scope_to_suites
+        from .auth import caller_suites
 
         # Job-function scoping: the subject picker offers only the caller's
         # departments' specialists, matching the scoped /agents roster (else a
         # picked-but-403'd pack drives mixed failures mid-assessment).
-        agents = scope_to_suites(
-            request,
-            [{"name": a["name"], "suite": a.get("suite")} for a in list_agents()],
-            suite_of=lambda a: a.get("suite"),
-        )
+        allowed = caller_suites(request)
+        agents = [
+            {"name": agent["name"], "suite": agent.get("suite")}
+            for agent in list_agents()
+            if allowed is None or set(agent["suites"]) <= allowed
+        ]
         # People pick from readable names grouped by department; the pack
         # name stays the option value the API receives.
         from maverick.departments import department_title

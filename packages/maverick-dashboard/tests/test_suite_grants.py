@@ -460,3 +460,53 @@ def test_cross_suite_fork_is_hidden_from_compartments_without_both_grants(monkey
     response = c.get("/compartments", params={"q": "Private cross-suite sentinel"})
     assert response.status_code == 200
     assert "No specialists match this search" in response.text
+
+
+def test_cross_suite_fork_requires_both_grants_on_agent_and_deliverable_views(
+    monkeypatch, tmp_path,
+):
+    domains_dir = tmp_path / "domains"
+    domains_dir.mkdir()
+    (domains_dir / "legal_client.toml").write_text(
+        'name = "legal_client"\nextends = "aero_avionics"\n'
+        'description = "Private cross-suite sentinel"\n'
+        '[output]\nshape = "report"\n'
+        'deliverable = "Private cross-suite artifact"\n'
+        'consumers = ["cross_suite_private_role"]\n'
+        'cadence = "on-demand"\ngate = "review"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(domains_dir))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick.domain import available_domains
+    from maverick_dashboard import suite_grants
+
+    assert "legal_client" in available_domains()
+    _as(monkeypatch, "user:limited")
+    for suites in (["aerospace_defense"], ["legal"]):
+        suite_grants.set_suites("user:limited", suites)
+        names = {a["name"] for a in c.get("/api/v1/agents").json()["agents"]}
+        assert "legal_client" not in names
+        assert 'data-name="legal_client"' not in c.get("/agents?name=legal_client").text
+        assert c.get("/api/v1/agents/legal_client").status_code == 403
+        assert c.get("/api/v1/agents/legal_client/jobcard").status_code == 403
+        assert "Private cross-suite artifact" not in c.get(
+            "/deliverables?role=cross_suite_private_role",
+        ).text
+
+    suite_grants.set_suites("user:limited", ["aerospace_defense", "legal"])
+    agents = c.get("/api/v1/agents").json()["agents"]
+    fork = next(a for a in agents if a["name"] == "legal_client")
+    assert fork["suites"] == ["aerospace_defense", "legal"]
+    detail = c.get("/api/v1/agents/legal_client")
+    assert detail.status_code == 200
+    assert detail.json()["name"] == "legal_client"
+    assert detail.json()["suites"] == fork["suites"]
+    assert c.get("/api/v1/agents/legal_client/jobcard").json()[
+        "job_description"
+    ]["suites"] == fork["suites"]
+    assert 'data-name="legal_client"' in c.get("/agents?name=legal_client").text
+    assert "Private cross-suite artifact" in c.get(
+        "/deliverables?role=cross_suite_private_role",
+    ).text
