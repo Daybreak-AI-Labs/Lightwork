@@ -234,6 +234,8 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
     slug = slugify(name)
     if not _NAME_RE.match(slug):
         raise ValueError("trigger name must contain a letter or digit (a-z, 0-9, -)")
+    if source == "form" and cursor:
+        raise ValueError("Form submission position is managed automatically.")
     if flow and template_snapshot is not None:
         raise ValueError("flow triggers cannot include a template snapshot")
     # Direct store callers get the same creation-time pinning as the REST API
@@ -349,6 +351,10 @@ def set_cursor(name: str, cursor: str, *, tenant: str | None = None,
         if len(matches) != 1:
             return False
         match = matches[0]
+        if match.get("source") == "form" and (
+            expected_cursor is None or expected_generation is None
+        ):
+            return False
         if expected_generation is not None:
             from .event_poll import _trigger_key
             if _trigger_key(match) != expected_generation:

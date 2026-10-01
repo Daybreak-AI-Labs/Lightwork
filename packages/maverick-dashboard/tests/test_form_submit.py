@@ -157,6 +157,12 @@ def test_accepted_form_cannot_rebind_or_delete_before_original_flow_is_queued(mo
     assert client.post("/form/lead", json={"name": "accepted for A"}).status_code == 201
     listed = client.get("/api/v1/event-triggers").json()["triggers"]
     assert next(t for t in listed if t["name"] == "intake")["pending_submissions"] == 1
+    with pytest.raises(ValueError, match="managed automatically"):
+        event_triggers_store.set_trigger(
+            "intake", "", "form", config={"token": "lead"},
+            flow="published-form-flow", cursor="1", tenant="",
+        )
+    assert not event_triggers_store.set_cursor("intake", "1", tenant="")
     rebind = client.post("/api/v1/event-triggers", json={
         "name": "intake", "source": "form", "flow": second.id,
         "config": {"token": "lead"},
@@ -173,6 +179,11 @@ def test_accepted_form_cannot_rebind_or_delete_before_original_flow_is_queued(mo
     assert run.flow_id == "published-form-flow" and run.data["name"] == "accepted for A"
     assert next(t for t in client.get("/api/v1/event-triggers").json()["triggers"]
                 if t["name"] == "intake")["pending_submissions"] == 0
+    with pytest.raises(ValueError, match="managed automatically"):
+        event_triggers_store.set_trigger(
+            "intake", "", "form", config={"token": "lead"},
+            flow="published-form-flow", cursor="0", tenant="",
+        )
     assert client.post("/api/v1/event-triggers", json={
         "name": "intake", "source": "form", "flow": second.id,
         "config": {"token": "lead"},
