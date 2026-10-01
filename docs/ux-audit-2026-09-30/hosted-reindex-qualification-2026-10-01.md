@@ -68,7 +68,16 @@ The final 137-case cohort includes the complete files
 `test_cohere_embed.py`. All eight package roots came from this isolated clone
 through process-local `PYTHONPATH`; the shared environment was not modified.
 
-Browser qualification is owned by the parent browser worker after integration.
+The focused installed-Chrome journey passed at worker commit
+`43f567a6fc9d18e96d024499f2ae217baf40ced3` (1.8-second case, 12.455-second
+runner). Synthetic responses exercise the shipped client: a positive $0.000125
+ceiling appears before confirmation; dispatch preserves the exact reviewed
+context; observed and unresolved costs retain six decimal places; unconfirmed
+jobs offer no resend control; confirmed Archive retains cost receipts. The
+report is `audit/browser-hosted-reindex-43f567a-results.json`. This browser case
+does not invoke a provider; the native accounting behavior is covered by the
+137-case cohort above. Final complete-browser qualification remains separate.
+
 Installed-model performance and distributed PostgreSQL publication are separate
 qualification boundaries. New cost/recovery copy remains under the existing
 English fallback; this patch does not claim added translation coverage.
