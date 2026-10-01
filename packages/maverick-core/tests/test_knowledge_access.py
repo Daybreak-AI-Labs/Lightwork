@@ -987,7 +987,14 @@ def test_complete_catalogue_rejects_earlier_expiry_during_final_later_check(
         monkeypatch.setattr(registry, "knowledge_candidate_page", lambda *_args, **_kwargs: {
             "items": rows, "snapshot": None, "last": None, "has_more": False,
         })
-    rights[("tenant-a", first.asset_id)]["expires_at"] = time.time() + 0.25
+    expiry = rights[("tenant-a", first.asset_id)]["expires_at"]
+    authoritative_time = registry.store.authoritative_time
+    clock = {"after_final_later_check": False}
+    monkeypatch.setattr(
+        registry.store,
+        "authoritative_time",
+        lambda: expiry + 1 if clock["after_final_later_check"] else authoritative_time(),
+    )
     original = registry.resolve_dataset
     counts = {first.asset_id: 0, second.asset_id: 0}
 
@@ -995,7 +1002,7 @@ def test_complete_catalogue_rejects_earlier_expiry_during_final_later_check(
         counts[reference.asset_id] += 1
         admission = original(tenant, reference, **kwargs)
         if reference == second and counts[reference.asset_id] == 4:
-            time.sleep(0.35)
+            clock["after_final_later_check"] = True
         return admission
 
     monkeypatch.setattr(registry, "resolve_dataset", expire_first_during_final_sweep)
@@ -1019,6 +1026,7 @@ def test_complete_catalogue_rejects_earlier_expiry_during_final_later_check(
 
     with pytest.raises(KnowledgeAccessDenied, match="expired during knowledge access"):
         call()
+    assert clock["after_final_later_check"] is True
     assert counts == {first.asset_id: 4, second.asset_id: 4}
 
 
