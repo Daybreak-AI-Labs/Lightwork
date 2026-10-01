@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import auth, settings_access_guard, settings_tests
+from . import auth, settings_access_guard, settings_tests, step_up
 from . import settings_catalog as catalog
 
 router = APIRouter()
@@ -1302,6 +1302,11 @@ async def catalog_update(
         # ``message`` is written for people (the page shows it as is).
         return JSONResponse({"detail": exc.message, "message": exc.message},
                             status_code=exc.status, headers={"Cache-Control": "no-store"})
+    if any(c["setting"].id in settings_access_guard.SIGN_IN_IDS
+           or c["setting"].id.startswith(settings_access_guard.SIGN_IN_PREFIXES)
+           or c["setting"].id.startswith(settings_access_guard.KEY_PREFIXES)
+           for c in changes):
+        step_up.require_recent_mfa(request, "change_auth_settings")
     try:
         access = await run_in_threadpool(_guard, request, writes, changes, _layers) \
             if changes else []

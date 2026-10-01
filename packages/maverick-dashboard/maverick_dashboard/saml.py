@@ -215,10 +215,36 @@ def prepare_login_redirect(
         ) from e
 
     client = client or _client(cfg)
+    extra: dict = {}
+    requested = _requested_authn_context()
+    if requested is not None:
+        extra["requested_authn_context"] = requested
     reqid, info = client.prepare_for_authenticate(
-        relay_state=relay_state, binding=BINDING_HTTP_REDIRECT
+        relay_state=relay_state, binding=BINDING_HTTP_REDIRECT, **extra
     )
     return str(reqid or ""), dict(info["headers"]).get("Location", "")
+
+
+def _requested_authn_context():  # pragma: no cover -- needs pysaml2
+    """A ``RequestedAuthnContext`` asking the IdP for one of the configured
+    second-factor contexts while "Require a second factor" is on, or ``None``.
+    The ACS still checks the assertion: a request is a hint, not proof."""
+    from .mfa_policy import policy, require_mfa
+
+    if not require_mfa():
+        return None
+    try:
+        contexts = list(policy()["saml_authn_contexts"])
+        from saml2.saml import AuthnContextClassRef  # type: ignore
+        from saml2.samlp import RequestedAuthnContext  # type: ignore
+    except Exception:
+        return None
+    if not contexts:
+        return None
+    return RequestedAuthnContext(
+        authn_context_class_ref=[AuthnContextClassRef(text=c) for c in contexts],
+        comparison="exact",
+    )
 
 
 def login_redirect_url(
@@ -267,6 +293,10 @@ class SamlIdentity:
     # assertion (replay defense). The ACS fails closed when the ID is missing.
     assertion_id: str = ""
     expires_at: float = 0.0
+    # The assertion's AuthnContextClassRef (how the IdP says the person
+    # authenticated); "" when the response does not expose one. The
+    # second-factor policy compares it with [auth.mfa] saml_authn_contexts.
+    authn_context: str = ""
 
     @property
     def principal(self) -> str:
@@ -337,7 +367,25 @@ def extract_identity(authn_response) -> SamlIdentity:
         attrs = {}
     assertion_id, expires_at = _assertion_replay_fields(authn_response)
     return SamlIdentity(name_id=name_id, attributes=dict(attrs),
-                        assertion_id=assertion_id, expires_at=expires_at)
+                        assertion_id=assertion_id, expires_at=expires_at,
+                        authn_context=_authn_context(authn_response))
+
+
+def _authn_context(authn_response) -> str:
+    """The first AuthnContextClassRef pysaml2 reports (``authn_info()`` yields
+    ``(class_ref, authenticating_authorities, instant)`` tuples), else ""."""
+    info = getattr(authn_response, "authn_info", None)
+    if not callable(info):
+        return ""
+    try:
+        entries = info() or []
+    except Exception:  # pragma: no cover -- response shape varies
+        return ""
+    for entry in entries:
+        ref = entry[0] if isinstance(entry, (list, tuple)) and entry else entry
+        if isinstance(ref, str) and ref.strip():
+            return ref.strip()
+    return ""
 
 
 def mint_session_cookie(name_id: str, *, secret: str | None = None) -> str:
@@ -569,10 +617,38 @@ async def saml_acs(request: Request):
         # retries with a fresh assertion).
         log.warning("SAML ACS: replay store unavailable; refusing login")
         return _tx_error("SAML session store unavailable", status_code=503)
+    # Second factor: with "Require a second factor" on, the assertion's
+    # authentication context must name one. One plain sentence, no session.
+    from .mfa_policy import (
+        MFA_MISSING_MESSAGE,
+        require_mfa,
+        saml_context_proves_mfa,
+    )
+
+    mfa = saml_context_proves_mfa(identity.authn_context)
+    if require_mfa() and not mfa:
+        log.warning("SAML ACS: sign-in refused, assertion carried no second factor")
+        from .app import templates
+
+        return _clear_saml_tx(templates.TemplateResponse(
+            request, "error.html",
+            {"status": 403, "title": "Sign in again with your authenticator",
+             "message": MFA_MISSING_MESSAGE, "path": "/saml/login", "gate": "step_up"},
+            status_code=403,
+        ))
     try:
-        cookie = mint_session_cookie(identity.name_id)
+        from .oidc_login import mint_browser_session
+
+        cookie = mint_browser_session(
+            request, sub=identity.name_id, secret=secret, via="session", mfa=mfa,
+            ttl=_SESSION_TTL,
+        )
     except SamlUnavailable as e:
         return _tx_error(str(e), status_code=503)
+    except Exception:
+        log.warning("SAML ACS: session record unavailable; refusing sign-in")
+        return _tx_error("Lightwork could not record this sign-in, so it was not "
+                         "completed. Try again.", status_code=503)
     # Record the NameID (the session sub) so SCIM deprovision can revoke this
     # live session even for a persistent/transient NameID that maps to no SCIM
     # attribute. Mirrors the OIDC callback's record_login.

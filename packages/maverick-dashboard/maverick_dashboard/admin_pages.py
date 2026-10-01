@@ -15,7 +15,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from . import auth
+from . import auth, step_up
 
 router = APIRouter()
 
@@ -778,6 +778,7 @@ def users_set_role(
     """Assign a dashboard role to a user principal (admin only)."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    step_up.require_recent_mfa(request, "change_role")
     from . import rbac
     try:
         rbac.set_role(principal.strip(), role.strip(),
@@ -795,6 +796,7 @@ def users_remove(request: Request, principal: str = Form(...)) -> RedirectRespon
     pinned in config is unaffected — it can't be removed here."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    step_up.require_recent_mfa(request, "change_role")
     from . import rbac
     try:
         rbac.remove_user(principal.strip(),
@@ -1016,6 +1018,7 @@ def spending_limits_workspace(request: Request, choice: str = Form("none"),
     actor = auth.caller_principal(request) or "local"
     try:
         if choice == "none":
+            step_up.require_recent_mfa(request, "remove_spending_limit")
             spending_limits.clear_workspace_limit(actor=actor)
             return _limit_redirect("workspace_cleared")
         spending_limits.set_workspace_limit(amount, period, actor=actor)
@@ -1033,6 +1036,7 @@ def spending_limits_default(request: Request, choice: str = Form("none"),
     actor = auth.caller_principal(request) or "local"
     try:
         if choice == "none":
+            step_up.require_recent_mfa(request, "remove_spending_limit")
             spending_limits.clear_default_limit(actor=actor)
             return _limit_redirect("default_cleared")
         spending_limits.set_default_limit(amount, period, actor=actor)
@@ -1051,6 +1055,7 @@ def spending_limits_person(request: Request, principal: str = Form(""),
     actor = auth.caller_principal(request) or "local"
     try:
         if action == "remove":
+            step_up.require_recent_mfa(request, "remove_spending_limit")
             spending_limits.clear_user_limit(principal, actor=actor)
             return _limit_redirect("person_cleared")
         spending_limits.set_user_limit(principal, amount, period, actor=actor)

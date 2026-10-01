@@ -147,6 +147,12 @@ _LIST = {
     "a2a.tools": ["web_search"],
     "a2a.deny_tools": ["shell"],
     "residency.allowed_regions": ["EU"],
+    "auth.mfa.amr_values": ["mfa", "corp-push"],
+    "auth.mfa.acr_values": ["urn:example:mfa"],
+    "auth.mfa.saml_authn_contexts": ["urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken"],
+    # The saving request comes from loopback: the list must contain it.
+    "auth.ip_allowlist.cidrs": ["127.0.0.1/32", "10.0.0.0/8"],
+    "auth.ip_allowlist.workspace_cidrs": ["127.0.0.1/32", "10.0.0.0/8"],
 }
 _SECRETS = {
     "queue.redis_dsn": "rediss://:pw@queue.example.com:6380/0",  # pragma: allowlist secret

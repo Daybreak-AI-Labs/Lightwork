@@ -325,6 +325,9 @@ async def seal(request: Request, body: PreviewIn) -> dict:
 @router.post("/audit/rotate-key")
 async def rotate_key(request: Request) -> dict:
     require_global_permission(request, "admin")
+    from .step_up import require_recent_mfa
+
+    require_recent_mfa(request, "rotate_keys")
     from maverick.audit.signing import _have_crypto, rotate_audit_keypair
     if not _have_crypto():
         raise HTTPException(status_code=503, detail="Signing is not available on this installation.")

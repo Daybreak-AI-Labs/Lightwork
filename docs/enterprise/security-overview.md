@@ -149,6 +149,60 @@ SAML SSO.
 OIDC SSO, **SAML SSO** (via pysaml2, off by default), and **SCIM 2.0**
 provisioning + deprovisioning all ship today; SCIM deprovision force-revokes live
 sessions, including pairwise-`sub` IdPs (Entra) via a login-time subject directory.
+SAML and SCIM have been exercised against the protocol test suites in this
+repository, not yet certified against a live identity provider (that
+certification is the roadmap item above).
+
+## Sign-in security: second factor, step-up, sessions, allowed addresses
+
+All four are off by default and configured under `[auth]` in `config.toml`,
+by the installer's **Sign-in security** step, or in Settings > All settings >
+People & access > Sign-in security. None of them applies without a named
+sign-in: the auth-off local mode and the static server token have no principal
+to hold a second factor.
+
+- **Require a second factor** (`[auth.mfa] require`, `MAVERICK_MFA_REQUIRE`).
+  An OIDC session is issued only when the ID token's `amr` (RFC 8176) names a
+  second-factor method (`mfa`, `mca`, `otp`, `hwk`, `swk`, `fido`, `pop`, `sms`,
+  `tel`, `sc` by default; `amr_values` extends it) or its `acr` is one of
+  `acr_values`, which are also sent as `acr_values` on the authorization
+  request. A SAML session is issued only when the assertion's
+  `AuthnContextClassRef` is one of `saml_authn_contexts` (Microsoft
+  `multipleauthn`, the OASIS two-factor classes and Okta's `2fa:any` by
+  default), and the AuthnRequest asks for them. A refused sign-in shows one
+  sentence: "Your sign-in didn't include a second factor. Sign in again with
+  your authenticator." Sessions record whether a second factor was proved and
+  when. Reverse-proxy identities and passphrase (invitation) sessions carry no
+  such proof, so with the requirement on they are refused. Turning the
+  requirement on from a session without a second factor is refused, so an
+  administrator cannot lock themselves out.
+- **Step-up** (`[auth.mfa] step_up_minutes`, default 15). While the
+  requirement is on, the sensitive operations listed in
+  `maverick_dashboard/step_up.py` (changing or removing a role, removing a
+  spending limit, turning off the emergency stop, rotating signing or
+  workspace keys, changing sign-in/administrator/key-service settings,
+  deleting a workspace, signing others out) need a second factor no older than
+  that. Otherwise the API answers 403 with a plain sentence and a
+  `reauthenticate` link (`/auth/login?fresh=1`, which sends `prompt=login` so
+  the provider asks again), and the page shows a "Sign in again" button.
+- **Sessions** (`/settings/sessions`, `/api/v1/sessions`). Every browser
+  session is recorded server-side (`dashboard-sessions.sqlite3`: person,
+  sign-in method, second factor, issued, last seen, address, device summary)
+  and kept `[auth.sessions] retention_days` after it ends. People see and end
+  their own sessions; administrators anyone's. "Sign out this device" ends one
+  session; "Sign out everywhere" ends every recorded session and bumps the
+  person's revocation epoch, which also ends untracked sessions and API bearers
+  issued before now. Every revoke writes a control-plane audit row.
+- **Allowed addresses** (`[auth.ip_allowlist] cidrs`, `MAVERICK_IP_ALLOWLIST`;
+  `workspace_cidrs` per workspace, which a workspace's own `config.toml` can
+  narrow). The installation list is enforced before sign-in for every request
+  except the liveness/readiness probes; the workspace list once the caller's
+  workspace is pinned. The client address is the socket peer; `X-Forwarded-For`
+  counts only from a peer pinned in `[auth.proxy] trusted_proxies`, walked from
+  the right past trusted hops. A blocked address sees one sentence. Saving a
+  list that does not contain the address the request came from is refused, so
+  an administrator cannot lock themselves out; entries that do not parse are
+  refused rather than skipped. Changes are audited like every other setting.
 
 > Licensing: Lightwork is proprietary, commercially licensed software
 > ([`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)).

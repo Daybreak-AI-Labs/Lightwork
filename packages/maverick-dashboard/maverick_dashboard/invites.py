@@ -429,12 +429,21 @@ def session_ttl_seconds() -> int:
     return LOCAL_SESSION_DAYS * 86400
 
 
-def mint_local_session(email: str) -> str:
-    """A signed session cookie value for ``user:<email>`` (no-IdP mode)."""
+def mint_local_session(email: str, request=None) -> str:
+    """A signed session cookie value for ``user:<email>`` (no-IdP mode).
+
+    With ``request`` the session is recorded for the Sessions page (a ``sid``
+    in the cookie, no second factor: a passphrase is one factor). Without one
+    -- tests and older callers -- it is an untracked legacy cookie."""
     from maverick.oidc import validate_subject
     from maverick.web_session import sign_session
 
     email = validate_subject(email)
+    if request is not None:
+        from .oidc_login import mint_browser_session
+
+        return mint_browser_session(request, sub=email, secret=local_session_secret(),
+                                    via="invite", mfa=False, ttl=session_ttl_seconds())
     now = int(time.time())
     return sign_session({"sub": email, "iat": now, "exp": now + session_ttl_seconds()},
                         local_session_secret())
@@ -463,5 +472,9 @@ def local_session_principal(request):
     if is_revoked(sub, payload.get("iat")):
         return None
     from maverick.oidc import VerifiedPrincipal
-    return VerifiedPrincipal(sub=sub, issuer="invite-session", audience="",
-                             claims={"via": "invite"})
+
+    from .oidc_login import session_claims
+    claims = session_claims(payload, request, via="invite")
+    if claims is None:
+        return None
+    return VerifiedPrincipal(sub=sub, issuer="invite-session", audience="", claims=claims)

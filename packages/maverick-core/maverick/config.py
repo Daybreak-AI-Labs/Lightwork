@@ -1130,6 +1130,105 @@ def get_safety() -> dict:
     }
 
 
+# RFC 8176 authentication-method values that mean a second factor was used,
+# plus "fido" (Okta/Auth0 emit it for WebAuthn). "pwd", "pin", "kba", "user"
+# and the plain biometric hints are single factors and deliberately absent;
+# an administrator extends this list in [auth.mfa] amr_values.
+DEFAULT_MFA_AMR_VALUES: tuple[str, ...] = (
+    "mfa", "mca", "otp", "hwk", "swk", "fido", "pop", "sms", "tel", "sc",
+)
+# SAML AuthnContextClassRef values that mean a second factor was used.
+DEFAULT_MFA_SAML_CONTEXTS: tuple[str, ...] = (
+    "http://schemas.microsoft.com/claims/multipleauthn",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorContract",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorUnregistered",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:SmartcardPKI",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:Smartcard",
+    "urn:okta:loa:2fa:any",
+)
+DEFAULT_STEP_UP_MINUTES = 15
+
+
+def _str_list(value: object, default: tuple[str, ...]) -> list[str]:
+    if isinstance(value, str):
+        value = [part for part in value.split(",")]
+    if not isinstance(value, (list, tuple)):
+        return list(default)
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+def get_auth_mfa() -> dict:
+    """``[auth.mfa]``: require a second factor at sign-in, and step-up.
+
+    Off by default. ``require`` (``MAVERICK_MFA_REQUIRE``) accepts an OIDC
+    session only when the ID token's ``amr`` names one of ``amr_values`` or
+    its ``acr`` is in ``acr_values``, and a SAML session only when the
+    assertion's authentication context is in ``saml_authn_contexts``.
+    ``acr_values`` is also sent on the authorization request.
+    ``step_up_minutes`` (``MAVERICK_MFA_STEP_UP_MINUTES``) is how recent that
+    second factor must be for a sensitive action while ``require`` is on.
+    A workspace's own config.toml overlays these keys for its members.
+    """
+    cfg = (load_config().get("auth") or {}).get("mfa") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    require = env_flag("MAVERICK_MFA_REQUIRE")
+    if require is None:
+        # A present non-bool is uncertainty about a security policy: on.
+        require = _strict_config_bool(cfg, "require", False, invalid=True)
+    minutes_raw: object = os.environ.get("MAVERICK_MFA_STEP_UP_MINUTES") or cfg.get(
+        "step_up_minutes", DEFAULT_STEP_UP_MINUTES)
+    try:
+        minutes = int(float(str(minutes_raw)))
+    except (TypeError, ValueError):
+        minutes = DEFAULT_STEP_UP_MINUTES
+    if isinstance(minutes_raw, bool) or minutes < 1:
+        minutes = DEFAULT_STEP_UP_MINUTES
+    return {
+        "require": bool(require),
+        "step_up_minutes": minutes,
+        "amr_values": _str_list(cfg.get("amr_values"), DEFAULT_MFA_AMR_VALUES),
+        "acr_values": _str_list(cfg.get("acr_values"), ()),
+        "saml_authn_contexts": _str_list(
+            cfg.get("saml_authn_contexts"), DEFAULT_MFA_SAML_CONTEXTS),
+    }
+
+
+def get_ip_allowlist() -> dict:
+    """``[auth.ip_allowlist]``: network addresses allowed to use the dashboard.
+
+    ``cidrs`` (``MAVERICK_IP_ALLOWLIST``, comma-separated) is the installation
+    list, checked before sign-in; ``workspace_cidrs`` is read after a
+    workspace is chosen, so a workspace's own config.toml can narrow it for
+    its members. An empty list allows every address. Unparsable entries are
+    kept here as text; the dashboard's checker rejects them, never skips them.
+    """
+    cfg = (load_config().get("auth") or {}).get("ip_allowlist") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    env = os.environ.get("MAVERICK_IP_ALLOWLIST")
+    cidrs = _str_list(env, ()) if env is not None and env.strip() else _str_list(
+        cfg.get("cidrs"), ())
+    return {
+        "cidrs": cidrs,
+        "workspace_cidrs": _str_list(cfg.get("workspace_cidrs"), ()),
+    }
+
+
+def get_auth_sessions() -> dict:
+    """``[auth.sessions]``: how long ended sign-in sessions stay listed."""
+    cfg = (load_config().get("auth") or {}).get("sessions") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    raw = cfg.get("retention_days", 30)
+    try:
+        days = int(raw) if not isinstance(raw, bool) else 30
+    except (TypeError, ValueError):
+        days = 30
+    return {"retention_days": max(1, min(days, 3650))}
+
+
 def get_skills() -> dict:
     """Return the ``[skills]`` section with signing defaults filled in.
 

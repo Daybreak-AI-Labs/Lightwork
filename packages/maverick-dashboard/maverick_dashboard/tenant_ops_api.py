@@ -169,6 +169,9 @@ async def keys_preview(body: KeysIn, request: Request) -> dict:
 @router.post("/keys/rotate")
 async def keys_rotate(body: KeysIn, request: Request) -> dict:
     _mutation(request)
+    from .step_up import require_recent_mfa
+
+    require_recent_mfa(request, "rotate_keys")
     if body.confirm is not True:
         raise HTTPException(409, "Confirm to re-protect the workspaces. Nothing was changed.")
     from maverick.tenant.kms_fleet import rotate_local_fleet

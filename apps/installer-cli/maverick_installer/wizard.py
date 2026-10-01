@@ -4085,6 +4085,66 @@ def pick_oidc() -> dict[str, Any]:
     return result
 
 
+def pick_sign_in_security(sso_enabled: bool) -> dict[str, Any]:
+    """The "Sign-in security" step: require a second factor, how recent it
+    must be for sensitive actions, and the network addresses allowed in.
+
+    Returns a dict the writer emits as ``[auth.mfa]`` and
+    ``[auth.ip_allowlist]``; ``{}`` when nothing was chosen (so the writer
+    emits nothing and the kernel defaults -- off, 15 minutes, everyone --
+    apply). Off by default for compatibility.
+    """
+    console.print(
+        "[dim]Sign-in security. With company sign-in, Lightwork can insist that "
+        "the provider confirmed a second factor (authenticator app, security key "
+        "or code) and ask for a recent one before sensitive actions such as "
+        "changing roles or turning off the emergency stop. You can also limit "
+        "which network addresses may reach Lightwork at all. All OFF by "
+        "default.[/dim]"
+    )
+    result: dict[str, Any] = {}
+    if sso_enabled and _q_confirm(
+        "Require sign-in with a second factor?", default=False
+    ):
+        result["require"] = True
+        minutes = _safe_int(
+            _q_text(
+                "  Sensitive actions need a second factor no older than (minutes)",
+                default="15",
+            ),
+            default=15,
+        )
+        result["step_up_minutes"] = max(1, min(minutes, 1440))
+    cidrs = _csv_list(
+        _q_text(
+            "Network addresses or ranges allowed to reach Lightwork "
+            "(comma-separated, empty = everyone; include the address you use)",
+            default="",
+        )
+    )
+    if cidrs:
+        import ipaddress
+
+        bad = [c for c in cidrs if _bad_network(c, ipaddress)]
+        while bad:
+            console.print(
+                f"[yellow]Not a network address or range: {', '.join(bad)}[/yellow]"
+            )
+            cidrs = _csv_list(_q_text("  Allowed addresses or ranges", default=""))
+            bad = [c for c in cidrs if _bad_network(c, ipaddress)]
+        if cidrs:
+            result["cidrs"] = cidrs
+    return result
+
+
+def _bad_network(text: str, ipaddress) -> bool:
+    try:
+        ipaddress.ip_network(text, strict=False)
+    except ValueError:
+        return True
+    return False
+
+
 def _ask_external_agent_followups(advanced: dict[str, Any]) -> None:
     """The external-agent gateway's follow-up questions (gateway already on).
 
@@ -5462,6 +5522,8 @@ def pick_advanced() -> dict[str, Any]:
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
     advanced["oidc"] = pick_oidc()
+    advanced["sign_in_security"] = pick_sign_in_security(
+        bool(advanced["oidc"].get("enabled")))
     advanced["local_owner_setup"] = _q_confirm(
         "Allow first-owner setup in the app on this computer? "
         "A named owner creates a local passphrase and can invite colleagues. "
@@ -8689,6 +8751,20 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# want_assertions_signed = true")
         lines.append('# sp_cert_file = ""   # to sign AuthnRequests / decrypt')
         lines.append('# sp_key_file = ""')
+    security = advanced.get("sign_in_security") or {}
+    if isinstance(security, dict) and security.get("require"):
+        # Second factor at sign-in + step-up for sensitive actions. Read by
+        # maverick.config.get_auth_mfa (the dashboard's mfa_policy).
+        lines.append("")
+        lines.append("[auth.mfa]")
+        lines.append("require = true")
+        _emit_kv(lines, "step_up_minutes", int(security.get("step_up_minutes") or 15))
+    if isinstance(security, dict) and security.get("cidrs"):
+        # Network addresses allowed to reach the dashboard. Read by
+        # maverick.config.get_ip_allowlist (the dashboard's ip_allowlist).
+        lines.append("")
+        lines.append("[auth.ip_allowlist]")
+        _emit_kv(lines, "cidrs", [str(c) for c in security["cidrs"]])
     return lines
 
 

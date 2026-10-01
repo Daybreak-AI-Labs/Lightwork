@@ -879,11 +879,28 @@ def _resolve_principal(
     return _authenticate_oidc_bearer(request, token)
 
 
+def _enforce_workspace_policies(connection, principal) -> None:
+    """Policies that need the caller's workspace: its allowed addresses and
+    its second-factor requirement (the workspace's config overlay is active
+    once the tenant is pinned). Sign-in bootstrap and sign-out paths are
+    skipped so a refused session can still end itself."""
+    path = getattr(getattr(connection, "url", None), "path", "") or ""
+    if _self_authenticated_path(path):
+        return
+    from .ip_allowlist import BLOCKED_MESSAGE, workspace_allows
+    from .mfa_policy import enforce_session_policy
+
+    if not workspace_allows(connection):
+        raise HTTPException(status_code=403, detail=BLOCKED_MESSAGE)
+    enforce_session_policy(principal)
+
+
 def _bind_principal(connection, principal):
     """The only phase that mutates request identity or the task's tenant pin."""
     if connection is not None and principal is not None:
         connection.state.principal = principal
         _pin_tenant_from_principal(connection, principal)
+        _enforce_workspace_policies(connection, principal)
     return principal
 
 

@@ -24,6 +24,13 @@ for each workspace) are in settings_catalog_structured.
 """
 from __future__ import annotations
 
+from maverick.config import (
+    DEFAULT_MFA_AMR_VALUES as _MFA_AMR,
+)
+from maverick.config import (
+    DEFAULT_MFA_SAML_CONTEXTS as _MFA_SAML,
+)
+
 # Plain patterns (full match) for text and list entries.
 _HTTPS = r"https://[^\s\"'<>?#]{1,300}"
 _HTTPS_OR_LOCAL = r"(https://[^\s\"'<>?#]{1,300}|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?(/[^\s\"'<>?#]{0,200})?)"
@@ -213,6 +220,87 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Any program on this computer will be able to tell Lightwork who is signed "
                   "in.",
           aliases="loopback localhost"),
+    ) + _sign_in_security(S)
+
+
+def _sign_in_security(S) -> tuple:  # noqa: N803 -- the catalog's row type
+    grp, sec = "People & access", "Sign-in security"
+    return (
+        S("auth.mfa", "require", "Require sign-in with a second factor",
+          "A company sign-in counts only when the provider confirms a second factor (an "
+          "authenticator app, a security key or a code). People whose sign-in has none are "
+          "asked to sign in again. Your own sign-in must include one before you can turn "
+          "this on.",
+          "toggle", grp, False, "maverick_dashboard.mfa_policy", subgroup=sec,
+          env=("MAVERICK_MFA_REQUIRE",), weaker=False,
+          warning="People will be able to use Lightwork with a password alone.",
+          aliases="mfa two-factor 2fa authenticator otp"),
+        S("auth.mfa", "step_up_minutes", "Sensitive actions need a sign-in this recent",
+          "While a second factor is required: changing roles, removing a spending limit, "
+          "turning off the emergency stop, rotating keys, changing sign-in settings, "
+          "deleting a workspace or signing others out needs a second factor no older than "
+          "this many minutes. Otherwise the person is asked to sign in again.",
+          "number", grp, 15, "maverick_dashboard.mfa_policy", subgroup=sec,
+          minimum=1, maximum=1440, integer=True, unit="minutes",
+          env=("MAVERICK_MFA_STEP_UP_MINUTES",), weaker="higher",
+          warning="An older sign-in will be enough for sensitive actions.",
+          aliases="step-up reauthenticate fresh"),
+        S("auth.mfa", "amr_values", "Sign-in methods that count as a second factor",
+          "The authentication-method values (the ID token's amr claim) that prove a second "
+          "factor. The standard values are filled in; add your provider's own if it uses "
+          "different ones.",
+          "list", grp, list(_MFA_AMR), "maverick_dashboard.mfa_policy", subgroup=sec,
+          pattern=r"[A-Za-z0-9:._-]{1,64}", item_label="Method", item_hint="otp",
+          item_error="a short method name", max_items=40, weaker="grow",
+          warning="More sign-in methods will count as a second factor.",
+          aliases="amr methods"),
+        S("auth.mfa", "acr_values", "Authentication contexts that count as a second factor",
+          "Values of the ID token's acr claim that prove a second factor. They are also "
+          "requested from the provider at sign-in. Leave empty when your provider uses the "
+          "methods above instead.",
+          "list", grp, [], "maverick_dashboard.mfa_policy", subgroup=sec,
+          pattern=r"[A-Za-z0-9:._/-]{1,200}", item_label="Context",
+          item_hint="urn:example:mfa", item_error="a context value with no spaces",
+          max_items=20, weaker="grow",
+          warning="More authentication contexts will count as a second factor.",
+          aliases="acr context"),
+        S("auth.mfa", "saml_authn_contexts", "SAML authentication contexts that count as a "
+          "second factor",
+          "The assertion's authentication context values that prove a second factor for "
+          "single sign-on. The common values are filled in.",
+          "list", grp, list(_MFA_SAML), "maverick_dashboard.mfa_policy", subgroup=sec,
+          pattern=r"[A-Za-z0-9:._/-]{1,200}", item_label="Context",
+          item_hint="urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken",
+          item_error="a context value with no spaces", max_items=40, weaker="grow",
+          warning="More SAML authentication contexts will count as a second factor.",
+          aliases="saml authncontext"),
+        S("auth.ip_allowlist", "cidrs", "Network addresses allowed to use Lightwork",
+          "Only these addresses or ranges may reach Lightwork; everyone else sees a plain "
+          "refusal. Empty allows every address. The address you are saving from must be on "
+          "the list. Behind a company proxy, list the proxy under Proxy addresses to trust "
+          "first so the real address is used.",
+          "list", grp, [], "maverick_dashboard.ip_allowlist", subgroup=sec, pattern=_NETWORK,
+          item_label="Address", item_hint="203.0.113.0/24",
+          item_error="a network address or range", max_items=64,
+          env=("MAVERICK_IP_ALLOWLIST",), weaker="widen",
+          warning="More network addresses will be able to reach Lightwork.",
+          aliases="ip allowlist allow list cidr network"),
+        S("auth.ip_allowlist", "workspace_cidrs", "Network addresses allowed for this "
+          "workspace",
+          "After a person chooses a workspace, only these addresses or ranges may use it. "
+          "Empty allows every address. A workspace's own settings file can narrow this for "
+          "its members.",
+          "list", grp, [], "maverick_dashboard.ip_allowlist", subgroup=sec, pattern=_NETWORK,
+          item_label="Address", item_hint="203.0.113.0/24",
+          item_error="a network address or range", max_items=64, weaker="widen",
+          warning="More network addresses will be able to use this workspace.",
+          aliases="workspace ip allowlist"),
+        S("auth.sessions", "retention_days", "Keep ended sessions listed for",
+          "How long a sign-in session stays in the record after it ends, so the Sessions "
+          "page can still show it.",
+          "number", grp, 30, "maverick_dashboard.session_registry", subgroup=sec,
+          minimum=1, maximum=3650, integer=True, unit="days",
+          aliases="sessions retention"),
     )
 
 

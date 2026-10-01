@@ -149,7 +149,7 @@ async def invite_accept(request: Request, token: str):
         log.info("invite accepted (local): %s as %s", inv.email, inv.role)
         response = RedirectResponse("/", status_code=303)
         from .oidc_login import _cookie_secure, _set_cookie
-        _set_cookie(response, "mvk_session", invites.mint_local_session(inv.email),
+        _set_cookie(response, "mvk_session", invites.mint_local_session(inv.email, request=request),
                     max_age=invites.session_ttl_seconds(),
                     secure=_cookie_secure(request))
         return response

@@ -1413,8 +1413,10 @@ app.include_router(create_ott_ctv_privacy_rights_router())
 # Admin pages (/settings + /users): their own router module -- the first
 # slice of decomposing this file by nav group. See maverick_dashboard.admin_pages.
 from .admin_pages import router as admin_pages_router  # noqa: E402
+from .sessions_page import router as sessions_router  # noqa: E402
 
 app.include_router(admin_pages_router)
+app.include_router(sessions_router)
 # Settings > All settings (/settings/all + its catalog save/reset API).
 from .privacy_notice_publication_targets_api import (  # noqa: E402
     router as privacy_notice_targets_router,
@@ -2308,6 +2310,36 @@ async def bearer_auth(request: Request, call_next):
     return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
 
+_IP_ALLOWLIST_EXEMPT = frozenset({"/healthz", "/livez", "/readyz"})
+
+
+@app.middleware("http")
+async def ip_allowlist_gate(request: Request, call_next):
+    """Refuse every request from an address outside ``[auth.ip_allowlist]``.
+
+    Registered after ``bearer_auth`` so it wraps it and runs first: an address
+    that is not allowed never reaches sign-in. Only the liveness/readiness
+    probes pass (a load balancer's address is not a person's). The workspace
+    list is checked later, in the authentication dependency, once the
+    caller's workspace is known. Empty list: nothing changes."""
+    if request.url.path in _IP_ALLOWLIST_EXEMPT:
+        return await call_next(request)
+    from . import ip_allowlist
+
+    if await run_in_threadpool(ip_allowlist.installation_allows, request):
+        return await call_next(request)
+    _auth_metrics.record_auth_failure("ip_allowlist")
+    if _wants_html(request):
+        return templates.TemplateResponse(
+            request, "error.html",
+            {"status": 403, "title": "This address isn't allowed",
+             "message": ip_allowlist.BLOCKED_MESSAGE, "path": request.url.path,
+             "gate": "ip"},
+            status_code=403,
+        )
+    return JSONResponse({"detail": ip_allowlist.BLOCKED_MESSAGE}, status_code=403)
+
+
 def _wants_html(request: Request) -> bool:
     """True when the client prefers HTML (browser nav) over JSON (API)."""
     accept = (request.headers.get("accept") or "").lower()
@@ -2407,11 +2439,32 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         if status == 400 and str(exc.detail or "").startswith("Invalid audit day"):
             message = "That date isn’t valid. Pick a day from the calendar, then try again."
         gate = ""
+        reauthenticate = ""
         if status == 403 and isinstance(exc.detail, str):
             # Feature switches and named sign-in gates raise 403 with these
             # fixed server phrases; show the real reason instead of the
             # generic role message. The check itself is unchanged.
-            if "disabled in Settings" in exc.detail:
+            from .ip_allowlist import BLOCKED_MESSAGE as _ip_blocked
+            from .mfa_policy import MFA_MISSING_MESSAGE as _mfa_missing
+            from .step_up import StepUpRequired as _StepUpRequired
+
+            if isinstance(exc, _StepUpRequired):
+                gate = "step_up"
+                title = "Sign in again to continue"
+                message = exc.detail
+                reauthenticate = exc.reauthenticate
+            elif exc.detail == _mfa_missing:
+                gate = "step_up"
+                title = "Sign in again with your authenticator"
+                message = exc.detail
+                from .step_up import reauthenticate_url
+
+                reauthenticate = reauthenticate_url(request)
+            elif exc.detail == _ip_blocked:
+                gate = "ip"
+                title = "This address isn't allowed"
+                message = exc.detail
+            elif "disabled in Settings" in exc.detail:
                 gate = "off"
                 title = "This page is turned off"
                 message = (
@@ -2434,12 +2487,19 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 "message": message,
                 "path": request.url.path,
                 "gate": gate,
+                "reauthenticate": reauthenticate,
             },
             status_code=status,
             headers=exc.headers,
         )
+    body: dict = {"detail": exc.detail}
+    reauthenticate = getattr(exc, "reauthenticate", "")
+    if reauthenticate:
+        # Step-up: the API caller (a page script or a program) gets the plain
+        # sentence and the link that signs the person in again.
+        body["reauthenticate"] = reauthenticate
     return JSONResponse(
-        {"detail": exc.detail},
+        body,
         status_code=exc.status_code,
         headers=exc.headers,
     )

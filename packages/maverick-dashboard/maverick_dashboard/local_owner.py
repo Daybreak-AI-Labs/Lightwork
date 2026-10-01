@@ -143,7 +143,7 @@ def _credentials(email, password):
     return email, password
 
 
-def _finish(row):
+def _finish(row, request=None):
     from . import invites, rbac
     if row["status"] == "pending":
         principal = "user:" + row["email"]
@@ -158,7 +158,7 @@ def _finish(row):
         _write(row)
     elif rbac.get_stored_role("user:" + row["email"]) is None:
         raise HTTPException(403, "This local account no longer has an assigned role. Contact a current administrator.")
-    return invites.mint_local_session(row["email"])
+    return invites.mint_local_session(row["email"], request=request)
 
 
 def enroll(request: Request, *, email: str, password: str, confirm: bool):
@@ -181,7 +181,7 @@ def enroll(request: Request, *, email: str, password: str, confirm: bool):
                "password_hash": _password(password, salt), "status": "pending",
                "created_at": time.time(), "failures": 0, "locked_until": 0}
         _write(row)
-        return _finish(row)
+        return _finish(row, request)
 
 
 def login(request: Request, *, email: str, password: str):
@@ -206,4 +206,4 @@ def login(request: Request, *, email: str, password: str):
         _enforce_scim_active(VerifiedPrincipal(sub=email, issuer="invite-session", audience="", claims={}))
         row.update(failures=0, locked_until=0)
         _write(row)
-        return _finish(row)
+        return _finish(row, request)
