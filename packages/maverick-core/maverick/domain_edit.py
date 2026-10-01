@@ -28,6 +28,7 @@ from .domain import (
     _OVERLAYABLE,
     DomainProfile,
     _coerce,
+    _envelope_errors,
     _load_raw_domains,
     available_domains,
     builtin_dir,
@@ -120,57 +121,14 @@ def _resolve(name: str, patch: dict) -> DomainProfile:
     return overlay_profile(base, patch) if base else _coerce(name, patch)
 
 
-_RISK_RANK = {"low": 0, "medium": 1, "high": 2}
-
-
 def _base_profile(name: str, patch: dict) -> DomainProfile | None:
-    """Built-in profile an override inherits from, if one exists."""
+    """Active profile an override inherits from, if one exists."""
     base_name = str(patch.get("extends") or name)
+    if base_name != name:
+        base = available_domains().get(base_name)
+        if base is not None:
+            return base
     return load_domains(builtin_dir()).get(base_name)
-
-
-def _envelope_errors(base: DomainProfile | None, merged: DomainProfile) -> list[str]:
-    """Reject overrides that broaden a built-in pack's capability envelope."""
-    if base is None:
-        return []
-    errors: list[str] = []
-    base_allow = set(base.allow_tools)
-    merged_allow = set(merged.allow_tools)
-    added_tools = sorted(merged_allow - base_allow)
-    if added_tools:
-        errors.append(
-            "allow_tools cannot add tools beyond the built-in pack: "
-            + ", ".join(added_tools)
-        )
-    missing_denies = sorted(set(base.deny_tools) - set(merged.deny_tools))
-    if missing_denies:
-        errors.append(
-            "deny_tools cannot remove built-in denied tools: "
-            + ", ".join(missing_denies)
-        )
-    base_rank = _RISK_RANK.get(str(base.max_risk or ""))
-    merged_rank = _RISK_RANK.get(str(merged.max_risk or ""))
-    if base_rank is not None and merged_rank is not None and merged_rank > base_rank:
-        errors.append(
-            f"max_risk cannot be raised above the built-in pack ({base.max_risk})"
-        )
-    if merged.compartment != base.compartment:
-        errors.append("compartment cannot differ from the built-in pack")
-    # allow_paths / allow_hosts / mcp_servers are equally capability-broadening:
-    # an override adding a path, host, or MCP server the built-in pack never
-    # granted escalates the envelope just like adding a tool. Reject additions.
-    for field, label in (
-        ("allow_paths", "allow_paths"),
-        ("allow_hosts", "allow_hosts"),
-        ("mcp_servers", "mcp_servers"),
-    ):
-        added = sorted(set(getattr(merged, field) or ()) - set(getattr(base, field) or ()))
-        if added:
-            errors.append(
-                f"{label} cannot add entries beyond the built-in pack: "
-                + ", ".join(str(a) for a in added)
-            )
-    return errors
 
 
 def validate_override(name: str, patch: dict) -> tuple[list[str], list[str]]:
@@ -183,7 +141,8 @@ def validate_override(name: str, patch: dict) -> tuple[list[str], list[str]]:
     patch = dict(patch)
     merged = _resolve(name, patch)
     errors, warnings = lint_profile(merged)
-    errors.extend(_envelope_errors(_base_profile(name, patch), merged))
+    if not errors:
+        errors.extend(_envelope_errors(_base_profile(name, patch), merged))
     return errors, warnings
 
 
@@ -296,7 +255,7 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
     return {
         "name": prof.name,
         "generation": _override_generation(name, (Path(directory) if directory else user_dir()) / f"{name}.toml"),
-        "suite": suite_for(name),
+        "suite": suite_for(prof.name) or suite_for(name),
         "description": prof.description,
         "persona": prof.persona,
         "allow_tools": list(prof.allow_tools),
@@ -326,7 +285,7 @@ def list_agents(directory: str | Path | None = None) -> list[dict]:
     for name, prof in sorted(available_domains().items()):
         out.append({
             "name": name,
-            "suite": suite_for(name),
+            "suite": suite_for(prof.name) or suite_for(name),
             "description": prof.description,
             "is_override": name in overrides,
             "has_workflow": bool(prof.workflow),

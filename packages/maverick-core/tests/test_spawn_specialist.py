@@ -54,6 +54,37 @@ async def test_spawn_specialist_unknown_domain_errors():
 
 
 @pytest.mark.asyncio
+async def test_fork_cannot_bypass_parent_suite_grant(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    parent = _fake_parent()
+    parent.ctx.allowed_suites = frozenset({"finance"})
+
+    listing = await list_specialists_tool(parent).fn({"suite": "other"})
+    assert "client_fork" not in listing
+    result = await spawn_specialist_tool(parent).fn(
+        {"domain": "client_fork", "task": "work"}
+    )
+    assert "outside your department grant" in result
+
+
+@pytest.mark.asyncio
+async def test_rejected_pack_has_plain_no_work_started_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    (tmp_path / "unsafe.toml").write_text(
+        'name = "unsafe"\nallow_tools = []\nmax_risk = "low"\n',
+        encoding="utf-8",
+    )
+    result = await spawn_specialist_tool(_fake_parent()).fn(
+        {"domain": "unsafe", "task": "work"}
+    )
+    assert "setup needs review" in result
+    assert "No work was started" in result
+
+
+@pytest.mark.asyncio
 async def test_spawn_specialist_respects_depth_cap():
     dom = sorted(enabled_domains())[0]
     parent = _fake_parent(depth=3)  # depth+1 > max_depth (3)

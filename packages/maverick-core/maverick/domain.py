@@ -314,7 +314,9 @@ def user_dir() -> Path:
     return Workspace.current().domains_dir
 
 
-def _load_raw_domains(directory: str | Path) -> dict[str, dict]:
+def _load_raw_domains(
+    directory: str | Path, *, rejected: dict[str, list[str]] | None = None,
+) -> dict[str, dict]:
     """Parse every ``*.toml`` in ``directory`` to its raw dict (keys as written).
 
     Unlike :func:`load_domains`, this keeps *which keys a file actually set* --
@@ -327,7 +329,11 @@ def _load_raw_domains(directory: str | Path) -> dict[str, dict]:
     for p in sorted(directory.glob("*.toml")):
         try:
             data = _load_domain_toml(p)
+            if str(data.get("name") or p.stem) != p.stem:
+                raise ValueError("domain pack identity does not match its file")
         except Exception:
+            if rejected is not None:
+                rejected[p.stem] = ["agent setup file cannot be read or parsed"]
             continue
         out[str(data.get("name") or p.stem)] = data
     return out
@@ -386,6 +392,42 @@ def overlay_profile(base: DomainProfile, patch: dict) -> DomainProfile:
     return DomainProfile(name=base.name, **data)
 
 
+_RISK_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def _envelope_errors(base: DomainProfile | None, merged: DomainProfile) -> list[str]:
+    """Reject an overlay that broadens the pack it inherits from."""
+    if base is None:
+        return []
+    errors: list[str] = []
+    added_tools = sorted(set(merged.allow_tools) - set(base.allow_tools))
+    if added_tools:
+        errors.append("allow_tools cannot add tools beyond the built-in pack: "
+                      + ", ".join(added_tools))
+    missing_denies = sorted(set(base.deny_tools) - set(merged.deny_tools))
+    if missing_denies:
+        errors.append("deny_tools cannot remove built-in denied tools: "
+                      + ", ".join(missing_denies))
+    base_rank = _RISK_RANK.get(str(base.max_risk or ""))
+    merged_rank = _RISK_RANK.get(str(merged.max_risk or ""))
+    if base_rank is not None and merged_rank is not None and merged_rank > base_rank:
+        errors.append(f"max_risk cannot be raised above the built-in pack ({base.max_risk})")
+    if merged.compartment != base.compartment:
+        errors.append("compartment cannot differ from the built-in pack")
+    for field_name in ("allow_paths", "allow_hosts"):
+        inherited = set(getattr(base, field_name))
+        current = set(getattr(merged, field_name))
+        # Empty path/host scopes mean unrestricted. Dropping a non-empty
+        # inherited scope broadens it; adding a scope to an empty one narrows.
+        if inherited and (not current or not current <= inherited):
+            errors.append(f"{field_name} cannot broaden the built-in pack's scope")
+    added_servers = sorted(set(merged.mcp_servers) - set(base.mcp_servers))
+    if added_servers:
+        errors.append("mcp_servers cannot add entries beyond the built-in pack: "
+                      + ", ".join(added_servers))
+    return errors
+
+
 def render_workflow_prompt(workflow: list[WorkflowStep]) -> str:
     """A pack's playbook as a system-prompt block (``""`` when there is none,
     so packs without a workflow behave exactly as before)."""
@@ -409,20 +451,27 @@ def _resolved_catalog() -> tuple[dict[str, DomainProfile], dict[str, list[str]]]
     builtin = builtin_domains()
     resolved = dict(builtin)
     rejected: dict[str, list[str]] = {}
-    for name, patch in _load_raw_domains(user_dir()).items():
+    raw = _load_raw_domains(user_dir(), rejected=rejected)
+    for name in rejected:
+        resolved.pop(name, None)
+    for name, patch in raw.items():
         try:
             base = resolved.get(str(patch.get("extends") or name))
             profile = overlay_profile(base, patch) if base else _coerce(name, patch)
             errors, _ = lint_profile(profile)
+            if base is not None and not errors:
+                errors.extend(_envelope_errors(base, profile))
         except Exception:
             # A hand-edited pack with malformed field types must not interrupt
             # discovery or become active through the workspace catalog.
             rejected[name] = ["malformed domain pack fields"]
+            resolved.pop(name, None)
             continue
         if errors:
             # Editor saves already apply this lint gate. Apply it to files
             # placed or synced into the workspace directory as well.
             rejected[name] = errors
+            resolved.pop(name, None)
             continue
         resolved[name] = profile
     return resolved, rejected
@@ -546,7 +595,7 @@ def enabled_domains(cfg: dict | None = None) -> dict[str, DomainProfile]:
         return domains
     return {
         name: prof for name, prof in domains.items()
-        if (suite_for(name) is None) or (suite_for(name) not in disabled)
+        if suite_for(name) not in disabled and suite_for(prof.name) not in disabled
     }
 
 
@@ -771,6 +820,30 @@ def _lint_workflow(profile: DomainProfile) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+_STRING_LIST_FIELDS = (
+    "allow_tools", "deny_tools", "allow_paths", "allow_hosts",
+    "mcp_servers", "knowledge_sources", "refuse",
+)
+
+
+def _profile_field_type_errors(profile: DomainProfile) -> list[str]:
+    """Reject malformed TOML fields before list/set coercion can change policy."""
+    errors: list[str] = []
+    for field_name in _STRING_LIST_FIELDS:
+        value = getattr(profile, field_name)
+        if not isinstance(value, list) or any(
+            not isinstance(item, str) or not item.strip() for item in value
+        ):
+            errors.append(f"{field_name} must be a list of non-empty strings")
+    if not isinstance(profile.models, dict) or any(
+        not isinstance(key, str) or not key.strip()
+        or not isinstance(value, str) or not value.strip()
+        for key, value in profile.models.items()
+    ):
+        errors.append("models must map non-empty role names to model names")
+    return errors
+
+
 def lint_profile(profile: DomainProfile) -> tuple[list[str], list[str]]:
     """Quality-gate one pack. Returns ``(errors, warnings)``.
 
@@ -780,6 +853,9 @@ def lint_profile(profile: DomainProfile) -> tuple[list[str], list[str]]:
     gaps a pack author should look at. Pure, for tests and the CLI."""
     errors: list[str] = []
     warnings: list[str] = []
+    type_errors = _profile_field_type_errors(profile)
+    if type_errors:
+        return type_errors, warnings
     if not profile.allow_tools:
         errors.append("allow_tools is empty: an empty allowlist grants ALL "
                       "tools -- name the tools this specialist needs")
@@ -934,6 +1010,10 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
     from .agent_autonomy import default_profile_for, render_autonomy_prompt
     from .domain_discipline import augment_persona
     from .domain_refusals import render_refusals
+    type_errors = _profile_field_type_errors(profile)
+    if type_errors:
+        raise ValueError(f"Domain {profile.name!r} has malformed fields: "
+                         + "; ".join(type_errors))
     # Parsing helpers may hand a profile directly to the factory without
     # passing through available_domains(). An absent allowlist means ALL tools
     # and an absent ceiling means no cap, so neither is safe to spawn.

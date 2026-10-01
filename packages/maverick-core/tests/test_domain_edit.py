@@ -176,6 +176,26 @@ class TestValidateAndList:
         assert errors                               # empty allow_tools etc.
         assert read_override("nope") == {}          # nothing was written
 
+    def test_inherited_path_and_host_scopes_cannot_be_removed(self, tenant_dir):
+        from maverick.domain import rejected_workspace_domains
+
+        write_override("a_parent", {
+            "allow_tools": ["read_file"], "max_risk": "low",
+            "allow_paths": ["C:/approved/*"],
+            "allow_hosts": ["approved.example"],
+        })
+        patch = {"extends": "a_parent", "allow_paths": [], "allow_hosts": []}
+        errors, _ = validate_override("z_child", patch)
+        assert any("allow_paths cannot broaden" in e for e in errors)
+        assert any("allow_hosts cannot broaden" in e for e in errors)
+
+        (tenant_dir / "z_child.toml").write_text(
+            'name = "z_child"\nextends = "a_parent"\n'
+            'allow_paths = []\nallow_hosts = []\n', encoding="utf-8",
+        )
+        assert "z_child" not in available_domains()
+        assert rejected_workspace_domains()["z_child"]
+
     def test_list_agents_flags_overrides(self, tenant_dir):
         name, _ = _clean_builtin()
         before = {a["name"]: a for a in list_agents()}

@@ -1,6 +1,7 @@
 """Domain packs: schema, loader, and capability derivation (agent factory)."""
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -302,6 +303,45 @@ class TestAvailableDomainsOverlay:
             f'name = "{name}"\nallow_tools = []\n', encoding="utf-8",
         )
 
+        assert name not in available_domains()
+        assert rejected_workspace_domains()[name]
+        (tmp_path / f"{name}.toml").unlink()
+        assert available_domains()[name] == base
+
+    def test_workspace_override_cannot_expand_builtin_tools(self, tmp_path, monkeypatch):
+        name = "aero_avionics"
+        base = load_domains(builtin_dir())[name]
+        assert not lint_profile(base)[0]
+        assert "web_search" not in base.allow_tools
+        monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+        (tmp_path / f"{name}.toml").write_text(
+            f'name = "{name}"\n'
+            f'allow_tools = {json.dumps([*base.allow_tools, "web_search"])}\n',
+            encoding="utf-8",
+        )
+
+        assert name not in available_domains()
+        assert any("allow_tools cannot add" in e for e in rejected_workspace_domains()[name])
+
+    def test_malformed_deny_list_cannot_run(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+        (tmp_path / "unsafe.toml").write_text(
+            'name = "unsafe"\nallow_tools = ["shell"]\n'
+            'deny_tools = "shell"\nmax_risk = "high"\n', encoding="utf-8",
+        )
+
+        assert "unsafe" not in available_domains()
+        assert any("deny_tools" in e for e in rejected_workspace_domains()["unsafe"])
+
+    def test_unparseable_builtin_override_blocks_until_removed(self, tmp_path, monkeypatch):
+        name, base = _clean_builtin()
+        monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+        path = tmp_path / f"{name}.toml"
+        path.write_text('allow_tools = [', encoding="utf-8")
+
+        assert name not in available_domains()
+        assert rejected_workspace_domains()[name]
+        path.unlink()
         assert available_domains()[name] == base
 
     def test_domains_lint_reports_rejected_workspace_pack(self, tmp_path, monkeypatch):
@@ -459,7 +499,7 @@ class TestBuiltinCatalogCache:
         available_domains()  # warm the builtin cache
         name = sorted(load_domains(builtin_dir()))[0]
         monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
-        (tmp_path / "ovr.toml").write_text(
+        (tmp_path / f"{name}.toml").write_text(
             f'name = "{name}"\ndescription = "overridden-in-test"\n'
         )
         assert available_domains()[name].description == "overridden-in-test"

@@ -707,6 +707,7 @@ def _visible_domains(domains: dict, ctx: Any | None) -> dict:
     return {
         name: profile for name, profile in domains.items()
         if _suite_allowed(ctx, suite_for(name))
+        and _suite_allowed(ctx, suite_for(profile.name))
     }
 
 
@@ -732,13 +733,23 @@ def spawn_specialist_tool(parent: Agent) -> Tool:
         domains = enabled_domains()
         profile = domains.get(domain)
         if profile is None:
+            from ..domain import rejected_workspace_domains
+
+            if domain in rejected_workspace_domains():
+                return (
+                    f"ERROR: {domain!r} cannot start because its setup needs "
+                    "review. Ask an administrator to check its permissions "
+                    "and operating limits. No work was started."
+                )
             sample = ", ".join(sorted(domains)[:30])
             return (
                 f"ERROR: no enabled specialist domain {domain!r}. Call "
                 f"list_specialists to see the roster. Some available: {sample}"
             )
         suite = suite_for(domain)
-        if not _suite_allowed(parent.ctx, suite):
+        if not _suite_allowed(parent.ctx, suite) or not _suite_allowed(
+            parent.ctx, suite_for(profile.name)
+        ):
             return f"ERROR: specialist domain {domain!r} is outside your department grant"
         if parent.depth + 1 > parent.ctx.max_depth:
             return f"ERROR: max depth {parent.ctx.max_depth} reached"

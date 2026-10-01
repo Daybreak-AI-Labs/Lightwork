@@ -42,6 +42,15 @@ def test_agent_from_profile_rejects_missing_or_invalid_envelope(allow_tools, max
         )
 
 
+def test_agent_from_profile_rejects_malformed_deny_list_before_spawn():
+    with pytest.raises(ValueError, match="deny_tools"):
+        agent_from_profile(
+            DomainProfile(name="unsafe", allow_tools=["shell"],
+                          deny_tools="shell", max_risk="high"),
+            None, "work",
+        )
+
+
 def test_agent_from_profile_sets_domain_persona_and_capability(tmp_path):
     ctx = _ctx(tmp_path)
     profile = DomainProfile(

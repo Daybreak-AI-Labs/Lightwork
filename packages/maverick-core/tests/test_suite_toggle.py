@@ -47,3 +47,14 @@ def test_enabled_true_is_a_noop_and_toggles_are_independent():
     # the legacy 'legal' pack (no legal_ prefix) is unaffected by the suite toggle
     if "legal" in alld:
         assert "legal" in out
+
+
+def test_fork_cannot_bypass_disabled_inherited_suite(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path))
+    (tmp_path / "client_fork.toml").write_text(
+        'name = "client_fork"\nextends = "aero_avionics"\n', encoding="utf-8",
+    )
+    assert "client_fork" in available_domains()
+    assert "client_fork" not in enabled_domains(
+        cfg={"suites": {"aerospace_defense": False}}
+    )
