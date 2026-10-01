@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.routing import Match
 
 PACKAGE = Path(__file__).resolve().parents[1] / "maverick_dashboard"
 TEMPLATES = PACKAGE / "templates"
@@ -147,7 +148,10 @@ def test_exposed_governance_pages_use_shared_shell_and_mounted_assets(
     parser.feed(response.text)
     expected_assets = SHARED_ASSETS | page_assets
     assert expected_assets <= parser.assets
-    assert parser.assets <= registered
+    routes = _effective_routes(dashboard_client.app.routes)
+    for asset in parser.assets:
+        scope = {"type": "http", "method": "GET", "path": asset, "root_path": ""}
+        assert any(route.matches(scope)[0] == Match.FULL for route in routes), asset
     assert all(parser.asset_counts[asset] == 1 for asset in page_assets)
 
     for asset in parser.assets:

@@ -718,7 +718,7 @@ def test_a_note_from_a_protected_project_runs_under_its_protection(monkeypatch):
     assert r.status_code == 202, r.text
     assert r.json() == {"started": True, "repo": "billing", "protect": "block"}
     assert started == [("billing", "billing: add retries",
-                        "In the billing code project.\nAdd retries", None)]
+                        "In the billing code project.\nAdd retries", None, "", None)]
     assert recorded == [("code_watch_note_start",
                          {"installation": False, "repo": "billing", "note": "abc123",
                           "protect": "block"})]
