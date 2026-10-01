@@ -112,9 +112,12 @@
     var scale = panel.getBoundingClientRect().width / panel.offsetWidth || 1;
     var compact = height / scale < 400;
     var gap = compact ? 12 : 84;
+    // Keep the device's bottom inset in the same unzoomed layout units as
+    // the visible bounds, reserving it in both position and available height.
+    var safeBottom = 'env(safe-area-inset-bottom, 0px) / ' + scale;
     panel.style.width = Math.max(0, Math.min(320, width / scale - 24)) + 'px';
-    panel.style.maxHeight = Math.max(0, height / scale - gap - 12) + 'px';
-    panel.style.bottom = (window.innerHeight - height - top) / scale + gap + 'px';
+    panel.style.maxHeight = 'max(0px, calc(' + (height / scale - gap - 12) + 'px - ' + safeBottom + '))';
+    panel.style.bottom = 'calc(' + ((window.innerHeight - height - top) / scale + gap) + 'px + ' + safeBottom + ')';
     var end = getComputedStyle(panel).direction === 'rtl' ? left : window.innerWidth - width - left;
     panel.style.insetInlineEnd = end / scale + 12 + 'px';
     // Short windows and the on-screen keyboard need the space normally kept

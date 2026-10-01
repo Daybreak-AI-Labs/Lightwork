@@ -1,6 +1,7 @@
 // Actual web chat widget in a same-origin host, with synthetic receipt transport.
 // CSS content zoom and a controlled visualViewport are explicit emulations;
-// this does not qualify a native virtual keyboard or human screen-reader speech.
+// the safe-area style contract does not qualify a nonzero native device inset,
+// a native virtual keyboard, or human screen-reader speech.
 const {test, expect} = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -42,8 +43,13 @@ async function panelFits(page) {
       .map(node => {const r = node.getBoundingClientRect(); return {name: node.getAttribute('aria-label') || node.textContent,
         left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height};});
     return {viewport: {width: innerWidth, top, bottom}, panel: {left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
-      scroll: panel.scrollWidth, width: panel.clientWidth}, controls};
+      scroll: panel.scrollWidth, width: panel.clientWidth},
+      styles: {bottom: panel.style.bottom, maxHeight: panel.style.maxHeight}, controls};
   });
+  // Desktop Chromium reports a zero safe-area inset. Require the live fit()
+  // styles to retain the device term in both positioning and height limits.
+  expect(state.styles.bottom).toContain('env(safe-area-inset-bottom');
+  expect(state.styles.maxHeight).toContain('env(safe-area-inset-bottom');
   expect(state.panel.left, JSON.stringify(state)).toBeGreaterThanOrEqual(-1);
   expect(state.panel.right, JSON.stringify(state)).toBeLessThanOrEqual(state.viewport.width + 1);
   expect(state.panel.top, JSON.stringify(state)).toBeGreaterThanOrEqual(state.viewport.top - 1);
@@ -75,7 +81,7 @@ for (const layout of [
   {name: '200% content zoom', width: 640, height: 950, zoom: 2},
   {name: '320px RTL', width: 320, height: 740, direction: 'rtl'},
   {name: 'emulated keyboard viewport', width: 390, height: 844, keyboardHeight: 310},
-]) test(`widget controls and uncertain receipt fit ${layout.name}`, async ({page}) => {
+]) test(`widget controls and uncertain receipt fit ${layout.name}`, async ({page}, info) => {
   await page.route('**/chat/send', route => route.fulfill({status: 503, contentType: 'application/json', body: '{}'}));
   const ui = await host(page, layout);
   await panelFits(page);
@@ -84,6 +90,9 @@ for (const layout of [
   await expect(ui.status).toContainText('Start not confirmed');
   await expect(page.getByRole('button', {name: 'Check start status'})).toBeVisible();
   await panelFits(page);
+  if (layout.name === 'landscape' || layout.name === '200% content zoom') {
+    await info.attach(`widget-unknown-receipt-${layout.name}`, {body: await page.screenshot(), contentType: 'image/png'});
+  }
   await ui.input.press('Escape');
   await expect(ui.panel).toBeHidden(); await expect(ui.button).toBeFocused();
 });
