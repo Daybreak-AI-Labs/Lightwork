@@ -38,10 +38,14 @@ def _register_form(token: str, *, tenant: str = "", name: str = "", owner: str =
     try:
         published = flow_store.load_published_bundle("published-form-flow")
         if published is None:
+            # Most intake tests submit a person's name. Declare that public
+            # field explicitly; an input-free flow exposes only the message
+            # fallback from its public page.
+            declared = [{"key": "name", "type": "text"}] if inputs is None else inputs
             saved = flow_store.save_flow(Flow(
                 id="published-form-flow", name="Published form", start="a",
                 nodes={"a": FlowNode(id="a", kind="agent", brief="Review the submission")},
-                inputs=inputs or [],
+                inputs=declared,
             ))
             release = flow_store.publish_flow(
                 saved.id, expected_version=saved.version, expected_revision=saved.revision,
@@ -59,7 +63,7 @@ def _register_form(token: str, *, tenant: str = "", name: str = "", owner: str =
 
 def test_new_form_api_mints_a_server_secret_and_returns_the_link(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    _register_form("old-link")  # Publish the flow used by the new automation.
+    _register_form("old-link", inputs=[])  # Publish the flow used by the new automation.
     client = _client()
     created = client.post("/api/v1/event-triggers", json={
         "name": "new-intake", "source": "form", "flow": "published-form-flow",
@@ -164,11 +168,13 @@ def test_live_automation_form_page_uses_published_inputs(monkeypatch, tmp_path):
 
 def test_automation_form_without_declared_inputs_still_has_a_useful_field(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    _register_form("intake")
+    _register_form("intake", inputs=[])
     page = _client().get("/form/intake")
     assert page.status_code == 200
     assert '<textarea class="textarea" id="af-field-1" name="message"' in page.text
     assert "What would you like to share?" in page.text
+    assert _client().post("/form/intake", json={"name": "unlisted"}).status_code == 422
+    assert _client().post("/form/intake", json={"message": "Hello"}).status_code == 201
 
 
 def test_bound_template_form_page_uses_immutable_params_without_exposing_defaults(monkeypatch, tmp_path):
@@ -264,6 +270,60 @@ def test_typed_form_refuses_invalid_answers_before_append_and_dispatches_typed_d
     assert run.input_data["due"] == "2026-10-01"
 
 
+def test_public_form_cannot_override_an_undeclared_saved_flow_default(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("guarded", inputs=[{"key": "message", "type": "text", "required": True}])
+    from maverick.flow import store as flow_store
+    from maverick_dashboard import event_triggers_store
+
+    bound_flow, release = flow_store.load_published_bundle("published-form-flow")
+    event_triggers_store.set_trigger(
+        "accept-guarded", "", "form", config={"token": "guarded"},
+        flow=bound_flow.id, flow_owner=bound_flow.owner,
+        flow_revision=release["release_id"], params={"recipient": "approved@example.test"},
+    )
+    client = _client()
+    page = client.get("/form/guarded")
+    assert page.status_code == 200
+    assert 'name="message"' in page.text
+    assert 'name="recipient"' not in page.text
+    refused = client.post("/form/guarded", json={
+        "message": "Review this", "recipient": "outside@example.test",
+    })
+    assert refused.status_code == 422
+    assert "not on the saved form" in refused.text
+    assert not list(tmp_path.rglob("*.ndjson"))
+
+    accepted = client.post("/form/guarded", json={"message": "Review this"})
+    assert accepted.status_code == 201
+    polled = client.post("/api/v1/event-triggers/poll?name=accept-guarded")
+    assert polled.status_code == 200
+    fired = polled.json()["triggers"][0]["fired_flows"]
+    assert len(fired) == 1
+    run = flow_store.load_run(fired[0])
+    assert run.input_data["recipient"] == "approved@example.test"
+
+
+def test_legacy_row_with_undeclared_field_stays_pending(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("legacy", inputs=[{"key": "message", "type": "text", "required": True}])
+    from maverick import form_store
+    from maverick_dashboard import event_triggers_store
+
+    assert form_store.append("legacy", {
+        "message": "Review this", "recipient": "outside@example.test",
+    }) == 1
+    polled = _client().post("/api/v1/event-triggers/poll?name=accept-legacy")
+    assert polled.status_code == 200
+    result = polled.json()["triggers"][0]
+    assert result["poll_error"] is True
+    assert result["fired_flows"] == []
+    assert any("not on the saved form" in note for note in result["notes"])
+    trigger = event_triggers_store.get_trigger("accept-legacy", tenant="")
+    assert trigger["cursor"] == "0"
+    assert event_triggers_store.pending_form_submissions(trigger) == 1
+
+
 def test_preexisting_invalid_form_row_stays_pending_for_repair(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _register_form("typed", inputs=[{"key": "amount", "type": "number", "required": True}])
@@ -295,13 +355,16 @@ def test_missing_bound_template_param_is_rejected_before_append(monkeypatch, tmp
     )
     client = _client()
     assert client.post("/form/contact-link", json={"other": "Ada"}).status_code == 422
+    assert client.post("/form/contact-link", json={"name": "Ada", "other": "x"}).status_code == 422
     assert not list(tmp_path.rglob("*.ndjson"))
     assert client.post("/form/contact-link", json={"name": "Ada"}).status_code == 201
 
 
 def test_json_submission_is_recorded_and_pollable(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    _register_form("signup")
+    _register_form("signup", inputs=[
+        {"key": "email", "type": "text"}, {"key": "plan", "type": "text"},
+    ])
     r = _client().post("/form/signup", json={"email": "a@b.com", "plan": "pro"})
     assert r.status_code == 201 and r.json()["seq"] == 1
     # The first poll records the existing submission without replaying it.
@@ -331,6 +394,7 @@ def test_new_form_delivers_first_submission_before_first_poll(monkeypatch, tmp_p
     saved = flow_store.save_flow(Flow(
         id="first-form-flow", name="First form", start="a",
         nodes={"a": FlowNode(id="a", kind="agent", brief="Review {{name}}")},
+        inputs=[{"key": "name", "type": "text"}],
     ))
     flow_store.publish_flow(
         saved.id, expected_version=saved.version, expected_revision=saved.revision,
@@ -396,6 +460,7 @@ def test_accepted_form_cannot_rebind_or_delete_before_original_flow_is_queued(mo
     second = flow_store.save_flow(Flow(
         id="second-flow", name="Second flow", start="a",
         nodes={"a": FlowNode(id="a", kind="agent", brief="Review {{name}}")},
+        inputs=[{"key": "name", "type": "text"}],
     ))
     flow_store.publish_flow(
         second.id, expected_version=second.version, expected_revision=second.revision,
@@ -634,7 +699,7 @@ def test_public_append_blocks_rebind_until_pending_row_is_visible(monkeypatch, t
 
 def test_urlencoded_submission(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    _register_form("contact")
+    _register_form("contact", inputs=[])
     r = _client().post("/form/contact", data={"message": "hello"})
     assert r.status_code == 201
     from maverick import form_store
@@ -644,7 +709,7 @@ def test_urlencoded_submission(monkeypatch, tmp_path):
 
 def test_small_multipart_text_submission(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    _register_form("contact")
+    _register_form("contact", inputs=[])
     response = _client().post("/form/contact", files={"message": (None, "hello")})
     assert response.status_code == 201
     from maverick import form_store

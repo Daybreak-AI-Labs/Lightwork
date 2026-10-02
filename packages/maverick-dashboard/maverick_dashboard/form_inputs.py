@@ -10,6 +10,53 @@ class FormInputError(ValueError):
     """A received answer cannot safely start the bound automation."""
 
 
+def public_form_fields(target, defaults: dict, *, is_flow: bool) -> list[dict]:
+    """Describe the fields a public caller may supply to one saved target."""
+    from maverick import form_store
+
+    if is_flow:
+        raw_fields = [
+            {"key": spec.get("key"), "label": spec.get("label"),
+             "type": spec.get("type") or "text",
+             "required": bool(spec.get("required")) and "default" not in spec
+             and spec.get("key") not in defaults}
+            for spec in target.inputs
+        ]
+    else:
+        raw_fields = [
+            {"key": key, "label": key.replace("_", " "), "type": "text",
+             "required": key not in defaults}
+            for key in target.params
+        ]
+    if not raw_fields:
+        raw_fields = [{"key": "message", "label": "What would you like to share?",
+                       "type": "text", "required": True, "long": True}]
+    if len(raw_fields) > form_store._MAX_FIELDS:
+        raise FormInputError("This form has too many fields.")
+    fields = []
+    seen = set()
+    for spec in raw_fields:
+        key = str(spec.get("key") or "").strip()
+        kind = str(spec.get("type") or "text")
+        if not key or len(key) > 200 or key in seen or kind not in {"text", "number", "bool", "date"}:
+            raise FormInputError("This form's saved fields need repair before submission.")
+        seen.add(key)
+        fields.append({
+            "key": key, "label": str(spec.get("label") or key).strip()[:200] or key,
+            "type": kind, "required": bool(spec.get("required")),
+            "long": bool(spec.get("long")),
+        })
+    return fields
+
+
+def validate_public_form_fields(fields: dict, allowed: list[dict],
+                                *, trusted_keys: frozenset[str] = frozenset()) -> None:
+    """Refuse caller-controlled keys absent from the bound public form."""
+    names = {field["key"] for field in allowed}
+    if any(key not in names and key not in trusted_keys for key in fields):
+        raise FormInputError("This submission includes fields not on the saved form.")
+
+
 def validate_template_form(template, defaults: dict, fields: dict) -> None:
     """Refuse a missing required immutable-template parameter before append."""
     values = {**(defaults or {}), **fields}

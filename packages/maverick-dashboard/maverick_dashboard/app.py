@@ -10524,44 +10524,16 @@ def _live_registered_form_target(trigger: dict, token: str):
 
 def _automation_form_definition(trigger: dict, token: str) -> dict:
     """Only display fields from the verified immutable target, never a draft."""
-    from maverick import form_store
+    from .form_inputs import FormInputError, public_form_fields
 
     with _live_registered_form_target(trigger, token) as (current, target):
-        defaults = current.get("params") or {}
-        if current.get("flow"):
-            raw_fields = [
-                {"key": spec.get("key"), "label": spec.get("label"),
-                 "type": spec.get("type") or "text",
-                 "required": bool(spec.get("required")) and "default" not in spec
-                 and spec.get("key") not in defaults}
-                for spec in target.inputs
-            ]
-            title = target.name
-        else:
-            raw_fields = [
-                {"key": key, "label": key.replace("_", " "), "type": "text",
-                 "required": key not in defaults}
-                for key in target.params
-            ]
-            title = target.title
-        if not raw_fields:
-            raw_fields = [{"key": "message", "label": "What would you like to share?",
-                           "type": "text", "required": True, "long": True}]
-        if len(raw_fields) > form_store._MAX_FIELDS:
-            raise _FormTargetUnavailable("form has too many fields")
-        fields = []
-        seen = set()
-        for spec in raw_fields:
-            key = str(spec.get("key") or "").strip()
-            kind = str(spec.get("type") or "text")
-            if not key or len(key) > 200 or key in seen or kind not in {"text", "number", "bool", "date"}:
-                raise _FormTargetUnavailable("form fields are unavailable")
-            seen.add(key)
-            fields.append({
-                "key": key, "label": str(spec.get("label") or key).strip()[:200] or key,
-                "type": kind, "required": bool(spec.get("required")),
-                "long": bool(spec.get("long")),
-            })
+        try:
+            fields = public_form_fields(
+                target, current.get("params") or {}, is_flow=bool(current.get("flow")),
+            )
+        except FormInputError as exc:
+            raise _FormTargetUnavailable("form fields are unavailable") from exc
+        title = target.name if current.get("flow") else target.title
         title = str(title or current.get("name") or "Submission form")
         if "{{" in title:
             title = str(current.get("name") or "Submission form").replace("-", " ").title()
@@ -10572,9 +10544,22 @@ def _append_registered_form(trigger: dict, token: str, fields: dict) -> int:
     """Check and append under the same registry lock as edits and deletion."""
     from maverick import form_store
 
-    from .form_inputs import coerce_flow_form, validate_template_form
+    from .form_inputs import (
+        FormInputError,
+        coerce_flow_form,
+        public_form_fields,
+        validate_public_form_fields,
+        validate_template_form,
+    )
 
     with _live_registered_form_target(trigger, token) as (current, target):
+        try:
+            allowed = public_form_fields(
+                target, current.get("params") or {}, is_flow=bool(current.get("flow")),
+            )
+        except FormInputError as exc:
+            raise _FormTargetUnavailable("form fields are unavailable") from exc
+        validate_public_form_fields(fields, allowed)
         if current.get("flow"):
             coerce_flow_form(target, {**(current.get("params") or {}), **fields})
         else:

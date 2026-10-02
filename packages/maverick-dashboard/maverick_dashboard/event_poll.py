@@ -197,6 +197,20 @@ def _fire_template(world, trig, tpl, events, owner, fire, summary, durable=False
     trigger_key = _trigger_key(trig)
     entries = []
     for index, event in enumerate(events):
+        if trig.get("source") == "form":
+            from .form_inputs import (
+                FormInputError,
+                public_form_fields,
+                validate_public_form_fields,
+            )
+
+            try:
+                allowed = public_form_fields(tpl, trig.get("params") or {}, is_flow=False)
+                validate_public_form_fields(
+                    event, allowed, trusted_keys=frozenset({"_seq", "_ts"}),
+                )
+            except FormInputError as exc:
+                raise RuntimeError(f"form submission needs attention: {exc}") from exc
         params = dict(trig.get("params") or {})
         for k, v in event.items():      # event fields fill DECLARED params only
             if k in declared:
@@ -250,6 +264,22 @@ def _fire_flow(trig, events, owner, fire_flow, summary, event_ids=None, durable=
     ``summary['fired_flows']``."""
     flow_id = trig["flow"]
     for index, event in enumerate(events):
+        if trig.get("source") == "form":
+            from .form_inputs import (
+                FormInputError,
+                public_form_fields,
+                validate_public_form_fields,
+            )
+
+            try:
+                allowed = public_form_fields(
+                    bound_flow, trig.get("params") or {}, is_flow=True,
+                )
+                validate_public_form_fields(
+                    event, allowed, trusted_keys=frozenset({"_seq", "_ts"}),
+                )
+            except FormInputError as exc:
+                raise RuntimeError(f"form submission needs attention: {exc}") from exc
         data = dict(trig.get("params") or {})
         for k, v in event.items():   # a flow takes ALL event fields as data (no declared set)
             data[str(k)] = v if isinstance(v, (int, float, bool)) else str(v)[:2000]
