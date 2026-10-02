@@ -14,8 +14,11 @@ test('a real switch in one tab pauses another tab draft and approval without cro
     await approval.goto('/approvals');
     const reject=approval.locator(`button[data-id="${original.approvals['workspace-a']}"][data-action=deny]`);
     await expect(reject).toBeEnabled();
-    const writes=[];
-    for(const page of [draft,approval])page.on('request',request=>{if(!['GET','HEAD','OPTIONS'].includes(request.method()))writes.push(request.url());});
+    const writes=[],approvalPosts=[];
+    for(const page of [draft,approval])page.on('request',request=>{
+      if(!['GET','HEAD','OPTIONS'].includes(request.method()))writes.push(request.url());
+      if(page===approval&&request.method()==='POST'&&new URL(request.url()).pathname.includes('/api/v1/approvals/'))approvalPosts.push(request.url());
+    });
     expect((await picker.goto('/workspace/tenant')).status()).toBe(200);
     await picker.locator('.tsel-pick[data-tenant="workspace-b"]').click();
     await expect.poll(async()=>(await app.state()).selected).toBe('workspace-b');
@@ -30,9 +33,12 @@ test('a real switch in one tab pauses another tab draft and approval without cro
     await expect(draft.locator('#wf-steps')).toHaveValue('Unsaved workspace A draft');
     await draft.locator('#wf-save-btn').click();
     await reject.click();
+    await expect(approval.locator('#mv-form')).toBeVisible();
+    await approval.locator('#mv-form-ok').click();
     await expect(draft.locator('#wf-status')).toContainText('Could not save the workflow');
     await expect(draft.locator('#wf-steps')).toHaveValue('Unsaved workspace A draft');
     await expect(approval.locator('#approval-msg')).toContainText('Could not');
+    expect(approvalPosts).toEqual([]);
     expect(writes).toEqual([]);
     const stale=await app.context.request.post(`/api/v1/approvals/${original.approvals['workspace-a']}/deny`,{headers:{'X-Lightwork-Expected-Tenant':'workspace-a'}});
     expect(stale.status(),await stale.text()).toBe(409);

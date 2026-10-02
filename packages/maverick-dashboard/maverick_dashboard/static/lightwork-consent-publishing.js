@@ -371,7 +371,11 @@
           await call("/properties/" + encodeURIComponent(p.property_id) + "/withdraw", { method: "POST", json: {
             expected_property_revision: p.revision, expected_publication_revision: p.publication_revision, idempotency_key: CW.reference() } });
           await loadProperties(); CW.say(status, "The banner no longer shows on " + CW.human(p.property_id) + ".");
-        } catch (error) { CW.fail(status, error, "withdraw the banner"); }
+        } catch (error) {
+          if (error && error.status === 409) {
+            CW.say(status, "Could not withdraw the banner. This changed since you opened it. Refresh the page and try again.", true);
+          } else { CW.fail(status, error, "withdraw the banner"); }
+        }
       });
     }
 

@@ -29,6 +29,7 @@ async function page(options={}){
     if(u.pathname.includes("/catalog/translations/"))return reply(200,{payload:{messages:{"purpose.old.title":"Old"}}});
     if(u.pathname.includes("/catalog/"))return reply(200,{items:[],total:0,next_offset:null});
     if(u.pathname.endsWith("/history"))return reply(200,{items:[{publication_id:"publication-b",publication_revision:2,action:"publish",created_at:1800000100},{publication_id:"publication-a",publication_revision:1,action:"publish",created_at:1800000000}]});
+    if(u.pathname.endsWith("/withdraw")&&options.withdrawStatus)return reply(options.withdrawStatus,{detail:"publication revision is 3, expected 2"});
     return reply(201,{ok:true});
   };
   w.eval(read("static/lightwork-consent-workbench.js"));
@@ -87,6 +88,20 @@ test("withdraw and restore confirm first and carry the row's references",async()
     assert.equal(rollback.body.target_publication_id,"publication-a");
     assert.match(ui.confirms.at(-1),/Restore version 1/);
   }finally{ui.dom.window.close();}
+});
+
+test("stale withdrawal gives refresh guidance without exposing revisions; other failures use the shared error",async()=>{
+  for(const [code,expected] of [[409,/changed since you opened it\. Refresh the page/],[503,/^Could not withdraw the banner\.$/]]){
+    const ui=await page({withdrawStatus:code});
+    try{
+      ui.button("#cpp-property-table","Withdraw").click();await flush();
+      const status=ui.d.getElementById("cpp-status");
+      assert.equal(status.getAttribute("role"),"alert");
+      assert.match(status.textContent,expected);
+      assert.doesNotMatch(status.textContent,/revision|expected 2|409|503/);
+      assert.equal(ui.posts().filter(c=>c.url.endsWith("/withdraw")).length,1);
+    }finally{ui.dom.window.close();}
+  }
 });
 
 test("a new use of data stores its words in the language pack, then saves the reference",async()=>{
