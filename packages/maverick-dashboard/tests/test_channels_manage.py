@@ -20,6 +20,7 @@ def _iso(monkeypatch, tmp_path):
     # dashboard-config.toml (the overlay settings_store writes) under tmp.
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.delenv("VOICE_ALLOWED_CALLERS", raising=False)
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     from maverick_dashboard import app as dash_app
@@ -108,6 +109,34 @@ def test_page_renders_management_forms():
     assert 'action="/channels/save"' in r.text
     assert 'value="slack"' in r.text and 'value="telegram"' in r.text
     assert 'name="enabled"' in r.text
+
+
+def test_voice_inventory_and_settings_explain_required_caller_list(tmp_path):
+    from maverick import config
+    from maverick_dashboard import integration_readiness
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[channels.voice]\nenabled = true\napi_key = "fixture"\n'
+        'webhook_token = "fixture"\n', encoding="utf-8",
+    )
+    config.reset_config_cache()
+    client = _client()
+    page = client.get("/channels")
+    assert page.status_code == 200
+    assert "Set permitted callers" in page.text
+    assert "/settings/all?id=channels.voice.allowed_callers" in page.text
+    assert "An empty list blocks incoming work" in page.text
+    assert "Needs attention" in page.text
+    assert "Add permitted caller numbers" in page.text
+
+    settings = client.get("/settings/all?id=channels.voice.allowed_callers")
+    assert settings.status_code == 200
+    assert "With no effective list, incoming calls cannot start work" in settings.text
+
+    configured = {"enabled": True, "api_key": "fixture", "webhook_token": "fixture",
+                  "allowed_callers": ["+12025550111"]}
+    assert integration_readiness.channel_readiness("voice", configured)["runtime"]["status"] == "passed"
 
 
 def test_save_channel_enables_and_hides_secret():

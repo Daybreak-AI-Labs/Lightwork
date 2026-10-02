@@ -15,6 +15,11 @@ Config in ~/.maverick/config.toml::
     phone_number  = "+14155551234"
     port          = 8770
     assistant_id  = "<provider assistant/agent id>"
+    webhook_token = "${VAPI_WEBHOOK_TOKEN}"
+    allowed_callers = ["+12025550111"]
+
+Only listed caller numbers may start work. Caller ID is a coarse restriction,
+not proof of the individual behind a call; sensitive actions still need review.
 
 The TTS / STT happens on the provider's side; Lightwork is just the
 "reasoning brain" the provider calls when the user pauses. This keeps
@@ -39,6 +44,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 
 from .base import (
     Channel,
@@ -58,6 +64,23 @@ PROVIDER_KEY_ENV = {
     "retell": "RETELL_API_KEY",
     "bland": "BLAND_API_KEY",
 }
+
+
+_E164 = re.compile(r"\+[1-9][0-9]{5,14}\Z")
+
+
+def configured_callers(values=None) -> set[str]:
+    """Resolve and validate the effective list of callers allowed to start work.
+
+    An explicit empty list overrides the environment. A missing list remains
+    empty so the webhook and listener can refuse inbound work safely.
+    """
+    if values is not None and not isinstance(values, (list, tuple, set, frozenset)):
+        raise ValueError("voice channel: caller list must contain phone numbers")
+    callers = normalize_allowlist(values, "VOICE_ALLOWED_CALLERS")
+    if any(not _E164.fullmatch(number) for number in callers):
+        raise ValueError("voice channel: caller list needs phone numbers in +countrycode format")
+    return callers
 
 
 try:
@@ -113,13 +136,9 @@ class VoiceChannel(Channel):
         self.port = port
         self.assistant_id = assistant_id
         self.webhook_token = webhook_token or os.environ.get("VAPI_WEBHOOK_TOKEN")
-        # Optional per-caller allowlist (by phone number). The webhook bearer
-        # + loopback bind are the primary gate; when this is set we also
-        # restrict WHICH caller number may drive the agent. Empty = allow any
-        # authenticated caller (bearer still required).
-        self.allowed_callers = normalize_allowlist(
-            allowed_callers, "VOICE_ALLOWED_CALLERS",
-        )
+        # The bearer authenticates the webhook service, not the phone caller.
+        # A caller list is required before any transcript can start work.
+        self.allowed_callers = configured_callers(allowed_callers)
 
         self._app = FastAPI()
         add_webhook_body_limit(self._app)
@@ -143,6 +162,8 @@ class VoiceChannel(Channel):
     ):
         if not self._check_webhook_auth(authorization):
             raise HTTPException(status_code=401, detail="invalid webhook bearer")
+        if not self.allowed_callers:
+            raise HTTPException(status_code=403, detail="voice caller list is not configured")
 
         # Vapi sends webhook events with a `type` field: "function-call",
         # "end-of-call-report", "transcript", "speech-update", etc.
@@ -172,14 +193,11 @@ class VoiceChannel(Channel):
             call = call if isinstance(call, dict) else {}
             customer = call.get("customer")
             customer = customer if isinstance(customer, dict) else {}
-            user_id = (
-                customer.get("number")
-                or call.get("id")
-                or "voice-unknown"
-            )
-            # Enforce the per-caller allowlist when one is configured.
-            if self.allowed_callers and not is_allowed(str(user_id), self.allowed_callers):
-                log.warning("unauthorized voice caller: %s", user_id)
+            user_id = customer.get("number")
+            if not isinstance(user_id, str) or not _E164.fullmatch(user_id):
+                raise HTTPException(status_code=403, detail="canonical caller number required")
+            if not is_allowed(user_id, self.allowed_callers):
+                log.warning("unauthorized voice caller")
                 return {"response": "Sorry, this number isn't authorized to use this assistant."}
             from .delivery import DeliveryUnknown
 
@@ -189,11 +207,11 @@ class VoiceChannel(Channel):
                 raise HTTPException(status_code=400, detail="stable call and transcript event identity required")
             identity = f"{len(call_id)}:{call_id}:{event_id}"
             account = self._delivery_account()
-            msg = IncomingMessage(user_id=str(user_id), sender_id=str(user_id), text=transcript,
+            msg = IncomingMessage(user_id=user_id, sender_id=user_id, text=transcript,
                                   channel=self.name, message_id=identity)
             def authorize():
                 return (account == self._delivery_account() and self._check_webhook_auth(authorization)
-                        and (not self.allowed_callers or is_allowed(str(user_id), self.allowed_callers)))
+                        and is_allowed(user_id, self.allowed_callers))
             async def prepare_response(reply):
                 # Returning a response object cannot confirm provider receipt
                 # or spoken delivery. Repeated callbacks read the saved result.
@@ -225,6 +243,8 @@ class VoiceChannel(Channel):
                          hashlib.sha256(self.api_key.encode()).hexdigest()))
 
     async def start(self) -> None:
+        if not self.allowed_callers:
+            raise ValueError("voice channel: set allowed_callers or VOICE_ALLOWED_CALLERS before receiving calls")
         import uvicorn
         if not self.webhook_token:
             # Inbound webhook auth rejects every request without a token, so the

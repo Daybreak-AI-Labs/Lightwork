@@ -481,12 +481,15 @@ def test_voice_allowlist_blocks_unauthorized_caller(monkeypatch):
 
 
 @pytest.mark.skipif(not _have_voice_deps(), reason="fastapi+httpx not installed")
-def test_voice_without_allowlist_allows_any_authenticated_caller(monkeypatch):
-    """Back-compat: with no allowlist, the bearer is the gate (any caller)."""
+def test_voice_without_allowlist_refuses_authenticated_caller(monkeypatch):
+    """The webhook bearer authenticates the provider, not its phone caller."""
     from fastapi.testclient import TestClient
     from maverick_channels.voice import VoiceChannel
 
-    async def _handler(_):
+    seen = []
+
+    async def _handler(message):
+        seen.append(message)
         return "ran"
 
     monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
@@ -497,5 +500,31 @@ def test_voice_without_allowlist_allows_any_authenticated_caller(monkeypatch):
         "message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1"},
         "call": {"id": "call1", "customer": {"number": "+19998887777"}},
     })
-    assert resp.status_code == 200
-    assert resp.json() == {"response": "ran"}
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "voice caller list is not configured"
+    assert seen == []
+
+
+@pytest.mark.skipif(not _have_voice_deps(), reason="fastapi+httpx not installed")
+@pytest.mark.parametrize("number", [None, "", "202-555-0111", "+012025550111", "+12025550111 "])
+def test_voice_refuses_missing_or_noncanonical_number_even_with_valid_bearer(monkeypatch, number):
+    from fastapi.testclient import TestClient
+    from maverick_channels.voice import VoiceChannel
+
+    seen = []
+
+    async def _handler(message):
+        seen.append(message)
+        return "ran"
+
+    monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
+    chan = VoiceChannel(_handler, api_key="vapi-test-key", allowed_callers=["+12025550111"])
+    call = {"id": "call1", "customer": {}}
+    if number is not None:
+        call["customer"]["number"] = number
+    resp = TestClient(chan._app).post("/webhook/voice", headers={"Authorization": "Bearer voice-secret"},
+        json={"message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1"},
+              "call": call})
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "canonical caller number required"
+    assert seen == []

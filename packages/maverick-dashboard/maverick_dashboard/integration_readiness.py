@@ -595,9 +595,34 @@ _CHANNEL_MODULES = {
     "whatsapp_cloud": "maverick_channels.whatsapp_cloud",
     "sms": "maverick_channels.sms",
     "email": "maverick_channels.email",
+    "voice": "maverick_channels.voice",
     "mattermost": "maverick_channels.mattermost",
     "teams": "maverick_channels.teams",
 }
+
+
+def _voice_configuration_problem(channel_config: dict[str, Any]) -> str:
+    """A local voice preflight must reflect the inbound caller gate."""
+    try:
+        from maverick_channels.voice import _HAVE_DEPS, PROVIDER_KEY_ENV, configured_callers
+    except ImportError:
+        return "The phone call adapter is unavailable."
+    if not _HAVE_DEPS:
+        return "Phone call support is not installed on this server."
+
+    try:
+        callers = configured_callers(channel_config.get("allowed_callers"))
+    except ValueError:
+        return "Caller numbers must use +countrycode format in Settings > All settings > Chat channels > Phone calls."
+    if not callers:
+        return "Add permitted caller numbers in Settings > All settings > Chat channels > Phone calls before calls can start work."
+    provider = str(channel_config.get("provider") or "vapi")
+    key_env = PROVIDER_KEY_ENV.get(provider, "VAPI_API_KEY")
+    if not (channel_config.get("api_key") or os.environ.get(key_env)):
+        return "The phone call service key is missing."
+    if not (channel_config.get("webhook_token") or os.environ.get("VAPI_WEBHOOK_TOKEN")):
+        return "The incoming call check key is missing."
+    return ""
 
 
 def probe_channel(name: str, channel_config: dict[str, Any]) -> dict[str, Any]:
@@ -608,6 +633,11 @@ def probe_channel(name: str, channel_config: dict[str, Any]) -> dict[str, Any]:
     webhook acceptance.
     """
     channel = str(name).strip().lower()
+    if channel == "voice":
+        problem = _voice_configuration_problem(channel_config)
+        if problem:
+            return {"verified": False, "detail": problem,
+                    "evidence": {"kind": "local_adapter_preflight"}}
     missing = [
         field
         for field in _CHANNEL_REQUIRED_FIELDS.get(channel, ())
@@ -687,11 +717,12 @@ def channel_readiness(name: str, channel_config: dict[str, Any]) -> dict[str, An
             for field in _CHANNEL_REQUIRED_FIELDS.get(channel, ())
             if not str(channel_config.get(field) or "").strip()
         ]
+        voice_problem = _voice_configuration_problem(channel_config) if channel == "voice" else ""
         runtime = check(
-            "failed" if missing else "passed",
+            "failed" if missing or voice_problem else "passed",
             (
-                "missing required field(s): " + ", ".join(missing)
-                if missing
+                voice_problem or "missing required field(s): " + ", ".join(missing)
+                if voice_problem or missing
                 else "required channel configuration passed local preflight"
             ),
             kind="channel_local_preflight",

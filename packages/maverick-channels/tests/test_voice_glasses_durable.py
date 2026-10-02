@@ -21,7 +21,7 @@ async def until(predicate):
 
 def voice_event(**fields):
     return {"message": {"type": "transcript", "role": "user", "transcriptType": "final",
-            "transcript": "question", "id": "event1", "call": {"id": "call1", "customer": {"number": "+owner"}},
+            "transcript": "question", "id": "event1", "call": {"id": "call1", "customer": {"number": "+12025550111"}},
             **fields}}
 
 
@@ -33,7 +33,7 @@ def test_voice_parallel_callbacks_return_saved_result_with_one_execution():
             await release.wait()
             return "saved response"
         handler_mock = AsyncMock(side_effect=handler)
-        channel = VoiceChannel(handler_mock, api_key="fixture", webhook_token="fixture", allowed_callers={"+owner"})
+        channel = VoiceChannel(handler_mock, api_key="fixture", webhook_token="fixture", allowed_callers={"+12025550111"})
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=channel._app), base_url="http://fixture",
                                      headers={"Authorization": "Bearer fixture"}) as client:
             first = asyncio.create_task(client.post("/webhook/voice", json=voice_event()))
@@ -44,7 +44,7 @@ def test_voice_parallel_callbacks_return_saved_result_with_one_execution():
             assert (await first).json() == {"response": "saved response"}
             assert (await client.post("/webhook/voice", json=voice_event())).json() == {"response": "saved response"}
             handler_mock.assert_awaited_once()
-            channel.allowed_callers = {"someone-else"}
+            channel.allowed_callers = {"+12025550112"}
             response = await client.post("/webhook/voice", json=voice_event())
             assert "saved response" not in response.text
         row = DeliveryJournal().store.list(limit=1)[0]
@@ -55,7 +55,7 @@ def test_voice_parallel_callbacks_return_saved_result_with_one_execution():
 def test_voice_partial_missing_identity_and_changed_replay_do_not_execute():
     async def run():
         handler = AsyncMock(return_value="answer")
-        channel = VoiceChannel(handler, api_key="fixture", webhook_token="fixture")
+        channel = VoiceChannel(handler, api_key="fixture", webhook_token="fixture", allowed_callers={"+12025550111"})
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=channel._app), base_url="http://fixture",
                                      headers={"Authorization": "Bearer fixture"}) as client:
             assert (await client.post("/webhook/voice", json=voice_event(transcriptType="partial"))).json() == {}

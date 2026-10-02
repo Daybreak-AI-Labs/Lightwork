@@ -43,6 +43,7 @@ def test_voice_channel_constructs_with_api_key():
         phone_number="+14155551234",
         port=8770,
         assistant_id="asst_xyz",
+        allowed_callers=["+12025550111"],
     )
     # FastAPI route is wired.
     routes = [r.path for r in chan._app.routes if hasattr(r, "path")]
@@ -58,8 +59,44 @@ def test_voice_channel_picks_up_env(monkeypatch):
         return ""
 
     monkeypatch.setenv("VAPI_API_KEY", "from-env")
+    monkeypatch.setenv("VOICE_ALLOWED_CALLERS", "+12025550111,+12025550112")
     chan = VoiceChannel(handler=_noop)
     assert chan.api_key == "from-env"
+    assert chan.allowed_callers == {"+12025550111", "+12025550112"}
+
+
+@pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
+def test_voice_caller_configuration_refuses_invalid_numbers_and_empty_start(monkeypatch):
+    import asyncio
+
+    from maverick_channels.voice import VoiceChannel
+
+    monkeypatch.delenv("VOICE_ALLOWED_CALLERS", raising=False)
+    with pytest.raises(ValueError, match="caller list must contain"):
+        VoiceChannel(handler=_noop, api_key="vapi-test-key", allowed_callers="+12025550111")
+    with pytest.raises(ValueError, match="caller list needs phone numbers"):
+        VoiceChannel(handler=_noop, api_key="vapi-test-key", allowed_callers=["202-555-0111"])
+    channel = VoiceChannel(handler=_noop, api_key="vapi-test-key", webhook_token="voice-secret")
+    with pytest.raises(ValueError, match="allowed_callers"):
+        asyncio.run(channel.start())
+
+
+@pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
+def test_server_voice_wiring_uses_the_configured_caller_list(monkeypatch):
+    from maverick.server import _wire_voice
+
+    monkeypatch.setenv("VOICE_ALLOWED_CALLERS", "+12025550112")
+
+    class Server:
+        _handle_message = _noop
+
+        def add_channel(self, channel):
+            self.channel = channel
+
+    server = Server()
+    _wire_voice(server, {"api_key": "fixture", "webhook_token": "fixture",
+                         "allowed_callers": ["+12025550111"]})
+    assert server.channel.allowed_callers == {"+12025550111"}
 
 
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
@@ -71,7 +108,7 @@ def test_voice_webhook_requires_bearer_token(monkeypatch):
         return "ok"
 
     monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
-    chan = VoiceChannel(handler=_noop, api_key="vapi-test-key")
+    chan = VoiceChannel(handler=_noop, api_key="vapi-test-key", allowed_callers=["+12025550111"])
     client = TestClient(chan._app)
     payload = {"message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1", "call": {"id": "call1"}}}
     resp = client.post("/webhook/voice", json=payload)
@@ -87,9 +124,9 @@ def test_voice_webhook_accepts_valid_bearer_token(monkeypatch):
         return "ok"
 
     monkeypatch.setenv("VAPI_WEBHOOK_TOKEN", "voice-secret")
-    chan = VoiceChannel(handler=_noop, api_key="vapi-test-key")
+    chan = VoiceChannel(handler=_noop, api_key="vapi-test-key", allowed_callers=["+12025550111"])
     client = TestClient(chan._app)
-    payload = {"message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1", "call": {"id": "call1"}}}
+    payload = {"message": {"type": "transcript", "role": "user", "transcript": "hi", "id": "event1", "call": {"id": "call1", "customer": {"number": "+12025550111"}}}}
     resp = client.post(
         "/webhook/voice",
         json=payload,

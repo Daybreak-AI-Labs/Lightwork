@@ -1077,7 +1077,7 @@ CHANNEL_ALLOWLISTS: dict[str, tuple[str, bool, str, str, str, str, str]] = {
     "irc": ("IRC", False, "allowed_user_ids", "Account", "nickname",
             r"[^\s,]{1,64}", "a signed-in IRC account name"),
     "voice": ("Phone calls", False, "allowed_callers", "Number", "+14155551234",
-              _PHONE, "a phone number starting with + and the country code"),
+              r"\+[1-9][0-9]{5,14}", "a full phone number starting with + and a country code"),
     "mattermost": ("Mattermost", True, "allowed_user_ids", "Person", "alice",
                    r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", "a Mattermost username or user id"),
     "teams": ("Microsoft Teams", True, "allowed_users", "Person",
@@ -1099,10 +1099,19 @@ def _channel_settings() -> tuple[Setting, ...]:
                          warning=f"People on the {label} list will be able to give agents work.",
                          aliases=f"{name} channel chat", **common))
         noun = "callers" if key == "allowed_callers" else "people"
+        access_help = (
+            "Only numbers in the effective caller list can start work through calls. "
+            "Enter each number with + and its country code. If this list is blank, "
+            "a server-provided list may apply. With no effective list, incoming calls "
+            "cannot start work. Caller ID alone does not verify a person; sensitive "
+            "actions still need approval."
+            if name == "voice" else
+            f"Only {noun} listed here can give agents work through {label}. When the "
+            "list is empty, the list set on your server applies; with no list at all, "
+            "nobody can."
+        )
         out.append(S(section, key, f"Who may use {label}",
-                     f"Only {noun} listed here can give agents work through {label}. When the "
-                     "list is empty, the list set on your server applies; with no list at all, "
-                     "nobody can.",
+                     access_help,
                      "list", default=[], weaker="grow", item_label=item, item_hint=hint,
                      pattern=pattern, item_error=error, empty_unset=True, max_items=200,
                      max_length=300,

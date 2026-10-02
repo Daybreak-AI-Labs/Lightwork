@@ -207,7 +207,14 @@
         <tr>
           <td>{{ channel.name | humanize }}</td>
           <td>{% if channel.configured %}<span class="badge active">Yes</span>{% else %}<span class="badge">No</span>{% endif %}</td>
-          <td>{{ integration_readiness(channel.readiness) }}</td>
+          <td>{{ integration_readiness(channel.readiness) }}
+            {% if channel.name == 'voice' %}
+            <p class="muted ch-help">Incoming calls can start work only from a listed number.
+              <a href="/settings/all?id=channels.voice.allowed_callers">Set permitted callers</a>
+              under Chat channels &rsaquo; Phone calls. An empty list blocks incoming work.
+              Caller ID alone does not verify a person.</p>
+            {% endif %}
+          </td>
         </tr>
       {% endfor %}
       </tbody>
