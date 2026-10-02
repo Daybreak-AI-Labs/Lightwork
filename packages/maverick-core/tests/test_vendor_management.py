@@ -109,6 +109,24 @@ def test_questionnaire_requires_a_registered_template_and_reads_back():
     assert rows[0]["submissions"][0]["q1"] == "yes"
 
 
+def test_questionnaire_read_failure_does_not_look_unanswered(monkeypatch):
+    from maverick import form_store
+
+    record = _register()
+    vm.request_questionnaire(
+        record["id"], assessment_type="vendor_risk", actor="ops",
+        expected_revision=record["revision"],
+    )
+
+    def fail_read(_token, _cursor):
+        raise OSError("private storage detail")
+
+    monkeypatch.setattr(form_store, "since", fail_read)
+    with pytest.raises(vm.QuestionnaireResponsesUnavailable) as exc:
+        vm.questionnaire_responses(record["id"])
+    assert "private storage detail" not in str(exc.value)
+
+
 def test_monitoring_notes_and_posture():
     record = _register()
     with pytest.raises(ValueError, match="severity"):

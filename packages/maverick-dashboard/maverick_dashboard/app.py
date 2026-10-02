@@ -4351,13 +4351,32 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     record = vendor_management.get_vendor(vendor_id[:64])
     if record is None:
         raise HTTPException(status_code=404, detail="That vendor could not be found.")
+    questionnaire_unavailable = False
+    questionnaire_statuses = {}
+    if record.get("questionnaires"):
+        try:
+            checked = await run_in_threadpool(
+                vendor_management.questionnaire_responses, vendor_id[:64]
+            )
+            questionnaire_statuses = {
+                row["form_path"].rsplit("/", 1)[-1]: row["status"]
+                for row in checked
+            }
+        except vendor_management.QuestionnaireResponsesUnavailable:
+            questionnaire_unavailable = True
     record["registered_at_date"] = _date(record.get("registered_at"))
     now = _time.time()
     for c in record.get("contracts") or []:
         c["renews_date"] = _date(c.get("renews_at"))
         c["overdue"] = float(c.get("renews_at") or 0) < now
     for q in record.get("questionnaires") or []:
-        q.pop("token", None)   # the live form token never reaches a page
+        token = q.pop("token", None)   # the live form token never reaches a page
+        status = questionnaire_statuses.get(token)
+        if status is None:
+            questionnaire_unavailable = True
+            q["status"] = "unavailable"
+        else:
+            q["status"] = status
         q["requested_at_date"] = _date(q.get("requested_at"))
     for n in record.get("monitoring_notes") or []:
         n["recorded_at_date"] = _date(n.get("recorded_at"))
@@ -4391,6 +4410,7 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     return templates.TemplateResponse(
         request, "vendor_detail.html",
         {"vendor": record, "questionnaire_types": questionnaire_types, "assessments": assessments,
+         "questionnaire_unavailable": questionnaire_unavailable,
          "record_alerts": alerts})
 
 

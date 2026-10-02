@@ -104,6 +104,30 @@ def test_vendor_questionnaire_lifecycle_over_the_api():
     assert back.json()["questionnaires"][0]["status"] == "sent"
 
 
+def test_vendor_questionnaire_read_failure_returns_unavailable(monkeypatch):
+    from maverick import form_store
+
+    vendor = client.post("/api/v1/vendors", json={
+        "name": "Globex", "category": "hosting",
+        "criticality": "medium", "owner": "it",
+    }).json()
+    sent = client.post(
+        f"/api/v1/vendors/{vendor['id']}/questionnaires",
+        json={"assessment_type": "vendor_risk", "revision": vendor["revision"]},
+    ).json()
+
+    def fail_read(_token, _cursor):
+        raise OSError("private storage detail")
+
+    monkeypatch.setattr(form_store, "since", fail_read)
+    response = client.get(f"/api/v1/vendors/{vendor['id']}/questionnaires")
+    assert response.status_code == 503
+    assert "couldn't check questionnaire replies" in response.json()["detail"]
+    assert "questionnaires" not in response.json()
+    assert "private storage detail" not in response.text
+    assert sent["form_path"] not in response.text
+
+
 def test_vendor_status_note_and_onetrust_import():
     vendor = client.post("/api/v1/vendors", json={
         "name": "Initech", "category": "billing",

@@ -84,6 +84,10 @@ class VendorManagementConfigError(VendorManagementError):
     """The feature is not enabled or configured safely."""
 
 
+class QuestionnaireResponsesUnavailable(VendorManagementError):
+    """A questionnaire's stored replies could not be checked."""
+
+
 def get_vendor_management_config() -> dict[str, Any]:
     from .config import load_global_config
 
@@ -327,8 +331,10 @@ def questionnaire_responses(vendor_id: str) -> list[dict[str, Any]]:
             # Cursor "0" = everything; "" would be a baseline-only call
             # that returns no rows at all.
             submissions, _cursor = form_store.since(token, "0")
-        except Exception:
-            submissions = []
+        except Exception as exc:
+            raise QuestionnaireResponsesUnavailable(
+                "questionnaire replies could not be checked"
+            ) from exc
         kind = str(row.get("assessment_type") or "")
         out.append(
             {

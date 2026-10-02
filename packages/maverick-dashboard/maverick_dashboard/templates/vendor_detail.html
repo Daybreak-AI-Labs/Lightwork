@@ -51,6 +51,7 @@
 
   <div class="section-head"><h2>Questionnaires</h2>{% if questionnaire_types %}<button type="button" class="btn btn--primary" data-vd-add="questionnaire">Send a questionnaire</button>{% endif %}</div>
   <div class="panel{% if not vendor.questionnaires %} empty{% endif %}">
+    {% if questionnaire_unavailable %}<p role="alert">We can't check questionnaire replies right now. Please try again before following up with this vendor.</p>{% endif %}
     {% if vendor.questionnaires %}
       <table>
         <thead><tr><th scope="col">Questionnaire</th><th scope="col">Status</th>
@@ -59,7 +60,7 @@
         {% for q in vendor.questionnaires %}
           <tr>
             <td>{{ q.title }}</td>
-            <td><span class="badge {{ 'done' if q.status == 'answered' else 'info' }}">{{ q.status | humanize }}</span></td>
+            <td><span class="badge {{ 'done' if q.status == 'answered' else 'warn' if q.status == 'unavailable' else 'info' }}">{{ 'Replies unavailable' if q.status == 'unavailable' else q.status | humanize }}</span></td>
             <td>{{ q.requested_at_date }}</td>
             <td class="muted">{{ q.requested_by | identity }}</td>
           </tr>

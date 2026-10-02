@@ -86,6 +86,30 @@ def test_vendor_detail_renders_record_without_form_tokens():
     assert developer_terms(body) == []
 
 
+def test_vendor_detail_shows_checked_reply_state_and_read_failure(monkeypatch):
+    from maverick import form_store
+
+    record = _vendor()
+    token = record["questionnaires"][0]["token"]
+    form_store.append(token, {"vr_q1": "yes"})
+    answered = client.get(f"/privacy/vendors/{record['id']}")
+    assert answered.status_code == 200
+    assert "Answered</span>" in answered.text
+    assert token not in answered.text
+
+    def fail_read(_token, _cursor):
+        raise OSError("private storage detail")
+
+    monkeypatch.setattr(form_store, "since", fail_read)
+    unavailable = client.get(f"/privacy/vendors/{record['id']}")
+    assert unavailable.status_code == 200
+    assert "can't check questionnaire replies right now" in unavailable.text
+    assert "Replies unavailable</span>" in unavailable.text
+    assert "Answered</span>" not in unavailable.text
+    assert token not in unavailable.text
+    assert "private storage detail" not in unavailable.text
+
+
 def test_vendor_detail_404_and_403(tmp_path):
     from maverick import config
 

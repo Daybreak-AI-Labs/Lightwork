@@ -2835,10 +2835,17 @@ async def vendor_questionnaire_responses(request: Request,
                                          vendor_id: str) -> dict:
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    rows = await _estate_call(
-        vm.questionnaire_responses, vendor_id[:64],
-        not_found="no such vendor",
-    )
+    try:
+        rows = await run_in_threadpool(vm.questionnaire_responses, vendor_id[:64])
+    except vm.QuestionnaireResponsesUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="We couldn't check questionnaire replies. Please try again shortly.",
+        ) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="no such vendor") from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"questionnaires": rows}
 
 
