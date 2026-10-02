@@ -139,6 +139,41 @@ def test_run_creates_template_from_definitions():
     assert load_template(item["template"]) is not None
 
 
+def test_signed_in_importer_can_edit_own_workflow_but_another_user_cannot(monkeypatch):
+    import maverick_dashboard.auth as auth
+    from maverick.templates import load_template
+
+    monkeypatch.setattr(auth, "proxy_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
+    monkeypatch.setattr(auth, "proxy_header_name", lambda: "X-Forwarded-User")
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+    client = _client()
+    headers = {"X-Forwarded-User": "alice"}
+    imported = client.post("/api/v1/import/run", headers=headers, json={
+        "source": "n8n", "definitions": [N8N_WF],
+    })
+    assert imported.status_code == 200, imported.text
+    name = imported.json()["imported"][0]["template"]
+    original = load_template(name)
+    assert original.owner == "user:alice"
+
+    edit = {
+        "name": name, "title": "Updated workflow", "body": "Review the new lead.",
+        "overwrite": True, "expected_generation": original.generation,
+    }
+    saved = client.post("/api/v1/workflows", headers=headers, json=edit)
+    assert saved.status_code == 201, saved.text
+    updated = load_template(name)
+    assert updated.owner == "user:alice"
+    assert updated.body == "Review the new lead."
+
+    denied = client.post("/api/v1/workflows", headers={"X-Forwarded-User": "bob"}, json={
+        **edit, "body": "Replace Alice's workflow.", "expected_generation": updated.generation,
+    })
+    assert denied.status_code == 403, denied.text
+    assert load_template(name).body == "Review the new lead."
+
+
 def test_dry_run_writes_nothing():
     r = _client().post("/api/v1/import/run", json={
         "source": "n8n", "definitions": [N8N_WF], "dry_run": True,

@@ -44,8 +44,8 @@ def materialize(
 
     ``queue`` (a ``maverick.job_queue.JobQueue``) enables auto-creating a cron
     schedule for ``schedule``-triggered automations whose cron we recovered.
-    ``owner``/``channel``/``user_id`` are copied into activated schedule payloads
-    so worker-created goals and runs preserve the caller's authenticated identity.
+    ``owner`` is retained on the imported template and activated schedule;
+    ``channel``/``user_id`` carry the authenticated identity into scheduled runs.
     Webhook/event triggers are returned as ``suggested_trigger`` for the caller
     to wire (the webhook trigger store is a dashboard concern).
     """
@@ -79,6 +79,7 @@ def materialize(
             budget_dollars=budget_dollars,
             budget_wall_seconds=budget_wall_seconds,
             overwrite=overwrite,
+            owner=owner,
         )
         created = True
 
