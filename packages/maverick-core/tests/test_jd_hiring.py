@@ -66,7 +66,8 @@ def test_match_includes_custom_tenant_packs(tmp_path, monkeypatch):
         'compartment = "acme_llama_groomer"\n'
         'description = "Grooms llamas and maintains llama grooming schedules"\n'
         'persona = "You are the llama grooming specialist."\n'
-        'allow_tools = ["read_file"]\n',
+        'allow_tools = ["read_file"]\n'
+        'max_risk = "low"\n',
         encoding="utf-8",
     )
     domains = available_domains()
