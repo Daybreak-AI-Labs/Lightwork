@@ -80,6 +80,28 @@ test('key re-protection previews, confirms and never shows the key', async (t) =
   assert.match(ui.document.getElementById('tenant-keys-out').textContent, /Re-protected 1 workspace/);
 });
 
+test('key re-protection does not hide a missing activity record', async (t) => {
+  const markup = body('templates/tenants.html', '<details class="panel tenants-advanced" id="tenant-keys-panel">', '<style>');
+  const ui = await fixture(markup, 'lightwork-tenant-ops.js', (url) => {
+    if (url.endsWith('/keys/preview')) return response({summary: '1 workspace would be re-protected.', total: 1,
+      rows: [{workspace: 'Acme', result: 'Would be re-protected'}]});
+    if (url.endsWith('/keys/rotate')) return response({job: {id: 'k2', state: 'done', record_warning: true,
+      result: {summary: 'Re-protected 1 workspace.', failed: 0, rows: []}}});
+    return response({});
+  });
+  t.after(() => ui.window.close());
+  const form = ui.document.getElementById('tenant-keys');
+  const file = (value) => new ui.window.File([value], 'key.txt', {type: 'text/plain'});
+  Object.defineProperty(form.elements.current_key, 'files', {value: [file('a'.repeat(64))]});
+  Object.defineProperty(form.elements.new_key, 'files', {value: [file('b'.repeat(64))]});
+  submit(ui, form);
+  await ui.settle();
+  ui.document.getElementById('tenant-keys-rotate').click();
+  await ui.settle();
+  assert.match(ui.document.getElementById('tenant-keys-msg').textContent, /could not be added to the activity record/);
+  assert.match(ui.document.getElementById('tenant-keys-msg').textContent, /Keep the current key/);
+});
+
 test('stripe send is offered after a preview and confirmed first', async (t) => {
   const markup = '<select name="workspace"></select>' + body('templates/billing.html', '<div class="panel" id="stripe-billing">', '{% endif %}');
   const ui = await fixture(markup.replace('<select class="select" name="workspace" required>', '<select class="select" name="workspace" required><option value="acme">Acme</option>'),

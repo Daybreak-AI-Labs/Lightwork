@@ -270,7 +270,7 @@ _CONTEXTS = tuple(
                 "Drafts may be wrong and need your review; the companion cannot execute tools or task actions.",
                 "It cannot read another employee's tasks, use connected sources or create learned memory.",
                 "Companion administration exposes policy and audit metadata, not private companion history.",
-                "Copilot explains this page; it cannot read or clear your companion conversation.",
+                "Copilot can show the status of your own saved conversation and clear it after you review the request. It does not read or share your conversation text.",
             ),
             next_steps=(
                 "Review your access, AI draft permission, destination and retention policy before sending a message.",

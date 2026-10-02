@@ -2,53 +2,13 @@
 
 # Primeiros passos
 
-<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+<!-- See the authoritative English page for the latest installation status. -->
 
 ## Instalação
 
-Use Python 3.10–3.12 e o SHA completo de um commit revisado. Os oito pacotes próprios ainda não são publicados como um conjunto completo no PyPI; instale-os juntos a partir do repositório com o instalador do manifesto. Isso inclui painel, assistente, canais, servidor MCP e pacotes de conhecimento e aprendizado. `release-runtime` fornece o cliente compatível com OpenAI; `evidence-analysis`, os leitores de PDF e planilhas.
+Para instalar o Lightwork para um cliente, baixe o arquivo assinado para seu sistema em uma [versão do GitHub com anexos](https://github.com/Daybreak-AI-Labs/Lightwork/releases). Verifique a soma e a assinatura da versão exata e execute o arquivo com o comando `dashboard`. O [guia de distribuição](../../DISTRIBUTION.md) informa os arquivos e as verificações. Se não houver arquivo para sua plataforma, solicite um pacote para clientes.
 
-macOS / Linux:
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-No Windows PowerShell, substitua primeiro o marcador do commit:
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-Os caminhos explícitos dispensam alterar a política de ativação do PowerShell. Configure o provedor e a sandbox no assistente. A instalação a partir do código-fonte não fornece contas externas, créditos de API, mecanismo de contêineres nem cluster Kubernetes. Verifique uma operação real autorizada antes de usar uma integração para clientes.
-
-Verifique os pacotes com o Python do mesmo ambiente:
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-No Windows, use `.\.venv\Scripts\python.exe` e `.\.venv\Scripts\lightwork.exe` para esses executáveis.
-
-Para o bootstrap de desktop autenticado, obtenha `deploy/desktop/install.sh` ou `deploy/desktop/install.ps1` do commit revisado e defina `MAVERICK_REF` com seu SHA completo em minúsculas. Isso continua sendo uma instalação a partir das fontes, com acesso ao repositório e requisitos da plataforma; não é um instalador de produto assinado e independente. Os scripts rejeitam referências mutáveis e não usam um índice público como alternativa para os pacotes próprios. Cada variável `MAVERICK_*` também pode ser escrita como `LIGHTWORK_*`.
+Não clone o repositório inteiro para uma instalação de cliente: ele também contém documentos internos de pesquisa, auditoria e patentes. Os oito pacotes ainda não foram publicados juntos no PyPI. Mantenedores com acesso já aprovado ao repositório podem usar o [procedimento de instalação para engenharia](../../internal/source-install.md).
 
 ## Primeira execução
 

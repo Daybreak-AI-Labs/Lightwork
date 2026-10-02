@@ -23,6 +23,13 @@ shell** as a private engineering workflow artifact. It requires network access
 and GitHub authorization to clone the pinned private commit, installs readable
 source, and is neither self-contained nor attached to product releases.
 
+Do not grant a customer full-repository access or send a Git archive solely for
+installation. A clone includes internal research, audit evidence and patent
+documents outside the runtime package trees. The four reduced SKU archives are
+explicitly allowlisted demos, not a full-platform source distribution. If no
+signed binary is attached for the customer's platform, the release process has
+not provided that customer installation path; request an approved package.
+
 The standalone SKUs are **not PyPI packages**. Their explicit release manifests
 drive deterministic ZIP builds and each GitHub Release carries SHA-256 checksums,
 a CycloneDX SBOM, and Sigstore signature/certificate files. `publish.yml`

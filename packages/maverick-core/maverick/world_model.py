@@ -31,7 +31,12 @@ from typing import Any
 from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from .deadline_alerts import SQLITE_SCHEMA as _DEADLINE_ALERT_SCHEMA
 from .event_admission import SQLITE_SCHEMA as _EVENT_ADMISSION_SCHEMA
-from .event_admission import LegacyEventGoalHeld, compatible_event_goal
+from .event_admission import (
+    EventRegistryUnavailable,
+    LegacyEventGoalHeld,
+    compatible_event_goal,
+    execution_binding_lock,
+)
 from .file_lock import (
     atomic_create_bytes,
     cross_process_lock,
@@ -2116,7 +2121,10 @@ class WorldModel:
         # bytes, even when independent connections mutate the same goal.
         now = time.time()
         legacy_refused = False
-        with self._writing() as conn:
+        binding_scope = (execution_binding_lock(self, goal_id)
+                         if status in {"active", "running"}
+                         else contextlib.nullcontext(False))
+        with binding_scope as binding_locked, self._writing() as conn:
             if status in {"active", "running"}:
                 prior = conn.execute(
                     "SELECT g.status,g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
@@ -2124,6 +2132,13 @@ class WorldModel:
                     "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
                     "WHERE g.id=? AND o.kind IN ('event','event_v2')", (int(goal_id),),
                 ).fetchone()
+                if prior is None and binding_locked:
+                    current = conn.execute("SELECT status FROM goals WHERE id=?", (int(goal_id),)).fetchone()
+                    if current is not None and current[0] not in {"active", "running"}:
+                        raise EventRegistryUnavailable("Event origin disappeared during execution claim")
+                if (prior is not None and prior[0] not in {"active", "running"}
+                        and not binding_locked):
+                    raise EventRegistryUnavailable("Event binding changed during execution claim")
                 if (prior is not None and prior[0] not in {"active", "running"}
                         and not compatible_event_goal(prior[2], prior[3], prior[1], prior[4])):
                     legacy_refused = True
@@ -2258,7 +2273,7 @@ class WorldModel:
         if expected_owner is not None:
             sql += " AND owner = ?"
             params += (str(expected_owner),)
-        with self._writing() as conn:
+        with execution_binding_lock(self, goal_id) as binding_locked, self._writing() as conn:
             owner_clause = " AND g.owner=?" if expected_owner is not None else ""
             legacy = conn.execute(
                 "SELECT g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
@@ -2268,6 +2283,16 @@ class WorldModel:
                 "AND o.kind IN ('event','event_v2')" + owner_clause,
                 (int(goal_id), *((str(expected_owner),) if expected_owner is not None else ())),
             ).fetchone()
+            if legacy is None and binding_locked:
+                eligible = conn.execute(
+                    "SELECT 1 FROM goals WHERE id=? AND status='pending'" +
+                    (" AND owner=?" if expected_owner is not None else ""),
+                    (int(goal_id), *((str(expected_owner),) if expected_owner is not None else ())),
+                ).fetchone()
+                if eligible is not None:
+                    raise EventRegistryUnavailable("Event origin disappeared during execution claim")
+            if legacy is not None and not binding_locked:
+                raise EventRegistryUnavailable("Event binding changed during execution claim")
             if legacy is not None and not compatible_event_goal(
                     legacy[1], legacy[2], legacy[0], legacy[3]):
                 conn.execute(

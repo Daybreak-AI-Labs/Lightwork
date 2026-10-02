@@ -4,24 +4,14 @@ Four deployment targets, all driven by the same `maverick init` wizard.
 
 ## Desktop
 
-For most users.
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python -m pip install -c requirements/ci.txt \
-  -e './packages/maverick-core[release-runtime]' \
-  -e ./packages/maverick-shield -e ./packages/maverick-channels \
-  -e ./packages/maverick-evolve -e ./packages/maverick-dashboard \
-  -e ./packages/maverick-mcp -e ./packages/maverick-knowledge \
-  -e ./apps/installer-cli
-maverick init
-```
-
-Do not install the Lightwork distribution names from public PyPI until the
-project has reserved and protected every namespace. The desktop bootstrap
-scripts also require a lowercase, full commit SHA and fail closed.
+For most users, obtain the signed binary for the target operating system from
+an [asset-bearing release](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+Verify its checksum and exact-tag signature, run its `dashboard` command, and
+complete setup in the local application. A tag without that binary is not a
+customer installation path. The eight-package PyPI cohort remains unpublished;
+do not install Lightwork distribution names from a public index. Full-repository
+clones include internal research, audit and patent documents and are restricted
+to authorized engineering source installs.
 
 Runs as your user. Application state defaults to `~/.maverick/`; customer task
 files use the selected sandbox workspace. Guided setup proposes
@@ -45,8 +35,7 @@ world backend for the same share links to work on every replica; PostgreSQL alon
 does not replicate these locators. Include the directory in application-state
 backups. Expired locators are pruned in bounded batches when new links are made.
 
-**Artifact status:** reviewed source is the dependable installation route
-today. A successful tagged release is configured to publish three single-file
+**Artifact status:** a successful tagged release is configured to publish three single-file
 PyInstaller binaries, checksums, SBOMs, and Sigstore material; check the
 [release assets](https://github.com/Daybreak-AI-Labs/Lightwork/releases) for
 the exact operating-system file before relying on one. The engineering
@@ -54,9 +43,9 @@ bootstrap packages and the Windows customer package candidate
 are separate paths. The customer candidate includes the frozen runtime and
 offline WebView2 installer, but still requires publisher and clean-machine
 acceptance before release. Engineering bootstrap packages are
-not attached to product releases. As checked on September 14, 2026, the repository
-has no published release assets; source installation remains an engineering
-setup, not a qualified customer delivery.
+not attached to product releases. Check the exact release asset inventory and
+its signature before describing a binary as available. Engineering source
+installation is not qualified customer delivery.
 
 ## Docker
 

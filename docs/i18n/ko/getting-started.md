@@ -2,53 +2,13 @@
 
 # 시작하기
 
-<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+<!-- See the authoritative English page for the latest installation status. -->
 
 ## 설치
 
-Python 3.10–3.12와 검토한 커밋의 전체 SHA를 사용하세요. 자체 패키지 8개는 아직 완전한 묶음으로 PyPI에 게시되지 않았으므로, 매니페스트 설치 프로그램을 통해 저장소 소스를 함께 설치하세요. 대시보드, 마법사, 채널, MCP 서버, 지식 및 학습 패키지가 포함됩니다. `release-runtime`은 OpenAI 호환 클라이언트를, `evidence-analysis`는 PDF 및 스프레드시트 파서를 제공합니다.
+고객 설치에는 운영체제에 맞는 서명된 파일을 [파일이 첨부된 GitHub 릴리스](https://github.com/Daybreak-AI-Labs/Lightwork/releases)에서 받으세요. 해당 릴리스의 체크섬과 서명을 확인한 뒤 `dashboard` 명령으로 실행하세요. [배포 안내](../../DISTRIBUTION.md)에 파일과 확인 절차가 나와 있습니다. 해당 플랫폼의 파일이 없다면 고객용 패키지를 요청하세요.
 
-macOS / Linux:
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-Windows PowerShell에서는 먼저 커밋 자리표시자를 바꾸세요.
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-실행 파일 경로를 명시하므로 PowerShell 활성화 정책을 변경할 필요가 없습니다. 마법사에서 공급자와 샌드박스를 설정하세요. 소스 설치는 외부 계정, API 크레딧, 컨테이너 엔진이나 Kubernetes 클러스터를 만들지 않습니다. 고객 업무에 통합 기능을 사용하기 전에 허가된 실제 작업으로 확인하세요.
-
-같은 환경의 Python으로 패키지 묶음을 확인하세요.
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-Windows에서는 해당 실행 파일 이름 대신 `.\.venv\Scripts\python.exe`와 `.\.venv\Scripts\lightwork.exe`를 사용하세요.
-
-인증이 필요한 데스크톱 소스 설치에는 검토한 커밋의 `deploy/desktop/install.sh` 또는 `deploy/desktop/install.ps1`을 사용하고 `MAVERICK_REF`에 소문자로 된 전체 SHA를 설정하세요. 이 방식은 저장소 접근 권한과 플랫폼 사전 요구 사항이 필요한 소스 설치이며, 독립적으로 실행되는 서명된 제품 설치 프로그램이 아닙니다. 스크립트는 변경 가능한 참조를 거부하고 자체 패키지를 공개 인덱스에서 대신 받지 않습니다. `MAVERICK_*` 변수는 `LIGHTWORK_*`로도 표기할 수 있습니다.
+고객 설치를 위해 전체 저장소를 복제하지 마세요. 내부 연구, 감사, 특허 문서도 포함됩니다. 여덟 패키지는 아직 PyPI에 일괄 게시되지 않았습니다. 이미 저장소 접근 승인을 받은 유지보수 담당자는 [개발용 설치 절차](../../internal/source-install.md)를 사용할 수 있습니다.
 
 ## 첫 실행
 

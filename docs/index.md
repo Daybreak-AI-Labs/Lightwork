@@ -52,28 +52,18 @@ Lightwork is proprietary, commercially licensed software (see
 
 ## Quick start
 
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-pip install -e ./packages/maverick-core
-pip install -e ./apps/installer-cli
-maverick init                # interactive wizard (3 minutes)
-maverick start "review my latest commit"
-```
-
-Or skip the prompts:
-
-```bash
-maverick init --fast         # defaults: Anthropic + local sandbox; no generated task cap
-```
+Download a binary for your operating system from an
+[asset-bearing release](https://github.com/Daybreak-AI-Labs/Lightwork/releases),
+verify its checksum and exact-tag signature, then run its `dashboard` command.
+Complete the owner and provider setup in the application. If no binary is
+attached for your platform, request a customer package. A repository clone
+copies internal research, audit and patent documents; source installation is
+for authorized engineering.
 
 ## Watch it work
 
-```bash
-maverick monitor             # live plan-tree TUI in another terminal
-maverick logs                # audit log
-maverick cost                # spend summary
-```
+Open the dashboard to review running work, its activity log and cost. Some
+in-product controls still need implementation and customer acceptance.
 
 ## Licensing & access
 

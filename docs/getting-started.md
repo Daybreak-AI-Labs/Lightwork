@@ -2,65 +2,27 @@
 
 ## Install
 
-Use Python 3.10–3.12 and a reviewed full commit SHA. The first-party distribution
-names are not yet published as a complete public PyPI cohort; install their local
-sources together through the manifest installer. It supplies all eight packages,
-including the dashboard, wizard, channels, MCP server, knowledge and learning
-packages. `release-runtime` supplies the OpenAI-compatible provider client;
-`evidence-analysis` supplies the PDF and spreadsheet parsers.
+Open the [GitHub Releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases)
+and choose a published release that actually includes the Lightwork binary for
+your operating system. Download the binary, its `.sig` and `.pem` files, and the
+release checksum manifest. Verify the checksum and exact-tag Sigstore identity
+before running it, using the verification instructions supplied with that
+release. A tag without an operating-system binary is
+not an installable customer release. Ask for a customer package if yours is
+missing.
 
-On macOS/Linux:
+Run the verified binary with its `dashboard` command and open the local address
+it prints. The current filenames are `maverick-windows-x86_64.exe` on Windows,
+`maverick-macos-arm64` on Apple Silicon, and `maverick-linux-x86_64` on Linux.
+The dashboard guides owner sign-in and provider setup. A provider account,
+credentials, API credits and any external integration prerequisites still need
+their own authorization and validation.
 
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-On Windows PowerShell (replace the commit placeholder first):
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-The explicit executable paths avoid a PowerShell activation-policy requirement.
-Configure the intended provider and sandbox in the wizard. A source installation
-does not provision third-party accounts, API credits, a container engine or a
-Kubernetes cluster. Follow the selected integration's requirements and verify a
-real authorized operation before relying on it for customer work.
-
-To verify the installed cohort, use the same environment's Python:
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-On Windows, substitute `.\.venv\Scripts\python.exe` and
-`.\.venv\Scripts\lightwork.exe` for those executable names.
-
-For the authenticated desktop source bootstrap, obtain
-`deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from that reviewed
-commit and set `MAVERICK_REF` to its lowercase full SHA. This remains a source
-bootstrap with repository-access and platform prerequisites; it is not a
-self-contained signed product installer. The scripts reject mutable refs and
-have no first-party public-index fallback. Every `MAVERICK_*` variable can also
-be spelled `LIGHTWORK_*`.
+Do not clone the full repository to install for a customer: a clone also copies
+internal research, audit evidence and patent documents. The eight-package
+public PyPI cohort is not yet published. Maintainers who already have approved
+repository access can follow the separate engineering source-install procedure
+in the private repository.
 
 ## First run
 

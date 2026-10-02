@@ -6,6 +6,7 @@ import html as _html
 import re
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 ORIGIN = {"Origin": "http://testserver"}
@@ -143,10 +144,51 @@ def test_key_preview_then_confirmed_rotation_never_returns_key_material(client, 
     assert finished["state"] == "done" and "Re-protected 2 workspaces" in finished["result"]["summary"]
     status = client.get(BASE + "/jobs/" + job["id"])
     assert old.hex() not in status.text and new.hex() not in status.text
-    records = [p for _, p in seen if p.get("verb") == "workspace_keys_reprotect"]
-    assert len(records) == 1 and old.hex() not in str(records) and new.hex() not in str(records)
+    requested = [p for _, p in seen if p.get("verb") == "workspace_keys_reprotect_requested"]
+    finished_events = [p for _, p in seen if p.get("verb") == "workspace_keys_reprotect_finished"]
+    assert len(requested) == len(finished_events) == 1
+    assert finished_events[0]["job_id"] == job["id"]
+    assert finished_events[0]["ok"] is True and finished_events[0]["reprotected"] == 2
+    assert old.hex() not in str(requested + finished_events) and new.hex() not in str(requested + finished_events)
     again = client.post(BASE + "/keys/preview", json=body).json()
     assert "2 already use it" in again["summary"]
+
+
+def test_key_job_exposes_a_missing_result_record_without_claiming_no_change(client, monkeypatch):
+    from maverick_dashboard import ops_admin_jobs, tenant_ops_api
+
+    old, new = bytes(range(32)), bytes(range(1, 33))
+    _workspace_with_key("acme", old)
+
+    def refuse_result(_actor, _job):
+        raise RuntimeError("activity record unavailable")
+
+    monkeypatch.setattr(tenant_ops_api, "_record_key_result", refuse_result)
+    job = client.post(BASE + "/keys/rotate", json={"current_key": old.hex(),
+                      "new_key": new.hex(), "confirm": True}).json()["job"]
+    assert ops_admin_jobs.wait(job["id"])["state"] == "done"
+    public = client.get(BASE + "/jobs/" + job["id"]).json()["job"]
+    assert public["record_warning"] is True
+    assert "Re-protected 1 workspace" in public["result"]["summary"]
+    assert old.hex() not in str(public) and new.hex() not in str(public)
+
+
+def test_key_operation_does_not_start_when_request_cannot_be_recorded(client, monkeypatch):
+    from maverick_dashboard import tenant_ops_api
+
+    old, new = bytes(range(32)), bytes(range(1, 33))
+    _workspace_with_key("acme", old)
+
+    def refuse_request(*_args, **_kwargs):
+        raise HTTPException(503, "activity record unavailable")
+
+    monkeypatch.setattr(tenant_ops_api, "_record", refuse_request)
+    body = {"current_key": old.hex(), "new_key": new.hex()}
+    refused = client.post(BASE + "/keys/rotate", json={**body, "confirm": True})
+    assert refused.status_code == 503
+    assert "Nothing was changed" in refused.json()["detail"]
+    remaining = client.post(BASE + "/keys/preview", json=body).json()
+    assert "1 workspace would be re-protected" in remaining["summary"]
 
 
 def test_workspaces_page_offers_the_new_controls_in_plain_words(client):

@@ -87,6 +87,68 @@ def compatible_event_goal(kind: str, origin: str, owner: str,
     return False
 
 
+@contextmanager
+def execution_binding_lock(world, goal_id: int):
+    """Pin an event binding through the pending-to-active transaction.
+
+    Trigger edits take the dashboard registry lock. The read here finishes
+    before acquiring that lock, then callers enter the world write transaction;
+    this order also matches public-form decisions (registry before world).
+    Callers must retry, rather than start, if an event origin appears between
+    this preflight and their transactional origin read.
+    """
+    from .world_model import WorldModel
+
+    if isinstance(world, WorldModel):
+        event = world._read_one(
+            "SELECT 1 FROM goal_origins WHERE goal_id=? "
+            "AND kind IN ('event','event_v2')", (int(goal_id),),
+        ) is not None
+        if event:
+            from threading import get_ident
+
+            if world._writer_ident == get_ident():
+                raise EventRegistryUnavailable(
+                    "Event execution must begin outside a world transaction"
+                )
+    else:
+        from .world_model_backends.postgres import PostgresWorldModel, _mutation_tenant_scope
+
+        if not isinstance(world, PostgresWorldModel):
+            raise TypeError("event execution requires a supported world model")
+        if getattr(getattr(world, "_tx_depth", None), "value", 0):
+            # A nested transaction already holds a world connection/row lock.
+            # Acquiring the file registry now would invert the form/trigger
+            # lock order, and the inner commit may precede the outer commit.
+            raise EventRegistryUnavailable(
+                "Event execution must begin outside a world transaction"
+            )
+        scoped, params = _mutation_tenant_scope("g.tenant_id")
+        with world._tx() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM goal_origins o JOIN goals g ON g.id=o.goal_id "
+                "WHERE o.goal_id=%s AND o.kind IN ('event','event_v2') "
+                "AND " + scoped,
+                (int(goal_id), *params),
+            )
+            event = cursor.fetchone() is not None
+
+    if event:
+        try:
+            from maverick_dashboard import event_triggers_store
+
+            lock = event_triggers_store.registry_lock()
+            lock.__enter__()
+        except (ImportError, OSError, RuntimeError) as exc:
+            raise EventRegistryUnavailable("Event automation registry lock is unavailable") from exc
+        try:
+            yield True
+        finally:
+            lock.__exit__(None, None, None)
+    else:
+        yield False
+
+
 def _compatible_goal_binding(origin: str, owner: str, trigger_key: str, *,
                              allow_mail: bool) -> bool:
     if not origin or not trigger_key:

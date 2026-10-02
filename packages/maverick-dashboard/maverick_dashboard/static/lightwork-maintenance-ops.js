@@ -349,6 +349,8 @@
     if (current.state === 'done') done(current.result || {});
     else if (current.state === 'failed') say(name, current.error || 'It did not finish.');
     else say(name, 'Still working. Check back in a few minutes.');
+    if (current.record_warning) say(name, (current.state === 'done' ? 'The work finished. ' : '') +
+      'Its result could not be added to the activity record. Ask your administrator to reconcile it before continuing.');
   }
   runners.components = async function () {
     if (!await confirmed('Prepare the connection components now? This rebuilds them in Lightwork\'s program folder.', 'Prepare')) return;

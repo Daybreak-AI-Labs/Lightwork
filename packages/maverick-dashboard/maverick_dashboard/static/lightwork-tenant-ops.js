@@ -112,8 +112,11 @@
           await new Promise(function (resolve) { setTimeout(resolve, 1000); });
           job = (await call(BASE + '/jobs/' + encodeURIComponent(job.id))).job;
         }
-        if (job.state === 'done') { render(job.result); keysMsg.textContent = 'Done.'; }
-        else keysMsg.textContent = job.error || 'Still working. Check back in a few minutes.';
+        if (job.state === 'done') {
+          render(job.result);
+          keysMsg.textContent = job.result && job.result.failed ? 'Some workspaces still need attention. Keep the current key.' : 'Done.';
+        } else keysMsg.textContent = job.error || 'Still working. Check back in a few minutes.';
+        if (job.record_warning) keysMsg.textContent += ' The result could not be added to the activity record. Keep the current key and ask your administrator to reconcile it before continuing.';
       } catch (failure) { keysMsg.textContent = await failText(failure, 're-protect the workspaces'); }
       keys.reset();
     });

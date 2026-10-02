@@ -34,14 +34,19 @@ import secrets
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from urllib.parse import quote
 
 from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from ..deadline_alerts import POSTGRES_SCHEMA as _DEADLINE_ALERT_SCHEMA_PG
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
-from ..event_admission import LegacyEventGoalHeld, compatible_event_goal
+from ..event_admission import (
+    EventRegistryUnavailable,
+    LegacyEventGoalHeld,
+    compatible_event_goal,
+    execution_binding_lock,
+)
 from ..goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
 from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
 from ..metadata_history import POSTGRES_INDEXES as _HISTORY_INDEXES
@@ -1261,6 +1266,7 @@ class PostgresWorldModel:
         # gives each tx its own connection, so the lock is a no-op contention
         # point there but harmless.
         self._lock = threading.RLock()
+        self._tx_depth = threading.local()
         self._migrate()
         if self._rls:
             self._preflight_rls_or_die()
@@ -1322,7 +1328,11 @@ class PostgresWorldModel:
                     if snapshot:
                         cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                     self._set_tenant_guc(cur)
-                    yield cur
+                    self._tx_depth.value = getattr(self._tx_depth, "value", 0) + 1
+                    try:
+                        yield cur
+                    finally:
+                        self._tx_depth.value -= 1
                 finally:
                     cur.close()
             return
@@ -1335,7 +1345,11 @@ class PostgresWorldModel:
                 if snapshot:
                     cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                 self._set_tenant_guc(cur)
-                yield cur
+                self._tx_depth.value = getattr(self._tx_depth, "value", 0) + 1
+                try:
+                    yield cur
+                finally:
+                    self._tx_depth.value -= 1
                 self.conn.commit()
             except (psycopg.OperationalError, psycopg.InterfaceError):
                 try:
@@ -1612,7 +1626,7 @@ class PostgresWorldModel:
         # GREATEST is evaluated against the row under the UPDATE lock, not a
         # stale client-side SELECT, including on a stalled/backwards clock.
         now = time.time()
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         sql = (
             # COALESCE so a status-only update (result=None) doesn't wipe
             # an existing result -- matches the SQLite backend.
@@ -1627,21 +1641,34 @@ class PostgresWorldModel:
             sql += " AND " + frag
             params += fparams
         legacy_refused = False
-        with self._tx() as cur:
+        binding_scope = (execution_binding_lock(self, goal_id)
+                         if status in {"active", "running"}
+                         else nullcontext(False))
+        with binding_scope as binding_locked, self._tx() as cur:
             if status in {"active", "running"}:
-                scoped, scoped_params = _tenant_scope("g.tenant_id")
+                scoped, scoped_params = _mutation_tenant_scope("g.tenant_id")
                 current_sql = (
                     "SELECT g.status,g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
                     "JOIN goal_origins o ON o.goal_id=g.id "
                     "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
-                    "AND a.tenant_id=g.tenant_id "
+                    "AND a.tenant_id=COALESCE(g.tenant_id,'') "
                     "WHERE g.id=%s AND o.kind IN ('event','event_v2')"
                 )
                 if scoped:
                     current_sql += " AND " + scoped
-                current_sql += " FOR UPDATE OF g"
+                current_sql += " FOR UPDATE OF g,o"
                 cur.execute(current_sql, (int(goal_id), *scoped_params))
                 prior = cur.fetchone()
+                if prior is None and binding_locked:
+                    cur.execute("SELECT g.status FROM goals g WHERE g.id=%s" +
+                                (" AND " + scoped if scoped else "") +
+                                " FOR UPDATE OF g", (int(goal_id), *scoped_params))
+                    current = cur.fetchone()
+                    if current is not None and current[0] not in {"active", "running"}:
+                        raise EventRegistryUnavailable("Event origin disappeared during execution claim")
+                if (prior is not None and prior[0] not in {"active", "running"}
+                        and not binding_locked):
+                    raise EventRegistryUnavailable("Event binding changed during execution claim")
                 if (prior is not None and prior[0] not in {"active", "running"}
                         and not compatible_event_goal(prior[2], prior[3], prior[1], prior[4])):
                     legacy_refused = True
@@ -1784,21 +1811,32 @@ class PostgresWorldModel:
             params.append(str(expected_owner))
         sql += " AND " + frag
         params += fparams
-        with self._tx() as cur:
+        with execution_binding_lock(self, goal_id) as binding_locked, self._tx() as cur:
             scoped, scoped_params = _mutation_tenant_scope("g.tenant_id")
             owner_sql = " AND g.owner=%s" if expected_owner is not None else ""
             cur.execute(
                 "SELECT g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
                 "JOIN goal_origins o ON o.goal_id=g.id "
                 "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
-                "AND a.tenant_id=g.tenant_id "
+                "AND a.tenant_id=COALESCE(g.tenant_id,'') "
                 "WHERE g.id=%s AND g.status='pending' "
                 "AND o.kind IN ('event','event_v2') "
-                "AND " + scoped + owner_sql + " FOR UPDATE OF g",
+                "AND " + scoped + owner_sql + " FOR UPDATE OF g,o",
                 (int(goal_id), *scoped_params,
                  *((str(expected_owner),) if expected_owner is not None else ())),
             )
             legacy = cur.fetchone()
+            if legacy is None and binding_locked:
+                cur.execute(
+                    "SELECT 1 FROM goals g WHERE g.id=%s AND g.status='pending' "
+                    "AND " + scoped + owner_sql + " FOR UPDATE OF g",
+                    (int(goal_id), *scoped_params,
+                     *((str(expected_owner),) if expected_owner is not None else ())),
+                )
+                if cur.fetchone() is not None:
+                    raise EventRegistryUnavailable("Event origin disappeared during execution claim")
+            if legacy is not None and not binding_locked:
+                raise EventRegistryUnavailable("Event binding changed during execution claim")
             if legacy is not None and not compatible_event_goal(
                     legacy[1], legacy[2], legacy[0], legacy[3]):
                 cur.execute(

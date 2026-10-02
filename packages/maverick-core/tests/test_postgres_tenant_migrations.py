@@ -737,7 +737,8 @@ def test_owner_aware_claim_uses_exact_tenant_compare_and_swap(monkeypatch):
 
     assert model.claim_goal_for_run(42, expected_owner="agent:worker") is True
     assert "goal_origins" in cursor.calls[0][0]
-    sql, params = cursor.calls[1]
+    assert "FOR UPDATE OF g,o" in cursor.calls[1][0]
+    sql, params = cursor.calls[2]
     assert "status='pending' AND owner=%s" in sql
     assert "tenant_id = %s" in sql
     assert "OR tenant_id IS NULL" not in sql

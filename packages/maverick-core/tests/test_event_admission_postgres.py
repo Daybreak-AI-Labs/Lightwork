@@ -4,6 +4,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 from maverick import event_admission
@@ -28,6 +29,72 @@ def test_native_pg_concurrent_admission_commits_one_goal(postgres_test_dsn):
     with tenant_scope(tenant="alpha"), PostgresWorldModel(postgres_test_dsn) as world:
         assert len(world.list_goals()) == 1
         assert event_admission.pending(world, "same-trigger") == [("same-event", first[0], "pending")]
+
+
+def test_native_pg_trigger_edit_cannot_interleave_execution_claim(
+    postgres_test_dsn, tmp_path, monkeypatch,
+):
+    from maverick.templates import Template
+    from maverick.world_model_backends import postgres
+    from maverick_dashboard import event_poll, event_triggers_store, triggers_store
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    template = triggers_store.snapshot_from_template(
+        Template(name="orders-template", title="Order {{title}}",
+                 body="Process {{title}}", params=["title"]),
+    )
+    trigger = event_triggers_store.set_trigger(
+        "orders", "orders-template", "http_json", owner="user:alice",
+        tenant="alpha", config={"url": "https://first.example.test"},
+        template_snapshot=template,
+    )
+    with tenant_scope(tenant="alpha"), PostgresWorldModel(postgres_test_dsn) as world:
+        goal, _ = event_admission.admit(
+            world, "event-one", "Order one", "Process one", owner="user:alice",
+            origin="orders", trigger_key=event_poll._trigger_key(trigger),
+            origin_kind="event_v2",
+        )
+
+    validated = Event()
+    release_claim = Event()
+    edit_started = Event()
+    edit_finished = Event()
+    original = postgres.compatible_event_goal
+
+    def paused_proof(*args):
+        result = original(*args)
+        validated.set()
+        assert release_claim.wait(5)
+        return result
+
+    def claim():
+        with tenant_scope(tenant="alpha"), PostgresWorldModel(postgres_test_dsn) as world:
+            return world.claim_goal_for_run(goal, expected_owner="user:alice")
+
+    def edit():
+        edit_started.set()
+        event_triggers_store.set_trigger(
+            "orders", "orders-template", "http_json", owner="user:alice",
+            tenant="alpha", config={"url": "https://second.example.test"},
+            template_snapshot=template,
+        )
+        edit_finished.set()
+
+    monkeypatch.setattr(postgres, "compatible_event_goal", paused_proof)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            started = pool.submit(claim)
+            assert validated.wait(10)
+            edited = pool.submit(edit)
+            assert edit_started.wait(5)
+            assert not edit_finished.wait(0.1)
+            release_claim.set()
+            assert started.result(timeout=10)
+            edited.result(timeout=10)
+        with tenant_scope(tenant="alpha"), PostgresWorldModel(postgres_test_dsn) as world:
+            assert world.get_goal(goal).status == "active"
+    finally:
+        release_claim.set()
 
 
 def test_native_pg_receipts_are_exact_tenant_scoped_even_without_rls(postgres_test_dsn, monkeypatch):

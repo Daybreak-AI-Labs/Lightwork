@@ -2,53 +2,13 @@
 
 # はじめに
 
-<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+<!-- See the authoritative English page for the latest installation status. -->
 
 ## インストール
 
-Python 3.10〜3.12 と、確認済みコミットの完全な SHA を使用してください。自社製の 8 パッケージは、完全な一式としてはまだ PyPI に公開されていません。マニフェストのインストーラーでリポジトリのソースをまとめてインストールします。ダッシュボード、ウィザード、チャネル、MCP サーバー、知識・学習パッケージが含まれます。`release-runtime` は OpenAI 互換クライアント、`evidence-analysis` は PDF と表計算ファイルのパーサーを追加します。
+お客様向けのインストールでは、使用する OS の署名済みファイルを[配布ファイルが添付された GitHub リリース](https://github.com/Daybreak-AI-Labs/Lightwork/releases)から入手してください。対象リリースのチェックサムと署名を確認し、`dashboard` コマンドで起動します。ファイルと確認手順は[配布ガイド](../../DISTRIBUTION.md)を参照してください。対象 OS のファイルがない場合は、お客様向けパッケージを依頼してください。
 
-macOS / Linux:
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-Windows PowerShell では、先にコミットのプレースホルダーを置き換えてください。
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-実行ファイルのパスを明示するため、PowerShell の有効化ポリシーを変更する必要はありません。ウィザードでプロバイダーとサンドボックスを設定してください。ソースからのインストールでは、外部アカウント、API クレジット、コンテナーエンジン、Kubernetes クラスターは用意されません。顧客業務に使う前に、許可された実際の操作で連携を確認してください。
-
-同じ環境の Python でパッケージ一式を確認します。
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-Windows では、実行ファイル名を `.\.venv\Scripts\python.exe` と `.\.venv\Scripts\lightwork.exe` に置き換えてください。
-
-認証付きのデスクトップ用ソースインストールには、確認済みコミットから `deploy/desktop/install.sh` または `deploy/desktop/install.ps1` を取得し、その小文字の完全な SHA を `MAVERICK_REF` に設定します。これはリポジトリへのアクセスと各プラットフォームの前提条件を必要とするソースインストールであり、単独で動く署名済み製品インストーラーではありません。スクリプトは変更可能な参照を拒否し、自社製パッケージを公開インデックスから代替取得しません。`MAVERICK_*` 変数は `LIGHTWORK_*` とも表記できます。
+お客様へのインストールのためにリポジトリ全体を複製しないでください。内部の研究、監査、特許文書も含まれます。8 つのパッケージはまだ PyPI に一式として公開されていません。承認済みのリポジトリアクセスを持つ保守担当者は[開発用インストール手順](../../internal/source-install.md)を利用できます。
 
 ## 初回実行
 

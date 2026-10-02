@@ -2,53 +2,13 @@
 
 # शुरुआत करें
 
-<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+<!-- See the authoritative English page for the latest installation status. -->
 
 ## इंस्टॉल
 
-Python 3.10–3.12 और जाँचे गए कमिट का पूरा SHA इस्तेमाल करें। हमारे आठ पैकेज अभी PyPI पर एक पूरे समूह के रूप में प्रकाशित नहीं हैं; मैनिफ़ेस्ट इंस्टॉलर से रिपॉज़िटरी के सोर्स पैकेज एक साथ इंस्टॉल करें। इनमें डैशबोर्ड, विज़ार्ड, चैनल, MCP सर्वर तथा ज्ञान और सीखने वाले पैकेज शामिल हैं। `release-runtime` OpenAI-संगत क्लाइंट देता है; `evidence-analysis` PDF और स्प्रेडशीट के पार्सर देता है।
+ग्राहक इंस्टॉल के लिए अपने ऑपरेटिंग सिस्टम की हस्ताक्षरित फ़ाइल [फ़ाइलों वाली GitHub रिलीज़](https://github.com/Daybreak-AI-Labs/Lightwork/releases) से लें। उसी रिलीज़ की चेकसम और हस्ताक्षर जाँचें, फिर फ़ाइल को `dashboard` कमांड से चलाएँ। [वितरण मार्गदर्शिका](../../DISTRIBUTION.md) में फ़ाइलें और जाँच के चरण दिए हैं। आपके प्लेटफ़ॉर्म की फ़ाइल न हो तो ग्राहक पैकेज माँगें।
 
-macOS / Linux:
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-Windows PowerShell में पहले कमिट का प्लेसहोल्डर बदलें:
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-एक्ज़ीक्यूटेबल के सीधे पथ इस्तेमाल करने से PowerShell की एक्टिवेशन नीति बदलने की ज़रूरत नहीं पड़ती। विज़ार्ड में प्रोवाइडर और सैंडबॉक्स सेट करें। सोर्स से इंस्टॉल करने पर बाहरी खाते, API क्रेडिट, कंटेनर इंजन या Kubernetes क्लस्टर नहीं बनते। किसी इंटीग्रेशन को ग्राहक के काम में इस्तेमाल करने से पहले एक वास्तविक, अधिकृत ऑपरेशन जाँचें।
-
-पैकेजों की जाँच उसी एनवायरनमेंट के Python से करें:
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-Windows में इन एक्ज़ीक्यूटेबल नामों की जगह `.\.venv\Scripts\python.exe` और `.\.venv\Scripts\lightwork.exe` इस्तेमाल करें।
-
-प्रमाणीकृत डेस्कटॉप सोर्स इंस्टॉल के लिए जाँचे गए कमिट से `deploy/desktop/install.sh` या `deploy/desktop/install.ps1` लें और `MAVERICK_REF` में उसका पूरा SHA छोटे अक्षरों में सेट करें। यह सोर्स इंस्टॉल है, जिसके लिए रिपॉज़िटरी एक्सेस और प्लेटफ़ॉर्म की पूर्व-आवश्यकताएँ चाहिए; यह अपने आप चलने वाला हस्ताक्षरित उत्पाद इंस्टॉलर नहीं है। स्क्रिप्ट बदल सकने वाले रेफ़रेंस अस्वीकार करती हैं और अपने पैकेजों के लिए सार्वजनिक इंडेक्स पर निर्भर नहीं होतीं। हर `MAVERICK_*` वेरिएबल को `LIGHTWORK_*` भी लिखा जा सकता है।
+ग्राहक इंस्टॉल के लिए पूरा रिपॉज़िटरी क्लोन न करें: उसमें आंतरिक शोध, ऑडिट और पेटेंट दस्तावेज़ भी हैं। आठों पैकेज अभी PyPI पर एक साथ प्रकाशित नहीं हैं। पहले से स्वीकृत रिपॉज़िटरी पहुँच वाले रखरखावकर्ता [इंजीनियरिंग इंस्टॉल मार्गदर्शिका](../../internal/source-install.md) का उपयोग कर सकते हैं।
 
 ## पहली बार चलाना
 

@@ -29,26 +29,16 @@ Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-age
 
 > **Proprietary software — not open source.** Lightwork is enterprise software; use, redistribution, and derivative works require a license. [Contact us](https://github.com/Daybreak-AI-Labs/Lightwork) for evaluation or commercial access. See [`LICENSE`](./LICENSE) and [`TRADEMARK.md`](./TRADEMARK.md).
 
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init                        # four questions, safe defaults
-lightwork start "Build a CLI that emails me a digest of today's top Hacker News stories — research the API, write it, and verify it runs"
-```
-
-> A one-line `pipx install 'maverick-agent[installer]'` is planned after the
-> complete eight-package cohort is published. Until the package or an
-> asset-bearing GitHub Release exists, use a reviewed source commit as shown
-> above. The [Releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases)
-> is the authoritative source for downloadable artifacts.
+For a customer installation, obtain the signed binary for your operating
+system from an [asset-bearing GitHub Release](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+Verify the exact tag and attached signature, then open the local dashboard to
+complete setup in Lightwork. If the release has no binary for your platform,
+request a customer package. Repository access is an engineering arrangement:
+cloning the repository also copies internal research, audit and patent files.
 
 ## Status
 
-Alpha and installable from a reviewed source commit today. Release automation
+Alpha with an engineering source-install path. Release automation
 builds an eight-package Python cohort, container, single-file binaries, four
 standalone source archives, and evidence artifacts. A downloadable artifact is
 available to users only after it appears on the
@@ -60,13 +50,13 @@ publishers are verified. See [`docs/getting-started.md`](./docs/getting-started.
 
 | Component | v0.1 (today) | Planned (v0.2+) |
 |---|---|---|
-| Install | Reviewed source commit; bootstrap/native assets when present on a GitHub Release | pipx after the complete cohort is published; code-signed bundles + auto-update |
+| Install | Signed release binary when the operating-system asset is published; reviewed source checkout for internal engineering | Complete published package cohort; code-signed bundles + auto-update |
 | GUI | Local web dashboard (`lightwork dashboard`) + chat at `/chat`; authenticated source-bootstrap shell is an internal engineering artifact | Self-contained, signed native installer + iOS/Android |
 | Sandbox | Local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, SSH, Modal | Firecracker microVM (scaffold — exec path does not yet mount the workspace), Daytona |
 | AI providers | Anthropic (full), OpenAI, OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM (per-role routable) | Cohere |
 | Channels | 16 wired into `lightwork serve` — Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon, Voice, IRC, Threads, RCS; WhatsApp (Cloud API + Twilio)/SMS (need Twilio), iMessage (macOS-only) | Glasses (adapter is a stub), push notifications |
 | Safety | Shield wired at 3 chokepoints; agent-shield SDK if installed, else a built-in rule set | Agent-shield full ~115 patterns |
-| Distribution | Release workflow for GHCR image, binaries, four signed source archives, checksums, and SBOMs; reviewed source install works today | PyPI (8-package lockstep cohort, gated pending namespace verification); self-contained code-signed installer; Homebrew tap |
+| Distribution | Release workflow for GHCR image, binaries, four reduced demo source archives, checksums, and SBOMs | PyPI (8-package lockstep cohort, gated pending namespace verification); self-contained code-signed installer; Homebrew tap |
 | Tests | Ruff, security gates, posture ratchet, and pytest on Python 3.10/3.11/3.12 | Broader deployment and browser journey coverage |
 
 **Full list of shipped features → [`docs/FEATURES.md`](./docs/FEATURES.md).** The forward backlog (what isn't built yet) lives in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
@@ -86,57 +76,22 @@ system; a tag alone is not a downloadable build:
 | **Linux** | `maverick-linux-x86_64` |
 
 Verify the release tag, checksums, and attached Sigstore material before
-running a binary. The separate Tauri workflow currently produces an unsigned
+running a binary; then run its `dashboard` command and open the local address it
+prints. The dashboard guides first-owner setup. The separate Tauri workflow
+currently produces an unsigned
 authenticated source-bootstrap artifact for authorized repository users. It
 clones readable source from a pinned private commit and is not advertised as a
 self-contained product installer.
 
-### Terminal install with pipx (coming with the first tagged release)
+### Terminal install with pipx (planned)
 
-Once the packages are published to PyPI on the first tagged release, a single pipx command will install everything. **This does not work yet** — the packages aren't on the public index (see [Status](#status)); until then use the [From source](#from-source) steps above. The published command will be:
+The complete eight-package cohort has not been published to PyPI. Do not use
+public package names as an installation substitute. The signed release binary
+is the customer download path when an asset exists for your operating system.
 
-```bash
-pipx install 'maverick-agent[installer]'
-lightwork init
-```
-
-For source-based desktop bootstrapping, download `deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from a commit you trust, verify it, and set `MAVERICK_REF` to that lowercase, full 40-character commit SHA. The bootstrap scripts reject missing and mutable refs and never fall back to the public index.
-
-The PyPI distribution name is `maverick-agent` — Lightwork's original codename, kept because the `maverick` name is squatted on PyPI. The CLI it installs answers to **both `lightwork` and `maverick`**; every `MAVERICK_*` environment variable can equally be spelled `LIGHTWORK_*`. The `[installer]` extra pulls the wizard into the same pipx environment so `lightwork init` resolves.
-
-If you already installed the kernel without the extra, inject the wizard:
-
-From the reviewed source checkout, inject the local path so pipx never resolves
-a first-party name from a public index:
-
-```bash
-pipx inject maverick-agent ./apps/installer-cli
-```
-
-### From source
-
-Use Python 3.10–3.12. The manifest installer resolves all eight local packages
-together against the reviewed constraints. The examples below use a POSIX shell;
-[Getting started](docs/getting-started.md#install) includes PowerShell commands.
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-
-lightwork init                           # interactive wizard
-lightwork start "Plan a 2-week trip"      # one-shot goal
-lightwork chat                            # interactive REPL
-lightwork dashboard                       # web UI at http://127.0.0.1:8765
-lightwork serve                           # channel server (Telegram/Discord/...)
-lightwork mcp                             # MCP server (Claude Code / Cursor)
-lightwork doctor                          # health check
-lightwork version                         # installed package versions
-```
+The intended PyPI distribution name is `maverick-agent`. A complete cohort
+publication must precede any pipx customer guidance. For maintainers with
+existing repository access, see the [engineering source-install procedure](docs/internal/source-install.md).
 
 ## CLI reference
 

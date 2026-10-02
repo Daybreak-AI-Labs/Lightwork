@@ -2,53 +2,13 @@
 
 # Начало работы
 
-<!-- Installation section synchronized with docs/getting-started.md at e19f502. -->
+<!-- See the authoritative English page for the latest installation status. -->
 
 ## Установка
 
-Используйте Python 3.10–3.12 и полный SHA проверенного коммита. Восемь собственных пакетов пока не опубликованы в PyPI как полный комплект; устанавливайте их вместе из репозитория с помощью установщика по манифесту. В комплект входят панель управления, мастер, каналы, сервер MCP, пакеты знаний и обучения. `release-runtime` предоставляет совместимый с OpenAI клиент, а `evidence-analysis` — средства чтения PDF и таблиц.
+Для установки у клиента скачайте подписанный файл для своей ОС из [выпуска GitHub с приложенными файлами](https://github.com/Daybreak-AI-Labs/Lightwork/releases). Проверьте контрольную сумму и подпись именно этого выпуска, затем запустите файл с командой `dashboard`. Список файлов и порядок проверки приведены в [руководстве по поставке](../../DISTRIBUTION.md). Если файла для вашей платформы нет, запросите клиентский пакет.
 
-macOS / Linux:
-
-```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1'
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork init
-lightwork dashboard
-```
-
-В Windows PowerShell сначала замените заполнитель SHA коммита:
-
-```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
-git checkout --detach <reviewed-full-40-character-commit-sha>
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip==26.2.1
-.\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-.\.venv\Scripts\lightwork.exe init
-.\.venv\Scripts\lightwork.exe dashboard
-```
-
-Явные пути к программам позволяют не менять политику активации PowerShell. Настройте провайдера и песочницу в мастере. Установка из исходников не создаёт сторонние учётные записи, кредиты API, движок контейнеров или кластер Kubernetes. Прежде чем использовать интеграцию для клиента, проверьте реальную разрешённую операцию.
-
-Проверьте комплект пакетов с помощью Python из того же окружения:
-
-```bash
-python scripts/install_release_cohort.py --verify-only
-python -m pip check
-lightwork version
-lightwork doctor
-```
-
-В Windows используйте для этих программ `.\.venv\Scripts\python.exe` и `.\.venv\Scripts\lightwork.exe`.
-
-Для аутентифицированной установки настольного приложения получите `deploy/desktop/install.sh` или `deploy/desktop/install.ps1` из проверенного коммита и задайте в `MAVERICK_REF` его полный SHA в нижнем регистре. Это по-прежнему установка из исходников, требующая доступа к репозиторию и компонентов платформы, а не автономный подписанный установщик продукта. Скрипты отклоняют изменяемые ссылки и не используют публичный индекс как запасной источник собственных пакетов. Переменные `MAVERICK_*` также можно записывать как `LIGHTWORK_*`.
+Не клонируйте весь репозиторий ради клиентской установки: он также содержит внутренние исследования, материалы аудита и патентные документы. Все восемь пакетов ещё не опубликованы вместе в PyPI. Сопровождающие с уже одобренным доступом к репозиторию могут использовать [инженерную инструкцию по установке](../../internal/source-install.md).
 
 ## Первый запуск
 

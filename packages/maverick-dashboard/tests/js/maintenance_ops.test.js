@@ -118,6 +118,19 @@ test('refusals show the server sentence when it is plain', async (t) => {
   assert.match(ui.document.querySelector('[data-ops-status="upkeep"]').textContent, /read-only/);
 });
 
+test('background maintenance shows an activity-record failure after work finishes', async (t) => {
+  const ui = await fixture((url) => {
+    if (url.endsWith('/connection-components')) return response({job: {id: 'j1', state: 'done',
+      record_warning: true, result: {summary: 'Prepared 1 connection component.', prepared: ['Task connection']}}});
+    return response({});
+  });
+  t.after(() => ui.window.close());
+  ui.document.querySelector('[data-ops-run="components"]').click();
+  await ui.settle();
+  assert.match(ui.document.querySelector('[data-ops-out="upkeep"]').textContent, /Prepared 1 connection component/);
+  assert.match(ui.document.querySelector('[data-ops-status="upkeep"]').textContent, /could not be added to the activity record/);
+});
+
 test('this app shows why it cannot restart, or restarts after confirming when supervised', async (t) => {
   let ui = await fixture(() => response({}));
   t.after(() => ui.window.close());
