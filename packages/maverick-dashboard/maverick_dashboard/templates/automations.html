@@ -870,7 +870,7 @@
             ? 'Submission status is unavailable. Changes are paused until Lightwork can check it.'
             : pending > 0
               ? pending + (pending === 1 ? ' submission is' : ' submissions are') + ' waiting. Choose Check now before changing or deleting this automation.'
-              : 'All received submissions have been checked.'));
+              : 'All received submissions have been checked. If this form is full, replace its link and share the new one.'));
         }
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
         var hist = el('div', 'auto__runs'); main.appendChild(hist); renderEventHistory(histByName[t.name] || [], hist);
@@ -897,6 +897,45 @@
               } catch (error) { copyStatus.textContent = 'Could not copy. Open the form and copy its address.'; }
             });
             actions.appendChild(copyLink); actions.appendChild(copyStatus);
+            var replaceLink = el('button', 'btn btn--ghost', 'Replace link');
+            replaceLink.type = 'button';
+            replaceLink.disabled = pending !== 0 || !t.binding_revision;
+            replaceLink.setAttribute('aria-label', 'Replace form link for ' + t.name);
+            replaceLink.addEventListener('click', async function () {
+              if (replaceLink.disabled) return;
+              if (!(await mvConfirm('Replace the link for “' + t.name + '”? The old link will stop working. Submissions already received stay saved. Copy and share the new link everywhere you used the old one.', {okText: 'Replace link'}))) return;
+              replaceLink.disabled = true;
+              var completed = false;
+              evMsg.textContent = 'Replacing the form link…';
+              try {
+                var response = await fetch('/api/v1/event-triggers/' + encodeURIComponent(t.name) + '/rotate-form-link', {
+                  method: 'POST', headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({expected_generation: t.binding_revision})
+                });
+                var result = await response.json().catch(function () { return null; });
+                if (!response.ok) {
+                  evMsg.textContent = response.status === 409
+                    ? 'The form has changed or still has submissions waiting. Check its current link and status before trying again.'
+                    : plainError(response, 'replace the form link');
+                  await loadEventTriggers();
+                  return;
+                }
+                if (!result || !result.config || typeof result.config.token !== 'string' || result.config.token === formToken) {
+                  evMsg.textContent = 'The result could not be confirmed. Check the current link before trying again.';
+                  await loadEventTriggers();
+                  return;
+                }
+                completed = true;
+                formLink.href = '/form/' + encodeURIComponent(result.config.token);
+                copyStatus.textContent = 'New link ready to copy.';
+                await loadEventTriggers();
+                evMsg.textContent = 'Link replaced. The old link no longer works. Copy the new link and update everywhere you shared it.';
+              } catch (error) {
+                await loadEventTriggers();
+                evMsg.textContent = 'The result could not be confirmed. Check the current link before trying again.';
+              } finally { if (!completed) replaceLink.disabled = false; }
+            });
+            actions.appendChild(replaceLink);
           } else {
             main.appendChild(el('div', 'mv-row__sub', 'This form has no link. Ask an administrator to repair its setup.'));
           }

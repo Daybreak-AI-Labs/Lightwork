@@ -114,6 +114,7 @@ from .api_schemas import (
     FlowRunIn,
     FlowSaveIn,
     FollowupsIn,
+    FormLinkRotationIn,
     FulfillmentIdentityIn,
     FulfillmentResponseIn,
     FulfillmentSourceIn,
@@ -10687,6 +10688,8 @@ def _require_event_triggers() -> None:
 
 
 def _event_trigger_out(rec: dict) -> EventTriggerOut:
+    from .event_poll import _trigger_key
+
     return EventTriggerOut(
         name=rec["name"],
         template=rec["template"],
@@ -10696,6 +10699,7 @@ def _event_trigger_out(rec: dict) -> EventTriggerOut:
         params=rec.get("params") or {},
         cursor=rec.get("cursor") or "",
         interval_seconds=int(rec.get("interval_seconds") or 0),
+        binding_revision=_trigger_key(rec),
     )
 
 
@@ -10905,6 +10909,45 @@ def delete_event_trigger_endpoint(request: Request, name: str) -> dict:
     if not deleted:
         raise HTTPException(status_code=404, detail="no event trigger with that name")
     return {"deleted": name}
+
+
+@router.post("/event-triggers/{name}/rotate-form-link", response_model=EventTriggerOut)
+def rotate_event_trigger_form_link(
+    request: Request, response: Response, name: str, payload: FormLinkRotationIn,
+) -> EventTriggerOut:
+    """Replace a drained form link; its previously accepted file stays intact."""
+    from maverick import form_store
+    from maverick.paths import current_tenant_id
+
+    from maverick_dashboard import event_triggers_store
+
+    require_permission(request, "operate")
+    _require_event_triggers()
+    try:
+        updated = event_triggers_store.rotate_form_link(
+            name,
+            expected_generation=payload.expected_generation,
+            owner=goal_owner_filter(request),
+            tenant=current_tenant_id() or "",
+            actor=caller_principal(request) or "local",
+        )
+    except event_triggers_store.FormTriggerPending as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"This form has {exc.count} submission(s) still waiting. "
+                    "Choose Check now before replacing its link."),
+        ) from exc
+    except event_triggers_store.FormTriggerConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except form_store.FormStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="This form's pending submissions cannot be checked right now.",
+        ) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="no form automation with that name")
+    response.headers["Cache-Control"] = "no-store"
+    return _event_trigger_out(updated)
 
 
 @router.post("/event-triggers/poll")

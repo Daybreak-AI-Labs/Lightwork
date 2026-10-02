@@ -349,6 +349,12 @@ class EventTriggerOut(BaseModel):
     params: dict[str, str] = Field(default_factory=dict)
     cursor: str = ""
     interval_seconds: int = 0
+    binding_revision: str = ""
+
+
+class FormLinkRotationIn(BaseModel):
+    """The binding observed before a form owner replaces its public link."""
+    expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class LearningToggleIn(BaseModel):

@@ -174,6 +174,60 @@ test("saved form automation exposes a usable open and copy link", async () => {
   assert.equal(status.textContent, "Link copied.");
 });
 
+test("a drained form replaces its link only after the owner reviews the consequence", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.loadRuns = () => {};
+  let token = "legacy.link", submitted, confirmation = "";
+  ui.context.mvConfirm = async text => { confirmation = text; return true; };
+  ui.context.fetch = async (url, options) => {
+    if (url === "/api/v1/event-triggers") return ui.reply({sources: ["form"], triggers: [
+      {name: "intake", source: "form", flow: "review", cursor: "0", pending_submissions: 0,
+        binding_revision: "old-generation", config: {token}}
+    ]});
+    if (url.endsWith("/history?limit=500")) return ui.reply({history: []});
+    if (url.endsWith("/outcomes")) return ui.reply({outcomes: {}});
+    if (url.endsWith("/rotate-form-link")) {
+      submitted = {url, options}; token = "form-new";
+      return ui.reply({config: {token}});
+    }
+    throw new Error("Unexpected request " + url);
+  };
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers()"),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  await ui.context.loadEventTriggers();
+  const actions = ui.get("auto-event-list").children[0].children[1];
+  const replace = actions.children[3];
+  assert.equal(replace.textContent, "Replace link");
+  assert.equal(replace.disabled, false);
+  await replace.listeners.click();
+  assert.match(confirmation, /old link will stop working.*already received stay saved/);
+  assert.equal(submitted.options.method, "POST");
+  assert.deepEqual(JSON.parse(submitted.options.body), {expected_generation: "old-generation"});
+  assert.match(ui.get("auto-event-msg").textContent, /old link no longer works.*Copy the new link/);
+  assert.equal(ui.get("auto-event-list").children[0].children[1].children[0].href, "/form/form-new");
+});
+
+test("forms with waiting or unknown submissions cannot replace their links", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.loadRuns = () => {};
+  ui.context.fetch = async url => {
+    if (url === "/api/v1/event-triggers") return ui.reply({sources: ["form"], triggers: [
+      {name: "waiting", source: "form", flow: "review", pending_submissions: 1,
+        binding_revision: "rev-1", config: {token: "old-1"}},
+      {name: "unknown", source: "form", flow: "review", pending_submissions: null,
+        binding_revision: "rev-2", config: {token: "old-2"}}
+    ]});
+    if (url.endsWith("/history?limit=500")) return ui.reply({history: []});
+    if (url.endsWith("/outcomes")) return ui.reply({outcomes: {}});
+    throw new Error("Unexpected request " + url);
+  };
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers()"),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  await ui.context.loadEventTriggers();
+  assert.equal(ui.get("auto-event-list").children[0].children[1].children[3].disabled, true);
+  assert.equal(ui.get("auto-event-list").children[1].children[1].children[3].disabled, true);
+});
+
 test("catalog picker offers only published flows and retains exact template parameter names", async () => {
   const ui = eventFixture(); await settle();
   assert.deepEqual(ui.get("auto-event-template").children.map(option => option.value), ["", "triage"]);

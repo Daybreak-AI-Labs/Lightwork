@@ -151,6 +151,7 @@ def list_triggers() -> list[dict]:
             "tenant": str(t.get("tenant") or ""),
             "interval_seconds": int(t.get("interval_seconds") or 0),
             "created": float(t.get("created") or 0.0),
+            "last_form_link_rotation": _decode_obj(t.get("last_form_link_rotation")),
         })
     out.sort(key=lambda t: (t["created"], t["name"]))
     return out
@@ -190,6 +191,10 @@ def _dump(triggers: list[dict]) -> str:
         lines.append(f"tenant = {json.dumps(str(t.get('tenant') or ''))}")
         lines.append(f"interval_seconds = {int(t.get('interval_seconds') or 0)}")
         lines.append(f"created = {float(t.get('created') or 0.0)}")
+        lines.append(
+            "last_form_link_rotation = "
+            + json.dumps(json.dumps(t.get("last_form_link_rotation") or {}, sort_keys=True))
+        )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -356,6 +361,9 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             # scheduler default (0) by blanking the box.
             "interval_seconds": int(interval_seconds),
             "created": (prior["created"] if prior else time.time()),
+            "last_form_link_rotation": (
+                prior.get("last_form_link_rotation") or {} if prior else {}
+            ),
         }
         if str(source) == "form":
             from maverick import form_store
@@ -438,3 +446,72 @@ def delete_trigger(
                 raise FormTriggerPending(waiting)
         _write([t for t in triggers if t is not match])
     return True
+
+
+def rotate_form_link(
+    name: str, *, expected_generation: str, owner: str | None = None,
+    tenant: str | None = None, actor: str = "",
+) -> dict | None:
+    """Replace a drained form's public link without discarding its old queue.
+
+    The registry lock also surrounds public form admission. An expected binding
+    generation makes retries after an uncertain response safe: the first
+    successful replacement changes the generation, and a retry is refused.
+    """
+    from maverick import form_store
+    from maverick.paths import reset_tenant, set_tenant
+
+    from .event_poll import _trigger_key
+
+    with _locked():
+        triggers = list_triggers()
+        matches = _matching(triggers, name, tenant)
+        if len(matches) != 1:
+            return None
+        current = matches[0]
+        if (owner is not None and current.get("owner", "") != owner) or current.get("source") != "form":
+            return None
+        if _trigger_key(current) != expected_generation:
+            raise FormTriggerConflict("This form changed. Refresh it before replacing the link.")
+        old_token = str((current.get("config") or {}).get("token") or "")
+        if not old_token:
+            raise FormTriggerConflict("This form has no active link to replace.")
+        waiting = pending_form_submissions(current)
+        if waiting:
+            raise FormTriggerPending(waiting)
+
+        # Never recycle a file left by an older link. A fresh token must start
+        # with an empty queue and must not claim a different active form.
+        scope = set_tenant(str(current.get("tenant") or "") or None)
+        try:
+            for _ in range(8):
+                new_token = "form-" + secrets.token_urlsafe(24)
+                if any(
+                    t.get("source") == "form"
+                    and str((t.get("config") or {}).get("token") or "") == new_token
+                    for t in triggers
+                ) or form_store._path(new_token).exists():
+                    continue
+                break
+            else:
+                raise FormTriggerConflict("A new private form link could not be reserved. Try again.")
+        finally:
+            reset_tenant(scope)
+
+        updated = {
+            **current,
+            "config": {**(current.get("config") or {}), "token": new_token},
+            "cursor": "0",
+            "cursor_format": 0,
+            # Private registry metadata, committed in the same atomic write as
+            # the new link. No raw link secret is copied into event telemetry.
+            "last_form_link_rotation": {
+                "at": time.time(),
+                "actor": str(actor or "local")[:120],
+                "old_token_sha256": hashlib.sha256(old_token.encode()).hexdigest(),
+                "new_token_sha256": hashlib.sha256(new_token.encode()).hexdigest(),
+            },
+        }
+        triggers[triggers.index(current)] = updated
+        _write(triggers)
+        return updated

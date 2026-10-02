@@ -2363,6 +2363,11 @@ here.
   data when the trigger polls. Its per-token queue is capped at
   5,000 submissions / 32 MiB; a full queue refuses new submissions with 507
   rather than accepting data that cannot be retained.
+  An owner can replace a form link in Automations after every accepted
+  submission has been checked. The old link stops accepting submissions, the
+  new link starts with an empty queue, and the old submission file is retained.
+  Replacement refuses pending or unreadable history; stuck accepted rows still
+  need a separate reviewed recovery path.
 
   The administrator's connected-automation settings show the effective signing
   configuration. Reviewed changes recheck current authority and settings,
