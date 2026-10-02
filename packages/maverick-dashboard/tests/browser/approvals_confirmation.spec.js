@@ -37,7 +37,7 @@ test('a high-risk approval is confirmed in the page on a phone, decided with a t
   await page.locator('#approval-confirm-ok').click();
 
   await expect(dialog).toBeHidden();
-  await expect(page.locator('#mv-toasts')).toContainText('approved');
+  await expect(page.locator('#mv-toasts')).toContainText('authorized');
   const decided=page.locator('#approval-decided');
   await expect(decided).toBeVisible();
   await expect(decided.locator(`article.approval-item[data-id="${id}"]`)).toBeVisible();
