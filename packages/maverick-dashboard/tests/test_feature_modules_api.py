@@ -10,6 +10,7 @@ parent); turning it OFF disables only the module itself.
 """
 from __future__ import annotations
 
+import hashlib
 import time
 
 import pytest
@@ -22,15 +23,20 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     from maverick import config
+    from maverick.audit import signing
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY", raising=False)
+    monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", raising=False)
     config.reset_config_cache()
+    signing._reset_injected_keypair_cache()
     app.state.module_readiness_evidence = {}
     yield
     app.state.module_readiness_evidence = {}
     config.reset_config_cache()
+    signing._reset_injected_keypair_cache()
 
 
 def _module(section):
@@ -265,11 +271,15 @@ def test_runtime_failure_receipt_requires_exact_activation_fingerprint():
 
 
 def test_module_state_and_mutation_fail_closed_on_unreadable_sources(
-    monkeypatch,
+    monkeypatch, request,
 ):
     from maverick import config
 
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "module-state-test-token")
+    monkeypatch.setenv(
+        "MAVERICK_AUDIT_SIGNING_KEY",
+        hashlib.sha256(request.node.nodeid.encode()).hexdigest(),
+    )
     authorization = {"Authorization": "Bearer module-state-test-token"}
     original_source_errors = config.config_source_errors
     monkeypatch.setattr(
