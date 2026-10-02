@@ -8,7 +8,7 @@ const { webcrypto } = require("node:crypto");
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/automations.html"), "utf8").replace(/\r\n/g, "\n");
 
 function fixture() {
-  const nodes = {}, calls = [], storage = new Map();
+  const nodes = {}, calls = [], events = [], storage = new Map();
   class Element {
     constructor(tag = "div") { this.tagName = tag; this.children = []; this.listeners = {}; this.dataset = {}; this.value = ""; this.checked = false; this.disabled = false; this.valid = true; }
     set id(value) { this._id = value; nodes[value] = this; }
@@ -25,10 +25,11 @@ function fixture() {
   }
   function get(id) { return nodes[id] || (nodes[id] = new Element()); }
   const document = { getElementById: get, createElement: tag => new Element(tag), createTextNode: text => { const e = new Element(); e.textContent = text; return e; },
-    querySelectorAll: () => [] };
+    querySelectorAll: () => [], dispatchEvent: event => { events.push(event); return true; } };
   const providers = { providers: [{ name: "github", label: "GitHub" }], connected: ["github"], status: {}, vault_enabled: true, connection_context: "context-a" };
   const reply = data => ({ ok: true, status: 200, json: async () => data });
   const context = { document, URL, Uint8Array, console, Date,
+    CustomEvent: function (type, options) { this.type = type; this.detail = options.detail; },
     fetch: async (url, options) => {
       calls.push({ url, options });
       if (url === "/api/v1/oauth/providers") return reply(providers);
@@ -43,7 +44,7 @@ function fixture() {
       sessionStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) } } };
   context.el = (tag, cls, text = "") => { const e = new Element(tag); e.className = cls; e.textContent = text; return e; };
   vm.createContext(context);
-  return { context, get, nodes, calls, storage, providers, reply };
+  return { context, get, nodes, calls, events, storage, providers, reply };
 }
 async function settle() { await new Promise(resolve => setImmediate(resolve)); }
 function eventFixture() {
@@ -324,6 +325,97 @@ test("a form owner can review received answers and record a do-not-run decision"
   assert.equal(requestBody.expected_fields_sha256, "digest");
   assert.match(panel.textContent, /Will not run/);
   assert.match(ui.get("auto-event-msg").textContent, /Decision recorded/);
+});
+
+test("a form owner confirms an interrupted signed decision using the current binding", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.loadRuns = () => {};
+  ui.context.mvConfirm = async () => true;
+  let repaired = false, requestBody;
+  ui.context.fetch = async (url, options) => {
+    if (url === "/api/v1/event-triggers") return ui.reply({sources: ["form"], triggers: [
+      {name: "intake", source: "form", flow: "review", pending_submissions: 1,
+        binding_revision: "rev-1", config: {token: "link"}}
+    ]});
+    if (url.endsWith("/history?limit=500")) return ui.reply({history: []});
+    if (url.endsWith("/outcomes")) return ui.reply({outcomes: {}});
+    if (url === "/api/v1/event-triggers/intake/form-submissions") return ui.reply({
+      binding_revision: "rev-1", waiting_total: 1,
+      interrupted_decision: repaired ? null : {
+        sequence: 1, received_at: 1, fields: {name: "Ada"}, fields_sha256: "fields",
+        decision_sha256: "decision", reason: "Handled directly with the customer.",
+        decided_by: "Alice", decided_at: 1
+      },
+      submissions: repaired ? [{sequence: 1, received_at: 1, fields: {name: "Ada"},
+        fields_sha256: "fields", do_not_run: true, reason: "Handled directly with the customer."}] : []
+    });
+    if (url.endsWith("/form-submissions/1/recover-decision")) {
+      requestBody = JSON.parse(options.body); repaired = true; return ui.reply({do_not_run: true});
+    }
+    throw new Error("Unexpected request " + url);
+  };
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  await ui.context.loadEventTriggers();
+  const entry = ui.get("auto-event-list").children[0];
+  const review = entry.children[1].children.find(button => button.textContent === "Review waiting submissions");
+  await review.listeners.click();
+  await settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.events.at(-1).detail.selection)),
+    {kind: "form_recovery", name: "intake", sequence: 1});
+  const panel = entry.children[0].children.at(-1);
+  assert.match(panel.textContent, /Ada/);
+  assert.match(panel.textContent, /Handled directly with the customer/);
+  assert.equal(panel.textContent.includes("Do not run this submission"), false);
+  const confirm = panel.children[0].children.find(button => button.textContent === "Confirm recorded decision");
+  await confirm.listeners.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(requestBody)), {
+    expected_generation: "rev-1", expected_fields_sha256: "fields", expected_decision_sha256: "decision"
+  });
+  assert.match(ui.get("auto-event-msg").textContent, /Decision confirmed/);
+  assert.equal(ui.events.at(-1).detail.selection, null);
+});
+
+test("a lost recovery response is verified after the form cursor advances", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.loadRuns = () => {};
+  ui.context.mvConfirm = async () => true;
+  let repaired = false;
+  ui.context.fetch = async url => {
+    if (url === "/api/v1/event-triggers") return ui.reply({sources: ["form"], triggers: [
+      {name: "intake", source: "form", flow: "review", pending_submissions: repaired ? 0 : 1,
+        binding_revision: "rev-1", config: {token: "link"}}
+    ]});
+    if (url.endsWith("/history?limit=500")) return ui.reply({history: []});
+    if (url.endsWith("/outcomes")) return ui.reply({outcomes: {}});
+    if (url === "/api/v1/event-triggers/intake/form-submissions") return ui.reply({
+      binding_revision: "rev-1", waiting_total: repaired ? 0 : 1,
+      interrupted_decision: repaired ? null : {
+        sequence: 1, received_at: 1, fields: {name: "Ada"}, fields_sha256: "fields",
+        decision_sha256: "decision", reason: "Handled directly with the customer.",
+        decided_by: "Alice", decided_at: 1
+      }, submissions: []
+    });
+    if (url.endsWith("/form-submissions/1/recover-decision")) {
+      repaired = true;
+      throw new TypeError("response lost after signed completion");
+    }
+    if (url.endsWith("/form-submissions/1/decision-receipt")) return ui.reply({
+      sequence: 1, binding_revision: "rev-1", fields_sha256: "fields",
+      decision_sha256: "decision", do_not_run: true
+    });
+    throw new Error("Unexpected request " + url);
+  };
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  await ui.context.loadEventTriggers();
+  const entry = ui.get("auto-event-list").children[0];
+  await entry.children[1].children.find(button => button.textContent === "Review waiting submissions").listeners.click();
+  await settle();
+  const panel = entry.children[0].children.at(-1);
+  await panel.children[0].children.find(button => button.textContent === "Confirm recorded decision").listeners.click();
+  assert.match(ui.get("auto-event-msg").textContent, /Decision confirmed.*moved past/);
+  assert.equal(ui.events.at(-1).detail.selection, null);
 });
 
 test("catalog picker offers only published flows and retains exact template parameter names", async () => {

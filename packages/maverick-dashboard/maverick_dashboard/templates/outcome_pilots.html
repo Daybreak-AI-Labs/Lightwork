@@ -191,6 +191,14 @@
         </select></label>
         <label>Prior-exposure checks and remaining limitations<textarea class="input" name="prior_exposure_statement" id="op-prior-exposure" maxlength="2000" rows="3"></textarea></label>
       </div>
+      <div class="op-accounting-assurance">
+        <h3>Optional improvement release</h3>
+        <p>Connect this plan to a governed candidate before work starts. Lightwork checks the currently deployed baseline and freezes both release commitments with the selected cases. Use protected evaluation tasks and record prior-exposure checks. The task history does not yet verify which release served each case, so the resulting comparison remains exploratory.</p>
+        <label for="op-candidate">Candidate release</label>
+        <select id="op-candidate" name="candidate_id" class="input"><option value="">No candidate release — workflow pilot</option></select>
+        <button type="button" class="btn" id="op-candidate-refresh">Load available candidates</button>
+        <p id="op-candidate-status" role="status" aria-live="polite">Choose Load available candidates when you want a release-bound pilot.</p>
+      </div>
       <p>The exclusion mode requires a named account and task cases only. It prevents automatic local capture, donation and learning replay for the fixed evaluation group. It does not undo prior learning, control provider training or cover manually copied/relabelled data. State what was checked; do not assume new task IDs prove new content.</p>
       <div id="op-planned-cases"></div>
       <button type="button" class="btn" id="op-add-case">Add a case</button>

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 
 import pytest
@@ -735,7 +736,254 @@ def test_owner_can_record_exact_waiting_form_submission_without_losing_original(
     assert event_triggers_store.pending_form_submissions(
         event_triggers_store.get_trigger("intake", tenant="")
     ) == 0
+    receipt = client.get("/api/v1/event-triggers/intake/form-submissions/1/decision-receipt")
+    assert receipt.status_code == 200, receipt.text
+    assert receipt.json()["binding_revision"] == snapshot["binding_revision"]
+    assert receipt.json()["fields_sha256"] == row["fields_sha256"]
+    assert receipt.json()["decision_sha256"] == decision.json()["decision_sha256"]
     assert form_store._path("stale").read_bytes() == original
+
+
+def test_owner_recovers_signed_form_decision_after_interrupted_marker_write(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", hashlib.sha256(str(tmp_path).encode()).hexdigest())
+    _register_form("interrupted", name="intake")
+    from maverick import audit, form_store
+    from maverick_dashboard import event_triggers_store, form_recovery
+
+    client = _client()
+    assert client.post("/form/interrupted", json={"name": "customer answer"}).status_code == 201
+    original = form_store._path("interrupted").read_bytes()
+    waiting = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    row = waiting["submissions"][0]
+    body = {"expected_generation": waiting["binding_revision"],
+            "expected_fields_sha256": row["fields_sha256"],
+            "reason": "Handled outside the workflow after speaking with the customer."}
+    decided = client.post(
+        "/api/v1/event-triggers/intake/form-submissions/1/do-not-run", json=body,
+    )
+    assert decided.status_code == 200
+    journal = form_recovery._path("interrupted")
+    marker = form_recovery._marker(journal)
+    marker.write_bytes(form_recovery._signed_receipt(0, "0" * 64))
+
+    before = event_triggers_store.get_trigger("intake", tenant="")["cursor"]
+    result = client.post("/api/v1/event-triggers/poll?name=intake").json()["triggers"][0]
+    assert result["poll_error"] is True
+    assert event_triggers_store.get_trigger("intake", tenant="")["cursor"] == before
+    held = client.get("/api/v1/event-triggers/intake/form-submissions")
+    assert held.status_code == 200
+    assert held.json()["submissions"] == []
+    recovery = held.json()["interrupted_decision"]
+    assert recovery["fields"] == {"name": "customer answer"}
+    assert recovery["reason"] == body["reason"]
+    assert recovery["decision_sha256"] == decided.json()["decision_sha256"]
+    endpoint = "/api/v1/event-triggers/intake/form-submissions/1/recover-decision"
+    pins = {"expected_generation": waiting["binding_revision"],
+            "expected_fields_sha256": row["fields_sha256"],
+            "expected_decision_sha256": recovery["decision_sha256"]}
+    assert client.post(endpoint, json={**pins, "expected_generation": "0" * 64}).status_code == 409
+    assert client.post(endpoint, json={**pins, "expected_decision_sha256": "0" * 64}).status_code == 409
+    assert marker.read_bytes() == form_recovery._signed_receipt(0, "0" * 64)
+
+    real_record = audit.record
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: False)
+    assert client.post(endpoint, json=pins).status_code == 503
+    assert client.get("/api/v1/event-triggers/intake/form-submissions").json()["interrupted_decision"]
+    monkeypatch.setattr(audit, "record", real_record)
+    repaired = client.post(endpoint, json=pins)
+    assert repaired.status_code == 200, repaired.text
+    assert client.post(endpoint, json=pins).status_code == 409
+    confirmed = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    assert confirmed["interrupted_decision"] is None
+    assert confirmed["submissions"][0]["do_not_run"] is True
+    assert form_store._path("interrupted").read_bytes() == original
+    result = client.post("/api/v1/event-triggers/poll?name=intake").json()["triggers"][0]
+    assert result["poll_error"] is False
+    assert result["abandoned_submissions"] == 1
+    assert result["fired_flows"] == []
+
+
+@pytest.mark.parametrize("prior_decision", [False, True])
+def test_owner_recovers_signed_form_decision_before_journal_append(
+    monkeypatch, tmp_path, prior_decision,
+):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", hashlib.sha256(str(tmp_path).encode()).hexdigest())
+    _register_form("pending-append", name="intake")
+    from maverick import file_lock, form_store
+    from maverick_dashboard import event_triggers_store, form_recovery
+
+    client = _client()
+    count = 2 if prior_decision else 1
+    for sequence in range(1, count + 1):
+        assert client.post("/form/pending-append", json={"name": f"answer {sequence}"}).status_code == 201
+    original = form_store._path("pending-append").read_bytes()
+    waiting = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    if prior_decision:
+        first = waiting["submissions"][0]
+        decided = client.post(
+            "/api/v1/event-triggers/intake/form-submissions/1/do-not-run",
+            json={"expected_generation": waiting["binding_revision"],
+                  "expected_fields_sha256": first["fields_sha256"],
+                  "reason": "Handled first answer outside the workflow."},
+        )
+        assert decided.status_code == 200, decided.text
+    row = waiting["submissions"][count - 1]
+    endpoint = f"/api/v1/event-triggers/intake/form-submissions/{count}"
+    real_append = file_lock.open_private_append
+
+    def fail_before_append(*_args, **_kwargs):
+        raise OSError("simulated crash before decision append")
+
+    monkeypatch.setattr(file_lock, "open_private_append", fail_before_append)
+    refused = client.post(endpoint + "/do-not-run", json={
+        "expected_generation": waiting["binding_revision"],
+        "expected_fields_sha256": row["fields_sha256"],
+        "reason": "Handled this answer outside the workflow after review.",
+    })
+    assert refused.status_code == 503
+    monkeypatch.setattr(file_lock, "open_private_append", real_append)
+    journal = form_recovery._path("pending-append")
+    if prior_decision:
+        assert len(journal.read_text(encoding="utf-8").splitlines()) == 1
+    else:
+        assert not journal.exists()
+    marker = form_recovery._marker(journal)
+    signed_pending = marker.read_bytes()
+    before = event_triggers_store.get_trigger("intake", tenant="")["cursor"]
+    assert client.post("/api/v1/event-triggers/poll?name=intake").json()["triggers"][0]["poll_error"]
+    assert event_triggers_store.get_trigger("intake", tenant="")["cursor"] == before
+    held = client.get("/api/v1/event-triggers/intake/form-submissions")
+    assert held.status_code == 200, held.text
+    recovery = held.json()["interrupted_decision"]
+    assert recovery["sequence"] == count
+    assert recovery["recovery_phase"] == "journal_pending"
+    assert recovery["fields"] == row["fields"]
+    pins = {"expected_generation": waiting["binding_revision"],
+            "expected_fields_sha256": row["fields_sha256"],
+            "expected_decision_sha256": recovery["decision_sha256"]}
+    assert client.post(endpoint + "/recover-decision", json={**pins,
+        "expected_decision_sha256": "0" * 64}).status_code == 409
+    marker.write_bytes(b"{}\n")
+    assert client.get("/api/v1/event-triggers/intake/form-submissions").status_code == 503
+    assert client.post(endpoint + "/recover-decision", json=pins).status_code == 503
+    marker.write_bytes(signed_pending)
+
+    real_write = file_lock.atomic_write_bytes
+
+    def fail_final_marker(target, payload, *args, **kwargs):
+        if target == marker:
+            raise OSError("simulated crash after decision append")
+        return real_write(target, payload, *args, **kwargs)
+
+    monkeypatch.setattr(file_lock, "atomic_write_bytes", fail_final_marker)
+    assert client.post(endpoint + "/recover-decision", json=pins).status_code == 503
+    monkeypatch.setattr(file_lock, "atomic_write_bytes", real_write)
+    after_append = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    assert after_append["interrupted_decision"]["recovery_phase"] == "marker_pending"
+    repaired = client.post(endpoint + "/recover-decision", json=pins)
+    assert repaired.status_code == 200, repaired.text
+    assert client.post(endpoint + "/recover-decision", json=pins).status_code == 409
+    receipt = client.get(endpoint + "/decision-receipt")
+    assert receipt.status_code == 200, receipt.text
+    assert receipt.json() == {"sequence": count,
+        "binding_revision": waiting["binding_revision"],
+        "fields_sha256": row["fields_sha256"],
+        "decision_sha256": recovery["decision_sha256"], "do_not_run": True}
+    assert form_store._path("pending-append").read_bytes() == original
+    polled = client.post("/api/v1/event-triggers/poll?name=intake").json()["triggers"][0]
+    assert polled["poll_error"] is False
+    assert polled["abandoned_submissions"] == count
+    assert polled["fired_flows"] == []
+    assert client.get(endpoint + "/decision-receipt").json() == receipt.json()
+
+
+@pytest.mark.parametrize("prior_decision", [False, True])
+def test_owner_recovers_only_exact_signed_partial_decision_row(
+    monkeypatch, tmp_path, prior_decision,
+):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", hashlib.sha256(str(tmp_path).encode()).hexdigest())
+    _register_form("partial-append", name="intake")
+    from maverick import audit, file_lock, form_store
+    from maverick_dashboard import event_triggers_store, form_recovery
+
+    client = _client()
+    count = 2 if prior_decision else 1
+    for sequence in range(1, count + 1):
+        assert client.post("/form/partial-append", json={"name": f"answer {sequence}"}).status_code == 201
+    original = form_store._path("partial-append").read_bytes()
+    waiting = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    if prior_decision:
+        first = waiting["submissions"][0]
+        assert client.post(
+            "/api/v1/event-triggers/intake/form-submissions/1/do-not-run",
+            json={"expected_generation": waiting["binding_revision"],
+                  "expected_fields_sha256": first["fields_sha256"],
+                  "reason": "Handled first answer outside the workflow."},
+        ).status_code == 200
+    row = waiting["submissions"][count - 1]
+    endpoint = f"/api/v1/event-triggers/intake/form-submissions/{count}"
+    journal = form_recovery._path("partial-append")
+    real_append = file_lock.open_private_append
+
+    def crash_during_append(*_args, **_kwargs):
+        pending = json.loads(form_recovery._marker(journal).read_bytes())["pending_decision"]
+        exact = form_recovery._row_bytes(pending)
+        with journal.open("ab") as handle:
+            handle.write(exact[:len(exact) // 2])
+            handle.flush()
+            os.fsync(handle.fileno())
+        raise OSError("simulated partial decision write")
+
+    monkeypatch.setattr(file_lock, "open_private_append", crash_during_append)
+    failed = client.post(endpoint + "/do-not-run", json={
+        "expected_generation": waiting["binding_revision"],
+        "expected_fields_sha256": row["fields_sha256"],
+        "reason": "Handled this answer outside the workflow after review.",
+    })
+    assert failed.status_code == 503
+    monkeypatch.setattr(file_lock, "open_private_append", real_append)
+    partial = journal.read_bytes()
+    before = event_triggers_store.get_trigger("intake", tenant="")["cursor"]
+    assert client.post("/api/v1/event-triggers/poll?name=intake").json()["triggers"][0]["poll_error"]
+    assert event_triggers_store.get_trigger("intake", tenant="")["cursor"] == before
+    held = client.get("/api/v1/event-triggers/intake/form-submissions")
+    assert held.status_code == 200, held.text
+    recovery = held.json()["interrupted_decision"]
+    assert recovery["recovery_phase"] == "partial_journal_pending"
+    assert recovery["sequence"] == count
+    pins = {"expected_generation": waiting["binding_revision"],
+            "expected_fields_sha256": row["fields_sha256"],
+            "expected_decision_sha256": recovery["decision_sha256"]}
+    damaged = bytearray(partial)
+    damaged[-1] ^= 1
+    journal.write_bytes(damaged)
+    assert client.get("/api/v1/event-triggers/intake/form-submissions").status_code == 503
+    assert client.post(endpoint + "/recover-decision", json=pins).status_code == 503
+    journal.write_bytes(partial)
+    real_record = audit.record
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: False)
+    assert client.post(endpoint + "/recover-decision", json=pins).status_code == 503
+    assert journal.read_bytes() == partial
+    monkeypatch.setattr(audit, "record", real_record)
+    repaired = client.post(endpoint + "/recover-decision", json=pins)
+    assert repaired.status_code == 200, repaired.text
+    assert journal.read_bytes().startswith(partial)
+    assert len(journal.read_bytes().splitlines()) == count
+    assert client.post(endpoint + "/recover-decision", json=pins).status_code == 409
+    receipt = client.get(endpoint + "/decision-receipt")
+    assert receipt.status_code == 200, receipt.text
+    assert receipt.json()["decision_sha256"] == recovery["decision_sha256"]
+    assert form_store._path("partial-append").read_bytes() == original
+    polled = client.post("/api/v1/event-triggers/poll?name=intake").json()["triggers"][0]
+    assert polled["poll_error"] is False
+    assert polled["abandoned_submissions"] == count
+    assert polled["fired_flows"] == []
 
 
 def test_form_decision_refuses_failed_audit_and_damaged_journal(monkeypatch, tmp_path):
@@ -786,6 +1034,9 @@ def test_form_decision_refuses_failed_audit_and_damaged_journal(monkeypatch, tmp
     })
     journal.write_text(json.dumps(forged) + "\n", encoding="utf-8")
     assert client.get("/api/v1/event-triggers/intake/form-submissions").status_code == 503
+    assert client.get(
+        "/api/v1/event-triggers/intake/form-submissions/1/decision-receipt"
+    ).status_code == 503
     before = event_triggers_store.get_trigger("intake", tenant="")["cursor"]
     polled = client.post("/api/v1/event-triggers/poll?name=intake")
     assert polled.json()["triggers"][0]["poll_error"] is True
@@ -873,6 +1124,18 @@ def test_truncated_form_decision_tail_never_replays_as_unanswered(monkeypatch, t
     assert result["poll_error"] is True
     assert result["fired_flows"] == []
     assert event_triggers_store.get_trigger("intake", tenant="")["cursor"] == before
+    repair = client.post(
+        "/api/v1/event-triggers/intake/form-submissions/2/recover-decision",
+        json={"expected_generation": waiting["binding_revision"],
+              "expected_fields_sha256": waiting["submissions"][1]["fields_sha256"],
+              "expected_decision_sha256": "0" * 64},
+    )
+    assert repair.status_code == 503
+    journal.write_text("".join(lines), encoding="utf-8")
+    form_recovery._marker(journal).write_bytes(form_recovery._signed_receipt(0, "0" * 64))
+    # Two signed rows beyond the marker cannot be inferred to be one
+    # interrupted append, even when every row signature is intact.
+    assert client.get("/api/v1/event-triggers/intake/form-submissions").status_code == 503
 
 
 def test_empty_form_can_be_changed_and_deleted_before_a_first_submission(monkeypatch, tmp_path):

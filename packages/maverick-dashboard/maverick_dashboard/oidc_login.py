@@ -617,6 +617,8 @@ async def auth_callback(request: Request):
         session_cookie = mint_browser_session(
             request, sub=principal.sub, secret=cfg.session_secret, via="session",
             mfa=mfa, ttl=_SESSION_TTL,
+            extra={"oidc_issuer": principal.issuer,
+                   "oidc_audience": principal.audience},
         )
     except Exception:
         log.warning("OIDC callback: session record unavailable; refusing sign-in")

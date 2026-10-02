@@ -11,6 +11,7 @@ import json
 import math
 import secrets
 import time
+from dataclasses import asdict
 from decimal import Decimal
 
 from maverick.governed_records import GovernedRecordStore
@@ -323,7 +324,23 @@ def prepare_admission(pilot_id, *, context, resolve):
     return _finish_protected_plan(record, resolve) if record.get("state") == "preparing" else record
 
 
-def create(body, *, context, actor, resolve):
+def _release_for_plan(body, mode, actor, resolve_release):
+    candidate_id = body.get("candidate_id")
+    if candidate_id is None:
+        return None
+    from .outcome_pilot_releases import ReleaseBinding
+
+    if mode != "exclude_local_learning":
+        raise ValueError("An improvement candidate needs protected evaluation tasks and prior-exposure checks.")
+    if not actor.startswith("user:") or not callable(resolve_release):
+        raise PermissionError("A named account and trusted release connection are required for an improvement pilot.")
+    release_binding = resolve_release(candidate_id)
+    if type(release_binding) is not ReleaseBinding or release_binding.candidate_id != candidate_id:
+        raise ValueError("The selected improvement candidate could not be bound to this pilot.")
+    return release_binding
+
+
+def create(body, *, context, actor, resolve, resolve_release=None):
     mode = body.get("learning_mode", "observational")
     if mode not in {"observational", "exclude_local_learning"}:
         raise ValueError("Choose an available pilot learning-data treatment.")
@@ -342,6 +359,7 @@ def create(body, *, context, actor, resolve):
         if existing["creation_request"] != request:
             raise RecordConflict("This operation reference already belongs to another pilot.")
         return prepare_admission(identifier, context=context, resolve=resolve)
+    release_binding = _release_for_plan(body, mode, actor, resolve_release)
     sources, cases = set(), []
     for index, case in enumerate(body["cases"]):
         key = (case["kind"], case["reference"])
@@ -362,7 +380,12 @@ def create(body, *, context, actor, resolve):
               "learning_mode": mode, "prior_exposure_statement": body.get("prior_exposure_statement", ""),
               "state": "preparing" if mode == "exclude_local_learning" else "frozen",
               "creation_request": request, "frozen_at": time.time(), "operations": {}}
-    record["plan_version"] = digest({k: record[k] for k in ("title", "customer", "workflow", "criteria", "cases", "frozen_at", "learning_mode", "prior_exposure_statement")})
+    if release_binding is not None:
+        record["release_binding"] = asdict(release_binding)
+    plan_material = {k: record[k] for k in ("title", "customer", "workflow", "criteria", "cases", "frozen_at", "learning_mode", "prior_exposure_statement")}
+    if release_binding is not None:
+        plan_material["release_binding"] = record["release_binding"]
+    record["plan_version"] = digest(plan_material)
     record["admission_manifest"] = admission_manifest(record)
     # Recheck after assembling the whole plan. This detects concurrent starts;
     # sources remain separate stores, so report eligibility also checks times.
@@ -622,20 +645,25 @@ def report(record, *, resolve):
     reviewed = record.get("independent_review")
     learning["independent_review"] = {**reviewed, "current": reviewed["evidence_version"] == learning["evidence_version"]} if reviewed else None
     learning["review_history"] = record.get("independent_review_history", [])
+    limitations = ["Observations and evidence references are attributed to their recorder; they are not independently verified.",
+        "Time fields are non-overlapping hands-on effort. Wall time and costs remain separate observations.",
+        "All planned cases remain in the acceptance denominator, including missing and rejected cases.",
+        "Paired comparisons include current complete observations, including rejected results. Missing pairs can bias comparisons.",
+        "The selected local-learning mode covers automatic goal-bound capture, replay and ingestion only. It does not prove prior exposure, provider training exclusion or manually relabelled imports.",
+        "Recorded runtime prices are not provider invoices. Reported total cost must include review, rework, and failed attempts."]
+    if record.get("release_binding") is not None:
+        limitations.append("The frozen release binding records a deployed baseline and proposed candidate at planning time. Case execution does not yet attest which release handled each case, so this pilot cannot establish release lift or a causal improvement.")
     return {"id": record["id"], "title": record["title"], "customer": record["customer"],
             "workflow": record["workflow"], "criteria": record["criteria"], "revision": record["revision"],
             "plan_version": record["plan_version"], "frozen_at": record["frozen_at"], "cases": rows,
             "state": record.get("state", "frozen"),
             "admission": admission,
             "groups": groups, "measurement_basis": "operator_reported",
+            "release_binding": record.get("release_binding"),
+            "case_exposure_verified": False, "causal_lift_qualified": False,
             "learning_policy": learning,
             "provider_invoice_verified": False, "holdout_exposure_verified": False,
-            "limitations": ["Observations and evidence references are attributed to their recorder; they are not independently verified.",
-              "Time fields are non-overlapping hands-on effort. Wall time and costs remain separate observations.",
-              "All planned cases remain in the acceptance denominator, including missing and rejected cases.",
-              "Paired comparisons include current complete observations, including rejected results. Missing pairs can bias comparisons.",
-              "The selected local-learning mode covers automatic goal-bound capture, replay and ingestion only. It does not prove prior exposure, provider training exclusion or manually relabelled imports.",
-              "Recorded runtime prices are not provider invoices. Reported total cost must include review, rework, and failed attempts."]}
+            "limitations": limitations}
 
 
 def review_queue(actor, *, limit=200):

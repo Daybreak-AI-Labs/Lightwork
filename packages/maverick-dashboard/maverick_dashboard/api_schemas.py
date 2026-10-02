@@ -364,6 +364,13 @@ class FormAbandonIn(BaseModel):
     reason: str = Field(min_length=10, max_length=500)
 
 
+class FormDecisionRecoveryIn(BaseModel):
+    """The exact interrupted decision and received row reviewed by its owner."""
+    expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_fields_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_decision_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class LearningToggleIn(BaseModel):
     """Turn the whole self-learning loop on/off from the dashboard (writes the
     learning knobs to the config overlay), or only the one learning system

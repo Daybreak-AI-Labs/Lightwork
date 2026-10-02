@@ -7,12 +7,18 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from maverick import config
+from maverick.candidate_promotion import CandidatePromotionConflict, CandidatePromotionNotFound
 from maverick.outcome_accounting import COST_COVERAGE_FAMILIES
 from maverick.privacy_ops import RecordConflict
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
-from . import outcome_accounting_bridge, outcome_pilot_sources, outcome_pilots
+from . import (
+    outcome_accounting_bridge,
+    outcome_pilot_releases,
+    outcome_pilot_sources,
+    outcome_pilots,
+)
 from .auth import caller_principal, require_global_permission, require_permission
 from .draft_api import context_for
 
@@ -43,6 +49,7 @@ class PlanIn(StrictIn):
     cases: list[CaseIn] = Field(..., min_length=4, max_length=100)
     learning_mode: Literal["observational", "exclude_local_learning"] = "observational"
     prior_exposure_statement: str = Field(default="", max_length=2000)
+    candidate_id: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
 class IndependentReviewIn(StrictIn):
@@ -112,6 +119,10 @@ async def _call(function, *args, **kwargs):
         raise
     except RecordConflict as exc:
         raise HTTPException(409, str(exc)) from exc
+    except CandidatePromotionConflict as exc:
+        raise HTTPException(409, "The candidate changed. Review its current release state and try again.") from exc
+    except CandidatePromotionNotFound as exc:
+        raise HTTPException(404, "The selected candidate is unavailable in this workspace.") from exc
     except LookupError as exc:
         raise HTTPException(404, "The pilot or source is unavailable in this account and workspace.") from exc
     except PermissionError as exc:
@@ -158,8 +169,9 @@ async def create_pilot(request: Request, response: Response, body: PlanIn):
     actor = caller_principal(request) or "local:dashboard"
     resolver = _resolver(request)
     response.headers["Cache-Control"] = "private, no-store"
-    record = await _call(outcome_pilots.create, body.model_dump(), context=context,
-        actor=actor, resolve=resolver)
+    record = await _call(outcome_pilots.create, body.model_dump(exclude_none=True), context=context,
+        actor=actor, resolve=resolver,
+        resolve_release=partial(outcome_pilot_releases.bind, request))
     manifest = await _call(
         outcome_accounting_bridge.admit_pilot, record, resolve=resolver,
     )
@@ -168,6 +180,13 @@ async def create_pilot(request: Request, response: Response, body: PlanIn):
         context=context, actor=actor, resolve=resolver,
     )
     return {"id": record["id"], "revision": record["revision"], "context": context}
+
+
+@router.get("/api/v1/outcome-pilots/release-candidates")
+async def release_candidates(request: Request, response: Response):
+    context = _context(request)
+    response.headers["Cache-Control"] = "private, no-store"
+    return {**await _call(outcome_pilot_releases.choices, request), "context": context}
 
 
 @router.get("/api/v1/outcome-pilots/sources")
@@ -221,6 +240,19 @@ async def pilot_report(request: Request, response: Response, pilot_id: str):
         )
     return {**await _call(outcome_pilots.report, record, resolve=resolver),
             "provider_costs": await report_for(request, record), "context": context}
+
+
+@router.get("/api/v1/outcome-pilots/{pilot_id}/release-status")
+async def release_status(request: Request, response: Response, pilot_id: str):
+    context = _context(request)
+    response.headers["Cache-Control"] = "private, no-store"
+    record = await _call(outcome_pilots.get, pilot_id, context)
+    raw_binding = record.get("release_binding")
+    if raw_binding is None:
+        raise HTTPException(404, "This pilot has no candidate release binding.")
+    binding = await _call(outcome_pilot_releases.ReleaseBinding, **raw_binding)
+    return {**await _call(outcome_pilot_releases.status, request, binding),
+            "pilot_id": pilot_id, "plan_version": record["plan_version"], "context": context}
 
 
 @router.post("/api/v1/outcome-pilots/prepared-tasks")

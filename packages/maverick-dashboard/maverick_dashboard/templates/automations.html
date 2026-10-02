@@ -898,16 +898,72 @@
               async function showWaitingSubmissions() {
                 reviewPanel.hidden = false;
                 reviewPanel.textContent = 'Loading received answers…';
+                function shareRecovery(held) {
+                  document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {
+                    selection: held ? {kind: 'form_recovery', name: t.name, sequence: held.sequence} : null
+                  }}));
+                }
                 var result;
                 try {
                   var response = await fetch('/api/v1/event-triggers/' + encodeURIComponent(t.name) + '/form-submissions', {cache: 'no-store'});
-                  if (!response.ok) { reviewPanel.textContent = plainError(response, 'review these submissions'); return null; }
+                  if (!response.ok) { shareRecovery(null); reviewPanel.textContent = plainError(response, 'review these submissions'); return null; }
                   result = await response.json();
-                } catch (error) { reviewPanel.textContent = plainError(error, 'review these submissions'); return null; }
+                } catch (error) { shareRecovery(null); reviewPanel.textContent = plainError(error, 'review these submissions'); return null; }
                 if (!result || !Array.isArray(result.submissions) || result.binding_revision !== t.binding_revision) {
-                  reviewPanel.textContent = 'This form changed. Refresh the page before making a decision.'; return null;
+                  shareRecovery(null); reviewPanel.textContent = 'This form changed. Refresh the page before making a decision.'; return null;
                 }
+                shareRecovery(result.interrupted_decision);
                 reviewPanel.textContent = '';
+                if (result.interrupted_decision) {
+                  var held = result.interrupted_decision;
+                  var heldCard = el('div', 'mv-row');
+                  heldCard.appendChild(el('strong', '', 'A recorded decision needs recovery'));
+                  heldCard.appendChild(el('p', 'muted', 'The signed decision was saved, but an interruption left its completion record unfinished. Work is held. Review the received answers and original reason before confirming; this does not run or remove the submission.'));
+                  var heldFields = document.createElement('dl');
+                  Object.entries(held.fields || {}).forEach(function (pair) {
+                    heldFields.appendChild(el('dt', '', mvHuman(pair[0])));
+                    heldFields.appendChild(el('dd', '', String(pair[1])));
+                  });
+                  heldCard.appendChild(heldFields);
+                  heldCard.appendChild(el('p', 'muted', 'Recorded reason: ' + held.reason));
+                  heldCard.appendChild(el('p', 'muted', 'Recorded by ' + held.decided_by + ' on ' + new Date(Number(held.decided_at) * 1000).toLocaleString()));
+                  var repair = el('button', 'btn btn--ghost', 'Confirm recorded decision');
+                  repair.type = 'button'; heldCard.appendChild(repair);
+                  var repairStatus = el('span', 'muted'); repairStatus.setAttribute('role', 'status');
+                  heldCard.appendChild(repairStatus);
+                  repair.addEventListener('click', async function () {
+                    if (repair.disabled || !(await mvConfirm('Confirm the signed “Do not run” decision for this exact submission? Lightwork will complete its record so Check now can continue. The received answers stay saved and no work starts.', {okText: 'Confirm decision'}))) return;
+                    repair.disabled = true; repairStatus.textContent = 'Checking the signed record…';
+                    var response = null;
+                    try {
+                      response = await fetch('/api/v1/event-triggers/' + encodeURIComponent(t.name) + '/form-submissions/' + encodeURIComponent(held.sequence) + '/recover-decision', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({expected_generation: t.binding_revision, expected_fields_sha256: held.fields_sha256, expected_decision_sha256: held.decision_sha256})
+                      });
+                    } catch (error) { /* Read the current state after an uncertain response. */ }
+                    var failure = response && !response.ok ? plainError(response, 'confirm the recorded decision') : '';
+                    var refreshed = await showWaitingSubmissions();
+                    if (!refreshed) return;
+                    var current = refreshed.submissions.find(function (row) { return row.sequence === held.sequence; });
+                    var confirmed = !refreshed.interrupted_decision && current && current.do_not_run;
+                    if (!confirmed && !refreshed.interrupted_decision) {
+                      try {
+                        var receiptResponse = await fetch('/api/v1/event-triggers/' + encodeURIComponent(t.name) + '/form-submissions/' + encodeURIComponent(held.sequence) + '/decision-receipt');
+                        if (receiptResponse.ok) {
+                          var receipt = await receiptResponse.json();
+                          confirmed = receipt.do_not_run === true && receipt.sequence === held.sequence &&
+                            receipt.binding_revision === t.binding_revision && receipt.fields_sha256 === held.fields_sha256 &&
+                            receipt.decision_sha256 === held.decision_sha256;
+                        }
+                      } catch (error) { /* A missing receipt must never claim success. */ }
+                    }
+                    evMsg.textContent = confirmed
+                      ? (current ? 'Decision confirmed. Choose Check now to continue past this submission.' : 'Decision confirmed. The form has moved past this submission.')
+                      : (failure || 'The decision remains held. Refresh and review it before trying again.');
+                  });
+                  reviewPanel.appendChild(heldCard);
+                  return result;
+                }
                 reviewPanel.appendChild(el('p', 'muted', 'These answers stay saved. If a submission cannot be used, you can record why it should not start work. This does not undo work already started.'));
                 result.submissions.forEach(function (submission) {
                   var card = el('div', 'mv-row');

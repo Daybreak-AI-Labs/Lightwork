@@ -101,7 +101,55 @@
 
   <div class="section-head"><h2 id="chat-accounts">Your chat accounts</h2></div>
   <div class="panel">
-    <p class="muted">Link a chat app so you can approve requests and get your daily summary there. A code works once and for 15 minutes.</p>
+    {% if bridge_available %}
+    <h3>Ask Lightwork from chat</h3>
+    <p class="muted">Connect your Slack or Microsoft Teams account to your signed-in Lightwork account. Send the code from the chat account, then return here and confirm the account we found. A code works once and expires in 10 minutes.</p>
+    {% if bridge_notice %}<p role="alert">{{ bridge_notice }}</p>{% endif %}
+    {% if bridge_code %}
+    <div class="panel" role="status">
+      <p><strong>Your {{ bridge_channel | capitalize }} connection code: <code>{{ bridge_code }}</code></strong></p>
+      <p>Send <code>LIGHTWORK CONNECT {{ bridge_code }}</code> in a direct message to the Lightwork bot{% if bridge_channel == 'slack' %} in Slack{% else %} in Microsoft Teams{% endif %}. Then refresh this page and confirm the account below.</p>
+    </div>
+    {% endif %}
+    {% if bridge_pending %}
+    <h4>Confirm the account we found</h4>
+    {% for pending in bridge_pending %}
+    <div class="panel">
+      <p>{{ pending.channel | capitalize }} account <strong>{{ pending.sender_id }}</strong> in workspace <strong>{{ pending.provider_tenant }}</strong>.</p>
+      {% if bridge_can_connect %}<form method="post" action="/me/channels/oidc/confirm">
+        <input type="hidden" name="challenge_id" value="{{ pending.id }}" />
+        <button type="submit" class="btn btn--primary">Yes, connect this account</button>
+      </form>{% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% if bridge_links %}
+    <h4>Chat connections</h4>
+    <table>
+      <thead><tr><th scope="col">Chat app</th><th scope="col">Account</th><th scope="col">Workspace</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead>
+      <tbody>{% for link in bridge_links %}
+      <tr><td>{{ link.channel | capitalize }}</td><td>{{ link.sender_id }}</td>
+        <td>{{ link.provider_tenant }}</td>
+        <td>{% if link.status == 'active' %}Connected{% elif link.status == 'revoked' %}Disconnected; finish removal{% else %}Confirmation needs retry{% endif %}</td><td>
+          <form method="post" action="/me/channels/oidc/unlink" class="users-inline">
+            <input type="hidden" name="link_id" value="{{ link.id }}" />
+            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect{% else %}Finish removal{% endif %}</button>
+          </form>
+        </td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% endif %}
+    {% if bridge_can_connect %}<form method="post" action="/me/channels/oidc/start" class="users-row-form">
+      <label class="users-field"><span>Chat app</span><select class="select" name="channel">
+        <option value="slack">Slack</option><option value="teams">Microsoft Teams</option>
+      </select></label>
+      <button type="submit" class="btn btn--primary">Get a connection code</button>
+    </form>{% else %}<p class="muted">Your current access allows you to view and remove chat connections, but not connect an account for tasks.</p>{% endif %}
+    <h3>Summaries and approval notifications</h3>
+    <p class="muted">The links below can deliver updates and approval notices. They do not sign you in for chat tasks or approval decisions. Email cannot start tasks without proof of mailbox ownership.</p>
+    {% else %}
+    <p class="muted">Link a chat app so you can approve requests and get your daily summary there. Chat task access requires a single sign-on session.</p>
+    {% endif %}
     {% if link_code %}
     <div class="panel" role="status">
       <p><strong>Your {{ link_channel | capitalize }} code: <code>{{ link_code }}</code></strong></p>

@@ -79,7 +79,18 @@ def test_long_sqlite_query_stops_at_progress_deadline_and_releases_connection(sq
     result = sqlite_call.tool.fn(sqlite_call.args)
     assert time.monotonic() - began < 2
     assert LONG_SQL in statements
-    assert result.startswith("ERROR:") and "QueryDeadlineExceeded" in result
+    if sqlite_call.module is sqlite_module:
+        assert result.startswith("ERROR:") and "QueryDeadlineExceeded" in result
+    else:
+        # The generic SQL tool cannot prove that a WITH statement is read-only.
+        # It can report a definite rollback or an unknown outcome, depending
+        # on whether cancellation/rollback completed before the deadline.
+        assert (
+            result.startswith("ERROR:") and "transaction_status=rolled_back" in result
+            or result.startswith("INDETERMINATE:")
+            and "transaction_status=unknown" in result
+        )
+        assert "QueryDeadlineExceeded" in result
     assert executions[0].finished
     assert executions[0].cancellation_support == "sqlite_progress_and_interrupt"
     with closing(sqlite3.connect(sqlite_call.path, timeout=0.1)) as connection, connection:

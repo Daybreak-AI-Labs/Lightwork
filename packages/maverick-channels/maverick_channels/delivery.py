@@ -131,6 +131,8 @@ def _payload(msg, record_id):
         files.append({"filename": filename, "mime": mime, "sha256": sha, "size_bytes": len(data)})
         publications.append((_blob_path(record_id, sha), data, sha))
     payload = {"user_id": _bounded(msg.user_id, 4096, "recipient"), "sender_id": msg.sender_id,
+               "provider_tenant_id": getattr(msg, "provider_tenant_id", None),
+               "provider_sender_id": getattr(msg, "provider_sender_id", None),
                "channel": msg.channel, "message_id": msg.message_id, "text": msg.text, "attachments": files}
     return payload, publications
 

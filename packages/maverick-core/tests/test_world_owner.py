@@ -317,6 +317,9 @@ def test_postgres_payload_version_contract_on_stalled_clock(tmp_path, monkeypatc
     w.record_signoff(gid, "approved", expected_updated_at=reviewed.updated_at)
     monkeypatch.setattr(postgres.time, "time", lambda: reviewed.updated_at + clock_delta)
     monkeypatch.setattr(postgres, "_tenant_scope", lambda: ("", []))
+    # This SQLite dialect shim has no tenant_id column; production mutations
+    # still use the exact-tenant predicate rather than the read predicate.
+    monkeypatch.setattr(postgres, "_mutation_tenant_scope", lambda column="tenant_id": ("", []))
 
     class Cursor:
         def __init__(self, cursor):

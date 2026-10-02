@@ -728,6 +728,7 @@ class TestReconnectOnBrokenConnection:
         world._pool = None
         world._rls = False
         world._lock = threading.RLock()
+        world._tx_depth = threading.local()
         world._dsn = "postgresql://fake"
         world._connect_kwargs = {"autocommit": False}
         world._io_timeout_seconds = 0.25

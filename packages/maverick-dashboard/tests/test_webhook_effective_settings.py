@@ -322,7 +322,15 @@ def test_set_and_remove_are_recorded_without_the_secret(monkeypatch):
     assert save(http, value).status_code == 200
     assert save(http, "", action="remove").status_code == 200
     changes = [r for r in rows if r.get("section") == "webhooks" and r.get("key") == "secret"]
-    assert [(r["old"], r["new"]) for r in changes] == [("not set", "set"), ("set", "not set")]
+    assert [(r["phase"], r["old"], r["new"]) for r in changes] == [
+        ("reviewed", "not set", "unconfirmed"),
+        ("confirmed", "not set", "set"),
+        ("reviewed", "set", "unconfirmed"),
+        ("confirmed", "set", "not set"),
+    ]
+    assert changes[0]["operation_id"] == changes[1]["operation_id"]
+    assert changes[2]["operation_id"] == changes[3]["operation_id"]
+    assert changes[0]["operation_id"] != changes[2]["operation_id"]
     assert all(r.get("_global") is True and r.get("actor") for r in changes)
     assert value not in repr(rows)
 
@@ -339,3 +347,48 @@ def test_a_refused_record_undoes_the_change(monkeypatch):
     response = save(http, "synthetic-unrecorded-key")
     assert response.status_code == 503
     assert webhooks.inbound_secret() in (None, "")
+
+
+@pytest.mark.parametrize("refused_phase", ["reviewed", "confirmed"])
+def test_false_audit_result_never_reports_success_or_keeps_new_secret(monkeypatch, refused_phase):
+    import maverick.audit as audit
+
+    rows = []
+
+    def record(kind, **payload):
+        rows.append(payload)
+        return payload["phase"] != refused_phase
+
+    monkeypatch.setattr(audit, "audit_event", record)
+    http = client()
+    response = save(http, "synthetic-unrecorded-key")
+    assert response.status_code == 503
+    assert webhooks.inbound_secret() in (None, "")
+    assert not config.dashboard_overrides_path().exists()
+    assert [row["phase"] for row in rows] == (
+        ["reviewed"] if refused_phase == "reviewed" else ["reviewed", "confirmed"]
+    )
+
+
+def test_review_and_confirm_are_durable_linked_activity_rows(tmp_path, monkeypatch):
+    import time
+
+    import maverick.audit as audit
+    from maverick.audit import AuditEvent, AuditLog
+
+    sink = AuditLog(tmp_path / "activity", sign=True)
+
+    def persist(kind, *, agent, goal_id=None, **payload):
+        return sink.record(AuditEvent(ts=time.time(), kind=kind, agent=agent,
+                                      goal_id=goal_id, payload=payload))
+
+    monkeypatch.setattr(audit, "record_global", persist)
+    assert save(client(), "synthetic-activity-key").status_code == 200
+    rows = [row for row in sink.tail(10)
+            if row.get("section") == "webhooks" and row.get("key") == "secret"]
+    assert [(row["phase"], row["new"]) for row in rows] == [
+        ("reviewed", "unconfirmed"), ("confirmed", "set")]
+    assert rows[0]["operation_id"] == rows[1]["operation_id"]
+    assert "synthetic-activity-key" not in repr(rows)
+    assert sink.signing_enabled
+    assert all(row.get("sig") for row in rows)

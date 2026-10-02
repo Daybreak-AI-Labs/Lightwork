@@ -135,9 +135,9 @@
 
     {% if c.name == 'teams' %}
     <div class="section-head"><h3 id="teams-links">People linked to Teams</h3></div>
-    <p class="muted ch-help">Lightwork only knows a Teams user by their Microsoft Entra object ID. Link that ID
+    <p class="muted ch-help">Lightwork only knows a Teams user by their Microsoft Entra object ID. {% if oidc_channel_enabled %}The links below are for legacy notifications; task and approval access requires the person to connect from My work.{% else %}Link that ID
       (or their sign-in address) to a Lightwork user so their messages and approval decisions are recorded
-      under the right person. Approvals from Teams also need <strong>Decide approvals in Microsoft Teams</strong>
+      under the right person.{% endif %} Approvals from Teams also need <strong>Decide approvals in Microsoft Teams</strong>
       turned on under All settings. Setup steps: <code>docs/channels/teams.md</code>.</p>
     {% if teams_link_code %}
     <div class="panel ch-saved" role="status"><strong>One-time code:</strong> <code>{{ teams_link_code }}</code>
@@ -181,6 +181,25 @@
     {% endif %}
   </div>
   {% endfor %}
+
+  <div class="section-head"><h2 id="oidc-channel-links">Chat account connections</h2></div>
+  <div class="panel">
+    <p class="muted">{% if oidc_channel_enabled %}People connect their Slack or Microsoft Teams account from My work after signing in. Only accounts marked Connected can start tasks, while their owner still has workspace access. People can retry a pending confirmation from My work; an administrator can finish removing a disconnected record here.{% else %}Turn on single sign-on to let people connect a chat account for task access.{% endif %}</p>
+    {% if oidc_channel_notice %}<p role="alert">{{ oidc_channel_notice }}</p>{% elif oidc_channel_links %}
+    <table><thead><tr><th scope="col">Person</th><th scope="col">Chat app</th>
+      <th scope="col">Account</th><th scope="col">Workspace</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead>
+      <tbody>{% for link in oidc_channel_links %}<tr>
+        <td>{{ link.principal | identity }}</td><td>{{ link.channel | capitalize }}</td>
+        <td>{{ link.sender_id }}</td><td>{{ link.provider_tenant }}</td>
+        <td>{% if link.status == 'active' %}Connected{% elif link.status == 'revoked' %}Disconnected{% else %}Pending audit{% endif %}</td><td>
+          <form method="post" action="/channels/oidc/revoke" data-channels-confirm="Disconnect this chat account from Lightwork tasks?">
+            <input type="hidden" name="link_id" value="{{ link.id }}" />
+            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect{% else %}Finish removal{% endif %}</button>
+          </form>
+        </td></tr>{% endfor %}</tbody>
+    </table>
+    {% else %}<p class="muted">No chat accounts are connected for tasks.</p>{% endif %}
+  </div>
 
   <div class="section-head"><h2 id="email-alerts">Email alerts and the daily summary</h2></div>
   <div class="panel">

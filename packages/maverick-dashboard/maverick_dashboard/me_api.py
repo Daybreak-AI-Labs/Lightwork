@@ -53,6 +53,50 @@ def _world():
     return shared_world()
 
 
+def _bridge_identity(request: Request) -> tuple[str, str, str] | None:
+    """Exact IdP identity from this request's live OIDC browser session only."""
+    from maverick.oidc import load_oidc_config, login_enabled
+    from maverick.web_session import verify_session
+
+    from .oidc_login import SESSION_COOKIE, _principal_from_request_session
+
+    if not login_enabled():
+        return None
+    # The channel server belongs to this deployment. A browser-selected or
+    # per-user virtual workspace has no matching first-party bot installation.
+    if getattr(request.state, "workspace_tenant_source", "") in {
+        "principal_selection", "principal_isolation",
+    }:
+        return None
+    principal = _principal_from_request_session(request)
+    if principal is None or auth.caller_principal(request) != principal.principal:
+        return None
+    cfg = load_oidc_config()
+    payload = verify_session(request.cookies.get(SESSION_COOKIE, ""), cfg.session_secret)
+    if (not isinstance(payload, dict) or payload.get("sub") != principal.sub
+            or payload.get("oidc_issuer") != cfg.issuer
+            or payload.get("oidc_audience") != cfg.audience):
+        return None
+    return principal.sub, cfg.issuer, cfg.audience
+
+
+def _require_bridge_identity(request: Request) -> tuple[str, str, str]:
+    identity = _bridge_identity(request)
+    if identity is None:
+        if getattr(request.state, "workspace_tenant_source", "") in {
+            "principal_selection", "principal_isolation",
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail="This chat bot is not connected to the selected workspace.",
+            )
+        raise HTTPException(
+            status_code=403,
+            detail="Sign in again with single sign-on to connect this chat account."
+        )
+    return identity
+
+
 def _my_work(request: Request, principal: str) -> dict:
     from maverick import channel_identities, daily_digest, user_preferences
 
@@ -67,8 +111,21 @@ def _my_work(request: Request, principal: str) -> dict:
         links = channel_identities.links_for(principal)
     except channel_identities.ChannelIdentityError:
         links = []
+    bridge_identity = _bridge_identity(request)
+    bridge_links, bridge_pending, bridge_notice = [], [], ""
+    if bridge_identity:
+        from maverick import channel_oidc_bridge
+
+        try:
+            bridge_links = channel_oidc_bridge.links_for(*bridge_identity)
+            bridge_pending = channel_oidc_bridge.pending(*bridge_identity)
+        except channel_oidc_bridge.BridgeError:
+            bridge_notice = "Connected chat account records are unavailable. Ask an administrator to check them."
     return {"digest": digest, "preferences": prefs, "links": links,
-            "can_decide": can_decide}
+            "can_decide": can_decide, "bridge_available": bridge_identity is not None,
+            "bridge_can_connect": bridge_identity is not None and auth.has_permission(request, "operate"),
+            "bridge_links": bridge_links, "bridge_pending": bridge_pending,
+            "bridge_notice": bridge_notice}
 
 
 # ----------------------------------------------------------------------------
@@ -76,7 +133,15 @@ def _my_work(request: Request, principal: str) -> dict:
 # ----------------------------------------------------------------------------
 
 @router.get("/me", response_class=HTMLResponse)
-def me_page(request: Request, saved: str = "", code: str = "", channel: str = "") -> HTMLResponse:
+def me_page(request: Request, saved: str = "") -> HTMLResponse:
+    # Connection codes must only reach this page from the authenticated POST
+    # that issued them. A GET URL can be supplied by someone else.
+    return _render_me_page(request, saved=saved)
+
+
+def _render_me_page(request: Request, *, saved: str = "", link_code: str = "",
+                    link_channel: str = "", bridge_code: str = "",
+                    bridge_channel: str = "") -> HTMLResponse:
     """My work: what is waiting for me, my spending, my chat accounts, my summary."""
     auth.require_permission(request, "view")
     from maverick import user_preferences
@@ -92,6 +157,8 @@ def me_page(request: Request, saved: str = "", code: str = "", channel: str = ""
     saved_msg = {
         "preferences": "Your choices are saved.",
         "unlinked": "That chat account is no longer linked.",
+        "chat_connected": "This chat account can now start Lightwork tasks.",
+        "chat_disconnected": "This chat account can no longer start Lightwork tasks.",
         "sent": "Your summary was sent. Check your linked chat app or inbox.",
         "not_sent": "Your summary could not be sent. Link a chat account or add an email first.",
         "bad_preferences": "Those choices could not be saved. Check the values and try again.",
@@ -100,14 +167,78 @@ def me_page(request: Request, saved: str = "", code: str = "", channel: str = ""
         "principal": principal,
         "saved": saved_msg,
         "saved_failed": saved in {"not_sent", "bad_preferences"},
-        "link_code": code if channel else "",
-        "link_channel": channel,
+        "link_code": link_code,
+        "link_channel": link_channel,
+        "bridge_code": bridge_code,
+        "bridge_channel": bridge_channel,
         "time_zones": user_preferences.time_zone_choices(),
         "digest_scheduler_on": digest_on,
         "email_on": email_configured(),
         "hours": list(range(24)),
     })
     return _app().templates.TemplateResponse(request, "me.html", model)
+
+
+@router.post("/me/channels/oidc/start")
+def me_oidc_bridge_start(request: Request, channel: str = Form(...)) -> HTMLResponse:
+    auth.require_permission(request, "operate")
+    _app()._require_same_origin(request)
+    from maverick import channel_oidc_bridge
+
+    identity = _require_bridge_identity(request)
+    try:
+        issued = channel_oidc_bridge.begin(*identity, channel)
+    except channel_oidc_bridge.BridgeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response = _render_me_page(request, bridge_code=issued["code"], bridge_channel=channel)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@router.post("/me/channels/oidc/confirm")
+def me_oidc_bridge_confirm(request: Request, challenge_id: str = Form(...)) -> RedirectResponse:
+    auth.require_permission(request, "operate")
+    _app()._require_same_origin(request)
+    from maverick import channel_oidc_bridge
+
+    try:
+        channel_oidc_bridge.confirm(*_require_bridge_identity(request), challenge_id)
+    except channel_oidc_bridge.BridgeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RedirectResponse("/me?saved=chat_connected#chat-accounts", status_code=303)
+
+
+@router.post("/me/channels/oidc/unlink")
+def me_oidc_bridge_unlink(request: Request, link_id: str = Form(...)) -> RedirectResponse:
+    auth.require_permission(request, "view")
+    _app()._require_same_origin(request)
+    from maverick import channel_oidc_bridge
+
+    try:
+        removed = channel_oidc_bridge.unlink(*_require_bridge_identity(request), link_id)
+    except channel_oidc_bridge.BridgeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="That connection was not found.")
+    return RedirectResponse("/me?saved=chat_disconnected#chat-accounts", status_code=303)
+
+
+@router.post("/channels/oidc/revoke")
+def admin_oidc_bridge_revoke(request: Request, link_id: str = Form(...)) -> RedirectResponse:
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from maverick import channel_oidc_bridge
+
+    try:
+        removed = channel_oidc_bridge.revoke(
+            link_id, actor=auth.caller_principal(request) or "operator",
+        )
+    except channel_oidc_bridge.BridgeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="That connection was not found.")
+    return RedirectResponse("/channels?saved=oidc_revoked#channel-slack", status_code=303)
 
 
 @api.get("/me/work")
@@ -149,7 +280,7 @@ def me_preferences(
 
 
 @router.post("/me/channels/link-code")
-def me_link_code(request: Request, channel: str = Form(...)) -> RedirectResponse:
+def me_link_code(request: Request, channel: str = Form(...)) -> HTMLResponse:
     """A one-time code the person sends from the chat app (``/lightwork link``)."""
     auth.require_permission(request, "view")
     _app()._require_same_origin(request)
@@ -160,8 +291,12 @@ def me_link_code(request: Request, channel: str = Form(...)) -> RedirectResponse
         issued = channel_identities.issue_link_code(principal, channel)
     except channel_identities.ChannelIdentityError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return RedirectResponse(
-        f"/me?channel={issued['channel']}&code={issued['code']}#chat-accounts", status_code=303)
+    response = _render_me_page(
+        request, link_code=issued["code"], link_channel=issued["channel"],
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 @router.post("/me/channels/unlink")
@@ -293,6 +428,14 @@ async def _verified_slack_body(request: Request) -> bytes:
 
 
 def _slack_principal_for(user_id: str):
+    from maverick.oidc import oidc_enabled
+
+    if oidc_enabled():
+        # The HTTP interaction's signature proves the configured Slack app,
+        # but this route has no verified current bot installation receipt.
+        # Socket Mode can resolve the exact workspace/account tuple; HTTP
+        # decisions stay unavailable until it can establish that same proof.
+        return None
     from maverick.channel_identities import principal_for
 
     return principal_for("slack", user_id)

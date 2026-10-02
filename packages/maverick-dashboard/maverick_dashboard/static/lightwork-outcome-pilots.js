@@ -11,8 +11,11 @@
   const node = (tag, text) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; return e; };
   const operation = () => crypto.randomUUID();
   const sourceKey = source => source.kind + ':' + source.reference;
+  const publishSelection = id => document.dispatchEvent(new CustomEvent('lightwork:copilot-selection',
+    {detail:{selection:id ? {kind:'outcome_pilot',id} : {}}}));
   function clearAuthority() {
     lostAuthority = true; current = null; sources = []; pilotCursor = ''; report.replaceChildren(); $('op-independent-report').replaceChildren();
+    publishSelection('');
     if ($('op-prepared')) $('op-prepared').replaceChildren();
     root.querySelectorAll('textarea,input').forEach(input => { input.value = ''; });
     root.querySelectorAll('select').forEach(select => select.replaceChildren()); controls(true);
@@ -123,6 +126,33 @@
       report.append(node('p', 'Prior-exposure statement by ' + learning.prior_exposure_actor + ': ' + (learning.prior_exposure_statement || 'Not provided.')));
       if (learning.independent_review) report.append(node('p', 'Independent review by ' + learning.independent_review.actor + ': ' + learning.independent_review.decision.replaceAll('_',' ') + (learning.independent_review.current ? ' (current).' : ' (evidence changed; review again).')));
     }
+    if (data.release_binding) {
+      const box = node('section'); box.className = 'panel';
+      box.append(node('h3', 'Frozen improvement release'));
+      box.append(node('p', 'Candidate ' + data.release_binding.candidate_id + ' was bound to the deployed baseline before these cases started. The frozen plan preserves both exact release commitments.'));
+      box.append(node('p', 'This installation does not attest which release served each case. Reported scores, effort, acceptance and cost do not establish a causal release improvement.'));
+      const check = node('button', 'Check current release and recovery'); check.type = 'button'; check.className = 'btn';
+      const feedback = node('p'); feedback.setAttribute('role','status'); feedback.setAttribute('aria-live','polite');
+      check.addEventListener('click', async () => {
+        if (busy || lostAuthority) return;
+        check.disabled = true; feedback.textContent = 'Checking the current promotion and deployed release…';
+        try {
+          const result = await request('/' + encodeURIComponent(data.id) + '/release-status');
+          if (!current || current.id !== data.id) return;
+          const deployed = {baseline_active:'The original baseline is currently deployed.', candidate_active:'The candidate is currently deployed.',
+            other_release_active:'Another release is currently deployed.', candidate_changed:'The candidate record changed after this plan was frozen.',
+            rollback_unavailable:'Deployment compatibility or rollback readiness changed.', unavailable:'The deployed release could not be verified now.'};
+          const states = {awaiting_review:'waiting for independent approval', authorized:'approved for staging', staged:'staged',
+            canary:'in monitored rollout', active:'active', rolled_back:'rolled back', uncertain:'outcome uncertain',
+            denied:'denied', blocked:'blocked', not_advancing:'not advancing', unavailable:'unavailable'};
+          feedback.replaceChildren(node('span', (deployed[result.deployment_state] || 'Release status is unavailable.') +
+            ' Promotion is ' + (states[result.promotion_state] || 'under review') + '. Case release exposure and causal lift remain unverified. '));
+          const link = node('a', 'Open candidate approval, promotion and rollback'); link.href = '/research#research-promotions'; feedback.append(link);
+        } catch (error) { feedback.textContent = error.message + ' Recheck the candidate in Research before continuing.'; }
+        finally { check.disabled = lostAuthority; }
+      });
+      box.append(check, feedback); report.append(box);
+    }
     for (const [name, g] of Object.entries(data.groups)) {
       const box = node('section'); box.className = 'panel';
       box.append(node('h3', name === 'all' ? 'All planned cases' : name === 'holdout' ? 'Fixed evaluation group' : 'Process refinement group'));
@@ -172,9 +202,9 @@
   }
   async function load(id) {
     const ticket = ++serial;
-    if (!id) { current = null; report.replaceChildren(); $('op-export').disabled = true; return; }
-    try { const data = await request('/' + id); if (ticket === serial) draw(data); }
-    catch (e) { if (ticket === serial) { current = null; report.replaceChildren(); $('op-export').disabled = true; status.textContent = e.message; } throw e; }
+    if (!id) { current = null; report.replaceChildren(); $('op-export').disabled = true; publishSelection(''); return; }
+    try { const data = await request('/' + id); if (ticket === serial) { draw(data); publishSelection(data.id); } }
+    catch (e) { if (ticket === serial) { current = null; report.replaceChildren(); $('op-export').disabled = true; status.textContent = e.message; publishSelection(''); } throw e; }
   }
   async function refreshList(selected, cursor) {
     const continuation = cursor || '';
@@ -205,13 +235,35 @@
     if (cases.some(c => !c)) { status.textContent = 'Choose a currently available source for every case.'; return; }
     if (cases.length < 4 || new Set(cases.map(c => c.kind + ':' + c.reference)).size !== cases.length) { status.textContent = 'Choose at least four different unstarted cases.'; return; }
     const mode = fd.get('learning_mode') || 'observational', prior = String(fd.get('prior_exposure_statement') || '').trim();
-    if (mode === 'exclude_local_learning' && (prior.length < 20 || cases.some(c => c.kind !== 'goal'))) { status.textContent = 'Protected pilots need task cases and a prior-exposure statement of at least20 characters.'; return; }
+    const candidate = String(fd.get('candidate_id') || '').trim();
+    if (candidate && mode !== 'exclude_local_learning') { status.textContent = 'An improvement candidate needs protected evaluation tasks. Choose that learning-data treatment and record prior-exposure checks.'; return; }
+    if (mode === 'exclude_local_learning' && (prior.length < 20 || cases.some(c => c.kind !== 'goal'))) { status.textContent = 'Protected pilots need task cases and a prior-exposure statement of at least 20 characters.'; return; }
     const body = {title:fd.get('title'),customer:fd.get('customer'),workflow:fd.get('workflow'),criteria:fd.get('criteria'),cases, learning_mode:mode, prior_exposure_statement:prior,
       operation_id:form.dataset.operation || operation()}; form.dataset.operation = body.operation_id;
+    if (candidate) body.candidate_id = candidate;
     mutation(async () => { const saved = await request('', 'POST', body); await refreshThroughSelected(saved.id); await load(saved.id); form.reset(); delete form.dataset.operation; $('op-plan-details').open = false; });
   });
   $('op-plan').addEventListener('input', () => { delete $('op-plan').dataset.operation; });
   $('op-learning-mode').addEventListener('change', () => { $('op-prior-exposure').required = $('op-learning-mode').value === 'exclude_local_learning'; });
+  $('op-candidate').addEventListener('change', () => {
+    if ($('op-candidate').value) $('op-learning-mode').value = 'exclude_local_learning';
+    $('op-prior-exposure').required = $('op-learning-mode').value === 'exclude_local_learning';
+    delete $('op-plan').dataset.operation;
+  });
+  $('op-candidate-refresh').addEventListener('click', async () => {
+    if (busy || lostAuthority) return;
+    busy = true; controls(true); const note = $('op-candidate-status'); note.textContent = 'Loading governed candidates…';
+    try {
+      const data = await request('/release-candidates');
+      const picker = $('op-candidate'), prior = picker.value;
+      picker.replaceChildren(new Option('No candidate release — workflow pilot', ''));
+      (data.items || []).forEach(item => picker.append(new Option('Candidate ' + item.candidate_id + ' · ' + item.target_id + ' · ' + item.state.replaceAll('_',' '), item.candidate_id)));
+      if ([...picker.options].some(option => option.value === prior)) picker.value = prior;
+      note.textContent = data.available ? (data.items.length ? 'Choose a candidate. The deployed baseline is checked again when you save.' : 'No candidate is waiting for release in this workspace.') +
+        (data.partial ? ' Only the most recent candidates are shown.' : '') : data.detail;
+    } catch (error) { note.textContent = error.message; }
+    finally { busy = false; controls(false); }
+  });
   $('op-review-load').addEventListener('click', () => {
     if (busy || lostAuthority) return;
     const identifier = $('op-review-reference').value.trim();

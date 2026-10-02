@@ -115,6 +115,7 @@ from .api_schemas import (
     FlowSaveIn,
     FollowupsIn,
     FormAbandonIn,
+    FormDecisionRecoveryIn,
     FormLinkRotationIn,
     FulfillmentIdentityIn,
     FulfillmentResponseIn,
@@ -11049,14 +11050,35 @@ def waiting_form_submissions(request: Request, response: Response, name: str) ->
             )
             rows, _ = form_store.since(token, raw, limit=25)
             total = form_store.pending(token, raw)
-            decisions = form_recovery.decisions(token, generation)
-            submissions = [{
-                "sequence": row["_seq"], "received_at": row["_ts"],
-                "fields": form_recovery._row_fields(row),
-                "fields_sha256": form_recovery.fields_digest(form_recovery._row_fields(row)),
-                "do_not_run": row["_seq"] in decisions,
-                "reason": decisions.get(row["_seq"], {}).get("reason", ""),
-            } for row in rows]
+            tail = form_recovery.interrupted_decision(token, generation)
+            recovery = None
+            if tail is not None:
+                accepted = next((row for row in rows if row["_seq"] == tail["sequence"]), None)
+                if (accepted is None or form_recovery.fields_digest(
+                        form_recovery._row_fields(accepted)) != tail["fields_sha256"]):
+                    raise form_recovery.FormRecoveryUnavailable(
+                        "interrupted decision does not match a waiting submission"
+                    )
+                recovery = {
+                    "sequence": tail["sequence"], "received_at": accepted["_ts"],
+                    "fields": form_recovery._row_fields(accepted),
+                    "fields_sha256": tail["fields_sha256"],
+                    "decision_sha256": tail["hash"], "reason": tail["reason"],
+                    "decided_by": tail["actor"], "decided_at": tail["at"],
+                    "recovery_phase": tail["_recovery_phase"],
+                }
+                # No ordinary decisions may be offered while one signed
+                # decision is unfinished. It needs owner review first.
+                submissions = []
+            else:
+                decisions = form_recovery.decisions(token, generation)
+                submissions = [{
+                    "sequence": row["_seq"], "received_at": row["_ts"],
+                    "fields": form_recovery._row_fields(row),
+                    "fields_sha256": form_recovery.fields_digest(form_recovery._row_fields(row)),
+                    "do_not_run": row["_seq"] in decisions,
+                    "reason": decisions.get(row["_seq"], {}).get("reason", ""),
+                } for row in rows]
     except (form_store.FormStoreUnavailable, form_recovery.FormRecoveryUnavailable,
             EventSourceError, OSError, ValueError) as exc:
         raise HTTPException(
@@ -11064,7 +11086,123 @@ def waiting_form_submissions(request: Request, response: Response, name: str) ->
         ) from exc
     response.headers["Cache-Control"] = "no-store"
     return {"submissions": submissions, "waiting_total": total,
-            "binding_revision": generation}
+            "binding_revision": generation, "interrupted_decision": recovery}
+
+
+@router.post("/event-triggers/{name}/form-submissions/{sequence}/recover-decision")
+def recover_form_submission_decision(
+    request: Request, response: Response, name: str, sequence: int,
+    payload: FormDecisionRecoveryIn,
+) -> dict:
+    """Owner-confirmed completion of one signed decision record."""
+    from maverick import form_store
+    from maverick.audit.errors import AuditRefused
+    from maverick.automation_events import EventSourceError, _decode_cursor
+    from maverick.paths import current_tenant_id
+
+    from maverick_dashboard import event_triggers_store, form_recovery
+    from maverick_dashboard.event_poll import _trigger_key
+
+    require_permission(request, "operate")
+    _require_event_triggers()
+    tenant = current_tenant_id() or ""
+    current = event_triggers_store.get_trigger(name, tenant=tenant)
+    if (current is None or current.get("source") != "form"
+            or current.get("owner", "") not in _event_trigger_allowed_owners(request)):
+        raise HTTPException(status_code=404, detail="no form automation with that name")
+    token = str((current.get("config") or {}).get("token") or "")
+    try:
+        with form_recovery.locked(token), event_triggers_store.registry_lock():
+            current = event_triggers_store.get_trigger(name, tenant=tenant)
+            if (current is None or current.get("source") != "form"
+                    or current.get("owner", "") not in _event_trigger_allowed_owners(request)
+                    or str((current.get("config") or {}).get("token") or "") != token
+                    or _trigger_key(current) != payload.expected_generation):
+                raise HTTPException(status_code=409, detail="This form changed. Refresh it.")
+            raw = _decode_cursor(
+                str(current.get("cursor") or "0"), "form",
+                int(current.get("cursor_format") or 0),
+            )
+            rows, _ = form_store.since(token, raw, limit=25)
+            row = next((entry for entry in rows if entry["_seq"] == sequence), None)
+            if row is None:
+                raise HTTPException(status_code=409, detail="This submission is no longer waiting.")
+            if form_recovery.already_started(current, row, _world()):
+                raise HTTPException(
+                    status_code=409,
+                    detail="This submission has already started work. Review its run.",
+                )
+            decision = form_recovery.seal_interrupted_decision(
+                token, payload.expected_generation, row,
+                expected_fields_sha256=payload.expected_fields_sha256,
+                expected_decision_sha256=payload.expected_decision_sha256,
+                actor=caller_principal(request) or "local",
+            )
+    except form_recovery.FormRecoveryConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AuditRefused as exc:
+        raise HTTPException(
+            status_code=503, detail="The signed recovery record was refused. No repair was applied."
+        ) from exc
+    except (form_store.FormStoreUnavailable, form_recovery.FormRecoveryUnavailable,
+            EventSourceError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The interrupted decision could not be verified or repaired. It remains held.",
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return {"sequence": sequence, "do_not_run": True, "decision_sha256": decision["hash"]}
+
+
+@router.get("/event-triggers/{name}/form-submissions/{sequence}/decision-receipt")
+def form_submission_decision_receipt(
+    request: Request, response: Response, name: str, sequence: int,
+) -> dict:
+    """Verify an owner's exact signed decision even after polling moves on."""
+    from maverick import form_store
+    from maverick.automation_events import EventSourceError
+    from maverick.paths import current_tenant_id
+
+    from maverick_dashboard import event_triggers_store, form_recovery
+    from maverick_dashboard.event_poll import _trigger_key
+
+    require_permission(request, "operate")
+    _require_event_triggers()
+    tenant = current_tenant_id() or ""
+    current = event_triggers_store.get_trigger(name, tenant=tenant)
+    if (sequence < 1 or current is None or current.get("source") != "form"
+            or current.get("owner", "") not in _event_trigger_allowed_owners(request)):
+        raise HTTPException(status_code=404, detail="no form decision for that submission")
+    token = str((current.get("config") or {}).get("token") or "")
+    try:
+        with form_recovery.locked(token), event_triggers_store.registry_lock():
+            current = event_triggers_store.get_trigger(name, tenant=tenant)
+            if (current is None or current.get("source") != "form"
+                    or current.get("owner", "") not in _event_trigger_allowed_owners(request)
+                    or str((current.get("config") or {}).get("token") or "") != token):
+                raise HTTPException(status_code=409, detail="This form changed. Refresh it.")
+            generation = _trigger_key(current)
+            rows, _ = form_store.since(token, str(sequence - 1), limit=1)
+            row = next((entry for entry in rows if entry["_seq"] == sequence), None)
+            if row is None:
+                raise HTTPException(status_code=404, detail="no form decision for that submission")
+            decision = form_recovery.decisions(token, generation).get(sequence)
+            fields_sha256 = form_recovery.fields_digest(form_recovery._row_fields(row))
+            if decision is None:
+                raise HTTPException(status_code=404, detail="no completed decision for that submission")
+            if decision["fields_sha256"] != fields_sha256:
+                raise form_recovery.FormRecoveryUnavailable(
+                    "form decision no longer matches its original submission"
+                )
+    except (form_store.FormStoreUnavailable, form_recovery.FormRecoveryUnavailable,
+            EventSourceError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503, detail="The decision receipt cannot be verified right now."
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return {"sequence": sequence, "binding_revision": generation,
+            "fields_sha256": fields_sha256,
+            "decision_sha256": decision["hash"], "do_not_run": True}
 
 
 @router.post("/event-triggers/{name}/form-submissions/{sequence}/do-not-run")

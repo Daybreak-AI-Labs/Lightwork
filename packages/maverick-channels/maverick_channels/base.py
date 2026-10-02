@@ -222,6 +222,11 @@ class IncomingMessage:
     channel: str = ""
     raw: object = None
     sender_id: str | None = None
+    # First-party provider identifiers retained in the sealed durable intake.
+    # These fields alone are never proof; the delivery receipt must also match
+    # the currently authenticated app account at execution time.
+    provider_tenant_id: str | None = None
+    provider_sender_id: str | None = None
     # Platform message id of THIS inbound message, when the platform has one
     # (Slack ts, Telegram message_id, ...). Lets the reply thread onto it via
     # Channel.send_threaded; None on platforms without addressable messages.

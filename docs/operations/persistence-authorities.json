@@ -23492,6 +23492,54 @@
       ]
     },
     {
+      "path": "packages/maverick-core/maverick/channel_oidc_bridge.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-core/maverick/channel_oidc_bridge.py",
+      "purpose": "Confirmed Slack and Teams account links and one-use challenges that can authorize work for a signed-in OIDC principal.",
+      "referenced_store_owners": [
+        "maverick.file_lock",
+        "maverick.audit",
+        "maverick_dashboard.rbac",
+        "maverick_dashboard.scim_groups"
+      ],
+      "review": "Private bounded JSON, one process-local and one cross-process lock, atomic replacement, installation-path binding, provider receipt and signed-in confirmation. Current role and SCIM activity are rechecked on use. A restored older copy could revive a revoked link or consumed code; hold restored authority for explicit reconciliation. No shared-host or live-provider qualification.",
+      "governed_namespaces": [],
+      "persisted_authorities": [
+        {
+          "sample_path": "channel-oidc-bridge.json",
+          "recovery_policy": "channel_oidc_identity_link_authority",
+          "disposition": "Retain exact links and challenges; block startup after restore until current account, revocation, and code-use state are reconciled. Never infer a current grant from an older copy."
+        }
+      ],
+      "literal_path_hints": [
+        "channel-oidc-bridge.json"
+      ],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "atomic_replace": 1
+      },
+      "source_sites": [
+        {
+          "line": 45,
+          "function": "store_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home() / 'channel-oidc-bridge.json'"
+        },
+        {
+          "line": 68,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 103,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store_path(), raw)"
+        }
+      ]
+    },
+    {
       "path": "packages/maverick-core/maverick/stripe_collection.py",
       "contract": "execution",
       "owner": "packages/maverick-core/maverick/stripe_collection.py",

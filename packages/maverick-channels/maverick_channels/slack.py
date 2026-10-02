@@ -102,8 +102,19 @@ class SlackChannel(Channel):
                                   or os.environ.get("SLACK_APPROVALS_CHANNEL", "")).strip()
 
     def _authorized(self, msg, account):
-        return bool(account and account == self._account_id
-                    and is_allowed(msg.principal_id, self.allowed_user_ids))
+        from maverick.oidc import oidc_enabled
+
+        if not (account and account == self._account_id
+                and is_allowed(msg.principal_id, self.allowed_user_ids)):
+            return False
+        if (not oidc_enabled() and msg.provider_tenant_id is None
+                and msg.provider_sender_id is None):
+            # Pre-upgrade durable receipts had no provider tuple. They retain
+            # the original account and current allowlist checks, but cannot
+            # acquire OIDC identity authority after an upgrade.
+            return True
+        return bool(msg.provider_tenant_id == self._team_id
+                    and msg.provider_sender_id == msg.principal_id)
 
     async def _prepare(self, msg, route):
         msg.attachments = await self._download_files({"files": route.get("files", [])})
@@ -166,8 +177,20 @@ class SlackChannel(Channel):
             self._world = open_world()
         return self._world
 
-    @staticmethod
-    def _principal_for(user_id: str):
+    def _principal_for(self, user_id: str):
+        from maverick.oidc import oidc_enabled
+
+        if oidc_enabled():
+            if not self._account_id or not self._team_id:
+                return None
+            from maverick.channel_oidc_bridge import BridgeError, resolve
+
+            from .delivery import _digest
+
+            try:
+                return resolve("slack", _digest(self._account_id), self._team_id, user_id)
+            except BridgeError:
+                return None
         from maverick.channel_identities import principal_for
 
         return principal_for("slack", user_id)
@@ -206,7 +229,11 @@ class SlackChannel(Channel):
 
         payload = req.payload if isinstance(req.payload, dict) else {}
         user_id = str((payload.get("user") or {}).get("id") or "")
-        allowed = is_allowed(user_id, self.allowed_user_ids)
+        team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
+        from maverick.oidc import oidc_enabled
+
+        allowed = (is_allowed(user_id, self.allowed_user_ids)
+                   and (not oidc_enabled() or team.get("id") == self._team_id))
         if payload.get("type") == "view_submission" and allowed:
             return await self._on_view_submission(client, req, payload)
         await self._ack(client, req)
@@ -228,7 +255,14 @@ class SlackChannel(Channel):
 
     async def _ask_from_slash(self, form: dict) -> str:
         """``/lightwork ask <goal>`` runs the same handler as a chat message."""
+        from maverick.oidc import oidc_enabled
         from maverick.slack_interactive import parse_slash_text
+
+        if oidc_enabled():
+            # Slash commands have no durable execution receipt. A provider
+            # tuple alone cannot stand in for the delivery journal's verified
+            # app-account receipt, so direct messages carry OIDC chat tasks.
+            return "Send your task in a direct message to the Lightwork bot."
 
         _verb, goal = parse_slash_text(form.get("text"))
         msg = IncomingMessage(user_id=str(form.get("channel_id") or ""), text=goal,
@@ -241,10 +275,18 @@ class SlackChannel(Channel):
         form = req.payload if isinstance(req.payload, dict) else {}
         await self._ack(client, req)
         user_id = str(form.get("user_id") or "")
+        from maverick.oidc import oidc_enabled
+
+        if oidc_enabled() and form.get("team_id") != self._team_id:
+            return None
         if not is_allowed(user_id, self.allowed_user_ids):
             return None
         verb, rest = parse_slash_text(form.get("text"))
-        if verb == "ask" and rest and self._principal_for(user_id):
+        if verb == "ask" and oidc_enabled():
+            result = {"response_type": "ephemeral", "replace_original": False,
+                      "text": "Send your task in a direct message to the Lightwork bot. "
+                              "Connect your account from My work first if needed."}
+        elif verb == "ask" and rest and self._principal_for(user_id):
             answer = await self._ask_from_slash(form)
             result = {"response_type": "ephemeral", "replace_original": False,
                       "text": str(answer)[:3000]}
@@ -308,6 +350,7 @@ class SlackChannel(Channel):
                 user_id=event["channel"], text=text or
                 ("Process the attached file(s)." if files else ""), channel=self.name,
                 sender_id=sender, message_id=event["ts"],
+                provider_tenant_id=self._team_id, provider_sender_id=sender,
             )
             account = self._account_id
             # A mention in a channel or group answers in its thread so the

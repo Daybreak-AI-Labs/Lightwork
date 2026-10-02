@@ -210,16 +210,40 @@ class Server:
         # reply target and expose the human via msg.principal_id; the tenant, the
         # conversation key, and the runner's user_id must ALL agree on it -- else a
         # user's world.db lands under a different tenant than their memory/audit.
-        # When OIDC is enabled, do not trust the channel-provided principal:
-        # fail closed unless a verified ID token supplies the Lightwork principal.
+        # An explicit ID token always has priority: a bad token cannot inherit
+        # a previously linked chat account. First-party Slack/Teams delivery
+        # can instead use a separately confirmed OIDC bridge, but only with a
+        # current durable app receipt and exact provider account/sender tuple.
         if oidc_enabled():
-            try:
-                principal_id = verify_oidc_token(_extract_oidc_token(msg)).principal
-            except OIDCError:
-                log.warning(
-                    "OIDC authentication failed for inbound %s message",
-                    msg.channel or "unknown",
-                )
+            token = _extract_oidc_token(msg)
+            if token or _oidc_token_present(msg):
+                try:
+                    principal_id = verify_oidc_token(token).principal
+                except OIDCError:
+                    log.warning("OIDC authentication failed for inbound %s message", msg.channel or "unknown")
+                    return "⚠ Authentication failed: OIDC token is missing or invalid."
+            elif msg.channel in {"slack", "teams"}:
+                from . import channel_oidc_bridge
+
+                account_sha256 = getattr(msg, "_verified_channel_account_sha256", None)
+                provider_tenant = getattr(msg, "provider_tenant_id", None)
+                sender_id = getattr(msg, "provider_sender_id", None)
+                try:
+                    proof_reply = channel_oidc_bridge.observe(
+                        msg.channel, account_sha256, provider_tenant, sender_id, msg.text,
+                    )
+                    if proof_reply is not None:
+                        return proof_reply
+                    principal_id = channel_oidc_bridge.resolve(
+                        msg.channel, account_sha256, provider_tenant, sender_id,
+                    )
+                except Exception:
+                    log.exception("Chat identity proof unavailable for %s", msg.channel)
+                    principal_id = None
+                if not principal_id:
+                    return ("⚠ Connect this chat account from My work before asking "
+                            "Lightwork to start a task.")
+            else:
                 return "⚠ Authentication failed: OIDC token is missing or invalid."
         else:
             principal_id = getattr(msg, "principal_id", msg.user_id)
@@ -1076,6 +1100,26 @@ def _extract_oidc_token(msg) -> str:
             return authorization[len(prefix):].strip()
         return authorization.strip()
     return ""
+
+
+def _oidc_token_present(msg) -> bool:
+    """An explicitly supplied, even empty, credential must be verified."""
+    for attr in ("id_token", "oidc_token", "authorization"):
+        if getattr(msg, attr, None) is not None:
+            return True
+    raw = getattr(msg, "raw", None)
+    if isinstance(raw, dict):
+        if any(key in raw for key in ("id_token", "oidc_token")):
+            return True
+        headers = raw.get("headers")
+    else:
+        headers = getattr(raw, "headers", None)
+    try:
+        return headers is not None and any(
+            key in headers for key in ("authorization", "Authorization")
+        )
+    except (TypeError, AttributeError):
+        return False
 
 
 def _linked_channel_refusal(channel, user_id, account_sha256):

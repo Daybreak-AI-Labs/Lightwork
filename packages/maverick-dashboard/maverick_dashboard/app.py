@@ -8616,7 +8616,13 @@ async def templates_market_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/channels", response_class=HTMLResponse)
-def channels_page(request: Request, saved: str = "", code: str = "") -> HTMLResponse:
+def channels_page(request: Request, saved: str = "") -> HTMLResponse:
+    # A link code supplied in a GET URL is not evidence that this admin issued it.
+    return _render_channels_page(request, saved=saved)
+
+
+def _render_channels_page(request: Request, *, saved: str = "",
+                          issued_code: str = "") -> HTMLResponse:
     """Channels: manage the common ones (enable + credentials) from the form
     sections, plus a read-only, secret-redacted view of everything configured.
     Saved to the dashboard overlay, never config.toml; effective on the next
@@ -8720,7 +8726,7 @@ def channels_page(request: Request, saved: str = "", code: str = "") -> HTMLResp
             "saved": saved_msg,
             "saved_failed": saved in {"test_failed", "send_failed", "email_failed"},
             "sendable": ["email", "sms", "slack"],
-            **teams_links_api.page_context(code),
+            **teams_links_api.page_context(issued_code),
             "mail_configured": _mail_configured(),
         },
     )

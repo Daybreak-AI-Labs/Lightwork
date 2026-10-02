@@ -161,6 +161,24 @@ def test_slash_command_status_and_ask_run_through_the_handler(monkeypatch, tmp_p
     assert len(replies) == 2  # not on the allow list: acked, nothing else
 
 
+def test_oidc_slash_ask_refuses_without_durable_receipt(monkeypatch, tmp_path):
+    from maverick import oidc, slack_interactive
+
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: True)
+    ch = _channel(monkeypatch, tmp_path)
+    replies = []
+    monkeypatch.setattr(slack_interactive, "respond",
+                        lambda url, payload: replies.append(payload) or True)
+    form = {"command": "/lightwork", "text": "ask draft the memo", "team_id": "T1",
+            "user_id": "U123", "channel_id": "D1", "response_url": "https://hooks.slack.com/c"}
+    asyncio.run(ch._on_request(_client(), _req("slash_commands", form)))
+    assert "direct message" in replies[-1]["text"]
+    ch.handler.assert_not_called()
+    assert "direct message" in asyncio.run(ch._ask_from_slash(form))
+    asyncio.run(ch._on_request(_client(), _req("slash_commands", {**form, "team_id": "TOTHER"})))
+    assert len(replies) == 1
+
+
 def test_channel_message_needs_a_mention_and_answers_in_thread(monkeypatch, tmp_path):
     ch = _channel(monkeypatch, tmp_path)
     client = _client()
@@ -191,6 +209,10 @@ def test_dm_and_file_share_behave_as_before(monkeypatch, tmp_path):
                                      "channel_type": "im", "text": "do it", "ts": "2.1"}}
     asyncio.run(ch._on_request(client, _req("events_api", dm)))
     assert ch.handler.call_args.args[0].text == "do it"
+    assert ch.handler.call_args.args[0].provider_tenant_id == "T1"
+    assert ch.handler.call_args.args[0].provider_sender_id == "U123"
+    from maverick_channels.delivery import _digest
+    assert ch.handler.call_args.args[0]._verified_channel_account_sha256 == _digest("T1:B1")
     assert "thread_ts" not in ch._web.chat_postMessage.call_args.kwargs
     edited = {"team_id": "T1", "event": {"type": "message", "subtype": "message_changed",
                                          "user": "U123", "channel": "D5", "text": "x", "ts": "2.2"}}
@@ -202,6 +224,25 @@ def test_dm_and_file_share_behave_as_before(monkeypatch, tmp_path):
     monkeypatch.setattr(ch, "_download_files", AsyncMock(return_value=[]))
     asyncio.run(ch._on_request(client, _req("events_api", shared)))
     assert ch.handler.call_count == 2
+
+
+def test_oidc_slack_ingress_rejects_other_workspace_and_legacy_identity(monkeypatch, tmp_path):
+    from maverick import channel_identities, oidc
+
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: True)
+    ch = _channel(monkeypatch, tmp_path)
+    channel_identities.link("slack", "U123", "user:alice", actor="admin")
+    assert ch._principal_for("U123") is None
+    other_team = {"team_id": "TOTHER", "event": {
+        "type": "message", "user": "U123", "channel": "D5",
+        "channel_type": "im", "text": "do it", "ts": "3.1",
+    }}
+    with pytest.raises(PermissionError, match="account/message identity"):
+        asyncio.run(ch._on_request(_client(), _req("events_api", other_team)))
+    ch.handler.assert_not_called()
+    correct_team = {**other_team, "team_id": "T1"}
+    asyncio.run(ch._on_request(_client(), _req("events_api", correct_team)))
+    assert ch.handler.await_count == 1
 
 
 def test_post_approval_card_sends_blocks(monkeypatch, tmp_path):

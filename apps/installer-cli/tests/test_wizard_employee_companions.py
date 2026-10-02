@@ -89,7 +89,11 @@ def test_companion_copilot_guidance_distinguishes_ai_drafts_from_actions():
     admin = copilot_context.context_for_page("/companion/admin")
     assert employee.title == "My companion"
     assert admin.title == "Employee companions"
-    assert any("cannot read or clear" in boundary for boundary in employee.boundaries)
+    assert any(
+        "clear it after you review" in boundary
+        and "does not read or share your conversation text" in boundary
+        for boundary in employee.boundaries
+    )
     assert any("cannot enroll" in boundary for boundary in admin.boundaries)
     assert any("private companion history" in boundary for boundary in admin.boundaries)
     assert any("configured AI service" in boundary for boundary in employee.boundaries)

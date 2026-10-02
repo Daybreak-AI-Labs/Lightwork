@@ -155,12 +155,14 @@ def test_link_code_and_unlink_flow(tmp_path, monkeypatch):
     _as(monkeypatch, "user:alice")
     client = _client()
     r = client.post("/me/channels/link-code", data={"channel": "slack"})
-    assert r.status_code == 303
-    location = r.headers["location"]
-    code = location.split("code=")[1].split("#")[0]
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+    import re
+
+    code = re.search(r"/lightwork link ([A-Za-z0-9]{8})", r.text).group(1)
     assert len(code) == 8
-    page = client.get(location).text
-    assert f"/lightwork link {code}" in page
+    assert f"/lightwork link {code}" in r.text
+    assert code not in client.get(f"/me?channel=slack&code={code}").text
     assert channel_identities.redeem_link_code("slack", "U77", code) == "user:alice"
     assert "U77" in client.get("/me").text
     r = client.post("/me/channels/unlink", data={"channel": "slack", "external_id": "U77"})

@@ -45,7 +45,7 @@ def _server(server_mod):
     return srv
 
 
-def test_oidc_enabled_rejects_message_without_token(monkeypatch):
+def test_oidc_enabled_rejects_unlinked_message_without_token(monkeypatch):
     from maverick import oidc as oidc_mod
     from maverick import server as server_mod
 
@@ -73,8 +73,8 @@ def test_oidc_enabled_rejects_message_without_token(monkeypatch):
     srv = _server(server_mod)
     out = asyncio.run(srv._handle_message(_Msg()))
 
-    assert "Authentication failed" in out
-    assert seen_tokens == [""]
+    assert "Connect this chat account from My work" in out
+    assert seen_tokens == []  # A token-free chat message needs a verified link.
     assert srv.world.goals == []
     assert srv.world.turns == []
 

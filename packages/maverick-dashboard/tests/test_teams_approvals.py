@@ -299,9 +299,12 @@ def test_channels_page_links_teams_accounts(monkeypatch):
     assert "alice@example.com" in page and "Teams account linked." in page
     assert client.post("/channels/teams/link", data={"teams_id": "bad id!", "principal": "x"}).status_code == 422
     r = client.post("/channels/teams/link-code", data={"principal": "user:carol"}, follow_redirects=False)
-    assert "saved=link_code&code=" in r.headers["location"]
-    code = r.headers["location"].split("code=")[1].split("&")[0]
-    assert "One-time code" in client.get(f"/channels?saved=link_code&code={code}").text
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    import re
+
+    code = re.search(r"One-time code:</strong> <code>([A-Za-z0-9]+)</code>", r.text).group(1)
+    assert "One-time code" in r.text
+    assert code not in client.get(f"/channels?saved=link_code&code={code}").text
     assert teams_identity.redeem_link_code(code, "carol-object-id") == "user:carol"
     r = client.post("/channels/teams/unlink", data={"teams_id": "alice@example.com"}, follow_redirects=False)
     assert "saved=unlinked" in r.headers["location"] and teams_identity.link_for("alice@example.com") is None

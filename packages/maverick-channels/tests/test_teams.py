@@ -46,9 +46,10 @@ def rsa_key():
     return rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
-def _jwks(key, kid="k1") -> dict:
+def _jwks(key, kid="k1", endorsements=("msteams",)) -> dict:
     public = jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key(), as_dict=True)
-    public.update({"kid": kid, "use": "sig", "alg": "RS256"})
+    public.update({"kid": kid, "use": "sig", "alg": "RS256",
+                   "endorsements": list(endorsements)})
     return {"keys": [public]}
 
 
@@ -150,7 +151,8 @@ def _claim_ok(monkeypatch):
 
 def _message(text="hello agent", *, conversation_type="personal", entities=None, activity_id="m1",
              conversation_id="a:conv1", aad=AAD_USER, tenant=TENANT):
-    return {"type": "message", "id": activity_id, "serviceUrl": SERVICE_URL, "text": text,
+    return {"type": "message", "channelId": "msteams", "id": activity_id,
+            "serviceUrl": SERVICE_URL, "text": text,
             "from": {"id": "29:user-scoped", "aadObjectId": aad, "name": "Alice"},
             "recipient": {"id": f"28:{APP_ID}", "name": "Lightwork"},
             "conversation": {"id": conversation_id, "conversationType": conversation_type},
@@ -237,6 +239,39 @@ def test_webhook_refuses_missing_or_bad_token(rsa_key):
     assert not ch.handler.await_count
 
 
+def test_webhook_requires_teams_channel_endorsement_and_service_url(rsa_key):
+    ch = _channel(rsa_key)
+    direct_line = _message("link FAKECODE")
+    direct_line["channelId"] = "directline"
+    assert _post(ch, rsa_key, direct_line).status_code == 403
+    assert not ch.handler.await_count
+
+    no_endorsement = _channel(rsa_key, keys=SigningKeys(jwks=_jwks(rsa_key, endorsements=())))
+    assert _post(no_endorsement, rsa_key, _message()).status_code == 403
+    assert not no_endorsement.handler.await_count
+
+    missing_service_claim = _token(rsa_key, serviceurl="")
+    assert _post(ch, rsa_key, _message(), token=missing_service_claim).status_code == 403
+    assert not ch.handler.await_count
+
+
+def test_preupgrade_teams_receipt_authority_is_legacy_only(rsa_key, monkeypatch):
+    from maverick import oidc
+    from maverick_channels.base import IncomingMessage
+
+    ch = _channel(rsa_key)
+    old_message = IncomingMessage(user_id="a:conv1", sender_id=AAD_USER,
+                                  channel="teams", text="question")
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: False)
+    assert ch._authorized(old_message, APP_ID)
+    assert not ch._authorized(old_message, "another installation")
+    ch.allowed_user_ids.clear()
+    assert not ch._authorized(old_message, APP_ID)
+    ch.allowed_user_ids.add(AAD_USER)
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: True)
+    assert not ch._authorized(old_message, APP_ID)
+
+
 # ------------------------------------------------------ activity parsing
 
 def test_parse_personal_and_channel_messages():
@@ -256,7 +291,7 @@ def test_parse_personal_and_channel_messages():
 
 
 def test_parse_conversation_update_and_ignored_types():
-    added = {"type": "conversationUpdate", "serviceUrl": SERVICE_URL,
+    added = {"type": "conversationUpdate", "channelId": "msteams", "serviceUrl": SERVICE_URL,
              "recipient": {"id": f"28:{APP_ID}"}, "membersAdded": [{"id": f"28:{APP_ID}"}],
              "conversation": {"id": "c1"}, "channelData": {"tenant": {"id": TENANT}}}
     parsed = parse_activity(added, bot_id=f"28:{APP_ID}")
@@ -276,6 +311,9 @@ def test_message_becomes_work_and_reply_goes_to_the_thread(rsa_key, monkeypatch)
     msg = ch.handler.await_args.args[0]
     assert msg.channel == "teams" and msg.text == "write the weekly summary"
     assert msg.user_id == "a:conv1" and msg.sender_id == AAD_USER and msg.message_id == "m1"
+    assert msg.provider_tenant_id == TENANT and msg.provider_sender_id == AAD_USER
+    from maverick_channels.delivery import _digest
+    assert msg._verified_channel_account_sha256 == _digest(APP_ID)
     token_call, reply = ch.transport.calls
     assert token_call["url"] == token_endpoint(TENANT)
     assert token_call["data"]["scope"] == "https://api.botframework.com/.default"
@@ -312,9 +350,24 @@ def test_handler_error_reply_is_redacted(rsa_key, monkeypatch):
     assert "sk-SECRET" not in sent and sent == "⚠ An internal error occurred."
 
 
+def test_oidc_teams_ingress_requires_aad_identity_and_current_tenant(rsa_key, monkeypatch):
+    from maverick import oidc
+
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: True)
+    ch = _channel(rsa_key, allowed_user_ids=["29:user-scoped", AAD_USER])
+    assert _post(ch, rsa_key, _message(aad="", activity_id="no-aad")).status_code == 200
+    ch.handler.assert_not_called()
+    assert _post(ch, rsa_key, _message(tenant="ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee",
+                                      activity_id="other-tenant")).status_code == 200
+    ch.handler.assert_not_called()
+    assert _post(ch, rsa_key, _message(activity_id="valid-aad")).status_code == 200
+    ch.handler.assert_awaited_once()
+
+
 def test_welcome_on_bot_added(rsa_key):
     ch = _channel(rsa_key)
-    added = {"type": "conversationUpdate", "serviceUrl": SERVICE_URL, "id": "u1",
+    added = {"type": "conversationUpdate", "channelId": "msteams",
+             "serviceUrl": SERVICE_URL, "id": "u1",
              "recipient": {"id": f"28:{APP_ID}"}, "membersAdded": [{"id": f"28:{APP_ID}"}],
              "from": {"id": "29:x"}, "conversation": {"id": "c1"},
              "channelData": {"tenant": {"id": TENANT}}}

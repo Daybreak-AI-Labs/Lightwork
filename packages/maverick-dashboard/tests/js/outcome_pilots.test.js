@@ -97,6 +97,41 @@ test('protected plan sends an explicit learning mode and attributed prior-exposu
   assert.equal(body.cases.length,4);ui.dom.window.close();
 });
 
+test('improvement pilot chooses a governed candidate and keeps release lift unqualified',async()=>{
+  const bound={...report(),release_binding:{candidate_id:'candidate-one'},case_exposure_verified:false,causal_lift_qualified:false};
+  const ui=await setup([
+    {context:'alice',available:true,items:[{candidate_id:'candidate-one',target_id:'installed-lightwork',state:'authorized'}]},
+    {context:'alice',id:'OPL-test',revision:2},
+    {context:'alice',items:[{id:'OPL-test',title:'Pilot',cases:4}]},
+    bound,
+    {context:'alice',deployment_state:'candidate_active',promotion_state:'canary',case_exposure_verified:false,
+      causal_lift_qualified:false,review_href:'/research'},
+  ]);
+  const selections=[];
+  ui.d.addEventListener('lightwork:copilot-selection',event=>selections.push(event.detail.selection));
+  ui.d.getElementById('op-candidate-refresh').click();await tick();
+  const picker=ui.d.getElementById('op-candidate');picker.value='candidate-one';
+  picker.dispatchEvent(new ui.w.Event('change'));
+  const form=ui.d.getElementById('op-plan');
+  for(const name of ['title','customer','workflow','criteria'])form.elements[name].value='Improvement '+name;
+  ui.d.getElementById('op-prior-exposure').value='Checked task inputs and local history; provider exposure remains unknown.';
+  [...ui.d.querySelectorAll('#op-planned-cases select')].forEach((select,index)=>{select.value='goal:'+(index+1);});
+  form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();
+  const create=ui.calls.find(call=>call.url==='/api/v1/outcome-pilots' && call.options.method==='POST');
+  assert.equal(JSON.parse(create.options.body).candidate_id,'candidate-one');
+  assert.equal(JSON.parse(create.options.body).learning_mode,'exclude_local_learning');
+  assert.equal(selections.at(-1).kind,'outcome_pilot');
+  assert.equal(selections.at(-1).id,'OPL-test');
+  assert.match(ui.d.getElementById('op-report').textContent,/do not establish a causal release improvement/);
+  ui.d.querySelector('#op-report section button').click();await tick();
+  assert.match(ui.d.getElementById('op-report').textContent,/candidate is currently deployed/);
+  assert.match(ui.calls.at(-1).url,/OPL-test\/release-status$/);
+  ui.d.getElementById('op-selected').value='';
+  ui.d.getElementById('op-selected').dispatchEvent(new ui.w.Event('change'));await tick();
+  assert.equal(Object.keys(selections.at(-1)).length,0);
+  ui.dom.window.close();
+});
+
 test('duplicate-pilot conflict keeps the complete plan and exact retry reference',async()=>{
   const conflict=()=>({ok:false,status:409,json:async()=>({detail:'One or more selected work items already belongs to an active or frozen pilot in this tenant. No allocation model is configured.'})});
   const ui=await setup([conflict]);

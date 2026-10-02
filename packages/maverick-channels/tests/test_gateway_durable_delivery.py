@@ -140,6 +140,21 @@ def test_slack_admits_before_ack_then_downloads_and_recovers_after_ack_crash(mon
     assert channel._web.chat_postMessage.call_args.kwargs["thread_ts"] == "100.1"
 
 
+def test_preupgrade_slack_receipt_authority_is_legacy_only(monkeypatch):
+    from maverick import oidc
+
+    channel, _, _ = _slack(monkeypatch, AsyncMock(return_value="answer"))
+    old_message = IncomingMessage(user_id="room", sender_id="human", channel="slack", text="question")
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: False)
+    assert channel._authorized(old_message, channel._account_id)
+    assert not channel._authorized(old_message, "another installation")
+    channel.allowed_user_ids.clear()
+    assert not channel._authorized(old_message, channel._account_id)
+    channel.allowed_user_ids.add("human")
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: True)
+    assert not channel._authorized(old_message, channel._account_id)
+
+
 def test_slack_failed_admission_is_not_acked_or_executed(monkeypatch):
     handler = AsyncMock(return_value="answer")
     channel, client, req = _slack(monkeypatch, handler)

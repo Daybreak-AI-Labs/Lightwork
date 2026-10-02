@@ -205,7 +205,7 @@ class SigningKeys:
             raise TeamsAuthError("Bot Framework OpenID metadata has no https jwks_uri")
         self._store(self._fetch(uri))
 
-    def key_for(self, kid: str):
+    def key_for(self, kid: str, *, required_endorsement: str | None = None):
         import jwt
 
         with self._lock:
@@ -215,10 +215,16 @@ class SigningKeys:
             jwk = self._keys.get(kid)
             if jwk is None:
                 raise TeamsAuthError("signing key is unknown")
+            if required_endorsement:
+                endorsements = jwk.get("endorsements")
+                if (not isinstance(endorsements, list)
+                        or required_endorsement not in endorsements):
+                    raise TeamsAuthError("signing key is not endorsed for this channel")
             return jwt.PyJWK(jwk).key
 
 
-def verify_bot_token(token: str, *, app_id: str, keys: SigningKeys) -> dict:
+def verify_bot_token(token: str, *, app_id: str, keys: SigningKeys,
+                     required_endorsement: str | None = None) -> dict:
     """Return the verified claims of a Bot Connector JWT or raise TeamsAuthError.
 
     Checks (from Microsoft's Bot Connector authentication page): Bearer JWT,
@@ -241,7 +247,7 @@ def verify_bot_token(token: str, *, app_id: str, keys: SigningKeys) -> dict:
     kid = header.get("kid")
     if not isinstance(kid, str) or not 1 <= len(kid) <= 256:
         raise TeamsAuthError("invalid signing key identifier")
-    key = keys.key_for(kid)
+    key = keys.key_for(kid, required_endorsement=required_endorsement)
     try:
         claims = jwt.decode(token, key, algorithms=list(ALGORITHMS), audience=app_id,
                             leeway=CLOCK_SKEW_SECONDS,
@@ -512,16 +518,34 @@ class TeamsChannel(Channel):
         return bool(parsed.tenant_id) and parsed.tenant_id in self.allowed_tenants
 
     def _sender_allowed(self, parsed: ParsedActivity) -> bool:
-        return self._tenant_allowed(parsed) and is_allowed(parsed.principal_key.lower(), self.allowed_user_ids)
+        from maverick.oidc import oidc_enabled
+
+        return (self._tenant_allowed(parsed)
+                and (not oidc_enabled() or bool(parsed.sender_aad))
+                and is_allowed(parsed.principal_key.lower(), self.allowed_user_ids))
 
     def _authorized(self, msg: IncomingMessage, account: str) -> bool:
-        return bool(account == self.app_id and is_allowed(str(msg.principal_id).lower(), self.allowed_user_ids))
+        from maverick.oidc import oidc_enabled
+
+        if not (account == self.app_id
+                and is_allowed(str(msg.principal_id).lower(), self.allowed_user_ids)):
+            return False
+        if (not oidc_enabled() and msg.provider_tenant_id is None
+                and msg.provider_sender_id is None):
+            # Pre-upgrade receipts retain the original account and allowlist
+            # policy. Missing fields can never authorize OIDC identity.
+            return True
+        return bool(msg.provider_tenant_id in self.allowed_tenants
+                    and msg.provider_sender_id == msg.principal_id)
 
     async def _verify(self, request) -> dict:
         header = request.headers.get("Authorization", "")
         if not header.startswith("Bearer "):
             raise TeamsAuthError("missing bearer token")
-        return await asyncio.to_thread(verify_bot_token, header[7:], app_id=self.app_id, keys=self.keys)
+        return await asyncio.to_thread(
+            verify_bot_token, header[7:], app_id=self.app_id, keys=self.keys,
+            required_endorsement="msteams",
+        )
 
     # -- webhook -------------------------------------------------------------
 
@@ -538,11 +562,13 @@ class TeamsChannel(Channel):
             activity = json.loads(body or b"{}")
         except ValueError:
             raise HTTPException(status_code=400, detail="bad JSON") from None
+        if not isinstance(activity, dict) or activity.get("channelId") != "msteams":
+            raise HTTPException(status_code=403, detail="not a verified Microsoft Teams activity")
         parsed = parse_activity(activity, bot_id=self.connector.bot_id)
         if parsed is None:
             return JSONResponse({})
         claimed_url = str(claims.get("serviceurl") or "")
-        if claimed_url and claimed_url.rstrip("/") != parsed.service_url.rstrip("/"):
+        if not claimed_url or claimed_url != parsed.service_url:
             raise HTTPException(status_code=403, detail="service URL does not match the token")
         if not self._tenant_allowed(parsed):
             log.warning("teams: activity from a tenant that is not allowed; ignoring")
@@ -615,7 +641,9 @@ class TeamsChannel(Channel):
         if not parsed.text:
             return JSONResponse({})
         msg = IncomingMessage(user_id=parsed.conversation_id, text=parsed.text, channel=self.name,
-                              sender_id=parsed.principal_key, message_id=parsed.activity_id)
+                              sender_id=parsed.principal_key, message_id=parsed.activity_id,
+                              provider_tenant_id=parsed.tenant_id,
+                              provider_sender_id=parsed.sender_aad)
         account = self.app_id
         route = {"service_url": parsed.service_url, "reply_to": parsed.activity_id}
         external_id = parsed.conversation_id + ":" + parsed.activity_id
@@ -679,6 +707,25 @@ class TeamsChannel(Channel):
             raise RuntimeError("Approvals from Teams need the Lightwork dashboard package on this server.")
         return module
 
+    async def _approval_principal(self, parsed: ParsedActivity) -> str | None:
+        from maverick.oidc import oidc_enabled
+
+        if oidc_enabled():
+            from maverick.channel_oidc_bridge import BridgeError, resolve
+
+            from .delivery import _digest
+
+            try:
+                return await asyncio.to_thread(
+                    resolve, "teams", _digest(self.app_id), parsed.tenant_id,
+                    parsed.sender_aad,
+                )
+            except BridgeError:
+                return None
+        from maverick.teams_identity import principal_for
+
+        return await asyncio.to_thread(principal_for, parsed.sender_aad, parsed.sender_id)
+
     async def handle_invoke(self, parsed: ParsedActivity) -> dict:
         """Decide an approval card action through the dashboard's decision path."""
         from .teams_cards import (
@@ -710,12 +757,9 @@ class TeamsChannel(Channel):
         except RuntimeError as exc:
             return message_response(str(exc))
         self._remember(parsed)
-        from maverick.teams_identity import principal_for
-
-        principal = await asyncio.to_thread(principal_for, parsed.sender_aad, parsed.sender_id)
+        principal = await self._approval_principal(parsed)
         if not principal:
-            return message_response("Your Teams account isn't linked to a Lightwork user. Ask an "
-                                    "administrator to link it, or send `link <code>` in a chat with me.")
+            return message_response("Your Teams account isn't linked for this request. Connect it from My work.")
         view = await asyncio.to_thread(module.approval_view, approval_id)
         if view is None:
             return message_response("This request no longer exists.")
