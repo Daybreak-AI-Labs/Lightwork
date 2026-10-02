@@ -13,8 +13,7 @@
              badge=(counts.active ~ ' active') if counts.active else 'idle',
              badge_class='ok' if counts.active else 'idle',
              copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked.
-                   Every goal runs inside the budget and guardrails you
-                   set.') }}
+                   Spending and time limits apply when an administrator sets them.') }}
   {% endcall %}
 
   {% if counts.total == 0 %}
@@ -22,7 +21,7 @@
       <h2 class="empty__title">Start your first goal</h2>
       <p class="muted" style="max-width: 540px; margin: 0 auto 1.75rem;">
         Describe the outcome you want. Lightwork plans the work across a team
-        of AI agents, runs it within your budget, and streams results back here.
+        of AI agents, uses this installation’s current settings, and streams results back here.
       </p>
       <form method="post" action="/chat/send" style="display: flex; gap: 0.5rem; max-width: 580px; margin: 0 auto; flex-wrap: wrap;">
         <input type="text" name="title" required autofocus

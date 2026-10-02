@@ -26,10 +26,10 @@ Qualify the selected backend with your corpus.
 | **pgvector** | Deployments already operating Postgres | Needs `maverick-knowledge[pgvector]`, the `vector` extension, and verified database isolation, backup and permissions. |
 | **qdrant** | Existing retrieval infrastructure | Needs `maverick-knowledge[qdrant]`. Existing exact documents remain readable and erasable. New ingestion, interrupted-document repair and in-place reindex are refused; migrate ingestion to SQLite or pgvector. |
 
-We do **not** ship a managed-only vector service as the default: the platform
-sells "your data never leaves your boundary," so the knowledge store — the
-client's most sensitive documents — must be self-hostable. A hosted backend can
-be added later as an option, never the baseline.
+The default knowledge store can be self-hosted. Whether document content leaves
+your deployment also depends on the embedder, model provider, and connectors
+you enable. Review those settings and outbound policy before adding sensitive
+documents.
 
 ### pgvector
 

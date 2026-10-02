@@ -248,13 +248,11 @@ OpenAI/Groq keys are configured.
 
 ## Changing models or providers
 
-Re-run the wizard any time:
-
-```bash
-maverick init
-```
-
-Or edit `~/.maverick/config.toml` directly. The `[models]` section maps each agent role to a `provider:model-id` string. See [`configuration.md`](./configuration.md) for the schema.
+After installation, open **Settings → Provider keys** or **Settings → Models**
+to change these choices. The page identifies values controlled by the
+deployment; an installation administrator must change that source before the
+new value can take effect. See [`configuration.md`](./configuration.md) for the
+underlying settings.
 
 ## Where data lives
 
@@ -268,7 +266,9 @@ Or edit `~/.maverick/config.toml` directly. The `[models]` section maps each age
 | `~/.maverick/learned-skills/` | Skills distilled by the learning loops |
 | `~/.maverick/dreams/` | Consolidated insights, rehearsal queue, learning snapshots |
 
-All local. Nothing is uploaded except your prompts to the cloud LLM you chose.
+Lightwork stores the files listed above in your deployment. If you enable cloud
+AI providers or connected services, the work sent through them can leave that
+deployment. Review each provider, connector, and outbound policy before use.
 
 Once you have a few runs behind you, the learning surface is four commands:
 `maverick dream` (consolidate experience), `maverick hindsight` (did learning
