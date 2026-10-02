@@ -14,6 +14,7 @@ submissions instead of silently dropping entries that a trigger has not polled.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 
@@ -47,6 +48,23 @@ def _path(token: str):
     return data_dir("forms") / f"{storage_key(token)}.ndjson"
 
 
+def _accepted_marker(p):
+    return p.with_name(p.name + ".accepted")
+
+
+def _mark_accepted(p) -> None:
+    """Persist that this queue has held work before acknowledging it."""
+    marker = _accepted_marker(p)
+    if marker.exists():
+        return
+    from .file_lock import atomic_create_bytes
+
+    try:
+        atomic_create_bytes(marker, b"accepted\n")
+    except FileExistsError:
+        pass
+
+
 def _bound_fields(fields: dict) -> dict:
     out: dict = {}
     for k, v in (fields or {}).items():
@@ -68,7 +86,14 @@ def append(token: str, fields: dict, *, ts: float = 0.0) -> int:
         # installation's existing directory as well as newly created ones.
         ensure_private_directory(p.parent)
         with cross_process_lock(p, strict=True):
-            count, highest = _state(p)
+            exists = p.exists()
+            if _accepted_marker(p).exists() and not exists:
+                raise FormStoreUnavailable("form submissions are unavailable")
+            count, highest = _state(p) if exists else (0, 0)
+            if not count and _accepted_marker(p).exists():
+                raise FormStoreUnavailable("form submissions are unavailable")
+            if count:
+                _mark_accepted(p)  # Initialize pre-upgrade queues under the same lock.
             if count >= _MAX_LINES:
                 raise FormStoreFull("form submission limit reached")
             seq = highest + 1
@@ -80,6 +105,9 @@ def append(token: str, fields: dict, *, ts: float = 0.0) -> int:
             fd = open_private_append(p, require_private_parent=True)
             with os.fdopen(fd, "ab") as f:
                 f.write(line)
+                f.flush()
+                os.fsync(f.fileno())
+            _mark_accepted(p)
             return seq
     except (OSError, RuntimeError) as exc:
         if isinstance(exc, FormStoreFull):
@@ -87,36 +115,50 @@ def append(token: str, fields: dict, *, ts: float = 0.0) -> int:
         return 0
 
 
+def _validated_rows(p):
+    """Reject damage before a reader can acknowledge or append past a row."""
+    expected = 1
+    with open(p, encoding="utf-8") as f:
+        for line in f:
+            try:
+                row = json.loads(line)
+            except ValueError as exc:
+                raise FormStoreUnavailable("form submissions are damaged") from exc
+            if not isinstance(row, dict) or not isinstance(row.get("fields"), dict):
+                raise FormStoreUnavailable("form submissions are damaged")
+            if type(row.get("seq")) is not int or row["seq"] != expected:
+                raise FormStoreUnavailable("form submission sequence is damaged")
+            ts = row.get("ts")
+            try:
+                valid_ts = type(ts) in (int, float) and math.isfinite(ts)
+            except OverflowError:
+                valid_ts = False
+            if not valid_ts:
+                raise FormStoreUnavailable("form submissions are damaged")
+            expected += 1
+            yield row
+
+
 def _state(p) -> tuple[int, int]:
     """Read count and high-water sequence under the caller's file lock."""
     count = highest = 0
-    try:
-        with open(p, encoding="utf-8") as f:
-            for line in f:
-                count += 1
-                try:
-                    seq = json.loads(line).get("seq")
-                    if type(seq) is int and seq > highest:
-                        highest = seq
-                except (ValueError, AttributeError):
-                    continue
-    except FileNotFoundError:
-        pass
+    for row in _validated_rows(p):
+        count += 1
+        highest = row["seq"]
     return count, highest
 
 
 def pending(token: str, cursor: str) -> int:
     """Count accepted submissions beyond a trigger's acknowledged cursor.
 
-    Unlike the best-effort source poll, this admission guard fails closed on an
-    unreadable or malformed store. Callers must hold the event-trigger registry
-    lock while checking and changing a public form's binding.
+    Callers must hold the event-trigger registry lock while checking and
+    changing a public form's binding.
     """
     if not isinstance(cursor, str) or not cursor.isdecimal():
         raise FormStoreUnavailable("form cursor is unavailable")
     after = int(cursor)
     p = _path(token)
-    if not p.exists():
+    if not p.exists() and not _accepted_marker(p).exists():
         if after:
             raise FormStoreUnavailable("form submissions are unavailable")
         return 0
@@ -125,21 +167,15 @@ def pending(token: str, cursor: str) -> int:
     try:
         with cross_process_lock(p, strict=True):
             if not p.exists():
-                if after:
-                    raise FormStoreUnavailable("form submissions are unavailable")
-                return 0
+                raise FormStoreUnavailable("form submissions are unavailable")
             count = highest = 0
-            with open(p, encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        row = json.loads(line)
-                        seq = row["seq"]
-                    except (ValueError, TypeError, KeyError) as exc:
-                        raise FormStoreUnavailable("form submissions are damaged") from exc
-                    if type(seq) is not int or seq <= highest:
-                        raise FormStoreUnavailable("form submission sequence is damaged")
-                    highest = seq
-                    count += seq > after
+            for row in _validated_rows(p):
+                highest = row["seq"]
+                count += highest > after
+            if highest:
+                _mark_accepted(p)  # Safely mark a validated pre-upgrade queue.
+            elif _accepted_marker(p).exists():
+                raise FormStoreUnavailable("form submissions are unavailable")
             if after > highest:
                 raise FormStoreUnavailable("form cursor is ahead of submissions")
             return count
@@ -154,48 +190,46 @@ def since(token: str, cursor: str, *, limit: int | None = None) -> tuple[list[di
     A bounded poll advances only through the returned rows, never the backlog."""
     if limit is not None and limit <= 0:
         raise ValueError("form poll limit must be positive")
+    if not isinstance(cursor, str) or (cursor and not cursor.isdecimal()):
+        raise FormStoreUnavailable("form cursor is unavailable")
+    after = int(cursor) if cursor else None
     p = _path(token)
-    rows: list[dict] = []
-    if not p.exists():
+    if not p.exists() and not _accepted_marker(p).exists():
+        if after:
+            raise FormStoreUnavailable("form submissions are unavailable")
         # Do not create a lock sidecar on a baseline poll for a new form.
         return [], cursor or "0"
     from .file_lock import cross_process_lock
 
     try:
-        with cross_process_lock(p, strict=True), open(p, encoding="utf-8") as f:
-            for ln in f:
-                ln = ln.strip()
-                if not ln:
-                    continue
-                try:
-                    rows.append(json.loads(ln))
-                except ValueError:
-                    continue
-    except OSError:
-        # A non-empty baseline cursor even for a missing store ("0"), so the
-        # first submission after the trigger is armed locks in and then fires --
-        # returning "" would leave the trigger's cursor unadvanced and swallow it.
-        return [], cursor or "0"
+        with cross_process_lock(p, strict=True):
+            rows = list(_validated_rows(p))
+            if rows:
+                _mark_accepted(p)  # Safely mark a validated pre-upgrade queue.
+            elif _accepted_marker(p).exists():
+                raise FormStoreUnavailable("form submissions are unavailable")
+    except (OSError, UnicodeError) as exc:
+        raise FormStoreUnavailable("form submissions are unavailable") from exc
     if not rows:
+        if after:
+            raise FormStoreUnavailable("form cursor is ahead of submissions")
         return [], cursor or "0"
-    highest = str(rows[-1].get("seq") or len(rows))
-    try:
-        after = int(cursor) if cursor else None
-    except (TypeError, ValueError):
-        after = None
+    highest = rows[-1]["seq"]
+    if after is not None and after > highest:
+        raise FormStoreUnavailable("form cursor is ahead of submissions")
     if after is None:
-        return [], highest                       # baseline only
-    fresh = [r for r in rows if int(r.get("seq") or 0) > after]
+        return [], str(highest)                  # baseline only
+    fresh = [r for r in rows if r["seq"] > after]
     if limit is not None:
         fresh = fresh[:limit]
     if not fresh:
-        return [], highest
+        return [], str(highest)
     events = []
     for r in fresh:
-        ev = dict(r.get("fields") or {})
-        ev["_seq"], ev["_ts"] = r.get("seq"), r.get("ts")
+        ev = dict(r["fields"])
+        ev["_seq"], ev["_ts"] = r["seq"], r["ts"]
         events.append(ev)
-    return events, str(fresh[-1].get("seq") or highest)
+    return events, str(fresh[-1]["seq"])
 
 
 __all__ = ["FormStoreFull", "FormStoreUnavailable", "append", "pending", "since",

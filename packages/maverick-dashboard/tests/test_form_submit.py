@@ -721,6 +721,50 @@ def test_missing_or_corrupt_form_history_blocks_changes(monkeypatch, tmp_path):
     assert client.delete("/api/v1/event-triggers/intake").status_code == 503
 
 
+def test_damaged_accepted_form_row_cannot_advance_poll_cursor(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("history", name="intake")
+    from maverick import form_store
+    from maverick_dashboard import event_triggers_store
+
+    client = _client()
+    for name in ("first", "second", "third"):
+        assert client.post("/form/history", json={"name": name}).status_code == 201
+    path = form_store._path("history")
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    path.write_text(lines[0] + "{damaged\n" + lines[2], encoding="utf-8")
+    before = event_triggers_store.get_trigger("intake", tenant="")["cursor"]
+
+    polled = client.post("/api/v1/event-triggers/poll?name=intake")
+    assert polled.status_code == 200
+    result = polled.json()["triggers"][0]
+    assert result["poll_error"] is True
+    assert result["new_events"] == 0
+    assert result["fired_flows"] == []
+    assert event_triggers_store.get_trigger("intake", tenant="")["cursor"] == before
+
+
+def test_missing_first_accepted_form_queue_blocks_delete_and_poll(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("history", name="intake")
+    from maverick import form_store
+    from maverick_dashboard import event_triggers_store
+
+    client = _client()
+    assert client.post("/form/history", json={"name": "accepted"}).status_code == 201
+    before = event_triggers_store.get_trigger("intake", tenant="")["cursor"]
+    form_store._path("history").unlink()
+
+    assert client.delete("/api/v1/event-triggers/intake").status_code == 503
+    assert client.post("/form/history", json={"name": "retry"}).status_code == 503
+    polled = client.post("/api/v1/event-triggers/poll?name=intake")
+    assert polled.status_code == 200
+    result = polled.json()["triggers"][0]
+    assert result["poll_error"] is True
+    assert result["fired_flows"] == []
+    assert event_triggers_store.get_trigger("intake", tenant="")["cursor"] == before
+
+
 def test_form_rebind_is_refused_after_restart_until_original_rows_are_drained(monkeypatch, tmp_path):
     import subprocess
     import sys
