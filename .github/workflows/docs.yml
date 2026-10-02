@@ -90,6 +90,18 @@ jobs:
           destinations: set[str] = set()
           reviewed_non_markdown = {
               (
+                  "clients/examples/rest_lifecycle.py",
+                  "clients/examples/rest_lifecycle.py",
+              ),
+              (
+                  "clients/examples/lightwork.ts",
+                  "clients/examples/lightwork.ts",
+              ),
+              (
+                  "clients/examples/external_agent_loop.py",
+                  "clients/examples/external_agent_loop.py",
+              ),
+              (
                   "benchmarks/results/governance-frontier-v1/"
                   "measured-manifest.json",
                   "benchmarks/results/governance-frontier-v1/"

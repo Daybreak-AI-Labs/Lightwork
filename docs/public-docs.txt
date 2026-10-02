@@ -18,10 +18,13 @@ plugins.md
 connectors.md
 starter-goals.md
 api.md
+clients/examples/rest_lifecycle.py
 grpc.md
 a2a.md
 external-agents.md
 clients/external-agent-quickstart.md
+clients/examples/lightwork.ts
+clients/examples/external_agent_loop.py
 comparison.md
 performance/streaming-parity.md
 SECURITY_GRC.md

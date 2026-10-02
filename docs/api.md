@@ -181,9 +181,10 @@ The receipt distinguishes `state` (`accepted` or `not_dispatched`),
 `submission_state`, the goal, and `execution_confirmed: false`. Admission/dispatch
 is not proof of a completed provider or external action. A 409 means that the same
 key's reviewed input or effective execution limits differ; review the existing
-request. A missing/unavailable receipt leaves the start unresolved. A 401/403
-requires restoring authorized access. None of these conditions permits a new-key
-POST. See the [full recovery contract](client-request-lifecycle.md#starting-work-and-halting-it).
+request. A missing/unavailable receipt leaves the start unresolved: keep the
+original key and input, restore the same account and workspace, and check again.
+A 401/403 requires restoring authorized access. Do not submit another POST until
+the original outcome is reconciled.
 
 ## Example: poll every event page through terminal acknowledgement
 
