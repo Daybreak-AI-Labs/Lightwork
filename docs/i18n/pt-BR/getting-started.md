@@ -175,10 +175,21 @@ envelope limitado do pacote.)
 ## Entrada de voz (integrada, offline)
 
 O botão de microfone do painel e a ferramenta `transcribe_audio` funcionam sem
-chave de provedor: o motor Whisper local vem junto com o pacote do painel, e
-o modelo (verificado por checksum) é baixado automaticamente na primeira vez
-que o painel inicia (pulado em implantações com bloqueio de egresso, ou com
-`[voice] auto_fetch_model = false`). A CLI mostra os detalhes:
+chave de provedor: o motor Whisper local vem junto com o pacote do painel, mas
+abrir o aplicativo não baixa os arquivos do modelo por padrão. Em
+**Settings → Models → Local voice setup**, um administrador global pode conferir
+a origem e o tamanho do modelo configurado (cerca de 148 MB no modelo padrão)
+e verificá-lo ou baixá-lo. O progresso persiste após recarregar a página;
+cancelar remove o download incompleto, e falhas podem ser tentadas novamente
+na mesma tela. Arquivos existentes só são marcados como verificados quando
+tamanho exato e checksum conferem. Isso não comprova que o motor de voz esteja
+carregado nem que o microfone funcione.
+
+O instalador pergunta explicitamente se downloads na inicialização são
+permitidos. Uma configuração salva de `[voice] auto_fetch_model = true` ou
+`MAVERICK_VOICE_AUTO_FETCH=1` ainda os habilita; a política de rede vale
+também para redirecionamentos. Caminhos de modelos personalizados gerenciados
+e o backend de voz em nuvem escolhido mantêm sua configuração. A CLI opcional também está disponível:
 
 ```bash
 maverick voice setup    # baixa o modelo verificado por checksum (~148 MB)
@@ -193,13 +204,11 @@ com chaves OpenAI/Groq configuradas.
 
 ## Trocar de modelos ou provedores
 
-Execute o assistente novamente a qualquer momento:
-
-```bash
-maverick init
-```
-
-Ou edite `~/.maverick/config.toml` diretamente. A seção `[models]` mapeia cada papel de agente para uma string `provider:model-id`. Consulte [`configuration.md`](../../configuration.md) para ver o esquema.
+Após a instalação, abra **Settings → Provider keys** ou **Settings → Models**
+para mudar essas opções. A página indica os valores controlados pela
+implantação; um administrador da instalação precisa alterar essa origem
+antes que o novo valor entre em vigor. Consulte [`configuration.md`](../../configuration.md)
+para conhecer as configurações subjacentes.
 
 ## Onde os dados ficam
 
@@ -213,7 +222,10 @@ Ou edite `~/.maverick/config.toml` diretamente. A seção `[models]` mapeia cada
 | `~/.maverick/learned-skills/` | Skills destiladas pelos loops de aprendizado |
 | `~/.maverick/dreams/` | Insights consolidados, fila de ensaio, snapshots de aprendizado |
 
-Tudo fica local. Nada é enviado para fora, exceto seus prompts para o LLM na nuvem que você escolheu.
+Lightwork armazena os arquivos acima na sua implantação. Se você ativar
+provedores de IA na nuvem ou serviços conectados, o trabalho enviado a eles
+pode sair dessa implantação. Revise cada provedor, conector e política de
+saída antes de usá-los.
 
 Depois de algumas execuções acumuladas, a superfície de aprendizado se resume a
 quatro comandos: `maverick dream` (consolidar a experiência), `maverick hindsight`

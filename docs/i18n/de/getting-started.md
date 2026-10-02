@@ -175,10 +175,22 @@ Spezialist von der ersten Ausführung an für seine Aufgabe ausgerüstet ist.
 ## Spracheingabe (eingebaut, offline)
 
 Der Mikrofon-Button im Dashboard und das Tool `transcribe_audio` funktionieren
-ohne Provider-Schlüssel: die lokale Whisper-Engine wird mit dem
-Dashboard-Paket ausgeliefert, und das checksummen-geprüfte Modell wird beim
-ersten Dashboard-Start automatisch geladen (übersprungen bei Egress-Lock oder
-mit `[voice] auto_fetch_model = false`). Die CLI zeigt die Details:
+ohne Provider-Schlüssel: Die lokale Whisper-Engine wird mit dem Dashboard-Paket
+ausgeliefert, beim Öffnen der App werden Modelldateien aber standardmäßig nicht
+heruntergeladen. Unter **Settings → Models → Local voice setup** kann ein
+globaler Administrator Quelle und Größe des konfigurierten Modells (beim
+Standardmodell etwa 148 MB) prüfen und es kontrollieren oder herunterladen.
+Der Fortschritt bleibt nach einem Neuladen der Seite erhalten; ein Abbruch
+entfernt den unvollständigen Download, und Fehler lassen sich dort erneut
+versuchen. Vorhandene Dateien gelten erst nach Prüfung von genauer Größe und
+Prüfsumme als verifiziert. Das belegt weder, dass die Sprach-Engine geladen
+ist, noch, dass das Mikrofon funktioniert.
+
+Der Installer fragt ausdrücklich, ob Downloads beim Start erlaubt sind. Eine
+gespeicherte Einstellung `[voice] auto_fetch_model = true` oder
+`MAVERICK_VOICE_AUTO_FETCH=1` aktiviert sie weiterhin; die Netzwerkrichtlinie
+gilt auch für Weiterleitungen. Verwaltete Pfade zu eigenen Modellen und ein
+gewähltes Cloud-Sprachbackend bleiben erhalten. Die optionale CLI ist ebenfalls verfügbar:
 
 ```bash
 maverick voice setup    # lädt das checksummen-geprüfte Modell (~148 MB)
@@ -193,13 +205,11 @@ Maschine, wenn OpenAI/Groq-Schlüssel konfiguriert sind.
 
 ## Modelle oder Provider wechseln
 
-Führen Sie den Assistenten jederzeit erneut aus:
-
-```bash
-maverick init
-```
-
-Oder bearbeiten Sie `~/.maverick/config.toml` direkt. Der Abschnitt `[models]` ordnet jeder Agentenrolle eine Zeichenkette der Form `provider:model-id` zu. Das Schema ist in [`configuration.md`](../../configuration.md) beschrieben.
+Öffnen Sie nach der Installation **Settings → Provider keys** oder
+**Settings → Models**, um diese Werte zu ändern. Die Seite kennzeichnet Werte,
+die vom Deployment vorgegeben werden; ein Installationsadministrator muss
+diese Quelle ändern, bevor ein neuer Wert wirksam wird. Die zugrunde liegende
+Konfiguration ist in [`configuration.md`](../../configuration.md) beschrieben.
 
 ## Wo die Daten liegen
 
@@ -213,7 +223,10 @@ Oder bearbeiten Sie `~/.maverick/config.toml` direkt. Der Abschnitt `[models]` o
 | `~/.maverick/learned-skills/` | Von den Lernschleifen destillierte Skills |
 | `~/.maverick/dreams/` | Konsolidierte Erkenntnisse, Probelauf-Warteschlange, Lern-Snapshots |
 
-Alles bleibt lokal. Außer Ihren Prompts an das von Ihnen gewählte Cloud-LLM wird nichts hochgeladen.
+Lightwork speichert die oben genannten Dateien in Ihrem Deployment. Wenn Sie
+Cloud-KI-Provider oder verbundene Dienste aktivieren, kann die an sie
+gesendete Arbeit das Deployment verlassen. Prüfen Sie jeden Provider,
+Connector und jede Egress-Richtlinie vor der Nutzung.
 
 Sobald Sie ein paar Läufe hinter sich haben, besteht die Lernoberfläche aus vier
 Befehlen: `maverick dream` (Erfahrung konsolidieren), `maverick hindsight` (hat
