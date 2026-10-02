@@ -164,6 +164,7 @@
           <td>
             <form method="post" action="/users/channels/unlink" class="users-inline"
                   data-users-confirm="Unlink this {{ l.channel }} account from {{ name_of(principal) }}?" data-users-ok="Unlink">
+              {{ workspace_binding() }}
               <input type="hidden" name="channel" value="{{ l.channel }}" />
               <input type="hidden" name="external_id" value="{{ l.external_id }}" />
               <button type="submit" class="btn btn--danger" aria-label="Unlink {{ l.channel }} account {{ l.external_id }}">Unlink</button>
@@ -179,6 +180,7 @@
     {% endif %}
     <h3 class="users-subhead">Link a chat account</h3>
     <form method="post" action="/users/channels/link" class="users-row-form">
+      {{ workspace_binding() }}
       <label class="users-field">
         <span>Person</span>
         <select class="select" name="principal" required>

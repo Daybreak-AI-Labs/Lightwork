@@ -44,5 +44,6 @@ def install(app, world, tenant, principal):
             approval_id = world.create_approval(
                 "salesforce.update_records", risk="high", scope="Salesforce accounts",
                 detail=encode_approval_detail(card), provenance="consent",
+                requested_by=principal,
             )
         return {"synthetic": True, "approval_id": approval_id, "provider_calls": 0}
