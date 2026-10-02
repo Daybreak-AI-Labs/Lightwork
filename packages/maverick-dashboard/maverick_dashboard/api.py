@@ -195,6 +195,7 @@ from .approval_decisions import (  # noqa: F401 -- re-exported for tests
     undo_from_dashboard,
 )
 from .auth import (
+    _dashboard_token_authenticated,
     assert_goal_access,
     assert_template_access,
     auth_genuinely_off,
@@ -10724,9 +10725,31 @@ def _govern_event_source_config(request: Request, source: str, config: dict) -> 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _event_trigger_allowed_owners(request: Request) -> frozenset[str]:
+    """Keep static-token local triggers and older ownerless rows accessible.
+
+    The static dashboard bearer has no named principal. Newly saved triggers
+    use the durable ``user:local`` owner, while older local rows have no owner.
+    This exception applies only to a request carrying that exact bearer.
+    """
+    owner = goal_owner_filter(request)
+    if owner == "" and _dashboard_token_authenticated(request):
+        return frozenset(("", "user:local"))
+    return frozenset((owner or "",))
+
+
+def _event_trigger_mutation_owner(request: Request, name: str, tenant: str) -> str | None:
+    """Return the observed owner for a store-locked mutation, or hide the row."""
+    from maverick_dashboard import event_triggers_store
+
+    existing = event_triggers_store.get_trigger(name, tenant=tenant)
+    if existing is None or existing.get("owner", "") not in _event_trigger_allowed_owners(request):
+        return None
+    return existing.get("owner", "")
+
+
 def _owned_event_triggers(request: Request) -> list[dict]:
-    """Event triggers visible to the caller: their own when auth is on, all of
-    them for auth-off/admin (``goal_owner_filter`` returns None)."""
+    """Event triggers visible to the authenticated caller in the current tenant."""
     from maverick.paths import current_tenant_id
 
     from maverick_dashboard import event_triggers_store
@@ -10734,10 +10757,8 @@ def _owned_event_triggers(request: Request) -> list[dict]:
     tenant = current_tenant_id() or ""
     triggers = event_triggers_store.list_triggers()
     triggers = [t for t in triggers if t.get("tenant", "") == tenant]
-    owner = goal_owner_filter(request)
-    if owner is not None:
-        triggers = [t for t in triggers if t.get("owner", "") == owner]
-    return triggers
+    allowed_owners = _event_trigger_allowed_owners(request)
+    return [t for t in triggers if t.get("owner", "") in allowed_owners]
 
 
 @router.get("/event-triggers")
@@ -10832,15 +10853,14 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
 
     default_name = payload.name or template or flow
     tenant = current_tenant_id() or ""
-    owner_filter = goal_owner_filter(request)
-    if owner_filter is not None:
-        existing = event_triggers_store.get_trigger(
-            event_triggers_store.slugify(default_name), tenant=tenant
+    existing = event_triggers_store.get_trigger(
+        event_triggers_store.slugify(default_name), tenant=tenant
+    )
+    if existing is not None and existing.get("owner", "") not in _event_trigger_allowed_owners(request):
+        raise HTTPException(
+            status_code=409, detail="an event trigger with that name already exists"
         )
-        if existing is not None and existing.get("owner", "") != owner_filter:
-            raise HTTPException(
-                status_code=409, detail="an event trigger with that name already exists"
-            )
+    durable_owner = durable_automation_owner(request)
     try:
         rec = event_triggers_store.set_trigger(
             default_name,
@@ -10848,7 +10868,7 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
             payload.source,
             config=cfg,
             params=payload.params or {},
-            owner=durable_automation_owner(request),
+            owner=durable_owner,
             flow=flow,
             flow_owner=(target_flow.owner if target_flow is not None else ""),
             flow_revision=(
@@ -10862,7 +10882,7 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
             interval_seconds=payload.interval_seconds,
             tenant=tenant,
             mint_public_form_token=payload.source == "form",
-            expected_owner=owner_filter,
+            expected_owner=existing.get("owner", "") if existing is not None else durable_owner,
         )  # bind OAuth vault reads to this tenant
     except event_triggers_store.FormTriggerPending as e:
         raise HTTPException(
@@ -10890,11 +10910,15 @@ def delete_event_trigger_endpoint(request: Request, name: str) -> dict:
 
     from maverick_dashboard import event_triggers_store
 
+    tenant = current_tenant_id() or ""
+    owner = _event_trigger_mutation_owner(request, name, tenant)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="no event trigger with that name")
     try:
         deleted = event_triggers_store.delete_trigger(
             name,
-            owner=goal_owner_filter(request),
-            tenant=current_tenant_id() or "",
+            owner=owner,
+            tenant=tenant,
         )
     except event_triggers_store.FormTriggerPending as e:
         raise HTTPException(
@@ -10923,12 +10947,16 @@ def rotate_event_trigger_form_link(
 
     require_permission(request, "operate")
     _require_event_triggers()
+    tenant = current_tenant_id() or ""
+    owner = _event_trigger_mutation_owner(request, name, tenant)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="no form automation with that name")
     try:
         updated = event_triggers_store.rotate_form_link(
             name,
             expected_generation=payload.expected_generation,
-            owner=goal_owner_filter(request),
-            tenant=current_tenant_id() or "",
+            owner=owner,
+            tenant=tenant,
             actor=caller_principal(request) or "local",
         )
     except event_triggers_store.FormTriggerPending as exc:
@@ -11031,10 +11059,9 @@ def event_trigger_history(request: Request, name: str = "", limit: int = 50) -> 
 
     from maverick_dashboard import trigger_events_store
 
-    owner = goal_owner_filter(request)
     rows = trigger_events_store.history(
         name=name or None,
-        owner=owner,
+        owners=_event_trigger_allowed_owners(request),
         tenant=current_tenant_id() or "",
         limit=max(1, min(1000, limit)),
     )

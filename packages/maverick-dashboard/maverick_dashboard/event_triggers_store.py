@@ -225,12 +225,8 @@ def pending_form_submissions(trigger: dict) -> int:
         reset_tenant(scope)
 
 
-def _api_form_config(config: dict | None, prior: dict | None, existing: list[dict],
-                     expected_owner: str | None) -> dict:
+def _api_form_config(config: dict | None, prior: dict | None, existing: list[dict]) -> dict:
     """Reserve a server-generated public link while the registry lock is held."""
-    if (prior is not None and expected_owner is not None
-            and prior.get("owner", "") != expected_owner):
-        raise FormTriggerConflict("This automation belongs to another person.")
     resolved = dict(config or {})
     supplied = str(resolved.get("token") or "")
     old_token = (
@@ -318,8 +314,11 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             ),
             None,
         )
+        if (prior is not None and expected_owner is not None
+                and prior.get("owner", "") != expected_owner):
+            raise FormTriggerConflict("This automation belongs to another person.")
         resolved_config = (
-            _api_form_config(config, prior, existing, expected_owner)
+            _api_form_config(config, prior, existing)
             if source == "form" and mint_public_form_token else dict(config or {})
         )
         bound_cursor = cursor

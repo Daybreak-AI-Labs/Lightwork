@@ -78,6 +78,121 @@ def test_new_form_api_mints_a_server_secret_and_returns_the_link(monkeypatch, tm
     assert client.post(f"/form/{token}", json={"message": "Hello"}).status_code == 201
 
 
+def test_static_token_can_manage_new_and_legacy_local_forms(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("legacy-link", name="legacy")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-form-operator-token")  # pragma: allowlist secret
+    from maverick_dashboard import event_triggers_store
+
+    client = _client()
+    auth = {"Authorization": "Bearer static-form-operator-token"}
+    created = client.post("/api/v1/event-triggers", headers=auth, json={
+        "name": "new-intake", "source": "form", "flow": "published-form-flow", "config": {},
+    })
+    assert created.status_code == 201
+    original_token = created.json()["config"]["token"]
+    assert event_triggers_store.get_trigger("new-intake", tenant="")["owner"] == "user:local"
+
+    listed = client.get("/api/v1/event-triggers", headers=auth)
+    assert listed.status_code == 200
+    rows = {row["name"]: row for row in listed.json()["triggers"]}
+    assert rows["new-intake"]["config"]["token"] == original_token
+    assert rows["legacy"]["config"]["token"] == "legacy-link"
+
+    updated = client.post("/api/v1/event-triggers", headers=auth, json={
+        "name": "new-intake", "source": "form", "flow": "published-form-flow", "config": {},
+    })
+    assert updated.status_code == 201
+    assert updated.json()["config"]["token"] == original_token
+    rotated = client.post(
+        "/api/v1/event-triggers/new-intake/rotate-form-link", headers=auth,
+        json={"expected_generation": updated.json()["binding_revision"]},
+    )
+    assert rotated.status_code == 200
+    assert rotated.json()["config"]["token"] != original_token
+    new_token = rotated.json()["config"]["token"]
+    assert client.post(f"/form/{new_token}", json={"name": "Ada"}).status_code == 201
+    polled = client.post("/api/v1/event-triggers/poll?name=new-intake", headers=auth)
+    assert polled.status_code == 200
+    assert polled.json()["polled"] == 1
+    history = client.get("/api/v1/event-triggers/history?name=new-intake", headers=auth)
+    assert history.status_code == 200
+    assert history.json()["history"][0]["owner"] == "user:local"
+
+    legacy_rotated = client.post(
+        "/api/v1/event-triggers/legacy/rotate-form-link", headers=auth,
+        json={"expected_generation": rows["legacy"]["binding_revision"]},
+    )
+    assert legacy_rotated.status_code == 200
+    legacy_updated = client.post("/api/v1/event-triggers", headers=auth, json={
+        "name": "legacy", "source": "form", "flow": "published-form-flow", "config": {},
+    })
+    assert legacy_updated.status_code == 201
+    assert legacy_updated.json()["config"]["token"] == legacy_rotated.json()["config"]["token"]
+    assert event_triggers_store.get_trigger("legacy", tenant="")["owner"] == "user:local"
+    assert client.delete("/api/v1/event-triggers/new-intake", headers=auth).status_code == 200
+    assert client.delete("/api/v1/event-triggers/legacy", headers=auth).status_code == 200
+
+
+def test_static_token_form_list_denies_missing_and_wrong_bearers(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("private-form-link", name="private")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-form-operator-token")  # pragma: allowlist secret
+    client = _client()
+
+    for headers in ({}, {"Authorization": "Bearer incorrect"}):
+        denied = client.get("/api/v1/event-triggers", headers=headers)
+        assert denied.status_code == 401
+        assert "private-form-link" not in denied.text
+
+
+def test_static_token_does_not_claim_another_named_owner_form(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("legacy-link", name="legacy")
+    from maverick_dashboard import event_triggers_store
+
+    prior = event_triggers_store.get_trigger("legacy", tenant="")
+    foreign = event_triggers_store.set_trigger(
+        "foreign", "", "form", config={"token": "foreign-link"},
+        flow=prior["flow"], flow_owner=prior["flow_owner"],
+        flow_revision=prior["flow_revision"], owner="user:alice", tenant="",
+    )
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-form-operator-token")  # pragma: allowlist secret
+    client = _client()
+    auth = {"Authorization": "Bearer static-form-operator-token"}
+
+    listed = client.get("/api/v1/event-triggers", headers=auth)
+    assert listed.status_code == 200
+    assert "foreign" not in {row["name"] for row in listed.json()["triggers"]}
+    assert client.delete("/api/v1/event-triggers/foreign", headers=auth).status_code == 404
+    from maverick_dashboard.event_poll import _trigger_key
+
+    assert client.post(
+        "/api/v1/event-triggers/foreign/rotate-form-link", headers=auth,
+        json={"expected_generation": _trigger_key(foreign)},
+    ).status_code == 404
+    assert client.post("/api/v1/event-triggers", headers=auth, json={
+        "name": "foreign", "source": "form", "flow": "published-form-flow", "config": {},
+    }).status_code == 409
+    assert event_triggers_store.get_trigger("foreign", tenant="")["owner"] == "user:alice"
+
+
+def test_non_form_upsert_checks_expected_owner_under_store_lock(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import event_triggers_store
+
+    event_triggers_store.set_trigger("shared", "", "http_json", owner="user:alice")
+    with pytest.raises(event_triggers_store.FormTriggerConflict):
+        event_triggers_store.set_trigger(
+            "shared", "", "http_json", owner="user:local", expected_owner="user:local",
+        )
+    assert event_triggers_store.get_trigger("shared", tenant="")["owner"] == "user:alice"
+    updated = event_triggers_store.set_trigger(
+        "shared", "", "http_json", owner="user:alice", expected_owner="user:alice",
+    )
+    assert updated["owner"] == "user:alice"
+
+
 def test_new_form_api_rejects_caller_chosen_tokens_even_if_they_look_strong(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _register_form("old-link")
